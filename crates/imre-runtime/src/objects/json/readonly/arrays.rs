@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use serde_json::value::RawValue;
 
-use super::{Source, View, constants, elements, push_array};
+use super::{Nodes, Source, View, constants, elements, push_array};
 
 pub(in crate::objects::json) struct Deferred {
     text: Rc<str>,
@@ -63,8 +63,7 @@ impl Deferred {
                 let index = nodes.len();
                 nodes.push(node);
                 Ok::<_, serde_json::Error>(View {
-                    nodes: Rc::new(nodes),
-                    root_items: None,
+                    nodes: Nodes::Document(Rc::new(nodes)),
                     index,
                 })
             };

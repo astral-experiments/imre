@@ -34,6 +34,76 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         use ParameterKind::{PositionalOnly, PositionalOrKeyword};
+        if matches!(name, "startswith" | "endswith")
+            && call.arguments.keywords.is_empty()
+            && let [argument] = call.arguments.args.as_ref()
+        {
+            let affix = self.expr(argument)?;
+            let op = if name == "startswith" {
+                TextOperation::StartsWith
+            } else {
+                TextOperation::EndsWith
+            };
+            let check = |text, affix| Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::Text(op), vec![text, affix]),
+            };
+            let Some(types) = self.types.fields(affix.ty) else {
+                return Ok(check(receiver, self.coerce(affix, Type::Str, argument)?));
+            };
+            if !types
+                .iter()
+                .all(|ty| matches!(ty, Type::Str | Type::StrLiteral(_)))
+            {
+                return Err(error(
+                    self.source,
+                    argument,
+                    "prefix or suffix tuple elements must be str",
+                ));
+            }
+            let text = self.hidden(receiver.ty);
+            let mut body = vec![Statement::Assign(text, receiver)];
+            let mut clear = vec![text];
+            let affixes = if let ExprKind::Tuple(values) = &affix.kind
+                && values
+                    .iter()
+                    .all(|value| matches!(value.kind, ExprKind::Str(_)))
+            {
+                values.clone()
+            } else {
+                let tuple = self.hidden(affix.ty);
+                body.push(Statement::Assign(tuple, affix));
+                clear.insert(0, tuple);
+                types
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &ty)| Expr {
+                        ty,
+                        kind: ExprKind::Field(Box::new(self.local(tuple)), i),
+                    })
+                    .collect()
+            };
+            let matches = affixes
+                .into_iter()
+                .map(|affix| check(self.local(text), affix))
+                .collect::<Vec<_>>();
+            let kind = if matches.is_empty() {
+                ExprKind::Bool(false)
+            } else {
+                ExprKind::Boolean(false, matches)
+            };
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Scope {
+                    body,
+                    value: Box::new(Expr {
+                        ty: Type::Bool,
+                        kind,
+                    }),
+                    clear,
+                },
+            });
+        }
         // Existing infallible entry points avoid a pending-error check for these
         // common signatures, whose arguments cannot request an invalid split.
         if call.arguments.args.is_empty()

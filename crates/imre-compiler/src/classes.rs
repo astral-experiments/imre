@@ -10,7 +10,11 @@ use crate::modules::{Binding, DefinitionId, Intrinsic, SourceGraph, SourceModule
 
 mod dataclasses;
 mod enums;
+mod exceptions;
+mod inheritance;
+mod record_hash;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
+pub(crate) use inheritance::super_init;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MethodKind {
@@ -22,6 +26,8 @@ pub(crate) enum MethodKind {
 
 pub(crate) struct Classes {
     pub(crate) definitions: Vec<Class>,
+    pub(crate) exceptions: HashMap<DefinitionId, u32>,
+    pub(crate) exception_declarations: Vec<crate::types::NamedException>,
     pub(crate) ids: HashMap<DefinitionId, usize>,
 }
 
@@ -32,6 +38,13 @@ pub(crate) struct Class {
     pub(crate) fields: Vec<Field>,
     pub(crate) methods: Vec<ast::StmtFunctionDef>,
     pub(crate) method_kinds: Vec<MethodKind>,
+    /// Declaring class for the corresponding method's imports and lexical super.
+    pub(crate) method_origins: Vec<DefinitionId>,
+    /// Single storage-bearing lineage, nearest base first.
+    pub(crate) bases: Vec<usize>,
+    pub(crate) abstract_methods: HashSet<String>,
+    pub(crate) abc: bool,
+    pub(crate) toml_hash: bool,
     pub(crate) dataclass: Option<DataclassOptions>,
     pub(crate) enum_members: Option<enums::Members>,
     pub(crate) generated_initializer: bool,
@@ -39,7 +52,9 @@ pub(crate) struct Class {
     pub(crate) initializer: Option<usize>,
 }
 
+#[derive(Clone)]
 pub(crate) struct Field {
+    pub(crate) module: usize,
     pub(crate) name: String,
     pub(crate) annotation: ast::Expr,
     pub(crate) default: Option<FieldDefault>,
@@ -50,8 +65,12 @@ pub(crate) struct Field {
 
 impl Classes {
     pub(crate) fn instance(&self, id: usize) -> Type {
-        if self.definitions[id].enum_members.is_some() {
-            Type::StrEnum(id)
+        if let Some(members) = &self.definitions[id].enum_members {
+            if members.plain {
+                Type::Enum(id)
+            } else {
+                Type::StrEnum(id)
+            }
         } else {
             Type::Class(id)
         }
@@ -59,7 +78,8 @@ impl Classes {
 
     /// Assigns nominal identities in module and source order, independently of imports' aliases.
     pub(crate) fn collect(graph: &SourceGraph) -> Result<Self, String> {
-        let mut definitions = Vec::new();
+        let (exceptions, exception_declarations) = exceptions::collect(graph)?;
+        let mut nodes = Vec::new();
         let mut ids = HashMap::new();
         for (module_id, module) in graph.modules.iter().enumerate() {
             for (statement, node) in module.parsed.syntax().body.iter().enumerate() {
@@ -68,13 +88,21 @@ impl Classes {
                         module: module_id,
                         statement,
                     };
-                    let class = collect_class(graph, module, definition, node)?;
-                    ids.insert(definition, definitions.len());
-                    definitions.push(class);
+                    if !graph.includes(definition) || exceptions.contains_key(&definition) {
+                        continue;
+                    }
+                    ids.insert(definition, nodes.len());
+                    nodes.push((definition, node));
                 }
             }
         }
-        Ok(Self { definitions, ids })
+        let definitions = inheritance::resolve(graph, &nodes, &ids)?;
+        Ok(Self {
+            definitions,
+            ids,
+            exceptions,
+            exception_declarations,
+        })
     }
 }
 
@@ -83,13 +111,22 @@ fn collect_class(
     module: &SourceModule,
     definition: DefinitionId,
     node: &ast::StmtClassDef,
+    base: Option<(usize, &Class)>,
 ) -> Result<Class, String> {
     let is_enum = node.arguments.as_ref().is_some_and(|arguments| {
-        matches!(arguments.args.as_ref(), [base] if graph.resolve(definition.module, base) == Some(Binding::Intrinsic(Intrinsic::StrEnum)))
+        matches!(arguments.args.as_ref(), [base] if matches!(graph.resolve(definition.module, base), Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))))
             && arguments.keywords.is_empty()
     });
+    let abc = base.is_some_and(|(_, parent)| parent.abc)
+        || node.arguments.as_ref().is_some_and(|args| {
+            args.args.iter().any(|arg| {
+                graph.resolve(definition.module, arg) == Some(Binding::Intrinsic(Intrinsic::Abc))
+            })
+        });
     if node.type_params.is_some()
         || !is_enum
+            && base.is_none()
+            && !abc
             && node
                 .arguments
                 .as_ref()
@@ -104,10 +141,28 @@ fn collect_class(
         return Err(module.error(node, "decorated StrEnum declarations are unsupported"));
     }
     let mut enum_members = is_enum.then(enums::Members::default);
+    if let Some(members) = &mut enum_members {
+        members.plain = graph.resolve(definition.module, &node.arguments.as_ref().unwrap().args[0])
+            == Some(Binding::Intrinsic(Intrinsic::StandardEnum));
+    }
     let dataclass = dataclasses::options(graph, definition.module, node)?;
     let mut names = HashSet::new();
     let mut class_bindings = HashSet::new();
-    let mut fields = Vec::new();
+    let mut abstract_methods = base
+        .map(|(_, parent)| parent.abstract_methods.clone())
+        .unwrap_or_default();
+    let mut hash = None;
+    let mut fields = base
+        .map(|(_, base)| base.fields.clone())
+        .unwrap_or_default();
+    if let Some((_, base)) = base
+        && (base.enum_members.is_some()
+            || base
+                .dataclass
+                .is_some_and(|b| dataclass.is_none_or(|d| d.frozen != b.frozen)))
+    {
+        return Err(module.error(node, "incompatible base for a fixed-layout class"));
+    }
     let mut methods = Vec::new();
     let mut method_kinds = Vec::new();
     let mut initializer = None;
@@ -138,27 +193,74 @@ fn collect_class(
                 if names.contains(name) {
                     return Err(module.error(field, &format!("duplicate class member {name:?}")));
                 }
-                fields.push(dataclasses::field(
+                if base
+                    .is_some_and(|(_, base)| base.methods.iter().any(|m| m.name.as_str() == name))
+                {
+                    return Err(
+                        module.error(field, "a fixed field cannot replace an inherited method")
+                    );
+                }
+                let declared_field = dataclasses::field(
                     graph,
                     definition.module,
                     field,
                     name,
                     dataclass.as_ref(),
                     &class_bindings,
-                )?);
+                )?;
+                if let Some(index) = fields.iter().position(|inherited| inherited.name == name) {
+                    if dataclass.is_none() {
+                        return Err(module.error(node, "an inherited field cannot be redeclared"));
+                    }
+                    fields[index] = declared_field;
+                } else {
+                    fields.push(declared_field);
+                }
                 names.insert(name.to_owned());
                 if field.value.is_some() {
                     class_bindings.insert(name.to_owned());
                 }
             }
             ast::Stmt::FunctionDef(method) => {
-                if method.is_async || method.type_params.is_some() {
-                    return Err(module.error(
-                        method,
-                        "async methods and method type parameters are unsupported",
-                    ));
+                let abstract_method = matches!(method.decorator_list.as_slice(), [decorator]
+                    if graph.resolve(definition.module, &decorator.expression) == Some(Binding::Intrinsic(Intrinsic::AbstractMethod)));
+                if !abstract_method && !graph.includes_method(definition.module, method) {
+                    abstract_methods.remove(method.name.as_str());
+                    continue;
+                }
+                if method.type_params.is_some() {
+                    return Err(module.error(method, "method type parameters are unsupported"));
                 }
                 let name = method.name.as_str();
+                if base.is_some_and(|(_, base)| base.fields.iter().any(|field| field.name == name))
+                {
+                    return Err(
+                        module.error(method, "a method cannot replace an inherited fixed field")
+                    );
+                }
+                if abstract_method {
+                    if !abc || !method.body.iter().all(|stmt| matches!(stmt, ast::Stmt::Pass(_))
+                        || matches!(stmt, ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_) | ast::Expr::EllipsisLiteral(_)))) {
+                        return Err(module.error(method, "an abstract record method must be a declaration on an ABC"));
+                    }
+                    if !names.insert(name.to_owned()) {
+                        return Err(module.error(method, "duplicate abstract method"));
+                    }
+                    abstract_methods.insert(name.to_owned());
+                    class_bindings.insert(name.to_owned());
+                    continue;
+                }
+                abstract_methods.remove(name);
+                if name == "__hash__" {
+                    if hash.is_some() || !dataclass.is_some_and(|d| d.frozen && d.eq) {
+                        return Err(module
+                            .error(method, "a custom hash requires a frozen equality dataclass"));
+                    }
+                    hash = Some(method);
+                    names.insert(name.to_owned());
+                    class_bindings.insert(name.to_owned());
+                    continue;
+                }
                 if is_enum && (name.starts_with('_') || matches!(name, "name" | "value")) {
                     return Err(module.error(
                         method,
@@ -166,7 +268,7 @@ fn collect_class(
                     ));
                 }
                 if name.starts_with("__")
-                    && !matches!(name, "__init__" | "__str__")
+                    && !matches!(name, "__init__" | "__str__" | "__bool__" | "__iter__")
                     && !(name == "__post_init__" && dataclass.is_some())
                 {
                     return Err(
@@ -202,7 +304,7 @@ fn collect_class(
                 {
                     return Err(module.error(method, "a property getter must take only self"));
                 }
-                if matches!(name, "__str__" | "__post_init__")
+                if matches!(name, "__str__" | "__post_init__" | "__bool__" | "__iter__")
                     && (kind != MethodKind::Instance
                         || method.parameters.len() != 1
                         || first.is_none_or(|parameter| parameter.default.is_some()))
@@ -232,12 +334,30 @@ fn collect_class(
             }
         }
     }
+    let mut method_origins = vec![definition; methods.len()];
+    if let Some(method) = hash
+        && !record_hash::toml_fields(method, &fields, graph, definition.module)
+    {
+        return Err(module.error(
+            method,
+            "a frozen custom hash must hash a TOML serialization of its exact ordered JSON fields",
+        ));
+    }
+    let inherited_fields = base.map_or(&[][..], |(_, base)| base.fields.as_slice());
+    if !is_enum
+        && dataclass.is_none()
+        && fields.len() == inherited_fields.len()
+        && let Some(init) = initializer
+    {
+        inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields)?;
+    }
     let generated_initializer =
         initializer.is_none() && dataclass.is_some_and(|options| options.init);
     let initializer = if generated_initializer {
         let index = methods.len();
         methods.push(dataclasses::initializer(module, node, &fields)?);
         method_kinds.push(MethodKind::Instance);
+        method_origins.push(definition);
         Some(index)
     } else if is_enum {
         if enum_members.as_ref().unwrap().values.is_empty() {
@@ -248,23 +368,73 @@ fn collect_class(
         if dataclass.is_some_and(|options| options.frozen) {
             return Err(module.error(node, "frozen dataclasses require a generated initializer"));
         }
-        Some(initializer.ok_or_else(|| {
-            module.error(
+        if initializer.is_some() {
+            initializer
+        } else if let Some((_, base)) = base
+            && fields.len() == base.fields.len()
+            && let Some(init) = base.initializer
+        {
+            let index = methods.len();
+            methods.push(base.methods[init].clone());
+            method_kinds.push(MethodKind::Instance);
+            method_origins.push(base.method_origins[init]);
+            Some(index)
+        } else if fields.is_empty() {
+            let index = methods.len();
+            methods.push(dataclasses::initializer(module, node, &[])?);
+            method_kinds.push(MethodKind::Instance);
+            method_origins.push(definition);
+            Some(index)
+        } else {
+            return Err(module.error(
                 node,
                 "a fixed class requires an explicit or generated __init__ method",
-            )
-        })?)
+            ));
+        }
     };
-    if let Some(initializer) = initializer {
-        check_initializer(module, &methods[initializer], &fields)?;
+    if let Some(initializer) = initializer
+        && method_origins[initializer] == definition
+    {
+        check_initializer(
+            module,
+            &methods[initializer],
+            &fields,
+            if generated_initializer {
+                &[]
+            } else {
+                inherited_fields
+            },
+        )?;
+    }
+    let mut bases = Vec::new();
+    if let Some((id, base)) = base {
+        bases.push(id);
+        bases.extend_from_slice(&base.bases);
+        for (index, method) in base.methods.iter().enumerate() {
+            if method.name.as_str() != "__init__" && !names.contains(method.name.as_str()) {
+                if base.method_kinds[index] == MethodKind::Class
+                    && !graph.inherits_class_method(definition, method.name.as_str())
+                {
+                    continue;
+                }
+                methods.push(method.clone());
+                method_kinds.push(base.method_kinds[index]);
+                method_origins.push(base.method_origins[index]);
+            }
+        }
     }
     Ok(Class {
         definition,
         name: node.name.as_str().to_owned(),
         node: node.clone(),
         fields,
+        toml_hash: hash.is_some(),
         methods,
         method_kinds,
+        method_origins,
+        bases,
+        abstract_methods,
+        abc,
         dataclass,
         enum_members,
         generated_initializer,
@@ -287,6 +457,12 @@ fn method_kind(
             Err(module.error(method, "method decorators cannot be stacked"))
         };
     };
+    if graph.resolve(module_id, &decorator.expression)
+        == Some(Binding::Intrinsic(Intrinsic::ContextManager))
+        && !method.is_async
+    {
+        return Ok(MethodKind::Instance);
+    }
     if let ast::Expr::Name(name) = &decorator.expression
         && graph.resolve(module_id, &decorator.expression).is_none()
         && !class_names.contains(name.id.as_str())
@@ -310,6 +486,7 @@ fn check_initializer(
     module: &SourceModule,
     initializer: &ast::StmtFunctionDef,
     fields: &[Field],
+    inherited: &[Field],
 ) -> Result<(), String> {
     let receiver = initializer
         .parameters
@@ -323,10 +500,43 @@ fn check_initializer(
         .map(|field| field.name.as_str())
         .collect::<HashSet<_>>();
     let mut initialized = HashSet::new();
+    let mut called_super = false;
     for statement in &initializer.body {
         let assignment = match statement {
             ast::Stmt::Assign(assignment) => assignment,
             ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_)) => {
+                continue;
+            }
+            ast::Stmt::Expr(value)
+                if let ast::Expr::Call(call) = &*value.value
+                    && super_init(call) =>
+            {
+                if called_super
+                    || inherited
+                        .iter()
+                        .any(|f| initialized.contains(f.name.as_str()))
+                {
+                    return Err(
+                        module.error(call, "base initializer fields may only be initialized once")
+                    );
+                }
+                for argument in call
+                    .arguments
+                    .args
+                    .iter()
+                    .chain(call.arguments.keywords.iter().map(|kw| &kw.value))
+                {
+                    let mut use_self = SelfUse(receiver, None, &initialized);
+                    use_self.visit_expr(argument);
+                    if let Some(expr) = use_self.1 {
+                        return Err(module.error(
+                            expr,
+                            "the incomplete instance cannot escape during construction",
+                        ));
+                    }
+                }
+                initialized.extend(inherited.iter().map(|f| f.name.as_str()));
+                called_super = true;
                 continue;
             }
             ast::Stmt::Pass(_) => continue,
@@ -337,6 +547,14 @@ fn check_initializer(
                 ));
             }
         };
+        let mut self_use = SelfUse(receiver, None, &initialized);
+        self_use.visit_expr(&assignment.value);
+        if let Some(expression) = self_use.1 {
+            return Err(module.error(
+                expression,
+                "__init__ cannot expose self before construction or read an uninitialized field",
+            ));
+        }
         let mut targets = Vec::new();
         for target in &assignment.targets {
             initializer_targets(target, &mut targets);
@@ -362,14 +580,9 @@ fn check_initializer(
                 ));
             }
         }
-        let mut self_use = SelfUse(receiver, None);
-        self_use.visit_expr(&assignment.value);
-        if let Some(expression) = self_use.1 {
-            return Err(module.error(
-                expression,
-                "__init__ assignment values cannot read or expose self before construction finishes",
-            ));
-        }
+    }
+    if !inherited.is_empty() && !called_super {
+        return Err(module.error(initializer, "an explicit subclass initializer must call super().__init__ to initialize inherited fields"));
     }
     let missing = fields
         .iter()
@@ -407,11 +620,17 @@ fn initializer_targets<'a>(target: &'a ast::Expr, targets: &mut Vec<&'a ast::Exp
     }
 }
 
-struct SelfUse<'a>(&'a str, Option<&'a ast::Expr>);
+struct SelfUse<'a, 'b>(&'a str, Option<&'a ast::Expr>, &'b HashSet<&'a str>);
 
-impl<'a> Visitor<'a> for SelfUse<'a> {
+impl<'a> Visitor<'a> for SelfUse<'a, '_> {
     fn visit_expr(&mut self, expression: &'a ast::Expr) {
         if self.1.is_some() {
+            return;
+        }
+        if let ast::Expr::Attribute(field) = expression
+            && matches!(&*field.value, ast::Expr::Name(name) if name.id == self.0)
+            && self.2.contains(field.attr.as_str())
+        {
             return;
         }
         if let ast::Expr::Lambda(lambda) = expression

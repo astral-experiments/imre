@@ -8,14 +8,14 @@ impl Checker<'_> {
         &mut self,
         source: &ast::Expr,
         hint: Option<Type>,
-    ) -> Result<(pipelines::Prepared, Type, bool), String> {
+    ) -> Result<Iteration, String> {
         let empty_key = hint.unwrap_or(Type::Str);
-        let mut input = if matches!(source, ast::Expr::Dict(dict) if dict.items.is_empty()) {
-            Iteration::Container {
+        if matches!(source, ast::Expr::Dict(dict) if dict.items.is_empty()) {
+            Ok(Iteration::Container {
                 iterable: self.expr_expected(source, self.types.dict(empty_key, Type::Int))?,
                 items: false,
                 start: None,
-            }
+            })
         } else {
             self.expansion_input(
                 source,
@@ -23,8 +23,16 @@ impl Checker<'_> {
                     matches!(source, ast::Expr::List(list) if list.elts.is_empty())
                         .then_some(empty_key)
                 }),
-            )?
-        };
+            )
+        }
+    }
+
+    fn prepare_counter_input(
+        &mut self,
+        mut input: Iteration,
+        source: &ast::Expr,
+        hint: Option<Type>,
+    ) -> Result<(pipelines::Prepared, Type, bool), String> {
         let mut mapping_key = None;
         if let Iteration::Container {
             iterable, items, ..
@@ -42,7 +50,7 @@ impl Checker<'_> {
             }
         }
         let prepared = self.prepare_iteration(input, source, false)?;
-        self.hint_empty_iteration(&prepared, Some(empty_key));
+        self.hint_empty_iteration(&prepared, Some(hint.unwrap_or(Type::Str)));
         let element = mapping_key.unwrap_or(self.locals[prepared.value]);
         if let Some(key) = hint {
             self.expect(key, element, source)?;
@@ -64,9 +72,29 @@ impl Checker<'_> {
             .and_then(|v| self.types.mapping(v.ty))
             .map(|(key, _)| key)
             .or(hint);
-        let input = match call.arguments.args.as_ref() {
-            [source] => Some(self.counter_input(source, hint)?),
-            [] => None,
+        let (receiver, input) = match call.arguments.args.as_ref() {
+            [source] => match (receiver, self.counter_input(source, hint)?) {
+                (
+                    Some(receiver),
+                    Iteration::Container {
+                        iterable,
+                        items: false,
+                        start: None,
+                    },
+                ) if call.arguments.keywords.is_empty()
+                    && self.types.mapping(iterable.ty) == self.types.mapping(receiver.ty) =>
+                {
+                    return Ok(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::CounterUpdate, vec![receiver, iterable]),
+                    });
+                }
+                (receiver, input) => (
+                    receiver,
+                    Some(self.prepare_counter_input(input, source, hint)?),
+                ),
+            },
+            [] => (receiver, None),
             _ => {
                 return Err(error(
                     self.source,

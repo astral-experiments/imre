@@ -82,6 +82,13 @@ impl Output {
         format!("{name}_{}", if bound { "bound" } else { "plain" })
     }
 
+    pub fn async_name(&self, id: usize) -> String {
+        format!(
+            "{}_async",
+            self.numbered("callable", id, self.functions[id])
+        )
+    }
+
     pub fn string_name(&self, id: usize, prefix: &str) -> String {
         self.numbered(prefix, id, self.strings[id])
     }
@@ -266,6 +273,31 @@ mod tests {
         assert!(units["main"].contains(" = external hidden global ptr"));
         assert!(!units["spare"].contains("@callable_m"));
         assert!(!units["spare"].contains("@literal_m"));
+    }
+
+    #[test]
+    fn async_calls_and_exception_types_are_visible_to_their_callers() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.py");
+        fs::write(
+            &entry,
+            "import asyncio\nfrom leaf import fail\nasyncio.run(fail())\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("leaf.py"),
+            "class Failure(Exception):\n    pass\nasync def fail() -> None:\n    raise Failure('failed')\n",
+        ).unwrap();
+        let units = crate::compile_file_units(&entry, None, &crate::CompileOptions::default())
+            .unwrap()
+            .units
+            .into_iter()
+            .map(|u| (u.name, u.llvm_ir))
+            .collect::<std::collections::HashMap<_, _>>();
+        assert!(units["main"].contains("declare hidden i64 @callable_m"));
+        assert!(units["leaf"].contains("define hidden i64 @callable_m"));
+        assert!(units["leaf"].contains("@exception_type_256 = external hidden constant"));
+        assert!(units["main"].contains("@exception_type_256 = hidden constant"));
     }
 
     #[test]

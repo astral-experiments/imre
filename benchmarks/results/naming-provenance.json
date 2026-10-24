@@ -818974,6 +818974,294 @@
         "replacement_count": 0
       }
     },
+    "benchmarks/results/2026-10-24-ruff-ecosystem-capture-plans.json.gz": {
+      "normalized_bytes": 1350,
+      "normalized_sha256": "1b1858e7bf5497dabe9f34d35d1ff9570535829f8a805fed14a15c802ee42461",
+      "original_bytes": 1350,
+      "original_sha256": "1b1858e7bf5497dabe9f34d35d1ff9570535829f8a805fed14a15c802ee42461",
+      "restoration": {
+        "deflate": {
+          "level": 9,
+          "memory_level": 8,
+          "strategy": 0,
+          "window_bits": -15
+        },
+        "encoder_zlib_version": "1.3.2",
+        "header_hex": "1f8b0800000000000203",
+        "kind": "gzip-deflate",
+        "payload": {
+          "normalized_bytes": 5768,
+          "normalized_sha256": "0d4f45d8bd060d8987f8065753445a01f8b98dd789c493b1aebe4eab1b88e01a",
+          "original_bytes": 5768,
+          "original_sha256": "0d4f45d8bd060d8987f8065753445a01f8b98dd789c493b1aebe4eab1b88e01a",
+          "restoration": {
+            "encoding": "bytes",
+            "kind": "text",
+            "positions_zlib_hex": "78da030000000001",
+            "replacement_count": 0
+          }
+        },
+        "trailer_hex": "bc876f7b88160000"
+      }
+    },
+    "benchmarks/results/2026-10-24-ruff-ecosystem-diff-blocks.json.gz": {
+      "normalized_bytes": 24454,
+      "normalized_sha256": "3f0ef70c6b30b6f52895259eff86ba959392e509aea236efd3bbc5c2392357bf",
+      "original_bytes": 24456,
+      "original_sha256": "feba5116e81c03c5de916a417586425b4816f699619d9c0d712128e1bb816ad7",
+      "restoration": {
+        "deflate": {
+          "level": 9,
+          "memory_level": 8,
+          "strategy": 0,
+          "window_bits": -15
+        },
+        "encoder_zlib_version": "1.3.2",
+        "header_hex": "1f8b08000000000002ff",
+        "kind": "gzip-deflate",
+        "payload": {
+          "normalized_bytes": 141414,
+          "normalized_sha256": "c2e25e29547e53e7b6e5e8cdd3a6e623323efde181e8d05b528c34840a376f60",
+          "original_bytes": 141637,
+          "original_sha256": "146f7eafab52b0613364c638cc5dde0e7d597d4657bf54aa73d2215aaed51705",
+          "restoration": {
+            "encoding": "bytes",
+            "kind": "text",
+            "positions_zlib_hex": "78daa58f314b426114869ff35dfcaee0e0702797a04dda9c23e2d22614d41f7030a31c9a1d5da2c1367109c15d43ad06270d240d4cd241104230680b4425419aea5e0c07d73b1c7878cfc37b38658b8c666c30146e43f40cc25c901652bc0b5361a028057951f4847a908ea22bffc9483872f424315e0d5777948ae63e405b71e3a31970f52b93bee2eb8099e65bf36632d13c5a5c722d7c085122d4c43df9eb27ce19c33d9636259be63e559b2d763dcca7782cf8719ff45671e7bd22b743c3e29813160f42513827c1b38fec8ae66b72b2e226b5d6db7c98be70ca214bc593c56c9b82c91ff91e5840",
+            "replacement_count": 223
+          }
+        },
+        "trailer_hex": "1996eb2045290200"
+      }
+    },
+    "benchmarks/results/2026-10-24-ruff-ecosystem-diff-blocks.md": {
+      "normalized_bytes": 3691,
+      "normalized_sha256": "c35f38babfe2bcdae39e3000c8e8911b44fc86d9358b99df137067cb16aceabf",
+      "original_bytes": 3548,
+      "original_sha256": "4ddcd8218afa94ee5eab5ed4622dd961cd754fabfc0bb719e50cdf1c545ca5cf",
+      "restoration": {
+        "encoding": "bytes",
+        "kind": "text",
+        "markdown_note": true,
+        "positions_zlib_hex": "78da7bc8c2c8cef8978311000a6101f5",
+        "replacement_count": 3
+      }
+    },
+    "benchmarks/results/2026-10-24-ruff-ecosystem-live.json.gz": {
+      "normalized_bytes": 3564,
+      "normalized_sha256": "a435d2a298b561b5b8b125a36822bb7a4c9dc6b008059bf9c155f4937a260294",
+      "original_bytes": 3558,
+      "original_sha256": "e9d1a13f6ca040bf470c194f9582c549b615433361d7390729593cbb7de80358",
+      "restoration": {
+        "deflate": {
+          "level": 9,
+          "memory_level": 8,
+          "strategy": 0,
+          "window_bits": -15
+        },
+        "encoder_zlib_version": "1.3.2",
+        "header_hex": "1f8b0800000000000203",
+        "kind": "gzip-deflate",
+        "payload": {
+          "normalized_bytes": 20524,
+          "normalized_sha256": "661f39695ad5fa567c6e036934d52e5c205c9c8dfce7ee40e298531b54c31f90",
+          "original_bytes": 20530,
+          "original_sha256": "a00b33b082e5833243185d8fc2e17e9652bbddfa724d8e1db8cb68089a7e0dd4",
+          "restoration": {
+            "encoding": "bytes",
+            "kind": "text",
+            "positions_zlib_hex": "78da9363d8afcef09885219ce1b10a439306030022da03f4",
+            "replacement_count": 6
+          }
+        },
+        "trailer_hex": "85a0814732500000"
+      }
+    },
+    "benchmarks/results/2026-10-24-ruff-ecosystem-live.md": {
+      "normalized_bytes": 1801,
+      "normalized_sha256": "c844b0c2c64c6c3804b1cdf28c55e27b53d13527a92ab90fc08364c0c218e925",
+      "original_bytes": 1657,
+      "original_sha256": "d5a03ef4654c85902378abd41b53e874ba1a451b680ea6d047c4fbeb2964a54d",
+      "restoration": {
+        "encoding": "bytes",
+        "kind": "text",
+        "markdown_note": true,
+        "positions_zlib_hex": "78dad3676c65660400028a00ba",
+        "replacement_count": 2
+      }
+    },
+    "benchmarks/results/2026-10-24-ruff-ecosystem-packed.json.gz": {
+      "normalized_bytes": 12133,
+      "normalized_sha256": "f45a5e22192513b8a45d3dab12254a0681f63152a9939eafa5a085abbe90625a",
+      "original_bytes": 12133,
+      "original_sha256": "72db78f9c8f27a81d119c57d9a5bd6c5c01e305bc10a0663ca23180e81d09fd8",
+      "restoration": {
+        "deflate": {
+          "level": 9,
+          "memory_level": 8,
+          "strategy": 0,
+          "window_bits": -15
+        },
+        "encoder_zlib_version": "1.3.2",
+        "header_hex": "1f8b08000000000002ff",
+        "kind": "gzip-deflate",
+        "payload": {
+          "normalized_bytes": 67696,
+          "normalized_sha256": "131919e2d05325cdf67c3aa1de2501ef73bcd24e73a7b043087b059f1d90026f",
+          "original_bytes": 67788,
+          "original_sha256": "575c2b1345b73b6f007a075995fa5c8e8129ad2e767d8e7b3c71aaabe4cb2c7a",
+          "restoration": {
+            "encoding": "bytes",
+            "kind": "text",
+            "positions_zlib_hex": "78da4d8ebd4ac36014869f73e2970e1dd2a197e0d0b1ae1d5c3a55e815747071e825d80e254b9cdc03828b38b5a2946e0597200a2ae82009a553a04470e915a498af86e074de9f07ce7bdb2037c42e89901c3221107c438b11be70ce8fb015be9499c78bf2213c7abc2aef52266ba157e0634e79732c5e200f2ef33acfcaa521aa5bfca2c693b2eb921a8ee8f36dcf89756dee84fca0b0f74260e3c8100a43066c0cd33f95556a59b5d97f55b6d72e9fc259f161d1215462dd6f77b852564aa2a4c7dc34f9050a603afc",
+            "replacement_count": 92
+          }
+        },
+        "trailer_hex": "abe68db5cc080100"
+      }
+    },
+    "benchmarks/results/2026-10-24-ruff-ecosystem-packed.md": {
+      "normalized_bytes": 3290,
+      "normalized_sha256": "d1e2406cb51b9503bb0abb29c19f22edb810ba12992db864cdb56a3f11df18eb",
+      "original_bytes": 3148,
+      "original_sha256": "309576d37d3494eb101b672475b169489c2455e677ba726f5a628a1088407613",
+      "restoration": {
+        "encoding": "bytes",
+        "kind": "text",
+        "markdown_note": true,
+        "positions_zlib_hex": "78da3bcbc2c8ced8c0ca78859911000eea0239",
+        "replacement_count": 4
+      }
+    },
+    "benchmarks/results/2026-10-24-ruff-ecosystem-preview.json.gz": {
+      "normalized_bytes": 17158,
+      "normalized_sha256": "d78bf460a6547ebab1ce04b0f122bc70f3dac3531d4d74a8e20453d973d982c6",
+      "original_bytes": 17158,
+      "original_sha256": "bc8e2b44c6dfcb8d3b740d47bd77e69b7a41ffd49241c688261f6182b931f89d",
+      "restoration": {
+        "deflate": {
+          "level": 9,
+          "memory_level": 8,
+          "strategy": 0,
+          "window_bits": -15
+        },
+        "encoder_zlib_version": "1.3.2",
+        "header_hex": "1f8b08000000000002ff",
+        "kind": "gzip-deflate",
+        "payload": {
+          "normalized_bytes": 97278,
+          "normalized_sha256": "1d5f35fb17139efc289656519deebd7f2d2f6fed359394506bbfda7716d7ab97",
+          "original_bytes": 97337,
+          "original_sha256": "a22458353fa0912f430e93ec94d38e91617aae7681764993726a6d4ca1915dd5",
+          "restoration": {
+            "encoding": "bytes",
+            "kind": "text",
+            "positions_zlib_hex": "78da1dcab10a41511c80f1ef7f8e7b6eb9e96e9e8117b049caa48cca66b1b1598ce65b88dd6411b7f0001689223118c50b9089e50e38b6afafdfc8e32e4c129c841a25f25c63746c97699225439a50645e91c358f3d0a4a8d3165a5c84a77056843e5bc5da65e9b353bc5ca6ffd38d53fcf10655f6daf2a330332c3c368ac061e5591e25790b372172e819fa86816168f808390a7c0111092685",
+            "replacement_count": 59
+          }
+        },
+        "trailer_hex": "bb93b48e397c0100"
+      }
+    },
+    "benchmarks/results/2026-10-24-ruff-ecosystem-preview.md": {
+      "normalized_bytes": 5947,
+      "normalized_sha256": "74c6702874c18111a466f20b2441df55bd3b101ca0b060f307fb4c3b71143311",
+      "original_bytes": 5813,
+      "original_sha256": "9acd8e94c97d84928eb4b5b746d44b832585cc5191ebeb2c901c2c683b48b258",
+      "restoration": {
+        "encoding": "bytes",
+        "kind": "text",
+        "markdown_note": true,
+        "positions_zlib_hex": "78daab623cccc2388199f12523e33f364659c68d2c8ceb9819a7b132be6564e4655cc7c208008e28079a",
+        "replacement_count": 12
+      }
+    },
+    "benchmarks/results/2026-10-24-ruff-ecosystem-storage.json.gz": {
+      "normalized_bytes": 16016,
+      "normalized_sha256": "2c2061921c0aebe17f0478cf89b750c943b3538996b9e178b2bfca5f16829695",
+      "original_bytes": 16019,
+      "original_sha256": "7671fc9719db7c9f8345099456f747caaae9ce2ca835d0b7831d31b08b29a7ea",
+      "restoration": {
+        "deflate": {
+          "level": 9,
+          "memory_level": 8,
+          "strategy": 0,
+          "window_bits": -15
+        },
+        "encoder_zlib_version": "1.3.2",
+        "header_hex": "1f8b08000000000002ff",
+        "kind": "gzip-deflate",
+        "payload": {
+          "normalized_bytes": 83923,
+          "normalized_sha256": "8fb5952db30f5f0541f31867b1c77d9805380b12f10b53ede06b979d124e63f3",
+          "original_bytes": 84015,
+          "original_sha256": "b77e2525c405aa1bcad8e51b28ee04ce3493c1fef2479655691b50bd75795c21",
+          "restoration": {
+            "encoding": "bytes",
+            "kind": "text",
+            "positions_zlib_hex": "78da3dcc3f0b415118c7f1ef73ae731783dd6ab1deb7a18c1685c588d96852ca4d744732180d4831f83348148ac12893dd5b704eeebddba7dff3ede9a49925c852a72534790b5fe1a998a6382beec22ec5457193707909399337a870756c6e9299cb22c949d1d51c92366f6b8e19caf80e1e6b3171df6a29d1361736e6a5325c087b616eb9d7f4842a25b6a12aac34be558189c3c32acfd16324d428327019ff358c15b8d1f5a32305f1f507d381349c",
+            "replacement_count": 92
+          }
+        },
+        "trailer_hex": "817aa3b22f480100"
+      }
+    },
+    "benchmarks/results/2026-10-24-ruff-ecosystem-storage.md": {
+      "normalized_bytes": 4807,
+      "normalized_sha256": "0be35cdde2361a75d2e198decb150e780d236d311abb10b3ded5a394128e8f8e",
+      "original_bytes": 4669,
+      "original_sha256": "f6b39661a8baa9e05db8eaae971de1fd0621e4772a4c6bf201dc2754d8197520",
+      "restoration": {
+        "encoding": "bytes",
+        "kind": "text",
+        "markdown_note": true,
+        "positions_zlib_hex": "78da5365ec64659ccac8c8c328c6388b93b18f89711e33230023d50348",
+        "replacement_count": 8
+      }
+    },
+    "benchmarks/results/2026-10-24-ruff-ecosystem.json.gz": {
+      "normalized_bytes": 1530,
+      "normalized_sha256": "e1976566e1b0e81e2fc54554329cd6036cc4eff8fa4eb758e59e338af8004a88",
+      "original_bytes": 1530,
+      "original_sha256": "ae95b7cd792a86660351202bd445597d56588989a8091c52134b6d63b65c4478",
+      "restoration": {
+        "deflate": {
+          "level": 9,
+          "memory_level": 8,
+          "strategy": 0,
+          "window_bits": -15
+        },
+        "encoder_zlib_version": "1.3.2",
+        "header_hex": "1f8b08080000000002ff62656e63682d66757365642e6a736f6e00",
+        "kind": "gzip-deflate",
+        "payload": {
+          "normalized_bytes": 6386,
+          "normalized_sha256": "7e2b785d29e4b03a6197885d95e2989d6af42aef601d1a3ea5c7f174ad4cd3f1",
+          "original_bytes": 6400,
+          "original_sha256": "7980b350ef433b83e893bb20eebb97384589eecb7972be681cb096c4ddbbc408",
+          "restoration": {
+            "encoding": "bytes",
+            "kind": "text",
+            "positions_zlib_hex": "78da6b6364b0635063c8648864d8c8cc709591e12823c3775686bd5c0c6b9918eeb0309ce262d8c0c40000a40208d6",
+            "replacement_count": 14
+          }
+        },
+        "trailer_hex": "2e2f559700190000"
+      }
+    },
+    "benchmarks/results/2026-10-24-ruff-ecosystem.md": {
+      "normalized_bytes": 1730,
+      "normalized_sha256": "97e2e955380765bf848d850e009984864204e3aae0a518a79862c95460695d8b",
+      "original_bytes": 1588,
+      "original_sha256": "6b0c43a86e98974eeb9d9071fcf3a83a4e62d98da36c428807f6aedcc11e3630",
+      "restoration": {
+        "encoding": "bytes",
+        "kind": "text",
+        "markdown_note": true,
+        "positions_zlib_hex": "78da6b6064dcc9c428cb788c9111000e640225",
+        "replacement_count": 4
+      }
+    },
     "benchmarks/results/2026-10-24-splitlines-iteration-source.tar.xz": {
       "normalized_bytes": 8112,
       "normalized_sha256": "79304f401903ef4925c314cbe0bbd03854bb3b4b8db1c5a28c374cc05f65a738",

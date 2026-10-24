@@ -27,6 +27,29 @@ PROPERTY = ITEM + "    @property\n    def double(self) -> int:\n        return s
 ITEMS_METHOD = ITEM + "    def items(self, value: int) -> list[int]:\n        return [value]\n"
 
 REJECTED = {
+    "unproven_post_init_conversion": """from dataclasses import dataclass
+@dataclass(frozen=True)
+class Wrapper:
+    value: dict[str, int]
+    def __post_init__(self) -> None:
+        print("wrapper callback")
+@dataclass(frozen=True)
+class Holder:
+    data: Wrapper
+    def __post_init__(self) -> None:
+        if isinstance(self.data, dict):
+            object.__setattr__(self, "data", Wrapper(value=self.data))
+Holder({"a": 1})
+""",
+    "asdict_copy_unknown_keyword": """from dataclasses import asdict, dataclass
+from typing import Self
+@dataclass(frozen=True)
+class Option:
+    preview: bool = False
+    def updated(self: Self, **kwargs) -> Self:
+        return type(self)(**{**asdict(self), **kwargs})
+Option().updated(unknown=True)
+""",
     "post_init_parameter": ITEM + "    def __post_init__(self, argument: int) -> None:\n        pass\n",
     "post_init_return": ITEM + "    def __post_init__(self) -> int:\n        return 1\n",
     "post_init_static": ITEM + "    @staticmethod\n    def __post_init__(self: int) -> None:\n        pass\n",

@@ -480,7 +480,14 @@ impl Verifier<'_> {
                     params.into_iter().eq(expected),
                     "callable parameter types do not match target",
                 )?;
-                same(returns, callee.returns)
+                // A cold callable returns the coroutine to Python. Its native
+                // adapter runs the target body when awaited and returns its payload.
+                let native_result = if matches!(returns, Type::Coroutine(_)) {
+                    types.awaited(returns).unwrap()
+                } else {
+                    returns
+                };
+                same(native_result, callee.returns)
             }
             ExprKind::Invoke { callable, args } => {
                 let (params, returns) = types
@@ -543,7 +550,10 @@ impl Verifier<'_> {
                             .get(*class)
                             .ok_or("invalid enum class")?;
                         require(*member < metadata.enum_members.len(), "invalid enum member")?;
-                        same(value.ty, Type::StrEnum(*class))?;
+                        require(
+                            matches!(value.ty, Type::StrEnum(id) | Type::Enum(id) if id == *class),
+                            "enum member result has the wrong class",
+                        )?;
                     }
                     Builtin::SortedRecordRows { class, columns } => {
                         let fields = self
@@ -711,6 +721,32 @@ mod tests {
         module.functions[0].locals[0] = Type::Float;
         module.entry.body = vec![Statement::Expr(callable)];
         reject(&module, "expected float, got str");
+    }
+
+    #[test]
+    fn checks_the_awaited_result_of_a_coroutine_callback() {
+        let mut module = empty();
+        module.functions.push(Function {
+            params: Vec::new(),
+            returns: Type::Int,
+            locals: Vec::new(),
+            body: vec![Statement::Return(int())],
+        });
+        let make_callback = |result| {
+            Statement::Expr(Expr {
+                ty: module
+                    .types
+                    .callable(Vec::new(), module.types.coroutine(result)),
+                kind: ExprKind::Callable {
+                    function: 0,
+                    receiver: None,
+                },
+            })
+        };
+        module.entry.body = vec![make_callback(Type::Int)];
+        super::module(&module).unwrap();
+        module.entry.body = vec![make_callback(Type::Float)];
+        reject(&module, "expected int, got float");
     }
 
     #[test]

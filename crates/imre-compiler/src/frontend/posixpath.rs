@@ -36,21 +36,44 @@ impl Checker<'_> {
                 ));
             }
         };
-        let first = self.fspath_argument(first)?;
-        let ty = first.ty;
-        if join && rest.is_empty() {
-            return Ok(first);
+        let mut operands = Vec::with_capacity(1 + rest.len());
+        for expression in std::iter::once(first).chain(rest) {
+            operands.push((expression, self.expr(expression)?));
         }
-        let mut args = vec![first];
-        let mut path_in_tail = false;
-        for child in rest {
-            let raw = self.expr(child)?;
-            path_in_tail |= raw.ty == Type::Path;
-            args.push(self.fspath_value(raw, child)?);
-        }
+        let bytes = operands[0].1.ty == Type::Bytes;
+        let mixed = join
+            && operands
+                .iter()
+                .any(|(_, value)| (value.ty == Type::Bytes) != bytes);
         // CPython's mixed-type diagnostic inspects the unconverted tail even
         // when the component that first failed appears earlier in the call.
-        let operation = if join && args.iter().any(|arg| arg.ty != ty) {
+        let path_in_tail = operands
+            .iter()
+            .skip(1)
+            .any(|(_, value)| value.ty == Type::Path);
+        let mut args = Vec::with_capacity(operands.len());
+        for (index, (expression, value)) in operands.into_iter().enumerate() {
+            let value = if mixed
+                && index > 0
+                && self
+                    .types
+                    .members(value.ty)
+                    .is_some_and(|members| members == [Type::Str, Type::Path])
+            {
+                value
+            } else if join && matches!(value.ty, Type::Union(_) | Type::JsonRoot | Type::JsonValue)
+            {
+                self.path_text(value, expression)?
+            } else {
+                self.fspath_value(value, expression)?
+            };
+            args.push(value);
+        }
+        if join && args.len() == 1 {
+            return Ok(args.pop().unwrap());
+        }
+        let ty = args[0].ty;
+        let operation = if mixed {
             PosixPathOperation::MixedJoin { path_in_tail }
         } else {
             operation

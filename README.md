@@ -37,6 +37,10 @@ Imre also runs Ruff’s original memory reporter. It compares saved JSON capture
 or runs two versions of ty on flake8, Sphinx, Prefect, and Trio.
 [Run the memory reporter](examples/memory_report/README.md#run-ruffs-original-script).
 
+Imre builds Ruff’s ecosystem checker from its original Python package. It clones
+58 repositories and compares the diagnostics from two Ruff binaries.
+[Run the ecosystem checker](examples/ruff_ecosystem/README.md#run-the-original-check-command).
+
 Imre supports:
 
 - Statically resolved imports, including [rebuilt native extension wheels](docs/extensions.md)

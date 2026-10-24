@@ -67,6 +67,25 @@ impl Session {
         // Give ty its exact public signature without loading the dynamic CPython
         // compatibility implementation or weakening unresolved-import checks.
         let intrinsic = SystemPathBuf::from(root).join("imre");
+        for (name, stub) in [
+            (
+                "tomli",
+                "from tomllib import load as load, loads as loads\n",
+            ),
+            (
+                "unidiff",
+                "class PatchSet:\n    def __init__(self, patch: str) -> None: ...\n",
+            ),
+            (
+                "tomli_w",
+                "from typing import Any, BinaryIO\ndef dumps(obj: dict[str, Any]) -> str: ...\ndef dump(obj: dict[str, Any], fp: BinaryIO) -> None: ...\n",
+            ),
+        ] {
+            system
+                .fs()
+                .write_file_all(SystemPathBuf::from(root).join(format!("{name}.pyi")), stub)
+                .map_err(|error| error.to_string())?;
+        }
         system
             .fs()
             .write_file_all(
@@ -222,6 +241,16 @@ impl Session {
         Ok(copy)
     }
 
+    pub(crate) fn data_attribute(&self, module: usize, expression: &ruff_python_ast::Expr) -> bool {
+        use ty_python_semantic::types::Type as Ty;
+        self.used_hints.set(true);
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        matches!(
+            expression.inferred_type(&model),
+            Some(Ty::NominalInstance(_) | Ty::LiteralValue(_))
+        )
+    }
+
     /// Get a scalar layout hint for an append operand in its own lexical scope.
     pub(crate) fn scalar_type(
         &self,
@@ -276,18 +305,35 @@ impl Session {
     }
 
     /// Checks every loaded file, including unused functions and inactive main guards.
-    pub(crate) fn check(&mut self) -> Result<(), String> {
+    pub(crate) fn check_scopes(
+        &mut self,
+        skipped: Option<&[Vec<TextRange>]>,
+        decorators: &[Vec<TextRange>],
+    ) -> Result<(), String> {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(self.rules.clone());
-        self.errors()
+        self.errors(skipped, decorators)
     }
 
-    fn errors(&self) -> Result<(), String> {
+    fn errors(
+        &self,
+        skipped: Option<&[Vec<TextRange>]>,
+        decorators: &[Vec<TextRange>],
+    ) -> Result<(), String> {
         let errors: Vec<_> = self
             .files
             .iter()
-            .flat_map(|&file| file_errors(&self.db, file))
+            .enumerate()
+            .flat_map(|(index, &file)| {
+                let checked = CheckedFile::new(
+                    &self.db,
+                    file,
+                    skipped.map_or(&[][..], |ranges| ranges[index].as_slice()),
+                    decorators.get(index).map_or(&[][..], Vec::as_slice),
+                );
+                file_errors(&self.db, checked)
+            })
             .map(String::as_str)
             .collect();
         if errors.is_empty() {
@@ -298,19 +344,43 @@ impl Session {
     }
 }
 
+/// Reachable-only entry profiles can select different scopes of the same source.
+#[salsa::interned]
+struct CheckedFile<'db> {
+    #[returns(copy)]
+    file: File,
+    skipped: Vec<TextRange>,
+    decorators: Vec<TextRange>,
+}
+
 /// A per-file result depends on the ty queries it actually read, including any other source
 /// consulted to render a diagnostic. Every revision still requests the result for every file.
 #[salsa::tracked(returns(ref))]
-fn file_errors(db: &dyn Db, file: File) -> Vec<String> {
+fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
+    let file = checked.file(db);
     #[cfg(test)]
     FILE_CHECKS.with_borrow_mut(|checks| {
         if let Some(checks) = checks {
             checks.push(file.path(db).to_string());
         }
     });
+    let skipped = checked.skipped(db);
+    let decorators = checked.decorators(db);
     db.check_file(file)
         .iter()
-        .filter(|diagnostic| diagnostic.severity() >= Severity::Error)
+        .filter(|diagnostic| {
+            diagnostic.severity() >= Severity::Error
+                && !diagnostic
+                    .primary_span()
+                    .and_then(|span| span.range())
+                    .is_some_and(|range| {
+                        skipped.iter().any(|scope| scope.contains_range(range))
+                            || (diagnostic.id().as_str() == "no-matching-overload"
+                                && decorators
+                                    .iter()
+                                    .any(|decorator| decorator.contains_range(range)))
+                    })
+        })
         .map(|diagnostic| {
             diagnostic
                 .display(
@@ -418,25 +488,27 @@ impl AnalysisCache {
         }
     }
 
-    pub(crate) fn check(
+    pub(crate) fn check_scopes(
         &mut self,
         fresh: &mut Session,
         inputs: &crate::SourceInputs,
+        skipped: Option<&[Vec<TextRange>]>,
+        decorators: &[Vec<TextRange>],
     ) -> Result<(), String> {
         if let Some(cached) = &mut self.diagnostics
             && cached.same_files(fresh, inputs)
         {
             cached.update(fresh, inputs)?;
-            return cached.session.errors();
+            return cached.session.errors(skipped, decorators);
         }
         if self.hints.is_some() {
             // The quiet database must retain its inference with diagnostics disabled.
             let mut session = fresh.diagnostic_copy()?;
-            let result = session.check();
+            let result = session.check_scopes(skipped, decorators);
             self.diagnostics = Some(CachedSession::new(session, inputs));
             result
         } else {
-            let result = fresh.check();
+            let result = fresh.check_scopes(skipped, decorators);
             self.diagnostics = Some(CachedSession::new(fresh.clone(), inputs));
             result
         }
@@ -767,7 +839,11 @@ mod diagnostic_mode_tests {
                 .iter()
                 .any(|d| d.severity() >= Severity::Error)
         );
-        let message = session.check().unwrap_err();
+        let message = session.check_scopes(None, &[]).unwrap_err();
         assert!(message.contains("not callable"), "{message}");
+        // Entry profiles can skip a scope without changing its source or Salsa revision.
+        let whole = TextRange::new(0.into(), 40.into());
+        assert!(session.errors(Some(&[vec![whole]]), &[]).is_ok());
+        assert_eq!(session.errors(None, &[]).unwrap_err(), message);
     }
 }

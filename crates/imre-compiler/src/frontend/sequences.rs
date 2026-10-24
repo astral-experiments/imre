@@ -8,11 +8,15 @@ pub(super) fn check_reads(
     function: &ast::StmtFunctionDef,
     parameter: &str,
     empty_tuple_default: bool,
+    graph: &SourceGraph,
+    module: ModuleId,
     source: &str,
 ) -> Result<(), String> {
     let mut reads = Reads {
         parameter,
         empty_tuple_default,
+        graph,
+        module,
         allowed: HashSet::new(),
         invalid: None,
     };
@@ -35,6 +39,8 @@ pub(super) fn check_reads(
 struct Reads<'a, 'ast> {
     parameter: &'a str,
     empty_tuple_default: bool,
+    graph: &'a SourceGraph,
+    module: ModuleId,
     allowed: HashSet<TextRange>,
     invalid: Option<&'ast ast::Expr>,
 }
@@ -107,6 +113,14 @@ impl<'ast> Visitor<'ast> for Reads<'_, 'ast> {
                 if subscript.ctx == ast::ExprContext::Load && !self.empty_tuple_default =>
             {
                 self.allow(&subscript.value);
+            }
+            ast::Expr::Call(call)
+                if self.graph.resolve(self.module, &call.func)
+                    == Some(Binding::Intrinsic(Intrinsic::Ndiff)) =>
+            {
+                for arg in &call.arguments.args {
+                    self.allow(arg);
+                }
             }
             ast::Expr::Call(call)
                 if matches!(&*call.func, ast::Expr::Name(name) if name.id == "len")

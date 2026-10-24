@@ -43,6 +43,20 @@ pub struct RecordSemantics {
     pub fields: *const RecordField,
 }
 
+impl RecordDescriptor {
+    /// Only records with a pure TOML hash reserve an extra untraced cache word.
+    pub(super) fn has_toml_hash(&self) -> bool {
+        // SAFETY: every descriptor used by the runtime owns static metadata or null.
+        unsafe { self.semantics.as_ref().is_some_and(|s| s.flags & 4 != 0) }
+    }
+
+    fn allocated_words(&self) -> usize {
+        self.length
+            .checked_add(usize::from(self.has_toml_hash()))
+            .unwrap_or_else(|| fail("MemoryError", "record allocation is too large"))
+    }
+}
+
 #[repr(C)]
 pub struct RecordField {
     pub name: *const u8,
@@ -65,6 +79,30 @@ const _: () = assert!(size_of::<Header>() == 16 && align_of::<Header>() == 8);
 pub(super) unsafe fn descriptor<'a>(payload: *const usize) -> &'a RecordDescriptor {
     // SAFETY: the immutable descriptor belongs to the live allocation's header.
     unsafe { (*payload.cast::<Header>().sub(1)).descriptor() }
+}
+
+/// Checks the declared identity of a record, including across codegen units.
+///
+/// # Safety
+/// Both arguments refer to live, compiler-described class layouts.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_record_has_type(
+    payload: *const usize,
+    expected: *const RecordDescriptor,
+) -> u32 {
+    // SAFETY: class descriptors and their qualified names outlive the program.
+    unsafe {
+        let actual = descriptor(payload);
+        if std::ptr::eq(actual, expected) {
+            return 1;
+        }
+        let left = &*actual.semantics;
+        let right = &*(*expected).semantics;
+        u32::from(
+            std::slice::from_raw_parts(left.qualified_name, left.qualified_name_len)
+                == std::slice::from_raw_parts(right.qualified_name, right.qualified_name_len),
+        )
+    }
 }
 
 /// Initializes caller-owned scratch for a tuple used only by a read-only lookup.
@@ -140,7 +178,7 @@ pub(super) struct RecordBatch<'a> {
 impl<'a> RecordBatch<'a> {
     /// Wide records with fewer than two slots per block use individual allocations.
     pub(super) fn new(descriptor: &'a RecordDescriptor) -> Option<Self> {
-        let words = layout(descriptor.length).size() / size_of::<usize>();
+        let words = layout(descriptor.allocated_words()).size() / size_of::<usize>();
         (words <= BLOCK_WORDS / 2).then_some(Self {
             descriptor,
             words,
@@ -197,7 +235,7 @@ pub unsafe extern "C" fn imre_record_new(descriptor: *const RecordDescriptor) ->
     let record = unsafe { allocate_record(descriptor) };
     if record.is_null() {
         // SAFETY: the descriptor remains live after a failed allocation.
-        handle_alloc_error(layout(unsafe { (*descriptor).length }));
+        handle_alloc_error(layout(unsafe { (*descriptor).allocated_words() }));
     }
     record
 }
@@ -223,7 +261,7 @@ pub unsafe extern "C" fn imre_record_try_new(descriptor: *const RecordDescriptor
 pub(super) unsafe fn allocate_record(descriptor: *const RecordDescriptor) -> *mut usize {
     // SAFETY: the caller provides immutable live metadata for this allocation.
     let descriptor_value = unsafe { &*descriptor };
-    let allocation_layout = layout(descriptor_value.length);
+    let allocation_layout = layout(descriptor_value.allocated_words());
     // Validate once before constructing an object whose destructor uses the kinds.
     for index in 0..descriptor_value.length {
         // SAFETY: the descriptor promises this many initialized kind entries.
@@ -243,7 +281,7 @@ pub(super) unsafe fn allocate_record(descriptor: *const RecordDescriptor) -> *mu
         // Only the payload needs zeroing for partial-field cleanup. The ordinary
         // allocation can reuse a freed small record without clearing its header.
         let payload = allocation.add(size_of::<Header>()).cast::<usize>();
-        payload.write_bytes(0, descriptor_value.length);
+        payload.write_bytes(0, descriptor_value.allocated_words());
         payload
     }
 }
@@ -388,7 +426,7 @@ unsafe fn release_record_owner(payload: *const usize) {
         // and the immutable descriptor cannot change during the record's lifetime.
         unsafe {
             release_fields::<false>(payload, descriptor);
-            let size = size_of::<Header>() + descriptor.length * size_of::<usize>();
+            let size = size_of::<Header>() + descriptor.allocated_words() * size_of::<usize>();
             let layout = Layout::from_size_align_unchecked(size, align_of::<Header>());
             dealloc(payload.cast::<Header>().sub(1).cast_mut().cast(), layout);
         }

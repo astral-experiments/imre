@@ -7,6 +7,7 @@
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 use std::sync::LazyLock;
 
+mod record_hash;
 mod sorted_rows;
 
 use hashbrown::HashTable;
@@ -62,8 +63,8 @@ impl Hash for PathKey {
     }
 }
 
-/// An immutable tuple owns its concrete record without copying its fields into
-/// a second allocation. Lookup borrows that owner; hashing cannot call user code.
+/// An immutable tuple or dataclass key roots its concrete record without
+/// copying its fields into a second allocation.
 struct TupleKey(*const usize);
 
 impl Clone for TupleKey {
@@ -102,13 +103,27 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) {
         let (value, position) = current;
         // SAFETY: the root owns every tuple in the traversal and its descriptor.
         let layout = unsafe { super::records::descriptor(value) };
+        if layout.has_toml_hash() {
+            // SAFETY: the key boundary prepares this frozen record's cached hash.
+            let cached = unsafe { *value.add(layout.length) };
+            debug_assert_ne!(cached, 0);
+            cached.hash(state);
+            let Some(next) = pending.pop() else { return };
+            current = next;
+            continue;
+        }
         if position == 0 {
             // Tuple equality requires the same descriptor. Hash it once per tuple.
             std::ptr::from_ref(layout).hash(state);
         }
+        // SAFETY: a rooted record's semantic metadata is immutable and static.
+        let semantics = unsafe { layout.semantics.as_ref() };
         for index in position..layout.length {
             // SAFETY: the static layout covers each initialized concrete field.
             unsafe {
+                if semantics.is_some_and(|s| s.kind == 0 && (*s.fields.add(index)).flags & 1 == 0) {
+                    continue;
+                }
                 let kind = WordKind::new(*layout.kinds.add(index));
                 let word = kind.read_record_field(value.add(index));
                 let raw = kind.raw();
@@ -666,6 +681,33 @@ impl Mapping {
         pairs
     }
 
+    pub(super) fn is_empty(&self) -> bool {
+        self.tables.len() == 0
+    }
+
+    /// A typed dict of None can initialize a mutable document's removal values.
+    pub(super) fn document_null_keys(&self) -> Vec<Rc<Str>> {
+        assert_eq!((self.tables.key_kind(), self.value_kind.raw()), (3, 0));
+        let mut keys = Vec::with_capacity(self.tables.len());
+        self.tables.all(|key, _| {
+            // SAFETY: the mapping holds a strong reference to each exact string key.
+            keys.push(unsafe { acquire_rc(key) });
+            true
+        });
+        keys
+    }
+
+    pub(super) fn document_pairs(&self) -> Vec<(Rc<Str>, Rc<Object>)> {
+        assert_eq!((self.tables.key_kind(), self.value_kind.raw()), (3, 5));
+        let mut pairs = Vec::with_capacity(self.tables.len());
+        self.tables.all(|key, value| {
+            // SAFETY: the exact native mapping roots each typed key and value.
+            pairs.push(unsafe { (acquire_rc(key), acquire_rc(value)) });
+            true
+        });
+        pairs
+    }
+
     /// # Safety
     /// Both tables and all values are rooted and immutable for this traversal.
     pub(super) unsafe fn compare_entry(
@@ -992,6 +1034,24 @@ impl Storage {
     }
 }
 
+/// Each statically decorated module function owns one typed cache for the
+/// lifetime of the program. A failed call never reaches the wrapper's insert.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_function_cache(id: usize, key: u32, value: u32) -> *const Object {
+    thread_local! { static CACHES: std::cell::RefCell<std::collections::HashMap<usize, Rc<Object>>> = std::cell::RefCell::default(); }
+    CACHES.with_borrow_mut(|caches| {
+        Rc::into_raw(
+            caches
+                .entry(id)
+                .or_insert_with(|| {
+                    // SAFETY: imre_dict_new returns an independent strong owner.
+                    unsafe { Rc::from_raw(imre_dict_new(key, value)) }
+                })
+                .clone(),
+        )
+    })
+}
+
 /// Creates a dictionary with concrete scalar keys and one shared value descriptor.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_dict_new(key_kind: u32, value_kind: u32) -> *const Object {
@@ -999,6 +1059,7 @@ pub extern "C" fn imre_dict_new(key_kind: u32, value_kind: u32) -> *const Object
         Box::new(Mapping::new(key_kind, value_kind)),
     )))))
 }
+
 /// Constructs an integer-valued Counter with non-inserting zero subscriptions.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_counter_new(key_kind: u32) -> *const Object {
@@ -1009,21 +1070,54 @@ pub extern "C" fn imre_counter_new(key_kind: u32) -> *const Object {
     )))))
 }
 
+/// Add the source counts in insertion order. Updating a counter from itself doubles each count.
+///
+/// # Safety
+/// Both arguments root dictionaries with the same immutable key type and integer values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_counter_update(target: *const Object, source: *const Object) {
+    // SAFETY: the iterator acquires the source and each pair before mutating the target.
+    // When the handles alias, replacing a count leaves the source's keys intact.
+    unsafe {
+        let iter = Rc::from_raw(imre_dict_iter(source, 1));
+        while let Some((key, Some(count))) = iter
+            .0
+            .with_mut(|s| s.mapping_iterator_mut().next())
+            .expect("only counter values change during update")
+        {
+            let current = Int(imre_dict_get_default(target, key.word, 1));
+            let total = Int(crate::imre_int_binary(current.0, count.word, 0));
+            imre_dict_set(target, key.word, total.0);
+        }
+    }
+}
+
+/// Sums exact integers after evaluating the dictionary and the start value.
+///
+/// # Safety
+/// The caller roots a dictionary of integers and a tagged integer start.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_sum_values(mapping: *const Object, start: usize) -> usize {
+    // SAFETY: no callbacks occur while reading these immutable integer values.
+    unsafe {
+        crate::imre_int_retain(start);
+        let mut total = Int(start);
+        object(mapping).0.with(|s| {
+            s.dictionary().tables.all(|_, word| {
+                total = Int(crate::imre_int_binary(total.0, word, 0));
+                true
+            })
+        });
+        total.into_raw()
+    }
+}
+
 /// # Safety
 /// `value` roots an exact Counter; addition only reads its immutable integer words.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_counter_total(value: *const Object) -> usize {
-    let mut total = Int::small(0).unwrap();
-    // SAFETY: no user code or mutation can run while reading these counts.
-    unsafe {
-        object(value).0.with(|storage| {
-            storage.dictionary().tables.all(|_, count| {
-                total = Int(crate::imre_int_binary(total.0, count, 0));
-                true
-            });
-        })
-    };
-    total.into_raw()
+    // SAFETY: the caller roots this integer mapping and the zero start is immediate.
+    unsafe { imre_dict_sum_values(value, Int::small(0).unwrap().0) }
 }
 
 /// Attaches the exact element descriptor to a native `defaultdict(list)`.

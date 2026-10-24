@@ -9,6 +9,35 @@ from pathlib import Path
 from textwrap import dedent
 
 ACCEPTED = {
+    "nominal_exception_hierarchy": """
+class ParseError(ValueError):
+    "A failure while reading input."
+
+class MissingField(ParseError):
+    pass
+
+class InvalidField(ParseError):
+    pass
+
+try:
+    try:
+        raise InvalidField("unknown key")
+    except ParseError as original:
+        raise MissingField("missing name") from original
+except InvalidField:
+    raise AssertionError("a sibling matched the handler")
+except ParseError as error:
+    print(str(error))
+    print(isinstance(error, MissingField))
+    print(isinstance(error, InvalidField))
+    print(isinstance(error, ValueError))
+    print(error.__suppress_context__)
+    cause = error.__cause__
+    assert cause is not None
+    print(str(cause))
+    print(isinstance(cause, InvalidField))
+    print(isinstance(cause, MissingField))
+""",
     "explicit_causes": """
 def show(error: Exception) -> None:
     print(str(error))
@@ -763,7 +792,11 @@ finally:
     "writable_exception_suppression": 'error = ValueError("error")\nerror.__suppress_context__ = True',
     "exception_group": "try:\n    raise ValueError()\nexcept* ValueError:\n    pass\n",
     "dynamic_handler": "kind = ValueError\ntry:\n    pass\nexcept kind:\n    pass\n",
-    "custom_exception": "class Custom(Exception):\n    pass\n",
+    "exception_subclass_method": """
+class WithMethod(Exception):
+    def describe(self) -> str:
+        return "extra behavior"
+""",
 }
 
 ERRORS = {
@@ -865,6 +898,8 @@ def main() -> None:
             path.write_text(dedent(source), encoding="utf-8")
             result = run([compiler, "check", str(path)])
             assert result.returncode > 0 and result.stderr, (name, result)
+            if name == "exception_subclass_method":
+                assert "exception subclasses support a docstring or pass" in result.stderr, result
             passed += 1
         cases = [(name, source, None) for name, source in ACCEPTED.items()]
         cases += [

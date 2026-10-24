@@ -25,13 +25,14 @@ enum Allocator {
 
 const JEMALLOC_RUNTIME: &str = "libimre_runtime_jemalloc.a";
 
-const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--watch | -w]
+const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only] [--entry-profile FILE] [--watch | -w]
        imre extension-header
        imre build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]
        imre run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]
 
 Build options:
   --module-root DIRECTORY  --runtime LIBRARY.a  --emit-llvm FILE.ll
+  --reachable-only         Compile definitions reachable from program entry and module initialization
   --extension-path DIRECTORY  Search an installed Imre wheel directory (repeatable)
   --clang CLANG  --opt-level 0|1|2|3  --sanitize  --no-cache  --whole-program
   -q, --quiet              Suppress build status
@@ -45,6 +46,7 @@ Build writes the executable to the current directory using the source filename w
 Check --watch reports each revision to stderr until interrupted.
 Build and run share cached module objects and executables on supported native Linux toolchains.
 Use --whole-program to optimize all modules together.
+Use --entry-profile FILE to compile selected branches and reject excluded modes at runtime.
 Override the cache location with IMRE_CACHE_DIR or bypass it with --no-cache.
 Run passes arguments after -- to the program.
 ThinLTO (--lto-linker) requires explicit --runtime and --target.
@@ -119,21 +121,17 @@ fn run() -> Result<ExitCode, String> {
     let source_path = source_path.ok_or(USAGE)?;
     if command == "check" {
         if watch {
-            imre_compiler::IncrementalCompiler::default().watch_file_with_extensions(
+            imre_compiler::IncrementalCompiler::default().watch_file_with_options(
                 &source_path,
                 module_root.as_deref(),
-                &options.extension_paths,
+                &options,
                 |result| match result {
                     Ok(()) => eprintln!("Check passed"),
                     Err(error) => eprintln!("{error}\nCheck failed"),
                 },
             )?;
         } else {
-            imre_compiler::check_file_with_extensions(
-                &source_path,
-                module_root.as_deref(),
-                &options.extension_paths,
-            )?;
+            imre_compiler::check_file_with_options(&source_path, module_root.as_deref(), &options)?;
         }
         return Ok(ExitCode::SUCCESS);
     }
@@ -215,17 +213,20 @@ fn run() -> Result<ExitCode, String> {
             .or(native.as_ref())
             .and_then(|tools| tools.lld.as_deref())
     };
-    let cache = native.as_ref().filter(|_| !no_cache).and_then(|native| {
-        build_cache::Cache::open(
-            &source_path,
-            module_root.as_deref(),
-            &optimization,
-            &runtime,
-            native,
-            split,
-            &link,
-        )
-    });
+    let cache = native
+        .as_ref()
+        .filter(|_| !no_cache && !options.reachable_only)
+        .and_then(|native| {
+            build_cache::Cache::open(
+                &source_path,
+                module_root.as_deref(),
+                &optimization,
+                &runtime,
+                native,
+                split,
+                &link,
+            )
+        });
     // Wheel archives and their optional library manifests must be reread at link time.
     // Generated module objects are still keyed by their complete LLVM IR.
     let executable_cache = cache

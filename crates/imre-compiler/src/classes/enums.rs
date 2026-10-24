@@ -4,6 +4,7 @@ use super::*;
 
 #[derive(Default)]
 pub(crate) struct Members {
+    pub(crate) plain: bool,
     pub(crate) values: Vec<(String, String)>,
     pub(crate) names: HashMap<String, usize>,
     indices: HashMap<String, usize>,
@@ -42,6 +43,7 @@ impl Members {
                 if call.arguments.args.is_empty()
                     && call.arguments.keywords.is_empty()
                     && !shadowed(&call.func, bindings)
+                    && !self.plain
                     && graph.resolve(module_id, &call.func)
                         == Some(Binding::Intrinsic(Intrinsic::EnumAuto)) =>
             {

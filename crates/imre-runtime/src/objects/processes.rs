@@ -21,6 +21,9 @@ use super::records::{RecordDescriptor, imre_record_new};
 use super::words::WordKind;
 use super::{Bytes, Int, Object, Storage, Str, acquire_rc, fail, object};
 
+mod asynchronous;
+pub(super) use asynchronous::AsyncProcess;
+
 #[cfg(target_os = "linux")]
 unsafe extern "C" {
     static environ: *const *const libc::c_char;
@@ -28,6 +31,7 @@ unsafe extern "C" {
 
 /// Rich failures keep the original argv list, so later aliases affect str(error).
 /// The sealed string list cannot point back to the exception or form a cycle.
+#[derive(Clone)]
 pub(super) struct ProcessError {
     cmd: Rc<Object>,
     returncode: i32,
@@ -78,6 +82,7 @@ impl ProcessError {
     }
 }
 
+#[derive(Clone)]
 enum Deadline {
     Integer(Int),
     Float(f64),
@@ -85,6 +90,7 @@ enum Deadline {
 
 /// A deadline failure owns the original argv and undecoded pipe snapshots.
 /// Empty streams distinguish an observed EOF from no data observed before expiry.
+#[derive(Clone)]
 pub(super) struct TimeoutError {
     cmd: Rc<Object>,
     timeout: Deadline,
@@ -660,29 +666,29 @@ fn nonblocking(fd: RawFd) -> io::Result<()> {
 /// Polls both streams fairly, including HUP buffers, before collecting status.
 /// Decoding happens afterward so every failure still closes pipes and reaps.
 fn capture(child: Child) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
-    let mut child = ChildGuard {
+    capture_guard(ChildGuard {
         child,
         reaped: false,
-    };
-    let mut stdout = child
-        .child
-        .stdout
-        .take()
-        .expect("captured stdout was configured");
-    let mut stderr = child
-        .child
-        .stderr
-        .take()
-        .expect("captured stderr was configured");
-    nonblocking(stdout.as_raw_fd())?;
-    nonblocking(stderr.as_raw_fd())?;
-    let mut polls = [stdout.as_raw_fd(), stderr.as_raw_fd()].map(|fd| libc::pollfd {
-        fd,
+    })
+}
+
+fn capture_guard(mut child: ChildGuard) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
+    let mut stdout = child.child.stdout.take();
+    let mut stderr = child.child.stderr.take();
+    let fds = [
+        stdout.as_ref().map(AsRawFd::as_raw_fd),
+        stderr.as_ref().map(AsRawFd::as_raw_fd),
+    ];
+    for fd in fds.into_iter().flatten() {
+        nonblocking(fd)?;
+    }
+    let mut polls = fds.map(|fd| libc::pollfd {
+        fd: fd.unwrap_or(-1),
         events: libc::POLLIN,
         revents: 0,
     });
     let mut outputs = [Vec::new(), Vec::new()];
-    let mut remaining = 2;
+    let mut remaining = fds.iter().flatten().count();
     let mut buffer = [0_u8; 16 * 1024];
     while remaining != 0 {
         // SAFETY: poll has exactly two writable descriptors and waits without
@@ -702,9 +708,15 @@ fn capture(child: Child) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
                 continue;
             }
             let result = if index == 0 {
-                stdout.read(&mut buffer)
+                stdout
+                    .as_mut()
+                    .expect("poll only signals captured stdout")
+                    .read(&mut buffer)
             } else {
-                stderr.read(&mut buffer)
+                stderr
+                    .as_mut()
+                    .expect("poll only signals captured stderr")
+                    .read(&mut buffer)
             };
             match result {
                 Ok(0) => {
@@ -933,6 +945,64 @@ unsafe fn native_argv(args: *const Object) -> Result<Vec<CString>> {
     }
 }
 
+/// # Safety
+/// The caller roots an exact list of strings, Paths, or their closed union.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *const Str {
+    // SAFETY: inspect only the exact runtime representations admitted by this call.
+    let argv = unsafe {
+        object(args).0.with(|storage| -> Result<Vec<CString>> {
+            let list = storage.sequence();
+            list.values
+                .iter()
+                .map(|&word| {
+                    let (word, ty) = if list.kind.raw() == 9 {
+                        super::unions::member(word)
+                    } else {
+                        (word, list.kind)
+                    };
+                    match ty.raw() {
+                        3 => cstring((&*(word as *const Str)).as_bytes()),
+                        5 => object(word as *const Object)
+                            .0
+                            .with(|storage| match storage {
+                                Storage::Path { .. } => cstring(storage.path().as_bytes()),
+                                _ => fail("SystemError", "expected a subprocess Path argument"),
+                            }),
+                        _ => fail("SystemError", "invalid subprocess argument kind"),
+                    }
+                })
+                .collect()
+        })
+    };
+    let run = argv.and_then(|argv| {
+        if argv.is_empty() {
+            return Err(Error::new(Kind::IndexError, "list index out of range"));
+        }
+        let child = Launch::new(argv, None)?
+            .spawn_with_output(None, Stdio::piped(), Stdio::inherit())
+            .map_err(os_error)?;
+        let (status, stdout, _) = capture(child).map_err(os_error)?;
+        Ok((status, Rc::new(decode_utf8_text(stdout)?)))
+    });
+    match run {
+        Ok((status, stdout)) if status.success() => Rc::into_raw(stdout),
+        Ok((status, stdout)) => {
+            raise_process(ProcessError {
+                // SAFETY: the exception acquires the original rooted argv.
+                cmd: unsafe { acquire_rc(args as usize) },
+                returncode: status
+                    .code()
+                    .unwrap_or_else(|| -status.signal().unwrap_or(0)),
+                stdout: Some(stdout),
+                stderr: None,
+            });
+            std::ptr::null()
+        }
+        Err(error) => error.returning(std::ptr::null()),
+    }
+}
+
 /// Runs a child with its output forwarded directly to the parent's stderr.
 ///
 /// # Safety
@@ -975,6 +1045,49 @@ pub unsafe extern "C" fn imre_subprocess_to_stderr(args: *const Object, check: u
     }
 }
 
+/// Validate rooted language arguments and materialize an independent native launch.
+unsafe fn prepare_process(
+    args: *const Object,
+    cwd: *const Str,
+    env: *const Object,
+) -> Result<(Launch, Option<CString>)> {
+    // SAFETY: the caller roots the exact argv, optional directory and environment.
+    unsafe {
+        // Python selects args[0], validates every environment name, then
+        // converts native strings. Preserve that order for mixed failures.
+        if object(args)
+            .0
+            .with(|storage| storage.sequence().values.is_empty())
+        {
+            return Err(Error::new(Kind::IndexError, "list index out of range"));
+        }
+        let env = if env.is_null() {
+            None
+        } else {
+            Some(object(env).0.with(|storage| {
+                let Storage::Dictionary(mapping) = storage else {
+                    fail("SystemError", "expected an environment dictionary");
+                };
+                mapping.string_pairs()
+            }))
+        };
+        if env
+            .as_ref()
+            .is_some_and(|pairs| pairs.iter().any(|(key, _)| key.contains('=')))
+        {
+            return Err(Error::new(
+                Kind::ValueError,
+                "illegal environment variable name",
+            ));
+        }
+        let argv = native_argv(args)?;
+        let cwd = (!cwd.is_null())
+            .then(|| cstring((&*cwd).as_bytes()))
+            .transpose()?;
+        Ok((Launch::new(argv, env)?, cwd))
+    }
+}
+
 /// Shares launch validation and successful records without changing no-timeout IO.
 unsafe fn run_process(
     args: *const Object,
@@ -985,42 +1098,7 @@ unsafe fn run_process(
     descriptor: *const RecordDescriptor,
 ) -> *mut usize {
     // SAFETY: only independent native strings escape the exact input storage.
-    let prepared = unsafe {
-        (|| {
-            // Python selects args[0], validates every environment name, then
-            // converts native strings. Preserve that order for mixed failures.
-            if object(args)
-                .0
-                .with(|storage| storage.sequence().values.is_empty())
-            {
-                return Err(Error::new(Kind::IndexError, "list index out of range"));
-            }
-            let env = if env.is_null() {
-                None
-            } else {
-                Some(object(env).0.with(|storage| {
-                    let Storage::Dictionary(mapping) = storage else {
-                        fail("SystemError", "expected an environment dictionary");
-                    };
-                    mapping.string_pairs()
-                }))
-            };
-            if env
-                .as_ref()
-                .is_some_and(|pairs| pairs.iter().any(|(key, _)| key.contains('=')))
-            {
-                return Err(Error::new(
-                    Kind::ValueError,
-                    "illegal environment variable name",
-                ));
-            }
-            let argv = native_argv(args)?;
-            let cwd = (!cwd.is_null())
-                .then(|| cstring((&*cwd).as_bytes()))
-                .transpose()?;
-            Ok((Launch::new(argv, env)?, cwd))
-        })()
-    };
+    let prepared = unsafe { prepare_process(args, cwd, env) };
     let (launch, cwd) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => return error.returning(std::ptr::null_mut()),
@@ -1215,6 +1293,69 @@ mod tests {
             }
         }
         result
+    }
+
+    #[test]
+    fn async_children_rendezvous_and_drain_both_pipes() {
+        use super::asynchronous::{
+            imre_async_process_communicate, imre_async_process_spawn, imre_async_process_status,
+        };
+
+        let dir = Directory::new();
+        let cwd = Str::new(dir.0.to_str().unwrap());
+        let script = r#"
+            touch "$1"
+            retries=0
+            while ! test -f "$2"; do
+                retries=$((retries + 1))
+                test "$retries" -lt 500 || exit 91
+                sleep .01
+            done
+            dd if=/dev/zero bs=65536 count=4 2>/dev/null
+            dd if=/dev/zero bs=65536 count=5 1>&2 2>/dev/null
+            exit 7
+        "#;
+        let spawn = |name, partner| {
+            let argv = args(&["/bin/sh", "-c", script, "barrier", name, partner]);
+            // SAFETY: the exact list and cwd remain rooted until spawn returns.
+            unsafe {
+                let child =
+                    imre_async_process_spawn(Rc::as_ptr(&argv), &cwd, std::ptr::null(), 1, 1);
+                assert!(!child.is_null());
+                Rc::from_raw(child)
+            }
+        };
+        let first = spawn("first", "second");
+        assert_eq!(
+            // SAFETY: the first process is rooted and waits for a missing file.
+            unsafe { imre_async_process_status(Rc::as_ptr(&first), false) },
+            0
+        );
+        let second = spawn("second", "first");
+        const KINDS: [u32; 2] = [8, 8];
+        let descriptor = RecordDescriptor {
+            length: 2,
+            kinds: KINDS.as_ptr(),
+            semantics: std::ptr::null(),
+        };
+        for owner in [first, second] {
+            let process = Rc::as_ptr(&owner);
+            // SAFETY: each newly owned pair roots two immutable byte buffers
+            // until its release. Its descriptor outlives both communications.
+            unsafe {
+                assert_eq!(imre_async_process_status(process, true), exit_word(7));
+                for lengths in [[4 * 65536, 5 * 65536], [0, 0]] {
+                    let pair = imre_async_process_communicate(process, &descriptor);
+                    assert!(!pair.is_null());
+                    for (slot, length) in lengths.into_iter().enumerate() {
+                        let bytes = &*pair.add(slot).cast::<*const Bytes>().read();
+                        assert_eq!(bytes.len(), length);
+                    }
+                    imre_record_release(pair);
+                }
+                assert_eq!(imre_async_process_status(process, false), exit_word(7));
+            }
+        }
     }
 
     fn run(

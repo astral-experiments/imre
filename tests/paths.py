@@ -47,6 +47,8 @@ REJECTED = {
     "path_order": "print(Path('a') < Path('b'))",
     "mixed_path_set": "values = {Path('a'), 'a'}",
     "mixed_path_dict_key": "values = {Path('a'): 1, 'a': 2}",
+    "sysconfig_path": "import sysconfig\nsysconfig.get_path('stdlib')",
+    "which_mode_type": "import shutil\nshutil.which('tool', mode='x')",
     "path_constructor_value": "constructor = Path\nprint(constructor('a'))",
     "subclass": "class Custom(Path):\n    pass",
     "escaped_iterdir": "values = Path('.').iterdir()",
@@ -62,7 +64,7 @@ REJECTED = {
     "glob_absolute": "for value in Path('.').glob('/tmp'):\n    print(value)",
     "glob_options": "for value in Path('.').glob('*', case_sensitive=False):\n    print(value)",
     "predicate_options": "print(Path('.').exists(follow_symlinks=False))",
-    "write_default_encoding": "Path('a').write_text('data')",
+    "write_non_utf8_encoding": "Path('a').write_text('data', encoding='latin-1')",
     "read_encoding": "Path('a').read_text(encoding='latin-1')",
     "read_dynamic_encoding": "encoding = 'utf-8'\nPath('a').read_text(encoding=encoding)",
     "write_bytes": "Path('a').write_text(b'data', encoding='utf-8')",
@@ -135,6 +137,7 @@ def seed(directory: Path) -> None:
     (directory / "repeated-link").symlink_to("directory-link/../directory-link")
     (directory / "trailing-link").symlink_to("input.txt/")
     (directory / "absolute-link").symlink_to("/tmp", target_is_directory=True)
+    (directory / "command").touch(mode=0o755)
     (directory / "denied").mkdir()
     (directory / "denied" / "secret.json").write_text("secret")
     (directory / "denied").chmod(0)

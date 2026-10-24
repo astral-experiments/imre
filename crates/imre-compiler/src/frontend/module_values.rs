@@ -9,8 +9,8 @@ use super::*;
 pub(super) struct ModuleValues {
     definitions: RefCell<HashMap<DefinitionId, (usize, Type)>>,
     types: RefCell<Vec<Type>>,
-    pub(super) regex_literals: RefCell<HashMap<String, regex::CaptureNames>>,
-    regex_globals: RefCell<HashMap<usize, regex::CaptureNames>>,
+    pub(super) regex_literals: RefCell<HashMap<String, regex::CaptureLayout>>,
+    regex_globals: RefCell<HashMap<usize, regex::CaptureLayout>>,
 }
 
 impl ModuleValues {
@@ -36,7 +36,7 @@ impl ModuleValues {
         self.types.into_inner()
     }
 
-    pub(super) fn regex_groups(&self, pattern: &Expr) -> Option<regex::CaptureNames> {
+    pub(super) fn regex_groups(&self, pattern: &Expr) -> Option<regex::CaptureLayout> {
         match &pattern.kind {
             ExprKind::Builtin(Builtin::RegexCompile(source), _) => {
                 self.regex_literals.borrow().get(source).cloned()
@@ -126,6 +126,11 @@ impl Initialization {
         let mut body = Vec::new();
         let mut checkpoints = Vec::new();
         for (index, statement) in module.parsed.syntax().body.iter().enumerate() {
+            if module.type_guards.binary_search(&index).is_ok()
+                || local_functions::type_variable(checker.graph, checker.module, statement)
+            {
+                continue;
+            }
             let definition = DefinitionId {
                 module: checker.module,
                 statement: index,
@@ -255,12 +260,21 @@ fn collect(
             reads.insert(*slot);
         }
         ExprKind::Call(id, _)
+        | ExprKind::Builtin(
+            Builtin::Process(
+                ir::ProcessOperation::Coroutine { function: id, .. }
+                | ir::ProcessOperation::ContextNew { function: id },
+            ),
+            _,
+        )
         | ExprKind::Construct {
             initializer: id, ..
         } => calls.push(*id),
         ExprKind::Callable { function, .. } => references.push(*function),
-        ExprKind::Invoke { callable, .. } => {
-            if let Some(targets) = targets.get(&callable.ty) {
+        _ if callables::invoked_signature(value).is_some() => {
+            if let Some(targets) =
+                callables::invoked_signature(value).and_then(|ty| targets.get(&ty))
+            {
                 calls.extend(targets);
             }
         }

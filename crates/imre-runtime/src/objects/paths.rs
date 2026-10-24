@@ -409,6 +409,29 @@ pub unsafe extern "C" fn imre_path_new(text: *const Str) -> *const Object {
 }
 
 /// # Safety
+/// The word is a rooted str | Path value. Both branches return an owned string
+/// without resolving links or modifying the path's lexical spelling.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_union_path_text(value: usize) -> *const Str {
+    // SAFETY: clearing tag six restores the exact pathlib object address.
+    unsafe {
+        if value & 7 == 6 {
+            imre_path_text((value & !7) as *const Object)
+        } else {
+            Rc::into_raw(super::acquire_rc::<Str>(value))
+        }
+    }
+}
+
+/// # Safety
+/// The unnormalized path spelling is a live string through the filesystem call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_path_text_exists(path: *const Str) -> u32 {
+    // SAFETY: The path string is borrowed through the stat call.
+    u32::from(fs::metadata(unsafe { &*path }.as_str()).is_ok())
+}
+
+/// # Safety
 /// Root the exact Path and string throughout the call. Absolute children replace
 /// the left path; otherwise both operands are joined without resolving symlinks.
 #[unsafe(no_mangle)]

@@ -22,7 +22,33 @@ impl Checker<'_> {
                 "list accepts zero or one positional iterable",
             ));
         };
+        if let Some(diff) = self.materialize_ndiff(source)? {
+            if let Some(element) = element {
+                self.expect(element, Type::Str, source)?;
+            }
+            return Ok(diff);
+        }
+        if let ast::Expr::Generator(generator) = source
+            && let Some(filtered) =
+                self.string_list_filter(&generator.generators, &generator.elt, element)?
+        {
+            return Ok(filtered);
+        }
         let (input, convert) = self.consumer_input(source, element)?;
+        if !convert
+            && let Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            } = &input
+            && self.types.element(iterable.ty) == Some(Type::Str)
+            && element.is_none_or(|expected| expected == Type::Str)
+        {
+            return Ok(Expr {
+                ty: iterable.ty,
+                kind: ExprKind::Builtin(Builtin::StringListCopy, vec![iterable.clone()]),
+            });
+        }
         if convert
             && element.is_none_or(|ty| ty == Type::Int)
             && let Iteration::Container {
@@ -66,6 +92,31 @@ impl Checker<'_> {
         })
     }
 
+    /// Materializes the default line differ where the caller immediately exhausts it.
+    pub(super) fn materialize_ndiff(&mut self, source: &ast::Expr) -> Result<Option<Expr>, String> {
+        let ast::Expr::Call(call) = source else {
+            return Ok(None);
+        };
+        if self.resolve(&call.func) != Some(Binding::Intrinsic(Intrinsic::Ndiff)) {
+            return Ok(None);
+        }
+        self.reject_builtin_keywords(call)?;
+        let [before, after] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "ndiff requires two string sequences",
+            ));
+        };
+        let ty = self.types.list(Type::Str);
+        let before = self.expr_expected(before, ty)?;
+        let after = self.expr_expected(after, ty)?;
+        Ok(Some(Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::Ndiff, vec![before, after]),
+        }))
+    }
+
     /// `map` acquires its source iterator before `start` is evaluated, but
     /// conversion is lazy. Ordinary `sum` acquires its iterator afterward.
     pub(super) fn sum_call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -86,9 +137,7 @@ impl Checker<'_> {
         }
         let source = &call.arguments.args[0];
         let mut method_input = None;
-        if call.arguments.args.len() == 1
-            && call.arguments.keywords.is_empty()
-            && let ast::Expr::Call(view) = source
+        if let ast::Expr::Call(view) = source
             && self.resolve(&view.func).is_none()
             && view.arguments.args.is_empty()
             && view.arguments.keywords.is_empty()
@@ -97,10 +146,15 @@ impl Checker<'_> {
             && self.class_reference(&method.value).is_none()
         {
             let receiver = self.expr(&method.value)?;
-            if self.types.is_counter(receiver.ty) {
+            if self
+                .types
+                .mapping(receiver.ty)
+                .is_some_and(|(_, value)| value == Type::Int)
+            {
+                let start = self.sum_start(call)?;
                 return Ok(Expr {
                     ty: Type::Int,
-                    kind: ExprKind::Builtin(Builtin::CounterTotal, vec![receiver]),
+                    kind: ExprKind::Builtin(Builtin::DictSumValues, vec![receiver, start]),
                 });
             }
             // A first-party values method still produces its usual iterable.
@@ -109,7 +163,7 @@ impl Checker<'_> {
                 return Err(error(
                     self.source,
                     view,
-                    "values() in sum requires a Counter",
+                    "sum of values requires an integer-valued mapping or method returning an integer iterable",
                 ));
             };
             let iterable = self.class_method_call(view, method, class, Some(receiver))?;

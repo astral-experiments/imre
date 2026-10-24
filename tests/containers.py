@@ -21,6 +21,12 @@ class Item:
 ACCEPTED = {
     "set_literal_expansion": "values = {1}\nexpanded = {*values}\nexpanded.add(2)\nprint(len(values))\nprint(1 in expanded)\nprint(2 in expanded)\n",
     "dict_literal_expansion": 'values = {"one": 1}\ncopy = {**values}\ncopy["one"] = 2\nprint(values["one"])\nprint(copy["one"])\n',
+    "dict_values_iteration": """
+rows = {"first": [1], "second": [2]}
+for row in rows.values():
+    rows["second"] = [3]
+    print(row[0])
+""",
     "iteration_list_unpacking": "first, second = [1, 2]\nprint(first)\nprint(second)\n",
     "iteration_starred_unpacking": "first, *rest = (1, 2, 3)\nprint(first)\nprint(rest[0])\nprint(rest[1])\n",
     "iteration_mutable_unpacking_leaf": "values = [0]\nvalues[0], other = (1, 2)\nprint(values[0])\nprint(other)\n",
@@ -398,7 +404,7 @@ REJECTED = {
     "dict_items_escapes": 'values = {"one": 1}\nview = values.items()\n',
     "dict_items_arguments": 'values = {"one": 1}\nfor key, value in values.items(1):\n    pass\n',
     "dict_keys_view": 'values = {"one": 1}\nfor key in values.keys():\n    pass\n',
-    "dict_values_view": 'values = {"one": 1}\nfor value in values.values():\n    pass\n',
+    "dict_values_view_escape": 'values = {"one": 1}\nview = values.values()\n',
     "dict_first_class_iterator": 'values = {"one": 1}\niterator = iter(values)\n',
     "dict_wrong_items_target": 'values = {"one": 1}\nfor key, value, extra in values.items():\n    pass\n',
     "dict_invariant_values": """
@@ -729,6 +735,10 @@ ERRORS = {
     ),
     "dict_iteration_insert_size_change": (
         'values = {"first": 1, "second": 2}\nfor key in values:\n    print(key)\n    values["new"] = 3\n',
+        "RuntimeError",
+    ),
+    "dict_values_insert_size_change": (
+        'values = {"first": 1, "second": 2}\nfor value in values.values():\n    print(value)\n    values["new"] = 3\n',
         "RuntimeError",
     ),
     "dict_items_delete_size_change": (

@@ -107,7 +107,7 @@ impl Checker<'_> {
             .as_ref()?;
         let &member = members.names.get(name)?;
         Some(Expr {
-            ty: Type::StrEnum(class),
+            ty: self.classes.declarations.instance(class),
             kind: ExprKind::Builtin(Builtin::StrEnumMember { class, member }, Vec::new()),
         })
     }
@@ -148,10 +148,12 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
-        if ![left.ty, right.ty]
-            .into_iter()
-            .all(|ty| matches!(self.types.payload(ty).unwrap_or(ty), Type::StrEnum(_)))
-        {
+        if ![left.ty, right.ty].into_iter().all(|ty| {
+            matches!(
+                self.types.payload(ty).unwrap_or(ty),
+                Type::StrEnum(_) | Type::Enum(_)
+            )
+        }) {
             return Err(error(
                 self.source,
                 node,
@@ -182,7 +184,7 @@ impl Checker<'_> {
     /// Guards can fail. Only unconditional cases count toward a finite match.
     pub(super) fn enum_exhaustive(&self, ty: Type, cases: &[ast::MatchCase]) -> bool {
         let payload = self.types.payload(ty);
-        let Type::StrEnum(class) = payload.unwrap_or(ty) else {
+        let (Type::StrEnum(class) | Type::Enum(class)) = payload.unwrap_or(ty) else {
             return false;
         };
         let members = self.classes.declarations.definitions[class]
