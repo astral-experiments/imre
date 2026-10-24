@@ -1,20 +1,22 @@
-# Ruff ecosystem checker
+# Ruff ecosystem reporter
 
-The ten vendored Python modules are the original Ruff ecosystem package. The native executable checks two Ruff binaries against its 58 default Git repositories, using the same argument parser, temporary config changes and Markdown renderer as CPython. The source revision and file hashes are recorded in [UPSTREAM.json](UPSTREAM.json).
+The ten vendored Python modules are the original Ruff ecosystem package. One native executable compares two Ruff binaries on its 58 default Git repositories. Both `check` and `format` use Ruff's own argument parser, temporary configuration changes, Git operations, and Markdown renderers. The source revision and file hashes are recorded in [UPSTREAM.json](UPSTREAM.json).
 
-## Run the original check command
+## Run the original commands
 
-From a Imre checkout, with Git and both Ruff binaries available:
+From an Imre checkout, with Git and both Ruff binaries available:
 
 ```sh
-imre build --entry-profile examples/ruff_ecosystem/check-entry.json \
+imre build --entry-profile examples/ruff_ecosystem/markdown-entry.json \
   examples/ruff_ecosystem/ruff_ecosystem/__main__.py -o /tmp/ruff-ecosystem
 mkdir -p /tmp/ruff-checkouts
 /tmp/ruff-ecosystem --cache /tmp/ruff-checkouts check \
-  /path/to/ruff-0.15.0 /path/to/ruff-0.16.1 > report.md
+  /path/to/ruff-0.15.0 /path/to/ruff-0.16.1 > check.md
+/tmp/ruff-ecosystem --cache /tmp/ruff-checkouts format \
+  /path/to/ruff-0.15.0 /path/to/ruff-0.16.1 > format.md
 ```
 
-The first run clones the repositories. Subsequent runs reset and pull those checkouts. Omitting `--cache` gives the run a temporary workspace. The included entry profile selects `check` and Markdown output. `--force-preview` and `-v` work with that profile. Selecting the format command, JSON output, or the interactive debugger raises an error naming the required mode.
+Use a cache dedicated to this tool: Ruff resets its clones, and the formatter writes and commits files. Omitting `--cache` gives the run a temporary workspace. The profile supports Markdown, including `--force-preview` and `-v`. The format command uses Ruff's default `ruff-and-ruff`: commit the baseline formatter's changes, reset to the original revision, run the comparison formatter, then render the Git patch. JSON, interactive debugging, and the other formatter comparison modes are outside this profile.
 
 For a comparison against CPython, use a Python 3.12 environment containing `tomli`, `tomli-w`, and `unidiff`. The harness makes disposable copies of the cached repositories with fixed local Git remotes. It times the complete CLI from process launch through Markdown output, compares every byte, and records every repository revision. On Linux, select an available CPU with `--cpu` to make Ruff’s file traversal deterministic. When two configuration files are invalid, the parallel walker can report either error first.
 
@@ -24,6 +26,8 @@ python3 benchmarks/ruff_ecosystem_live.py --python /path/to/python3.12 \
   --new-ruff /path/to/ruff-0.16.1 --cache /tmp/ruff-checkouts \
   --output-dir /tmp/ruff-live-comparison --cpu 3 --rounds 3
 ```
+
+Pass `--command format` to run the same comparison on the formatter. Add `--capture-format /tmp/ruff-format-patches` to save exactly the 58 patches and errors used in the first CPython report, including the original project options and revisions. Capture uses CPython 3.12 or newer; the timing of that CPython run includes writing the captures.
 
 ## Replay frozen diagnostics
 
@@ -79,3 +83,40 @@ python3 benchmarks/ruff_ecosystem_benchmark.py preview --captures preview \
   --imre /tmp/ruff-replay --codon /tmp/ruff-replay-codon \
   --rust /path/to/ruff-ecosystem-reference --cpu 3 --output preview-results.json.gz
 ```
+
+### Replay all 58 formatter patches
+
+`format_replay.py` passes Git patches and formatter errors to Ruff’s original `markdown_format_result`. Capture them from the **same** CPython invocation that prints the expected Markdown. This matters because Ruff’s parallel walker can find either of two invalid Airflow configuration files first; its error messages also include the absolute checkout path.
+
+Use disposable checkouts with local Git remotes at the [pinned revisions](../../benchmarks/fixtures/ruff_ecosystem/format-projects.json), such as the `checkouts/` directory created by the live harness above. Run these commands from the Imre repository. The Python environment needs `tomli`, `tomli-w`, and `unidiff==1.0.0`; the capture hook uses CPython 3.12 or newer.
+
+```sh
+python3.14 benchmarks/ruff_ecosystem_format_capture.py /tmp/format-captures \
+  benchmarks/fixtures/ruff_ecosystem/format-projects.json \
+  --cache /path/to/disposable/checkouts format /path/to/ruff-0.15.0 /path/to/ruff-0.16.1 \
+  > /tmp/format-expected.md
+imre build --reachable-only examples/ruff_ecosystem/format_replay.py -o /tmp/format-imre
+/tmp/format-imre /tmp/format-captures 1 > /tmp/format-imre.md
+cmp /tmp/format-expected.md /tmp/format-imre.md
+```
+
+Each row of `projects.tsv` specifies the owner, project, revision, preview flag, exclude pattern, outcome (`ok` or `error`), and input filename. Tabs separate the fields. At 10×, the replay reads every patch ten times under distinct project names and renders one 580-project report.
+
+```sh
+cargo build --release --locked --manifest-path benchmarks/reference/ruff_ecosystem/Cargo.toml --bin format
+python3 benchmarks/codon_native/ruff_ecosystem_format_build.py --codon /path/to/codon --output /tmp/format-codon
+python3 benchmarks/ruff_ecosystem_format.py --captures /tmp/format-captures \
+  --python /path/to/python3.14 --imre /tmp/format-imre --codon /tmp/format-codon \
+  --rust benchmarks/reference/ruff_ecosystem/target/release/format --cpu 3 --output /tmp/format-times.json
+```
+
+The Rust reference parses the Git patches and writes Markdown independently. Codon compiles Ruff’s Markdown function bodies with native patch types. The Linux harness checks each Imre project report separately against CPython, compares every combined report byte-for-byte, and rotates all four processes across eight measured rounds on one CPU. Wall time includes startup, patch reads, rendering, and writing the full Markdown. Git and Ruff subprocesses run only during capture.
+
+On the pinned revisions, the 58-project report contained 693,937 bytes of Markdown: 22 changed projects, 30 unchanged projects, and six formatter errors. The 580-project report contained 7,014,958 bytes.
+
+| Frozen input | CPython 3.14 | Imre | Codon 0.20.4 | Rust | Imre / Rust |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 58 projects | 180.4 ms | 12.5 ms | 34.1 ms | 9.3 ms | 1.34× |
+| 580 projects | 747.6 ms | 107.2 ms | 232.7 ms | 65.8 ms | 1.63× |
+
+At 10×, median peak RSS was 37.8 MiB for Imre, 16.6 MiB for Rust, 87.2 MiB for Codon, and 107.1 MiB for CPython. Across the 58-project replay, the input and output optimizations cut heap allocations from 85,005 to 27,339 (Valgrind DHAT). The original Imre renderer allocated an owned string for each hunk line before joining it again. The compiler now groups the tail of a split when it can prove that the only use is a private list’s final join. Enabling just this optimization on the same generated LLVM program brought the 10× replay from 129.7 to 103.9 ms in a separate paired run. [Input hashes, individual report digests, peak memory, and raw timings](../../benchmarks/results/2026-10-24-ruff-ecosystem-format.json.gz)
