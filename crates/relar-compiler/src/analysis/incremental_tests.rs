@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use super::{DiagnosticCache, FILE_CHECKS};
+use super::{AnalysisCache, FILE_CHECKS};
 use crate::{CompileOptions, IncrementalCompiler, UnitCompilation, check_file, compile_file_units};
 use tempfile::tempdir;
 
@@ -97,7 +97,7 @@ fn ty_rechecks_an_importer_when_a_used_parameter_is_renamed() {
     let entry = project.path().join("main.py");
     fs::write(&entry, "from dep import score\nprint(score(base=1))\n").unwrap();
     fs::write(&dep, "def score(base: int) -> int:\n    return base\n").unwrap();
-    let mut cache = DiagnosticCache::default();
+    let mut cache = AnalysisCache::default();
     // Exercise ty in isolation: ordinary Relar lowering also rejects this bad keyword.
     let mut ty_check = || {
         let mut graph = crate::modules::SourceGraph::load(&entry, None).unwrap();
@@ -175,4 +175,76 @@ fn reachable_invalid_edits_and_import_topology_match_clean_diagnostics() {
     )
     .unwrap();
     compare().unwrap();
+}
+
+#[test]
+fn scalar_hints_follow_edited_asts_and_are_retained_only_on_demand() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let dep = project.path().join("dep.py");
+    fs::write(
+        &dep,
+        "def number() -> int:\n    return 7\ndef string() -> str:\n    return 'x'\n",
+    )
+    .unwrap();
+    let simple = "from dep import number as get\nprint(get())\n";
+    let collect = "from dep import number as get\ndef show() -> None:\n    items = []\n    items.append(get())\n    print(items[0])\nshow()\n";
+    let mut compiler = IncrementalCompiler::default();
+    let options = CompileOptions::default();
+    let mut run = |source: &str, hints| {
+        fs::write(&entry, source).unwrap();
+        let retained = llvm(compiler.compile_file_units(&entry, None, &options).unwrap());
+        assert_eq!(
+            retained,
+            llvm(compile_file_units(&entry, None, &options).unwrap())
+        );
+        assert_eq!(compiler.cache.hints.is_some(), hints);
+        retained
+    };
+    run(simple, false);
+    let ints = run(collect, true);
+    assert_eq!(run(collect, true), ints);
+    // Same-length replacement changes which imported return type the append sees.
+    let strings = collect.replace("number", "string");
+    let words = run(&strings, true);
+    assert!(ints != words);
+    // Move the expression and change its parser node index as well as its source range.
+    run(
+        &strings.replace("    items = []", "    count = 1\n    items = []"),
+        true,
+    );
+    run(simple, false);
+}
+
+#[test]
+fn quiet_never_checks_follow_an_imported_enum_and_failed_revisions() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let dep = project.path().join("dep.py");
+    let two = "from enum import StrEnum\nclass Choice(StrEnum):\n    FIRST = 'first'\n    LAST = 'last'\n";
+    let three = format!("{two}    EXTRA = 'extra'\n");
+    let caller = "from typing import assert_never\nfrom dep import Choice\ndef show(x: Choice) -> None:\n    if x == Choice.FIRST:\n        print(1)\n    elif x == Choice.LAST:\n        print(2)\n    else:\n        assert_never(x)\nshow(Choice.FIRST)\n";
+    fs::write(&entry, caller).unwrap();
+    let mut compiler = IncrementalCompiler::default();
+    let mut run = || {
+        let result = compiler.check_file(&entry, None);
+        assert_eq!(result, check_file(&entry, None));
+        result
+    };
+    fs::write(&dep, two).unwrap();
+    run().unwrap();
+    fs::write(&dep, three.as_bytes()).unwrap();
+    assert!(run().unwrap_err().contains("exhausted StrEnum"));
+    // A failed fresh preflight must not replace the last valid source snapshot.
+    fs::write(&dep, "bad\0source").unwrap();
+    assert!(run().unwrap_err().contains("null bytes"));
+    fs::write(&dep, two).unwrap();
+    run().unwrap();
+    // The existing dep.py is shadowed by an entirely new module identity.
+    let package = project.path().join("dep");
+    fs::create_dir(&package).unwrap();
+    fs::write(package.join("__init__.py"), &three).unwrap();
+    assert!(run().unwrap_err().contains("exhausted StrEnum"));
+    fs::write(package.join("__init__.py"), two).unwrap();
+    run().unwrap();
 }

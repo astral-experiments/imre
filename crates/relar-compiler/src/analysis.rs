@@ -4,6 +4,7 @@
 mod incremental_tests;
 mod inferred_shapes;
 
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -50,6 +51,7 @@ pub(crate) struct Session {
     files: Vec<File>,
     rules: Arc<RuleSelection>,
     root: PathBuf,
+    used_hints: Cell<bool>,
 }
 
 impl Session {
@@ -128,6 +130,7 @@ impl Session {
             files: Vec::new(),
             rules: Arc::new(rules),
             root: PathBuf::from(root),
+            used_hints: Cell::new(false),
         })
     }
 
@@ -135,17 +138,8 @@ impl Session {
     pub(crate) fn add(&mut self, path: &Path, source: &str) -> Result<ParsedModuleRef, String> {
         let path = path.to_str().ok_or("module paths must be valid UTF-8")?;
         check_source_complexity(source).map_err(|error| format!("{path}: {error}"))?;
-        self.db
-            .system
-            .fs()
-            .write_file_all(path, source)
-            .map_err(|error| error.to_string())?;
-        let file = system_path_to_file(&self.db, path).map_err(|error| error.to_string())?;
-        let parsed = ruff_db::parsed::parsed_module(
-            &self.db,
-            self.db.program_file(file).python_file(&self.db),
-        )
-        .load(&self.db);
+        let file = self.write_file(path, source)?;
+        let parsed = self.parsed(file);
         if let Some(error) = parsed.errors().first() {
             return Err(format!("{path}: {error}"));
         }
@@ -182,6 +176,36 @@ impl Session {
         Ok(parsed)
     }
 
+    fn write_file(&self, path: &str, source: &str) -> Result<File, String> {
+        self.db
+            .system
+            .fs()
+            .write_file_all(path, source)
+            .map_err(|error| error.to_string())?;
+        system_path_to_file(&self.db, path).map_err(|error| error.to_string())
+    }
+
+    fn parsed(&self, file: File) -> ParsedModuleRef {
+        ruff_db::parsed::parsed_module(&self.db, self.db.program_file(file).python_file(&self.db))
+            .load(&self.db)
+    }
+
+    /// Start diagnostics with independent rules and Salsa storage. Every file has already
+    /// passed the loader's preflight in this snapshot.
+    fn diagnostic_copy(&self) -> Result<Self, String> {
+        let mut copy = Self::new(&self.root)?;
+        for &file in &self.files {
+            let path = file
+                .path(&self.db)
+                .as_system_path()
+                .expect("first-party source");
+            let source = ruff_db::source::source_text(&self.db, file);
+            let file = copy.write_file(path.as_str(), source.as_str())?;
+            copy.files.push(file);
+        }
+        Ok(copy)
+    }
+
     /// Get a scalar layout hint for an append operand in its own lexical scope.
     pub(crate) fn scalar_type(
         &self,
@@ -191,6 +215,7 @@ impl Session {
         use crate::ir::Type;
         use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
 
+        self.used_hints.set(true);
         let file = self.db.program_file(self.files[module]);
         let ty = value.inferred_type(&SemanticModel::new(&self.db, file))?;
         if !matches!(
@@ -226,6 +251,7 @@ impl Session {
     }
 
     pub(crate) fn is_never(&self, module: usize, value: &ruff_python_ast::Expr) -> bool {
+        self.used_hints.set(true);
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
         matches!(
             value.inferred_type(&model),
@@ -285,53 +311,109 @@ thread_local! {
     static FILE_CHECKS: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
 }
 
-#[derive(Default)]
-pub(crate) struct DiagnosticCache {
-    previous: Option<(Session, crate::SourceInputs)>,
+struct CachedSession {
+    session: Session,
+    inputs: crate::SourceInputs,
 }
 
-impl DiagnosticCache {
+impl CachedSession {
+    fn new(session: Session, inputs: &crate::SourceInputs) -> Self {
+        Self {
+            session,
+            inputs: inputs.clone(),
+        }
+    }
+
+    // A changed search root, import miss or file identity can change name resolution.
+    fn same_files(&self, fresh: &Session, inputs: &crate::SourceInputs) -> bool {
+        self.session.root == fresh.root
+            && self.inputs.missing == inputs.missing
+            && self.inputs.files.len() == inputs.files.len()
+            && self
+                .inputs
+                .files
+                .iter()
+                .zip(&inputs.files)
+                .all(|(old, new)| old.0 == new.0 && old.1 == new.1)
+    }
+
+    fn update(&mut self, fresh: &Session, inputs: &crate::SourceInputs) -> Result<(), String> {
+        for (index, (old, new)) in self.inputs.files.iter_mut().zip(&inputs.files).enumerate() {
+            if old.2 == new.2 {
+                continue;
+            }
+            let source = ruff_db::source::source_text(&fresh.db, fresh.files[index]);
+            let file = self.session.files[index];
+            let path = new.0.to_str().ok_or("module paths must be valid UTF-8")?;
+            self.session
+                .db
+                .system
+                .fs()
+                .write_file(path, source.as_str())
+                .map_err(|error| error.to_string())?;
+            // An equal-size edit can even have the same mtime. Use the normalized source
+            // that passed preflight as the authoritative Salsa input.
+            file.set_source_text_override(&mut self.session.db)
+                .to(Some(source));
+            old.2.clone_from(&new.2);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct AnalysisCache {
+    diagnostics: Option<CachedSession>,
+    hints: Option<CachedSession>,
+}
+
+impl AnalysisCache {
+    pub(crate) fn restore_hints(
+        &mut self,
+        graph: &mut crate::modules::SourceGraph,
+    ) -> Result<(), String> {
+        if let Some(mut hints) = self.hints.take()
+            && hints.same_files(&graph.session, &graph.inputs)
+        {
+            hints.update(&graph.session, &graph.inputs)?;
+            // Relar stored statement indices while resolving the fresh source graph.
+            // Lower the identical normalized sources using the ASTs owned by this ty database.
+            for (module, &file) in graph.modules.iter_mut().zip(&hints.session.files) {
+                module.parsed = hints.session.parsed(file);
+            }
+            graph.session = hints.session;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn retain_hints(&mut self, graph: &crate::modules::SourceGraph) {
+        if graph.session.used_hints.take() {
+            self.hints = Some(CachedSession::new(graph.session.clone(), &graph.inputs));
+        }
+    }
+
     pub(crate) fn check(
         &mut self,
         fresh: &mut Session,
         inputs: &crate::SourceInputs,
     ) -> Result<(), String> {
-        if let Some((session, old_inputs)) = &mut self.previous
-            && session.root == fresh.root
-            && old_inputs.missing == inputs.missing
-            && old_inputs.files.len() == inputs.files.len()
-            && old_inputs
-                .files
-                .iter()
-                .zip(&inputs.files)
-                .all(|(old, new)| old.0 == new.0 && old.1 == new.1)
+        if let Some(cached) = &mut self.diagnostics
+            && cached.same_files(fresh, inputs)
         {
-            for (index, (old, new)) in old_inputs.files.iter_mut().zip(&inputs.files).enumerate() {
-                if old.2 == new.2 {
-                    continue;
-                }
-                let source = ruff_db::source::source_text(&fresh.db, fresh.files[index]);
-                let file = session.files[index];
-                let path = new.0.to_str().ok_or("module paths must be valid UTF-8")?;
-                session
-                    .db
-                    .system
-                    .fs()
-                    .write_file(path, source.as_str())
-                    .map_err(|error| error.to_string())?;
-                // An equal-size edit can even have the same mtime. The content we already
-                // parsed is the authoritative Salsa input for this revision.
-                file.set_source_text_override(&mut session.db)
-                    .to(Some(source));
-                old.2.clone_from(&new.2);
-            }
-            return session.errors();
+            cached.update(fresh, inputs)?;
+            return cached.session.errors();
         }
-        // A changed search root, import miss or file identity can change name resolution.
-        // The fresh database already mirrors precisely the files selected by this load.
-        let result = fresh.check();
-        self.previous = Some((fresh.clone(), inputs.clone()));
-        result
+        if self.hints.is_some() {
+            // The quiet database must retain its inference with diagnostics disabled.
+            let mut session = fresh.diagnostic_copy()?;
+            let result = session.check();
+            self.diagnostics = Some(CachedSession::new(session, inputs));
+            result
+        } else {
+            let result = fresh.check();
+            self.diagnostics = Some(CachedSession::new(fresh.clone(), inputs));
+            result
+        }
     }
 }
 
