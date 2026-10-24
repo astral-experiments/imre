@@ -45,12 +45,12 @@ pub unsafe extern "C" fn relar_str_dedent(text: *const Str) -> *const Str {
 }
 
 thread_local! {
-    static SHORT_FIELDS: std::cell::RefCell<[Option<Rc<Str>>; 257]> =
+    static SHORT_STRINGS: std::cell::RefCell<[Option<Rc<Str>>; 257]> =
         const { std::cell::RefCell::new([const { None }; 257]) };
 }
 
-/// Empty and single Latin-1 fields share immutable owners across splits.
-pub(super) fn split_field(value: &str) -> Rc<Str> {
+/// Reuses immutable owners for empty and single Latin-1 strings.
+pub(super) fn owned_string(value: &str) -> Rc<Str> {
     let index = match value.as_bytes() {
         [] => 256,
         [byte] => usize::from(*byte),
@@ -58,8 +58,8 @@ pub(super) fn split_field(value: &str) -> Rc<Str> {
         [0xc2 | 0xc3, _] => value.chars().next().unwrap() as usize,
         _ => return Rc::new(Str::new(value)),
     };
-    SHORT_FIELDS.with_borrow_mut(|fields| {
-        Rc::clone(fields[index].get_or_insert_with(|| Rc::new(Str::new(value))))
+    SHORT_STRINGS.with_borrow_mut(|strings| {
+        Rc::clone(strings[index].get_or_insert_with(|| Rc::new(Str::new(value))))
     })
 }
 
@@ -72,7 +72,7 @@ fn push_part(parts: &mut Words, source: &Rc<Str>, value: &str) {
     let value = if value.len() == source.len() {
         Rc::clone(source)
     } else {
-        split_field(value)
+        owned_string(value)
     };
     parts.values.push(Rc::into_raw(value) as usize);
 }
