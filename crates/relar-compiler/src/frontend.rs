@@ -3936,6 +3936,21 @@ impl<'a> Checker<'a> {
                     "groupby requires direct for iteration with an immediate list(group)",
                 ));
             }
+            Some(Binding::Intrinsic(Intrinsic::GetEnv)) => return self.environ_get(call),
+            Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
+                self.arguments(call, &[], None)?;
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetCwd), vec![]),
+                });
+            }
+            Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
+                self.reject_builtin_keywords(call)?;
+                let [path] = call.arguments.args.as_ref() else {
+                    return Err(error(self.source, call, "os.fspath requires one path"));
+                };
+                return self.fspath_argument(path);
+            }
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
             Some(Binding::Intrinsic(Intrinsic::Dedent)) => {

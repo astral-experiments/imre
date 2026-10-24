@@ -49,7 +49,7 @@ REJECTED = {
     "environ_index": "print(os.environ['KEY'])",
     "environ_assignment": "os.environ['KEY'] = 'value'",
     "environ_copy_args": "os.environ.copy(1)",
-    "environ_get": "print(os.environ.get('KEY'))",
+    "environ_wrong_key": "print(os.getenv(1))",
     "stored_run": "callback = run\ncallback(['command'])",
     "construct_result": "CompletedProcess(['command'], 0, '', '')",
     "construct_failure": "CalledProcessError(1, ['command'])",

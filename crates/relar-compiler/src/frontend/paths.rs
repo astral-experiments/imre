@@ -34,6 +34,24 @@ impl Checker<'_> {
         self.path_text(value, expression)
     }
 
+    /// Preserve exact str/bytes values and unwrap the spelling of a native Path.
+    pub(super) fn fspath_argument(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        let value = self.expr(expression)?;
+        self.fspath_value(value, expression)
+    }
+
+    pub(super) fn fspath_value(&self, value: Expr, expression: &ast::Expr) -> Result<Expr, String> {
+        match value.ty {
+            Type::Str | Type::Bytes => Ok(value),
+            Type::Path => Ok(operation(PathOperation::Text, Type::Str, vec![value])),
+            _ => Err(error(
+                self.source,
+                expression,
+                "expected str, bytes or pathlib.Path",
+            )),
+        }
+    }
+
     fn path_text(&self, value: Expr, node: &impl Ranged) -> Result<Expr, String> {
         match value.ty {
             Type::Str => Ok(value),

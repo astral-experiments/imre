@@ -375,6 +375,16 @@ fn path_utf8(path: OsString) -> Result<Str> {
         .map_err(|_| Error::new(Kind::UnicodeDecodeError, "resolved path is not valid UTF-8"))
 }
 
+/// Returns the current POSIX working directory as a new owned string.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_getcwd() -> *const Str {
+    let result = std::env::current_dir()
+        .map_err(files::errno_error)
+        .and_then(|cwd| path_utf8(cwd.into_os_string()))
+        .map(|text| Rc::into_raw(Rc::new(text)));
+    finish(result, std::ptr::null())
+}
+
 fn suffix_start(name: &str) -> Option<usize> {
     let index = name.rfind('.')?;
     name[..index]

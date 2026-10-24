@@ -46,11 +46,26 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
-            ProcessOperation::EnvironGet => self.call(
+            ProcessOperation::EnvironGet if returns == Type::Str => self.call(
                 "relar_environ_get",
                 Type::Str,
                 &[&args[0].value, &args[1].value],
             ),
+            ProcessOperation::EnvironGet => {
+                let default =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
+                let pointer = self.checked_instruction(format!(
+                    "call ptr @relar_environ_get(ptr {}, ptr {default})",
+                    args[0].value.operand
+                ));
+                let operand = self.instruction(format!("ptrtoint ptr {pointer} to i64"));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::GetCwd => self.call("relar_getcwd", Type::Str, &[]),
             ProcessOperation::EnvironCopy => {
                 let operand = self.checked_instruction("call ptr @relar_environ_copy()");
                 self.owned(Value {

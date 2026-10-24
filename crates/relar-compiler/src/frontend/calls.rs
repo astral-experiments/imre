@@ -231,6 +231,50 @@ impl Checker<'_> {
         })
     }
 
+    /// Keyword permutation happens only after supplied expressions have executed
+    /// and acquired independent roots. Identity order needs no extra scope.
+    pub(super) fn ordered_builtin(
+        &mut self,
+        operation: Builtin,
+        returns: Type,
+        arguments: ir::CallArgs,
+    ) -> Expr {
+        if arguments
+            .order
+            .iter()
+            .copied()
+            .eq(0..arguments.values.len())
+        {
+            return Expr {
+                ty: returns,
+                kind: ExprKind::Builtin(operation, arguments.values),
+            };
+        }
+        let mut body = Vec::new();
+        let mut clear = Vec::new();
+        for value in arguments.values {
+            let slot = self.hidden(value.ty);
+            body.push(Statement::Assign(slot, value));
+            clear.push(slot);
+        }
+        let args = arguments
+            .order
+            .iter()
+            .map(|&index| self.local(clear[index]))
+            .collect();
+        Expr {
+            ty: returns,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(Expr {
+                    ty: returns,
+                    kind: ExprKind::Builtin(operation, args),
+                }),
+                clear,
+            },
+        }
+    }
+
     pub(super) fn reject_builtin_keywords(&self, call: &ast::ExprCall) -> Result<(), String> {
         if call.arguments.keywords.is_empty() {
             Ok(())

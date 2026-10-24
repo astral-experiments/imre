@@ -262,29 +262,59 @@ impl Checker<'_> {
         self.coerce(value, expected, expression)
     }
 
+    /// A string default keeps a precise string result, while None uses the
+    /// zero word of Relar's existing optional-string representation.
+    pub(super) fn environ_get(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let optional = self.types.optional(Type::Str);
+        let params = [
+            Parameter {
+                name: "key".to_owned(),
+                ty: Type::Str,
+                kind: ParameterKind::PositionalOrKeyword,
+                default: None,
+                sign_only: false,
+            },
+            Parameter {
+                name: "default".to_owned(),
+                ty: optional,
+                kind: ParameterKind::PositionalOrKeyword,
+                default: Some(absent(optional)),
+                sign_only: false,
+            },
+        ];
+        let args = self.arguments_with(call, &params, None, |checker, index, argument| {
+            if index == 0 {
+                return checker.expr_expected(argument, Type::Str);
+            }
+            let value = checker.expr(argument)?;
+            if value.ty == Type::Str {
+                Ok(value)
+            } else {
+                checker.coerce(value, optional, argument)
+            }
+        })?;
+        let returns = args.values[args.order[1]].ty;
+        Ok(self.ordered_builtin(
+            Builtin::Process(ProcessOperation::EnvironGet),
+            returns,
+            args,
+        ))
+    }
+
     pub(super) fn environ_method(
         &mut self,
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        self.reject_builtin_keywords(call)?;
-        if attribute.attr.as_str() == "get"
-            && let [key, default] = call.arguments.args.as_slice()
-        {
-            return Ok(operation(
-                ProcessOperation::EnvironGet,
-                Type::Str,
-                vec![
-                    self.expr_expected(key, Type::Str)?,
-                    self.expr_expected(default, Type::Str)?,
-                ],
-            ));
+        if attribute.attr.as_str() == "get" {
+            return self.environ_get(call);
         }
+        self.reject_builtin_keywords(call)?;
         if attribute.attr.as_str() != "copy" || !call.arguments.args.is_empty() {
             return Err(error(
                 self.source,
                 call,
-                "os.environ accepts copy() or get(key, string_default)",
+                "os.environ accepts copy() or get(key, default=None)",
             ));
         }
         Ok(operation(
