@@ -4252,28 +4252,30 @@ impl<'a> Checker<'a> {
                 (ty, ExprKind::Tuple(values))
             }
             ast::Expr::BinOp(binary) => {
-                let (mut left, mut right) =
-                    if matches!(binary.op, ast::Operator::BitOr | ast::Operator::BitAnd) {
-                        let (left, left_key) = self.union_operand(&binary.left)?;
-                        let (right, right_key) = self.union_operand(&binary.right)?;
-                        if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
-                            self.expect(left_key, right_key, binary)?;
-                            return Ok(Expr {
-                                ty: self.types.set(left_key),
-                                kind: ExprKind::Builtin(
-                                    if binary.op == ast::Operator::BitAnd {
-                                        Builtin::KeyIntersection
-                                    } else {
-                                        Builtin::KeyUnion
-                                    },
-                                    vec![left, right],
-                                ),
-                            });
-                        }
-                        (left, right)
-                    } else {
-                        (self.expr(&binary.left)?, self.expr(&binary.right)?)
-                    };
+                let (mut left, mut right) = if matches!(
+                    binary.op,
+                    ast::Operator::BitOr | ast::Operator::BitAnd | ast::Operator::Sub
+                ) {
+                    let (left, left_key) = self.union_operand(&binary.left)?;
+                    let (right, right_key) = self.union_operand(&binary.right)?;
+                    if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
+                        self.expect(left_key, right_key, binary)?;
+                        return Ok(Expr {
+                            ty: self.types.set(left_key),
+                            kind: ExprKind::Builtin(
+                                match binary.op {
+                                    ast::Operator::Sub => Builtin::KeyDifference,
+                                    ast::Operator::BitAnd => Builtin::KeyIntersection,
+                                    _ => Builtin::KeyUnion,
+                                },
+                                vec![left, right],
+                            ),
+                        });
+                    }
+                    (left, right)
+                } else {
+                    (self.expr(&binary.left)?, self.expr(&binary.right)?)
+                };
                 if binary.op == ast::Operator::Add
                     && left.ty == Type::JsonValue
                     && right.ty == Type::JsonValue
@@ -4591,10 +4593,7 @@ impl<'a> Checker<'a> {
                         matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
                     });
                     if matches!(ty, Type::ListInt | Type::List(_)) && !tuple_list
-                        || matches!(
-                            ty,
-                            Type::Set(_) | Type::StringKeys | Type::Optional(_) | Type::Union(_)
-                        )
+                        || matches!(ty, Type::StringKeys | Type::Optional(_) | Type::Union(_))
                         || matches!(ty, Type::Dict(_)) && !self.types.is_counter(ty)
                         || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
                     {

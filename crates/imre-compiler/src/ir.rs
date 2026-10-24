@@ -645,6 +645,7 @@ pub(crate) enum Builtin {
     KeyUnion,
     KeySet,
     KeyIntersection,
+    KeyDifference,
     /// Produces sorted unique string keys from a small union of local dictionaries.
     SortedStringKeys,
     /// Each generated field reads the sorted key (0) or one input dictionary (1-based).

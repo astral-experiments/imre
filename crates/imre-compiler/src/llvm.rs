@@ -3174,7 +3174,7 @@ impl Emitter<'_, '_> {
                     };
                     self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
                 }
-                Type::Path | Type::List(_) | Type::Dict(_) => {
+                Type::Path | Type::List(_) | Type::Dict(_) | Type::Set(_) => {
                     let operation = if left.ty == Type::Path {
                         "path"
                     } else {
@@ -3252,7 +3252,6 @@ impl Emitter<'_, '_> {
                     right.operand
                 )),
                 Type::ListInt
-                | Type::Set(_)
                 | Type::StringKeys
                 | Type::Iterator
                 | Type::ByteOutput
@@ -4419,11 +4418,14 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_counter_update", &[&args[0].value, &args[1].value]);
                 none()
             }
-            Builtin::KeyUnion | Builtin::KeySet | Builtin::KeyIntersection => {
-                let function = if matches!(builtin, Builtin::KeyIntersection) {
-                    "imre_key_intersection"
-                } else {
-                    "imre_key_union"
+            Builtin::KeyUnion
+            | Builtin::KeySet
+            | Builtin::KeyIntersection
+            | Builtin::KeyDifference => {
+                let function = match builtin {
+                    Builtin::KeyDifference => "imre_key_difference",
+                    Builtin::KeyIntersection => "imre_key_intersection",
+                    _ => "imre_key_union",
                 };
                 self.call(
                     function,
@@ -5882,6 +5884,7 @@ declare void @imre_counter_update(ptr, ptr)
 declare i64 @imre_dict_sum_values(ptr, i64)
 declare i64 @imre_counter_total(ptr)
 declare ptr @imre_key_union(ptr, ptr)
+declare ptr @imre_key_difference(ptr, ptr)
 declare ptr @imre_key_intersection(ptr, ptr)
 declare ptr @imre_sorted_string_keys(ptr, i64)
 declare ptr @imre_sorted_record_rows(ptr, i64, ptr, ptr)

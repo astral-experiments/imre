@@ -339,7 +339,7 @@ REJECTED = {
     "defaultdict_wrong_value": "from collections import defaultdict\na: defaultdict[str, int] = defaultdict(list)\n",
     "defaultdict_plain_dict": "from collections import defaultdict\na: defaultdict[str, list[int]] = dict()\n",
     "defaultdict_wrong_entry": 'from collections import defaultdict\na: defaultdict[str, list[int]] = defaultdict(list)\na["a"].append("bad")\n',
-    "set_equality": "left = {1}\nright = {1}\nprint(left == right)\n",
+    "set_mixed_equality": 'left = {1}\nright = {"1"}\nprint(left == right)\n',
     "set_subset_comparison": "left = {1}\nright = {1, 2}\nprint(left < right)\n",
     "set_index": "values = {1}\nprint(values[0])\n",
     "set_index_write": "values = {1}\nvalues[0] = 2\n",
