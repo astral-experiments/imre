@@ -309,15 +309,17 @@ fn take_pending() -> Option<Rc<Object>> {
 
 /// Uses Ruff's Python repr rules and its pinned Unicode printable categories.
 pub(crate) fn string_repr(value: &str) -> Str {
-    let escaped = UnicodeEscape::new_repr(value);
     let mut result = String::new();
-    let quote = escaped.layout().quote.as_char();
-    result.push(quote);
-    escaped
-        .write_body(&mut result)
-        .expect("writing to a String cannot fail");
-    result.push(quote);
+    write_string_repr(value, &mut result).expect("writing to a String cannot fail");
     Str::from(result)
+}
+
+pub(crate) fn write_string_repr(value: &str, out: &mut impl std::fmt::Write) -> std::fmt::Result {
+    let escaped = UnicodeEscape::new_repr(value);
+    let quote = escaped.layout().quote.as_char();
+    out.write_char(quote)?;
+    escaped.write_body(out)?;
+    out.write_char(quote)
 }
 
 /// Acquires nullable exception input without retaining a storage reference.
