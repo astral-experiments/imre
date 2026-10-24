@@ -127,14 +127,16 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
         let directory = std::env::current_dir().map_err(files::os_error)?;
         path_utf8(directory.into_os_string())?
     };
-    let mut remaining = path.split('/').count();
-    let mut parts: Vec<_> = path
-        .split('/')
-        .rev()
-        .map(|part| ResolvePart::Component(Str::from(part)))
-        .collect();
+    let mut source = path.split('/');
+    let mut remaining = source.clone().count();
+    // Only expanded symlink targets and their completion markers need a stack.
+    let mut parts = Vec::new();
     let mut links: HashMap<Str, Option<Str>> = HashMap::new();
-    while let Some(part) = parts.pop() {
+    while let Some(part) = parts.pop().or_else(|| {
+        source
+            .next()
+            .map(|part| ResolvePart::Component(Str::from(part)))
+    }) {
         let part = match part {
             ResolvePart::Component(part) => part,
             ResolvePart::ResolvedLink(link) => {
