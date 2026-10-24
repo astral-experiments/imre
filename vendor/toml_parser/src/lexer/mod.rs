@@ -53,7 +53,8 @@ impl<'i> Lexer<'i> {
         // Divide before multiplying to avoid overflowing for very large inputs.
         let estimate = (len / 7) * 2;
         let addressable_limit = isize::MAX as usize / size_of::<Token>();
-        let capacity = estimate.min(addressable_limit);
+        // Long whitespace, comments, and strings each form a single token.
+        let capacity = estimate.min(addressable_limit).min(4096);
         let mut vec = Vec::with_capacity(capacity);
         vec.extend(self);
         vec

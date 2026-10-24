@@ -5,6 +5,14 @@ use snapbox::prelude::*;
 use snapbox::str;
 
 #[test]
+fn sparse_input_has_a_bounded_initial_reservation() {
+    let input = " ".repeat(1024 * 1024);
+    let tokens = crate::Source::new(&input).lex().into_vec();
+    assert!(tokens.len() < 4);
+    assert!(tokens.capacity() <= 4096);
+}
+
+#[test]
 fn test_lex_ascii_char() {
     let cases = [(
         ".trailing",

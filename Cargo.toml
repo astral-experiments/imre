@@ -42,3 +42,7 @@ unsafe_op_in_unsafe_fn = "deny"
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
+
+# Keep sparse TOML documents from reserving storage for millions of tokens.
+[patch.crates-io]
+toml_parser = { path = "vendor/toml_parser" }
