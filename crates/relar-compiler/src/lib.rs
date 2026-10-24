@@ -54,7 +54,7 @@ pub struct Compilation {
 }
 
 /// Files and failed import lookups observed by the source loader.
-#[derive(Default, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct SourceInputs {
     pub files: Vec<(PathBuf, PathBuf, String)>,
     pub missing: Vec<PathBuf>,
@@ -75,7 +75,16 @@ impl SourceInputs {
 
 /// Checks a closed first-party module graph, inferring its package root when omitted.
 pub fn check_file(path: &Path, module_root: Option<&Path>) -> Result<(), String> {
-    let (module, _) = checked_lower(&mut modules::SourceGraph::load(path, module_root)?)?;
+    check_file_with(path, module_root, None)
+}
+
+fn check_file_with(
+    path: &Path,
+    module_root: Option<&Path>,
+    cache: Option<&mut analysis::AnalysisCache>,
+) -> Result<(), String> {
+    let mut graph = modules::SourceGraph::load(path, module_root)?;
+    let (module, _) = checked_lower_with(&mut graph, cache)?;
     verify_after(&module, "lowering")
 }
 
@@ -111,14 +120,48 @@ pub struct UnitCompilation {
     pub source_inputs: SourceInputs,
 }
 
+/// Reuses ty's semantic queries across revisions of a first-party program in this process.
+/// Each call resolves imports and runs Relar's preflight, lowering and requested code generation
+/// against the current files. Changing the module root or resolved file set starts a new database.
+#[derive(Default)]
+pub struct IncrementalCompiler {
+    cache: analysis::AnalysisCache,
+}
+
+impl IncrementalCompiler {
+    /// Checks the current revision, including unused definitions in every reachable file.
+    pub fn check_file(&mut self, path: &Path, module_root: Option<&Path>) -> Result<(), String> {
+        check_file_with(path, module_root, Some(&mut self.cache))
+    }
+
+    /// Checks the current revision and emits the same codegen units as [`compile_file_units`].
+    pub fn compile_file_units(
+        &mut self,
+        path: &Path,
+        module_root: Option<&Path>,
+        options: &CompileOptions,
+    ) -> Result<UnitCompilation, String> {
+        compile_file_units_with(path, module_root, options, Some(&mut self.cache))
+    }
+}
+
 /// Keeps whole-program checking and specialization, then partitions native code by source owner.
 pub fn compile_file_units(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<UnitCompilation, String> {
+    compile_file_units_with(path, module_root, options, None)
+}
+
+fn compile_file_units_with(
+    path: &Path,
+    module_root: Option<&Path>,
+    options: &CompileOptions,
+    cache: Option<&mut analysis::AnalysisCache>,
+) -> Result<UnitCompilation, String> {
     let mut graph = modules::SourceGraph::load(path, module_root)?;
-    let (mut module, owners) = checked_lower(&mut graph)?;
+    let (mut module, owners) = checked_lower_with(&mut graph, cache)?;
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
     let names = graph
@@ -146,6 +189,21 @@ fn checked_lower(
 ) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
     let lowered = frontend::lower_with_owners(graph)?;
     graph.session.check()?;
+    Ok(lowered)
+}
+
+fn checked_lower_with(
+    graph: &mut modules::SourceGraph,
+    cache: Option<&mut analysis::AnalysisCache>,
+) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
+    let Some(cache) = cache else {
+        return checked_lower(graph);
+    };
+    cache.restore_hints(graph)?;
+    let lowered = frontend::lower_with_owners(graph);
+    cache.retain_hints(graph, lowered.is_ok());
+    let lowered = lowered?;
+    cache.check(&mut graph.session, &graph.inputs)?;
     Ok(lowered)
 }
 
