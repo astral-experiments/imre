@@ -44,10 +44,6 @@ def lambda_scope() -> None:
     print(chunks.pop())
 
 
-rebinding()
-lambda_scope()
-
-
 def materialized_before_delete() -> None:
     error = ValueError("first")
     flags = [False, True]
@@ -59,6 +55,8 @@ def materialized_before_delete() -> None:
             pass
 
 
+rebinding()
+lambda_scope()
 materialized_before_delete()
 
 for value in iter(lambda: exhausted(), "end"):
