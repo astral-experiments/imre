@@ -57,9 +57,9 @@ pub(super) fn adapters(
             "ptr %frame",
             attrs,
         );
-        let callable = load_arg(output, frame, 0, Type::Callable(id), false);
-        writeln!(output, "  %target = load ptr, {callable}\n  %slot = getelementptr %callable, {callable}, i32 0, i32 1\n  %context = load ptr, ptr %slot").unwrap();
-        let mut args = vec!["ptr %context".to_owned()];
+        let callable = load_arg(output, frame, 0, Type::Callable(id), true);
+        writeln!(output, "  %target = load ptr, {callable}").unwrap();
+        let mut args = vec![callable];
         let (params, _) = module.types.signature(Type::Callable(id)).unwrap();
         args.extend(params.iter().enumerate().map(|(index, &ty)| {
             load_arg(output, frame, index + 1, ty, resource_types.contains(&ty))

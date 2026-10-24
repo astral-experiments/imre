@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use super::*;
 
 /// Bound adapters pass the record's receiver according to the target's native
-/// convention. Plain functions ignore the same ABI's null context word.
+/// convention. Cold adapters take the callable owner from the invocation frame.
 pub(super) fn adapters(
     module: &Module,
     sanitize: bool,
@@ -18,7 +18,12 @@ pub(super) fn adapters(
     for function in module.functions.iter().chain([&module.entry]) {
         crate::ir::walk_expressions(&function.body, &mut |value| {
             if let ExprKind::Callable { function, receiver } = &value.kind {
-                targets.insert((*function, receiver.is_some()));
+                let (_, returns) = module.types.signature(value.ty).unwrap();
+                targets.insert((
+                    *function,
+                    receiver.is_some(),
+                    matches!(returns, Type::Coroutine(_)),
+                ));
                 enum_receiver |= receiver
                     .as_ref()
                     .is_some_and(|r| matches!(r.ty, Type::StrEnum(_) | Type::Enum(_)));
@@ -50,7 +55,7 @@ pub(super) fn adapters(
         )
         .unwrap();
     }
-    for (id, bound) in targets {
+    for (id, bound, cold) in targets {
         let function = &module.functions[id];
         let params = &function.params[usize::from(bound)..];
         let arguments = params
@@ -58,7 +63,12 @@ pub(super) fn adapters(
             .enumerate()
             .map(|(index, &slot)| format!("{} %arg{index}", function.locals[slot].llvm()))
             .collect::<Vec<_>>();
-        let mut signature = vec!["ptr %context".to_owned()];
+        let first_param = if cold {
+            "ptr %callable"
+        } else {
+            "ptr %context"
+        };
+        let mut signature = vec![first_param.to_owned()];
         signature.extend(arguments.iter().cloned());
         let scalar = bound
             && matches!(
@@ -85,11 +95,19 @@ pub(super) fn adapters(
             &signature.join(", "),
             attributes,
         );
+        if cold && bound {
+            body.push_str("  %slot = getelementptr %callable, ptr %callable, i32 0, i32 1\n  %context = load ptr, ptr %slot\n");
+        }
+        let owns_receiver = bound && resource_types.contains(&function.locals[function.params[0]]);
         if scalar {
             body.push_str("  %tag = ptrtoint ptr %context to i64\n");
-        } else if bound && resource_types.contains(&function.locals[function.params[0]]) {
-            // The callable record keeps its own receiver across invocations.
+        } else if owns_receiver {
             body.push_str("  call void @relar_record_retain(ptr %context)\n");
+        }
+        if cold && owns_receiver {
+            // The callee now owns self. A temporary bound method must not keep
+            // the previous self alive after its parameter is rebound.
+            body.push_str("  call void @relar_record_release(ptr %callable)\n");
         }
         writeln!(
             body,
@@ -97,6 +115,10 @@ pub(super) fn adapters(
             inputs.join(", ")
         )
         .unwrap();
+        if cold && !owns_receiver {
+            // A non-resource receiver can stay borrowed until the call returns.
+            body.push_str("  call void @relar_record_release(ptr %callable)\n");
+        }
         writeln!(body, "  ret {returns} %result\n}}").unwrap();
         output.common().push('\n');
     }
