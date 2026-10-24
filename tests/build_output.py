@@ -29,10 +29,10 @@ def main():
         parser.error("run with assertions enabled")
     binary = args.compiler.resolve()
     transcripts = {}
-    with tempfile.TemporaryDirectory(prefix="relar-output-") as temp:
+    with tempfile.TemporaryDirectory(prefix="imre-output-") as temp:
         root = Path(temp)
-        env = dict(os.environ, RELAR_CACHE_DIR=str(root / "cache"), TERM="xterm-256color")
-        env.pop("RELAR_CACHE_TRACE", None)
+        env = dict(os.environ, IMRE_CACHE_DIR=str(root / "cache"), TERM="xterm-256color")
+        env.pop("IMRE_CACHE_TRACE", None)
         env.pop("NO_COLOR", None)
         (root / "main.py").write_text(
             'from sys import argv\nfrom render import heading\nprint(heading())\n'

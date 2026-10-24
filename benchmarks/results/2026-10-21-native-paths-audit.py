@@ -22,10 +22,10 @@ import tempfile
 if sys.flags.optimize:
     raise SystemExit('audit requires assertions; do not use -O')
 sys.dont_write_bytecode = True
-ROOT = Path('/home/dev-user/code/oss/relar')
+ROOT = Path('/home/dev-user/code/oss/imre')
 REVISION = 'cec52a5a963343f974ac774db5e9f25a7e7fc5ba'
-ENGINES = ('relar', 'port', 'original', 'rust')
-COMPUTE_ENGINES = ('relar', 'original', 'rust')
+ENGINES = ('imre', 'port', 'original', 'rust')
+COMPUTE_ENGINES = ('imre', 'original', 'rust')
 INPUTS = {}
 GIT = {}
 
@@ -163,7 +163,7 @@ def check_row(validator, row, description, case, commands, *, samples, warmups, 
         assert row['summary'][engine] == summary
         seconds[engine] = summary['median_seconds']
     ratios = {f'{left}_over_{right}': seconds[left] / seconds[right]
-              for left, right in [('original', 'relar'), ('port', 'relar'), ('relar', 'rust'),
+              for left, right in [('original', 'imre'), ('port', 'imre'), ('imre', 'rust'),
                                   ('original', 'rust'), ('port', 'rust')]
               if left in seconds and right in seconds}
     assert {key: value for key, value in row.items() if '_over_' in key} == ratios
@@ -218,7 +218,7 @@ def check_preparation(prepared, mode):
         with Path(name).open('rb') as stream:
             header = stream.read(20)
         assert header[:6] == b'\x7fELF\x02\x01' and struct.unpack('<H', header[18:20])[0] == 62
-    build = load(paths['relar_build_record'])
+    build = load(paths['imre_build_record'])
     assert build['revision'] == REVISION and build['source_matches_revision'] and build['input_guards_passed']
     assert build['sha256']['compiler'] == hashes['compiler'] and build['sha256'][mode + '_runtime'] == hashes['runtime']
     for relative, digest in build['source_sha256'].items():
@@ -268,7 +268,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--timings-complete', required=True, action='store_true')
     parser.add_argument('--output', type=Path, default=Path('/tmp/2026-10-21-native-paths-audit.json'))
-    parser.add_argument('--context', type=Path, default=Path('/tmp/relar-path-timing-context.json'))
+    parser.add_argument('--context', type=Path, default=Path('/tmp/imre-path-timing-context.json'))
     args = parser.parse_args()
     guard(__file__)
     context = load(args.context)
@@ -288,11 +288,11 @@ def main():
         assert previous <= started < finished <= datetime.fromisoformat(context['finished_at'])
         previous = finished
         guard(window['log'])
-        assert Path(window['log']).read_text().rstrip().endswith('Saved /tmp/relar-path-timing-' + window['mode'] + '.json')
+        assert Path(window['log']).read_text().rstrip().endswith('Saved /tmp/imre-path-timing-' + window['mode'] + '.json')
     previous = datetime.fromisoformat(context['started_at'])
     counts, modes, identities = collections.Counter(), {}, {}
-    first = load('/tmp/relar-path-benchmark-normal-prepared.json')
-    with tempfile.TemporaryDirectory(prefix='relar-path-data-audit-') as temporary:
+    first = load('/tmp/imre-path-benchmark-normal-prepared.json')
+    with tempfile.TemporaryDirectory(prefix='imre-path-data-audit-') as temporary:
         oracle_root = Path(temporary)
         benchmark, validator = reconstruct_oracle(first, oracle_root)
         empty = validator.case('empty-control', validator.report(), validator.report())
@@ -300,9 +300,9 @@ def main():
                         *benchmark['workloads']([32, 256], [(256, 1), (4, 64)])]
         assert len(descriptions) == 11
         for mode in ('normal', 'thinlto'):
-            timing_path = Path(f'/tmp/relar-path-timing-{mode}.json')
+            timing_path = Path(f'/tmp/imre-path-timing-{mode}.json')
             timing = load(timing_path)
-            prepared_path = Path(f'/tmp/relar-path-benchmark-{mode}-prepared.json')
+            prepared_path = Path(f'/tmp/imre-path-benchmark-{mode}-prepared.json')
             prepared = load(prepared_path, timing['preparation_record_sha256'])
             assert timing['preparation'] == prepared and timing['revision'] == REVISION and not timing['dirty']
             assert timing['kind'] == 'memory-benchmark' and timing['input_guards_passed']
@@ -329,7 +329,7 @@ def main():
             directory = timing_path.with_suffix('')
             expected_command = [paths['python'], 'benchmarks/memory_benchmark.py', '--compiler', paths['compiler'],
                                 '--runtime', paths['runtime'], '--rust', paths['rust'], '--rust-build-record',
-                                paths['rust_build_record'], '--relar-build-record', paths['relar_build_record'],
+                                paths['rust_build_record'], '--imre-build-record', paths['imre_build_record'],
                                 '--python', paths['python'], '--clang', paths['clang'], '--target', prepared['effective_target'],
                                 '--artifact-dir', str(directory), '--output', str(timing_path)]
             if mode == 'thinlto':
@@ -385,17 +385,17 @@ def main():
     result = {'schema': 1, 'status': 'passed', 'measurement_revision': REVISION,
               'scope': 'Independent data replay of current preparation, application/compute/preload outputs, retained files, balanced orders, raw statistics, and Git/build/tool/artifact identities; no engine execution or historical benchmark dependency.',
               'counts': dict(counts), 'modes': modes, 'identities': identities,
-              'all_large_file_cases_at_most_twice_rust': all(row['relar_over_rust'] <= 2 for row in large),
-              'all_directory_cases_at_most_twice_rust': all(row['relar_over_rust'] <= 2 for row in directory),
-              'all_repeated_compute_cases_at_most_twice_rust': all(row['relar_over_rust'] <= 2 for row in compute),
+              'all_large_file_cases_at_most_twice_rust': all(row['imre_over_rust'] <= 2 for row in large),
+              'all_directory_cases_at_most_twice_rust': all(row['imre_over_rust'] <= 2 for row in directory),
+              'all_repeated_compute_cases_at_most_twice_rust': all(row['imre_over_rust'] <= 2 for row in compute),
               'audit_script_sha256': INPUTS[str(Path(__file__).absolute())], 'guarded_inputs': INPUTS,
               'limits': 'Reuses the independently reviewed Git-bound application oracle. Captures cannot reconstruct historical host isolation or prove which instructions ran. Native identities are rehashed without execution; repeated-compute estimates include preload/startup/final output and subtract no control.'}
     with args.output.open('x') as stream:
         json.dump(result, stream, indent=2)
         stream.write('\n')
     print(json.dumps({'output': str(args.output), 'counts': dict(counts),
-                      'directory_relar_over_rust': [row['relar_over_rust'] for row in directory],
-                      'compute_relar_over_rust': [row['relar_over_rust'] for row in compute]}, indent=2))
+                      'directory_imre_over_rust': [row['imre_over_rust'] for row in directory],
+                      'compute_imre_over_rust': [row['imre_over_rust'] for row in compute]}, indent=2))
 
 
 if __name__ == '__main__':

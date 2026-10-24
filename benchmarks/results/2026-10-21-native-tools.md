@@ -1,3 +1,5 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Native developer tools: download catalog and conformance reports
 
 Two complete offline developer tools compile to native executables: uv's CPython download catalog and Ruff's typing-conformance report. Both meet the **≤2× Rust target** for complete runs and repeated full computation in ordinary and matched ThinLTO builds. Complete runs take **1.485–1.841× Rust's time ordinarily** and **1.326–1.767× with ThinLTO**; repeated computation takes **1.882–1.958×** and **1.655–1.909×**, respectively. These are measured medians across the four workloads below.
@@ -6,7 +8,7 @@ Two complete offline developer tools compile to native executables: uv's CPython
 
 Median milliseconds, including process startup, raw input reads, all parsing and computation, complete output writing, and exit. Each row uses 20 samples per engine after two warmups, measured at `88169978bfc9436024a6bfc34fc8a6c7de285023`. The target is assessed separately for ordinary and matched ThinLTO builds using unrounded ratios.
 
-| Build | Workload | Upstream CPython ms | Typed CPython ms | Codon ms | Relar ms | Rust ms | Relar/Rust |
+| Build | Workload | Upstream CPython ms | Typed CPython ms | Codon ms | Imre ms | Rust ms | Imre/Rust |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Ordinary | CPython download catalog | 999.93 | 2972.91 | 567.21 | 286.26 | 155.45 | 1.841× |
 | Ordinary | Unchanged conformance, GitHub | 153.21 | 251.58 | 58.66 | 35.29 | 23.77 | 1.485× |
@@ -27,7 +29,7 @@ Separate entrypoints preload raw text once, then repeat the entire computation f
 
 The table divides whole-process medians by four. Startup, preload, checksum, final output, and exit remain included. Matching zero-round controls write empty output and are retained separately; **nothing is subtracted**.
 
-| Build | Workload | Upstream CPython ms/pass | Typed CPython ms/pass | Codon ms/pass | Relar ms/pass | Rust ms/pass | Relar/Rust |
+| Build | Workload | Upstream CPython ms/pass | Typed CPython ms/pass | Codon ms/pass | Imre ms/pass | Rust ms/pass | Imre/Rust |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Ordinary | CPython download catalog | 865.86 | 2894.26 | 570.74 | 242.02 | 123.62 | 1.958× |
 | Ordinary | Unchanged conformance, GitHub | 75.17 | 181.42 | 35.08 | 25.08 | 12.92 | 1.941× |
@@ -49,7 +51,7 @@ Upstream CPython and the typed CPython port are measured separately. Independent
 
 ## Method and validation
 
-Measurements ran on 2026-10-21, on an x86-64 Linux AMD EPYC-Milan host pinned to CPU 31. The tools were CPython 3.14.5 with PGO/LTO and its JIT disabled, Clang 18, Rust 1.98.1-dev / Ohm 1.98.1-1 with experimental Cargo defaults disabled, and Codon 0.20.4. The compiler/runtime came from the strict clean build at `10b7b5a`; all 79 compiler/runtime source inputs were checked for exact equality with the measured application revision `8816997`. Relar and Rust use generic targets with matched ordinary/ThinLTO configurations. The same generic-CPU Codon release configuration is measured in both modes; it does not receive Relar/Rust's ThinLTO toggle.
+Measurements ran on 2026-10-21, on an x86-64 Linux AMD EPYC-Milan host pinned to CPU 31. The tools were CPython 3.14.5 with PGO/LTO and its JIT disabled, Clang 18, Rust 1.98.1-dev / Ohm 1.98.1-1 with experimental Cargo defaults disabled, and Codon 0.20.4. The compiler/runtime came from the strict clean build at `10b7b5a`; all 79 compiler/runtime source inputs were checked for exact equality with the measured application revision `8816997`. Imre and Rust use generic targets with matched ordinary/ThinLTO configurations. The same generic-CPU Codon release configuration is measured in both modes; it does not receive Imre/Rust's ThinLTO toggle.
 
 Measurements run serially on one pinned CPU after builds, validators, and profilers stop. Five engines use ten balanced Williams orders, balancing positions and directed within-round neighbors; the 20 samples cover two complete cycles. Warmups and transitions between rounds are not balanced. CPython uses `-P -s -B`, `PYTHONHASHSEED=0`, and a disabled JIT in a minimal explicit environment. Each process's return code, stdout/stderr, complete output, and retained filesystem effects are checked outside the timer. Source, tool, binary, and complete input-tree guards are rechecked. Inputs are page-cache warm, outputs are not fsynced, and shared-host medians do not establish a confidence interval.
 
@@ -59,7 +61,7 @@ Core validation passed 288 Rust unit tests, 36 ordinary language suites, 13 ASan
 
 The measured implementation pools immutable string literals, avoids intermediate JSON strings, copies contiguous string slices directly, fuses supported split/index operations, and stores three sequence words inline without growing the 48-byte runtime object on the measured 64-bit ABI. Callgrind CPU and DHAT allocation profiles guide these changes separately; their instrumented elapsed times are diagnostic only and are not benchmark samples.
 
-The final ordinary catalog profile used the exact executables retained by strict preparation. Callgrind and DHAT recorded **1,775,384,590 instructions and 1,727,055 allocations** for Relar, versus **876,092,745 instructions and 885,672 allocations** for Rust. Relative to the prior architecture-shortcut version, the final application changes reduced Relar's instructions by **5.96%** and allocations by **10.12%**, with unchanged peak heap usage. The compiler/runtime were identical for that comparison. These are whole-program totals; inclusive helper percentages overlap. The independently checked profile records bind both executables to the strict ordinary preparation and retain the raw Callgrind/DHAT output. Earlier diagnostic comparisons remain in the evidence archive.
+The final ordinary catalog profile used the exact executables retained by strict preparation. Callgrind and DHAT recorded **1,775,384,590 instructions and 1,727,055 allocations** for Imre, versus **876,092,745 instructions and 885,672 allocations** for Rust. Relative to the prior architecture-shortcut version, the final application changes reduced Imre's instructions by **5.96%** and allocations by **10.12%**, with unchanged peak heap usage. The compiler/runtime were identical for that comparison. These are whole-program totals; inclusive helper percentages overlap. The independently checked profile records bind both executables to the strict ordinary preparation and retain the raw Callgrind/DHAT output. Earlier diagnostic comparisons remain in the evidence archive.
 
 The earlier complete run at `10b7b5aae54b57b16eeb220f907e677af544df6c` measured repeated catalog work at **2.00024× Rust with ThinLTO**, narrowly above the numerical target. Its original records, source bindings, audit, and replay remain preserved as baseline evidence; rounding that ratio to 2.00× does not establish a below-2× result.
 
@@ -75,5 +77,5 @@ From the repository root, extract the archive and replay its retained evidence:
 ```sh
 tar -xf benchmarks/results/2026-10-21-native-tools-evidence.tar.xz
 python3.14 native-tools-evidence-final-3/native_tools_evidence.py replay \
-  native-tools-evidence-final-3 --output /tmp/relar-native-tools-replay.json
+  native-tools-evidence-final-3 --output /tmp/imre-native-tools-replay.json
 ```

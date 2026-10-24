@@ -20,13 +20,13 @@ def show(value: str | None) -> None:
         print(value)
 
 
-show(os.environ.get("RELAR_PROCESS_PARENT"))
-print(os.environ.get("RELAR_PROCESS_EMPTY") is None)
-print(os.getenv("RELAR_PROCESS_EMPTY", None) is None)
-show(lookup("RELAR_PROCESS_PARENT", None))
-show(lookup("RELAR_PROCESS_EMPTY", "fallback"))
-print(os.getenv(default=marked("eager default"), key=marked("RELAR_PROCESS_PARENT")))
-print(os.environ.get(default=marked("second default"), key=marked("RELAR_PROCESS_EMPTY")))
+show(os.environ.get("IMRE_PROCESS_PARENT"))
+print(os.environ.get("IMRE_PROCESS_EMPTY") is None)
+print(os.getenv("IMRE_PROCESS_EMPTY", None) is None)
+show(lookup("IMRE_PROCESS_PARENT", None))
+show(lookup("IMRE_PROCESS_EMPTY", "fallback"))
+print(os.getenv(default=marked("eager default"), key=marked("IMRE_PROCESS_PARENT")))
+print(os.environ.get(default=marked("second default"), key=marked("IMRE_PROCESS_EMPTY")))
 print(os.getcwd().endswith("/work"))
 print(os.fspath(Path("./directory")))
 print(os.fspath(b"\xff") == b"\xff")
@@ -39,11 +39,11 @@ print(inherited.stdout)
 first = os.environ.copy()
 second = os.environ.copy()
 print(first[""])
-first["RELAR_PROCESS_OVERRIDE"] = "changed λ"
-first["RELAR_PROCESS_EMPTY"] = ""
-del first["RELAR_PROCESS_PARENT"]
-print(second["RELAR_PROCESS_OVERRIDE"])
-print(os.environ.copy()["RELAR_PROCESS_OVERRIDE"])
+first["IMRE_PROCESS_OVERRIDE"] = "changed λ"
+first["IMRE_PROCESS_EMPTY"] = ""
+del first["IMRE_PROCESS_PARENT"]
+print(second["IMRE_PROCESS_OVERRIDE"])
+print(os.environ.copy()["IMRE_PROCESS_OVERRIDE"])
 changed = subprocess.run(command, capture_output=True, encoding="utf-8", env=first, cwd=Path("directory"))
 print(changed.stdout)
 empty = subprocess.run(command, capture_output=True, encoding="utf-8", env={})
@@ -54,14 +54,14 @@ print(empty_name.returncode)
 print(empty_name.stdout)
 
 # Executable search uses the replacement PATH after changing directory.
-searched = subprocess.run(["relar-process-child", "-I", argv[2], "environment"], capture_output=True, encoding="utf-8", env={"PATH": "bin", "RELAR_PROCESS_OVERRIDE": "searched"}, cwd="directory")
+searched = subprocess.run(["imre-process-child", "-I", argv[2], "environment"], capture_output=True, encoding="utf-8", env={"PATH": "bin", "IMRE_PROCESS_OVERRIDE": "searched"}, cwd="directory")
 print(searched.stdout)
 relative = subprocess.run(["./relative-executable", "-I", argv[2], "environment"], capture_output=True, encoding="utf-8", env={}, cwd=Path("directory"))
 print(relative.stdout)
 
 optional_path: Path | None = Path("directory")
 optional_text: str | None = "directory"
-optional_env: dict[str, str] | None = {"RELAR_PROCESS_OVERRIDE": "optional"}
+optional_env: dict[str, str] | None = {"IMRE_PROCESS_OVERRIDE": "optional"}
 print(subprocess.run(command, capture_output=True, encoding="utf-8", cwd=optional_path, env=optional_env).stdout)
 print(subprocess.run(command, capture_output=True, encoding="utf-8", cwd=optional_text, env=None).stdout)
 optional_path = None

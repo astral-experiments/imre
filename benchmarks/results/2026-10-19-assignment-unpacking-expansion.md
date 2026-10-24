@@ -1,10 +1,10 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # Chained assignment, sequence unpacking, and container expansion
 
-Relar now supports chained assignment, nested and starred sequence unpacking, and typed list/set/dictionary expansion. The inventory reconciler uses all three while preserving its input, error, and report behavior. On the two large workloads, ThinLTO Relar runs **3.63× faster than CPython for dense input and 2.71× for sparse input**. Its median time relative to Rust BigInt is **+1.9% and +9.7%**, respectively; a positive value means Relar takes more time.
+Imre now supports chained assignment, nested and starred sequence unpacking, and typed list/set/dictionary expansion. The inventory reconciler uses all three while preserving its input, error, and report behavior. On the two large workloads, ThinLTO Imre runs **3.63× faster than CPython for dense input and 2.71× for sparse input**. Its median time relative to Rust BigInt is **+1.9% and +9.7%**, respectively; a positive value means Imre takes more time.
 
-The [compiler implementation](https://github.com/viarius-experiments/relar/pull/45) continues GitHub Stack 4 after the [truthiness and loop-else milestone](2026-10-19-truthiness-loop-else.md). Measurements and final validation use clean source commit `3cc767b401f988ece94e1eb4bb98c43cd06c02b2`. Results and the README refresh are committed afterward.
+The [compiler implementation](https://github.com/viarius-experiments/imre/pull/45) continues GitHub Stack 4 after the [truthiness and loop-else milestone](2026-10-19-truthiness-loop-else.md). Measurements and final validation use clean source commit `3cc767b401f988ece94e1eb4bb98c43cd06c02b2`. Results and the README refresh are committed afterward.
 
 ## Capability and application
 
@@ -20,11 +20,11 @@ The compiler reuses existing typed primitives and scoped IR. Tuple scalarization
 
 ## Updated-application comparisons
 
-CPython and current Relar run the updated application. Preserved Relar runs the previous application because its compiler cannot accept the new syntax. These comparisons combine the compiler change and application rewrite. Times are median milliseconds; positive time change means more time than preserved Relar.
+CPython and current Imre run the updated application. Preserved Imre runs the previous application because its compiler cannot accept the new syntax. These comparisons combine the compiler change and application rewrite. Times are median milliseconds; positive time change means more time than preserved Imre.
 
 **Ordinary linking**
 
-| Input | CPython ms | Previous Relar ms | Current Relar ms | Rust BigInt ms | Relar time change |
+| Input | CPython ms | Previous Imre ms | Current Imre ms | Rust BigInt ms | Imre time change |
 |---|---:|---:|---:|---:|---:|
 | empty | 27.007 | 2.124 | 2.129 | 2.143 | +0.25% |
 | boundary-128 | 27.618 | 2.731 | 2.739 | 2.542 | +0.31% |
@@ -35,7 +35,7 @@ CPython and current Relar run the updated application. Preserved Relar runs the 
 
 **ThinLTO**
 
-| Input | CPython ms | Previous Relar ms | Current Relar ms | Rust BigInt ms | Relar time change |
+| Input | CPython ms | Previous Imre ms | Current Imre ms | Rust BigInt ms | Imre time change |
 |---|---:|---:|---:|---:|---:|
 | empty | 27.140 | 2.207 | 2.158 | 2.243 | -2.22% |
 | boundary-128 | 27.938 | 2.770 | 2.712 | 2.591 | -2.09% |
@@ -44,13 +44,13 @@ CPython and current Relar run the updated application. Preserved Relar runs the 
 | dense-16384 | 76.639 | 21.372 | 21.090 | 20.699 | -1.32% |
 | sparse-16384 | 112.605 | 40.841 | 41.584 | 37.917 | +1.82% |
 
-The large ordinary-linking medians take +0.98% and +3.97% more time than preserved Relar. The corresponding ThinLTO changes are -1.32% and +1.82%. Both ordinary sparse workloads have nonoverlapping current/previous interquartile ranges; all six ThinLTO application pairs overlap. This is a compatibility milestone with a modest ordinary-linking regression, not a native speedup claim.
+The large ordinary-linking medians take +0.98% and +3.97% more time than preserved Imre. The corresponding ThinLTO changes are -1.32% and +1.82%. Both ordinary sparse workloads have nonoverlapping current/previous interquartile ranges; all six ThinLTO application pairs overlap. This is a compatibility milestone with a modest ordinary-linking regression, not a native speedup claim.
 
 These are complete-program measurements, not isolated unpacking costs. Small cases include substantial process startup and small-file overhead. No new CPU or allocation profiles were collected.
 
 ## Unchanged-application controls
 
-Current and preserved Relar also run the exact previous six-file application, with CPython and unchanged Rust participating in the same balanced rounds. This holds application source fixed for the compiler comparison.
+Current and preserved Imre also run the exact previous six-file application, with CPython and unchanged Rust participating in the same balanced rounds. This holds application source fixed for the compiler comparison.
 
 | Input | Ordinary previous ms | Ordinary current ms | Change | ThinLTO previous ms | ThinLTO current ms | Change |
 |---|---:|---:|---:|---:|---:|---:|
@@ -61,7 +61,7 @@ Current and preserved Relar also run the exact previous six-file application, wi
 | dense-16384 | 26.393 | 26.857 | +1.76% | 21.607 | 21.857 | +1.16% |
 | sparse-16384 | 49.727 | 50.852 | +2.26% | 41.519 | 41.808 | +0.69% |
 
-Across these twelve comparisons, median changes range from **-2.98% to +2.41%**. 3 of the twelve current/preserved Relar interquartile-range pairs do not overlap. Interquartile ranges describe sample spread; they are not confidence intervals or proof of equivalent performance. Application and unchanged-source families ran as separate sequential batches, so subtracting their changes would not establish a causal source-only effect. The [summary](2026-10-19-assignment-unpacking-expansion-summary.json) retains all four engines' statistics and exact quantiles in every family.
+Across these twelve comparisons, median changes range from **-2.98% to +2.41%**. 3 of the twelve current/preserved Imre interquartile-range pairs do not overlap. Interquartile ranges describe sample spread; they are not confidence intervals or proof of equivalent performance. Application and unchanged-source families ran as separate sequential batches, so subtracting their changes would not establish a causal source-only effect. The [summary](2026-10-19-assignment-unpacking-expansion-summary.json) retains all four engines' statistics and exact quantiles in every family.
 
 ## Method and provenance
 
@@ -71,7 +71,7 @@ Before timing, every family checks the independent 204-case oracle and `/dev/ful
 
 Fresh processes run on CPU 0 outside the execution sandbox. Timing includes startup/imports, file reading/decoding/parsing, reconciliation, rendering, buffered writes, flush/close, and exit. Builds, fixture preparation, oracles, hashing, verification, and deletion stay outside the clock. OS caches are warm; writes are not fsynced. All task-owned builds, tests, and profiling stop during timing. CPU frequency and unrelated activity on the shared host remain uncontrolled.
 
-CPython is 3.14.5. Relar uses Clang 18 at `-O3`, with the pinned Rust toolchain's LLD for cross-language ThinLTO and matched LLVM optimization budgets. Rust uses native containers, borrowed strings, direct formatting, and arbitrary-precision integers. The raw records retain exact tool versions, configurations, source hashes, and environment details. These results apply to this program and recorded environment.
+CPython is 3.14.5. Imre uses Clang 18 at `-O3`, with the pinned Rust toolchain's LLD for cross-language ThinLTO and matched LLVM optimization budgets. Rust uses native containers, borrowed strings, direct formatting, and arbitrary-precision integers. The raw records retain exact tool versions, configurations, source hashes, and environment details. These results apply to this program and recorded environment.
 
 ## Validation and evidence
 
@@ -79,7 +79,7 @@ All **2,417 semantic/regression checks** pass: **1,279 ordinary checks** across 
 
 The inventory separately passes **204 oracle cases and `/dev/full`** under O1 ASan/LSan, with leak detection enabled and no diagnostics. Initial sandboxed sanitizer attempts aborted during LeakSanitizer process inspection; unchanged inputs passed with sandbox permission, and both failed-attempt logs and successful receipts are retained. Sanitizers cover generated application code and the custom runtime; the prebuilt Rust standard library remains uninstrumented.
 
-Relar's existing exception model has no traceback/frame references. Exited frames release their owners during propagation, so implicit file closure can precede CPython's release of traceback-held locals. This preexisting boundary is documented in the subset guide; explicit `with` and `close` provide deterministic file handling.
+Imre's existing exception model has no traceback/frame references. Exited frames release their owners during propagation, so implicit file closure can precede CPython's release of traceback-held locals. This preexisting boundary is documented in the subset guide; explicit `with` and `close` provide deterministic file handling.
 
 The [independent audit](2026-10-19-assignment-unpacking-expansion-audit.json) passed **360,225 checks** over raw integer-nanosecond samples, exact quantiles, order, outcomes, source-family separation, and provenance. The [build record](2026-10-19-assignment-unpacking-expansion-build.json), [session](2026-10-19-assignment-unpacking-expansion-session.json), and [validation index](2026-10-19-assignment-unpacking-expansion-validation.json) connect the final results to the measured source and frozen artifacts.
 

@@ -6,12 +6,12 @@
   },
   "builds": {
     "baseline": {
-      "path": "/tmp/relar-memory-build-baseline/build-record.json",
+      "path": "/tmp/imre-memory-build-baseline/build-record.json",
       "revision": "c28b93960b40ffeb51402ce02ec6cbf0d80dcd3b",
       "sha256": "688a216d12059eb41937a583d3f193361d8a7a8a0f87221724204c7595d1a228"
     },
     "optimized": {
-      "path": "/tmp/relar-memory-build-optimized/build-record.json",
+      "path": "/tmp/imre-memory-build-optimized/build-record.json",
       "revision": "7119fb22d97f7057e662d1735700256ff0c853be",
       "sha256": "f836c34cd8146bb3150b300d81218ee385d8ff952cac471a371628aaadc54408"
     }
@@ -3900,32 +3900,32 @@
   "packager_sha256": "de413bcf83abc338b7b9400765f5e9e192fad81faea2ac87ff262d566b6e5fc5",
   "preparations": {
     "baseline-normal": {
-      "path": "/tmp/relar-memory-prepared-normal-v2.json",
+      "path": "/tmp/imre-memory-prepared-normal-v2.json",
       "sha256": "6a3073f6a44e93bcbeb822eb04b4a5dfdf2a8fb5e7a1f714a606541c7fc689ed"
     },
     "baseline-thinlto": {
-      "path": "/tmp/relar-memory-prepared-thinlto-v2.json",
+      "path": "/tmp/imre-memory-prepared-thinlto-v2.json",
       "sha256": "4be961139d26c2bb5f0bdac370c0a99414e30279f747780a3d88179063887f51"
     },
     "final-normal": {
-      "path": "/tmp/relar-memory-prepared-normal-final-v1.json",
+      "path": "/tmp/imre-memory-prepared-normal-final-v1.json",
       "sha256": "91c1e8ee293e1300cce69f9817e1a8bae69f151441c8f20971fc5a737d701ec1"
     },
     "final-thinlto": {
-      "path": "/tmp/relar-memory-prepared-thinlto-final-v1.json",
+      "path": "/tmp/imre-memory-prepared-thinlto-final-v1.json",
       "sha256": "2c66ab7efa911e46fd844b0e64c3aa234dd04528a84e5a5ec623425d8b966f94"
     }
   },
   "profiles": {
     "baseline": {
       "manifest_sha256": "52900a785a32cc2c56b838908f735f05e786d520f5c2190ee87d7d678f0a56fb",
-      "path": "/tmp/relar-memory-profile-baseline-v2",
+      "path": "/tmp/imre-memory-profile-baseline-v2",
       "provenance_sha256": "d40afeb22345a1b9817e657c3d12555f1525ede1e3a1c9f89490f2fa808ab227",
       "summary_sha256": "7bedfbbb5e96e22c69e178e6c2347bdca1cc97ed39ae411847e6754b4d82356a"
     },
     "optimized": {
       "manifest_sha256": "7e7b264f277158bb3cc69fb82010a1d461a8dc5257974528dc0857aa811072b2",
-      "path": "/tmp/relar-memory-profile-optimized-v1",
+      "path": "/tmp/imre-memory-profile-optimized-v1",
       "provenance_sha256": "41bd733ae9d800d74fb26d74157040dfecb35bd31cb8a5dfa981af7d8476455b",
       "summary_sha256": "f3b35af495a310083378155c41e49dd45b8fb886167c7352e2a01db150c24ef5"
     }
@@ -3933,7 +3933,7 @@
   "renderer_sha256": "bc06b24ebbe5e675837a58113052f97232fd30113311d6f753280e6f6ecc4fa2",
   "replay_sha256": "00a2eaf33375c2f9996861d88cca6184cc683becd6863c5672e8fa5b86770d8f",
   "report_sha256": "e5dcaf868baffae023872f927fd6b0a9ceb6114f75fb045d604f1e5f557c8c66",
-  "repository": "/home/dev-user/code/oss/relar",
+  "repository": "/home/dev-user/code/oss/imre",
   "schema": 1,
   "source_roles": {
     "baseline-application": "73ec04ba338bc0ce6dba7b7070d22c6fce0f2a6b",
@@ -3945,19 +3945,19 @@
   "status": "passed",
   "timings": {
     "baseline-normal": {
-      "path": "/tmp/relar-memory-timing-normal-v2.json",
+      "path": "/tmp/imre-memory-timing-normal-v2.json",
       "sha256": "d1fffd17767d83638254c2c88cd142a5d37d3cab18a2c2c74211e78dd30c64ad"
     },
     "baseline-thinlto": {
-      "path": "/tmp/relar-memory-timing-thinlto-v2.json",
+      "path": "/tmp/imre-memory-timing-thinlto-v2.json",
       "sha256": "b0a18d19c2e49466c155023fb69ab4bd6622140574ec3b879cd1bf95c4d7638d"
     },
     "final-normal": {
-      "path": "/tmp/relar-memory-timing-normal-final-v1.json",
+      "path": "/tmp/imre-memory-timing-normal-final-v1.json",
       "sha256": "dbdbb9b6bc2e5ff9ce7a714c3d78b290d7449d0ca7595d7e2514924915fe7686"
     },
     "final-thinlto": {
-      "path": "/tmp/relar-memory-timing-thinlto-final-v1.json",
+      "path": "/tmp/imre-memory-timing-thinlto-final-v1.json",
       "sha256": "bfa7d1f8af6e87173e424853610f87ad9cc57991ea2baaa8bf743d576f21823a"
     }
   }

@@ -16,11 +16,11 @@ class TimeoutExpired(Exception):
 def call(operation: int, request: str) -> str:
     if "\0" in request:
         raise ValueError("embedded null byte in native platform request")
-    from C import relar_benchmark_platform_call(i32, cobj) -> cobj
-    from C import relar_benchmark_platform_free(cobj)
-    result = relar_benchmark_platform_call(i32(operation), request.c_str())
+    from C import imre_benchmark_platform_call(i32, cobj) -> cobj
+    from C import imre_benchmark_platform_free(cobj)
+    result = imre_benchmark_platform_call(i32(operation), request.c_str())
     reply_text = str.from_ptr(result)
-    relar_benchmark_platform_free(result)
+    imre_benchmark_platform_free(result)
     reply = json.loads(reply_text)
     kind = reply["kind"].as_str()
     message = reply["message"].as_str()

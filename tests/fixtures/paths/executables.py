@@ -28,6 +28,6 @@ mixed("tail")
 mixed(Path("tail"))
 for path in ["", ".", "input.txt", "input.txt/", "file-link", "dangling-link", "bad\0name"]:
     print(os.path.exists(path))
-for program in ["./command", "./input.txt", "./tree", "./missing", "tree/../command", "relar-missing-command"]:
+for program in ["./command", "./input.txt", "./tree", "./missing", "tree/../command", "imre-missing-command"]:
     print(repr(shutil.which(program)))
 print("missing executable", sys.stderr)

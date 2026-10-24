@@ -5,7 +5,7 @@
   "revision": "547c7252cde4b0e5e4b1eae3f39670c71d902989",
   "validation_revision": "547c7252cde4b0e5e4b1eae3f39670c71d902989",
   "validation_tree": "427e99b058435bb236dbd91ded2bbdc1063aae41",
-  "validation_index": "/tmp/relar-iterator-validation-v1/index.json",
+  "validation_index": "/tmp/imre-iterator-validation-v1/index.json",
   "validation_index_sha256": "bc0e3cdc9a33fddf3c21825adec31b58f3f2e41ec574bd213f2f97725c94aa8a",
   "audit_script_sha256": "98782fe88945ff375413fb3d71f8d396b9cbfa05ac981f921771900dfb35818c",
   "fresh_compilation": {
@@ -13,8 +13,8 @@
       "record_sha256": "a0c07da604a07d026de72592503e4bf5fd5531892e1d2e9c60953cba267cb2d9",
       "inputs_sha256": "e346071ca786317be80d0185e6be86081e2a9b1e7d6e1ee372441f245ad07fab",
       "packages": [
-        "relar-compiler",
-        "relar-runtime"
+        "imre-compiler",
+        "imre-runtime"
       ],
       "unchanged_source_timestamps": 45,
       "raw_cargo_artifacts_fresh_false": 6,
@@ -25,8 +25,8 @@
       "record_sha256": "573873c784fd96c05c0b509ba89827beba22f4b21335c83acf23e30df3c3d62f",
       "inputs_sha256": "ff36b02c06043afcd3e9af9e7d9714dd750b5b32d3d00270784a43a73dd6b380",
       "packages": [
-        "relar-compiler",
-        "relar-runtime"
+        "imre-compiler",
+        "imre-runtime"
       ],
       "unchanged_source_timestamps": 45,
       "raw_cargo_artifacts_fresh_false": 5,
@@ -37,8 +37,8 @@
       "record_sha256": "3baa7b6b003ecc4bf5a18e3b35b51b5bd21bfc25f81a7b59688dd1e2ecf1da43",
       "inputs_sha256": "2d35b480a272a720a3f9504f72656b6a028a013c2c1ef3d9232b8cf99c6f3f35",
       "packages": [
-        "relar-compiler",
-        "relar-runtime"
+        "imre-compiler",
+        "imre-runtime"
       ],
       "unchanged_source_timestamps": 45,
       "raw_cargo_artifacts_fresh_false": 3,
@@ -52,7 +52,7 @@
       "record_sha256": "7876c1765f946a081896553e86e9de3d40bff8ed56947c6783cf5c4dda6966de",
       "inputs_sha256": "dbcd5d4a3ca37661c1fab5ded418d84a536012440c95e92ae7630d23ef7082ef",
       "packages": [
-        "relar-runtime"
+        "imre-runtime"
       ],
       "unchanged_source_timestamps": 13,
       "raw_cargo_artifacts_fresh_false": 1,
@@ -65,7 +65,7 @@
       "record_sha256": "81e1109cb6773efa2ab68ef726b415447f4bc113d521d7474597dc0dc8560fce",
       "inputs_sha256": "c217a08103e1f1263733ad785e76b4ead00da3209d2481d3a56317c3f6994d8f",
       "packages": [
-        "relar-runtime"
+        "imre-runtime"
       ],
       "unchanged_source_timestamps": 13,
       "raw_cargo_artifacts_fresh_false": 1,
@@ -181,7 +181,7 @@
         "cases": 194,
         "engines": [
           "cpython",
-          "relar",
+          "imre",
           "rust_bigint"
         ]
       },
@@ -190,7 +190,7 @@
         "cases": 196,
         "engines": [
           "cpython",
-          "relar",
+          "imre",
           "rust_bigint"
         ],
         "output_device_cases": 1
@@ -200,7 +200,7 @@
         "cases": 204,
         "engines": [
           "cpython",
-          "relar",
+          "imre",
           "rust_bigint"
         ],
         "output_device_cases": 1
@@ -211,7 +211,7 @@
         "output_device_cases": 1,
         "engines": [
           "cpython",
-          "relar",
+          "imre",
           "rust"
         ]
       }
@@ -362,9 +362,9 @@
     "artifact_metadata_matches_build_record": true,
     "fresh_cargo_json_inputs_and_compiler_invocations_independently_reparsed": true,
     "unit_test_execution_order_bound_to_raw_cargo_artifact_executables": [
-      "relar_compiler",
-      "relar",
-      "relar_runtime"
+      "imre_compiler",
+      "imre",
+      "imre_runtime"
     ],
     "frozen_compiler_and_three_runtime_copies_independently_rehashed": true,
     "recorded_final_tool_artifact_guards_passed": true,

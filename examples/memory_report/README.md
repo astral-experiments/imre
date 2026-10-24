@@ -5,14 +5,14 @@
 From a Ruff checkout, compare a pair of existing captures:
 
 ```sh
-relar run scripts/memory_report.py -- compare --old old.json --new new.json
+imre run scripts/memory_report.py -- compare --old old.json --new new.json
 ```
 
 Use `--old-dir` and `--new-dir` for directories of captures. Add
 `--output report.md` to write the Markdown to a file.
 
 ```sh
-RELAR_PYTHON="$(command -v python3)" relar run scripts/memory_report.py -- run \
+IMRE_PYTHON="$(command -v python3)" imre run scripts/memory_report.py -- run \
   --old-ty /path/to/old/ty --new-ty /path/to/new/ty \
   --projects-dir ./memory-projects --old-reports-dir ./old --new-reports-dir ./new
 ```
@@ -37,10 +37,10 @@ It reads `TY_MEMORY_REPORT=json` captures and
 produces the same Markdown summary and largest-change tables. The retained
 upstream source and license are in [upstream/](upstream/).
 
-From the repository root, after building Relar:
+From the repository root, after building Imre:
 
 ```sh
-target/release/relar build examples/memory_report/__main__.py \
+target/release/imre build examples/memory_report/__main__.py \
   --module-root examples --clang clang-18 -o /tmp/memory-report
 /tmp/memory-report \
   --old examples/memory_report/sample/ruff-scripts-old.json \
@@ -144,13 +144,13 @@ PYTHONPATH=stdlib:examples python3 -m memory_report \
 The models use `@dataclass(slots=True)`, scalar defaults, keyword-only fields,
 and `field(default_factory=list)`. `ProjectComparison.total_diff_bytes` is a
 read-only property, and changed-item rows are frozen dataclasses. These compile
-to Relar's fixed-layout records and direct function calls.
+to Imre's fixed-layout records and direct function calls.
 
 `load.py` uses native `pathlib.Path` values, `glob`, and `Path.stem`, then calls
 `MemoryReport.from_json(path)`. That class method reads UTF-8 text and uses
-`relar.json.decode(text, cls)` and returns `Self`. The compiler generates a
+`imre.json.decode(text, cls)` and returns `Self`. The compiler generates a
 decoder for concrete record fields; there is no exposed dynamic JSON object.
-The CPython implementation in `stdlib/relar/json.py` enforces the same boundary.
+The CPython implementation in `stdlib/imre/json.py` enforces the same boundary.
 Integers retain arbitrary precision. Required fields must be present, item byte
 counts default to zero, and absent report lists become fresh empty lists.
 Explicit `null` does not satisfy an exact integer, string, or list field.
@@ -180,7 +180,7 @@ python3 benchmarks/memory_validate.py --binary /tmp/memory-report \
 ```
 
 The [benchmark guide](../../benchmarks/reference/memory_report/README.md) compares
-Relar, independent Rust, typed CPython, and CPython adapters using upstream's
+Imre, independent Rust, typed CPython, and CPython adapters using upstream's
 unchanged models and renderer. The comparison adapter adds atomic output to its
 existing CLI; the prepared-project adapter adds the collection and capture
 workflow. Workloads include real captures, actual ty child runs, and clearly

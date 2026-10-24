@@ -1,3 +1,5 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Native paths and directory memory-report comparison
 
 The real Ruff/ty memory-report port now compares directories using native `pathlib.Path`. The new complete-directory workloads take **0.91–1.28× Rust’s time**; repeated parse/compare/render workloads take **1.38–1.63× Rust’s time**. Both ordinary and ThinLTO builds meet the ≤2× target.
@@ -6,9 +8,9 @@ The compiler supports a sealed, immutable POSIX `Path`: construction and joining
 
 ## Complete directory runs
 
-Median milliseconds over 12 measured rounds per engine, after two warmups. Each side contains 65,024 items, laid out as 256 small projects or four larger projects. These synthetic project directories use deterministic copies of the genuine Ruff captures in the repository. Full cases compare old to new; unchanged cases still decode every report. Lower Relar/Rust is better.
+Median milliseconds over 12 measured rounds per engine, after two warmups. Each side contains 65,024 items, laid out as 256 small projects or four larger projects. These synthetic project directories use deterministic copies of the genuine Ruff captures in the repository. Full cases compare old to new; unchanged cases still decode every report. Lower Imre/Rust is better.
 
-| Build | Projects × items/project | Case | Upstream CPython ms | Relar ms | Rust ms | Relar/Rust |
+| Build | Projects × items/project | Case | Upstream CPython ms | Imre ms | Rust ms | Imre/Rust |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
 | Ordinary | 256 × 254 items | full | 351.585 | 165.089 | 133.239 | 1.239× |
 | Ordinary | 256 × 254 items | unchanged | 293.285 | 110.181 | 115.902 | 0.951× |
@@ -27,14 +29,14 @@ Every run includes process startup, directory scanning, reading and decoding all
 
 Separate entrypoints preload the input texts once and perform eight complete decode/compare/render passes. The table divides whole-process time by eight, including preload/startup/final output; it is an amortized estimate, not a pure in-process timer. Each pass contributes the full report’s Unicode character count to a checksum, and the checksum plus complete final report are checked. Rust black-boxes its borrowed inputs and checksum contributions. The original CPython adapter uses the pinned upstream models and renderer.
 
-| Build | Projects × items/project | Upstream CPython ms/pass | Relar ms/pass | Rust ms/pass | Relar/Rust |
+| Build | Projects × items/project | Upstream CPython ms/pass | Imre ms/pass | Rust ms/pass | Imre/Rust |
 | --- | --- | ---: | ---: | ---: | ---: |
 | Ordinary | 256 × 254 items | 238.101 | 132.467 | 81.433 | 1.627× |
 | Ordinary | 4 × 16,256 items | 245.208 | 122.533 | 81.875 | 1.497× |
 | ThinLTO | 256 × 254 items | 235.198 | 115.071 | 73.184 | 1.572× |
 | ThinLTO | 4 × 16,256 items | 244.152 | 105.439 | 76.462 | 1.379× |
 
-Zero-pass preload controls are retained without subtraction. Their medians are 3.1–6.3% of the corresponding native eight-pass medians. Repeated workloads use all six three-engine permutations over 12 rounds, balancing positions and directed within-round neighbors. All four engines, including typed CPython, are checked during preparation; repeated timing uses Relar, upstream CPython, and Rust.
+Zero-pass preload controls are retained without subtraction. Their medians are 3.1–6.3% of the corresponding native eight-pass medians. Repeated workloads use all six three-engine permutations over 12 rounds, balancing positions and directed within-round neighbors. All four engines, including typed CPython, are checked during preparation; repeated timing uses Imre, upstream CPython, and Rust.
 
 The six existing file-mode workloads also passed in each build, taking 0.93–1.43× Rust’s time. Their complete timings and the empty-report controls are retained in the raw records. Small real captures are startup-heavy. Controls are retained without subtraction.
 

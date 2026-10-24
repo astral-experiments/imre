@@ -5,14 +5,14 @@
   "revision": "8b54eae6572a93926265d78562656dd395ad28b0",
   "validation_revision": "8b54eae6572a93926265d78562656dd395ad28b0",
   "validation_tree": "828263223d7e12d12c1863268567e5ab8ce3b1fd",
-  "validation_index": "/tmp/relar-luhn-performance-validation-v3/index.json",
+  "validation_index": "/tmp/imre-luhn-performance-validation-v3/index.json",
   "validation_index_sha256": "793c61af6f1ca927c54215d45a5cd30fdeddad5547545a8adb014c0df121bdda",
   "audit_script_sha256": "d552b60041c618cb6b037ef89b988a964ac6f7af5da1e8c32d7af4cf5d5d95e6",
   "unicode_audits": {
     "runtime": {
-      "audit_path": "/tmp/relar-luhn-tests-validation-dev/unicode-tables-audit.json",
+      "audit_path": "/tmp/imre-luhn-tests-validation-dev/unicode-tables-audit.json",
       "audit_sha256": "7b709a3cfc98f52c23fab5fca4e1c2d5acc4364943c8efee67dd18cf520b1761",
-      "source_path": "crates/relar-runtime/src/integer_text.rs",
+      "source_path": "crates/imre-runtime/src/integer_text.rs",
       "source_sha256": "61483a52ce8c37bfe88e03413c7cd4027e39183d3d88fbf1977720a6c1c2bbdf",
       "original_audited_source_sha256": "82f87dc1be5fec2588e8c2888187e58e4f75f77d7ecb0d0d30444892382cf58d",
       "whole_source_file_unchanged": false,
@@ -30,7 +30,7 @@
       "basis": "Exact byte identity of the relevant Unicode implementation with the original audited Git blob; the moved invalid_literal wrapper is outside that unchanged implementation scope"
     },
     "reference": {
-      "audit_path": "/tmp/relar-luhn-unicode-table-validation.json",
+      "audit_path": "/tmp/imre-luhn-unicode-table-validation.json",
       "audit_sha256": "721300298744164c65da03d97e8f8f8e92235ac8f3d3245c8d374e63819e67bb",
       "source_path": "benchmarks/reference/luhn_checksum/src/unicode.rs",
       "source_sha256": "e594819475d89df36fe2661511aebf7e6e42cc606e387cf4cba3938c99efaf56",
@@ -53,8 +53,8 @@
       "record_sha256": "1de83e1146be737ea03faf41f75b288434a677fcbe8f3c6a69ed31340501f9be",
       "inputs_sha256": "914bea48ef0972b0d85b7ad2ed3c05fb51de7a530d6b19f87add2cfb3613f821",
       "packages": [
-        "relar-compiler",
-        "relar-runtime"
+        "imre-compiler",
+        "imre-runtime"
       ],
       "unchanged_source_timestamps": 44,
       "raw_cargo_artifacts_fresh_false": 6,
@@ -65,8 +65,8 @@
       "record_sha256": "36daf7e179b2c4e566fb6d0a1bef5df4f8f350126a17b526879113fb2933bf20",
       "inputs_sha256": "27b1b19c7abccd3f23301d9251303bd9f53cc298a52f4cc519c7356b0f22aa83",
       "packages": [
-        "relar-compiler",
-        "relar-runtime"
+        "imre-compiler",
+        "imre-runtime"
       ],
       "unchanged_source_timestamps": 44,
       "raw_cargo_artifacts_fresh_false": 5,
@@ -77,8 +77,8 @@
       "record_sha256": "39be3a3c8dba7945257703b9748f03326176f5da4d129d8c7d20e34cb44996d8",
       "inputs_sha256": "e47a064131866df0fa4b2064cc3e279a887fec2b0416df8b7407ccde9f69e66a",
       "packages": [
-        "relar-compiler",
-        "relar-runtime"
+        "imre-compiler",
+        "imre-runtime"
       ],
       "unchanged_source_timestamps": 44,
       "raw_cargo_artifacts_fresh_false": 3,
@@ -92,7 +92,7 @@
       "record_sha256": "f5a219a4a2ed223ab6e230fc3d144cbf80a86ae01b9338f8978564fd1b1372b3",
       "inputs_sha256": "15a616942783280df309a3009803c89f39502d9402c4e7c7034e08624c24b617",
       "packages": [
-        "relar-runtime"
+        "imre-runtime"
       ],
       "unchanged_source_timestamps": 13,
       "raw_cargo_artifacts_fresh_false": 1,
@@ -105,7 +105,7 @@
       "record_sha256": "6a2cde69667aeeebf8eab2b3e8a0a908ac5c5e6b677551e094024b51b038168a",
       "inputs_sha256": "893efe0abe5988e8892cc9a0a405c44a8bcaa13bfc070ab51d9424ee63d6c22b",
       "packages": [
-        "relar-runtime"
+        "imre-runtime"
       ],
       "unchanged_source_timestamps": 13,
       "raw_cargo_artifacts_fresh_false": 1,
@@ -233,9 +233,9 @@
     "artifact_metadata_matches_build_record": true,
     "fresh_cargo_json_inputs_and_compiler_invocations_independently_reparsed": true,
     "unit_test_execution_order_bound_to_raw_cargo_artifact_executables": [
-      "relar_compiler",
-      "relar",
-      "relar_runtime"
+      "imre_compiler",
+      "imre",
+      "imre_runtime"
     ],
     "frozen_compiler_and_three_runtime_copies_independently_rehashed": true,
     "recorded_final_tool_artifact_guards_passed": true,

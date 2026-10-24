@@ -1,14 +1,16 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Conformance reports directly from a typing checkout
 
 The reporter now reads typed TOML configuration, discovers tests, runs two ty executables with deadlines, resolves diagnostic paths, computes the complete comparison, and publishes the report atomically. The measured checkout contains 146 tests. Complete workflows take **1.011–1.023× Rust’s time** across both build modes. Repeated full report computation takes **1.883–1.947× ordinarily** and **1.532–1.576× with ThinLTO**. All 18 measured cases, including zero-round controls, meet the **2× Rust target** using unrounded ratios.
 
-The compiler/runtime changes are at `8bfc0b72fbfd26f92004d4a60f4ea48e289a0d7a`; the application and corrected native comparison helper are at `207ad26a179fdf2e3cd6e6ad2c555d49a603d329`. Relar's program build records name `4eed53a642d7230445bcfaed66c78ce40b93e8c1`: the later commit changes only the Rust/Codon process helper, and every retained Relar source and binary identity was rechecked against the measured checkout.
+The compiler/runtime changes are at `8bfc0b72fbfd26f92004d4a60f4ea48e289a0d7a`; the application and corrected native comparison helper are at `207ad26a179fdf2e3cd6e6ad2c555d49a603d329`. Imre's program build records name `4eed53a642d7230445bcfaed66c78ce40b93e8c1`: the later commit changes only the Rust/Codon process helper, and every retained Imre source and binary identity was rechecked against the measured checkout.
 
 ## Complete checkout workflow
 
 Median milliseconds for fresh processes, including startup/imports, TOML parsing, test discovery, both actual ty children, path resolution, annotation and diagnostic processing, full rendering, atomic output replacement, temporary-directory cleanup, and exit. Each row uses 20 samples per engine after two warmups. Analyzer execution dominates this workflow; the separate computation table below exposes the reporter's own cost.
 
-| Build | Workload | Upstream CPython ms | Typed CPython ms | Codon ms | Relar ms | Rust ms | Relar/Rust |
+| Build | Workload | Upstream CPython ms | Typed CPython ms | Codon ms | Imre ms | Rust ms | Imre/Rust |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Ordinary | Unchanged, GitHub | 978.71 | 1283.81 | 949.18 | 885.96 | 872.89 | 1.015× |
 | Ordinary | Changed, GitHub | 997.04 | 1302.16 | 969.38 | 907.78 | 888.46 | 1.022× |
@@ -25,7 +27,7 @@ Separate entrypoints preload unchanged captured source text and raw diagnostics,
 
 The table divides whole-process medians by four. Startup, preload, checksums, final output, and exit remain included. **No zero-round baseline is subtracted.**
 
-| Build | Workload | Upstream CPython ms/pass | Typed CPython ms/pass | Codon ms/pass | Relar ms/pass | Rust ms/pass | Relar/Rust |
+| Build | Workload | Upstream CPython ms/pass | Typed CPython ms/pass | Codon ms/pass | Imre ms/pass | Rust ms/pass | Imre/Rust |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Ordinary | Unchanged, GitHub | 74.00 | 181.36 | 33.91 | 24.35 | 12.51 | 1.947× |
 | Ordinary | Changed, GitHub | 75.28 | 180.58 | 35.45 | 25.50 | 13.44 | 1.898× |
@@ -36,7 +38,7 @@ The table divides whole-process medians by four. Startup, preload, checksums, fi
 
 Matching zero-round controls load frozen inputs and write an empty report:
 
-| Build | Workload | Upstream CPython ms | Typed CPython ms | Codon ms | Relar ms | Rust ms | Relar/Rust |
+| Build | Workload | Upstream CPython ms | Typed CPython ms | Codon ms | Imre ms | Rust ms | Imre/Rust |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Ordinary | Unchanged, GitHub | 95.72 | 84.58 | 19.50 | 10.69 | 9.79 | 1.092× |
 | Ordinary | Changed, GitHub | 96.64 | 85.23 | 19.52 | 10.82 | 10.03 | 1.079× |
@@ -47,15 +49,15 @@ Matching zero-round controls load frozen inputs and write an empty report:
 
 ## New capability and comparison boundaries
 
-`relar.toml.decode(text, Schema)` decodes TOML 1.1 into concrete record or dictionary schemas with exact scalar types, optional fields, and supported defaults. Ignored values still undergo syntax and depth validation. The native parser is the pinned maintained `toml` crate; the CPython shim uses `tomllib` on Python 3.15+ or `tomli>=2.4` on older Python. Arbitrary dynamic TOML trees and datetime-valued schema fields remain outside the supported API.
+`imre.toml.decode(text, Schema)` decodes TOML 1.1 into concrete record or dictionary schemas with exact scalar types, optional fields, and supported defaults. Ignored values still undergo syntax and depth validation. The native parser is the pinned maintained `toml` crate; the CPython shim uses `tomllib` on Python 3.15+ or `tomli>=2.4` on older Python. Arbitrary dynamic TOML trees and datetime-valued schema fields remain outside the supported API.
 
 `Path.is_absolute()` and `Path.resolve(strict=False)` support lexical checks and filesystem resolution, including relative paths and symlinks. `subprocess.run(timeout=...)` accepts a float or `None`; typed `TimeoutExpired` handling exposes the original command, timeout, and partial byte captures. On timeout the runtime kills and reaps the direct child and closes its capture pipes. The reporter validates inputs, stages output in a sibling temporary workspace, and replaces the destination only after the complete report succeeds.
 
-The typed application is shared between Relar and CPython. The upstream CPython adapter retains Ruff's reporting algorithm with a bounded checkout CLI, timeout handling, and atomic-output adaptation; it is not the unchanged upstream command line. Native Codon 0.20.4 compiles the typed algorithm with the documented declaration/import adapters and native JSON conversions. For this workflow, Codon calls a separately built Rust library for TOML, captured subprocesses/deadlines, and temporary directories. The Rust reference shares that OS/TOML helper but independently implements report computation. FFI and conversion costs remain timed, and no native engine links CPython. See the [application guide](../../examples/conformance_report/README.md) and [Codon comparison contract](../codon_native/README.md).
+The typed application is shared between Imre and CPython. The upstream CPython adapter retains Ruff's reporting algorithm with a bounded checkout CLI, timeout handling, and atomic-output adaptation; it is not the unchanged upstream command line. Native Codon 0.20.4 compiles the typed algorithm with the documented declaration/import adapters and native JSON conversions. For this workflow, Codon calls a separately built Rust library for TOML, captured subprocesses/deadlines, and temporary directories. The Rust reference shares that OS/TOML helper but independently implements report computation. FFI and conversion costs remain timed, and no native engine links CPython. See the [application guide](../../examples/conformance_report/README.md) and [Codon comparison contract](../codon_native/README.md).
 
 ## Method and validation
 
-Measurements ran on October 21, 2026 in America/New_York (October 22 UTC), on an x86-64 Linux AMD EPYC-Milan devbox pinned to CPU 31, matching the preceding developer-tools comparison. Builds and other validators finished before timing. Ordinary and ThinLTO modes ran serially. Tools were CPython 3.14.5 with PGO/LTO and its JIT disabled, Clang 18, Rust 1.98.1-dev / Ohm 1.98.1-1 with experimental Cargo defaults disabled, and Codon 0.20.4. Relar and Rust use generic targets and matched ordinary/ThinLTO settings. Codon keeps the same portable release flags in both modes; its linked OS/TOML library follows the corresponding Rust mode.
+Measurements ran on October 21, 2026 in America/New_York (October 22 UTC), on an x86-64 Linux AMD EPYC-Milan devbox pinned to CPU 31, matching the preceding developer-tools comparison. Builds and other validators finished before timing. Ordinary and ThinLTO modes ran serially. Tools were CPython 3.14.5 with PGO/LTO and its JIT disabled, Clang 18, Rust 1.98.1-dev / Ohm 1.98.1-1 with experimental Cargo defaults disabled, and Codon 0.20.4. Imre and Rust use generic targets and matched ordinary/ThinLTO settings. Codon keeps the same portable release flags in both modes; its linked OS/TOML library follows the corresponding Rust mode.
 
 Five engines use ten Williams orders that balance positions and directed within-round neighbors; 20 samples cover two cycles. Warmups and transitions between rounds are not balanced. CPython uses a minimal explicit environment, `-s -B`, and `PYTHONHASHSEED=0`. Typed and offline entrypoints also use `-P`; the upstream live adapter retains its script directory for sibling imports. Every process's status, stdout/stderr, complete output, and filesystem effects are checked outside the timer. Source, tool, binary, shared-library, checkout, and captured-input identities are guarded before and after measurement. Filesystem caches are warm; publication is atomic but outputs are not fsynced. Shared-host medians are observations, not confidence intervals.
 
@@ -63,7 +65,7 @@ Both final modes passed 85 live validation executions apiece across five engines
 
 Core checks passed 293 Rust unit tests and three native-platform tests. Fully instrumented generated code and runtime passed 397 regression checks with ASan/LSan; the instrumented live reporter passed 51 additional engine executions. Retained offline validation covers 397 checks plus 30,000 annotation and 400 report differentials.
 
-An initial incomplete diagnostic timing attempt is retained separately and excluded from these tables. It exposed an avoidable zero-descriptor poll delay in the Rust/Codon helper. The helper now drains pipes before checking child status and uses a short wait after both streams close; a regression test covers that sequence. Both native references were rebuilt before the final measurements. Relar's programs were unchanged.
+An initial incomplete diagnostic timing attempt is retained separately and excluded from these tables. It exposed an avoidable zero-descriptor poll delay in the Rust/Codon helper. The helper now drains pipes before checking child status and uses a short wait after both streams close; a regression test covers that sequence. Both native references were rebuilt before the final measurements. Imre's programs were unchanged.
 
 ## Evidence and reproduction
 
@@ -80,7 +82,7 @@ From the repository root, extract and audit with Python 3.12 or newer and assert
 ```sh
 tar -xpf benchmarks/results/2026-10-21-live-conformance-evidence.tar.xz
 python3 -B live-conformance-evidence-20261021/replay.py \
-  > /tmp/relar-live-conformance-replay.json
+  > /tmp/imre-live-conformance-replay.json
 ```
 
 The [benchmark guide](../README.md#live-conformance-workflow) and [application guide](../../examples/conformance_report/README.md) contain build and run commands. Raw build records retain exact compiler, linker, runtime, source, environment, and tool hashes.

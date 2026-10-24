@@ -2,17 +2,17 @@
   "started_at_utc": "2026-10-18T13:16:38.281020+00:00",
   "source_commit": "edbbab93b26ccca638c7bf74336baef0d0fab4cd",
   "git_status_before": "",
-  "runner_source": "import datetime\nimport hashlib\nimport json\nfrom pathlib import Path\nimport subprocess\n\nroot = Path('/home/dev-user/code/oss/relar')\npython = '/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14'\nrecord_path = root / 'benchmarks/local/inventory-final-session.json'\ncache_probe = r'''\nimport hashlib, importlib.util, json, pathlib, struct, sys\nrecords = {}\nfor package in sys.argv[1:]:\n    for source in sorted(pathlib.Path(package).rglob('*.py')):\n        cached = pathlib.Path(importlib.util.cache_from_source(str(source)))\n        data = cached.read_bytes()\n        content = source.read_bytes()\n        assert data[:4] == importlib.util.MAGIC_NUMBER, source\n        flags = int.from_bytes(data[4:8], 'little')\n        if flags & 1:\n            assert data[8:16] == importlib.util.source_hash(content), source\n        else:\n            timestamp, size = struct.unpack('<II', data[8:16])\n            assert timestamp == (int(source.stat().st_mtime) & 0xffffffff), source\n            assert size == (len(content) & 0xffffffff), source\n        records[str(source)] = {'source_sha256': hashlib.sha256(content).hexdigest(), 'cache_path': str(cached), 'cache_sha256': hashlib.sha256(data).hexdigest(), 'cache_bytes': len(data), 'flags': flags, 'source_mtime_ns': source.stat().st_mtime_ns, 'valid_header': True}\nprint(json.dumps({'python': sys.version, 'cache_tag': sys.implementation.cache_tag, 'magic': importlib.util.MAGIC_NUMBER.hex(), 'pycache_prefix': sys.pycache_prefix, 'dont_write_bytecode': sys.dont_write_bytecode, 'files': records}))\n'''\n\ndef git(*arguments):\n    return subprocess.check_output(['git', *arguments], cwd=root, text=True).strip()\n\ndef caches():\n    command = [python, '-I', '-c', cache_probe, str(root / 'examples/inventory_reconciliation'), str(root / 'examples/incremental_planner')]\n    return json.loads(subprocess.check_output(command, cwd=root, text=True))\n\nrecord = {'started_at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'source_commit': git('rev-parse', 'HEAD'), 'git_status_before': git('status', '--porcelain'), 'runner_source': Path(__file__).read_text(), 'runs': {}, 'bytecode_before': caches()}\nassert not record['git_status_before'], 'Measured source checkout must be clean'\nassert record['source_commit'] == 'edbbab93b26ccca638c7bf74336baef0d0fab4cd'\n\ndef save():\n    record_path.write_text(json.dumps(record, indent=2) + '\\n')\n\nsave()\nfor mode in ('normal', 'lto'):\n    command = ['python3', 'benchmarks/inventory_benchmark.py',\n        '--compiler', 'benchmarks/local/comprehension-tools-final/relar',\n        '--runtime', 'benchmarks/local/comprehension-tools-final/' + ('librelar_runtime_lto.a' if mode == 'lto' else 'librelar_runtime.a'),\n        '--relar-build-record', 'benchmarks/local/comprehension-tools-final/build-record.json',\n        '--rust-bigint', f'benchmarks/local/inventory-reference-final-{mode}/inventory-bigint',\n        '--rust-build-record', f'benchmarks/local/inventory-reference-final-{mode}/build-record.json',\n        '--baseline', f'benchmarks/local/layout-{mode}-final/incremental_planner',\n        '--baseline-record', f'benchmarks/local/layout-{mode}-final.json',\n        '--python', python, '--clang', 'clang-18', '--target', 'x86_64-unknown-linux-gnu',\n        '--samples', '30', '--warmups', '2', '--cpu', '0',\n        '--artifact-dir', f'benchmarks/local/inventory-{mode}-final',\n        '--output', f'benchmarks/local/inventory-{mode}-final.json']\n    if mode == 'lto':\n        command += ['--lto-linker', str(root / 'benchmarks/local/batch-linker/ld.lld')]\n    record['runs'][mode] = {'command': command, 'started_at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat()}\n    save()\n    print('Starting ' + mode + ' inventory and unchanged-control measurements', flush=True)\n    result = subprocess.run(command, cwd=root, capture_output=True, text=True)\n    output = result.stdout + result.stderr\n    log = root / f'benchmarks/local/inventory-{mode}-final.log'\n    log.write_text(output)\n    print(output, end='', flush=True)\n    record['runs'][mode].update(returncode=result.returncode, completed_at_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(), log_sha256=hashlib.sha256(log.read_bytes()).hexdigest())\n    save()\n    result.check_returncode()\n    result_path = root / f'benchmarks/local/inventory-{mode}-final.json'\n    record['runs'][mode]['record_sha256'] = hashlib.sha256(result_path.read_bytes()).hexdigest()\n    assert caches() == record['bytecode_before'], 'Python package caches changed during measurement'\n    assert git('rev-parse', 'HEAD') == record['source_commit']\n    assert not git('status', '--porcelain')\n    save()\nrecord['bytecode_after'] = caches()\nrecord['git_status_after'] = git('status', '--porcelain')\nrecord['completed_at_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat()\nsave()\nprint('Both modes complete; source, bytecode caches, and build identities preserved', flush=True)\n",
+  "runner_source": "import datetime\nimport hashlib\nimport json\nfrom pathlib import Path\nimport subprocess\n\nroot = Path('/home/dev-user/code/oss/imre')\npython = '/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14'\nrecord_path = root / 'benchmarks/local/inventory-final-session.json'\ncache_probe = r'''\nimport hashlib, importlib.util, json, pathlib, struct, sys\nrecords = {}\nfor package in sys.argv[1:]:\n    for source in sorted(pathlib.Path(package).rglob('*.py')):\n        cached = pathlib.Path(importlib.util.cache_from_source(str(source)))\n        data = cached.read_bytes()\n        content = source.read_bytes()\n        assert data[:4] == importlib.util.MAGIC_NUMBER, source\n        flags = int.from_bytes(data[4:8], 'little')\n        if flags & 1:\n            assert data[8:16] == importlib.util.source_hash(content), source\n        else:\n            timestamp, size = struct.unpack('<II', data[8:16])\n            assert timestamp == (int(source.stat().st_mtime) & 0xffffffff), source\n            assert size == (len(content) & 0xffffffff), source\n        records[str(source)] = {'source_sha256': hashlib.sha256(content).hexdigest(), 'cache_path': str(cached), 'cache_sha256': hashlib.sha256(data).hexdigest(), 'cache_bytes': len(data), 'flags': flags, 'source_mtime_ns': source.stat().st_mtime_ns, 'valid_header': True}\nprint(json.dumps({'python': sys.version, 'cache_tag': sys.implementation.cache_tag, 'magic': importlib.util.MAGIC_NUMBER.hex(), 'pycache_prefix': sys.pycache_prefix, 'dont_write_bytecode': sys.dont_write_bytecode, 'files': records}))\n'''\n\ndef git(*arguments):\n    return subprocess.check_output(['git', *arguments], cwd=root, text=True).strip()\n\ndef caches():\n    command = [python, '-I', '-c', cache_probe, str(root / 'examples/inventory_reconciliation'), str(root / 'examples/incremental_planner')]\n    return json.loads(subprocess.check_output(command, cwd=root, text=True))\n\nrecord = {'started_at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'source_commit': git('rev-parse', 'HEAD'), 'git_status_before': git('status', '--porcelain'), 'runner_source': Path(__file__).read_text(), 'runs': {}, 'bytecode_before': caches()}\nassert not record['git_status_before'], 'Measured source checkout must be clean'\nassert record['source_commit'] == 'edbbab93b26ccca638c7bf74336baef0d0fab4cd'\n\ndef save():\n    record_path.write_text(json.dumps(record, indent=2) + '\\n')\n\nsave()\nfor mode in ('normal', 'lto'):\n    command = ['python3', 'benchmarks/inventory_benchmark.py',\n        '--compiler', 'benchmarks/local/comprehension-tools-final/imre',\n        '--runtime', 'benchmarks/local/comprehension-tools-final/' + ('libimre_runtime_lto.a' if mode == 'lto' else 'libimre_runtime.a'),\n        '--imre-build-record', 'benchmarks/local/comprehension-tools-final/build-record.json',\n        '--rust-bigint', f'benchmarks/local/inventory-reference-final-{mode}/inventory-bigint',\n        '--rust-build-record', f'benchmarks/local/inventory-reference-final-{mode}/build-record.json',\n        '--baseline', f'benchmarks/local/layout-{mode}-final/incremental_planner',\n        '--baseline-record', f'benchmarks/local/layout-{mode}-final.json',\n        '--python', python, '--clang', 'clang-18', '--target', 'x86_64-unknown-linux-gnu',\n        '--samples', '30', '--warmups', '2', '--cpu', '0',\n        '--artifact-dir', f'benchmarks/local/inventory-{mode}-final',\n        '--output', f'benchmarks/local/inventory-{mode}-final.json']\n    if mode == 'lto':\n        command += ['--lto-linker', str(root / 'benchmarks/local/batch-linker/ld.lld')]\n    record['runs'][mode] = {'command': command, 'started_at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat()}\n    save()\n    print('Starting ' + mode + ' inventory and unchanged-control measurements', flush=True)\n    result = subprocess.run(command, cwd=root, capture_output=True, text=True)\n    output = result.stdout + result.stderr\n    log = root / f'benchmarks/local/inventory-{mode}-final.log'\n    log.write_text(output)\n    print(output, end='', flush=True)\n    record['runs'][mode].update(returncode=result.returncode, completed_at_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(), log_sha256=hashlib.sha256(log.read_bytes()).hexdigest())\n    save()\n    result.check_returncode()\n    result_path = root / f'benchmarks/local/inventory-{mode}-final.json'\n    record['runs'][mode]['record_sha256'] = hashlib.sha256(result_path.read_bytes()).hexdigest()\n    assert caches() == record['bytecode_before'], 'Python package caches changed during measurement'\n    assert git('rev-parse', 'HEAD') == record['source_commit']\n    assert not git('status', '--porcelain')\n    save()\nrecord['bytecode_after'] = caches()\nrecord['git_status_after'] = git('status', '--porcelain')\nrecord['completed_at_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat()\nsave()\nprint('Both modes complete; source, bytecode caches, and build identities preserved', flush=True)\n",
   "runs": {
     "normal": {
       "command": [
         "python3",
         "benchmarks/inventory_benchmark.py",
         "--compiler",
-        "benchmarks/local/comprehension-tools-final/relar",
+        "benchmarks/local/comprehension-tools-final/imre",
         "--runtime",
-        "benchmarks/local/comprehension-tools-final/librelar_runtime.a",
-        "--relar-build-record",
+        "benchmarks/local/comprehension-tools-final/libimre_runtime.a",
+        "--imre-build-record",
         "benchmarks/local/comprehension-tools-final/build-record.json",
         "--rust-bigint",
         "benchmarks/local/inventory-reference-final-normal/inventory-bigint",
@@ -50,10 +50,10 @@
         "python3",
         "benchmarks/inventory_benchmark.py",
         "--compiler",
-        "benchmarks/local/comprehension-tools-final/relar",
+        "benchmarks/local/comprehension-tools-final/imre",
         "--runtime",
-        "benchmarks/local/comprehension-tools-final/librelar_runtime_lto.a",
-        "--relar-build-record",
+        "benchmarks/local/comprehension-tools-final/libimre_runtime_lto.a",
+        "--imre-build-record",
         "benchmarks/local/comprehension-tools-final/build-record.json",
         "--rust-bigint",
         "benchmarks/local/inventory-reference-final-lto/inventory-bigint",
@@ -80,7 +80,7 @@
         "--output",
         "benchmarks/local/inventory-lto-final.json",
         "--lto-linker",
-        "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld"
+        "/home/dev-user/code/oss/imre/benchmarks/local/batch-linker/ld.lld"
       ],
       "started_at_utc": "2026-10-18T13:17:47.860136+00:00",
       "returncode": 0,
@@ -96,108 +96,108 @@
     "pycache_prefix": null,
     "dont_write_bytecode": false,
     "files": {
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__init__.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__init__.py": {
         "source_sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
         "cache_sha256": "363df6ba1b6d8875d50e03f1f83983871c49843a872dfa796596b9b6a532d9b5",
         "cache_bytes": 256,
         "flags": 0,
         "source_mtime_ns": 1792327978557777105,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__main__.py": {
         "source_sha256": "853f4a7ae796ab29edbb9ff098d300969905bfe988ede2c90210e988191369a2",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
         "cache_sha256": "9be63bdf8c788994140963e13319420ac42eda03df1a2098a1f0dcf63b24e9ae",
         "cache_bytes": 1664,
         "flags": 0,
         "source_mtime_ns": 1792327979220772758,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/load.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/load.py": {
         "source_sha256": "074239fd9df26acc79424aed65e004df89d8b27c2d59fd7e2401ab74abeaad4d",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
         "cache_sha256": "0fef76be6db6b80d46ac5b3e38dbd52a1ded3642e5a09d9456d9f9d4b47217c6",
         "cache_bytes": 7288,
         "flags": 0,
         "source_mtime_ns": 1792327978818775394,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/model.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/model.py": {
         "source_sha256": "c3214a814d98213ff00bcb1dac25f18ac2c5bcafba96e07a8457aa161e3cbcbc",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
         "cache_sha256": "865686dbf0339f122caafc77307aa4f5756662fa6bac8c0319ef6ba23d268ced",
         "cache_bytes": 4991,
         "flags": 0,
         "source_mtime_ns": 1792327978688776246,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/reconcile.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/reconcile.py": {
         "source_sha256": "6c5aa3a17b5650e7bdad2434fbf80c3a9c08ca691de31d2cf87fdd1d7829125c",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
         "cache_sha256": "0bc2a40a8557f3f825527f2b1cdb579eebec10cee905d973379f933711e60cf8",
         "cache_bytes": 2568,
         "flags": 0,
         "source_mtime_ns": 1792328582648673246,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/render.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/render.py": {
         "source_sha256": "722a7ce42875d1997ba3dcbd85f17c1afaf14c5445406bb380a268b4681a023f",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
         "cache_sha256": "3f2570d08e599fe8c294df2d75fcbd205bd5be4b84c7718cd995f48724dbcb0d",
         "cache_bytes": 5315,
         "flags": 0,
         "source_mtime_ns": 1792328515931254835,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/incremental_planner/__init__.py": {
+      "/home/dev-user/code/oss/imre/examples/incremental_planner/__init__.py": {
         "source_sha256": "4f50561e32c7327e85b44e006e4eb048efce3303ab110fba581e2141a0562052",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/incremental_planner/__pycache__/__init__.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/incremental_planner/__pycache__/__init__.cpython-314.pyc",
         "cache_sha256": "d11a6de6abd8072dacfdd7655906e1de103275caccf862c897944bcbf1c5196e",
         "cache_bytes": 256,
         "flags": 0,
         "source_mtime_ns": 1792276562072576178,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/incremental_planner/__main__.py": {
+      "/home/dev-user/code/oss/imre/examples/incremental_planner/__main__.py": {
         "source_sha256": "cb0f0aaf0072542d8a345357f6cfb162576b177b4ff3e967833752caf8d70d6a",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/incremental_planner/__pycache__/__main__.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/incremental_planner/__pycache__/__main__.cpython-314.pyc",
         "cache_sha256": "0afb89b7fe426f6d4367c92bcb26e91382ab159c8091a21bde1c9a0aa7ce1370",
         "cache_bytes": 754,
         "flags": 0,
         "source_mtime_ns": 1792276562200575197,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/incremental_planner/model.py": {
+      "/home/dev-user/code/oss/imre/examples/incremental_planner/model.py": {
         "source_sha256": "327a0ed795b767c0782de7de8e599c0e886023e633cd10cc4a5c8656ee4b9b76",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/incremental_planner/__pycache__/model.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/incremental_planner/__pycache__/model.cpython-314.pyc",
         "cache_sha256": "c1a14d9711c7cca3d9e9a6849853c2c867763552ca981e06d93f796b89de598a",
         "cache_bytes": 3399,
         "flags": 0,
         "source_mtime_ns": 1792276562328574217,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/incremental_planner/parse.py": {
+      "/home/dev-user/code/oss/imre/examples/incremental_planner/parse.py": {
         "source_sha256": "2a32787df8694aab27b35918e0fe6bd2f38055942bb2e5632f75927493a58419",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/incremental_planner/__pycache__/parse.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/incremental_planner/__pycache__/parse.cpython-314.pyc",
         "cache_sha256": "e89b8fb29eaec657c42fff31f5c10a28f41648d172593a03292884b6625ce7e6",
         "cache_bytes": 1688,
         "flags": 0,
         "source_mtime_ns": 1792276562457573229,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/incremental_planner/render.py": {
+      "/home/dev-user/code/oss/imre/examples/incremental_planner/render.py": {
         "source_sha256": "a272b00d8445183dfcfce5aa489f82e9266ba4ab20db837c6f951c62a0dc1a85",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/incremental_planner/__pycache__/render.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/incremental_planner/__pycache__/render.cpython-314.pyc",
         "cache_sha256": "9a450750d77deb826c239b021dd7e5b65324eac7b8df279a99de018fa8b8b490",
         "cache_bytes": 1939,
         "flags": 0,
         "source_mtime_ns": 1792276562715571253,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/incremental_planner/schedule.py": {
+      "/home/dev-user/code/oss/imre/examples/incremental_planner/schedule.py": {
         "source_sha256": "7d753f3d8e77fce35886b59e8b065338725e6350c143d2dc8f93d7518f48ea8c",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/incremental_planner/__pycache__/schedule.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/incremental_planner/__pycache__/schedule.cpython-314.pyc",
         "cache_sha256": "187679104bcb04d9d73cd05670307f51f9be316fe2463087e62807b4b6f157da",
         "cache_bytes": 6727,
         "flags": 0,
@@ -213,108 +213,108 @@
     "pycache_prefix": null,
     "dont_write_bytecode": false,
     "files": {
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__init__.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__init__.py": {
         "source_sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
         "cache_sha256": "363df6ba1b6d8875d50e03f1f83983871c49843a872dfa796596b9b6a532d9b5",
         "cache_bytes": 256,
         "flags": 0,
         "source_mtime_ns": 1792327978557777105,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__main__.py": {
         "source_sha256": "853f4a7ae796ab29edbb9ff098d300969905bfe988ede2c90210e988191369a2",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
         "cache_sha256": "9be63bdf8c788994140963e13319420ac42eda03df1a2098a1f0dcf63b24e9ae",
         "cache_bytes": 1664,
         "flags": 0,
         "source_mtime_ns": 1792327979220772758,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/load.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/load.py": {
         "source_sha256": "074239fd9df26acc79424aed65e004df89d8b27c2d59fd7e2401ab74abeaad4d",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
         "cache_sha256": "0fef76be6db6b80d46ac5b3e38dbd52a1ded3642e5a09d9456d9f9d4b47217c6",
         "cache_bytes": 7288,
         "flags": 0,
         "source_mtime_ns": 1792327978818775394,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/model.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/model.py": {
         "source_sha256": "c3214a814d98213ff00bcb1dac25f18ac2c5bcafba96e07a8457aa161e3cbcbc",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
         "cache_sha256": "865686dbf0339f122caafc77307aa4f5756662fa6bac8c0319ef6ba23d268ced",
         "cache_bytes": 4991,
         "flags": 0,
         "source_mtime_ns": 1792327978688776246,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/reconcile.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/reconcile.py": {
         "source_sha256": "6c5aa3a17b5650e7bdad2434fbf80c3a9c08ca691de31d2cf87fdd1d7829125c",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
         "cache_sha256": "0bc2a40a8557f3f825527f2b1cdb579eebec10cee905d973379f933711e60cf8",
         "cache_bytes": 2568,
         "flags": 0,
         "source_mtime_ns": 1792328582648673246,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/render.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/render.py": {
         "source_sha256": "722a7ce42875d1997ba3dcbd85f17c1afaf14c5445406bb380a268b4681a023f",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
         "cache_sha256": "3f2570d08e599fe8c294df2d75fcbd205bd5be4b84c7718cd995f48724dbcb0d",
         "cache_bytes": 5315,
         "flags": 0,
         "source_mtime_ns": 1792328515931254835,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/incremental_planner/__init__.py": {
+      "/home/dev-user/code/oss/imre/examples/incremental_planner/__init__.py": {
         "source_sha256": "4f50561e32c7327e85b44e006e4eb048efce3303ab110fba581e2141a0562052",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/incremental_planner/__pycache__/__init__.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/incremental_planner/__pycache__/__init__.cpython-314.pyc",
         "cache_sha256": "d11a6de6abd8072dacfdd7655906e1de103275caccf862c897944bcbf1c5196e",
         "cache_bytes": 256,
         "flags": 0,
         "source_mtime_ns": 1792276562072576178,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/incremental_planner/__main__.py": {
+      "/home/dev-user/code/oss/imre/examples/incremental_planner/__main__.py": {
         "source_sha256": "cb0f0aaf0072542d8a345357f6cfb162576b177b4ff3e967833752caf8d70d6a",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/incremental_planner/__pycache__/__main__.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/incremental_planner/__pycache__/__main__.cpython-314.pyc",
         "cache_sha256": "0afb89b7fe426f6d4367c92bcb26e91382ab159c8091a21bde1c9a0aa7ce1370",
         "cache_bytes": 754,
         "flags": 0,
         "source_mtime_ns": 1792276562200575197,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/incremental_planner/model.py": {
+      "/home/dev-user/code/oss/imre/examples/incremental_planner/model.py": {
         "source_sha256": "327a0ed795b767c0782de7de8e599c0e886023e633cd10cc4a5c8656ee4b9b76",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/incremental_planner/__pycache__/model.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/incremental_planner/__pycache__/model.cpython-314.pyc",
         "cache_sha256": "c1a14d9711c7cca3d9e9a6849853c2c867763552ca981e06d93f796b89de598a",
         "cache_bytes": 3399,
         "flags": 0,
         "source_mtime_ns": 1792276562328574217,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/incremental_planner/parse.py": {
+      "/home/dev-user/code/oss/imre/examples/incremental_planner/parse.py": {
         "source_sha256": "2a32787df8694aab27b35918e0fe6bd2f38055942bb2e5632f75927493a58419",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/incremental_planner/__pycache__/parse.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/incremental_planner/__pycache__/parse.cpython-314.pyc",
         "cache_sha256": "e89b8fb29eaec657c42fff31f5c10a28f41648d172593a03292884b6625ce7e6",
         "cache_bytes": 1688,
         "flags": 0,
         "source_mtime_ns": 1792276562457573229,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/incremental_planner/render.py": {
+      "/home/dev-user/code/oss/imre/examples/incremental_planner/render.py": {
         "source_sha256": "a272b00d8445183dfcfce5aa489f82e9266ba4ab20db837c6f951c62a0dc1a85",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/incremental_planner/__pycache__/render.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/incremental_planner/__pycache__/render.cpython-314.pyc",
         "cache_sha256": "9a450750d77deb826c239b021dd7e5b65324eac7b8df279a99de018fa8b8b490",
         "cache_bytes": 1939,
         "flags": 0,
         "source_mtime_ns": 1792276562715571253,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/incremental_planner/schedule.py": {
+      "/home/dev-user/code/oss/imre/examples/incremental_planner/schedule.py": {
         "source_sha256": "7d753f3d8e77fce35886b59e8b065338725e6350c143d2dc8f93d7518f48ea8c",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/incremental_planner/__pycache__/schedule.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/incremental_planner/__pycache__/schedule.cpython-314.pyc",
         "cache_sha256": "187679104bcb04d9d73cd05670307f51f9be316fe2463087e62807b4b6f157da",
         "cache_bytes": 6727,
         "flags": 0,

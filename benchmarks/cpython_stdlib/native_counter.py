@@ -44,7 +44,7 @@ class Case:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("relar", "runtime", "clang", "result"):
+    for name in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--opt-level", type=int, choices=range(4), default=3)
     args = parser.parse_args()
@@ -63,7 +63,7 @@ def main():
             case = wd / "case.py"
             case.write_bytes(source(method, body))
             binary = wd / "case"
-            built = subprocess.run([args.relar.resolve(), "build", case, "-o", binary, "--no-cache",
+            built = subprocess.run([args.imre.resolve(), "build", case, "-o", binary, "--no-cache",
                 "--opt-level", str(args.opt_level), "--runtime", args.runtime.resolve(), "--clang",
                 args.clang.resolve()], cwd=wd, text=True, capture_output=True, timeout=120)
             result = built if built.returncode else subprocess.run([binary], cwd=wd, text=True, capture_output=True, timeout=30)
@@ -76,7 +76,7 @@ def main():
                 print(tests[case_id]["diagnostic"], file=sys.stderr)
             print(tests[case_id]["status"], case_id)
     args.result.write_text(json.dumps({"cpython_commit": commit, "opt_level": args.opt_level,
-        "assertions": "native Relar", "tests": tests}, indent=2) + "\n")
+        "assertions": "native Imre", "tests": tests}, indent=2) + "\n")
     return int(any(test["status"] != "pass" for test in tests.values()))
 
 

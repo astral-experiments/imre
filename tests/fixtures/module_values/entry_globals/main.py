@@ -8,7 +8,7 @@ from pathlib import Path
 
 def initialize() -> list[str]:
     print("initialize")
-    return [__doc__, os.environ.get("RELAR_UNSET_ENTRY_FIXTURE", "fallback")]
+    return [__doc__, os.environ.get("IMRE_UNSET_ENTRY_FIXTURE", "fallback")]
 
 
 VALUES = initialize()

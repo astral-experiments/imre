@@ -20,7 +20,7 @@ if sys.flags.optimize:
     raise SystemExit('replay requires assertions; do not use -O')
 sys.dont_write_bytecode = True
 REVISION = 'f4aee96d255b4b4772e8d3fd2ba7169844cc58eb'
-ENGINES = ('relar', 'port', 'original', 'rust')
+ENGINES = ('imre', 'port', 'original', 'rust')
 AUDIT_HELPER = 'benchmarks/results/2026-10-21-memory-report-artifact-audit.py'
 
 
@@ -101,7 +101,7 @@ def main():
         retained(manifest['audit_script']['path'], audit['audit_script_sha256'])
         records = {mode: load(item['path'], item['sha256']) for mode, item in manifest['timings'].items()}
         assert set(records) == {'normal', 'thinlto'}
-        context = load('/tmp/relar-dataclass-timing-context.json', audit['timing_context_sha256'])
+        context = load('/tmp/imre-dataclass-timing-context.json', audit['timing_context_sha256'])
         dates = [context['started_at'], records['normal']['started_at_utc'], records['normal']['completed_at_utc'],
                  records['thinlto']['started_at_utc'], records['thinlto']['completed_at_utc'], context['completed_at']]
         assert list(map(datetime.fromisoformat, dates)) == sorted(map(datetime.fromisoformat, dates))
@@ -140,7 +140,7 @@ def main():
         asan = load(asan_metadata['build']['path'], asan_metadata['build']['sha256'])
         assert asan['revision'] == REVISION and '--sanitize' in asan['compile_command']
         assert asan['environment'] == {'ASAN_OPTIONS': 'detect_leaks=1:abort_on_error=1'}
-        assert index['excluded']['/tmp/relar-dataclass-memory-asan']['sha256'] == asan['binary_sha256']
+        assert index['excluded']['/tmp/imre-dataclass-memory-asan']['sha256'] == asan['binary_sha256']
         asan_validation = load(asan_metadata['validation']['path'], asan_metadata['validation']['sha256'])
         assert asan_validation['cases'] == 72 and asan_validation['engine_executions'] == 264
         assert set(asan_validation['engines']) == set(ENGINES)
@@ -251,15 +251,15 @@ def main():
                               'max_seconds': max(values), 'p25_seconds': q[0], 'p75_seconds': q[2]}
                     assert actual == row['summary'][engine]
                     seconds[engine] = actual['median_seconds']
-                for left, right in (('original', 'relar'), ('port', 'relar'), ('relar', 'rust'), ('original', 'rust'), ('port', 'rust')):
+                for left, right in (('original', 'imre'), ('port', 'imre'), ('imre', 'rust'), ('original', 'rust'), ('port', 'rust')):
                     assert row[left + '_over_' + right] == seconds[left] / seconds[right]
                 fractions = {engine: results[0]['seconds'][engine] / seconds[engine] for engine in ENGINES} if results else None
                 if fractions is not None:
                     assert fractions == row['startup_control_fraction']
                 results.append({'label': row['label'], 'records': row['records'], 'seconds': seconds,
-                                'relar_over_rust': seconds['relar'] / seconds['rust'],
-                                'original_over_relar': seconds['original'] / seconds['relar'],
-                                'port_over_relar': seconds['port'] / seconds['relar'],
+                                'imre_over_rust': seconds['imre'] / seconds['rust'],
+                                'original_over_imre': seconds['original'] / seconds['imre'],
+                                'port_over_imre': seconds['port'] / seconds['imre'],
                                 'startup_control_fraction': fractions})
             assert results == audit['modes'][mode]
             modes[mode] = results
@@ -268,7 +268,7 @@ def main():
                 assert gzip.decompress(sidecar.read_bytes()) == retained(manifest['timings'][mode]['path'])
         targets = [row for rows in modes.values() for row in rows if row['label'].endswith('-256')]
         assert len(targets) == 4
-        passed = all(row['relar_over_rust'] <= 2 for row in targets)
+        passed = all(row['imre_over_rust'] <= 2 for row in targets)
         assert passed == audit['all_four_large_cases_at_most_twice_rust']
         result = {'status': 'passed', 'measurement_revision': REVISION,
                   'scope': 'Archive integrity, Git blobs, captured source/tool identities, preparation output oracle, timing filesystem bytes, order balance and recomputed statistics; no engine execution.',

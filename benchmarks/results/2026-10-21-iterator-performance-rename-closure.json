@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "kind": "public-relar-rename-closure",
+  "kind": "public-imre-rename-closure",
   "status": "passed",
   "completed_at_utc": "2026-10-21T00:36:58.189049+00:00",
-  "repository": "viarius-experiments/relar",
+  "repository": "viarius-experiments/imre",
   "repository_id": 1423429334,
   "stack_number": 4,
   "stack_node_id": "PRS_kwDOVNfO1s4AIoYG",
@@ -35,7 +35,7 @@
     "head_sha": "9b9dddab55beeb40241d00788394b8bcf69f9cce",
     "status": "completed",
     "conclusion": "success",
-    "html_url": "https://github.com/viarius-experiments/relar/actions/runs/39491300421"
+    "html_url": "https://github.com/viarius-experiments/imre/actions/runs/39491300421"
   },
   "heads_without_ci_workflow": [
     "main",

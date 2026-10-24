@@ -14,17 +14,17 @@ The [optimization report](../../benchmarks/results/2026-10-20-luhn-performance.m
 keeps the library unchanged and passes the upstream tests and 1,144 CPython
 differential cases in each of five native configurations. With ThinLTO,
 4,096-digit calls take 1.21–1.35× the streaming Rust reference's time and run
-27.7–29.4× faster than the previous Relar build. Short 16-digit calls still
+27.7–29.4× faster than the previous Imre build. Short 16-digit calls still
 take 2.77–4.11× Rust's time. The report includes both linking modes, CPython and
-preserved-Relar comparisons, allocation/instruction profiles, and audited raw
+preserved-Imre comparisons, allocation/instruction profiles, and audited raw
 evidence.
 
-From the repository root, after building Relar:
+From the repository root, after building Imre:
 
 ```sh
-target/release/relar build examples/luhn_checksum/driver.py \
+target/release/imre build examples/luhn_checksum/driver.py \
   --module-root examples/luhn_checksum \
-  --runtime target/release/librelar_runtime.a --clang clang-18 \
+  --runtime target/release/libimre_runtime.a --clang clang-18 \
   --opt-level 3 -o /tmp/luhn
 printf '7992739871' > /tmp/luhn-input
 /tmp/luhn append /tmp/luhn-input /tmp/luhn-output 1
@@ -44,7 +44,7 @@ and newlines are inputs to the library; the driver does not strip them.
 
 ```sh
 python3 tests/luhn.py \
-  --compiler target/release/relar --runtime target/release/librelar_runtime.a \
+  --compiler target/release/imre --runtime target/release/libimre_runtime.a \
   --clang clang-18 --python python3.14
 ```
 
@@ -68,7 +68,7 @@ python3 benchmarks/reference/luhn_checksum/build.py \
   --artifact-dir benchmarks/local/luhn-reference \
   --target-dir benchmarks/local/luhn-reference-target
 python3 benchmarks/luhn_benchmark.py \
-  --compiler target/release/relar --runtime target/release/librelar_runtime.a \
+  --compiler target/release/imre --runtime target/release/libimre_runtime.a \
   --clang clang-18 --python python3.14 \
   --rust benchmarks/local/luhn-reference/luhn-reference \
   --artifact-dir benchmarks/local/luhn-normal \
@@ -81,14 +81,14 @@ each run verifies the complete output and accumulated checksum. Whole-process
 times include startup, imports where applicable, file I/O, and the repeated
 calls. An empty-input control reports startup/protocol overhead without
 subtracting it. Increase `--batch-digits` when that control is a significant
-fraction of a sample; `--native-only` measures Relar/Rust while retaining CPython
+fraction of a sample; `--native-only` measures Imre/Rust while retaining CPython
 validation.
 
 To measure an optimization on the same program, preserve the previous executable
 and its JSON record, then add `--baseline /path/to/previous-luhn
 --baseline-record /path/to/previous.json`. The harness reuses the recorded input
 bytes and checks the application, reference, tool, target, and linking identities.
-With CPython, Rust, and both Relar builds, defaults become eight warmup rounds and
+With CPython, Rust, and both Imre builds, defaults become eight warmup rounds and
 twelve measured rounds. Four fixed orders balance each engine's position and
 every directed adjacent pair within a round; they do not balance transitions
 between rounds. Both counts must be multiples of four.
@@ -96,7 +96,7 @@ between rounds. Both counts must be multiples of four.
 Use committed sources, a fresh artifact directory, and an idle untraced CPU.
 The harness records CPU affinity, raw samples, commands, inputs, output hashes,
 CPython build settings, source/tool/binary hashes, LLVM output, and the Rust build
-record. `--relar-build-record` additionally verifies a compiler/runtime build
+record. `--imre-build-record` additionally verifies a compiler/runtime build
 record containing `sha256` and `source_sha256` identities. For ThinLTO, build a
-separate Rust reference with `--thinlto`, supply the matching Relar LTO runtime,
+separate Rust reference with `--thinlto`, supply the matching Imre LTO runtime,
 and pass `--target` and `--lto-linker /path/to/ld.lld` to the benchmark.

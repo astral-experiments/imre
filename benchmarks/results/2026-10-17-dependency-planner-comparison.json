@@ -28,7 +28,7 @@
     "llvm_ir": "7aa7197959c0af32a6d43b36799cf2e6bb46779ced2848dee35042f56a03af33"
   },
   "tools": {
-    "relar": "relar 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
+    "imre": "imre 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
     "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-18/bin",
     "cpython": {
       "implementation": "cpython",
@@ -122,7 +122,7 @@
     "timer": "time.perf_counter_ns around subprocess.run; shared with benchmark.py",
     "includes": "fresh process startup, package imports, input parsing, all scheduling and complete report output, and process exit",
     "excludes": "Rust workspace builds, AOT compilation, oracle/differential validation, and warmups",
-    "ordering": "all six CPython/baseline/Relar orders in a repeating cycle; adjacent orders reverse each other",
+    "ordering": "all six CPython/baseline/Imre orders in a repeating cycle; adjacent orders reverse each other",
     "fully_balanced_samples": true,
     "cpu": "harness and children inherit the same single-CPU affinity",
     "output_validation": "every warmup and sample must match the complete oracle output, exit zero, and emit no stderr; comparison and UTF-8 output hashing occur after timing",
@@ -135,11 +135,11 @@
       "<package-root>"
     ],
     "cpython_imports": "explicit package-root bootstrap runs unchanged package as __main__; normal bytecode caching is allowed",
-    "relar_command": [
+    "imre_command": [
       "<artifact-dir>/dependency_planner"
     ],
     "compile_command": [
-      "relar",
+      "imre",
       "build",
       "examples/dependency_planner/__main__.py",
       "--module-root",
@@ -159,32 +159,32 @@
       [
         "cpython",
         "baseline",
-        "relar"
+        "imre"
       ],
       [
-        "relar",
+        "imre",
         "baseline",
         "cpython"
       ],
       [
         "baseline",
-        "relar",
+        "imre",
         "cpython"
       ],
       [
         "cpython",
-        "relar",
+        "imre",
         "baseline"
       ],
       [
-        "relar",
+        "imre",
         "cpython",
         "baseline"
       ],
       [
         "baseline",
         "cpython",
-        "relar"
+        "imre"
       ]
     ],
     "baseline_command": [
@@ -232,7 +232,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 20369415,
@@ -248,7 +248,7 @@
             "stdout_sha256": "d666e12019702c293798e61efb3f668bcfdc050f63e88bd4f38eb521691f43f4",
             "stdout_bytes": 3575
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3468172,
             "stderr": "",
             "returncode": 0,
@@ -259,11 +259,11 @@
         {
           "index": 1,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 3480224,
             "stderr": "",
             "returncode": 0,
@@ -292,7 +292,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 20306477,
@@ -308,7 +308,7 @@
             "stdout_sha256": "d666e12019702c293798e61efb3f668bcfdc050f63e88bd4f38eb521691f43f4",
             "stdout_bytes": 3575
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3434028,
             "stderr": "",
             "returncode": 0,
@@ -319,11 +319,11 @@
         {
           "index": 1,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 3391159,
             "stderr": "",
             "returncode": 0,
@@ -349,7 +349,7 @@
           "index": 2,
           "order": [
             "baseline",
-            "relar",
+            "imre",
             "cpython"
           ],
           "baseline": {
@@ -359,7 +359,7 @@
             "stdout_sha256": "d666e12019702c293798e61efb3f668bcfdc050f63e88bd4f38eb521691f43f4",
             "stdout_bytes": 3575
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3395998,
             "stderr": "",
             "returncode": 0,
@@ -378,7 +378,7 @@
           "index": 3,
           "order": [
             "cpython",
-            "relar",
+            "imre",
             "baseline"
           ],
           "cpython": {
@@ -388,7 +388,7 @@
             "stdout_sha256": "d666e12019702c293798e61efb3f668bcfdc050f63e88bd4f38eb521691f43f4",
             "stdout_bytes": 3575
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3428588,
             "stderr": "",
             "returncode": 0,
@@ -406,11 +406,11 @@
         {
           "index": 4,
           "order": [
-            "relar",
+            "imre",
             "cpython",
             "baseline"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 3383865,
             "stderr": "",
             "returncode": 0,
@@ -437,7 +437,7 @@
           "order": [
             "baseline",
             "cpython",
-            "relar"
+            "imre"
           ],
           "baseline": {
             "elapsed_ns": 6862298,
@@ -453,7 +453,7 @@
             "stdout_sha256": "d666e12019702c293798e61efb3f668bcfdc050f63e88bd4f38eb521691f43f4",
             "stdout_bytes": 3575
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3396619,
             "stderr": "",
             "returncode": 0,
@@ -466,7 +466,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 20497693,
@@ -482,7 +482,7 @@
             "stdout_sha256": "d666e12019702c293798e61efb3f668bcfdc050f63e88bd4f38eb521691f43f4",
             "stdout_bytes": 3575
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3417558,
             "stderr": "",
             "returncode": 0,
@@ -493,11 +493,11 @@
         {
           "index": 7,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 3459506,
             "stderr": "",
             "returncode": 0,
@@ -523,7 +523,7 @@
           "index": 8,
           "order": [
             "baseline",
-            "relar",
+            "imre",
             "cpython"
           ],
           "baseline": {
@@ -533,7 +533,7 @@
             "stdout_sha256": "d666e12019702c293798e61efb3f668bcfdc050f63e88bd4f38eb521691f43f4",
             "stdout_bytes": 3575
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3402630,
             "stderr": "",
             "returncode": 0,
@@ -552,7 +552,7 @@
           "index": 9,
           "order": [
             "cpython",
-            "relar",
+            "imre",
             "baseline"
           ],
           "cpython": {
@@ -562,7 +562,7 @@
             "stdout_sha256": "d666e12019702c293798e61efb3f668bcfdc050f63e88bd4f38eb521691f43f4",
             "stdout_bytes": 3575
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3440411,
             "stderr": "",
             "returncode": 0,
@@ -580,11 +580,11 @@
         {
           "index": 10,
           "order": [
-            "relar",
+            "imre",
             "cpython",
             "baseline"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 4444829,
             "stderr": "",
             "returncode": 0,
@@ -611,7 +611,7 @@
           "order": [
             "baseline",
             "cpython",
-            "relar"
+            "imre"
           ],
           "baseline": {
             "elapsed_ns": 5766839,
@@ -627,7 +627,7 @@
             "stdout_sha256": "d666e12019702c293798e61efb3f668bcfdc050f63e88bd4f38eb521691f43f4",
             "stdout_bytes": 3575
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3413229,
             "stderr": "",
             "returncode": 0,
@@ -644,7 +644,7 @@
           "p25_seconds": 0.02030297325,
           "p75_seconds": 0.020521530000000003
         },
-        "relar": {
+        "imre": {
           "median_seconds": 0.0034153935,
           "min_seconds": 0.003383865,
           "max_seconds": 0.004444829,
@@ -659,7 +659,7 @@
           "p25_seconds": 0.00574497025,
           "p75_seconds": 0.006896917000000001
         },
-        "baseline_to_relar_ratio_of_medians": 1.6973004721125107,
+        "baseline_to_imre_ratio_of_medians": 1.6973004721125107,
         "cpython_to_baseline_ratio_of_medians": 3.5099459215528723
       }
     },
@@ -680,7 +680,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 31805279,
@@ -696,7 +696,7 @@
             "stdout_sha256": "9907328d02efc24a861fd64aa5775ee68418f6f1e7791eb68ebe2b4a2dcdc253",
             "stdout_bytes": 61986
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 8420174,
             "stderr": "",
             "returncode": 0,
@@ -707,11 +707,11 @@
         {
           "index": 1,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 8372917,
             "stderr": "",
             "returncode": 0,
@@ -740,7 +740,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 31558801,
@@ -756,7 +756,7 @@
             "stdout_sha256": "9907328d02efc24a861fd64aa5775ee68418f6f1e7791eb68ebe2b4a2dcdc253",
             "stdout_bytes": 61986
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 8218539,
             "stderr": "",
             "returncode": 0,
@@ -767,11 +767,11 @@
         {
           "index": 1,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 8343983,
             "stderr": "",
             "returncode": 0,
@@ -797,7 +797,7 @@
           "index": 2,
           "order": [
             "baseline",
-            "relar",
+            "imre",
             "cpython"
           ],
           "baseline": {
@@ -807,7 +807,7 @@
             "stdout_sha256": "9907328d02efc24a861fd64aa5775ee68418f6f1e7791eb68ebe2b4a2dcdc253",
             "stdout_bytes": 61986
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 8260037,
             "stderr": "",
             "returncode": 0,
@@ -826,7 +826,7 @@
           "index": 3,
           "order": [
             "cpython",
-            "relar",
+            "imre",
             "baseline"
           ],
           "cpython": {
@@ -836,7 +836,7 @@
             "stdout_sha256": "9907328d02efc24a861fd64aa5775ee68418f6f1e7791eb68ebe2b4a2dcdc253",
             "stdout_bytes": 61986
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 8259977,
             "stderr": "",
             "returncode": 0,
@@ -854,11 +854,11 @@
         {
           "index": 4,
           "order": [
-            "relar",
+            "imre",
             "cpython",
             "baseline"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 8446453,
             "stderr": "",
             "returncode": 0,
@@ -885,7 +885,7 @@
           "order": [
             "baseline",
             "cpython",
-            "relar"
+            "imre"
           ],
           "baseline": {
             "elapsed_ns": 69732597,
@@ -901,7 +901,7 @@
             "stdout_sha256": "9907328d02efc24a861fd64aa5775ee68418f6f1e7791eb68ebe2b4a2dcdc253",
             "stdout_bytes": 61986
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 8325839,
             "stderr": "",
             "returncode": 0,
@@ -914,7 +914,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 31405847,
@@ -930,7 +930,7 @@
             "stdout_sha256": "9907328d02efc24a861fd64aa5775ee68418f6f1e7791eb68ebe2b4a2dcdc253",
             "stdout_bytes": 61986
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 8285714,
             "stderr": "",
             "returncode": 0,
@@ -941,11 +941,11 @@
         {
           "index": 7,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 8329075,
             "stderr": "",
             "returncode": 0,
@@ -971,7 +971,7 @@
           "index": 8,
           "order": [
             "baseline",
-            "relar",
+            "imre",
             "cpython"
           ],
           "baseline": {
@@ -981,7 +981,7 @@
             "stdout_sha256": "9907328d02efc24a861fd64aa5775ee68418f6f1e7791eb68ebe2b4a2dcdc253",
             "stdout_bytes": 61986
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 8272300,
             "stderr": "",
             "returncode": 0,
@@ -1000,7 +1000,7 @@
           "index": 9,
           "order": [
             "cpython",
-            "relar",
+            "imre",
             "baseline"
           ],
           "cpython": {
@@ -1010,7 +1010,7 @@
             "stdout_sha256": "9907328d02efc24a861fd64aa5775ee68418f6f1e7791eb68ebe2b4a2dcdc253",
             "stdout_bytes": 61986
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 8328263,
             "stderr": "",
             "returncode": 0,
@@ -1028,11 +1028,11 @@
         {
           "index": 10,
           "order": [
-            "relar",
+            "imre",
             "cpython",
             "baseline"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 8346727,
             "stderr": "",
             "returncode": 0,
@@ -1059,7 +1059,7 @@
           "order": [
             "baseline",
             "cpython",
-            "relar"
+            "imre"
           ],
           "baseline": {
             "elapsed_ns": 69587537,
@@ -1075,7 +1075,7 @@
             "stdout_sha256": "9907328d02efc24a861fd64aa5775ee68418f6f1e7791eb68ebe2b4a2dcdc253",
             "stdout_bytes": 61986
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 8569131,
             "stderr": "",
             "returncode": 0,
@@ -1092,7 +1092,7 @@
           "p25_seconds": 0.03142856825,
           "p75_seconds": 0.031554028
         },
-        "relar": {
+        "imre": {
           "median_seconds": 0.008327051,
           "min_seconds": 0.008218539,
           "max_seconds": 0.008569131,
@@ -1107,7 +1107,7 @@
           "p25_seconds": 0.0697169755,
           "p75_seconds": 0.0703829965
         },
-        "baseline_to_relar_ratio_of_medians": 8.424180601271686,
+        "baseline_to_imre_ratio_of_medians": 8.424180601271686,
         "cpython_to_baseline_ratio_of_medians": 0.44910707852303466
       }
     },
@@ -1128,7 +1128,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 120779213,
@@ -1144,7 +1144,7 @@
             "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
             "stdout_bytes": 531728
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 51099504,
             "stderr": "",
             "returncode": 0,
@@ -1155,11 +1155,11 @@
         {
           "index": 1,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 50733082,
             "stderr": "",
             "returncode": 0,
@@ -1188,7 +1188,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 134995369,
@@ -1204,7 +1204,7 @@
             "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
             "stdout_bytes": 531728
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 51415101,
             "stderr": "",
             "returncode": 0,
@@ -1215,11 +1215,11 @@
         {
           "index": 1,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 52238473,
             "stderr": "",
             "returncode": 0,
@@ -1245,7 +1245,7 @@
           "index": 2,
           "order": [
             "baseline",
-            "relar",
+            "imre",
             "cpython"
           ],
           "baseline": {
@@ -1255,7 +1255,7 @@
             "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
             "stdout_bytes": 531728
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 52535560,
             "stderr": "",
             "returncode": 0,
@@ -1274,7 +1274,7 @@
           "index": 3,
           "order": [
             "cpython",
-            "relar",
+            "imre",
             "baseline"
           ],
           "cpython": {
@@ -1284,7 +1284,7 @@
             "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
             "stdout_bytes": 531728
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 50687789,
             "stderr": "",
             "returncode": 0,
@@ -1302,11 +1302,11 @@
         {
           "index": 4,
           "order": [
-            "relar",
+            "imre",
             "cpython",
             "baseline"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 50980111,
             "stderr": "",
             "returncode": 0,
@@ -1333,7 +1333,7 @@
           "order": [
             "baseline",
             "cpython",
-            "relar"
+            "imre"
           ],
           "baseline": {
             "elapsed_ns": 554702949,
@@ -1349,7 +1349,7 @@
             "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
             "stdout_bytes": 531728
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 50621174,
             "stderr": "",
             "returncode": 0,
@@ -1362,7 +1362,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 125425748,
@@ -1378,7 +1378,7 @@
             "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
             "stdout_bytes": 531728
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 51510258,
             "stderr": "",
             "returncode": 0,
@@ -1389,11 +1389,11 @@
         {
           "index": 7,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 50386668,
             "stderr": "",
             "returncode": 0,
@@ -1419,7 +1419,7 @@
           "index": 8,
           "order": [
             "baseline",
-            "relar",
+            "imre",
             "cpython"
           ],
           "baseline": {
@@ -1429,7 +1429,7 @@
             "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
             "stdout_bytes": 531728
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 53414231,
             "stderr": "",
             "returncode": 0,
@@ -1448,7 +1448,7 @@
           "index": 9,
           "order": [
             "cpython",
-            "relar",
+            "imre",
             "baseline"
           ],
           "cpython": {
@@ -1458,7 +1458,7 @@
             "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
             "stdout_bytes": 531728
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 51314564,
             "stderr": "",
             "returncode": 0,
@@ -1476,11 +1476,11 @@
         {
           "index": 10,
           "order": [
-            "relar",
+            "imre",
             "cpython",
             "baseline"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 52412616,
             "stderr": "",
             "returncode": 0,
@@ -1507,7 +1507,7 @@
           "order": [
             "baseline",
             "cpython",
-            "relar"
+            "imre"
           ],
           "baseline": {
             "elapsed_ns": 565896421,
@@ -1523,7 +1523,7 @@
             "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
             "stdout_bytes": 531728
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 50324471,
             "stderr": "",
             "returncode": 0,
@@ -1540,7 +1540,7 @@
           "p25_seconds": 0.122037128,
           "p75_seconds": 0.1246074605
         },
-        "relar": {
+        "imre": {
           "median_seconds": 0.0513648325,
           "min_seconds": 0.050324471,
           "max_seconds": 0.053414231,
@@ -1555,7 +1555,7 @@
           "p25_seconds": 0.5553886244999999,
           "p75_seconds": 0.56606434625
         },
-        "baseline_to_relar_ratio_of_medians": 10.974441355376754,
+        "baseline_to_imre_ratio_of_medians": 10.974441355376754,
         "cpython_to_baseline_ratio_of_medians": 0.21785564572178318
       }
     },
@@ -1576,7 +1576,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 20495529,
@@ -1592,7 +1592,7 @@
             "stdout_sha256": "3023bed7aac0f1e01953ef8a2ab4830be1ff9f95195abec62e171297e14f0476",
             "stdout_bytes": 2890
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3370159,
             "stderr": "",
             "returncode": 0,
@@ -1603,11 +1603,11 @@
         {
           "index": 1,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 3384937,
             "stderr": "",
             "returncode": 0,
@@ -1636,7 +1636,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 20169443,
@@ -1652,7 +1652,7 @@
             "stdout_sha256": "3023bed7aac0f1e01953ef8a2ab4830be1ff9f95195abec62e171297e14f0476",
             "stdout_bytes": 2890
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3247031,
             "stderr": "",
             "returncode": 0,
@@ -1663,11 +1663,11 @@
         {
           "index": 1,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 3235459,
             "stderr": "",
             "returncode": 0,
@@ -1693,7 +1693,7 @@
           "index": 2,
           "order": [
             "baseline",
-            "relar",
+            "imre",
             "cpython"
           ],
           "baseline": {
@@ -1703,7 +1703,7 @@
             "stdout_sha256": "3023bed7aac0f1e01953ef8a2ab4830be1ff9f95195abec62e171297e14f0476",
             "stdout_bytes": 2890
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3213478,
             "stderr": "",
             "returncode": 0,
@@ -1722,7 +1722,7 @@
           "index": 3,
           "order": [
             "cpython",
-            "relar",
+            "imre",
             "baseline"
           ],
           "cpython": {
@@ -1732,7 +1732,7 @@
             "stdout_sha256": "3023bed7aac0f1e01953ef8a2ab4830be1ff9f95195abec62e171297e14f0476",
             "stdout_bytes": 2890
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3243654,
             "stderr": "",
             "returncode": 0,
@@ -1750,11 +1750,11 @@
         {
           "index": 4,
           "order": [
-            "relar",
+            "imre",
             "cpython",
             "baseline"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 3221103,
             "stderr": "",
             "returncode": 0,
@@ -1781,7 +1781,7 @@
           "order": [
             "baseline",
             "cpython",
-            "relar"
+            "imre"
           ],
           "baseline": {
             "elapsed_ns": 5632057,
@@ -1797,7 +1797,7 @@
             "stdout_sha256": "3023bed7aac0f1e01953ef8a2ab4830be1ff9f95195abec62e171297e14f0476",
             "stdout_bytes": 2890
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3347167,
             "stderr": "",
             "returncode": 0,
@@ -1810,7 +1810,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 20268678,
@@ -1826,7 +1826,7 @@
             "stdout_sha256": "3023bed7aac0f1e01953ef8a2ab4830be1ff9f95195abec62e171297e14f0476",
             "stdout_bytes": 2890
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3336137,
             "stderr": "",
             "returncode": 0,
@@ -1837,11 +1837,11 @@
         {
           "index": 7,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 3242633,
             "stderr": "",
             "returncode": 0,
@@ -1867,7 +1867,7 @@
           "index": 8,
           "order": [
             "baseline",
-            "relar",
+            "imre",
             "cpython"
           ],
           "baseline": {
@@ -1877,7 +1877,7 @@
             "stdout_sha256": "3023bed7aac0f1e01953ef8a2ab4830be1ff9f95195abec62e171297e14f0476",
             "stdout_bytes": 2890
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3302514,
             "stderr": "",
             "returncode": 0,
@@ -1896,7 +1896,7 @@
           "index": 9,
           "order": [
             "cpython",
-            "relar",
+            "imre",
             "baseline"
           ],
           "cpython": {
@@ -1906,7 +1906,7 @@
             "stdout_sha256": "3023bed7aac0f1e01953ef8a2ab4830be1ff9f95195abec62e171297e14f0476",
             "stdout_bytes": 2890
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3263351,
             "stderr": "",
             "returncode": 0,
@@ -1924,11 +1924,11 @@
         {
           "index": 10,
           "order": [
-            "relar",
+            "imre",
             "cpython",
             "baseline"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 3214430,
             "stderr": "",
             "returncode": 0,
@@ -1955,7 +1955,7 @@
           "order": [
             "baseline",
             "cpython",
-            "relar"
+            "imre"
           ],
           "baseline": {
             "elapsed_ns": 5514189,
@@ -1971,7 +1971,7 @@
             "stdout_sha256": "3023bed7aac0f1e01953ef8a2ab4830be1ff9f95195abec62e171297e14f0476",
             "stdout_bytes": 2890
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 3304618,
             "stderr": "",
             "returncode": 0,
@@ -1988,7 +1988,7 @@
           "p25_seconds": 0.020088958,
           "p75_seconds": 0.02025844275
         },
-        "relar": {
+        "imre": {
           "median_seconds": 0.0032453424999999998,
           "min_seconds": 0.003213478,
           "max_seconds": 0.003347167,
@@ -2003,7 +2003,7 @@
           "p25_seconds": 0.0055507065000000005,
           "p75_seconds": 0.00564277975
         },
-        "baseline_to_relar_ratio_of_medians": 1.7258671465338404,
+        "baseline_to_imre_ratio_of_medians": 1.7258671465338404,
         "cpython_to_baseline_ratio_of_medians": 3.601202635943746
       }
     },
@@ -2024,7 +2024,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 30495973,
@@ -2040,7 +2040,7 @@
             "stdout_sha256": "c0c3ba4990efc9ab0efa39e58191c51d12045e7157f6a252a7fdc296b18b9d89",
             "stdout_bytes": 47841
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 6508849,
             "stderr": "",
             "returncode": 0,
@@ -2051,11 +2051,11 @@
         {
           "index": 1,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 6679456,
             "stderr": "",
             "returncode": 0,
@@ -2084,7 +2084,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 30250929,
@@ -2100,7 +2100,7 @@
             "stdout_sha256": "c0c3ba4990efc9ab0efa39e58191c51d12045e7157f6a252a7fdc296b18b9d89",
             "stdout_bytes": 47841
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 6488351,
             "stderr": "",
             "returncode": 0,
@@ -2111,11 +2111,11 @@
         {
           "index": 1,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 6582265,
             "stderr": "",
             "returncode": 0,
@@ -2141,7 +2141,7 @@
           "index": 2,
           "order": [
             "baseline",
-            "relar",
+            "imre",
             "cpython"
           ],
           "baseline": {
@@ -2151,7 +2151,7 @@
             "stdout_sha256": "c0c3ba4990efc9ab0efa39e58191c51d12045e7157f6a252a7fdc296b18b9d89",
             "stdout_bytes": 47841
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 6675118,
             "stderr": "",
             "returncode": 0,
@@ -2170,7 +2170,7 @@
           "index": 3,
           "order": [
             "cpython",
-            "relar",
+            "imre",
             "baseline"
           ],
           "cpython": {
@@ -2180,7 +2180,7 @@
             "stdout_sha256": "c0c3ba4990efc9ab0efa39e58191c51d12045e7157f6a252a7fdc296b18b9d89",
             "stdout_bytes": 47841
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 6501045,
             "stderr": "",
             "returncode": 0,
@@ -2198,11 +2198,11 @@
         {
           "index": 4,
           "order": [
-            "relar",
+            "imre",
             "cpython",
             "baseline"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 6516193,
             "stderr": "",
             "returncode": 0,
@@ -2229,7 +2229,7 @@
           "order": [
             "baseline",
             "cpython",
-            "relar"
+            "imre"
           ],
           "baseline": {
             "elapsed_ns": 68466072,
@@ -2245,7 +2245,7 @@
             "stdout_sha256": "c0c3ba4990efc9ab0efa39e58191c51d12045e7157f6a252a7fdc296b18b9d89",
             "stdout_bytes": 47841
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 6563410,
             "stderr": "",
             "returncode": 0,
@@ -2258,7 +2258,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 30495954,
@@ -2274,7 +2274,7 @@
             "stdout_sha256": "c0c3ba4990efc9ab0efa39e58191c51d12045e7157f6a252a7fdc296b18b9d89",
             "stdout_bytes": 47841
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 6570072,
             "stderr": "",
             "returncode": 0,
@@ -2285,11 +2285,11 @@
         {
           "index": 7,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 6570824,
             "stderr": "",
             "returncode": 0,
@@ -2315,7 +2315,7 @@
           "index": 8,
           "order": [
             "baseline",
-            "relar",
+            "imre",
             "cpython"
           ],
           "baseline": {
@@ -2325,7 +2325,7 @@
             "stdout_sha256": "c0c3ba4990efc9ab0efa39e58191c51d12045e7157f6a252a7fdc296b18b9d89",
             "stdout_bytes": 47841
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 6613614,
             "stderr": "",
             "returncode": 0,
@@ -2344,7 +2344,7 @@
           "index": 9,
           "order": [
             "cpython",
-            "relar",
+            "imre",
             "baseline"
           ],
           "cpython": {
@@ -2354,7 +2354,7 @@
             "stdout_sha256": "c0c3ba4990efc9ab0efa39e58191c51d12045e7157f6a252a7fdc296b18b9d89",
             "stdout_bytes": 47841
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 6493630,
             "stderr": "",
             "returncode": 0,
@@ -2372,11 +2372,11 @@
         {
           "index": 10,
           "order": [
-            "relar",
+            "imre",
             "cpython",
             "baseline"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 6508768,
             "stderr": "",
             "returncode": 0,
@@ -2403,7 +2403,7 @@
           "order": [
             "baseline",
             "cpython",
-            "relar"
+            "imre"
           ],
           "baseline": {
             "elapsed_ns": 66429284,
@@ -2419,7 +2419,7 @@
             "stdout_sha256": "c0c3ba4990efc9ab0efa39e58191c51d12045e7157f6a252a7fdc296b18b9d89",
             "stdout_bytes": 47841
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 6532222,
             "stderr": "",
             "returncode": 0,
@@ -2436,7 +2436,7 @@
           "p25_seconds": 0.03048234375,
           "p75_seconds": 0.031000868
         },
-        "relar": {
+        "imre": {
           "median_seconds": 0.006547816,
           "min_seconds": 0.006488351,
           "max_seconds": 0.006675118,
@@ -2451,7 +2451,7 @@
           "p25_seconds": 0.06654285725,
           "p75_seconds": 0.0669864485
         },
-        "baseline_to_relar_ratio_of_medians": 10.192258915033655,
+        "baseline_to_imre_ratio_of_medians": 10.192258915033655,
         "cpython_to_baseline_ratio_of_medians": 0.45886974213238957
       }
     },
@@ -2472,7 +2472,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 115766228,
@@ -2488,7 +2488,7 @@
             "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
             "stdout_bytes": 395810
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 34530019,
             "stderr": "",
             "returncode": 0,
@@ -2499,11 +2499,11 @@
         {
           "index": 1,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 33573910,
             "stderr": "",
             "returncode": 0,
@@ -2532,7 +2532,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 121877749,
@@ -2548,7 +2548,7 @@
             "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
             "stdout_bytes": 395810
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 34622361,
             "stderr": "",
             "returncode": 0,
@@ -2559,11 +2559,11 @@
         {
           "index": 1,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 33377705,
             "stderr": "",
             "returncode": 0,
@@ -2589,7 +2589,7 @@
           "index": 2,
           "order": [
             "baseline",
-            "relar",
+            "imre",
             "cpython"
           ],
           "baseline": {
@@ -2599,7 +2599,7 @@
             "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
             "stdout_bytes": 395810
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 34113104,
             "stderr": "",
             "returncode": 0,
@@ -2618,7 +2618,7 @@
           "index": 3,
           "order": [
             "cpython",
-            "relar",
+            "imre",
             "baseline"
           ],
           "cpython": {
@@ -2628,7 +2628,7 @@
             "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
             "stdout_bytes": 395810
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 34074261,
             "stderr": "",
             "returncode": 0,
@@ -2646,11 +2646,11 @@
         {
           "index": 4,
           "order": [
-            "relar",
+            "imre",
             "cpython",
             "baseline"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 34319196,
             "stderr": "",
             "returncode": 0,
@@ -2677,7 +2677,7 @@
           "order": [
             "baseline",
             "cpython",
-            "relar"
+            "imre"
           ],
           "baseline": {
             "elapsed_ns": 521690865,
@@ -2693,7 +2693,7 @@
             "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
             "stdout_bytes": 395810
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 33651383,
             "stderr": "",
             "returncode": 0,
@@ -2706,7 +2706,7 @@
           "order": [
             "cpython",
             "baseline",
-            "relar"
+            "imre"
           ],
           "cpython": {
             "elapsed_ns": 116078180,
@@ -2722,7 +2722,7 @@
             "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
             "stdout_bytes": 395810
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 32803046,
             "stderr": "",
             "returncode": 0,
@@ -2733,11 +2733,11 @@
         {
           "index": 7,
           "order": [
-            "relar",
+            "imre",
             "baseline",
             "cpython"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 33952785,
             "stderr": "",
             "returncode": 0,
@@ -2763,7 +2763,7 @@
           "index": 8,
           "order": [
             "baseline",
-            "relar",
+            "imre",
             "cpython"
           ],
           "baseline": {
@@ -2773,7 +2773,7 @@
             "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
             "stdout_bytes": 395810
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 35070834,
             "stderr": "",
             "returncode": 0,
@@ -2792,7 +2792,7 @@
           "index": 9,
           "order": [
             "cpython",
-            "relar",
+            "imre",
             "baseline"
           ],
           "cpython": {
@@ -2802,7 +2802,7 @@
             "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
             "stdout_bytes": 395810
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 33547262,
             "stderr": "",
             "returncode": 0,
@@ -2820,11 +2820,11 @@
         {
           "index": 10,
           "order": [
-            "relar",
+            "imre",
             "cpython",
             "baseline"
           ],
-          "relar": {
+          "imre": {
             "elapsed_ns": 33728619,
             "stderr": "",
             "returncode": 0,
@@ -2851,7 +2851,7 @@
           "order": [
             "baseline",
             "cpython",
-            "relar"
+            "imre"
           ],
           "baseline": {
             "elapsed_ns": 533150756,
@@ -2867,7 +2867,7 @@
             "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
             "stdout_bytes": 395810
           },
-          "relar": {
+          "imre": {
             "elapsed_ns": 33789742,
             "stderr": "",
             "returncode": 0,
@@ -2884,7 +2884,7 @@
           "p25_seconds": 0.11717021424999999,
           "p75_seconds": 0.1208943805
         },
-        "relar": {
+        "imre": {
           "median_seconds": 0.0338712635,
           "min_seconds": 0.032803046,
           "max_seconds": 0.035070834,
@@ -2899,7 +2899,7 @@
           "p25_seconds": 0.5192260865,
           "p75_seconds": 0.5232692795
         },
-        "baseline_to_relar_ratio_of_medians": 15.387926759803337,
+        "baseline_to_imre_ratio_of_medians": 15.387926759803337,
         "cpython_to_baseline_ratio_of_medians": 0.22738855275278866
       }
     }
@@ -2931,7 +2931,7 @@
       "llvm_ir": "3e0fc9f9a81c026625427e2cfbf090c734dacba959a416c3414034362d8c51b3"
     },
     "tools": {
-      "relar": "relar 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
+      "imre": "imre 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
       "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-18/bin",
       "cpython": {
         "implementation": "cpython",
@@ -2961,7 +2961,7 @@
       "returncode": 0
     },
     "compile_command": [
-      "relar",
+      "imre",
       "build",
       "examples/dependency_planner/__main__.py",
       "--module-root",

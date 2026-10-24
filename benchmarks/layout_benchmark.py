@@ -2,7 +2,7 @@
 
 The baseline bundle preserves binaries, their build records, exact captured inputs,
 and the original Rust reference sources. All paths in its index are relative to
-the index directory. New Relar artifacts are built once before correctness checks
+the index directory. New Imre artifacts are built once before correctness checks
 and timing; existing baselines and Rust executables are never rebuilt here.
 """
 
@@ -30,7 +30,7 @@ VALIDATORS = {
     "batch": manifest.validator.batch,
     "manifest": manifest.validator,
 }
-ENGINES = ("cpython", "baseline", "relar", "rust_bigint")
+ENGINES = ("cpython", "baseline", "imre", "rust_bigint")
 
 
 def runtime_context() -> dict:
@@ -87,7 +87,7 @@ def build_provenance(record: dict) -> dict:
             "compilation",
             "compile_command",
             "compile_elapsed_ns",
-            "relar_build_provenance",
+            "imre_build_provenance",
             "rustc_verbose",
             "runtime_lto_rustflags",
         )
@@ -126,7 +126,7 @@ def load_baseline(path: Path, thin_lto: bool, inputs: dict, hashes: dict) -> dic
         for name, digest in tool_record["source_sha256"].items()
     ):
         raise ValueError("frozen compiler/runtime sources differ from their snapshot")
-    for name in ("relar", "librelar_runtime.a", "librelar_runtime_lto.a"):
+    for name in ("imre", "libimre_runtime.a", "libimre_runtime_lto.a"):
         if not any(
             Path(key).name == name and digest == shared.sha256(tools[name])
             for key, digest in tool_record["sha256"].items()
@@ -162,14 +162,14 @@ def load_baseline(path: Path, thin_lto: bool, inputs: dict, hashes: dict) -> dic
     }
     if old_batch["sources"] != batch_sources or batch_build["sources"] != batch_sources:
         raise ValueError("batch baseline source identity changed")
-    runtime_name = "librelar_runtime_lto.a" if thin_lto else "librelar_runtime.a"
+    runtime_name = "libimre_runtime_lto.a" if thin_lto else "libimre_runtime.a"
     for record in (old_manifest, batch_build):
         if any(
             record["options"].get(key) != value
             for key, value in mode["options"].items()
         ):
             raise ValueError("baseline program modes/targets disagree")
-        if record["sha256"]["compiler"] != shared.sha256(tools["relar"]) or record[
+        if record["sha256"]["compiler"] != shared.sha256(tools["imre"]) or record[
             "sha256"
         ]["runtime"] != shared.sha256(tools[runtime_name]):
             raise ValueError("baseline programs do not use the same frozen tools")
@@ -359,7 +359,7 @@ def benchmark(args: argparse.Namespace) -> dict:
     inputs = {
         "compiler": Path(shared.executable(str(args.compiler))),
         "runtime": args.runtime.resolve(strict=True),
-        "relar_build_record": args.relar_build_record.resolve(strict=True),
+        "imre_build_record": args.imre_build_record.resolve(strict=True),
         "clang": Path(shared.executable(args.clang)),
         "harness": Path(__file__).resolve(),
         **{
@@ -410,26 +410,26 @@ def benchmark(args: argparse.Namespace) -> dict:
     }
     if sources != baseline["index"]["sources"]:
         raise ValueError("Python programs changed from the frozen baseline")
-    relar_record = json.loads(inputs["relar_build_record"].read_text())
-    runtime_name = "librelar_runtime_lto.a" if thin_lto else "librelar_runtime.a"
+    imre_record = json.loads(inputs["imre_build_record"].read_text())
+    runtime_name = "libimre_runtime_lto.a" if thin_lto else "libimre_runtime.a"
     for name, digest in (
-        ("relar", hashes["compiler"]),
+        ("imre", hashes["compiler"]),
         (runtime_name, hashes["runtime"]),
     ):
         if not any(
             Path(key).name == name and value == digest
-            for key, value in relar_record.get("sha256", {}).items()
+            for key, value in imre_record.get("sha256", {}).items()
         ):
-            raise ValueError(f"Relar build record does not identify selected {name}")
-    if thin_lto and relar_record.get("runtime_lto_rustflags") != "-Clinker-plugin-lto":
-        raise ValueError("Relar record must identify the bitcode runtime build")
-    if not relar_record.get("source_sha256"):
-        raise ValueError("Relar build record must preserve source hashes")
-    for name, digest in relar_record["source_sha256"].items():
+            raise ValueError(f"Imre build record does not identify selected {name}")
+    if thin_lto and imre_record.get("runtime_lto_rustflags") != "-Clinker-plugin-lto":
+        raise ValueError("Imre record must identify the bitcode runtime build")
+    if not imre_record.get("source_sha256"):
+        raise ValueError("Imre build record must preserve source hashes")
+    for name, digest in imre_record["source_sha256"].items():
         path = ROOT / name
         if shared.sha256(path) != digest:
-            raise ValueError(f"Relar build source changed: {name}")
-        inputs["relar_source:" + name], hashes["relar_source:" + name] = path, digest
+            raise ValueError(f"Imre build source changed: {name}")
+        inputs["imre_source:" + name], hashes["imre_source:" + name] = path, digest
     outputs = {
         group + "_" + kind: artifacts
         / (group + "_planner" + (".ll" if kind == "ir" else ""))
@@ -462,7 +462,7 @@ def benchmark(args: argparse.Namespace) -> dict:
         name: shared.run([str(inputs[key]), "--version"], b"", args.timeout)[
             "stdout"
         ].strip()
-        for name, key in (("relar", "compiler"), ("clang", "clang"))
+        for name, key in (("imre", "compiler"), ("clang", "clang"))
     }
     tools["lto_linker"] = (
         shared.run([str(inputs["lto_linker"]), "--version"], b"", args.timeout)[
@@ -530,7 +530,7 @@ def benchmark(args: argparse.Namespace) -> dict:
         commands[group] = {
             "cpython": validator.python_command(str(inputs["python"])),
             "baseline": [str(baseline["binaries"][group])],
-            "relar": [str(binary)],
+            "imre": [str(binary)],
             "rust_bigint": [str(baseline["references"][group])],
         }
     inputs.update(outputs)
@@ -597,7 +597,7 @@ def benchmark(args: argparse.Namespace) -> dict:
             },
         },
         "rust_build_records": baseline["reference_records"],
-        "relar_build_provenance": build_provenance(relar_record),
+        "imre_build_provenance": build_provenance(imre_record),
         "tools": tools,
         "execution": {
             "before": execution_before,
@@ -647,13 +647,13 @@ def benchmark(args: argparse.Namespace) -> dict:
                         "<package-root>",
                     ],
                     "baseline": [f"<baseline-{group}>"],
-                    "relar": [f"<relar-{group}>"],
+                    "imre": [f"<imre-{group}>"],
                     "rust_bigint": [f"<rust-{group}-bigint>"],
                 }
                 for group, validator in VALIDATORS.items()
             },
             "manifest_arguments": "append the exact captured case.arguments to each engine command",
-            "scope": "each group compares unchanged Python source/input under prior/new Relar and a preserved arbitrary-precision Rust direct port; original reference snapshots/build records are used without rewriting or rebuilding their algorithms; these are whole-program workload results, not isolated layout costs or general language-speed estimates",
+            "scope": "each group compares unchanged Python source/input under prior/new Imre and a preserved arbitrary-precision Rust direct port; original reference snapshots/build records are used without rewriting or rebuilding their algorithms; these are whole-program workload results, not isolated layout costs or general language-speed estimates",
         },
         "validation": validation,
         "workloads": workloads,
@@ -662,7 +662,7 @@ def benchmark(args: argparse.Namespace) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    for option in ("compiler", "runtime", "relar-build-record", "baseline-record"):
+    for option in ("compiler", "runtime", "imre-build-record", "baseline-record"):
         parser.add_argument("--" + option, type=Path, required=True)
     parser.add_argument("--python", default="python3.14")
     parser.add_argument("--clang", default="clang")

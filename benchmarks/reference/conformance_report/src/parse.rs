@@ -35,7 +35,7 @@ pub struct Inputs {
     pub new: String,
 }
 
-/// Apply the same object/array depth bound as Relar's typed JSON decoder.
+/// Apply the same object/array depth bound as Imre's typed JSON decoder.
 fn check_depth(text: &str) -> Result<()> {
     let mut quoted = false;
     let mut escaped = false;

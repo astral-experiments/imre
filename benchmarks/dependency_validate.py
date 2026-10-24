@@ -338,7 +338,7 @@ def validate(binary: Path | None, python: str, random_cases: int = 80) -> dict:
             native = execute([str(binary)], stdin)
             if native != expected:
                 raise AssertionError(
-                    f"Relar/oracle disagreement in {case.label}:\n{native!r}\n!=\n{expected!r}"
+                    f"Imre/oracle disagreement in {case.label}:\n{native!r}\n!=\n{expected!r}"
                 )
         counts["inputs"] += 1
         task_count += len(case.tasks)
