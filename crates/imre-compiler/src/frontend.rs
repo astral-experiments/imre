@@ -601,11 +601,11 @@ pub(crate) fn lower_with_owners(
         }
     }
     let initializer_start = definitions.len();
-    let helpers = Helpers::new(definitions.len() + graph.initializer_modules().count());
+    let helpers = Helpers::new(definitions.len() + graph.initializers().count());
     let globals = ModuleValues::default();
     let mut initializations = Vec::new();
     let mut available = HashSet::new();
-    for module_id in graph.initializer_modules() {
+    for (module_id, range) in graph.initializers() {
         let checker = Checker::new(
             graph,
             module_id,
@@ -616,7 +616,7 @@ pub(crate) fn lower_with_owners(
             &globals,
         );
         initializations.push(
-            Initialization::lower(checker, &mut available)
+            Initialization::lower(checker, &mut available, range)
                 .map_err(|error| format!("{}:{error}", graph.modules[module_id].path.display()))?,
         );
     }
