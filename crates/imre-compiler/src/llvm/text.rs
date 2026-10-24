@@ -89,7 +89,7 @@ impl Emitter<'_, '_> {
                 self.instruction(format!("call ptr @imre_str_dedent(ptr {source})"))
             }
             TextOperation::Unquote => {
-                self.instruction(format!("call ptr @imre_str_unquote(ptr {source})"))
+                self.checked_pointer(format!("call ptr @imre_str_unquote(ptr {source})"))
             }
             TextOperation::ShlexSplit => {
                 self.checked_instruction(format!("call ptr @imre_shlex_split(ptr {source})"))
