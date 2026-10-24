@@ -173,8 +173,9 @@ fn emit_program(
     sanitize: bool,
     mut partition: Option<&mut units::Owners<'_>>,
 ) -> Result<String, String> {
-    let borrows = borrows::analyze(module);
-    let effects = effects::analyze(module);
+    let callable_targets = crate::callables::Targets::analyze(module);
+    let borrows = borrows::analyze(module, &callable_targets);
+    let effects = effects::analyze(module, &callable_targets);
     let inline_dispatch = string_enums::inline_dispatch(module, &effects);
     let mut emitter = Emitter {
         module,
@@ -209,7 +210,7 @@ fn emit_program(
         ranges,
         effects,
         inline_dispatch,
-        callable_targets: crate::callables::Targets::analyze(module),
+        callable_targets,
         integer_regions: integer_regions::analyze(module),
         uses_sys_argv: module.uses_sys_argv(),
     };
