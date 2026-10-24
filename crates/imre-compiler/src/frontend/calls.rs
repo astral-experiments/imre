@@ -7,6 +7,7 @@ pub(super) enum ParameterKind {
     PositionalOnly,
     PositionalOrKeyword,
     KeywordOnly,
+    Variadic,
 }
 
 #[derive(Clone)]
@@ -167,15 +168,42 @@ impl Checker<'_> {
         if offset != 0 {
             order[0] = 0;
         }
-        // Without starred arguments Python requires all positional expressions
-        // before keyword expressions, so these two lists retain source order.
-        for (index, argument) in call.arguments.args.iter().enumerate() {
-            params
-                .get(index)
-                .filter(|parameter| parameter.kind != ParameterKind::KeywordOnly)
-                .ok_or_else(|| error(self.source, argument, "too many positional arguments"))?;
+        // The tuple for *args never escapes its read-only interface. Its homogeneous
+        // elements share the backend's list layout; the private pack is built at
+        // the same point as the trailing positional expressions.
+        let positional = params
+            .iter()
+            .take_while(|p| {
+                matches!(
+                    p.kind,
+                    ParameterKind::PositionalOnly | ParameterKind::PositionalOrKeyword
+                )
+            })
+            .count();
+        let pack = params
+            .iter()
+            .position(|p| p.kind == ParameterKind::Variadic);
+        for (index, argument) in call.arguments.args.iter().enumerate().take(positional) {
             order[index + offset] = values.len();
             values.push(check(self, index, argument)?);
+        }
+        if let Some(index) = pack {
+            let extras = ast::Expr::List(ast::ExprList {
+                node_index: ast::AtomicNodeIndex::NONE,
+                range: call.arguments.range(),
+                ctx: ast::ExprContext::Load,
+                elts: call
+                    .arguments
+                    .args
+                    .iter()
+                    .skip(positional)
+                    .cloned()
+                    .collect(),
+            });
+            order[index + offset] = values.len();
+            values.push(check(self, index, &extras)?);
+        } else if let Some(extra) = call.arguments.args.get(positional) {
+            return Err(error(self.source, extra, "too many positional arguments"));
         }
         for keyword in &call.arguments.keywords {
             let name = keyword
@@ -185,7 +213,9 @@ impl Checker<'_> {
                 .as_str();
             let index = params
                 .iter()
-                .position(|parameter| parameter.name == name)
+                .position(|parameter| {
+                    parameter.name == name && parameter.kind != ParameterKind::Variadic
+                })
                 .ok_or_else(|| {
                     error(
                         self.source,

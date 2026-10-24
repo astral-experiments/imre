@@ -267,9 +267,7 @@ impl Checker<'_> {
         helper.returns = signature.returns;
         helper.asynchronous = signature.asynchronous;
         let mut params = Vec::new();
-        for (parameter, ty) in definition
-            .parameters
-            .iter_non_variadic_params()
+        for (parameter, ty) in closed_calls::parameters(&definition.parameters)
             .zip(signature.params.iter().map(|p| p.ty))
         {
             let slot = helper.declare(parameter.name().as_str(), ty, parameter)?;

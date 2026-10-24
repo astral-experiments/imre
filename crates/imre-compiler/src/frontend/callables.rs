@@ -111,14 +111,16 @@ impl Checker<'_> {
         node: &impl Ranged,
     ) -> Result<Expr, String> {
         let skip = usize::from(receiver.is_some());
-        if signature.params[skip..]
-            .iter()
-            .any(|parameter| parameter.kind == ParameterKind::KeywordOnly)
-        {
+        if signature.params[skip..].iter().any(|parameter| {
+            matches!(
+                parameter.kind,
+                ParameterKind::KeywordOnly | ParameterKind::Variadic
+            )
+        }) {
             return Err(error(
                 self.source,
                 node,
-                "function values cannot have keyword-only parameters",
+                "function values require fixed positional parameters",
             ));
         }
         let mut signature = signature.clone();

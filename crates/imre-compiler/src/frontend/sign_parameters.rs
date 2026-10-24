@@ -74,11 +74,15 @@ impl Checker<'_> {
         ty: Type,
         sign_only: bool,
     ) -> Result<Expr, String> {
-        if !sign_only {
+        let packed = closed_calls::keyword_field(argument);
+        if !sign_only && !packed {
             return self.expr_expected(argument, ty);
         }
         let value = self.expr(argument)?;
-        if value.ty == Type::Int {
+        if packed && self.types.payload(value.ty) == Some(ty) {
+            return Ok(self.require_keyword_payload(value, ty));
+        }
+        if sign_only && value.ty == Type::Int {
             Ok(Expr {
                 ty: Type::Float,
                 kind: ExprKind::Builtin(Builtin::IntSignAsFloat, vec![value]),

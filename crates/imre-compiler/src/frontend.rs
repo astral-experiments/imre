@@ -16,6 +16,7 @@ mod assignments;
 mod asyncio;
 mod callables;
 mod calls;
+mod closed_calls;
 mod comprehensions;
 mod contexts;
 mod counter;
@@ -555,6 +556,7 @@ pub(crate) fn lower_with_owners(
     )?;
     for (module, function, _) in &mut definitions {
         assignments::alias_builtin_parameters(function, &graph.modules[*module].bindings);
+        closed_calls::prepare(function, graph, *module);
     }
     inference.solve(
         graph,
@@ -638,10 +640,8 @@ pub(crate) fn lower_with_owners(
             checker.asynchronous = signature.asynchronous;
             checker.method_context(signature.method);
             let mut params = Vec::new();
-            for (parameter, signature) in definition
-                .parameters
-                .iter_non_variadic_params()
-                .zip(&signature.params)
+            for (parameter, signature) in
+                closed_calls::parameters(&definition.parameters).zip(&signature.params)
             {
                 let slot = checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
                 checker.assigned.insert(slot);
@@ -969,13 +969,12 @@ fn signature(
         .map(|context| classes.instance(context.class));
     if !function.decorator_list.is_empty()
         || function.type_params.is_some()
-        || function.parameters.vararg.is_some()
         || function.parameters.kwarg.is_some()
     {
         return Err(error(
             source,
             function,
-            "decorators, type parameters, and variadic parameters are unsupported",
+            "decorators, type parameters, and variadic keyword parameters are unsupported",
         ));
     }
     let mut params = Vec::new();
@@ -1087,6 +1086,26 @@ fn signature(
             sign_only: ty == Type::Float
                 && parameter.annotation().is_some()
                 && sign_parameters::only_compares_zero(function, parameter.name().as_str()),
+        });
+    }
+    if let Some(pack) = function.parameters.vararg.as_deref() {
+        let annotation = pack.annotation().ok_or_else(|| {
+            error(
+                source,
+                pack,
+                "a variadic positional parameter requires an exact element annotation",
+            )
+        })?;
+        let element = annotation_in_class(annotation, graph, module, classes, types, owner)?;
+        sequences::check_pack_reads(function, pack.name.as_str(), graph, module, source)?;
+        let ty = types.list(element);
+        parameter_types.push(Some(ty));
+        params.push(Parameter {
+            name: pack.name.to_string(),
+            ty,
+            kind: ParameterKind::Variadic,
+            default: None,
+            sign_only: false,
         });
     }
     let returns = function
@@ -2363,12 +2382,7 @@ impl<'a> Checker<'a> {
         if dict.items.iter().any(|item| item.key.is_none()) {
             return self.expanded_dictionary(dict, expected);
         }
-        let mut types = expected.or_else(|| {
-            self.graph
-                .empty_keywords
-                .contains(self.module, dict)
-                .then_some((Type::Str, Type::None))
-        });
+        let mut types = expected;
         let mut entries = Vec::with_capacity(dict.items.len());
         for item in &dict.items {
             let key = item
@@ -4933,29 +4947,8 @@ impl<'a> Checker<'a> {
         {
             return Ok(mapping);
         }
-        if call.arguments.keywords.iter().any(|kw| kw.arg.is_none()) {
-            let mut normalized = call.clone();
-            normalized.arguments.keywords.retain(|kw| {
-                if kw.arg.is_some() {
-                    return true;
-                }
-                match &kw.value {
-                    ast::Expr::Dict(d) if d.items.is_empty() => false,
-                    ast::Expr::Name(n)
-                        if self.graph.empty_keywords.contains(self.module, n)
-                            && self
-                                .names
-                                .get(n.id.as_str())
-                                .is_some_and(|slot| self.assigned.contains(slot)) =>
-                    {
-                        false
-                    }
-                    _ => true,
-                }
-            });
-            if normalized.arguments.keywords.len() != call.arguments.keywords.len() {
-                return self.call_on(&normalized, receiver);
-            }
+        if let Some(expanded) = self.expand_closed_call(call) {
+            return self.call_on(&expanded, receiver);
         }
         if let Some(Binding::Intrinsic(
             kind @ (Intrinsic::TomliLoads

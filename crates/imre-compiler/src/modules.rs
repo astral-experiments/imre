@@ -11,7 +11,6 @@ use crate::analysis::Session;
 use crate::ir::PosixPathOperation;
 use crate::watch::FileSystem;
 
-mod empty_keywords;
 mod entry_profile;
 mod reachability;
 
@@ -438,7 +437,6 @@ impl SourceModule {
 }
 
 pub(crate) struct SourceGraph {
-    pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -867,7 +865,6 @@ impl<'a> Loader<'a> {
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
         let mut graph = SourceGraph {
-            empty_keywords: empty_keywords::EmptyKeywords::default(),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
@@ -882,7 +879,6 @@ impl<'a> Loader<'a> {
             initialization: self.initialization,
         };
         graph.reachable = reachable_only.then(|| reachability::Reachable::collect(&graph));
-        graph.empty_keywords = empty_keywords::EmptyKeywords::collect(&graph);
         graph.mutable_documents = graph.uses_mutable_documents();
         Ok(graph)
     }

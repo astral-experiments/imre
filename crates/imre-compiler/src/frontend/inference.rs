@@ -293,10 +293,8 @@ impl Inference {
                 checker.method_context(signature.method);
                 checker.inferred_returns = infer_return.then(Vec::new);
                 let result = (|| {
-                    for (parameter, signature) in function
-                        .parameters
-                        .iter_non_variadic_params()
-                        .zip(&signature.params)
+                    for (parameter, signature) in
+                        closed_calls::parameters(&function.parameters).zip(&signature.params)
                     {
                         let slot =
                             checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
