@@ -15,6 +15,7 @@ use crate::objects::words::Words;
 use crate::objects::{Object, Storage, object};
 use crate::{Error, Int, Kind, StorageCell, Str, finish};
 
+pub(in crate::objects) mod document;
 mod values;
 mod writer;
 
@@ -25,6 +26,7 @@ enum Node {
     Integer(Int),
     Float(f64),
     String(Rc<Str>),
+    Datetime(Str),
     Array(Vec<usize>),
     Object(Vec<(Str, usize)>),
 }
@@ -33,6 +35,7 @@ impl Node {
     fn truth(&self) -> bool {
         match self {
             Self::Null => false,
+            Self::Datetime(_) => true,
             Self::Bool(value) => *value,
             Self::Array(values) => !values.is_empty(),
             Self::Integer(value) => value.as_small() != Some(0),
@@ -45,6 +48,7 @@ impl Node {
     fn kind(&self) -> &'static str {
         match self {
             Self::Null => "NoneType",
+            Self::Datetime(_) => "datetime",
             Self::Bool(_) => "bool",
             Self::Integer(_) => "int",
             Self::Float(_) => "float",

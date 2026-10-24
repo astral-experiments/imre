@@ -7,6 +7,16 @@ use std::rc::Rc;
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Int, Object, Str, Words, fail, python_whitespace};
 
+/// Returns Python's substring membership for two exact strings.
+///
+/// # Safety
+/// Both operands are rooted for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_contains(needle: *const Str, text: *const Str) -> u32 {
+    // SAFETY: the caller roots both immutable strings through the search.
+    unsafe { u32::from((&*text).contains((&*needle).as_str())) }
+}
+
 /// Removes the common space/tab prefix after the caller has evaluated its text.
 /// Python 3.14 normalizes whitespace-only lines, including Unicode whitespace.
 ///

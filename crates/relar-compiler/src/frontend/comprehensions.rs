@@ -404,6 +404,60 @@ impl Checker<'_> {
         self.comprehension_display(expression, display, expected)
     }
 
+    /// A dict can consume an exact two-column zip in the same order as a
+    /// dictionary comprehension; the iterator itself never escapes.
+    pub(super) fn dict_from_zip(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+        let [source @ ast::Expr::Call(zip)] = call.arguments.args.as_ref() else {
+            return Ok(None);
+        };
+        if !call.arguments.keywords.is_empty()
+            || zip.arguments.args.len() != 2
+            || !matches!(&*zip.func,ast::Expr::Name(n) if n.id == "zip" && !self.names.contains_key("zip"))
+            || self.resolve(&zip.func).is_some()
+        {
+            return Ok(None);
+        }
+        let range = call.range();
+        let node_index = || ast::AtomicNodeIndex::NONE;
+        let item = |name: &str, ctx| {
+            ast::Expr::Name(ast::ExprName {
+                range,
+                node_index: node_index(),
+                id: name.into(),
+                ctx,
+            })
+        };
+        let target = ast::Expr::Tuple(ast::ExprTuple {
+            range,
+            node_index: node_index(),
+            parenthesized: false,
+            ctx: ast::ExprContext::Store,
+            elts: vec![
+                item("@zipkey", ast::ExprContext::Store),
+                item("@zipvalue", ast::ExprContext::Store),
+            ],
+        });
+        let clauses = [ast::Comprehension {
+            range,
+            node_index: node_index(),
+            target,
+            iter: source.clone(),
+            ifs: Vec::new(),
+            is_async: false,
+        }];
+        let key = item("@zipkey", ast::ExprContext::Load);
+        let value = item("@zipvalue", ast::ExprContext::Load);
+        self.comprehension_display(
+            &call.func,
+            Display {
+                clauses: &clauses,
+                value: Yield::Dict(&key, &value),
+            },
+            None,
+        )
+        .map(Some)
+    }
+
     /// Reduces an immediately consumed integer comprehension in its original
     /// eager order. Integer addition has no callbacks or recoverable failures;
     /// the private list and its element owners cannot otherwise be observed.

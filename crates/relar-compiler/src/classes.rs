@@ -10,6 +10,7 @@ use crate::modules::{Binding, DefinitionId, Intrinsic, SourceGraph, SourceModule
 
 mod dataclasses;
 mod enums;
+mod exceptions;
 mod inheritance;
 mod record_hash;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
@@ -25,6 +26,8 @@ pub(crate) enum MethodKind {
 
 pub(crate) struct Classes {
     pub(crate) definitions: Vec<Class>,
+    pub(crate) exceptions: HashMap<DefinitionId, u32>,
+    pub(crate) exception_declarations: Vec<crate::types::NamedException>,
     pub(crate) ids: HashMap<DefinitionId, usize>,
 }
 
@@ -62,8 +65,12 @@ pub(crate) struct Field {
 
 impl Classes {
     pub(crate) fn instance(&self, id: usize) -> Type {
-        if self.definitions[id].enum_members.is_some() {
-            Type::StrEnum(id)
+        if let Some(members) = &self.definitions[id].enum_members {
+            if members.plain {
+                Type::Enum(id)
+            } else {
+                Type::StrEnum(id)
+            }
         } else {
             Type::Class(id)
         }
@@ -71,6 +78,7 @@ impl Classes {
 
     /// Assigns nominal identities in module and source order, independently of imports' aliases.
     pub(crate) fn collect(graph: &SourceGraph) -> Result<Self, String> {
+        let (exceptions, exception_declarations) = exceptions::collect(graph)?;
         let mut nodes = Vec::new();
         let mut ids = HashMap::new();
         for (module_id, module) in graph.modules.iter().enumerate() {
@@ -80,7 +88,7 @@ impl Classes {
                         module: module_id,
                         statement,
                     };
-                    if !graph.includes(definition) {
+                    if !graph.includes(definition) || exceptions.contains_key(&definition) {
                         continue;
                     }
                     ids.insert(definition, nodes.len());
@@ -89,7 +97,12 @@ impl Classes {
             }
         }
         let definitions = inheritance::resolve(graph, &nodes, &ids)?;
-        Ok(Self { definitions, ids })
+        Ok(Self {
+            definitions,
+            ids,
+            exceptions,
+            exception_declarations,
+        })
     }
 }
 
@@ -101,7 +114,7 @@ fn collect_class(
     base: Option<(usize, &Class)>,
 ) -> Result<Class, String> {
     let is_enum = node.arguments.as_ref().is_some_and(|arguments| {
-        matches!(arguments.args.as_ref(), [base] if graph.resolve(definition.module, base) == Some(Binding::Intrinsic(Intrinsic::StrEnum)))
+        matches!(arguments.args.as_ref(), [base] if matches!(graph.resolve(definition.module, base), Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))))
             && arguments.keywords.is_empty()
     });
     let abc = base.is_some_and(|(_, parent)| parent.abc)
@@ -128,6 +141,10 @@ fn collect_class(
         return Err(module.error(node, "decorated StrEnum declarations are unsupported"));
     }
     let mut enum_members = is_enum.then(enums::Members::default);
+    if let Some(members) = &mut enum_members {
+        members.plain = graph.resolve(definition.module, &node.arguments.as_ref().unwrap().args[0])
+            == Some(Binding::Intrinsic(Intrinsic::StandardEnum));
+    }
     let dataclass = dataclasses::options(graph, definition.module, node)?;
     let mut names = HashSet::new();
     let mut class_bindings = HashSet::new();
@@ -211,11 +228,8 @@ fn collect_class(
                     abstract_methods.remove(method.name.as_str());
                     continue;
                 }
-                if method.is_async || method.type_params.is_some() {
-                    return Err(module.error(
-                        method,
-                        "async methods and method type parameters are unsupported",
-                    ));
+                if method.type_params.is_some() {
+                    return Err(module.error(method, "method type parameters are unsupported"));
                 }
                 let name = method.name.as_str();
                 if base.is_some_and(|(_, base)| base.fields.iter().any(|field| field.name == name))
@@ -443,6 +457,12 @@ fn method_kind(
             Err(module.error(method, "method decorators cannot be stacked"))
         };
     };
+    if graph.resolve(module_id, &decorator.expression)
+        == Some(Binding::Intrinsic(Intrinsic::ContextManager))
+        && !method.is_async
+    {
+        return Ok(MethodKind::Instance);
+    }
     if let ast::Expr::Name(name) = &decorator.expression
         && graph.resolve(module_id, &decorator.expression).is_none()
         && !class_names.contains(name.id.as_str())

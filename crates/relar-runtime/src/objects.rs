@@ -8,7 +8,9 @@
 
 mod argparse;
 mod args;
+mod asyncio;
 mod bytes;
+mod contexts;
 mod difflib;
 pub(crate) mod exceptions;
 mod files;
@@ -49,6 +51,14 @@ enum Storage {
     BytesIterator(bytes::BytesIterator),
     Exception(exceptions::Exception),
     File(Box<files::FileState>),
+    AsyncProcess(Box<processes::AsyncProcess>),
+    AsyncTask(Rc<asyncio::Task>),
+    GeneratorContext(Rc<contexts::Manager>),
+    DirectoryContext(tempdirs::DirectoryContext),
+    Document(json::readonly::document::Value),
+    EventLoop(Rc<asyncio::EventLoop>),
+    TaskGroup(Rc<asyncio::Group>),
+    Semaphore(Rc<asyncio::Semaphore>),
     Path {
         text: Rc<Str>,
         name: std::cell::OnceCell<Rc<Str>>,

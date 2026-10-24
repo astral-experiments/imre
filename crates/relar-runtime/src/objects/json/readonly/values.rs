@@ -17,6 +17,7 @@ impl View {
         }
         match (left, right) {
             (Node::Null, Node::Null) => true,
+            (Node::Datetime(a), Node::Datetime(b)) => a == b,
             (Node::String(a), Node::String(b)) => a == b,
             (Node::Float(a), Node::Float(b)) => a == b,
             (Node::Integer(a), Node::Integer(b)) => a.0 == b.0 || a.big() == b.big(),
@@ -53,6 +54,7 @@ impl View {
         let node = &self.nodes[i];
         match node {
             Node::Null => output.push_str("None"),
+            Node::Datetime(value) => output.push_str(value),
             Node::Bool(b) => output.push_str(if *b { "True" } else { "False" }),
             Node::Integer(i) => {
                 if let Some(i) = i.as_small() {

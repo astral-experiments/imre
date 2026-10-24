@@ -15,13 +15,24 @@ enum Shape {
     Set(Type),
     Tuple(Vec<Type>),
     Callable(Vec<Type>, Type),
+    Awaitable(Type),
+    DirectoryContext(Type),
     Optional(Type),
     Union(Vec<Type>),
+}
+
+#[derive(Clone)]
+pub(crate) struct NamedException {
+    pub id: u32,
+    pub name: String,
+    pub base: u32,
+    pub ancestors: Vec<u32>,
 }
 
 #[derive(Default)]
 struct Storage {
     shapes: Vec<Shape>,
+    exceptions: Vec<NamedException>,
     ids: HashMap<Shape, usize>,
     hashable_records: HashSet<usize>,
     custom_truth: HashSet<usize>,
@@ -35,6 +46,14 @@ struct Storage {
 pub(crate) struct Types(RefCell<Storage>);
 
 impl Types {
+    pub(crate) fn set_exception_declarations(&self, declarations: Vec<NamedException>) {
+        self.0.borrow_mut().exceptions = declarations;
+    }
+
+    pub(crate) fn exception_declarations(&self) -> Ref<'_, [NamedException]> {
+        Ref::map(self.0.borrow(), |storage| storage.exceptions.as_slice())
+    }
+
     pub(crate) fn string_literal(&self, mut values: Vec<String>) -> Type {
         values.sort_unstable();
         values.dedup();
@@ -85,6 +104,7 @@ impl Types {
                 | Type::Str
                 | Type::StrLiteral(_)
                 | Type::StrEnum(_)
+                | Type::Enum(_)
                 | Type::Bytes
                 | Type::Path
         ) || matches!(ty, Type::Tuple(_) | Type::Class(_)) && self.immutable_key_field(ty)
@@ -100,6 +120,7 @@ impl Types {
             | Type::Str
             | Type::StrLiteral(_)
             | Type::StrEnum(_)
+            | Type::Enum(_)
             | Type::Bytes
             | Type::Path
             | Type::None => true,
@@ -135,6 +156,12 @@ impl Types {
 
     /// Joins values only when one existing concrete or nullable layout can hold both.
     pub(crate) fn join(&self, left: Type, right: Type) -> Option<Type> {
+        if let (Some(left), Some(right)) = (self.directory_value(left), self.directory_value(right))
+        {
+            return self
+                .join(left, right)
+                .map(|value| self.directory_context(value));
+        }
         if left == right || self.payload(left) == Some(right) {
             Some(left)
         } else if self.payload(right) == Some(left) {
@@ -149,7 +176,7 @@ impl Types {
     }
 
     /// Canonicalizes a deliberately bounded union. Mutable container layouts
-    /// remain invariant, including the string-list member of a text union.
+    /// remain invariant; only str and bytes may form a nonnullable sum today.
     pub(crate) fn union(&self, values: &[Type]) -> Option<Type> {
         let mut members = Vec::new();
         let mut nullable = false;
@@ -189,9 +216,16 @@ impl Types {
                 }
             }
             [Type::Str, other] | [other, Type::Str]
-                if *other == Type::Bytes || self.element(*other) == Some(Type::Str) =>
+                if matches!(other, Type::Bytes | Type::Path | Type::Enum(_))
+                    || self.element(*other) == Some(Type::Str) =>
             {
                 Type::Union(self.intern(Shape::Union(vec![Type::Str, *other])))
+            }
+            [record @ Type::Class(id), Type::Exception]
+            | [Type::Exception, record @ Type::Class(id)]
+                if !self.0.borrow().custom_truth.contains(id) =>
+            {
+                Type::Union(self.intern(Shape::Union(vec![*record, Type::Exception])))
             }
             _ => return None,
         };
@@ -215,12 +249,22 @@ impl Types {
             Type::Class(id) if self.0.borrow().custom_truth.contains(&id) => None,
             Type::Class(_)
             | Type::Callable(_)
+            | Type::Enum(_)
             | Type::Iterator
             | Type::Exception
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::Path
             | Type::CompletedProcess
+            | Type::EventLoop
+            | Type::Coroutine(_)
+            | Type::Task(_)
+            | Type::TaskGroup
+            | Type::Document(_)
+            | Type::GeneratorContext
+            | Type::DirectoryContext(_)
+            | Type::Semaphore
+            | Type::AsyncProcess(_)
             | Type::Logger
             | Type::RegexPattern
             | Type::RegexMatch
@@ -269,6 +313,34 @@ impl Types {
 
     pub(crate) fn tuple(&self, elements: Vec<Type>) -> Type {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
+    }
+
+    pub(crate) fn directory_context(&self, result: Type) -> Type {
+        Type::DirectoryContext(self.intern(Shape::DirectoryContext(result)))
+    }
+
+    pub(crate) fn directory_value(&self, ty: Type) -> Option<Type> {
+        let Type::DirectoryContext(id) = ty else {
+            return None;
+        };
+        match self.0.borrow().shapes[id] {
+            Shape::DirectoryContext(value) => Some(value),
+            _ => unreachable!("directory context carries its enter type"),
+        }
+    }
+
+    pub(crate) fn coroutine(&self, result: Type) -> Type {
+        Type::Coroutine(self.intern(Shape::Awaitable(result)))
+    }
+
+    pub(crate) fn awaited(&self, ty: Type) -> Option<Type> {
+        let (Type::Coroutine(id) | Type::Task(id)) = ty else {
+            return None;
+        };
+        match self.0.borrow().shapes[id] {
+            Shape::Awaitable(result) => Some(result),
+            _ => unreachable!("awaitable has an exact result type"),
+        }
     }
 
     /// Callable types describe full positional calls; names and defaults remain
@@ -410,7 +482,7 @@ impl Types {
                 let choices = values.iter().map(|s| format!("{s:?}")).collect::<Vec<_>>();
                 format!("Literal[{}]", choices.join(", "))
             }
-            Type::Class(id) | Type::StrEnum(id) => class_name(id),
+            Type::Class(id) | Type::StrEnum(id) | Type::Enum(id) => class_name(id),
             Type::Callable(_) => {
                 let (params, returns) = self.signature(ty).unwrap();
                 format!(

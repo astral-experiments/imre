@@ -52,44 +52,60 @@ fn paint(enabled: bool, code: &str, text: &str) -> String {
     }
 }
 
-fn option_label(label: &str, summary: bool, color: bool) -> String {
-    if !color {
-        return label.to_owned();
-    }
-    if let Some((flag, args)) = label.split_once(' ') {
-        if summary {
-            format!("\x1b[36m{flag} \x1b[33m{args}\x1b[0m")
-        } else {
-            format!(
-                "{} {}",
-                paint(true, "1;36", flag),
-                paint(true, "1;33", args)
-            )
-        }
-    } else {
-        paint(true, if summary { "36" } else { "1;36" }, label)
-    }
-}
-
 impl OptionSpec {
     fn dest(&self) -> String {
-        self.flag[2..].replace('-', "_")
+        self.flags()
+            .find_map(|s| s.strip_prefix("--"))
+            .unwrap_or_else(|| self.flag.trim_start_matches('-'))
+            .replace('-', "_")
     }
 
-    fn invocation(&self) -> String {
-        if self.kind == Kind::Bool {
-            return self.flag.clone();
-        }
-        let metavar = if self.choices.is_empty() {
-            self.dest().to_uppercase()
+    fn label(&self, summary: bool, color: bool) -> String {
+        let mut metavar = if self.choices.is_empty() {
+            if self.positional() {
+                self.dest()
+            } else {
+                self.dest().to_uppercase()
+            }
         } else {
             format!("{{{}}}", self.choices.join(","))
         };
-        if self.many {
-            format!("{} {metavar} [{metavar} ...]", self.flag)
-        } else {
-            format!("{} {metavar}", self.flag)
+        if self.positional() {
+            return paint(color, if summary { "32" } else { "1;32" }, &metavar);
         }
+        if self.many {
+            metavar = format!("{metavar} [{metavar} ...]");
+        }
+        let option_color = |flag: &str, bold: bool| match (flag.starts_with("--"), bold) {
+            (true, true) => "1;36",
+            (true, false) => "36",
+            (false, true) => "1;32",
+            (false, false) => "32",
+        };
+        if summary {
+            if self.kind == Kind::Bool {
+                return paint(color, option_color(&self.flag, false), &self.flag);
+            }
+            return if color {
+                format!(
+                    "\x1b[{}m{} \x1b[33m{metavar}\x1b[0m",
+                    option_color(&self.flag, false),
+                    self.flag
+                )
+            } else {
+                format!("{} {metavar}", self.flag)
+            };
+        }
+        let mut label = self
+            .flags()
+            .map(|flag| paint(color, option_color(flag, true), flag))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if self.kind != Kind::Bool {
+            label.push(' ');
+            label.push_str(&paint(color, "1;33", &metavar));
+        }
+        label
     }
 }
 
@@ -280,59 +296,60 @@ impl Parser {
             (len(&self.prog), paint(color, "1;35", &self.prog)),
             (4, short),
         ];
-        for option in &self.options {
-            let label = option.invocation();
-            let length = len(&label);
-            let styled = option_label(&label, true, color);
+        for option in self.options.iter().filter(|o| !o.positional()) {
+            let length = len(&option.label(true, false));
+            let styled = option.label(true, color);
             parts.push(if option.required {
                 (length, styled)
             } else {
                 (length + 2, format!("[{styled}]"))
             });
         }
-        let positional = self.subcommands.as_ref().map(|commands| {
-            let text = format!("{} ...", commands.metavar());
-            (len(&text), paint(color, "32", &text))
-        });
+        let mut positional: Vec<_> = self
+            .options
+            .iter()
+            .filter(|o| o.positional())
+            .map(|option| (len(&option.label(true, false)), option.label(true, color)))
+            .collect();
+        if let Some(commands) = &self.subcommands {
+            let word = format!("{} ...", commands.metavar());
+            positional.push((len(&word), paint(color, "32", &word)));
+        }
         let prefix = "usage: ".len();
         let mut text = paint(color, "1;34", "usage: ");
-        let full_width = parts.iter().map(|(width, _)| *width).sum::<usize>() + parts.len() - 1
-            + positional.as_ref().map_or(0, |(len, _)| len + 1);
-        if prefix + full_width <= width {
-            for (i, (_, part)) in parts.iter().chain(&positional).enumerate() {
-                if i != 0 {
-                    text.push(' ');
-                }
-                text.push_str(part);
-            }
-        } else if (prefix + len(&self.prog)) * 4 <= 3 * width {
-            text.push_str(&usage_lines(
-                &parts,
-                prefix + len(&self.prog) + 1,
-                prefix,
-                width,
-            ));
-            if let Some((_, part)) = positional {
-                text.push('\n');
-                text.push_str(&" ".repeat(prefix + len(&self.prog) + 1));
-                text.push_str(&part);
-            }
+        let width_of = |parts: &[(usize, String)]| parts.iter().map(|(n, _)| n + 1).sum::<usize>();
+        if prefix + width_of(&parts) + width_of(&positional) - 1 <= width {
+            text.push_str(
+                &parts
+                    .iter()
+                    .chain(&positional)
+                    .map(|(_, part)| part.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
         } else {
-            text.push_str(&parts[0].1);
-            text.push('\n');
-            text.push_str(&" ".repeat(prefix));
-            let mut options = usage_lines(&parts[1..], prefix, prefix, width);
-            if let Some((n, part)) = positional {
-                let option_width: usize = parts[1..].iter().map(|(n, _)| n + 1).sum();
-                if prefix + option_width + n > width {
-                    options.push('\n');
-                    options.push_str(&" ".repeat(prefix));
-                } else {
-                    options.push(' ');
+            let short_prog = (prefix + len(&self.prog)) * 4 <= 3 * width;
+            let indent = if short_prog {
+                prefix + len(&self.prog) + 1
+            } else {
+                prefix
+            };
+            if short_prog {
+                text.push_str(&usage_lines(&parts, indent, prefix, width));
+            } else {
+                text.push_str(&parts[0].1);
+                text.push('\n');
+                text.push_str(&" ".repeat(indent));
+                if prefix + width_of(&parts[1..]) + width_of(&positional) - 1 <= width {
+                    parts.append(&mut positional);
                 }
-                options.push_str(&part);
+                text.push_str(&usage_lines(&parts[1..], indent, indent, width));
             }
-            text.push_str(&options);
+            if !positional.is_empty() {
+                text.push('\n');
+                text.push_str(&" ".repeat(indent));
+                text.push_str(&usage_lines(&positional, indent, indent, width));
+            }
         }
         text.push('\n');
         text
@@ -359,15 +376,32 @@ impl Parser {
         let color = color_enabled();
         let mut rows = vec![(
             "-h, --help".to_owned(),
+            format!(
+                "{}, {}",
+                paint(color, "1;32", "-h"),
+                paint(color, "1;36", "--help")
+            ),
             "show this help message and exit".to_owned(),
         )];
-        rows.extend(self.options.iter().map(|option| {
-            (
-                option.invocation(),
+        let mut positionals = Vec::new();
+        for option in &self.options {
+            let row = (
+                option.label(false, false),
+                option.label(false, color),
                 expand(&option.help, &self.prog, Some(option)),
-            )
-        }));
-        let mut max_header = rows.iter().map(|(label, _)| len(label)).max().unwrap();
+            );
+            if option.positional() {
+                positionals.push(row);
+            } else {
+                rows.push(row);
+            }
+        }
+        let mut max_header = rows
+            .iter()
+            .chain(&positionals)
+            .map(|(label, _, _)| len(label))
+            .max()
+            .unwrap();
         if let Some(commands) = &self.subcommands {
             max_header = max_header.max(len(&commands.metavar()));
             for child in &commands.choices {
@@ -379,13 +413,18 @@ impl Parser {
         let position = (max_header + 4)
             .min(24)
             .min(width.saturating_sub(20).max(4));
-        if let Some(commands) = &self.subcommands {
+        if !positionals.is_empty() || self.subcommands.is_some() {
             writeln!(
                 output,
                 "\n{}",
                 paint(color, "1;34", "positional arguments:")
             )
             .unwrap();
+            for (label, styled, help) in positionals {
+                help_row(&mut output, width, position, 2, &label, &styled, &help);
+            }
+        }
+        if let Some(commands) = &self.subcommands {
             let label = commands.metavar();
             help_row(
                 &mut output,
@@ -411,16 +450,7 @@ impl Parser {
             }
         }
         writeln!(output, "\n{}", paint(color, "1;34", "options:")).unwrap();
-        for (label, help) in rows {
-            let styled = if label == "-h, --help" {
-                format!(
-                    "{}, {}",
-                    paint(color, "1;32", "-h"),
-                    paint(color, "1;36", "--help")
-                )
-            } else {
-                option_label(&label, false, color)
-            };
+        for (label, styled, help) in rows {
             help_row(&mut output, width, position, 2, &label, &styled, &help);
         }
         // HelpFormatter collapses three or more newlines throughout the report,

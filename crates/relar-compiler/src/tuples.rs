@@ -721,9 +721,11 @@ mod tests {
 
     #[test]
     fn cleared_unpacking_roots_do_not_materialize_tuples() {
+        // A list-pattern assignment exercises tuple scalarization, while a plain
+        // tuple of local targets already stages each RHS directly in the frontend.
         let source = r#"
 def total(values: list[int]) -> int:
-    number, name, payload = (1000000000000000000000000000000, "snapshot", [1])
+    [number, name, payload] = (1000000000000000000000000000000, "snapshot", [1])
     print(number)
     print(name)
     print(payload[0])

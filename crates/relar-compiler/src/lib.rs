@@ -24,6 +24,8 @@ use std::path::{Path, PathBuf};
 
 #[derive(Default)]
 pub struct CompileOptions {
+    /// A file describing the branches to include in a closed executable.
+    pub entry_profile: Option<PathBuf>,
     /// Limit native lowering to definitions a closed entry program can use.
     pub reachable_only: bool,
     /// Marks generated functions for LLVM's AddressSanitizer pass.
@@ -39,6 +41,9 @@ pub fn check(source: &str) -> Result<(), String> {
 
 /// Compiles a checked module to LLVM IR; the resulting executable uses no CPython.
 pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String> {
+    if options.entry_profile.is_some() {
+        return Err("an entry profile requires a source file and its module name".to_owned());
+    }
     let mut module = frontend::lower(&modules::SourceGraph::single_with_mode(
         source,
         options.reachable_only,
@@ -102,11 +107,12 @@ pub fn check_file_with_options(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<(), String> {
-    frontend::lower(&modules::SourceGraph::load_with_mode(
+    frontend::lower(&modules::SourceGraph::load_profile(
         path,
         module_root,
         &options.extension_paths,
-        options.reachable_only,
+        options.reachable_only || options.entry_profile.is_some(),
+        options.entry_profile.as_deref(),
     )?)
     .map(|_| ())
 }
@@ -117,11 +123,12 @@ pub fn compile_file(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
-    let graph = modules::SourceGraph::load_with_mode(
+    let graph = modules::SourceGraph::load_profile(
         path,
         module_root,
         &options.extension_paths,
-        options.reachable_only,
+        options.reachable_only || options.entry_profile.is_some(),
+        options.entry_profile.as_deref(),
     )?;
     let mut module = frontend::lower(&graph)?;
     specialize(&mut module);
@@ -138,6 +145,7 @@ pub fn compile_file(
             .modules
             .into_iter()
             .map(|module| module.path)
+            .chain(options.entry_profile.iter().cloned())
             .collect(),
     })
 }
@@ -161,11 +169,12 @@ pub fn compile_file_units(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<UnitCompilation, String> {
-    let graph = modules::SourceGraph::load_with_mode(
+    let graph = modules::SourceGraph::load_profile(
         path,
         module_root,
         &options.extension_paths,
-        options.reachable_only,
+        options.reachable_only || options.entry_profile.is_some(),
+        options.entry_profile.as_deref(),
     )?;
     let (mut module, owners) = frontend::lower_with_owners(&graph)?;
     specialize(&mut module);
@@ -189,7 +198,12 @@ pub fn compile_file_units(
             .iter()
             .filter_map(|m| m.archive.clone())
             .collect(),
-        input_paths: graph.modules.into_iter().map(|m| m.path).collect(),
+        input_paths: graph
+            .modules
+            .into_iter()
+            .map(|m| m.path)
+            .chain(options.entry_profile.iter().cloned())
+            .collect(),
         source_inputs: graph.inputs,
     })
 }

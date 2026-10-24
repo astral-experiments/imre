@@ -33,13 +33,41 @@ pub(super) fn validate_storage(function: &ir::Function, types: &Types) -> Result
             .locals
             .iter()
             .any(|&ty| invalid_aggregate(ty, types));
+    // A cold indirect call owns a private argument frame for its continuation.
+    // Its callable cannot enter a language-visible tuple or container.
+    let mut frames = HashSet::new();
     ir::walk_expressions(&function.body, &mut |value| {
-        invalid |= invalid_aggregate(value.ty, types);
+        if let ExprKind::Builtin(
+            Builtin::Process(
+                ir::ProcessOperation::IndirectCoroutine { .. }
+                | ir::ProcessOperation::Coroutine { .. }
+                | ir::ProcessOperation::ContextNew { .. },
+            ),
+            args,
+        ) = &value.kind
+        {
+            frames.insert(std::ptr::from_ref(&args[0]));
+        }
+        if !frames.contains(&std::ptr::from_ref(value)) {
+            invalid |= invalid_aggregate(value.ty, types);
+        }
     });
     if invalid {
         Err("callable values cannot be stored in containers or tuples".into())
     } else {
         Ok(())
+    }
+}
+
+/// Synchronous or cold indirect calls both have a closed possible target set.
+pub(super) fn invoked_signature(value: &Expr) -> Option<Type> {
+    match &value.kind {
+        ExprKind::Invoke { callable, .. } => Some(callable.ty),
+        ExprKind::Builtin(
+            Builtin::Process(ir::ProcessOperation::IndirectCoroutine { signature, .. }),
+            _,
+        ) => Some(*signature),
+        _ => None,
     }
 }
 
@@ -82,11 +110,21 @@ impl Checker<'_> {
         }
         let mut signature = signature.clone();
         if let Some(inference) = self.inference {
+            let asynchronous = signature.asynchronous;
             inference
                 .callable_signature(
                     &mut signature,
                     skip,
-                    expected.and_then(|ty| self.types.signature(ty)),
+                    expected
+                        .and_then(|ty| self.types.signature(ty))
+                        .map(|(params, result)| {
+                            let returns = if asynchronous {
+                                self.types.awaited(result).unwrap_or(result)
+                            } else {
+                                result
+                            };
+                            (params, returns)
+                        }),
                 )
                 .map_err(|message| error(self.source, node, message))?;
         }
@@ -95,7 +133,11 @@ impl Checker<'_> {
                 .iter()
                 .map(|parameter| parameter.ty)
                 .collect(),
-            signature.returns,
+            if signature.asynchronous {
+                self.types.coroutine(signature.returns)
+            } else {
+                signature.returns
+            },
         );
         Ok(Expr {
             ty,
@@ -237,6 +279,9 @@ impl Checker<'_> {
             .zip(params)
             .map(|(argument, ty)| self.expr_expected(argument, ty))
             .collect::<Result<Vec<_>, _>>()?;
+        if let Type::Coroutine(_) = returns {
+            return Ok(self.indirect_coroutine(callable, values, returns));
+        }
         Ok(Expr {
             ty: returns,
             kind: ExprKind::Invoke {

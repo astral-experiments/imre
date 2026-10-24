@@ -23,7 +23,7 @@ enum Allocator {
 
 const JEMALLOC_RUNTIME: &str = "librelar_runtime_jemalloc.a";
 
-const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only]
+const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only] [--entry-profile FILE]
        relar extension-header
        relar build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]
        relar run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]
@@ -43,6 +43,7 @@ Build options:
 Build writes the executable to the current directory using the source filename without its extension.
 Build and run share cached module objects and executables on supported native Linux toolchains.
 Use --whole-program to optimize all modules together.
+Use --entry-profile FILE to compile selected branches and reject excluded modes at runtime.
 Override the cache location with RELAR_CACHE_DIR or bypass it with --no-cache.
 Run passes arguments after -- to the program.
 ThinLTO (--lto-linker) requires explicit --runtime and --target.

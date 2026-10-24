@@ -3,6 +3,7 @@
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
+    Document(DocumentShape),
     Int,
     Float,
     Bool,
@@ -11,6 +12,8 @@ pub(crate) enum Type {
     StrLiteral(usize),
     /// A nominal enum with an unboxed, nonzero canonical member tag.
     StrEnum(usize),
+    /// An ordinary Enum with a closed set of string-valued members.
+    Enum(usize),
     Bytes,
     ListInt,
     Class(usize),
@@ -23,7 +26,7 @@ pub(crate) enum Type {
     /// An exact positional signature carried by an owned callable record.
     Callable(usize),
     Optional(usize),
-    /// A closed text union with one owned tagged-pointer word.
+    /// A closed str/bytes union with one owned tagged-pointer word.
     Union(usize),
     /// An internal container or string cursor, never available in user annotations.
     Iterator,
@@ -39,6 +42,16 @@ pub(crate) enum Type {
     Path,
     /// A sealed text-process result with four concrete, readonly fields.
     CompletedProcess,
+    /// Async process handle, with bits for the captured stdout and stderr slots.
+    AsyncProcess(u8),
+    Coroutine(usize),
+    EventLoop,
+    Task(usize),
+    TaskGroup,
+    GeneratorContext,
+    /// A native temporary-directory or null context with a known enter result.
+    DirectoryContext(usize),
+    Semaphore,
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
     Logger,
@@ -57,6 +70,7 @@ impl std::fmt::Display for Type {
         match self {
             Self::StrLiteral(id) => return write!(f, "string-literal#{id}"),
             Self::StrEnum(id) => return write!(f, "string-enum#{id}"),
+            Self::Enum(id) => return write!(f, "enum#{id}"),
             Self::List(id) => return write!(f, "list#{id}"),
             Self::Dict(id) => return write!(f, "dict#{id}"),
             Self::Set(id) => return write!(f, "set#{id}"),
@@ -82,13 +96,25 @@ impl std::fmt::Display for Type {
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
             Self::CompletedProcess => "subprocess.CompletedProcess[str]",
+            Self::AsyncProcess(_) => "asyncio.subprocess.Process",
+            Self::Coroutine(_) => "Coroutine",
+            Self::EventLoop => "asyncio.AbstractEventLoop",
+            Self::Task(_) => "asyncio.Task",
+            Self::TaskGroup => "asyncio.TaskGroup",
+            Self::GeneratorContext => "@contextmanager",
+            Self::DirectoryContext(_) => "directory context",
+            Self::Semaphore => "asyncio.Semaphore",
             Self::RegexPattern => "re.Pattern[str]",
             Self::Logger => "logging.Logger",
             Self::RegexMatch => "re.Match[str]",
             Self::JsonValue => "JSON value",
             Self::JsonObject => "dict[str, Any]",
+            Self::Document(DocumentShape::Any) => "TOML or JSON value",
+            Self::Document(DocumentShape::Map) => "mutable dict[str, Any]",
+            Self::Document(DocumentShape::List) => "mutable list[Any]",
             Self::StrLiteral(_)
             | Self::StrEnum(_)
+            | Self::Enum(_)
             | Self::Class(_)
             | Self::List(_)
             | Self::Dict(_)
@@ -334,6 +360,8 @@ pub(crate) enum Compare {
 
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    DirectoryContextView,
+    Document(DocumentOp),
     /// Runs the static archive's module initializer in ordinary import order.
     ExtensionImport(String),
     /// Calls a checked declaration in a rebuilt extension's method table.
@@ -349,9 +377,12 @@ pub(crate) enum Builtin {
     },
     StrEnumName,
     StrEnumValue,
+    EnumLookup(usize),
+    EnumString,
     StrEnumIdentity,
     LiteralStringView,
     StringListContains,
+    StringContains,
     /// Reads an initialized module binding with an independent owned reference.
     GlobalGet(usize),
     /// Publishes one fixed module binding after its initializer succeeds.
@@ -359,6 +390,7 @@ pub(crate) enum Builtin {
     Print,
     StderrLine,
     StdoutWrite,
+    WallTime,
     GetLogger,
     LogLevel,
     LogWrite(u8),
@@ -451,7 +483,7 @@ pub(crate) enum Builtin {
     Append,
     Pop,
     IsNone,
-    /// Promotes an exact text union member without allocating or changing identity.
+    /// Promotes an exact str/bytes owner without allocating or changing identity.
     UnionInject,
     /// Projects a member proved by local control flow, acquiring its own owner.
     UnionProject,
@@ -472,6 +504,7 @@ pub(crate) enum Builtin {
     JsonLoad,
     JsonLoads,
     JsonEmptyObject,
+    FunctionCache(usize),
     HashStr,
     HashRecord,
     /// A dictionary with a read-only JSON receiver and a literal string key.
@@ -564,6 +597,49 @@ pub(crate) enum Builtin {
     ExceptionSuppressContext,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(crate) enum DocumentShape {
+    Any,
+    Map,
+    List,
+}
+
+/// The opcode also selects the exact representation for each native argument and result.
+#[derive(Clone, Copy)]
+#[repr(u32)]
+pub(crate) enum DocumentOp {
+    Null,
+    EmptyMap,
+    EmptyList,
+    FromStr,
+    FromBool,
+    FromInt,
+    FromFloat,
+    FromJson,
+    WrapList,
+    WrapMap,
+    MapView,
+    ListView,
+    AsStr,
+    RequireMap,
+    RequireList,
+    IsNull,
+    IsMap,
+    IsList,
+    IsStr,
+    Repr,
+    Truth,
+    ParseToml,
+    DumpToml,
+    UpdateMap,
+    PopDefault,
+    ReplaceItems,
+    SetItem,
+    WriteToml,
+    BoxNullMap,
+    FreezeMap,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum RegexCapture {
     Group,
@@ -591,6 +667,11 @@ pub(crate) enum TextOperation {
 /// Native path operations keep their exact result types in the checked IR.
 #[derive(Clone, Copy)]
 pub(crate) enum PathOperation {
+    Platform,
+    Scripts,
+    OsJoin,
+    OsExists,
+    Which,
     New,
     Join,
     WithName,
@@ -615,6 +696,12 @@ pub(crate) enum PathOperation {
     /// Scoped creation returns a hidden owned pathname, not an escaping manager.
     TemporaryDirectory,
     CleanupTemporaryDirectory,
+    ContextNew {
+        temporary: bool,
+    },
+    ContextEnter,
+    ContextExit,
+    UnionText,
     Iterdir,
     Glob,
     Next,
@@ -626,8 +713,56 @@ pub(crate) enum ProcessOperation {
     Executable,
     Exit,
     RunToStderr,
+    CheckOutput,
     Run,
     RunTimeout,
+    AsyncSpawn {
+        stdout: u8,
+        stderr: u8,
+    },
+    AsyncStatus {
+        wait: bool,
+    },
+    AsyncCommunicate,
+    Coroutine {
+        function: usize,
+        result: Type,
+    },
+    ContextNew {
+        function: usize,
+    },
+    ContextEnter,
+    ContextYield,
+    ContextExit,
+    ContextThrow,
+    IndirectCoroutine {
+        signature: Type,
+        result: Type,
+    },
+    Await,
+    RunLoop,
+    NewLoop,
+    SetLoop,
+    EnsureTask,
+    RunUntilComplete,
+    LoopSignal,
+    CloseLoop,
+    CancelTask,
+    TaskGroup,
+    CreateTask,
+    TaskResult,
+    EnterGroup,
+    JoinGroup,
+    AbortGroup,
+    ExceptionAt,
+    MemberCause,
+    Gather {
+        element: Type,
+        tagged: bool,
+    },
+    Semaphore,
+    Acquire,
+    Release,
     EnvironCopy,
     EnvironGet,
     CheckReturnCode,

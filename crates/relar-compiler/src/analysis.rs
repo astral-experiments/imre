@@ -56,6 +56,10 @@ impl Session {
                 "from tomllib import load as load, loads as loads\n",
             ),
             (
+                "unidiff",
+                "class PatchSet:\n    def __init__(self, patch: str) -> None: ...\n",
+            ),
+            (
                 "tomli_w",
                 "from typing import Any, BinaryIO\ndef dumps(obj: dict[str, Any]) -> str: ...\ndef dump(obj: dict[str, Any], fp: BinaryIO) -> None: ...\n",
             ),
@@ -143,7 +147,6 @@ impl Session {
         Ok(parsed)
     }
 
-    /// Distinguish a typed data attribute from a bound method when finding native roots.
     pub(crate) fn data_attribute(&self, module: usize, expression: &ruff_python_ast::Expr) -> bool {
         use ty_python_semantic::types::Type as Ty;
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
@@ -208,6 +211,7 @@ impl Session {
     pub(crate) fn check(
         &self,
         skipped: Option<&[Vec<ruff_text_size::TextRange>]>,
+        context_decorators: &[Vec<ruff_text_size::TextRange>],
     ) -> Result<(), String> {
         let mut errors = Vec::new();
         for (index, &file) in self.files.iter().enumerate() {
@@ -228,16 +232,12 @@ impl Session {
                         // sealed exception payload getters guard their category
                         // at runtime rather than depending on ty's narrowing.
                         diagnostic.severity() >= Severity::Error
-                            && !skipped.is_some_and(|scopes| {
-                                diagnostic
-                                    .primary_span()
-                                    .and_then(|span| span.range())
-                                    .is_some_and(|range| {
-                                        scopes[index]
-                                            .iter()
-                                            .any(|scope| scope.contains_range(range))
-                                    })
-                            })
+                            && !skipped.is_some_and(|scopes| diagnostic.primary_span().and_then(|span| span.range()).is_some_and(|range| scopes[index].iter().any(|scope| scope.contains_range(range))))
+                            // The native checker verifies a bare yield on every successful
+                            // entry, including legacy managers annotated with their yielded None.
+                            && !(diagnostic.id().as_str() == "no-matching-overload"
+                                && diagnostic.primary_span().and_then(|span| span.range()).is_some_and(|range|
+                                    context_decorators[index].iter().any(|decorator| decorator.contains_range(range))))
                             && !matches!(
                                 diagnostic.id().as_str(),
                                 "unsupported-operator"

@@ -232,6 +232,11 @@ impl Checker<'_> {
                         start: None,
                     });
                 }
+                let iterable = if matches!(iterable.ty, Type::Document(_)) {
+                    self.document_map(iterable)
+                } else {
+                    iterable
+                };
                 if self.types.mapping(iterable.ty).is_none() {
                     return Err(error(
                         self.source,

@@ -241,6 +241,102 @@ pub unsafe extern "C" fn relar_path_new(text: *const Str) -> *const Object {
 }
 
 /// # Safety
+/// The word is a rooted str | Path value. Both branches return an owned string
+/// without resolving links or modifying the path's lexical spelling.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_union_path_text(value: usize) -> *const Str {
+    // SAFETY: clearing tag six restores the exact pathlib object address.
+    unsafe {
+        if value & 7 == 6 {
+            relar_path_text((value & !7) as *const Object)
+        } else {
+            Rc::into_raw(super::acquire_rc::<Str>(value))
+        }
+    }
+}
+
+/// # Safety
+/// Both arguments are rooted string handles. Unlike pathlib, a POSIX join
+/// preserves repeated separators, dots and an explicitly empty final component.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_os_path_join(base: *const Str, child: *const Str) -> *const Str {
+    // SAFETY: Both strings remain live until this lexical operation finishes.
+    let (base, child) = unsafe { (&*base, &*child) };
+    let joined = if child.starts_with('/') || base.is_empty() {
+        child.clone()
+    } else {
+        let mut joined = base.clone();
+        if !base.ends_with('/') {
+            joined.push('/');
+        }
+        joined.push_str(child);
+        joined
+    };
+    Rc::into_raw(Rc::new(joined))
+}
+
+/// # Safety
+/// The unnormalized path spelling is a live string through the filesystem call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_path_text_exists(path: *const Str) -> u32 {
+    // SAFETY: The path string is borrowed through the stat call.
+    u32::from(fs::metadata(unsafe { &*path }.as_str()).is_ok())
+}
+
+fn executable_candidate(directory: &std::path::Path, command: &str) -> Option<std::path::PathBuf> {
+    use rustix::fs::{Access, access};
+    let path = directory.join(command);
+    (fs::metadata(&path).is_ok_and(|metadata| !metadata.is_dir())
+        && access(&path, Access::EXEC_OK).is_ok())
+    .then_some(path)
+}
+
+fn default_search_path() -> OsString {
+    use std::os::unix::ffi::OsStringExt;
+    // SAFETY: confstr with zero capacity returns the size including the terminator.
+    let length = unsafe { libc::confstr(libc::_CS_PATH, std::ptr::null_mut(), 0) };
+    if length > 0 {
+        let mut buffer = vec![0_u8; length];
+        // SAFETY: buffer has room for the full reported C string.
+        if unsafe { libc::confstr(libc::_CS_PATH, buffer.as_mut_ptr().cast(), length) } == length {
+            buffer.pop();
+            return OsString::from_vec(buffer);
+        }
+    }
+    OsString::from("/bin:/usr/bin")
+}
+
+/// # Safety
+/// The command string stays rooted through lookup. Return an owned string word
+/// or zero when the file is missing. Direct paths bypass the search environment.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_shutil_which(command: *const Str) -> usize {
+    // SAFETY: The caller owns this immutable string throughout path resolution.
+    let command = unsafe { &*command }.as_str();
+    let candidate = if let Some(last) = command.rfind('/') {
+        let (directory, command) = command.split_at(last + 1);
+        let stripped = directory.trim_end_matches('/');
+        let directory = if stripped.is_empty() {
+            directory
+        } else {
+            stripped
+        };
+        executable_candidate(std::path::Path::new(directory), command)
+    } else {
+        let path = std::env::var_os("PATH").unwrap_or_else(default_search_path);
+        if path.is_empty() {
+            return 0;
+        }
+        std::env::split_paths(&path).find_map(|directory| executable_candidate(&directory, command))
+    };
+    let Some(path) = candidate else { return 0 };
+    finish(
+        path_utf8(path.into_os_string()).map(|name| Rc::into_raw(Rc::new(name)) as usize),
+        0,
+    )
+}
+
+/// # Safety
 /// Root the exact Path and string throughout the call. Absolute children replace
 /// the left path; otherwise both operands are joined without resolving symlinks.
 #[unsafe(no_mangle)]

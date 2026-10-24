@@ -34,7 +34,8 @@ pub(super) fn resolve(
             }
             for argument in &args.args {
                 match graph.resolve(definition.module, argument) {
-                    Some(Binding::Intrinsic(Intrinsic::StrEnum)) if args.args.len() == 1 => {}
+                    Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))
+                        if args.args.len() == 1 => {}
                     Some(Binding::Intrinsic(Intrinsic::Abc)) => {}
                     Some(Binding::Definition(source)) if ids.contains_key(&source) => {
                         if source.module == definition.module

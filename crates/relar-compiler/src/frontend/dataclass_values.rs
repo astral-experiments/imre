@@ -25,6 +25,14 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         Type::Exception
         | Type::StringKeys
         | Type::TimeoutExpired
+        | Type::EventLoop
+        | Type::Coroutine(_)
+        | Type::Task(_)
+        | Type::TaskGroup
+        | Type::GeneratorContext
+        | Type::DirectoryContext(_)
+        | Type::Semaphore
+        | Type::AsyncProcess(_)
         | Type::Logger
         | Type::RegexPattern
         | Type::RegexMatch
@@ -40,6 +48,8 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
     }
 }
 
+/// Rejects only generated operations whose supported field representations cannot
+/// retain Python semantics; ignored fields and disabled operations remain valid.
 /// An unused generated repr does not constrain a closed entry. Check its full
 /// field tree on each operation that can actually format the value.
 pub(super) fn can_format(ty: Type, types: &Types, classes: &ClassInfo) -> bool {

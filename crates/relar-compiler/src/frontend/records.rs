@@ -345,8 +345,14 @@ pub(super) fn field_default(
             ExprKind::Builtin(Builtin::Counter, Vec::new())
         }
         ContainerFactory::List if types.element(concrete).is_some() => ExprKind::List(Vec::new()),
+        ContainerFactory::Dict if concrete == documents::MAP => {
+            ExprKind::Builtin(Builtin::Document(ir::DocumentOp::EmptyMap), Vec::new())
+        }
         ContainerFactory::Dict if concrete == Type::JsonObject => {
             ExprKind::Builtin(Builtin::JsonEmptyObject, Vec::new())
+        }
+        ContainerFactory::Dict if concrete == super::documents::MAP => {
+            ExprKind::Builtin(Builtin::Document(ir::DocumentOp::EmptyMap), Vec::new())
         }
         ContainerFactory::Dict
             if types.mapping(concrete).is_some()
@@ -457,6 +463,7 @@ pub(super) fn record_factories(
                 let function = inference.register(Vec::new(), Some(concrete));
                 let signature = Signature {
                     id: function,
+                    asynchronous: false,
                     params: Vec::new(),
                     returns: concrete,
                     method: None,
@@ -499,7 +506,7 @@ impl Checker<'_> {
         let previous = self.iterator_source.replace(expr.range());
         let result = self.boolean_operand(expr, hint);
         self.iterator_source = previous;
-        result
+        result.map(|value| self.document_iteration(value))
     }
 
     pub(super) fn record_generator(&self, context: MethodContext) -> bool {
@@ -513,6 +520,14 @@ impl Checker<'_> {
     /// Body checking and type discovery must see the same statically bound class
     /// and the same narrow permission to initialize a generated frozen record.
     pub(super) fn method_context(&mut self, context: Option<MethodContext>) {
+        self.context_method = context.is_some_and(|context| {
+            let record = &self.classes.declarations.definitions[context.class];
+            super::contexts::decorated(
+                &record.methods[context.index],
+                self.graph,
+                record.method_origins[context.index].module,
+            )
+        });
         self.class = context.map(|context| context.class);
         self.super_initializer = context.and_then(|context| {
             let record = &self.classes.declarations.definitions[context.class];
@@ -750,6 +765,18 @@ impl Checker<'_> {
             .ok_or_else(|| error(self.source, call, "unknown class method"))?
             .clone();
         let kind = signature.method.unwrap().kind(&self.classes.declarations);
+        if self.classes.keyword_copies.contains(&signature.id)
+            && let Some(receiver) = receiver
+        {
+            if !call.arguments.args.is_empty() {
+                return Err(error(
+                    self.source,
+                    call,
+                    "asdict copy methods accept only keyword fields",
+                ));
+            }
+            return self.copy_with_keywords(class, receiver, &call.arguments.keywords, call);
+        }
         if self.record_generator(signature.method.unwrap())
             && self.iterator_source != Some(call.range())
         {
@@ -778,14 +805,72 @@ impl Checker<'_> {
             )
         };
         self.calls.insert(signature.id);
-        let value = Expr {
-            ty,
-            kind: ExprKind::Call(signature.id, args),
-        };
+        let value = self.call_value(&signature, ty, args);
         Ok(self.evaluated_receiver(discarded, value))
     }
 
     pub(super) fn construct(&mut self, call: &ast::ExprCall, class: usize) -> Result<Expr, String> {
+        if self.classes.declarations.definitions[class]
+            .enum_members
+            .as_ref()
+            .is_some_and(|members| members.plain)
+        {
+            self.reject_builtin_keywords(call)?;
+            let [value] = call.arguments.args.as_ref() else {
+                return Err(error(self.source, call, "Enum lookup requires one value"));
+            };
+            let ty = Type::Enum(class);
+            let value = self.expr(value)?;
+            if value.ty == ty {
+                return Ok(value);
+            }
+            if self
+                .types
+                .members(value.ty)
+                .is_some_and(|members| members == [Type::Str, ty])
+            {
+                let slot = self.hidden(value.ty);
+                let test = Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(
+                        Builtin::IsInstance(vec![ir::InstanceType::Exact(ty)]),
+                        vec![self.local(slot)],
+                    ),
+                };
+                let member = Expr {
+                    ty,
+                    kind: ExprKind::Builtin(Builtin::UnionProject, vec![self.local(slot)]),
+                };
+                let text = Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::UnionProject, vec![self.local(slot)]),
+                };
+                let lookup = Expr {
+                    ty,
+                    kind: ExprKind::Builtin(Builtin::EnumLookup(class), vec![text]),
+                };
+                return Ok(Expr {
+                    ty,
+                    kind: ExprKind::Scope {
+                        body: vec![Statement::Assign(slot, value)],
+                        value: Box::new(Expr {
+                            ty,
+                            kind: ExprKind::Conditional(
+                                Box::new(test),
+                                Box::new(member),
+                                Box::new(lookup),
+                            ),
+                        }),
+                        clear: vec![slot],
+                    },
+                });
+            }
+            let text = self.coerce(value, Type::Str, call)?;
+            return Ok(Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::EnumLookup(class), vec![text]),
+            });
+        }
         if !self.classes.declarations.definitions[class]
             .abstract_methods
             .is_empty()
@@ -811,7 +896,19 @@ impl Checker<'_> {
         let materialized = self.immediate_constructor_input(call, class);
         let call = materialized.as_ref().unwrap_or(call);
         let signature = self.classes.methods[class]["__init__"].clone();
-        let args = if self.inference.is_some() {
+        let normalization = self.normalized_record_input(class);
+        let args = if let Some((field, wrapper, template)) = normalization {
+            let params = &signature.params[1..];
+            self.arguments_with(call, params, None, |checker, index, value| {
+                if params[index].name == field && matches!(value, ast::Expr::Dict(_)) {
+                    let mut conversion = template.clone();
+                    conversion.arguments.keywords[0].value = value.clone();
+                    checker.construct(&conversion, wrapper)
+                } else {
+                    checker.direct_argument(value, params[index].ty, params[index].sign_only)
+                }
+            })?
+        } else if self.inference.is_some() {
             self.infer_call(call, &signature, None, 1)?.1
         } else {
             self.arguments(call, &signature.params[1..], None)?
@@ -842,6 +939,8 @@ impl Checker<'_> {
                     "super().__init__ requires an explicit subclass initializer",
                 )
             })?;
+        calls::reject_unpacking(call, self.source)?;
+        let signature = self.classes.methods[base]["__init__"].clone();
         if self.classes.declarations.definitions[base].generated_initializer
             && self.classes.methods[base].contains_key("__post_init__")
         {
@@ -851,8 +950,6 @@ impl Checker<'_> {
                 "a base initializer with a dynamic post-init hook is unsupported",
             ));
         }
-        calls::reject_unpacking(call, self.source)?;
-        let signature = self.classes.methods[base]["__init__"].clone();
         let receiver = Expr {
             ty: Type::Class(base),
             kind: ExprKind::Builtin(Builtin::RecordView, vec![self.local(self.names["self"])]),

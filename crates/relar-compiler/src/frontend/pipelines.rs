@@ -187,6 +187,50 @@ impl Checker<'_> {
             return Ok(None);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
+            && attribute.attr.as_str() == "values"
+            && self.class_reference(&attribute.value).is_none()
+        {
+            let raw = self.expr(&attribute.value)?;
+            if let Type::Class(class) = raw.ty {
+                return Ok(Some(Iteration::Container {
+                    iterable: self.class_method_call(call, attribute, class, Some(raw))?,
+                    items: false,
+                    start: None,
+                }));
+            }
+            let source = if matches!(raw.ty, Type::Document(_)) {
+                self.document_map(raw)
+            } else {
+                raw
+            };
+            let (_, item) = self.types.mapping(source.ty).ok_or_else(|| {
+                error(self.source, call, "values() requires a concrete dictionary")
+            })?;
+            if !call.arguments.is_empty() {
+                return Err(error(self.source, call, "dict.values() takes no arguments"));
+            }
+            let mut input = self.prepare_container(source, true, call, false)?;
+            let pair = input.value;
+            let value = self.hidden(item);
+            input.next.push(Statement::If(
+                self.local(input.ready),
+                vec![
+                    Statement::Assign(
+                        value,
+                        Expr {
+                            ty: item,
+                            kind: ExprKind::Field(Box::new(self.local(pair)), 1),
+                        },
+                    ),
+                    Statement::Clear(pair),
+                ],
+                Vec::new(),
+            ));
+            input.value = value;
+            input.clear.push(value);
+            return Ok(Some(Iteration::Prepared(input)));
+        }
+        if let ast::Expr::Attribute(attribute) = &*call.func
             && matches!(attribute.attr.as_str(), "iterdir" | "glob")
             && self.class_reference(&attribute.value).is_none()
         {
@@ -1654,6 +1698,17 @@ impl Checker<'_> {
             *parameter,
             call,
         )?]);
+        if matches!(returns, Type::Coroutine(_)) {
+            let slot = self.hidden(callback.ty);
+            input
+                .evaluate
+                .insert(evaluation_index, Statement::Assign(slot, callback));
+            input.clear.push(slot);
+            return Ok((
+                self.indirect_coroutine(self.local(slot), args.values, returns),
+                Some(slot),
+            ));
+        }
         let (kind, captured) = if let ExprKind::Callable {
             function,
             receiver: None,

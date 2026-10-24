@@ -23,7 +23,7 @@ pub(super) fn adapters(module: &Module, sanitize: bool) -> String {
                 targets.insert((*function, receiver.is_some()));
                 enum_receiver |= receiver
                     .as_ref()
-                    .is_some_and(|r| matches!(r.ty, Type::StrEnum(_)));
+                    .is_some_and(|r| matches!(r.ty, Type::StrEnum(_) | Type::Enum(_)));
             }
             invoked |= matches!(value.kind, ExprKind::Invoke { .. });
         });
@@ -50,7 +50,11 @@ pub(super) fn adapters(module: &Module, sanitize: bool) -> String {
             .collect::<Vec<_>>();
         let mut signature = vec!["ptr %context".to_owned()];
         signature.extend(arguments.iter().cloned());
-        let scalar = bound && matches!(function.locals[function.params[0]], Type::StrEnum(_));
+        let scalar = bound
+            && matches!(
+                function.locals[function.params[0]],
+                Type::StrEnum(_) | Type::Enum(_)
+            );
         let mut inputs = Vec::new();
         if bound {
             inputs.push(if scalar { "i64 %tag" } else { "ptr %context" }.to_owned());
@@ -97,7 +101,7 @@ impl Emitter<'_, '_> {
         // nonowning tag in that word; only its adapter converts the bits back.
         let scalar = receiver
             .as_ref()
-            .is_some_and(|r| matches!(r.ty, Type::StrEnum(_)));
+            .is_some_and(|r| matches!(r.ty, Type::StrEnum(_) | Type::Enum(_)));
         let result = self.record_with_layout(ty, if scalar { "callable_enum" } else { "callable" });
         let target = adapter_name(function, receiver.is_some());
         self.line(format!("store ptr @{target}, ptr {}", result.operand));

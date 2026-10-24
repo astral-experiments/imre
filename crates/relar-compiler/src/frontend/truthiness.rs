@@ -8,7 +8,7 @@ impl Checker<'_> {
     /// do not require a general union. Every operand still receives type checks.
     pub(super) fn condition(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         if let ast::Expr::If(value) = expression {
-            return self.conditional_with(value, Self::condition);
+            return self.conditional_with(value, false, Self::condition);
         }
         if let ast::Expr::BoolOp(boolean) = expression {
             let and = boolean.op == ast::BoolOp::And;
@@ -50,6 +50,9 @@ impl Checker<'_> {
     pub(super) fn truth_value(&mut self, value: Expr) -> Expr {
         if value.ty == Type::Bool {
             return value;
+        }
+        if matches!(value.ty, Type::Document(_)) {
+            return documents::op(ir::DocumentOp::Truth, Type::Bool, vec![value]);
         }
         let Some(method) = self.bool_method(value.ty) else {
             return Expr {
@@ -191,8 +194,9 @@ impl Checker<'_> {
         match expression {
             ast::Expr::BoolOp(value) => return self.boolean_value(value, hint),
             ast::Expr::If(value) => {
-                return self
-                    .conditional_with(value, |checker, arm| checker.boolean_operand(arm, hint));
+                return self.conditional_with(value, false, |checker, arm| {
+                    checker.boolean_operand(arm, hint)
+                });
             }
             ast::Expr::Named(value) => return self.named_expression(value, hint),
             _ => {}

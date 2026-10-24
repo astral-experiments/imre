@@ -126,7 +126,9 @@ impl Initialization {
         let mut body = Vec::new();
         let mut checkpoints = Vec::new();
         for (index, statement) in module.parsed.syntax().body.iter().enumerate() {
-            if module.type_guards.binary_search(&index).is_ok() {
+            if module.type_guards.binary_search(&index).is_ok()
+                || local_functions::type_variable(checker.graph, checker.module, statement)
+            {
                 continue;
             }
             let definition = DefinitionId {
@@ -258,12 +260,21 @@ fn collect(
             reads.insert(*slot);
         }
         ExprKind::Call(id, _)
+        | ExprKind::Builtin(
+            Builtin::Process(
+                ir::ProcessOperation::Coroutine { function: id, .. }
+                | ir::ProcessOperation::ContextNew { function: id },
+            ),
+            _,
+        )
         | ExprKind::Construct {
             initializer: id, ..
         } => calls.push(*id),
         ExprKind::Callable { function, .. } => references.push(*function),
-        ExprKind::Invoke { callable, .. } => {
-            if let Some(targets) = targets.get(&callable.ty) {
+        _ if callables::invoked_signature(value).is_some() => {
+            if let Some(targets) =
+                callables::invoked_signature(value).and_then(|ty| targets.get(&ty))
+            {
                 calls.extend(targets);
             }
         }

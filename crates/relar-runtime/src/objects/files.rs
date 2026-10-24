@@ -123,7 +123,7 @@ impl FileState {
         self.input()?.read_bytes(usize::try_from(size).ok())
     }
 
-    fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+    pub(super) fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
         if self.kind == FileKind::BinaryRead {
             return Err(Error::new(Kind::UnsupportedOperation, "write"));
         }

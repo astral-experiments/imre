@@ -515,7 +515,14 @@ impl Checker<'_> {
         }
         let mut value = self.expr(&field.expression)?;
         if field.conversion != ast::ConversionFlag::Repr {
-            value = Self::enum_text(value);
+            value = if matches!(value.ty, Type::Enum(_)) {
+                Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::EnumString, vec![value]),
+                }
+            } else {
+                Self::enum_text(value)
+            };
         }
         if !specification.is_empty() {
             let sign = specification.strip_suffix('d').unwrap_or(&specification);
@@ -574,6 +581,9 @@ impl Checker<'_> {
             && matches!(value.ty, Type::Class(_) | Type::CompletedProcess)
         {
             return self.record_text(value, field);
+        }
+        if field.conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Document(_)) {
+            return Ok(documents::op(ir::DocumentOp::Repr, Type::Str, vec![value]));
         }
         if field.conversion == ast::ConversionFlag::Repr || self.types.element(value.ty).is_some() {
             if !dataclass_values::can_format(value.ty, self.types, self.classes) {

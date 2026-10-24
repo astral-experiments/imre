@@ -463,6 +463,91 @@ pub unsafe extern "C" fn relar_tempdir_cleanup(name: *const Str) {
     finish(result, ());
 }
 
+/// A stored context roots its enter value at construction. Temporary workspaces
+/// are removed on explicit exit or on the last owner's release before exit.
+pub(super) struct DirectoryContext {
+    value: super::words::OwnedWord,
+    temporary: bool,
+    armed: std::cell::Cell<bool>,
+}
+
+impl DirectoryContext {
+    pub(super) fn needs_cleanup(&self) -> bool {
+        self.armed.get()
+    }
+
+    fn remove(&self) -> io::Result<()> {
+        if self.temporary {
+            self.armed.set(false);
+            // SAFETY: a temporary context always owns a tagged string (tag zero).
+            cleanup(unsafe { &*(self.value.word as *const Str) })?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for DirectoryContext {
+    fn drop(&mut self) {
+        if self.armed.get() {
+            // Finalization cannot overwrite an in-flight return or exception.
+            let _ = self.remove();
+        }
+    }
+}
+
+/// # Safety
+/// The tagged word is a rooted str, Path, or absent value. Temporary creation
+/// has already succeeded and provides the exact directory name as a string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_directory_context_new(
+    value: usize,
+    temporary: u32,
+) -> *const super::Object {
+    // SAFETY: the compiler restricts the payload to nullable str | Path.
+    let value = unsafe { super::words::WordKind::new(256 | 9).acquire(value) };
+    let temporary = temporary != 0;
+    let manager = DirectoryContext {
+        value,
+        temporary,
+        armed: std::cell::Cell::new(temporary),
+    };
+    Rc::into_raw(Rc::new(super::Object(super::StorageCell::new(
+        super::Storage::DirectoryContext(manager),
+    ))))
+}
+
+/// # Safety
+/// The manager remains rooted. Each enter returns a fresh owner for the same value.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_directory_context_enter(manager: *const super::Object) -> usize {
+    // SAFETY: both handles are rooted while the payload owner is acquired.
+    unsafe {
+        super::object(manager).0.with(|storage| {
+            let super::Storage::DirectoryContext(manager) = storage else {
+                unreachable!()
+            };
+            manager.value.kind.acquire(manager.value.word).into_word()
+        })
+    }
+}
+
+/// # Safety
+/// The manager is rooted, with pending error state clear on entry. Explicit
+/// cleanup can raise and participates in normal finally unwinding.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_directory_context_exit(manager: *const super::Object) {
+    // SAFETY: there are no callbacks during descriptor-based cleanup.
+    let result = unsafe {
+        super::object(manager).0.with(|storage| {
+            let super::Storage::DirectoryContext(manager) = storage else {
+                unreachable!()
+            };
+            manager.remove().map_err(os_error)
+        })
+    };
+    finish(result, ());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

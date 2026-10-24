@@ -20,6 +20,16 @@ impl Checker<'_> {
         if ty == value.ty {
             return value;
         }
+        if matches!(value.ty, Type::Document(_)) {
+            return if ty == Type::Str {
+                documents::op(ir::DocumentOp::AsStr, Type::Str, vec![value])
+            } else {
+                Expr {
+                    ty,
+                    kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+                }
+            };
+        }
         if matches!((value.ty, ty), (Type::Class(parent), Type::Class(child)) if self.classes.parsers.child_of(child, parent))
         {
             return Expr {
@@ -143,6 +153,21 @@ impl Checker<'_> {
             ));
         };
         let value = self.expr(value)?;
+        if matches!(value.ty, Type::Document(_)) {
+            let op = match self.instance_types(classes)?.as_slice() {
+                [InstanceType::Dict] => ir::DocumentOp::IsMap,
+                [InstanceType::List] => ir::DocumentOp::IsList,
+                [InstanceType::Exact(Type::Str)] => ir::DocumentOp::IsStr,
+                _ => {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "document isinstance requires a dict, list, or str class",
+                    ));
+                }
+            };
+            return Ok(documents::op(op, Type::Bool, vec![value]));
+        }
         if value.ty == Type::JsonValue
             && matches!(
                 self.instance_types(classes)?.as_slice(),
@@ -294,6 +319,21 @@ impl Checker<'_> {
                 .get(&slot)
                 .copied()
                 .unwrap_or(self.locals[slot]);
+            if matches!(current, Type::Document(_)) {
+                for (classes, truth) in &constraints {
+                    if !*truth {
+                        continue;
+                    }
+                    let ty = match classes.as_slice() {
+                        [InstanceType::List] => documents::LIST,
+                        [InstanceType::Dict] => documents::MAP,
+                        [InstanceType::Exact(Type::Str)] => Type::Str,
+                        _ => continue,
+                    };
+                    self.narrowed.insert(slot, ty);
+                }
+                continue;
+            }
             let mut members = self.instance_members(current);
             for (classes, truth) in &constraints {
                 members.retain(|&ty| {
