@@ -122,7 +122,7 @@ impl WordKind {
                 2 => drop(Int(word)),
                 3 => Rc::decrement_strong_count(word as *const Str),
                 4 => crate::relar_list_release(word as *const List),
-                5 => Rc::decrement_strong_count(word as *const Object),
+                5 => records::release_object_word(Rc::from_raw(word as *const Object)),
                 6 => records::relar_record_release(word as *const usize),
                 7 if self.0 & NULLABLE != 0 => Rc::decrement_strong_count(word as *const f64),
                 7 => {}
