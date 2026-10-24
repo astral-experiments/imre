@@ -44,6 +44,10 @@ pub(super) struct SliceIndices {
 }
 
 impl SliceIndices {
+    pub(super) fn is_full_forward(&self, length: usize) -> bool {
+        !self.reverse && self.remaining == length
+    }
+
     /// Normalizes against the length at the time of access. Omitted negative
     /// stops stay at -1; an explicit -1 first counts backward from the length.
     ///
