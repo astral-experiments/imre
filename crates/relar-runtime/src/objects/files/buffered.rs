@@ -1,12 +1,71 @@
-//! A shared cursor for whole-file, bounded-byte, and incremental line reads.
+//! Buffered binary and UTF-8 streams with Python's read and write boundaries.
 
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, Read};
+use std::io::{self, BufRead, BufReader, BufWriter, IsTerminal, Read, Write};
 
 use smallvec::SmallVec;
 
 use super::gzip::{GzipError, GzipReader};
 use super::{Bytes, Error, Kind, Result, Str, decode_utf8_text, os_error};
+
+pub(super) struct Output {
+    raw: BufWriter<File>,
+    text: Option<Vec<u8>>,
+    line_buffering: bool,
+}
+
+impl Output {
+    pub(super) fn new(file: File, capacity: usize, binary: bool) -> Self {
+        Self {
+            line_buffering: !binary && file.is_terminal(),
+            raw: BufWriter::with_capacity(capacity, file),
+            text: (!binary).then(Vec::new),
+        }
+    }
+
+    pub(super) fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
+        let Some(pending) = &mut self.text else {
+            return self.raw.write_all(bytes);
+        };
+        let flush_line = self.line_buffering && memchr::memchr2(b'\r', b'\n', bytes).is_some();
+        // TextIOWrapper groups small encoded writes, but forwards a large write
+        // separately after draining any pending text.
+        const CHUNK_SIZE: usize = 8192;
+        if bytes.len() >= CHUNK_SIZE {
+            Self::drain_text(&mut self.raw, pending)?;
+            self.raw.write_all(bytes)?;
+        } else {
+            pending.extend_from_slice(bytes);
+            if pending.len() >= CHUNK_SIZE || flush_line {
+                Self::drain_text(&mut self.raw, pending)?;
+            }
+        }
+        if flush_line {
+            self.raw.flush()?;
+        }
+        Ok(())
+    }
+
+    fn drain_text(raw: &mut BufWriter<File>, pending: &mut Vec<u8>) -> io::Result<()> {
+        let result = raw.write_all(pending);
+        // TextIOWrapper removes the pending text even when the binary write fails.
+        pending.clear();
+        result
+    }
+
+    pub(super) fn flush(&mut self) -> io::Result<()> {
+        if let Some(pending) = &mut self.text {
+            Self::drain_text(&mut self.raw, pending)?;
+        }
+        self.raw.flush()
+    }
+
+    pub(super) fn finish(mut self) -> (File, io::Result<()>) {
+        let flushed = self.flush();
+        let (file, _) = self.raw.into_parts();
+        (file, flushed)
+    }
+}
 
 enum Source {
     Plain(File),
