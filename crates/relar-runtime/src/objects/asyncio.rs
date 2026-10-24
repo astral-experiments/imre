@@ -151,14 +151,11 @@ impl Task {
             return false;
         }
         let waiting = self.ready.take().is_some();
-        let cancellation = self
-            .cancelled
-            .replace(false)
-            .then_some(if waiting {
-                Cancellation::Waiter
-            } else {
-                Cancellation::Injected
-            });
+        let cancellation = self.cancelled.replace(false).then_some(if waiting {
+            Cancellation::Waiter
+        } else {
+            Cancellation::Injected
+        });
         swap_active(&mut self.frame.active.borrow_mut());
         CURRENT_TASK.replace(Rc::downgrade(self));
         let step = match self.frame.fiber.borrow_mut().as_mut() {
