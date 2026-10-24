@@ -64,6 +64,8 @@ pub(crate) enum Kind {
     CancelledError = 33,
     ExceptionGroup = 34,
     StopIteration = 35,
+    BadZipFile = 36,
+    NotImplementedError = 37,
 }
 
 impl Kind {
@@ -105,6 +107,8 @@ impl Kind {
             33 => Self::CancelledError,
             34 => Self::ExceptionGroup,
             35 => Self::StopIteration,
+            36 => Self::BadZipFile,
+            37 => Self::NotImplementedError,
             _ => fail("SystemError", "invalid exception kind"),
         }
     }
@@ -147,6 +151,8 @@ impl Kind {
             Self::CancelledError => "CancelledError",
             Self::ExceptionGroup => "ExceptionGroup",
             Self::StopIteration => "StopIteration",
+            Self::BadZipFile => "BadZipFile",
+            Self::NotImplementedError => "NotImplementedError",
         }
     }
 
@@ -180,6 +186,7 @@ impl Kind {
                     Self::SubprocessError | Self::CalledProcessError | Self::TimeoutExpired
                 )
             }
+            Self::RuntimeError => matches!(self, Self::RuntimeError | Self::NotImplementedError),
             Self::OSError => matches!(
                 self,
                 Self::OSError
