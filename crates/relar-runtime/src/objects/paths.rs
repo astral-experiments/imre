@@ -11,7 +11,7 @@ use std::rc::{Rc, Weak};
 use num_traits::ToPrimitive;
 
 use super::exceptions::{Error, Kind, Result, finish};
-use super::{Int, Object, Storage, StorageCell, Str, fail, files, object};
+use super::{Bytes, Int, Object, Storage, StorageCell, Str, fail, files, object};
 
 #[derive(Clone)]
 pub(super) enum PathText {
@@ -369,10 +369,20 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
     Ok(resolved)
 }
 
-fn path_utf8(path: OsString) -> Result<Str> {
+pub(super) fn path_utf8(path: OsString) -> Result<Str> {
     path.into_string()
         .map(Str::from)
         .map_err(|_| Error::new(Kind::UnicodeDecodeError, "resolved path is not valid UTF-8"))
+}
+
+/// Returns the current POSIX working directory as a new owned string.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_getcwd() -> *const Str {
+    let result = std::env::current_dir()
+        .map_err(files::errno_error)
+        .and_then(|cwd| path_utf8(cwd.into_os_string()))
+        .map(|text| Rc::into_raw(Rc::new(text)));
+    finish(result, std::ptr::null())
 }
 
 fn suffix_start(name: &str) -> Option<usize> {
@@ -414,84 +424,11 @@ pub unsafe extern "C" fn relar_union_path_text(value: usize) -> *const Str {
 }
 
 /// # Safety
-/// Both arguments are rooted string handles. Unlike pathlib, a POSIX join
-/// preserves repeated separators, dots and an explicitly empty final component.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_os_path_join(base: *const Str, child: *const Str) -> *const Str {
-    // SAFETY: Both strings remain live until this lexical operation finishes.
-    let (base, child) = unsafe { (&*base, &*child) };
-    let joined = if child.starts_with('/') || base.is_empty() {
-        child.clone()
-    } else {
-        let mut joined = base.clone();
-        if !base.ends_with('/') {
-            joined.push('/');
-        }
-        joined.push_str(child);
-        joined
-    };
-    Rc::into_raw(Rc::new(joined))
-}
-
-/// # Safety
 /// The unnormalized path spelling is a live string through the filesystem call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_path_text_exists(path: *const Str) -> u32 {
     // SAFETY: The path string is borrowed through the stat call.
     u32::from(fs::metadata(unsafe { &*path }.as_str()).is_ok())
-}
-
-fn executable_candidate(directory: &std::path::Path, command: &str) -> Option<std::path::PathBuf> {
-    use rustix::fs::{Access, access};
-    let path = directory.join(command);
-    (fs::metadata(&path).is_ok_and(|metadata| !metadata.is_dir())
-        && access(&path, Access::EXEC_OK).is_ok())
-    .then_some(path)
-}
-
-fn default_search_path() -> OsString {
-    use std::os::unix::ffi::OsStringExt;
-    // SAFETY: confstr with zero capacity returns the size including the terminator.
-    let length = unsafe { libc::confstr(libc::_CS_PATH, std::ptr::null_mut(), 0) };
-    if length > 0 {
-        let mut buffer = vec![0_u8; length];
-        // SAFETY: buffer has room for the full reported C string.
-        if unsafe { libc::confstr(libc::_CS_PATH, buffer.as_mut_ptr().cast(), length) } == length {
-            buffer.pop();
-            return OsString::from_vec(buffer);
-        }
-    }
-    OsString::from("/bin:/usr/bin")
-}
-
-/// # Safety
-/// The command string stays rooted through lookup. Return an owned string word
-/// or zero when the file is missing. Direct paths bypass the search environment.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_shutil_which(command: *const Str) -> usize {
-    // SAFETY: The caller owns this immutable string throughout path resolution.
-    let command = unsafe { &*command }.as_str();
-    let candidate = if let Some(last) = command.rfind('/') {
-        let (directory, command) = command.split_at(last + 1);
-        let stripped = directory.trim_end_matches('/');
-        let directory = if stripped.is_empty() {
-            directory
-        } else {
-            stripped
-        };
-        executable_candidate(std::path::Path::new(directory), command)
-    } else {
-        let path = std::env::var_os("PATH").unwrap_or_else(default_search_path);
-        if path.is_empty() {
-            return 0;
-        }
-        std::env::split_paths(&path).find_map(|directory| executable_candidate(&directory, command))
-    };
-    let Some(path) = candidate else { return 0 };
-    finish(
-        path_utf8(path.into_os_string()).map(|name| Rc::into_raw(Rc::new(name)) as usize),
-        0,
-    )
 }
 
 /// # Safety
@@ -532,14 +469,14 @@ pub unsafe extern "C" fn relar_path_join(path: *const Object, child: *const Str)
 }
 
 /// # Safety
-/// The caller roots the exact path and new name. Success transfers a fresh path.
+/// Root the path and replacement component until the owned new path or error is returned.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_path_with_name(
     path: *const Object,
     replacement: *const Str,
 ) -> *const Object {
     use super::exceptions::string_repr;
-    // SAFETY: both inputs stay rooted and this operation cannot call user code.
+    // SAFETY: both inputs are rooted and lexical operations cannot invoke callbacks.
     let result = unsafe {
         object(path).0.with(|storage| {
             let path = storage.path();
@@ -761,24 +698,6 @@ pub unsafe extern "C" fn relar_path_read_text(path: *const Object) -> *const Str
 }
 
 /// # Safety
-/// Root an exact Path during the raw read. The result owns the bytes through EOF.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_path_read_bytes(path: *const Object) -> *const super::Bytes {
-    // SAFETY: the rooted pathname remains borrowed during synchronous I/O.
-    let result = unsafe {
-        object(path).0.with(|storage| {
-            let name = storage.path();
-            check_nul(name)?;
-            fs::read(name).map_err(files::os_error)
-        })
-    };
-    finish(
-        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
-        std::ptr::null(),
-    )
-}
-
-/// # Safety
 /// Root an exact Path and string with clear pending error state. Success returns
 /// the canonical integer character count after flushing and closing the file.
 #[unsafe(no_mangle)]
@@ -788,6 +707,35 @@ pub unsafe extern "C" fn relar_path_write_text(path: *const Object, text: *const
         object(path)
             .0
             .with(|storage| files::write_path_text(storage.path(), &*text))
+    };
+    finish(result, 0)
+}
+
+/// # Safety
+/// Root an exact Path until the file closes and its owned bytes or error are returned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_path_read_bytes(path: *const Object) -> *const Bytes {
+    // SAFETY: the synchronous read cannot call back or invalidate the pathname.
+    let result = unsafe {
+        object(path)
+            .0
+            .with(|storage| files::read_path_bytes(storage.path()))
+    };
+    finish(
+        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        std::ptr::null(),
+    )
+}
+
+/// # Safety
+/// Root the Path and bytes through writing and closing. Success returns the byte count.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_path_write_bytes(path: *const Object, data: *const Bytes) -> usize {
+    // SAFETY: synchronous output only borrows these immutable values.
+    let result = unsafe {
+        object(path)
+            .0
+            .with(|storage| files::write_path_bytes(storage.path(), &*data))
     };
     finish(result, 0)
 }

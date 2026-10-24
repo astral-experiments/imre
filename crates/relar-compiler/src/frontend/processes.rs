@@ -408,6 +408,53 @@ impl Checker<'_> {
         ))
     }
 
+    /// Keywords capture their values in source order before applying the filesystem ABI.
+    pub(super) fn shutil_which(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let path = self.types.optional(Type::Str);
+        let params = [
+            ("cmd", Type::Str, None),
+            (
+                "mode",
+                Type::Int,
+                Some(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Int("1".into()),
+                }),
+            ),
+            ("path", path, Some(absent(path))),
+        ]
+        .map(|(name, ty, default)| Parameter {
+            name: name.into(),
+            ty,
+            kind: ParameterKind::PositionalOrKeyword,
+            default,
+            sign_only: false,
+        });
+        let args = self.arguments_with(call, &params, None, |checker, i, arg| match i {
+            0 => checker.fspath_argument(arg),
+            1 => checker.expr_expected(arg, Type::Int),
+            _ => {
+                let raw = checker.expr(arg)?;
+                if raw.ty == Type::None {
+                    return checker.coerce(raw, path, arg);
+                }
+                if checker
+                    .types
+                    .payload(raw.ty)
+                    .is_some_and(|t| matches!(t, Type::Str | Type::Bytes))
+                {
+                    return Ok(raw);
+                }
+                let value = checker.fspath_value(raw, arg)?;
+                let ty = checker.types.optional(value.ty);
+                checker.coerce(value, ty, arg)
+            }
+        })?;
+        let returns = self.types.optional(args.values[args.order[0]].ty);
+        Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Which), returns, args))
+    }
+
     /// Literal mode arguments establish a text-only result. Dynamic values are
     /// rooted in source order before their permutation into the runtime ABI.
     pub(super) fn process_run(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -582,29 +629,59 @@ impl Checker<'_> {
         self.coerce(value, expected, expression)
     }
 
+    /// A string default keeps a precise string result, while None uses the
+    /// zero word of Relar's existing optional-string representation.
+    pub(super) fn environ_get(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let optional = self.types.optional(Type::Str);
+        let params = [
+            Parameter {
+                name: "key".to_owned(),
+                ty: Type::Str,
+                kind: ParameterKind::PositionalOrKeyword,
+                default: None,
+                sign_only: false,
+            },
+            Parameter {
+                name: "default".to_owned(),
+                ty: optional,
+                kind: ParameterKind::PositionalOrKeyword,
+                default: Some(absent(optional)),
+                sign_only: false,
+            },
+        ];
+        let args = self.arguments_with(call, &params, None, |checker, index, argument| {
+            if index == 0 {
+                return checker.expr_expected(argument, Type::Str);
+            }
+            let value = checker.expr(argument)?;
+            if value.ty == Type::Str {
+                Ok(value)
+            } else {
+                checker.coerce(value, optional, argument)
+            }
+        })?;
+        let returns = args.values[args.order[1]].ty;
+        Ok(self.ordered_builtin(
+            Builtin::Process(ProcessOperation::EnvironGet),
+            returns,
+            args,
+        ))
+    }
+
     pub(super) fn environ_method(
         &mut self,
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        self.reject_builtin_keywords(call)?;
-        if attribute.attr.as_str() == "get"
-            && let [key, default] = call.arguments.args.as_slice()
-        {
-            return Ok(operation(
-                ProcessOperation::EnvironGet,
-                Type::Str,
-                vec![
-                    self.expr_expected(key, Type::Str)?,
-                    self.expr_expected(default, Type::Str)?,
-                ],
-            ));
+        if attribute.attr.as_str() == "get" {
+            return self.environ_get(call);
         }
+        self.reject_builtin_keywords(call)?;
         if attribute.attr.as_str() != "copy" || !call.arguments.args.is_empty() {
             return Err(error(
                 self.source,
                 call,
-                "os.environ accepts copy() or get(key, string_default)",
+                "os.environ accepts copy() or get(key, default=None)",
             ));
         }
         Ok(operation(

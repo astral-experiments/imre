@@ -36,6 +36,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::Logger
         | Type::RegexPattern
         | Type::RegexMatch
+        | Type::ExitCode
         | Type::TextIO
         | Type::BinaryIO
         | Type::Iterator

@@ -55,6 +55,8 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
+            // Even a zero-argument call may mutate a retained native list or reenter Python.
+            Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
                 match operation {
                     TextOperation::Split(_)
@@ -69,16 +71,24 @@ impl Builtin {
                 },
                 PreservesLists,
             ),
+            Self::PosixPath(operation) => Contract::new(
+                match operation {
+                    crate::ir::PosixPathOperation::MixedJoin { .. } => true,
+                    crate::ir::PosixPathOperation::Splitext => true, // Tuple allocation is fallible.
+                    _ => false,
+                },
+                PreservesLists,
+            ),
             Self::Path(operation) => Contract::new(
                 match operation {
                     PathOperation::ContextExit
-                    | PathOperation::Which
                     | PathOperation::ReadText
                     | PathOperation::ReadBytes
                     | PathOperation::Absolute
                     | PathOperation::WithName
                     | PathOperation::Resolve
                     | PathOperation::WriteText
+                    | PathOperation::WriteBytes
                     | PathOperation::Mkdir
                     | PathOperation::Unlink
                     | PathOperation::Rmdir
@@ -90,9 +100,7 @@ impl Builtin {
                     PathOperation::ContextNew { .. }
                     | PathOperation::ContextEnter
                     | PathOperation::UnionText
-                    | PathOperation::Platform
                     | PathOperation::Scripts
-                    | PathOperation::OsJoin
                     | PathOperation::OsExists
                     | PathOperation::New
                     | PathOperation::Join
@@ -120,7 +128,6 @@ impl Builtin {
                 | ProcessOperation::JoinGroup
                 | ProcessOperation::Acquire => Contract::new(true, Unknown),
                 ProcessOperation::Executable
-                | ProcessOperation::Exit
                 | ProcessOperation::CheckOutput
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run
@@ -150,6 +157,8 @@ impl Builtin {
                 | ProcessOperation::Release
                 | ProcessOperation::EnvironCopy
                 | ProcessOperation::EnvironGet
+                | ProcessOperation::GetCwd
+                | ProcessOperation::Which
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)
@@ -177,13 +186,17 @@ impl Builtin {
             | Self::DictGet
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
-            | Self::JsonLoad
             | Self::JsonLoads
             | Self::HashRecord
             | Self::JsonGet { .. }
             | Self::JsonGetReceiver
             | Self::JsonAdd
             | Self::JsonAddFields(_, _)
+            | Self::JsonDumps(_)
+            | Self::JsonDump(_)
+            | Self::JsonIndex
+            | Self::JsonIter
+            | Self::JsonLen
             | Self::JsonSelect(_)
             | Self::ListGet
             | Self::ListGetBounded { .. }
@@ -198,12 +211,12 @@ impl Builtin {
             | Self::Bool
             | Self::DictContains
             | Self::DictGetDefault
-            | Self::Counter
             | Self::CounterUpdate
             | Self::EnumLookup(_)
             | Self::DictSumValues
             | Self::DictTryGet(_)
             | Self::Encode
+            | Self::Sha256Hex
             | Self::ExceptionCause
             | Self::ExceptionMessage
             | Self::ExceptionSuppressContext
@@ -252,9 +265,8 @@ impl Builtin {
             | Self::StringReplace
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
-            Self::Append | Self::ListReserveRange | Self::SortByKeys => {
-                Contract::new(false, PreservesOwners)
-            }
+            Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
+            Self::ListReserveRange => Contract::new(false, PreservesOwners),
             Self::BinaryOpen(_)
             | Self::BinaryRead
             | Self::BinaryReadSize
@@ -271,7 +283,13 @@ impl Builtin {
             | Self::Print
             | Self::SortRestore
             | Self::StderrLine
-            | Self::StdoutWrite
+            | Self::SysStreamWrite { .. }
+            | Self::SysStreamFlush { .. }
+            | Self::SysExit
+            | Self::SystemExitNew { .. }
+            | Self::SystemExitCode
+            | Self::SystemExitCodeEqual { .. }
+            | Self::SysPlatform
             | Self::SysArgv
             | Self::TextClose
             | Self::TextEnter
@@ -282,6 +300,8 @@ impl Builtin {
             | Self::TomlKeys => Contract::new(true, Unknown),
             Self::BytesIter
             | Self::DefaultListDict
+            | Self::CounterNew
+            | Self::CounterTotal
             | Self::DictAsBase
             | Self::DictIter(_)
             | Self::ExceptionWithCause
@@ -299,14 +319,14 @@ impl Builtin {
             | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
-            | Self::SortedStringKeys
             | Self::SplitLinesIter
             | Self::StringIter
             | Self::StringReverseIter
             | Self::TextClosed => Contract::new(false, Unknown),
-            Self::SortedRecordRows { .. } | Self::TupleCacheNew | Self::TupleCacheResult => {
-                Contract::new(true, Unknown)
-            }
+            Self::SortedRecordRows { .. }
+            | Self::SortedStringKeys
+            | Self::TupleCacheNew
+            | Self::TupleCacheResult => Contract::new(true, Unknown),
         }
     }
 }
@@ -431,7 +451,6 @@ const TAGGED_INT: RuntimeParam = RuntimeParam::Value(Type::Int);
 pub(crate) struct OwnedIntOrError;
 /// The word borrows the rooted list element until consumption. Raw zero signals a pending error.
 pub(crate) struct BorrowedIntOrError;
-pub(crate) struct InfallibleVoid;
 /// One signals success. Zero signals a pending error.
 pub(crate) struct StatusOrError;
 
@@ -450,10 +469,15 @@ pub(crate) const LIST_BORROW_INDEX: RuntimeCall<BorrowedIntOrError, 2> = Runtime
     params: [INT_LIST, RuntimeParam::NativeIndex],
     result: BorrowedIntOrError,
 };
-pub(crate) const LIST_APPEND: RuntimeCall<InfallibleVoid, 2> = RuntimeCall {
+pub(crate) const LIST_APPEND: RuntimeCall<StatusOrError, 2> = RuntimeCall {
     symbol: "relar_list_append",
     params: [INT_LIST, TAGGED_INT],
-    result: InfallibleVoid,
+    result: StatusOrError,
+};
+pub(crate) const LIST_APPEND_PAIR: RuntimeCall<StatusOrError, 3> = RuntimeCall {
+    symbol: "relar_list_append_pair",
+    params: [INT_LIST, TAGGED_INT, TAGGED_INT],
+    result: StatusOrError,
 };
 pub(crate) const LIST_POP: RuntimeCall<OwnedIntOrError, 1> = RuntimeCall {
     symbol: "relar_list_pop",
@@ -490,6 +514,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || matches!(
             name,
             "int_floordiv"
+                | "relar_json_index"
+                | "relar_json_iter"
+                | "relar_json_len"
+                | "relar_json_get_receiver"
+                | "relar_json_add"
                 | "int_mod"
                 | "int_lshift"
                 | "int_rshift"
@@ -499,6 +528,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_subprocess_run_timeout"
                 | "relar_subprocess_run_timeout_int"
                 | "relar_environ_get"
+                | "relar_getcwd"
+                | "relar_shutil_which"
                 | "relar_environ_copy"
                 | "relar_subprocess_check"
                 | "relar_subprocess_error_field"
@@ -506,11 +537,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_print_float"
                 | "relar_stderr_line"
                 | "relar_enum_lookup"
-                | "relar_stdout_write"
                 | "relar_print_str"
                 | "relar_print_bytes"
                 | "relar_bytes_count"
                 | "relar_bytes_list"
+                | "relar_byte_output_finish"
                 | "relar_bytes_get"
                 | "relar_bytes_get_index"
                 | "relar_bytes_slice"
@@ -519,8 +550,6 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_bytes_decode_splitlines"
                 | "relar_bytes_decode"
                 | "relar_toml_keys"
-                | "relar_json_add"
-                | "relar_json_get_receiver"
                 | "relar_bytes_validate_utf8"
                 | "relar_binary_open"
                 | "relar_binary_read"
@@ -534,8 +563,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_sys_argv"
                 | "relar_path_read_bytes"
                 | "relar_path_read_text"
-                | "relar_shutil_which"
                 | "relar_path_write_text"
+                | "relar_path_write_bytes"
                 | "relar_path_mkdir"
                 | "relar_path_unlink"
                 | "relar_path_rmdir"

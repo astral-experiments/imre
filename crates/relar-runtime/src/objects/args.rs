@@ -114,17 +114,6 @@ pub extern "C" fn relar_sysconfig_scripts() -> *const Str {
     Rc::into_raw(Rc::new(Str::from(text)))
 }
 
-/// Python's platform spelling follows the native binary's target.
-#[unsafe(no_mangle)]
-pub extern "C" fn relar_sys_platform() -> *const Str {
-    let name = match std::env::consts::OS {
-        "macos" => "darwin",
-        "windows" => "win32",
-        other => other,
-    };
-    Rc::into_raw(Rc::new(Str::from(name)))
-}
-
 /// The Python interpreter for explicitly launched Python helpers. Preserve
 /// symlinks so a selected virtual environment keeps its own interpreter path.
 #[unsafe(no_mangle)]
@@ -133,19 +122,6 @@ pub extern "C" fn relar_sys_executable() -> *const Str {
         .and_then(|path| path.into_os_string().into_string().ok())
         .unwrap_or_default();
     Rc::into_raw(Rc::new(Str::from(text)))
-}
-
-/// # Safety
-/// The argument is a borrowed, live Python integer, or zero for no exit status.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_sys_exit(code: usize) {
-    if code == 0 {
-        Error::new(Kind::SystemExit, "").raise();
-        return;
-    }
-    // SAFETY: the caller owns the exact integer throughout conversion.
-    let code = unsafe { super::Int::borrow(code) };
-    Error::new(Kind::SystemExit, code.big().to_string()).raise();
 }
 
 /// Returns an owned reference to the same mutable list on every successful call.

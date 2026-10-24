@@ -12,14 +12,20 @@ use super::{Bytes, Error, Kind, List, Object, Storage, StorageCell, Str, Words, 
 fn ordered_indices(
     length: usize,
     reverse: bool,
-    mut compare: impl FnMut(usize, usize) -> Ordering,
-) -> SmallVec<[usize; 4]> {
-    let mut order: SmallVec<_> = (0..length).collect();
-    order.sort_by(|&left, &right| {
+    compare: impl Fn(usize, usize) -> Ordering,
+) -> Option<SmallVec<[usize; 4]>> {
+    let mut indices = SmallVec::new();
+    indices.try_reserve_exact(length).ok()?;
+    indices.extend(0..length);
+    indices.sort_unstable_by(|&left, &right| {
         let order = compare(left, right);
         if reverse { order.reverse() } else { order }
     });
-    order
+    // Restore encounter order within equal-key runs, including reverse sorts.
+    for equal in indices.chunk_by_mut(|&left, &right| compare(left, right).is_eq()) {
+        equal.sort_unstable();
+    }
+    Some(indices)
 }
 
 /// Walks each cycle with owner-preserving swaps, marking visited indices in the permutation.
@@ -43,16 +49,93 @@ fn permute<T>(values: &mut [T], order: &mut [usize]) {
 /// Long path-like strings often share the same leading bytes. For a large
 /// stable sort, find that prefix once before comparing the remaining bytes.
 ///
+pub(super) enum StringSort {
+    Stable { reverse: bool },
+    Distinct,
+}
+
 /// # Safety
 /// Each word is an immutable string rooted for the entire sort.
-unsafe fn sort_strings(values: &mut [usize], reverse: bool) {
+pub(super) unsafe fn sort_strings(values: &mut [usize], mode: StringSort) {
     // SAFETY: the list keeps these owners live, including while they move.
     let bytes = |word: usize| unsafe { (&*(word as *const Str)).as_bytes() };
     let skip = shared_prefix(values.iter().map(|&word| bytes(word)));
-    values.sort_by(|&left, &right| {
-        let order = bytes(left)[skip..].cmp(&bytes(right)[skip..]);
-        if reverse { order.reverse() } else { order }
-    });
+    let compare = |&left: &usize, &right: &usize| bytes(left)[skip..].cmp(&bytes(right)[skip..]);
+    match mode {
+        StringSort::Stable { reverse } => {
+            // Glidesort needs at least 48 scratch words to avoid internal allocation.
+            // A stack buffer also lets a large sort finish when the heap is full.
+            let mut local = [std::mem::MaybeUninit::uninit(); 64];
+            let mut heap = Vec::<usize>::new();
+            let scratch = if values.len() <= 128 || heap.try_reserve_exact(values.len()).is_err() {
+                local.as_mut_slice()
+            } else {
+                heap.spare_capacity_mut()
+            };
+            glidesort::sort_with_buffer_by(values, scratch, |left, right| {
+                if reverse {
+                    compare(right, left)
+                } else {
+                    compare(left, right)
+                }
+            });
+        }
+        StringSort::Distinct => sort_distinct_words(values, compare),
+    }
+}
+
+/// Merge a handful of ascending runs with a fallible scratch buffer. Random
+/// input and a failed reservation both use the allocation-free general sort.
+fn sort_distinct_words(
+    values: &mut [usize],
+    compare: impl Fn(&usize, &usize) -> std::cmp::Ordering,
+) {
+    let mut breaks = smallvec::SmallVec::<[usize; 8]>::new();
+    for index in 1..values.len() {
+        if compare(&values[index - 1], &values[index]).is_gt() {
+            if breaks.len() == breaks.capacity() {
+                values.sort_unstable_by(compare);
+                return;
+            }
+            breaks.push(index);
+        }
+    }
+    let mut scratch = Vec::new();
+    let ends = breaks
+        .iter()
+        .copied()
+        .skip(1)
+        .chain(std::iter::once(values.len()));
+    for (&split, end) in breaks.iter().zip(ends) {
+        if end - split <= 8 {
+            for index in split..end {
+                let word = values[index];
+                let dest = values[..index].partition_point(|other| compare(other, &word).is_lt());
+                values[dest..=index].rotate_right(1);
+            }
+            continue;
+        }
+        scratch.clear();
+        if scratch.try_reserve_exact(split).is_err() {
+            values.sort_unstable_by(compare);
+            return;
+        }
+        scratch.extend_from_slice(&values[..split]);
+        let (mut left, mut right) = (0, split);
+        for dest in 0..end {
+            if left == split {
+                // The unconsumed right suffix already starts at its final position.
+                break;
+            }
+            if right < end && compare(&values[right], &scratch[left]).is_lt() {
+                values[dest] = values[right];
+                right += 1;
+            } else {
+                values[dest] = scratch[left];
+                left += 1;
+            }
+        }
+    }
 }
 
 /// Returns a byte prefix shared by every key only when its removal pays for a
@@ -92,7 +175,7 @@ unsafe fn compare_int(left: usize, right: usize) -> Ordering {
 /// # Safety
 /// `keys` is a rooted list with the exact nonnullable scalar element kind.
 /// No mutation or callback overlaps the short immutable storage access.
-unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> SmallVec<[usize; 4]> {
+unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> Option<SmallVec<[usize; 4]>> {
     if kind == 2 {
         // SAFETY: integer lists have their separate exact runtime allocation.
         return unsafe {
@@ -251,13 +334,21 @@ pub unsafe extern "C" fn relar_sort_by_keys(
             object(values.cast()).0.with_mut(|storage| {
                 let values = storage.sequence_mut();
                 values.check_kind(key_kind);
-                sort_strings(&mut values.values, reverse != 0);
+                sort_strings(
+                    &mut values.values,
+                    StringSort::Stable {
+                        reverse: reverse != 0,
+                    },
+                );
             });
         }
         return;
     }
     // SAFETY: both exact list owners remain rooted throughout this operation.
-    let mut order = unsafe { key_order(keys, key_kind, reverse != 0) };
+    let Some(mut order) = (unsafe { key_order(keys, key_kind, reverse != 0) }) else {
+        super::exceptions::sequence_allocation_failed();
+        return;
+    };
     if element_kind == 2 {
         // SAFETY: all immutable key access has ended; swaps transfer existing owners.
         unsafe {
@@ -531,6 +622,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn permutation_growth_is_fallible_and_many_equal_keys_keep_their_positions() {
+        assert!(ordered_indices(usize::MAX, false, |a, b| a.cmp(&b)).is_none());
+        let keys: Vec<_> = (0..257).map(|index| index * 37 % 13).collect();
+        for reverse in [false, true] {
+            let mut expected: Vec<_> = (0..keys.len()).collect();
+            expected.sort_by(|&left, &right| {
+                let order = keys[left].cmp(&keys[right]);
+                if reverse { order.reverse() } else { order }
+            });
+            let actual =
+                ordered_indices(keys.len(), reverse, |a, b| keys[a].cmp(&keys[b])).unwrap();
+            assert_eq!(actual.as_slice(), expected);
+        }
+    }
+
+    #[test]
+    fn distinct_word_sort_handles_run_boundaries() {
+        for runs in 1..=10 {
+            for length in [0, 1, 7, 8, 31, 129] {
+                let mut words: Vec<_> = (0..runs)
+                    .flat_map(|start| (start..length).step_by(runs))
+                    .collect();
+                super::sort_distinct_words(&mut words, usize::cmp);
+                assert!(words.into_iter().eq(0..length));
+            }
+        }
+    }
+
+    #[test]
     fn empty_named_fields_do_not_reserve_the_template_length() {
         let template = "{x}".repeat(20_000) + "{y}";
         let result = format_named(&template, |name| match name {
@@ -547,7 +667,8 @@ mod tests {
     fn stable_permutations_preserve_ties_in_both_directions() {
         let keys = [2, 1, 2, 1, 0];
         for (reverse, expected) in [(false, [4, 1, 3, 0, 2]), (true, [0, 2, 1, 3, 4])] {
-            let mut order = ordered_indices(keys.len(), reverse, |a, b| keys[a].cmp(&keys[b]));
+            let mut order =
+                ordered_indices(keys.len(), reverse, |a, b| keys[a].cmp(&keys[b])).unwrap();
             let mut values = [0, 1, 2, 3, 4];
             permute(&mut values, &mut order);
             assert_eq!(values, expected);
@@ -557,7 +678,7 @@ mod tests {
     #[test]
     fn short_sorts_keep_the_permutation_inline() {
         for length in 0..=4 {
-            let mut order = ordered_indices(length, true, |left, right| left.cmp(&right));
+            let mut order = ordered_indices(length, true, |left, right| left.cmp(&right)).unwrap();
             assert!(!order.spilled());
             let mut values: Vec<_> = (0..length).collect();
             permute(&mut values, &mut order);
@@ -590,8 +711,8 @@ mod tests {
 
     #[test]
     fn sorting_shared_prefixes_uses_unicode_byte_order_and_stable_ties() {
-        for prefix in ["", "a-long-directory-name/"] {
-            let keys: Vec<_> = (0..96)
+        for (prefix, count) in [("", 96), ("a-long-directory-name/", 1025)] {
+            let keys: Vec<_> = (0..count)
                 .map(|i| Rc::new(Str::from(format!("{prefix}{}", ["é", "è", "ê"][i % 3]))))
                 .collect();
             for reverse in [false, true] {
@@ -599,7 +720,7 @@ mod tests {
                 expected.sort_by(|a, b| if reverse { b.cmp(a) } else { a.cmp(b) });
                 let mut words: Vec<_> = keys.iter().map(|s| Rc::as_ptr(s) as usize).collect();
                 // SAFETY: keys owns each immutable string until the comparison finishes.
-                unsafe { sort_strings(&mut words, reverse) };
+                unsafe { sort_strings(&mut words, StringSort::Stable { reverse }) };
                 assert!(
                     expected
                         .into_iter()

@@ -103,7 +103,13 @@ impl Value {
         }
     }
     fn from_json(view: &View, index: usize) -> Self {
+        if index == view.index
+            && let Some(root) = view.snapshot_root()
+        {
+            return Self::from_json(&root, root.index);
+        }
         match &view.nodes[index] {
+            Node::Deferred(array) => Self::from_json(array.view(), array.view().index),
             Node::Null => Self::Null,
             Node::Bool(x) => Self::Bool(*x),
             Node::Integer(x) => Self::Integer(x.clone()),

@@ -7,10 +7,22 @@ use crate::objects::exceptions::push_string_repr;
 
 impl View {
     pub(in crate::objects) fn equal(&self, right: &Self) -> bool {
-        self.equal_at(self.index, right, right.index)
+        let left_root = self.snapshot_root();
+        let right_root = right.snapshot_root();
+        let left = left_root.as_ref().unwrap_or(self);
+        let right = right_root.as_ref().unwrap_or(right);
+        left.equal_at(left.index, right, right.index)
     }
 
     fn equal_at(&self, a: usize, other: &Self, b: usize) -> bool {
+        if let Node::Deferred(array) = &self.nodes[a] {
+            let v = array.view();
+            return v.equal_at(v.index, other, b);
+        }
+        if let Node::Deferred(array) = &other.nodes[b] {
+            let v = array.view();
+            return self.equal_at(a, v, v.index);
+        }
         let left = &self.nodes[a];
         let right = &other.nodes[b];
         if std::ptr::eq(left, right) {
@@ -48,7 +60,18 @@ impl View {
     }
 
     pub(in crate::objects) fn write_repr(&self, output: &mut String) {
-        self.write_at(self.index, output);
+        if let Some(items) = self.nodes.root_items() {
+            // SAFETY: the root owns this ordinary list through the entire repr traversal.
+            unsafe {
+                crate::objects::values::write_repr(
+                    output,
+                    std::rc::Rc::as_ptr(items) as usize,
+                    crate::objects::words::WordKind::new(5),
+                )
+            };
+        } else {
+            self.write_at(self.index, output);
+        }
     }
 
     fn write_at(&self, i: usize, output: &mut String) {
@@ -66,6 +89,7 @@ impl View {
             }
             Node::Float(f) => output.push_str(&crate::floats::render(*f)),
             Node::String(s) => push_string_repr(s, output),
+            Node::Deferred(array) => array.view().write_repr(output),
             Node::Array(items) => {
                 output.push('[');
                 for (offset, &item) in items.iter().enumerate() {

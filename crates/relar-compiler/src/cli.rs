@@ -84,6 +84,7 @@ impl BuildOptions {
             }
             if command == "check"
                 && flag != "--module-root"
+                && flag != "--extension-path"
                 && flag != "--reachable-only"
                 && flag != "--entry-profile"
             {
@@ -105,6 +106,7 @@ impl BuildOptions {
                 }
                 Some("--reachable-only") => self.compile.reachable_only = true,
                 Some("--module-root") => self.module_root = Some(value()?.into()),
+                Some("--extension-path") => self.compile.extension_paths.push(value()?.into()),
                 Some("-o") if command == "build" => self.output = Some(value()?.into()),
                 Some("--runtime") => self.runtime = Some(value()?.into()),
                 Some("--emit-llvm") => self.llvm_path = Some(value()?.into()),

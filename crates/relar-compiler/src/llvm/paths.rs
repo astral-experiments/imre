@@ -154,10 +154,7 @@ impl Emitter<'_, '_> {
             }
             _ => {
                 let name = match operation {
-                    PathOperation::Platform => "relar_sys_platform",
                     PathOperation::Scripts => "relar_sysconfig_scripts",
-                    PathOperation::OsJoin => "relar_os_path_join",
-                    PathOperation::Which => "relar_shutil_which",
                     PathOperation::Absolute => "relar_path_absolute",
                     PathOperation::New => "relar_path_new",
                     PathOperation::Join => "relar_path_join",
@@ -170,6 +167,7 @@ impl Emitter<'_, '_> {
                     PathOperation::ReadBytes => "relar_path_read_bytes",
                     PathOperation::ReadText => "relar_path_read_text",
                     PathOperation::WriteText => "relar_path_write_text",
+                    PathOperation::WriteBytes => "relar_path_write_bytes",
                     PathOperation::Replace => "relar_path_replace",
                     _ => unreachable!("special path ABIs were handled above"),
                 };

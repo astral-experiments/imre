@@ -19,10 +19,12 @@ mod json;
 mod logging;
 mod mappings;
 mod paths;
+mod posixpath;
 mod processes;
 pub(crate) mod records;
 mod regexes;
 mod sequences;
+mod shutil;
 mod stdlib;
 mod string_enums;
 mod tempdirs;
@@ -51,6 +53,7 @@ enum Storage {
     StringIterator(sequences::StringIterator),
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
+    ByteOutput(bytes::ByteOutput),
     Exception(exceptions::Exception),
     File(Box<files::FileState>),
     AsyncProcess(Box<processes::AsyncProcess>),

@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 use ruff_python_literal::escape::{AsciiEscape, Escape};
+use sha2::{Digest, Sha256};
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::sequences::SliceIndices;
@@ -17,6 +18,125 @@ fn allocate(length: usize) -> Result<Bytes> {
         .try_reserve_exact(length)
         .map_err(|_| Error::new(Kind::MemoryError, "bytes allocation failed"))?;
     Ok(value)
+}
+
+/// Private append-only integer list whose only consumer converts it to bytes.
+pub(super) struct ByteOutput {
+    bytes: Vec<u8>,
+    invalid: bool,
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_byte_output_new() -> *const Object {
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ByteOutput(
+        ByteOutput {
+            bytes: Vec::new(),
+            invalid: false,
+        },
+    )))))
+}
+
+/// Hints at most 256 bytes per private buffer. A loop can break or raise before
+/// filling its output, and a failed hint must leave the next append unchanged.
+///
+/// # Safety
+/// The builder is rooted or null. Root all three canonical range arguments.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_byte_output_reserve_range(
+    output: *const Object,
+    start: usize,
+    stop: usize,
+    step: usize,
+    per_iteration: usize,
+) {
+    if output.is_null() {
+        return;
+    }
+    // SAFETY: the caller supplies the same captured operands as the range loop.
+    let Some(trips) = (unsafe { crate::small_range_trips(start, stop, step) }) else {
+        return;
+    };
+    let capacity = trips.saturating_mul(per_iteration).min(256);
+    // SAFETY: the private output is rooted and no storage borrow escapes.
+    unsafe {
+        super::object(output).0.with_mut(|storage| {
+            let Storage::ByteOutput(output) = storage else {
+                unreachable!()
+            };
+            if output.bytes.is_empty() && output.bytes.capacity() < capacity {
+                let _ = output.bytes.try_reserve_exact(capacity);
+            }
+        });
+    }
+}
+
+/// # Safety
+/// Root the private output and its canonical integer arguments for this call.
+unsafe fn append_bytes<const N: usize>(output: *const Object, words: [usize; N]) {
+    // SAFETY: only compiler-generated appends access this rooted private object.
+    unsafe {
+        super::object(output).0.with_mut(|storage| {
+            let Storage::ByteOutput(output) = storage else {
+                unreachable!()
+            };
+            if output.bytes.len() > super::MAX_LIST_LEN - N {
+                fail("MemoryError", "list allocation failed");
+            }
+            output
+                .bytes
+                .try_reserve(N)
+                .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
+            for word in words {
+                // Canonical 0..=255 are exactly the odd words in 1..=511.
+                // Invalid Ints have no observable destructor. Record the error
+                // without raising: a later producer exception must still win.
+                output.invalid |= word & !0x1fe != 1;
+                output.bytes.push((word >> 1) as u8);
+            }
+        });
+    }
+}
+
+/// # Safety
+/// Root the private output and the exact integer throughout the append.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_byte_output_append(output: *const Object, word: usize) {
+    // SAFETY: the caller roots both the output and the canonical integer.
+    unsafe { append_bytes(output, [word]) }
+}
+
+/// # Safety
+/// Root the private output and both already-evaluated exact integers.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_byte_output_append_pair(
+    output: *const Object,
+    first: usize,
+    second: usize,
+) {
+    // SAFETY: the caller roots the output and both canonical integers.
+    unsafe { append_bytes(output, [first, second]) }
+}
+
+/// # Safety
+/// Root the private output at its sole consuming bytes() expression.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_byte_output_finish(output: *const Object) -> *const Bytes {
+    // SAFETY: no Python-visible reference can observe the buffer transfer.
+    let result = unsafe {
+        super::object(output).0.with_mut(|storage| {
+            let Storage::ByteOutput(output) = storage else {
+                unreachable!()
+            };
+            if output.invalid {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    "bytes must be in range(0, 256)",
+                ));
+            }
+            Ok(Rc::into_raw(Rc::new(std::mem::take(&mut output.bytes))))
+        })
+    };
+    finish(result, std::ptr::null())
 }
 
 /// Converts a Python index-sized argument without truncating large integers.
@@ -359,6 +479,21 @@ pub unsafe extern "C" fn relar_str_encode(value: *const Str) -> *const Bytes {
     unsafe { relar_bytes_literal(value.as_ptr(), value.len()) }
 }
 
+/// # Safety
+/// The caller roots an exact bytes handle while the digest reads its contents.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_sha256_hex(value: *const Bytes) -> *const Str {
+    // SAFETY: the compiler roots the immutable bytes until hashing returns.
+    let digest = Sha256::digest(unsafe { &*value });
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut result = Str::with_capacity(digest.len() * 2);
+    for byte in digest {
+        result.push(char::from(HEX[(byte >> 4) as usize]));
+        result.push(char::from(HEX[(byte & 15) as usize]));
+    }
+    Rc::into_raw(Rc::new(result))
+}
+
 /// Renders Python's strict UTF-8 decode error from the invalid sequence bounds.
 fn decode_error(value: &[u8], error: std::str::Utf8Error) -> Error {
     let start = error.valid_up_to();
@@ -596,6 +731,34 @@ mod tests {
                 assert_eq!(Rc::strong_count(&source), 1);
                 assert_eq!(relar_error_pending(), 0);
             }
+        }
+    }
+
+    #[test]
+    fn byte_output_transfers_its_allocation_at_conversion() {
+        // SAFETY: the sole owner roots this private builder through conversion.
+        unsafe {
+            let output = Rc::from_raw(relar_byte_output_new());
+            relar_byte_output_reserve_range(std::ptr::null(), 1, 2001, 3, 2);
+            relar_byte_output_reserve_range(Rc::as_ptr(&output), 1, 2001, 3, usize::MAX);
+            output.0.with(|storage| {
+                let Storage::ByteOutput(output) = storage else {
+                    unreachable!()
+                };
+                assert_eq!(output.bytes.capacity(), 256);
+                assert!(output.bytes.is_empty());
+            });
+            relar_byte_output_append_pair(Rc::as_ptr(&output), 1, 511);
+            let buffer = output.0.with(|storage| {
+                let Storage::ByteOutput(output) = storage else {
+                    unreachable!()
+                };
+                output.bytes.as_ptr()
+            });
+            let result = Rc::from_raw(relar_byte_output_finish(Rc::as_ptr(&output)));
+            drop(output);
+            assert_eq!(result.as_ptr(), buffer);
+            assert_eq!(result.as_slice(), [0, 255]);
         }
     }
 

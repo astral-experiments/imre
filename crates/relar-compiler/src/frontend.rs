@@ -18,6 +18,7 @@ mod callables;
 mod calls;
 mod comprehensions;
 mod contexts;
+mod counter;
 mod dataclass_values;
 mod dispatch;
 mod documents;
@@ -33,6 +34,7 @@ mod matching;
 mod module_values;
 mod paths;
 mod pipelines;
+mod posixpath;
 mod processes;
 mod projected_equality;
 mod record_inputs;
@@ -43,6 +45,7 @@ mod sign_parameters;
 mod sorted_rows;
 mod stdlib;
 mod string_lists;
+mod sys;
 mod text;
 mod truthiness;
 mod unions;
@@ -148,6 +151,9 @@ impl ClassInfo {
             })
             .collect::<Result<Vec<_>, _>>()?;
         for (id, class) in declarations.definitions.iter().enumerate() {
+            if class.abstract_methods.is_empty() && !class.bases.is_empty() {
+                types.add_concrete_subclass(id, &class.bases);
+            }
             if let Some(&base) = class.bases.first()
                 && !fields[id].starts_with(&fields[base])
             {
@@ -641,7 +647,42 @@ pub(crate) fn lower_with_owners(
                 checker.assigned.insert(slot);
                 params.push(slot);
             }
-            let (mut body, falls_through) = if classes.keyword_copies.contains(&signature.id) {
+            let (mut body, falls_through) = if module.archive.is_some() {
+                let args = params.iter().map(|&slot| checker.local(slot)).collect();
+                let kind = |ty| match ty {
+                    Type::None => Ok(0),
+                    Type::Int => Ok(1),
+                    Type::Bytes => Ok(2),
+                    Type::ListInt => Ok(3),
+                    Type::Callable(_)
+                        if types.signature(ty) == Some((vec![Type::Int], Type::Int)) =>
+                    {
+                        Ok(4)
+                    }
+                    _ => Err(error(
+                        &module.source,
+                        definition,
+                        "native declarations currently support None, int, bytes, list[int], and Callable[[int], int]",
+                    )),
+                };
+                let call = Builtin::ExtensionCall {
+                    module: module.name.rsplit('.').next().unwrap().to_owned(),
+                    method: definition.name.to_string(),
+                    kinds: signature
+                        .params
+                        .iter()
+                        .map(|p| kind(p.ty))
+                        .collect::<Result<_, _>>()?,
+                    result_kind: kind(signature.returns)?,
+                };
+                (
+                    vec![Statement::Return(Expr {
+                        ty: signature.returns,
+                        kind: ExprKind::Builtin(call, args),
+                    })],
+                    false,
+                )
+            } else if classes.keyword_copies.contains(&signature.id) {
                 let class = signature.method.unwrap().class;
                 let value = checker.dispatch_record(
                     class,
@@ -825,12 +866,28 @@ pub(crate) fn lower_with_owners(
         }
     }
     for initialization in &initializations {
+        let module = &graph.modules[initialization.module];
+        let mut body = initialization.function.body.clone();
+        if module.archive.is_some() {
+            body.insert(
+                0,
+                Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(
+                        Builtin::ExtensionImport(
+                            module.name.rsplit('.').next().unwrap().to_owned(),
+                        ),
+                        vec![],
+                    ),
+                }),
+            );
+        }
         owners.push(initialization.module);
         functions.push(ir::Function {
             params: Vec::new(),
             returns: Type::None,
             locals: initialization.function.locals.clone(),
-            body: initialization.function.body.clone(),
+            body,
         });
         call_graph.push(initialization.calls.clone());
         class_reads.push(HashSet::new());
@@ -1759,15 +1816,18 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
             });
         }
-        let concrete = self.types.payload(expected).unwrap_or(expected);
-        if value.ty == Type::JsonValue
-            && (matches!(concrete, Type::JsonObject | Type::Int | Type::Str)
-                || self.types.element(concrete) == Some(Type::JsonObject))
+        let target = self.types.payload(expected).unwrap_or(expected);
+        if matches!(value.ty, Type::JsonValue | Type::JsonRoot)
+            && (matches!(
+                target,
+                Type::JsonObject | Type::Int | Type::Str | Type::Bool | Type::Float
+            ) || self.types.element(target) == Some(Type::JsonObject))
         {
             return Ok(json::select(value, expected, None, None));
         }
-        if self.types.is_default_list_dict(value.ty)
+        if (self.types.is_default_list_dict(value.ty) || self.types.is_counter(value.ty))
             && !self.types.is_default_list_dict(expected)
+            && !self.types.is_counter(expected)
             && self.types.mapping(value.ty) == self.types.mapping(expected)
         {
             return Ok(Expr {
@@ -1911,7 +1971,7 @@ impl<'a> Checker<'a> {
             {
                 Expr {
                     ty: concrete,
-                    kind: ExprKind::Builtin(Builtin::Counter, Vec::new()),
+                    kind: ExprKind::Builtin(Builtin::CounterNew, Vec::new()),
                 }
             }
             ast::Expr::Lambda(lambda) => {
@@ -1956,6 +2016,12 @@ impl<'a> Checker<'a> {
                 } else {
                     self.list_call(call, self.types.element(concrete))?
                 }
+            }
+            ast::Expr::Call(call)
+                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Counter))
+                    && self.types.mapping(concrete).is_some() =>
+            {
+                self.counter(call, None, self.types.mapping(concrete).map(|(key, _)| key))?
             }
             ast::Expr::Call(call)
                 if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::DefaultDict)) =>
@@ -2409,7 +2475,19 @@ impl<'a> Checker<'a> {
                 return Ok((receiver, true));
             }
         }
-        Ok((self.iteration_expression(expression, None)?, false))
+        let value = self.iteration_expression(expression, None)?;
+        let value = if matches!(
+            value.ty,
+            Type::JsonRoot | Type::JsonValue | Type::JsonObject
+        ) {
+            Expr {
+                ty: self.types.list(Type::JsonValue),
+                kind: ExprKind::Builtin(Builtin::JsonIter, vec![value]),
+            }
+        } else {
+            value
+        };
+        Ok((value, false))
     }
 
     /// Checks an iterable in its current lexical scope, before target binding.
@@ -3104,6 +3182,7 @@ impl<'a> Checker<'a> {
             ast::Stmt::AugAssign(assign) => {
                 if let ast::Expr::Subscript(target) = &*assign.target {
                     let list = self.expr(&target.value)?;
+                    let list = self.json_mutation_receiver(list, target)?;
                     let (key, element) = if let Some(mapping) = self.types.mapping(list.ty) {
                         mapping
                     } else {
@@ -3488,7 +3567,16 @@ impl<'a> Checker<'a> {
     /// Class-form raises construct a new instance, just like an explicit call.
     fn raised_exception(&mut self, value: &ast::Expr) -> Result<Expr, String> {
         if let Some(kind) = self.exception_category(value) {
-            if matches!(kind, 0 | 18 | 25..=32 | 34) {
+            if kind == 32 {
+                return Ok(Expr {
+                    ty: Type::Exception,
+                    kind: ExprKind::Builtin(
+                        Builtin::SystemExitNew { omit_none: false },
+                        Vec::new(),
+                    ),
+                });
+            }
+            if matches!(kind, 0 | 18 | 25..=31 | 34) {
                 return Err(error(
                     self.source,
                     value,
@@ -3922,6 +4010,15 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        // A chained method checks its receiver before its arguments. Keep the
+        // large general expression frame off that recursive path in debug builds.
+        match expression {
+            ast::Expr::Call(call) => self.call(call),
+            _ => self.non_call_expr(expression),
+        }
+    }
+
+    fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level) | Intrinsic::SignalNumber(level),
         )) = self.resolve(expression)
@@ -3957,6 +4054,12 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::GlobalGet(slot), Vec::new()),
             });
         }
+        if let Some(Binding::Intrinsic(Intrinsic::AccessMode(mode))) = self.resolve(expression) {
+            return Ok(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Int(mode.to_string()),
+            });
+        }
         if matches!(
             self.resolve(expression),
             Some(Binding::Intrinsic(Intrinsic::Argv))
@@ -3966,17 +4069,17 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
             });
         }
-        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::Platform)) {
-            return Ok(paths::operation(
-                ir::PathOperation::Platform,
-                Type::Str,
-                vec![],
-            ));
-        }
-        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::SysExecutable)) {
+        if let Some(Binding::Intrinsic(
+            intrinsic @ (Intrinsic::SysExecutable | Intrinsic::SysPlatform),
+        )) = self.resolve(expression)
+        {
+            let operation = match intrinsic {
+                Intrinsic::SysExecutable => Builtin::Process(ir::ProcessOperation::Executable),
+                _ => Builtin::SysPlatform,
+            };
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::Executable), vec![]),
+                kind: ExprKind::Builtin(operation, Vec::new()),
             });
         }
         let (ty, kind) = match expression {
@@ -4305,10 +4408,12 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
-                if values
-                    .iter()
-                    .any(|value| matches!(value.ty, Type::JsonValue | Type::JsonObject))
-                {
+                if values.iter().any(|value| {
+                    matches!(
+                        value.ty,
+                        Type::JsonRoot | Type::JsonValue | Type::JsonObject
+                    )
+                }) {
                     return json::compare(values, &compare.ops, self.source, expression);
                 }
                 if let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
@@ -4363,6 +4468,40 @@ impl<'a> Checker<'a> {
                         values,
                         compare.ops[0] == ast::CmpOp::NotEq,
                     ));
+                }
+                if values.iter().any(|value| value.ty == Type::ExitCode) {
+                    if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
+                        || !values.iter().all(|v| {
+                            matches!(
+                                v.ty,
+                                Type::None
+                                    | Type::Bool
+                                    | Type::Int
+                                    | Type::Str
+                                    | Type::StrLiteral(_)
+                                    | Type::ExitCode
+                            )
+                        })
+                    {
+                        return Err(error(
+                            self.source,
+                            expression,
+                            "exit codes support equality with None, bool, int, or str",
+                        ));
+                    }
+                    let reversed = values[0].ty != Type::ExitCode;
+                    let eq = Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Builtin(Builtin::SystemExitCodeEqual { reversed }, values),
+                    };
+                    return Ok(if compare.ops[0] == ast::CmpOp::NotEq {
+                        Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Not(Box::new(eq)),
+                        }
+                    } else {
+                        eq
+                    });
                 }
                 // Python StrEnum compares by its underlying str value, even
                 // against raw str or a member of another enum. A same-class
@@ -4453,8 +4592,15 @@ impl<'a> Checker<'a> {
                     Type::Document(_) => self.document_map(list),
                     _ => list,
                 };
-                if matches!(list.ty, Type::JsonValue | Type::JsonObject) {
+                if matches!(list.ty, Type::JsonRoot | Type::JsonValue | Type::JsonObject) {
                     let ast::Expr::StringLiteral(key) = subscript.slice.as_ref() else {
+                        let index = self.expr(&subscript.slice)?;
+                        if index.ty == Type::Int {
+                            return Ok(Expr {
+                                ty: Type::JsonValue,
+                                kind: ExprKind::Builtin(Builtin::JsonIndex, vec![list, index]),
+                            });
+                        }
                         return Err(error(
                             self.source,
                             expression,
@@ -4623,6 +4769,7 @@ impl<'a> Checker<'a> {
                         return Ok(value);
                     }
                     let (ty, builtin) = match attribute.attr.as_str() {
+                        "code" => (Type::ExitCode, Builtin::SystemExitCode),
                         "__cause__" => (
                             self.types.optional(Type::Exception),
                             Builtin::ExceptionCause,
@@ -4670,7 +4817,7 @@ impl<'a> Checker<'a> {
                 }
                 (ty, ExprKind::Field(Box::new(receiver), field))
             }
-            ast::Expr::Call(call) => return self.call(call),
+            ast::Expr::Call(_) => unreachable!("call dispatched by typed_expr"),
             ast::Expr::Generator(_) => {
                 return Err(error(
                     self.source,
@@ -4738,7 +4885,35 @@ impl<'a> Checker<'a> {
             }))
     }
 
-    fn call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+    fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        // A method result becomes the next receiver before its arguments are
+        // evaluated. Check such chains in that order without retaining a full
+        // expression and call-dispatch frame for every intermediate receiver.
+        let mut chain = Vec::new();
+        while let ast::Expr::Attribute(method) = &*call.func
+            && let ast::Expr::Call(inner) = &*method.value
+            && inner.func.is_attribute_expr()
+            && self.resolve(&inner.func).is_none()
+            && !call.arguments.args.iter().any(ast::Expr::is_starred_expr)
+            && call.arguments.keywords.iter().all(|kw| kw.arg.is_some())
+        {
+            chain.push(call);
+            call = inner;
+        }
+        let mut value = self.call_on(call, None)?;
+        for call in chain.into_iter().rev() {
+            if matches!(value.ty, Type::StrLiteral(_)) {
+                value = literals::view(value, Type::Str);
+            }
+            value = self.call_on(call, Some(value))?;
+        }
+        Ok(value)
+    }
+
+    fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
+        if let Some(value) = self.sys_call(call)? {
+            return Ok(value);
+        }
         if matches!(&*call.func,ast::Expr::Name(n) if n.id=="dict" && !self.names.contains_key("dict"))
             && self.resolve(&call.func).is_none()
             && let Some(mapping) = self.dict_from_zip(call)?
@@ -4766,7 +4941,7 @@ impl<'a> Checker<'a> {
                 }
             });
             if normalized.arguments.keywords.len() != call.arguments.keywords.len() {
-                return self.call(&normalized);
+                return self.call_on(&normalized, receiver);
             }
         }
         if let Some(Binding::Intrinsic(
@@ -4781,7 +4956,7 @@ impl<'a> Checker<'a> {
         if let Some(expression) = self.parse_args(call)? {
             return Ok(expression);
         }
-        self.call_with_key_view(call, None)
+        self.call_with_key_view(call, None, receiver)
     }
 
     /// A direct `dict.keys()` operand roots the mapping until the operation.
@@ -4790,7 +4965,7 @@ impl<'a> Checker<'a> {
         let mut view = false;
         let value = match source {
             ast::Expr::Call(call) if matches!(&*call.func, ast::Expr::Attribute(attr) if attr.attr.as_str() == "keys") => {
-                self.call_with_key_view(call, Some(&mut view))?
+                self.call_with_key_view(call, Some(&mut view), None)?
             }
             _ => self.expr(source)?,
         };
@@ -4806,6 +4981,7 @@ impl<'a> Checker<'a> {
         &mut self,
         call: &ast::ExprCall,
         key_view: Option<&mut bool>,
+        receiver: Option<Expr>,
     ) -> Result<Expr, String> {
         if crate::classes::super_init(call) {
             return self.call_super_initializer(call);
@@ -4817,22 +4993,6 @@ impl<'a> Checker<'a> {
             return Ok(copy);
         }
         calls::reject_unpacking(call, self.source)?;
-        if let ast::Expr::Attribute(method) = &*call.func
-            && method.attr.as_str() == "write"
-            && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Stdout))
-        {
-            self.reject_builtin_keywords(call)?;
-            let [text] = call.arguments.args.as_ref() else {
-                return Err(error(self.source, call, "stdout.write requires one string"));
-            };
-            return Ok(Expr {
-                ty: Type::Int,
-                kind: ExprKind::Builtin(
-                    Builtin::StdoutWrite,
-                    vec![self.expr_expected(text, Type::Str)?],
-                ),
-            });
-        }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "set")
             && let [input] = call.arguments.args.as_ref()
             && call.arguments.keywords.is_empty()
@@ -4856,6 +5016,40 @@ impl<'a> Checker<'a> {
             }
             let function = binding.target(self.source, &*call.func)?.clone();
             return self.call_local_function(call, &function);
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "hexdigest"
+            && let ast::Expr::Call(constructor) = &*method.value
+            && self.resolve(&constructor.func) == Some(Binding::Intrinsic(Intrinsic::Sha256))
+        {
+            self.reject_builtin_keywords(call)?;
+            self.reject_builtin_keywords(constructor)?;
+            calls::reject_unpacking(constructor, self.source)?;
+            if !call.arguments.args.is_empty() {
+                return Err(error(
+                    self.source,
+                    call,
+                    "sha256.hexdigest() takes no arguments",
+                ));
+            }
+            let data = match constructor.arguments.args.as_ref() {
+                [] => Expr {
+                    ty: Type::Bytes,
+                    kind: ExprKind::Bytes(Vec::new()),
+                },
+                [data] => self.expr_expected(data, Type::Bytes)?,
+                _ => {
+                    return Err(error(
+                        self.source,
+                        constructor,
+                        "sha256 accepts zero or one positional bytes argument",
+                    ));
+                }
+            };
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::Sha256Hex, vec![data]),
+            });
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "keys"
@@ -4888,6 +5082,18 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::TomlKeys, vec![text]),
             });
         }
+        if let ast::Expr::Subscript(s) = &*call.func
+            && self.resolve(&s.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
+        {
+            let ty = annotation(
+                &s.slice,
+                self.graph,
+                self.module,
+                &self.classes.declarations,
+                self.types,
+            )?;
+            return self.counter(call, None, Some(ty));
+        }
         match self.resolve(&call.func) {
             Some(Binding::Intrinsic(
                 kind @ (Intrinsic::RunLoop
@@ -4899,12 +5105,36 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.async_builtin(kind, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::Sha256)) => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "sha256 is supported only with an immediate .hexdigest()",
+                ));
+            }
+            Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
                 return Err(error(
                     self.source,
                     call,
                     "groupby requires direct for iteration with an immediate list(group)",
                 ));
+            }
+            Some(Binding::Intrinsic(Intrinsic::GetEnv)) => return self.environ_get(call),
+            Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
+                self.arguments(call, &[], None)?;
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetCwd), vec![]),
+                });
+            }
+            Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
+            Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
+                self.reject_builtin_keywords(call)?;
+                let [path] = call.arguments.args.as_ref() else {
+                    return Err(error(self.source, call, "os.fspath requires one path"));
+                };
+                return self.fspath_argument(path);
             }
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
             Some(Binding::Intrinsic(Intrinsic::WallTime)) if call.arguments.is_empty() => {
@@ -4938,12 +5168,6 @@ impl<'a> Checker<'a> {
                     ),
                 });
             }
-            Some(Binding::Intrinsic(Intrinsic::Counter)) if call.arguments.is_empty() => {
-                return Ok(Expr {
-                    ty: self.types.counter(Type::Str),
-                    kind: ExprKind::Builtin(Builtin::Counter, Vec::new()),
-                });
-            }
             Some(Binding::Intrinsic(Intrinsic::Ndiff)) => {
                 return Err(error(
                     self.source,
@@ -4953,10 +5177,7 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
             Some(Binding::Intrinsic(
-                intrinsic @ (Intrinsic::GetSysconfigPath
-                | Intrinsic::OsPathJoin
-                | Intrinsic::OsPathExists
-                | Intrinsic::Which),
+                intrinsic @ (Intrinsic::GetSysconfigPath | Intrinsic::OsPathExists),
             )) => {
                 return self.system_path_call(intrinsic, call);
             }
@@ -4968,30 +5189,6 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::ShlexSplit)) => {
                 return self.text_function(call, "s", ir::TextOperation::ShlexSplit);
-            }
-            Some(Binding::Intrinsic(Intrinsic::SysExit)) => {
-                self.reject_builtin_keywords(call)?;
-                let code = match call.arguments.args.as_ref() {
-                    [] | [ast::Expr::NoneLiteral(_)] => Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    },
-                    [code] => self.expr_expected(code, Type::Int)?,
-                    _ => {
-                        return Err(error(
-                            self.source,
-                            call,
-                            "sys.exit accepts one integer status",
-                        ));
-                    }
-                };
-                return Ok(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(
-                        Builtin::Process(ir::ProcessOperation::Exit),
-                        vec![code],
-                    ),
-                });
             }
             _ => {}
         }
@@ -5021,6 +5218,10 @@ impl<'a> Checker<'a> {
         if let Some(class) = self.class_reference(&call.func) {
             return self.construct(call, class);
         }
+        if let Some(Binding::Intrinsic(Intrinsic::PosixPath(operation))) = self.resolve(&call.func)
+        {
+            return self.posix_path(call, operation);
+        }
         if matches!(
             self.resolve(&call.func),
             Some(Binding::Intrinsic(Intrinsic::Path))
@@ -5033,11 +5234,10 @@ impl<'a> Checker<'a> {
         ) {
             return self.json_decode(call);
         }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::JsonLoads)) {
-            return self.json_loads(call);
-        }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::JsonLoad)) {
-            return self.json_load(call);
+        if let Some(Binding::Intrinsic(operation @ (Intrinsic::JsonLoads | Intrinsic::JsonLoad))) =
+            self.resolve(&call.func)
+        {
+            return self.json_loads(call, operation == Intrinsic::JsonLoad);
         }
         if matches!(
             self.resolve(&call.func),
@@ -5045,11 +5245,11 @@ impl<'a> Checker<'a> {
         ) {
             return self.toml_decode(call);
         }
-        if matches!(
-            self.resolve(&call.func),
-            Some(Binding::Intrinsic(Intrinsic::JsonEncode))
-        ) {
-            return self.json_encode(call);
+        if let Some(Binding::Intrinsic(
+            op @ (Intrinsic::JsonEncode | Intrinsic::JsonDumps | Intrinsic::JsonDump),
+        )) = self.resolve(&call.func)
+        {
+            return self.json_encode(call, op);
         }
         let gzip = matches!(
             self.resolve(&call.func),
@@ -5063,7 +5263,10 @@ impl<'a> Checker<'a> {
         }
         if let Some(kind) = self.exception_category(&call.func) {
             self.reject_builtin_keywords(call)?;
-            if matches!(kind, 0 | 18 | 25..=32 | 34) {
+            if kind == 32 {
+                return self.system_exit(call, false);
+            }
+            if matches!(kind, 0 | 18 | 25..=31 | 34) {
                 return Err(error(
                     self.source,
                     call,
@@ -5122,7 +5325,10 @@ impl<'a> Checker<'a> {
             if let Some(class) = self.class_reference(&attribute.value) {
                 return self.class_method_call(call, attribute, class, None);
             }
-            let receiver = self.expr(&attribute.value)?;
+            let receiver = match receiver {
+                Some(value) => value,
+                None => self.expr(&attribute.value)?,
+            };
             if let Type::Class(class) = receiver.ty {
                 return self.class_method_call(call, attribute, class, Some(receiver));
             }
@@ -5132,35 +5338,24 @@ impl<'a> Checker<'a> {
                 return self.class_method_call(call, attribute, class, Some(receiver));
             }
             let receiver = Self::enum_text(receiver);
-            if matches!(receiver.ty, Type::JsonValue | Type::JsonObject)
-                && attribute.attr.as_str() == "get"
-            {
-                return self.json_get(receiver, call);
-            }
             if matches!(receiver.ty, Type::Document(_)) {
                 return self.document_method(call, attribute, receiver);
             }
-            if receiver.ty == Type::Path && attribute.attr.as_str() == "open" {
-                let mode = match call.arguments.args.as_ref() {
-                    [] => "r",
-                    [ast::Expr::StringLiteral(mode)] => {
-                        check_string(mode, self.source)?;
-                        mode.value.to_str()
-                    }
-                    _ => {
-                        return Err(error(
-                            self.source,
-                            call,
-                            "Path.open requires a literal supported mode",
-                        ));
-                    }
-                };
-                let path = Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Path(ir::PathOperation::Text), vec![receiver]),
-                };
-                return self.open_mode(call, false, mode, path);
+            if matches!(
+                receiver.ty,
+                Type::JsonRoot | Type::JsonValue | Type::JsonObject
+            ) && attribute.attr.as_str() == "get"
+            {
+                return self.json_get(receiver, call);
             }
+            let receiver = if matches!(
+                attribute.attr.as_str(),
+                "append" | "pop" | "extend" | "sort"
+            ) {
+                self.json_mutation_receiver(receiver, call)?
+            } else {
+                receiver
+            };
             if receiver.ty == Type::Path {
                 return self.path_method(receiver, attribute, call);
             }
@@ -5195,8 +5390,21 @@ impl<'a> Checker<'a> {
                     _ => {}
                 }
             }
+            if self.types.is_counter(receiver.ty) {
+                match attribute.attr.as_str() {
+                    "update" => return self.counter(call, Some(receiver), None),
+                    "total"
+                        if call.arguments.args.is_empty() && call.arguments.keywords.is_empty() =>
+                    {
+                        return Ok(Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Builtin(Builtin::CounterTotal, vec![receiver]),
+                        });
+                    }
+                    _ => {}
+                }
+            }
             if attribute.attr.as_str() == "sort" && self.types.element(receiver.ty).is_some() {
-                self.check_mutable_json_rows(receiver.ty, call)?;
                 return self.list_sort(receiver, call);
             }
             if attribute.attr.as_str() == "union"
@@ -5300,23 +5508,6 @@ impl<'a> Checker<'a> {
                 });
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
-                if self.types.is_counter(receiver.ty)
-                    && attribute.attr.as_str() == "update"
-                    && let [source] = call.arguments.args.as_ref()
-                {
-                    let source = self.expr(source)?;
-                    if self.types.mapping(source.ty) != Some((key_type, Type::Int)) {
-                        return Err(error(
-                            self.source,
-                            call,
-                            "Counter.update requires a mapping of matching keys to int",
-                        ));
-                    }
-                    return Ok(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::Builtin(Builtin::CounterUpdate, vec![receiver, source]),
-                    });
-                }
                 if attribute.attr.as_str() == "keys"
                     && call.arguments.args.is_empty()
                     && let Some(view) = key_view
@@ -5386,11 +5577,7 @@ impl<'a> Checker<'a> {
                 )
             })?;
             if attribute.attr.as_str() == "extend" && call.arguments.args.len() == 1 {
-                self.check_mutable_json_rows(receiver.ty, call)?;
                 return self.extend_list(receiver, &call.arguments.args[0], call);
-            }
-            if matches!(attribute.attr.as_str(), "append" | "pop") {
-                self.check_mutable_json_rows(receiver.ty, call)?;
             }
             let mut args = vec![receiver];
             let (builtin, ty) = match attribute.attr.as_str() {
@@ -5644,6 +5831,23 @@ impl<'a> Checker<'a> {
                 },
             });
         }
+        if matches!(name.id.as_str(), "str" | "print")
+            && args.len() == 1
+            && args[0].ty == Type::ExitCode
+        {
+            let text = Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::Str, args),
+            };
+            return Ok(if name.id == "str" {
+                text
+            } else {
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::Print, vec![text]),
+                }
+            });
+        }
         if name.id == "print"
             && args.len() == 1
             && matches!(args[0].ty, Type::Exception | Type::TimeoutExpired)
@@ -5674,7 +5878,8 @@ impl<'a> Checker<'a> {
                 });
             }
             if matches!(name.id.as_str(), "str" | "print")
-                && matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess)
+                && (matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess)
+                    || self.types.is_counter(args[0].ty))
             {
                 let text = self.record_text(args.into_iter().next().unwrap(), call)?;
                 return Ok(if name.id == "str" {
@@ -5742,6 +5947,15 @@ impl<'a> Checker<'a> {
                 if args.len() == 1
                     && matches!(
                         args[0].ty,
+                        Type::JsonRoot | Type::JsonValue | Type::JsonObject
+                    ) =>
+            {
+                (Builtin::JsonLen, Type::Int)
+            }
+            "len"
+                if args.len() == 1
+                    && matches!(
+                        args[0].ty,
                         Type::Str
                             | Type::Bytes
                             | Type::ListInt
@@ -5777,7 +5991,7 @@ impl<'a> Checker<'a> {
         })
     }
 
-    /// Native text reads default to UTF-8. The path is evaluated once.
+    /// Text uses UTF-8 and defaults to reading; explicit modes stay literal.
     fn open(&mut self, call: &ast::ExprCall, gzip: bool) -> Result<Expr, String> {
         let (path, mode) = match call.arguments.args.as_ref() {
             [path] if !gzip => (path, "r"),
@@ -5794,25 +6008,9 @@ impl<'a> Checker<'a> {
             }
         };
         let path = self.path_argument(path)?;
-        self.open_mode(call, gzip, mode, path)
-    }
-
-    fn open_mode(
-        &self,
-        call: &ast::ExprCall,
-        gzip: bool,
-        mode: &str,
-        path: Expr,
-    ) -> Result<Expr, String> {
         let (ty, builtin) = match (gzip, mode) {
             (true, "rt") => (Type::TextIO, Builtin::GzipOpen),
             (true, "rb") => (Type::BinaryIO, Builtin::GzipOpen),
-            (false, "r") => (Type::TextIO, Builtin::TextOpen(0)),
-            (false, "w") => (Type::TextIO, Builtin::TextOpen(1)),
-            (false, "rb") => (Type::BinaryIO, Builtin::BinaryOpen(0)),
-            (false, "wb") => (Type::BinaryIO, Builtin::BinaryOpen(1)),
-            (false, "ab") => (Type::BinaryIO, Builtin::BinaryOpen(2)),
-            (false, "xb") => (Type::BinaryIO, Builtin::BinaryOpen(3)),
             (true, _) => {
                 return Err(error(
                     self.source,
@@ -5820,17 +6018,17 @@ impl<'a> Checker<'a> {
                     "gzip.open supports literal 'rb' or 'rt' mode",
                 ));
             }
-            (false, _) => {
-                return Err(error(
+            (false, mode) => paths::file_open_mode(mode).ok_or_else(|| {
+                error(
                     self.source,
                     call,
                     "open supports literal 'r', 'w', 'rb', 'wb', 'ab', or 'xb' mode",
-                ));
-            }
+                )
+            })?,
         };
         if ty == Type::BinaryIO {
             self.reject_builtin_keywords(call)?;
-        } else if gzip || mode != "r" || !call.arguments.keywords.is_empty() {
+        } else if gzip || !call.arguments.keywords.is_empty() {
             self.utf8_encoding(call)?;
         }
         Ok(Expr {
@@ -5848,6 +6046,10 @@ impl<'a> Checker<'a> {
                 "text file I/O requires encoding='utf-8'",
             ));
         };
+        self.utf8_encoding_keyword(encoding)
+    }
+
+    fn utf8_encoding_keyword(&self, encoding: &ast::Keyword) -> Result<(), String> {
         if encoding
             .arg
             .as_ref()

@@ -195,7 +195,7 @@ impl Checker<'_> {
                         vec![value, receiver, key],
                     )));
                 }
-                self.check_mutable_json_rows(receiver.ty, subscript)?;
+                let receiver = self.json_mutation_receiver(receiver, subscript)?;
                 let (key, element) = self
                     .types
                     .mapping(receiver.ty)

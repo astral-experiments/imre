@@ -106,41 +106,24 @@ pub(super) fn compare(
 }
 
 impl Checker<'_> {
-    /// The same document array may be projected at multiple typed boundaries.
-    /// Its source type remains read-only across aliases and function calls.
-    pub(super) fn check_mutable_json_rows(
+    /// Nested array projections may be shared by independent document views.
+    /// Only the original root list exposes the existing mutable Python list.
+    pub(super) fn json_mutation_receiver(
         &self,
-        ty: Type,
+        value: Expr,
         node: &impl Ranged,
-    ) -> Result<(), String> {
-        if self.types.element(ty) == Some(Type::JsonObject) {
+    ) -> Result<Expr, String> {
+        if self.types.element(value.ty) == Some(Type::JsonObject) {
             return Err(error(
                 self.source,
                 node,
                 "lists of readonly JSON object views cannot be mutated",
             ));
         }
-        Ok(())
-    }
-
-    pub(super) fn json_load(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        self.reject_builtin_keywords(call)?;
-        let [stream] = call.arguments.args.as_ref() else {
-            return Err(error(
-                self.source,
-                call,
-                "json.load requires one open text stream",
-            ));
-        };
-        let stream = self.expr_expected(stream, Type::TextIO)?;
-        let text = Expr {
-            ty: Type::Str,
-            kind: ExprKind::Builtin(Builtin::TextRead, vec![stream]),
-        };
-        Ok(Expr {
-            ty: Type::JsonValue,
-            kind: ExprKind::Builtin(Builtin::JsonLoad, vec![text]),
-        })
+        if value.ty == Type::JsonRoot {
+            return Ok(select(value, self.types.list(Type::JsonValue), None, None));
+        }
+        Ok(value)
     }
 
     pub(super) fn json_get(
@@ -149,30 +132,63 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
-        let [ast::Expr::StringLiteral(key), default] = call.arguments.args.as_ref() else {
+        let args = call.arguments.args.as_ref();
+        let [ast::Expr::StringLiteral(key), rest @ ..] = args else {
             return Err(error(
                 self.source,
                 call,
-                "readonly JSON get requires a literal string key and an integer or empty-list default",
+                "readonly JSON get requires a literal string key",
             ));
         };
         check_string(key, self.source)?;
-        let empty_list = matches!(default, ast::Expr::List(list) if list.elts.is_empty());
-        let args = if empty_list {
-            vec![receiver]
-        } else {
-            let default = self.expr_expected(default, Type::Int)?;
-            // Python binds the method before evaluating the default. Literal and
-            // local reads cannot mask a missing attribute on a malformed row.
-            let receiver = if matches!(default.kind, ExprKind::Int(_) | ExprKind::Local(_)) {
-                receiver
-            } else {
-                Expr {
-                    ty: receiver.ty,
-                    kind: ExprKind::Builtin(Builtin::JsonGetReceiver, vec![receiver]),
+        let (empty_list, values) = match rest {
+            [] => (
+                false,
+                vec![
+                    receiver,
+                    Expr {
+                        ty: Type::None,
+                        kind: ExprKind::None,
+                    },
+                ],
+            ),
+            [ast::Expr::List(list)] if list.elts.is_empty() => (true, vec![receiver]),
+            [default] => {
+                let default = self.expr(default)?;
+                if !matches!(
+                    default.ty,
+                    Type::None
+                        | Type::Bool
+                        | Type::Int
+                        | Type::Float
+                        | Type::Str
+                        | Type::StrLiteral(_)
+                ) {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "readonly JSON get requires a scalar or empty list default",
+                    ));
                 }
-            };
-            vec![receiver, default]
+                // Bind the receiver before an effectful default. Literal and local
+                // integer defaults retain the fast path for adding two fields.
+                let receiver = if matches!(default.kind, ExprKind::Int(_) | ExprKind::Local(_)) {
+                    receiver
+                } else {
+                    Expr {
+                        ty: receiver.ty,
+                        kind: ExprKind::Builtin(Builtin::JsonGetReceiver, vec![receiver]),
+                    }
+                };
+                (false, vec![receiver, default])
+            }
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "readonly JSON get takes a key and optional default",
+                ));
+            }
         };
         Ok(Expr {
             ty: Type::JsonValue,
@@ -181,23 +197,35 @@ impl Checker<'_> {
                     key: key.value.to_string(),
                     empty_list,
                 },
-                args,
+                values,
             ),
         })
     }
 
-    pub(super) fn json_loads(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+    pub(super) fn json_loads(&mut self, call: &ast::ExprCall, file: bool) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
         let [text] = call.arguments.args.as_ref() else {
             return Err(error(
                 self.source,
                 call,
-                "json.loads requires one UTF-8 string containing an array",
+                if file {
+                    "json.load requires one open text stream"
+                } else {
+                    "json.loads requires one UTF-8 string"
+                },
             ));
         };
-        let text = self.expr_expected(text, Type::Str)?;
+        let text = if file {
+            let stream = self.expr_expected(text, Type::TextIO)?;
+            Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::TextRead, vec![stream]),
+            }
+        } else {
+            self.expr_expected(text, Type::Str)?
+        };
         Ok(Expr {
-            ty: self.types.list(Type::JsonValue),
+            ty: Type::JsonRoot,
             kind: ExprKind::Builtin(Builtin::JsonLoads, vec![text]),
         })
     }
@@ -350,32 +378,69 @@ impl Checker<'_> {
     }
 
     /// Keep source keyword order while passing a fixed native encoding ABI.
-    pub(super) fn json_encode(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let [source] = call.arguments.args.as_ref() else {
-            return Err(error(
-                self.source,
-                call,
-                "encode expects one positional value",
-            ));
+    pub(super) fn json_encode(
+        &mut self,
+        call: &ast::ExprCall,
+        op: Intrinsic,
+    ) -> Result<Expr, String> {
+        let standard = op != Intrinsic::JsonEncode;
+        let (source, stream) = match (op, call.arguments.args.as_ref()) {
+            (Intrinsic::JsonDump, [value, stream]) => (value, Some(stream)),
+            (Intrinsic::JsonEncode | Intrinsic::JsonDumps, [value]) => (value, None),
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    if op == Intrinsic::JsonDump {
+                        "json.dump requires a value and a text stream"
+                    } else {
+                        "JSON encoding requires one positional value"
+                    },
+                ));
+            }
         };
         let mut names = HashSet::new();
         for keyword in &call.arguments.keywords {
             let name = keyword.arg.as_ref().map(|name| name.as_str());
-            if !matches!(name, Some("indent" | "ensure_ascii")) || !names.insert(name) {
+            if !(matches!(name, Some("indent" | "ensure_ascii"))
+                || standard && name == Some("allow_nan"))
+                || !names.insert(name)
+            {
                 return Err(error(
                     self.source,
                     keyword,
-                    "encode accepts indent and ensure_ascii once each",
+                    "unsupported or repeated JSON encoding option",
                 ));
             }
         }
-        let source = self.expr(source)?;
+        let source = match source {
+            ast::Expr::List(items) if standard && items.elts.is_empty() => {
+                self.expr_expected(source, Type::ListInt)?
+            }
+            ast::Expr::Dict(items) if standard && items.items.is_empty() => {
+                self.expr_expected(source, self.types.dict(Type::Str, Type::Int))?
+            }
+            _ => self.expr(source)?,
+        };
         let schema = source.ty;
-        check_type(schema, self.types, &mut Vec::new())
-            .map_err(|message| error(self.source, call, message))?;
+        if standard {
+            check_standard_encoding(schema, self.types)
+        } else {
+            check_type(schema, self.types, &mut Vec::new())
+        }
+        .map_err(|message| error(self.source, call, message))?;
         let slot = self.hidden(schema);
         let mut body = vec![Statement::Assign(slot, source)];
         let mut clear = vec![slot];
+        let file = if let Some(stream) = stream {
+            let stream = self.expr_expected(stream, Type::TextIO)?;
+            let file = self.hidden(Type::TextIO);
+            body.push(Statement::Assign(file, stream));
+            clear.push(file);
+            Some(self.local(file))
+        } else {
+            None
+        };
         let optional_int = self.types.optional(Type::Int);
         let mut indent = Expr {
             ty: optional_int,
@@ -388,35 +453,95 @@ impl Checker<'_> {
             ty: Type::Bool,
             kind: ExprKind::Bool(true),
         };
+        let mut allow_nan = ensure_ascii.clone();
         for keyword in &call.arguments.keywords {
-            let is_indent = keyword.arg.as_ref().unwrap() == "indent";
-            let value = self.expr_expected(
-                &keyword.value,
-                if is_indent { optional_int } else { Type::Bool },
-            )?;
+            let name = keyword.arg.as_ref().unwrap().as_str();
+            let value = if name == "indent" && standard {
+                let value = self.expr(&keyword.value)?;
+                match self.types.payload(value.ty).unwrap_or(value.ty) {
+                    Type::Str | Type::StrLiteral(_) => Self::string_value(value),
+                    Type::Bool if value.ty == Type::Bool => Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                    },
+                    _ => self.coerce(value, optional_int, &keyword.value)?,
+                }
+            } else {
+                self.expr_expected(
+                    &keyword.value,
+                    if name == "indent" {
+                        optional_int
+                    } else {
+                        Type::Bool
+                    },
+                )?
+            };
             let slot = self.hidden(value.ty);
             body.push(Statement::Assign(slot, value));
             clear.push(slot);
-            if is_indent {
-                indent = self.local(slot);
-            } else {
-                ensure_ascii = self.local(slot);
+            match name {
+                "indent" => indent = self.local(slot),
+                "ensure_ascii" => ensure_ascii = self.local(slot),
+                _ => allow_nan = self.local(slot),
             }
         }
+        let mut args = vec![self.local(slot), indent, ensure_ascii];
+        if standard {
+            args.push(allow_nan);
+        }
+        let (builtin, ty) = if let Some(stream) = file {
+            args.push(stream);
+            (Builtin::JsonDump(schema), Type::None)
+        } else if standard {
+            (Builtin::JsonDumps(schema), Type::Str)
+        } else {
+            (Builtin::JsonEncode(schema), Type::Str)
+        };
         Ok(Expr {
-            ty: Type::Str,
+            ty,
             kind: ExprKind::Scope {
                 body,
                 value: Box::new(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(
-                        Builtin::JsonEncode(schema),
-                        vec![self.local(slot), indent, ensure_ascii],
-                    ),
+                    ty,
+                    kind: ExprKind::Builtin(builtin, args),
                 }),
                 clear,
             },
         })
+    }
+}
+
+fn check_standard_encoding(ty: Type, types: &Types) -> Result<(), &'static str> {
+    if let Some(child) = types.payload(ty).or_else(|| types.element(ty)) {
+        return check_standard_encoding(child, types);
+    }
+    if let Some((key, child)) = types.mapping(ty) {
+        if !matches!(key, Type::Str | Type::Int) {
+            return Err("json.dumps supports dictionaries with string or integer keys");
+        }
+        return check_standard_encoding(child, types);
+    }
+    if let Some(fields) = types.fields(ty) {
+        for field in fields {
+            check_standard_encoding(field, types)?;
+        }
+        return Ok(());
+    }
+    match ty {
+        Type::None
+        | Type::Int
+        | Type::Bool
+        | Type::Float
+        | Type::Str
+        | Type::StrLiteral(_)
+        | Type::JsonRoot
+        | Type::JsonValue
+        | Type::JsonObject
+        | Type::Bytes
+        | Type::Set(_)
+        | Type::Class(_)
+        | Type::Path => Ok(()),
+        _ => Err("json.dumps requires concrete builtin values"),
     }
 }
 
@@ -566,7 +691,7 @@ pub(super) fn schemas(
 }
 
 fn check_type(ty: Type, types: &Types, pending: &mut Vec<usize>) -> Result<(), &'static str> {
-    if types.is_default_list_dict(ty) {
+    if types.is_default_list_dict(ty) || types.is_counter(ty) {
         return Err("JSON schemas require ordinary dictionaries");
     }
     if let Some(inner) = types.payload(ty).or_else(|| types.element(ty)) {

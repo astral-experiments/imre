@@ -16,6 +16,8 @@ pub(crate) enum Type {
     Enum(usize),
     Bytes,
     ListInt,
+    /// Native storage for a private append-only integer list consumed by bytes().
+    ByteOutput,
     Class(usize),
     List(usize),
     Dict(usize),
@@ -32,6 +34,8 @@ pub(crate) enum Type {
     Iterator,
     /// A sealed builtin exception with an immutable category and owned payload.
     Exception,
+    /// An owned view of the immutable None, bool, int or str in SystemExit.code.
+    ExitCode,
     /// A proved catch-only timeout with readonly float and nullable bytes fields.
     TimeoutExpired,
     /// A sealed UTF-8 text stream; aliases share its open/closed state.
@@ -57,6 +61,7 @@ pub(crate) enum Type {
     Logger,
     RegexMatch,
     /// Immutable selections from decoded JSON. Only the object form has a source annotation.
+    JsonRoot,
     JsonValue,
     JsonObject,
     None,
@@ -88,9 +93,11 @@ impl std::fmt::Display for Type {
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
             Self::ListInt => "list[int]",
+            Self::ByteOutput => "private byte output",
             Self::None => "None",
             Self::Iterator => "iterator",
             Self::Exception => "Exception",
+            Self::ExitCode => "SystemExit.code",
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
             Self::TextIO => "typing.TextIO",
             Self::BinaryIO => "typing.BinaryIO",
@@ -107,6 +114,7 @@ impl std::fmt::Display for Type {
             Self::RegexPattern => "re.Pattern[str]",
             Self::Logger => "logging.Logger",
             Self::RegexMatch => "re.Match[str]",
+            Self::JsonRoot => "JSON document",
             Self::JsonValue => "JSON value",
             Self::JsonObject => "dict[str, Any]",
             Self::Document(DocumentShape::Any) => "TOML or JSON value",
@@ -365,6 +373,15 @@ pub(crate) enum Compare {
 pub(crate) enum Builtin {
     DirectoryContextView,
     Document(DocumentOp),
+    /// Runs the static archive's module initializer in ordinary import order.
+    ExtensionImport(String),
+    /// Calls a checked declaration in a rebuilt extension's method table.
+    ExtensionCall {
+        module: String,
+        method: String,
+        kinds: Vec<u8>,
+        result_kind: u8,
+    },
     StrEnumMember {
         class: usize,
         member: usize,
@@ -383,7 +400,21 @@ pub(crate) enum Builtin {
     GlobalSet(usize),
     Print,
     StderrLine,
-    StdoutWrite,
+    SysStreamWrite {
+        stderr: bool,
+    },
+    SysStreamFlush {
+        stderr: bool,
+    },
+    SysPlatform,
+    SystemExitNew {
+        omit_none: bool,
+    },
+    SystemExitCode,
+    SystemExitCodeEqual {
+        reversed: bool,
+    },
+    SysExit,
     WallTime,
     GetLogger,
     LogLevel,
@@ -471,6 +502,7 @@ pub(crate) enum Builtin {
     BytesIter,
     Encode,
     Decode,
+    Sha256Hex,
     /// Validates complete UTF-8 at the decode evaluation point and returns a
     /// retained bytes identity for an internal allocation-free character gather.
     BytesValidateUtf8,
@@ -505,7 +537,6 @@ pub(crate) enum Builtin {
     ExactRecord(usize),
     /// Decodes one string into a checked record, list, or string-key dictionary.
     JsonDecode(Type),
-    JsonLoad,
     JsonLoads,
     JsonEmptyObject,
     FunctionCache(usize),
@@ -522,6 +553,9 @@ pub(crate) enum Builtin {
     JsonIsInt,
     /// Bind the JSON object method before an effectful default is evaluated.
     JsonGetReceiver,
+    JsonIndex,
+    JsonIter,
+    JsonLen,
     /// A literal-key path rooted in a readonly JSON owner. The result type selects
     /// an owned view, an exact scalar, or comparison with a supplied string literal.
     JsonSelect(Vec<String>),
@@ -530,7 +564,10 @@ pub(crate) enum Builtin {
     TomlKeys,
     /// Encodes rooted concrete storage using immutable, compiler-emitted metadata.
     JsonEncode(Type),
+    JsonDumps(Type),
+    JsonDump(Type),
     Path(PathOperation),
+    PosixPath(PosixPathOperation),
     Process(ProcessOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
@@ -559,7 +596,8 @@ pub(crate) enum Builtin {
     DictGet,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
-    Counter,
+    CounterNew,
+    CounterTotal,
     CounterUpdate,
     DictSumValues,
     /// Widens a defaultdict owner to its ordinary dictionary interface.
@@ -684,11 +722,8 @@ pub(crate) enum TextOperation {
 /// Native path operations keep their exact result types in the checked IR.
 #[derive(Clone, Copy)]
 pub(crate) enum PathOperation {
-    Platform,
     Scripts,
-    OsJoin,
     OsExists,
-    Which,
     New,
     Join,
     WithName,
@@ -706,6 +741,7 @@ pub(crate) enum PathOperation {
     ReadText,
     ReadBytes,
     WriteText,
+    WriteBytes,
     Mkdir,
     Unlink,
     Rmdir,
@@ -724,11 +760,20 @@ pub(crate) enum PathOperation {
     Next,
 }
 
+/// POSIX lexical operations preserve raw str or bytes spellings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PosixPathOperation {
+    Join,
+    MixedJoin { path_in_tail: bool },
+    Basename,
+    Dirname,
+    Splitext,
+}
+
 /// Synchronous process operations cannot invoke language callbacks.
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
     Executable,
-    Exit,
     RunToStderr,
     CheckOutput,
     Run,
@@ -782,6 +827,8 @@ pub(crate) enum ProcessOperation {
     Release,
     EnvironCopy,
     EnvironGet,
+    GetCwd,
+    Which,
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,

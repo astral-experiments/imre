@@ -342,7 +342,7 @@ pub(super) fn field_default(
     let concrete = types.payload(ty).unwrap_or(ty);
     let kind = match factory {
         ContainerFactory::Counter if types.is_counter(concrete) => {
-            ExprKind::Builtin(Builtin::Counter, Vec::new())
+            ExprKind::Builtin(Builtin::CounterNew, Vec::new())
         }
         ContainerFactory::List if types.element(concrete).is_some() => ExprKind::List(Vec::new()),
         ContainerFactory::Dict if concrete == documents::MAP => {
@@ -350,9 +350,6 @@ pub(super) fn field_default(
         }
         ContainerFactory::Dict if concrete == Type::JsonObject => {
             ExprKind::Builtin(Builtin::JsonEmptyObject, Vec::new())
-        }
-        ContainerFactory::Dict if concrete == super::documents::MAP => {
-            ExprKind::Builtin(Builtin::Document(ir::DocumentOp::EmptyMap), Vec::new())
         }
         ContainerFactory::Dict
             if types.mapping(concrete).is_some()
@@ -374,7 +371,7 @@ pub(super) fn field_default(
             return Err(error(
                 source,
                 &field.annotation,
-                "a default factory must match its exact list, dict, or set field type",
+                "a default factory must match its exact list, dict, set, or Counter field type",
             ));
         }
     };
