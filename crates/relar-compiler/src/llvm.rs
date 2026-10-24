@@ -3794,22 +3794,22 @@ impl Emitter<'_, '_> {
                         self.instruction(format!("getelementptr ptr, ptr {handles}, i64 {i}"));
                     self.line(format!("store ptr {}, ptr {slot}", source.value.operand));
                 }
-                let operand = if let Builtin::SortedRecordRows { class, columns } = builtin {
+                let instruction = if let Builtin::SortedRecordRows { class, columns } = builtin {
                     let name = self.byte_array(columns.clone());
                     let layout = self.output.global_ref(format!("layout_class_{class}"));
-                    self.checked_pointer(format!(
+                    format!(
                         "call ptr @relar_sorted_record_rows(ptr {handles}, i64 {}, ptr @{layout}, ptr @{name})",
                         args.len()
-                    ))
+                    )
                 } else {
-                    self.instruction(format!(
+                    format!(
                         "call ptr @relar_sorted_string_keys(ptr {handles}, i64 {})",
                         args.len()
-                    ))
+                    )
                 };
                 Value {
                     ty: returns,
-                    operand,
+                    operand: self.checked_pointer(instruction),
                     small_integer: false,
                 }
             }
@@ -5713,28 +5713,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn sorted_key_union_fuses_only_local_dictionary_reads() {
-        let llvm = compile(
-            "def add(d: dict[str, int]) -> dict[str, int]:\n    d['late'] = 1\n    return {}\ndef keys(a: dict[str, int], b: dict[str, int]) -> list[str]:\n    first = sorted(a.keys() | b.keys())\n    later = sorted(a.keys() | b.keys() | add(a).keys())\n    return first if first else later\n",
-            &CompileOptions::default(),
-        )
-        .unwrap();
-        assert_eq!(
-            llvm.matches("call ptr @relar_sorted_string_keys(").count(),
-            1
-        );
-        assert_eq!(llvm.matches("call ptr @relar_key_union(").count(), 2);
-    }
-
-    #[test]
-    fn sorted_rows_require_only_generated_field_assignments() {
-        let source = include_str!("../../../tests/fixtures/containers/sorted_rows.py");
-        let llvm = compile(source, &CompileOptions::default()).unwrap();
+    fn assert_checked_sorted_call(llvm: &str, function: &str) {
+        let pattern = format!(" = call ptr @{function}(");
         let mut lines = llvm.lines();
-        let call = lines
-            .find(|line| line.contains(" = call ptr @relar_sorted_record_rows("))
-            .unwrap();
+        let call = lines.find(|line| line.contains(&pattern)).unwrap();
         let result = call.trim().split_once(" = ").unwrap().0;
         assert!(
             lines
@@ -5742,7 +5724,25 @@ mod tests {
                 .unwrap()
                 .contains(&format!("icmp eq ptr {result}, null"))
         );
-        assert!(!lines.any(|line| line.contains(" = call ptr @relar_sorted_record_rows(")));
+        assert!(!lines.any(|line| line.contains(&pattern)));
+    }
+
+    #[test]
+    fn sorted_key_union_fuses_only_local_dictionary_reads() {
+        let llvm = compile(
+            "def add(d: dict[str, int]) -> dict[str, int]:\n    d['late'] = 1\n    return {}\ndef keys(a: dict[str, int], b: dict[str, int]) -> list[str]:\n    first = sorted(a.keys() | b.keys())\n    later = sorted(a.keys() | b.keys() | add(a).keys())\n    return first if first else later\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert_checked_sorted_call(&llvm, "relar_sorted_string_keys");
+        assert_eq!(llvm.matches("call ptr @relar_key_union(").count(), 2);
+    }
+
+    #[test]
+    fn sorted_rows_require_only_generated_field_assignments() {
+        let source = include_str!("../../../tests/fixtures/containers/sorted_rows.py");
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert_checked_sorted_call(&llvm, "relar_sorted_record_rows");
         assert_eq!(
             llvm.matches("call ptr @relar_sorted_string_keys(").count(),
             1
