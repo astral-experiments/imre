@@ -138,7 +138,16 @@ impl Builtin {
             | Self::DictGet
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
+            | Self::JsonDumps(_)
+            | Self::JsonDump(_)
             | Self::JsonLoads
+            | Self::JsonIndex
+            | Self::JsonIter
+            | Self::JsonLen
+            | Self::JsonGetReceiver
+            | Self::JsonGet(_)
+            | Self::JsonAdd
+            | Self::JsonIsInt
             | Self::JsonSelect(_)
             | Self::ListGet
             | Self::ListGetBounded { .. }
@@ -418,6 +427,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || matches!(
             name,
             "int_floordiv"
+                | "relar_json_index"
+                | "relar_json_iter"
+                | "relar_json_len"
+                | "relar_json_get_receiver"
+                | "relar_json_add"
                 | "int_mod"
                 | "int_lshift"
                 | "int_rshift"

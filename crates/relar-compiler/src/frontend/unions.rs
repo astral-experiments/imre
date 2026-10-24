@@ -131,9 +131,20 @@ impl Checker<'_> {
             ));
         };
         let value = self.expr(value)?;
+        if matches!(value.ty, Type::JsonRoot | Type::JsonValue)
+            && matches!(
+                self.instance_types(classes)?.as_slice(),
+                [InstanceType::Exact(Type::Int)]
+            )
+        {
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::JsonIsInt, vec![value]),
+            });
+        }
         if matches!(
             self.types.payload(value.ty).unwrap_or(value.ty),
-            Type::JsonValue | Type::JsonObject
+            Type::JsonRoot | Type::JsonValue | Type::JsonObject
         ) {
             return Err(error(
                 self.source,

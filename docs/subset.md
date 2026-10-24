@@ -148,18 +148,25 @@ A generator expression evaluates its leftmost iterable and acquires that iterato
 
 ## Typed JSON boundaries
 
-`json.loads(text)` accepts a Unicode string containing a JSON array. Iteration
-preserves input order. A function can receive a decoded object as
-`dict[str, Any]` and read nested literal string keys. Selecting into an
-annotated `str`, `int`, or another object checks that exact type at the read,
-including the nullable forms. Integers retain their full precision. A missing
-key raises `KeyError`; a value of the wrong type raises `TypeError`. Duplicate
-keys use the last value. Comparing a selected value with a string literal
-supports filters such as `if row["severity"] == "major"`. The object view is
-read-only. Dynamic keys, decoder options, and general `Any` annotations are
-outside this boundary. Malformed JSON raises `json.JSONDecodeError` (a
-`ValueError`), and nesting is limited to 128 containers. Strings use Unicode
-scalar values, and numeric literals follow the standard JSON grammar.
+`json.loads(text)` and `json.load(stream)` accept JSON arrays, objects, and
+scalars. A native text stream uses UTF-8, including the usual `open(path)`
+spelling. A document supports literal string keys, integer indices, length,
+truth tests, and iteration. Array iteration yields values and object iteration
+yields keys in insertion order. Select a value into a concrete scalar or
+`dict[str, Any]` at a checked boundary. The latter is a read-only JSON view,
+with literal-key `.get()`, scalar or empty-list defaults, and nested iteration.
+Original array roots keep their mutable list identity. Malformed JSON raises
+`json.JSONDecodeError`, and nesting is limited to 128 containers. Strings use
+Unicode scalar values. Integers retain their exact precision. The standard
+reader also recognizes `NaN`, `Infinity`, and `-Infinity`.
+
+`json.dumps(value)` returns a string and `json.dump(value, stream)` writes to
+a text stream. Both accept scalar values, typed lists, tuples, dictionaries
+with string or integer keys, and parsed documents. Keyword options include
+`indent` (integer, string, or `None`), `ensure_ascii` and `allow_nan`.
+Defaults match Python's separators, escaping and nonfinite number spellings.
+Dynamic hooks, arbitrary mapping keys, and general `Any` remain outside this
+boundary.
 
 `from relar.json import decode, encode` exposes explicit Relar APIs. `decode(text, Schema)` takes a string and a statically resolved record class, `list[T]`, or `dict[str, T]`, returning that exact type. Scalar and optional roots are not accepted by the decoder. Import aliases and first-party re-exports preserve the intrinsic identity. The native decoder constructs existing typed records, lists, and dictionaries directly, without exposing unknown values or `Any`.
 

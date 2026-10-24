@@ -443,6 +443,9 @@ impl Checker<'_> {
             ast::Expr::Attribute(attribute) => probe.field(attribute).ok().map(|(_, _, ty)| ty),
             ast::Expr::Subscript(subscript) => {
                 let receiver = probe.expr(&subscript.value).ok()?;
+                if receiver.ty == Type::JsonRoot {
+                    return Some(Type::JsonValue);
+                }
                 self.types
                     .mapping(receiver.ty)
                     .map(|(_, value)| value)

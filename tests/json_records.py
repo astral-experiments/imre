@@ -21,6 +21,9 @@ ITEM = "class Item:\n    value: int\n    def __init__(self, value: int) -> None:
 REJECTED = {
     "dynamic_json_key": 'import json\nkey = "field"\nrows = json.loads("[]")\nvalue = rows[0][key]\n',
     "write_json_object": 'from typing import Any\ndef write(row: dict[str, Any]) -> None:\n    row["field"] = 1\n',
+    "nested_json_list_mutation": 'import json\nfrom typing import Any\nrows: list[dict[str, Any]] = json.loads("{}").get("rows", [])\nrows.pop()\n',
+    "nested_json_item_mutation": 'import json\nfrom typing import Any\nrows: list[dict[str, Any]] = json.loads("{}").get("rows", [])\nrows[0] = rows[1]\n',
+    "root_json_cycle": 'import json\nroot = json.loads("[]")\nroot.append(root)\n',
     "general_any": "from typing import Any\ndef identity(value: Any) -> Any:\n    return value\n",
     "json_comparison": 'import json\nrows = json.loads("[]")\nprint(rows[0] == rows[1])\n',
     "json_instances": 'import json\nfor value in json.loads("[]"):\n    print(isinstance(value, str))\n',
