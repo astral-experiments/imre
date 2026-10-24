@@ -84,8 +84,10 @@ pub(crate) enum Intrinsic {
     RawDescriptionHelpFormatter,
     FutureAnnotations,
     Stderr,
-    SysExecutable,
+    Stdout,
+    SysPlatform,
     SysExit,
+    SysExecutable,
     ShlexSplit,
     Final,
     Argv,
@@ -196,6 +198,9 @@ impl IntrinsicModule {
         let symbol = match (self, name) {
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Sys, "stderr") => Intrinsic::Stderr,
+            (Self::Sys, "stdout") => Intrinsic::Stdout,
+            (Self::Sys, "platform") => Intrinsic::SysPlatform,
+            (Self::Sys, "exit") => Intrinsic::SysExit,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
             (Self::Argparse, "Namespace") => Intrinsic::ArgparseNamespace,
             (Self::Argparse, "RawDescriptionHelpFormatter") => {
@@ -203,7 +208,6 @@ impl IntrinsicModule {
             }
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
-            (Self::Sys, "exit") => Intrinsic::SysExit,
             (Self::Shlex, "split") => Intrinsic::ShlexSplit,
             (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,

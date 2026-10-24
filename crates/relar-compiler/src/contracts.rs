@@ -111,7 +111,6 @@ impl Builtin {
             ),
             Self::Process(operation) => match operation {
                 ProcessOperation::Executable
-                | ProcessOperation::Exit
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run
                 | ProcessOperation::RunTimeout
@@ -218,6 +217,13 @@ impl Builtin {
             | Self::Print
             | Self::SortRestore
             | Self::StderrLine
+            | Self::SysStreamWrite { .. }
+            | Self::SysStreamFlush { .. }
+            | Self::SysExit
+            | Self::SystemExitNew { .. }
+            | Self::SystemExitCode
+            | Self::SystemExitCodeEqual { .. }
+            | Self::SysPlatform
             | Self::SysArgv
             | Self::TextClose
             | Self::TextEnter

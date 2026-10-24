@@ -87,6 +87,8 @@ jobs:
           path: .cpython-stdlib-reference
           sparse-checkout: Lib/test
           persist-credentials: false
+      - name: Check sys streams and exits with vendored CPython methods
+        run: python3 benchmarks/cpython_stdlib/native_sys.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18
       - name: Run vendored CPython methods against native Relar
         run: |
           python3 benchmarks/cpython_stdlib/native_hashlib.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-hashlib.json"

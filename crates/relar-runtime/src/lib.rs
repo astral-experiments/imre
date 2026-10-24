@@ -375,6 +375,18 @@ struct Output<W = io::Stdout> {
 }
 
 impl<W: Write> Output<W> {
+    fn with_stream(stream: W, line_buffered: bool) -> Self {
+        let mut buffer = Vec::new();
+        // With zero capacity every write goes directly to the stream.
+        let _ = buffer.try_reserve_exact(8 * 1024);
+        Self {
+            stdout: stream,
+            buffer,
+            written: 0,
+            line_buffered,
+        }
+    }
+
     #[cold]
     fn write_all_slow(&mut self, bytes: &[u8]) -> io::Result<()> {
         self.flush_buffer()?;
@@ -432,16 +444,10 @@ static OUTPUT: LazyLock<Mutex<Output>> = LazyLock::new(|| {
     initialize_io();
     let stdout = io::stdout();
     let line_buffered = stdout.is_terminal();
-    let mut buffer = Vec::new();
-    // With zero capacity every write goes directly to stdout.
-    let _ = buffer.try_reserve_exact(8 * 1024);
-    Mutex::new(Output {
-        stdout,
-        buffer,
-        written: 0,
-        line_buffered,
-    })
+    Mutex::new(Output::with_stream(stdout, line_buffered))
 });
+
+mod sys;
 
 /// Prints one value and a newline, returning with the writer lock released.
 /// Only primitive formatters run here; they cannot call user code.
@@ -470,12 +476,7 @@ fn output(write: impl FnOnce(&mut Output) -> io::Result<()>) {
 pub unsafe extern "C" fn relar_stderr_line(text: *const Str) {
     // SAFETY: the caller owns the text for this call.
     let text = unsafe { &*text };
-    let mut writer = io::stderr().lock();
-    if writer
-        .write_all(text.as_bytes())
-        .and_then(|()| writer.write_all(b"\n"))
-        .is_err()
-    {
+    if sys::write_stderr(text, true).is_err() {
         Error::new(Kind::OSError, "could not write standard error").raise();
     }
 }
@@ -503,6 +504,7 @@ fn fail(kind: &str, message: &str) -> ! {
     // Preserve pending output and the original exception category. A failed
     // best-effort flush must neither recurse through fail nor hold this lock.
     let _ = flush_stdout();
+    let _ = sys::flush_stderr();
     let _ = writeln!(io::stderr().lock(), "{kind}: {message}");
     std::process::exit(1)
 }
@@ -512,6 +514,8 @@ fn fail(kind: &str, message: &str) -> ! {
 pub extern "C" fn relar_flush_stdout() {
     if flush_stdout().is_err() {
         Error::new(Kind::OSError, "could not write standard output").raise();
+    } else if sys::flush_stderr().is_err() {
+        Error::new(Kind::OSError, "could not write standard error").raise();
     }
 }
 

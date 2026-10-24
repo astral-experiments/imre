@@ -180,8 +180,11 @@ impl Checker<'_> {
 
     /// Exception categories below Exception need a runtime hierarchy test;
     /// other category checks are exact for every admitted concrete layout.
-    /// BaseException itself is catch-only, so every admitted value is an Exception.
+    /// A stored builtin exception can be either a SystemExit or an Exception.
     fn instance_member_matches(ty: Type, classes: &[InstanceType]) -> Option<bool> {
+        if ty == Type::ExitCode {
+            return None;
+        }
         let mut unknown = false;
         for &class in classes {
             if let InstanceType::Exception(kind) = class
@@ -194,7 +197,7 @@ impl Checker<'_> {
             }
             if let InstanceType::Exception(kind) = class
                 && ty == Type::Exception
-                && !matches!(kind, 0 | 1)
+                && kind != 0
             {
                 unknown = true;
             } else if class.accepts(ty) {

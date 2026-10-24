@@ -31,6 +31,8 @@ pub(crate) enum Type {
     Iterator,
     /// A sealed builtin exception with an immutable category and owned payload.
     Exception,
+    /// An owned view of the immutable None, bool, int or str in SystemExit.code.
+    ExitCode,
     /// A proved catch-only timeout with readonly float and nullable bytes fields.
     TimeoutExpired,
     /// A sealed UTF-8 text stream; aliases share its open/closed state.
@@ -80,6 +82,7 @@ impl std::fmt::Display for Type {
             Self::None => "None",
             Self::Iterator => "iterator",
             Self::Exception => "Exception",
+            Self::ExitCode => "SystemExit.code",
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
             Self::TextIO => "typing.TextIO",
             Self::BinaryIO => "typing.BinaryIO",
@@ -351,6 +354,21 @@ pub(crate) enum Builtin {
     GlobalSet(usize),
     Print,
     StderrLine,
+    SysStreamWrite {
+        stderr: bool,
+    },
+    SysStreamFlush {
+        stderr: bool,
+    },
+    SysPlatform,
+    SystemExitNew {
+        omit_none: bool,
+    },
+    SystemExitCode,
+    SystemExitCodeEqual {
+        reversed: bool,
+    },
+    SysExit,
     Input,
     Int,
     Float,
@@ -627,7 +645,6 @@ pub(crate) enum PosixPathOperation {
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
     Executable,
-    Exit,
     RunToStderr,
     Run,
     RunTimeout,

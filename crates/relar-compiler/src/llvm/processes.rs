@@ -12,13 +12,6 @@ impl Emitter<'_, '_> {
     ) -> Value {
         match operation {
             ProcessOperation::Executable => self.call("relar_sys_executable", Type::Str, &[]),
-            ProcessOperation::Exit => {
-                self.checked_line(format!(
-                    "call void @relar_sys_exit(i64 {})",
-                    args[0].value.operand
-                ));
-                none()
-            }
             ProcessOperation::RunToStderr => {
                 let check = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
                 self.checked_line(format!(

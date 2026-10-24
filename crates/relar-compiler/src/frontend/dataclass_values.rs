@@ -27,6 +27,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::TimeoutExpired
         | Type::RegexPattern
         | Type::RegexMatch
+        | Type::ExitCode
         | Type::TextIO
         | Type::BinaryIO
         | Type::Iterator
