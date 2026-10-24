@@ -554,7 +554,7 @@ Temporary-directory objects cannot be stored, passed, returned, manually entered
 
 ## UTF-8 files and process arguments
 
-`open(path, "r", encoding="utf-8")` and `open(path, "w", encoding="utf-8")` return a sealed `typing.TextIO` handle. The path is a string or native `Path`. Reading defaults to strict UTF-8, so `open(path)` and `open(path, "r")` are equivalent. Writing requires an explicit UTF-8 encoding and creates or truncates the file. Handles can be passed, returned, stored in fields or containers, and aliased; every alias observes the same open/closed state.
+`open(path)` and `open(path, "r")` read text using strict UTF-8. `open(path, "w")` creates or truncates the file and writes UTF-8. All three accept an explicit `encoding="utf-8"`. The path can be a string or a native `Path`. Each call returns a sealed `typing.TextIO` handle. The handle can be passed, returned, or stored in a field or container. All aliases observe the same open or closed state.
 
 `read()` consumes the remaining file and decodes strict UTF-8, translating CRLF and bare CR to LF. Further reads at EOF return the empty string. `write(text)` writes UTF-8 and returns the number of Unicode scalar characters, including embedded NULs. `flush()` makes buffered output visible to the operating system; it does not promise durable storage. `close()` flushes and closes, marks the shared handle closed even on a close failure, and succeeds on repeated calls. `.closed` is read-only. Entering, reading, writing, or flushing a closed handle raises `ValueError`. Reading a write-only handle or writing a read-only handle raises `io.UnsupportedOperation`, which matches both `OSError` and `ValueError`.
 
