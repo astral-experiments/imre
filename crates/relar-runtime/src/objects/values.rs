@@ -296,6 +296,98 @@ pub unsafe extern "C" fn relar_value_repr(word: usize, kind: u32) -> *const Str 
 /// The word and all descendants are rooted with the supplied representation;
 /// no runtime mutation or user callback can overlap formatting.
 pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind) {
+    let mut pending = Vec::new();
+    let mut current = Some(ReprTask::Word(word, kind));
+    while let Some(task) = current.take().or_else(|| pending.pop()) {
+        // SAFETY: the root owns the whole immutable graph until formatting
+        // returns. Tasks retain only copied words and positions, never storage
+        // references or buffer addresses.
+        current = unsafe {
+            match task {
+                ReprTask::Word(word, kind) => match kind.raw() & !NULLABLE {
+                    5 if word != 0 => Some(ReprTask::Object(word as *const Object, 0)),
+                    6 if word != 0 => Some(ReprTask::Record(word as *const usize, 0, 0)),
+                    _ => {
+                        write_scalar(output, word, kind);
+                        None
+                    }
+                },
+                ReprTask::Object(owner, position) => {
+                    object(owner).0.with(|storage| match storage {
+                        Storage::Sequence(values) => {
+                            if position == 0 {
+                                output.push('[');
+                            }
+                            for (index, &value) in values.values.iter().enumerate().skip(position) {
+                                if index != 0 {
+                                    output.push_str(", ");
+                                }
+                                if value != 0 && matches!(values.kind.raw() & !NULLABLE, 5 | 6) {
+                                    pending.push(ReprTask::Object(owner, index + 1));
+                                    return Some(ReprTask::Word(value, values.kind));
+                                }
+                                write_scalar(output, value, values.kind);
+                            }
+                            output.push(']');
+                            None
+                        }
+                        Storage::Dictionary(mapping) => {
+                            format_entry(owner, mapping.repr_entry(output, position), &mut pending)
+                        }
+                        Storage::Set(set) => {
+                            format_entry(owner, set.repr_entry(output, position), &mut pending)
+                        }
+                        Storage::Path { text, .. } => {
+                            output.push_str("PosixPath(");
+                            output.push_str(&super::exceptions::string_repr(text));
+                            output.push(')');
+                            None
+                        }
+                        _ => fail("SystemError", "unsupported resource representation"),
+                    })
+                }
+                ReprTask::Record(payload, position, written) => {
+                    record_field_repr(output, payload, position, written, &mut pending)
+                }
+                ReprTask::KeySeparator => {
+                    output.push_str(": ");
+                    None
+                }
+            }
+        };
+    }
+}
+
+enum ReprTask {
+    Word(usize, WordKind),
+    Object(*const Object, usize),
+    Record(*const usize, usize, usize),
+    KeySeparator,
+}
+
+pub(super) struct ReprEntry {
+    pub next: usize,
+    pub key: (usize, WordKind),
+    pub value: Option<(usize, WordKind)>,
+}
+
+fn format_entry(
+    owner: *const Object,
+    entry: Option<ReprEntry>,
+    pending: &mut Vec<ReprTask>,
+) -> Option<ReprTask> {
+    let entry = entry?;
+    pending.push(ReprTask::Object(owner, entry.next));
+    if let Some((word, kind)) = entry.value {
+        pending.push(ReprTask::Word(word, kind));
+        pending.push(ReprTask::KeySeparator);
+    }
+    Some(ReprTask::Word(entry.key.0, entry.key.1))
+}
+
+/// # Safety
+/// The rooted word has its declared scalar, integer-list, or nullable representation.
+unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
     let raw = kind.raw();
     if raw & NULLABLE != 0 && word == 0 {
         output.push_str("None");
@@ -325,33 +417,10 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                     if index != 0 {
                         output.push_str(", ");
                     }
-                    write_repr(output, value.0, WordKind::new(2));
+                    write_scalar(output, value.0, WordKind::new(2));
                 }
                 output.push(']');
             }),
-            5 => object(word as *const Object)
-                .0
-                .with(|storage| match storage {
-                    Storage::Sequence(values) => {
-                        output.push('[');
-                        for (index, &value) in values.values.iter().enumerate() {
-                            if index != 0 {
-                                output.push_str(", ");
-                            }
-                            write_repr(output, value, values.kind);
-                        }
-                        output.push(']');
-                    }
-                    Storage::Dictionary(value) => value.write_repr(output),
-                    Storage::Set(value) => value.write_repr(output),
-                    Storage::Path { text: value, .. } => {
-                        output.push_str("PosixPath(");
-                        output.push_str(&super::exceptions::string_repr(value));
-                        output.push(')');
-                    }
-                    _ => fail("SystemError", "unsupported resource representation"),
-                }),
-            6 => record_repr(output, word as *const usize),
             7 => {
                 let value = if raw & NULLABLE != 0 {
                     *(word as *const f64)
@@ -362,9 +431,9 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
             }
             8 => output.push_str(&super::bytes::repr(&*(word as *const Bytes))),
             9 if word & 1 == 0 => {
-                write_repr(output, word, WordKind::new(3));
+                write_scalar(output, word, WordKind::new(3));
             }
-            9 => write_repr(output, word & !1, WordKind::new(8)),
+            9 => write_scalar(output, word & !1, WordKind::new(8)),
             _ => unreachable!("WordKind validates concrete representations"),
         }
     }
@@ -376,7 +445,13 @@ unsafe fn text<'a>(pointer: *const u8, length: usize) -> &'a str {
     unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(pointer, length)) }
 }
 
-unsafe fn record_repr(output: &mut String, payload: *const usize) {
+unsafe fn record_field_repr(
+    output: &mut String,
+    payload: *const usize,
+    position: usize,
+    mut written: usize,
+    pending: &mut Vec<ReprTask>,
+) -> Option<ReprTask> {
     // SAFETY: the caller roots a fully initialized record and its descriptor.
     let layout = unsafe { descriptor(payload) };
     // SAFETY: public record representations always have static semantic metadata.
@@ -391,14 +466,15 @@ unsafe fn record_repr(output: &mut String, payload: *const usize) {
                 text(semantics.qualified_name, semantics.qualified_name_len)
             )
             .unwrap();
-            return;
+            return None;
         }
-        if semantics.kind != TUPLE {
-            output.push_str(text(semantics.name, semantics.name_len));
+        if position == 0 {
+            if semantics.kind != TUPLE {
+                output.push_str(text(semantics.name, semantics.name_len));
+            }
+            output.push('(');
         }
-        output.push('(');
-        let mut written = 0;
-        for index in 0..layout.length {
+        for index in position..layout.length {
             let field = if semantics.kind == TUPLE {
                 None
             } else {
@@ -415,13 +491,19 @@ unsafe fn record_repr(output: &mut String, payload: *const usize) {
                 output.push('=');
             }
             let kind = WordKind::new(*layout.kinds.add(index));
-            write_repr(output, kind.read_record_field(payload.add(index)), kind);
+            let word = kind.read_record_field(payload.add(index));
             written += 1;
+            if word != 0 && matches!(kind.raw() & !NULLABLE, 5 | 6) {
+                pending.push(ReprTask::Record(payload, index + 1, written));
+                return Some(ReprTask::Word(word, kind));
+            }
+            write_scalar(output, word, kind);
         }
         if semantics.kind == TUPLE && written == 1 {
             output.push(',');
         }
         output.push(')');
+        None
     }
 }
 
@@ -498,6 +580,31 @@ mod tests {
             assert_eq!(relar_record_equal(left, right), 1);
             relar_record_release(left);
             relar_record_release(right);
+        }
+    }
+
+    #[test]
+    fn deeply_nested_sequence_repr_preserves_all_delimiters() {
+        use crate::objects::{relar_object_release, relar_seq_append, relar_seq_new};
+        let mut chain = vec![relar_seq_new(2)];
+        // SAFETY: each sequence retains its declared child, and the separate
+        // roots are released from the outermost sequence to the leaf.
+        unsafe {
+            for _ in 0..20_000 {
+                let parent = relar_seq_new(5);
+                relar_seq_append(parent, *chain.last().unwrap() as usize, 5);
+                chain.push(parent);
+            }
+            let mut output = String::new();
+            write_repr(
+                &mut output,
+                *chain.last().unwrap() as usize,
+                WordKind::new(5),
+            );
+            assert_eq!(output, "[".repeat(chain.len()) + &"]".repeat(chain.len()));
+            for value in chain.into_iter().rev() {
+                relar_object_release(value);
+            }
         }
     }
 }

@@ -647,32 +647,33 @@ impl Mapping {
         }
     }
 
-    /// # Safety
-    /// The table and every descendant remain rooted and immutable until return.
-    pub(super) unsafe fn write_repr(&self, output: &mut String) {
-        if self.default_list_element.is_some() {
-            output.push_str("defaultdict(<class 'list'>, ");
-        }
-        output.push('{');
-        let key_kind = WordKind::new(self.tables.key_kind());
-        let mut first = true;
-        self.tables.all(|key, value| {
-            if !first {
-                output.push_str(", ");
+    /// Copies the next entry while the original table roots both words.
+    pub(super) fn repr_entry(
+        &self,
+        output: &mut String,
+        position: usize,
+    ) -> Option<super::values::ReprEntry> {
+        if position == 0 {
+            if self.default_list_element.is_some() {
+                output.push_str("defaultdict(<class 'list'>, ");
             }
-            first = false;
-            // SAFETY: immutable entries root both exact words during formatting.
-            unsafe {
-                super::values::write_repr(output, key, key_kind);
-                output.push_str(": ");
-                super::values::write_repr(output, value, self.value_kind);
-            }
-            true
-        });
-        output.push('}');
-        if self.default_list_element.is_some() {
-            output.push(')');
+            output.push('{');
         }
+        let Some((next, key, value)) = self.tables.next(position) else {
+            output.push('}');
+            if self.default_list_element.is_some() {
+                output.push(')');
+            }
+            return None;
+        };
+        if position != 0 {
+            output.push_str(", ");
+        }
+        Some(super::values::ReprEntry {
+            next,
+            key: (key.word, key.kind),
+            value: Some((value, self.value_kind)),
+        })
     }
 
     pub(super) fn new(key_kind: u32, value_kind: u32) -> Self {
@@ -714,26 +715,31 @@ impl Set {
             })
     }
 
-    /// # Safety
-    /// The set and its scalar keys remain rooted and immutable until return.
-    pub(super) unsafe fn write_repr(&self, output: &mut String) {
-        if self.tables.len() == 0 {
-            output.push_str("set()");
-            return;
-        }
-        output.push('{');
-        let kind = WordKind::new(self.tables.key_kind());
-        let mut first = true;
-        self.tables.all(|key, ()| {
-            if !first {
-                output.push_str(", ");
+    /// Copies the next key while the original set roots it.
+    pub(super) fn repr_entry(
+        &self,
+        output: &mut String,
+        position: usize,
+    ) -> Option<super::values::ReprEntry> {
+        if position == 0 {
+            if self.tables.len() == 0 {
+                output.push_str("set()");
+                return None;
             }
-            first = false;
-            // SAFETY: this immutable entry roots its exact scalar key.
-            unsafe { super::values::write_repr(output, key, kind) };
-            true
-        });
-        output.push('}');
+            output.push('{');
+        }
+        let Some((next, key, ())) = self.tables.next(position) else {
+            output.push('}');
+            return None;
+        };
+        if position != 0 {
+            output.push_str(", ");
+        }
+        Some(super::values::ReprEntry {
+            next,
+            key: (key.word, key.kind),
+            value: None,
+        })
     }
 }
 impl Drop for Mapping {
