@@ -311,6 +311,13 @@ mod tests {
     }
 
     #[test]
+    fn joins_chained_comparison_exits_after_the_first_two_operands() {
+        let source = "def check(value: int) -> int:\n    (first := value) == (second := value) < (last := value)\n    return first + second\n";
+        super::check(source).unwrap();
+        assert!(super::check(&source.replace("first + second", "first + last")).is_err());
+    }
+
+    #[test]
     fn joins_only_falling_exception_handler_exits() {
         let source = "def choose(value: int) -> str:\n    try:\n        if value == 0:\n            raise ValueError('zero')\n        raise IndexError('one')\n    except ValueError:\n        word = 'zero'\n    except IndexError:\n        return 'one'\n    return word\n";
         super::check(source).unwrap();
