@@ -149,34 +149,46 @@ fn timestamp(format: Option<&str>) -> String {
         return String::new();
     }
     let custom = format.filter(|value| !value.is_empty());
-    // A trailing sentinel distinguishes an empty expansion from a small buffer.
-    let pattern = format!("{}!", custom.unwrap_or("%Y-%m-%d %H:%M:%S"));
-    let Ok(fmt) = CString::new(pattern) else {
-        return String::new();
-    };
-    let mut buf = vec![0u8; fmt.as_bytes().len().max(64)];
-    loop {
-        // SAFETY: localtime_r initialized local; strftime receives a valid format and writable bytes.
-        let len = unsafe {
-            libc::strftime(
-                buf.as_mut_ptr().cast(),
-                buf.len(),
-                fmt.as_ptr(),
-                local.as_ptr(),
-            )
-        };
-        if len > 0 {
-            let mut text = String::from_utf8_lossy(&buf[..len - 1]).into_owned();
-            if custom.is_none() {
-                text.push_str(&format!(",{:03}", now.subsec_millis()));
+    let mut text = String::new();
+    for (index, part) in custom
+        .unwrap_or("%Y-%m-%d %H:%M:%S")
+        .split('\0')
+        .enumerate()
+    {
+        if index != 0 {
+            text.push('\0');
+        }
+        if part.is_empty() {
+            continue;
+        }
+        // strftime takes a C string. Format each NUL-free segment at the same instant.
+        // The sentinel distinguishes an empty expansion from an undersized buffer.
+        let fmt = CString::new(format!("{part}!")).expect("the segment contains no NUL");
+        let mut buf = vec![0u8; fmt.as_bytes().len().max(64)];
+        loop {
+            // SAFETY: localtime_r initialized local, and the format and destination are valid.
+            let len = unsafe {
+                libc::strftime(
+                    buf.as_mut_ptr().cast(),
+                    buf.len(),
+                    fmt.as_ptr(),
+                    local.as_ptr(),
+                )
+            };
+            if len > 0 {
+                text.push_str(&String::from_utf8_lossy(&buf[..len - 1]));
+                break;
             }
-            return text;
+            if buf.len() > fmt.as_bytes().len().saturating_mul(256).max(4096) {
+                return String::new();
+            }
+            buf.resize(buf.len() * 2, 0);
         }
-        if buf.len() > fmt.as_bytes().len().saturating_mul(256).max(4096) {
-            return String::new();
-        }
-        buf.resize(buf.len() * 2, 0);
     }
+    if custom.is_none() {
+        text.push_str(&format!(",{:03}", now.subsec_millis()));
+    }
+    text
 }
 
 fn level_name(level: &Int) -> String {
