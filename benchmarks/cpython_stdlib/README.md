@@ -32,6 +32,10 @@ Use `--cpython-source /path/to/cpython-3.14.5` if the interpreter needs a source
 
 `native_os.py` runs CPython's `MiscTests.test_getcwd`, `test_getcwd_long_path`, and the PEP 519 string and bytes return tests. Each `getcwd` and `fspath` executes in the compiled driver. CPython owns the directory setup, cleanup, assertions and process transport. The runner also compares the error from a deleted working directory. Use the same compiler, runtime, clang and optional CPython source arguments as for `native_json.py`.
 
+## Native POSIX os.path calls with upstream unittest assertions
+
+`native_os_path.py` runs CPython's complete POSIX `test_join`, `test_basename`, `test_dirname` and `test_splitext` methods. Pass the same compiler, runtime, clang, result and optional CPython source options as the JSON runner. The original unittest setup and comparisons run in CPython. Each tested path operation, including those made by the `splitextTest` helper, calls a compiled Relar program. The runner checks the native call count for every test.
+
 ## Full CPython reference run
 
 Use a CPython interpreter built from the exact release in the manifest with its normal test modules installed. Its `Lib/test` provides the shared `test.support`, helper programs and reference runner for the seven suites.

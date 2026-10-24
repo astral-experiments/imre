@@ -89,6 +89,7 @@ jobs:
           python3 benchmarks/cpython_stdlib/native_paths.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --result "$RUNNER_TEMP/cpython-paths.json"
           python3 benchmarks/cpython_stdlib/native_json.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json.json"
           python3 benchmarks/cpython_stdlib/native_os.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
+          python3 benchmarks/cpython_stdlib/native_os_path.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-os-path.json"
       - name: Check native build caching, linker options, and status
         run: |
           # Exercise the distro toolchain without setup-python's LD_LIBRARY_PATH.

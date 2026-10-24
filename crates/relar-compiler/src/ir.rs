@@ -459,6 +459,7 @@ pub(crate) enum Builtin {
     /// Encodes rooted concrete storage using immutable, compiler-emitted metadata.
     JsonEncode(Type),
     Path(PathOperation),
+    PosixPath(PosixPathOperation),
     Process(ProcessOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
@@ -589,6 +590,16 @@ pub(crate) enum PathOperation {
     Iterdir,
     Glob,
     Next,
+}
+
+/// POSIX lexical operations preserve raw str or bytes spellings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PosixPathOperation {
+    Join,
+    MixedJoin { path_in_tail: bool },
+    Basename,
+    Dirname,
+    Splitext,
 }
 
 /// Synchronous process operations cannot invoke language callbacks.

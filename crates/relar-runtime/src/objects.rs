@@ -14,6 +14,7 @@ mod files;
 mod json;
 mod mappings;
 mod paths;
+mod posixpath;
 mod processes;
 pub(crate) mod records;
 mod regexes;

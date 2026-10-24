@@ -22,6 +22,7 @@ mod integer_regions;
 mod json;
 mod literals;
 mod paths;
+mod posixpath;
 mod processes;
 mod records;
 mod runtime;
@@ -3260,6 +3261,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::Path(operation) => self.path_builtin(*operation, &args, returns),
+            Builtin::PosixPath(operation) => self.posix_path_builtin(*operation, &args, returns),
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
             Builtin::JsonLoads => Value {
                 ty: returns,
@@ -4849,6 +4851,10 @@ declare ptr @relar_path_name(ptr)
 declare ptr @relar_path_stem(ptr)
 declare ptr @relar_path_suffix(ptr)
 declare ptr @relar_path_parent(ptr)
+declare ptr @relar_posix_join(ptr, i64, i32)
+declare ptr @relar_posix_join_error(i32)
+declare ptr @relar_posix_component(ptr, i32, i32)
+declare void @relar_posix_splitext(ptr, i32, ptr)
 declare i32 @relar_path_is_absolute(ptr)
 declare ptr @relar_path_absolute(ptr)
 declare ptr @relar_path_resolve(ptr, i32)

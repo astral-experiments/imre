@@ -28,6 +28,7 @@ mod matching;
 mod module_values;
 mod paths;
 mod pipelines;
+mod posixpath;
 mod processes;
 mod projected_equality;
 mod records;
@@ -3987,6 +3988,10 @@ impl<'a> Checker<'a> {
         }
         if let Some(class) = self.class_reference(&call.func) {
             return self.construct(call, class);
+        }
+        if let Some(Binding::Intrinsic(Intrinsic::PosixPath(operation))) = self.resolve(&call.func)
+        {
+            return self.posix_path(call, operation);
         }
         if matches!(
             self.resolve(&call.func),
