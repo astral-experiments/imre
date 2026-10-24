@@ -69,6 +69,7 @@ mod tests {
         let module = Module {
             types: Default::default(),
             class_fields: Vec::new(),
+            list_builds: Default::default(),
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),

@@ -34,7 +34,6 @@ mod records;
 mod regex;
 mod sequences;
 mod sign_parameters;
-mod sorted_rows;
 mod stdlib;
 mod text;
 mod truthiness;
@@ -430,7 +429,6 @@ pub(crate) fn lower_with_owners(
                     ),
                 }));
             }
-            checker.fuse_sorted_rows(&definition.body, &mut body);
             if falls_through && types.payload(signature.returns).is_some() {
                 body.push(Statement::Return(Expr {
                     ty: signature.returns,
@@ -532,6 +530,7 @@ pub(crate) fn lower_with_owners(
     }
     // Entry code and inactive module guards can create helpers too. Validate the
     // complete graph only after every source expression has been lowered.
+    let list_builds = helpers.list_builds.take();
     for helper in helpers.into_functions() {
         owners.push(helper.module);
         functions.push(helper.function);
@@ -573,6 +572,7 @@ pub(crate) fn lower_with_owners(
         ir::Module {
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
+            list_builds,
             class_fields: classes.fields,
             json_records,
             globals: globals.into_types(),

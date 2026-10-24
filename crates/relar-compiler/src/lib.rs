@@ -18,6 +18,7 @@ mod ranges;
 mod reductions;
 #[cfg(test)]
 mod slice_sum_validation;
+mod sorted_rows;
 mod tuples;
 mod types;
 #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
@@ -142,6 +143,8 @@ pub fn compile_file_units(
 
 fn specialize(module: &mut ir::Module) -> Result<(), String> {
     verify_after(module, "lowering")?;
+    sorted_rows::specialize(module);
+    verify_after(module, "sorted record rows")?;
     tuples::scalarize(module);
     verify_after(module, "tuple scalarization")?;
     list_bounds::specialize(module);

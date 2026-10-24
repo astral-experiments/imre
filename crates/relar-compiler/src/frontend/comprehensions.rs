@@ -59,6 +59,7 @@ pub(super) struct Helper {
 pub(super) struct Helpers {
     first: usize,
     functions: RefCell<Vec<Option<Helper>>>,
+    pub(super) list_builds: RefCell<HashMap<usize, ir::ListBuild>>,
 }
 
 impl Helpers {
@@ -66,6 +67,7 @@ impl Helpers {
         Self {
             first,
             functions: RefCell::new(Vec::new()),
+            list_builds: RefCell::default(),
         }
     }
 
@@ -548,16 +550,43 @@ impl Checker<'_> {
         }
         // The leaf establishes the result type after its target/filter facts are
         // known. No expression can read this private slot before initialization.
-        let gather_input = match &input {
+        let plain_iterable = match &input {
             Iteration::Container {
                 iterable,
                 items: false,
                 start: None,
-            } if iterable.ty == Type::Str => Some(iterable.clone()),
+            } => Some(iterable),
             _ => None,
         };
+        let gather_input = plain_iterable
+            .filter(|value| value.ty == Type::Str)
+            .cloned();
         let result = helper.hidden(Type::None);
+        let list_binding = if matches!(display.value, Yield::List(_))
+            && let [clause] = display.clauses
+            && clause.ifs.is_empty()
+            && let Some(target) = clause.target.as_name_expr()
+            && let Some(Expr {
+                ty,
+                kind: ExprKind::Local(iterable),
+            }) = plain_iterable
+            && self.types.element(*ty).is_some()
+        {
+            Some((*iterable, target.id.as_str()))
+        } else {
+            None
+        };
         let loops = helper.comprehension_clause(display, 0, Some(input), expected, result)?;
+        if let Some((iterable, target)) = list_binding {
+            self.helpers.list_builds.borrow_mut().insert(
+                id,
+                ir::ListBuild {
+                    iterable,
+                    item: helper.names[target],
+                    result,
+                },
+            );
+        }
         let ty = helper.locals[result];
         let empty = match display.value {
             Yield::List(_) => ExprKind::List(Vec::new()),

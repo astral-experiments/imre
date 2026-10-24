@@ -74,6 +74,7 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
                     qualified_name: "subprocess.CompletedProcess".to_owned(),
                     dataclass_eq: false,
                     dataclass_repr: true,
+                    initializer_fields: None,
                     fields: ["args", "returncode", "stdout", "stderr"]
                         .into_iter()
                         .map(|name| crate::ir::ClassFieldMetadata {
