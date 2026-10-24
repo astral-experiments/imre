@@ -263,6 +263,13 @@ mod tests {
     }
 
     #[test]
+    fn nested_boolean_exits_preserve_only_guaranteed_writes() {
+        let source = "def f(flag: bool, other: bool) -> bool:\n    result = (saved := flag) and (other or (flag and (saved := other)))\n    return saved\n";
+        super::check(source).unwrap();
+        assert!(super::check(&source.replace("(saved := flag)", "flag")).is_err());
+    }
+
+    #[test]
     fn elif_chains_count_toward_branch_depth() {
         let flat = format!("if False: pass\n{}", "elif False: pass\n".repeat(10_000));
         let nested = format!(
