@@ -5,10 +5,10 @@ Relar compiles Ruff’s ten Python modules from their pinned upstream sources. T
 | Complete command | CPython 3.12.13 | Relar |
 | --- | ---: | ---: |
 | Cached, local origins, parallel file walks | 12.20 s | 10.34 s |
-| Cached, local origins, single CPU | 131.07 s | 121.87 s |
+| Cached, local origins, single CPU | 131.24 s | 124.21 s |
 | Fresh public GitHub clones | 54.08 s | 73.73 s |
 
-The parallel cached row is one paired run. Both engines produced the same 33,614 Markdown bytes. Airflow contains two invalid configurations. Ruff’s parallel directory walk can report either error first. With all processes pinned to a single CPU, two rounds in alternating order produced the same 33,614 bytes in all four runs. The single-CPU row gives the median for each engine.
+The parallel cached row is the median of three pairs. Two pairs matched byte-for-byte. One matched at 33,614 bytes and one at 33,618 bytes. In the third pair Ruff’s parallel directory walk reported different invalid Airflow configurations first. Each engine produced both versions across the three runs. With all processes pinned to a single CPU, two rounds in alternating order produced the same 33,614 bytes in all four runs. The single-CPU row gives the median for each engine.
 
 The two fresh runs include GitHub latency, checkout, and both Ruff processes. Superset and Home Assistant moved between runs. The later run consequently reported four additional violations. Peak RSS including child commands was 688 MiB for each fresh run.
 

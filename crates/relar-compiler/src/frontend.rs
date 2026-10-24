@@ -1892,7 +1892,17 @@ impl<'a> Checker<'a> {
             return Ok(value);
         }
         self.reject_class_receiver_value(expression)?;
-        let concrete = self.types.payload(expected).unwrap_or(expected);
+        let mut concrete = self.types.payload(expected).unwrap_or(expected);
+        if matches!(expression, ast::Expr::List(_))
+            && let Some(members) = self.types.members(concrete)
+        {
+            let mut lists = members
+                .into_iter()
+                .filter(|&ty| self.types.element(ty).is_some());
+            if let (Some(list), None) = (lists.next(), lists.next()) {
+                concrete = list;
+            }
+        }
         if matches!(concrete, Type::Callable(_)) {
             if let Some(Binding::Definition(definition)) = self.resolve(expression)
                 && let Some(signature) = self.functions.get(&definition).cloned()
