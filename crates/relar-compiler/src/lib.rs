@@ -273,6 +273,23 @@ mod tests {
     }
 
     #[test]
+    fn joins_elif_exits_through_an_exhaustive_type_guard() {
+        let source = concat!(
+            "def choose(value: str | bytes) -> str:\n",
+            "    if isinstance(value, str):\n",
+            "        answer = value\n",
+            "    elif isinstance(value, bytes):\n",
+            "        answer = value.decode()\n",
+            "    else:\n",
+            "        pass\n",
+            "    return answer\n",
+        );
+        super::check(source).unwrap();
+        let missing = source.replace("answer = value.decode()", "pass");
+        assert!(super::check(&missing).is_err());
+    }
+
+    #[test]
     fn joins_only_falling_exception_handler_exits() {
         let source = "def choose(value: int) -> str:\n    try:\n        if value == 0:\n            raise ValueError('zero')\n        raise IndexError('one')\n    except ValueError:\n        word = 'zero'\n    except IndexError:\n        return 'one'\n    return word\n";
         super::check(source).unwrap();

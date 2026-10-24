@@ -39,6 +39,15 @@ impl Checker<'_> {
         }
     }
 
+    /// Intersects one normally completed branch with the exits checked so far.
+    pub(super) fn merge_exit(&self, joined: &mut Option<LocalState>) {
+        if let Some(exit) = joined {
+            exit.retain_common(&self.assigned, &self.narrowed);
+        } else {
+            *joined = Some(self.local_state());
+        }
+    }
+
     /// Restores the facts at an alternative control-flow predecessor.
     pub(super) fn restore_state(&mut self, state: LocalState) {
         self.assigned = state.assigned;

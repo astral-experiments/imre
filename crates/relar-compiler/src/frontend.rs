@@ -2587,11 +2587,7 @@ impl<'a> Checker<'a> {
                 }
                 return Ok((statements, true));
             }
-            ast::Stmt::If(branch) => {
-                let (statement, flow) =
-                    self.if_chain(&branch.test, &branch.body, &branch.elif_else_clauses)?;
-                return Ok((vec![statement], flow));
-            }
+            ast::Stmt::If(branch) => return self.if_chain(branch),
             ast::Stmt::Match(branch) => return self.match_statement(branch),
             ast::Stmt::While(loop_) => {
                 self.invalidate_loop_facts(&loop_.body);
@@ -2933,11 +2929,7 @@ impl<'a> Checker<'a> {
                 }
             }
             if falls {
-                if let Some(exit) = &mut normal_exit {
-                    exit.retain_common(&self.assigned, &self.narrowed);
-                } else {
-                    normal_exit = Some(self.local_state());
-                }
+                self.merge_exit(&mut normal_exit);
             }
             handlers.push(ir::ExceptHandler {
                 kinds,
@@ -3038,54 +3030,62 @@ impl<'a> Checker<'a> {
         ))
     }
 
-    fn if_chain(
-        &mut self,
-        test: &ast::Expr,
-        body: &[ast::Stmt],
-        clauses: &[ast::ElifElseClause],
-    ) -> Result<(Statement, bool), String> {
-        let condition = self.condition(test)?;
-        let known = self.instance_condition(&condition);
-        let before = self.assigned.clone();
-        let facts = self.narrowed.clone();
-        self.apply_facts(test, true);
-        let guard_depth = self.regex_guards.len();
-        if let Some(guard) = self.regex_guard(&condition, body) {
-            self.regex_guards.push(guard);
-        }
-        let namespace_depth = self.namespace_guards.len();
-        if let Some(guard) = self.namespace_guard(test, body) {
-            self.namespace_guards.push(guard);
-        }
-        let (yes, yes_falls) = self.block(body)?;
-        self.namespace_guards.truncate(namespace_depth);
-        self.regex_guards.truncate(guard_depth);
-        let yes_falls = yes_falls && known != Some(false);
-        let yes_assigned = self.assigned.clone();
-        let yes_facts = self.narrowed.clone();
-        self.assigned = before;
-        self.narrowed = facts;
-        self.apply_facts(test, false);
-        let (no, no_falls) = if let Some((clause, rest)) = clauses.split_first() {
-            if let Some(test) = &clause.test {
-                let (nested, flow) = self.if_chain(test, &clause.body, rest)?;
-                (vec![nested], flow)
-            } else {
-                self.block(&clause.body)?
+    fn if_chain(&mut self, branch: &ast::StmtIf) -> Result<(Vec<Statement>, bool), String> {
+        let clauses = &branch.elif_else_clauses;
+        let conditions = std::iter::once((branch.test.as_ref(), branch.body.as_slice())).chain(
+            clauses
+                .iter()
+                .filter_map(|clause| Some((clause.test.as_ref()?, clause.body.as_slice()))),
+        );
+        let mut arms = Vec::with_capacity(clauses.len() + 1);
+        let mut joined = None;
+        let mut falls_at_cutoff = None;
+        let mut exit_fixed = false;
+        for (test, body) in conditions {
+            let condition = self.condition(test)?;
+            let known = self.instance_condition(&condition);
+            let before = self.local_state();
+            self.apply_facts(test, true);
+            let guard_depth = self.regex_guards.len();
+            if let Some(guard) = self.regex_guard(&condition, body) {
+                self.regex_guards.push(guard);
             }
+            let namespace_depth = self.namespace_guards.len();
+            if let Some(guard) = self.namespace_guard(test, body) {
+                self.namespace_guards.push(guard);
+            }
+            let (yes, yes_falls) = self.block(body)?;
+            self.namespace_guards.truncate(namespace_depth);
+            self.regex_guards.truncate(guard_depth);
+            if yes_falls && known != Some(false) && !exit_fixed {
+                self.merge_exit(&mut joined);
+            }
+            self.restore_state(before);
+            self.apply_facts(test, false);
+            if known == Some(true) {
+                // Later clauses are still checked. Their facts matter for checking
+                // dead code only when this prefix has no normal exit of its own.
+                falls_at_cutoff.get_or_insert(joined.is_some());
+                exit_fixed = joined.is_some();
+            }
+            arms.push((condition, yes));
+        }
+        let (mut no, no_falls) = if let Some(tail) = clauses.last().filter(|c| c.test.is_none()) {
+            self.block(&tail.body)?
         } else {
             (Vec::new(), true)
         };
-        let no_falls = no_falls && known != Some(true);
-        if yes_falls && no_falls {
-            self.assigned.retain(|slot| yes_assigned.contains(slot));
-            self.narrowed
-                .retain(|slot, ty| yes_facts.get(slot) == Some(ty));
-        } else if yes_falls {
-            self.assigned = yes_assigned;
-            self.narrowed = yes_facts;
+        if no_falls && !exit_fixed {
+            self.merge_exit(&mut joined);
         }
-        Ok((Statement::If(condition, yes, no), yes_falls || no_falls))
+        let falls = falls_at_cutoff.unwrap_or(joined.is_some());
+        if let Some(joined) = joined {
+            self.restore_state(joined);
+        }
+        for (condition, yes) in arms.into_iter().rev() {
+            no = vec![Statement::If(condition, yes, no)];
+        }
+        Ok((no, falls))
     }
 
     fn assign(&mut self, target: &ast::Expr, value: Expr) -> Result<Statement, String> {
