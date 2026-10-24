@@ -390,7 +390,7 @@ pub(crate) enum Builtin {
     StrEnumValue,
     EnumLookup(usize),
     EnumString,
-    StrEnumIdentity,
+    NominalIdentity,
     LiteralStringView,
     StringListContains,
     StringContains,
@@ -416,9 +416,7 @@ pub(crate) enum Builtin {
     },
     SysExit,
     WallTime,
-    GetLogger,
-    LogLevel,
-    LogWrite(u8),
+    Logging(LogOperation),
     Input,
     Int,
     Float,
@@ -768,6 +766,21 @@ pub(crate) enum PosixPathOperation {
     Basename,
     Dirname,
     Splitext,
+}
+
+/// Operations on the native logging registry and its named loggers.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LogOperation {
+    Get,
+    Configure,
+    Name,
+    Level,
+    Root,
+    Parent,
+    EffectiveLevel,
+    SetLevel,
+    Enabled,
+    Emit,
 }
 
 /// Synchronous process operations cannot invoke language callbacks.

@@ -27,6 +27,7 @@
     "Lib/test/test_json/test_speedups.py": "4c0aa5f993b30fd4c29daf3052d7cf6914fdc31f",
     "Lib/test/test_json/test_tool.py": "0a96b318b15b1c9a4e4fd23011c2c3374005661e",
     "Lib/test/test_json/test_unicode.py": "1aa9546dc4630618b23f0a91414959a6d4bb3b9f",
+    "Lib/test/test_logging.py": "c1dc06e02d965781df0498a444aa0a333bd28a85",
     "Lib/test/test_os.py": "555c85f4857c2d7e69dda2f390847c7f02123cb5",
     "Lib/test/test_pathlib/__init__.py": "4b16ecc31156a512db4a28fe272e5339994a4538",
     "Lib/test/test_pathlib/support/__init__.py": "dcaef654d77d68e51d38aeecd35a139703cf24d8",

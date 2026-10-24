@@ -50,6 +50,10 @@ Stream assertions receive the bytes that the native program wrote to its file.
 
 `native_os_path.py` runs CPython's complete POSIX `test_join`, `test_basename`, `test_dirname` and `test_splitext` methods. Pass the same compiler, runtime, clang, result and optional CPython source options as the JSON runner. The original unittest setup and comparisons run in CPython. Each tested path operation, including those made by the `splitextTest` helper, calls a compiled Imre program. The runner checks the native call count for every test.
 
+## Native logging
+
+`native_logging.py` copies three complete `BuiltinLevelsTest` methods and `LoggerTest.test_root_logger_aliases` verbatim. Logger calls, message callbacks, and identity assertions run in each native executable. CPython's original `BaseTest.assert_log_lines` compares the native stderr with the expected rows emitted from the upstream method body. A separate fixture compares formatting, argument evaluation, configuration, and stream output byte for byte.
+
 ## Full CPython reference run
 
 Use a test-enabled CPython interpreter built from the release in the manifest. Discover the suite names in the vendored directory, then run their matching copies in the release tree. This lets unittest discover the JSON and pathlib package tests with their original support modules.
