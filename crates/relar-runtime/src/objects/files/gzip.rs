@@ -1,7 +1,7 @@
 //! CPython's gzip member framing on top of flate2's streaming DEFLATE decoder.
 
 use std::fs::File;
-use std::io::{self, BufRead, Read};
+use std::io::{self, BufRead, BufReader, Read};
 use std::mem::MaybeUninit;
 use std::ops::Range;
 
@@ -24,34 +24,34 @@ impl std::error::Error for GzipError {}
 
 enum Phase {
     Header,
-    Body { chunk_end: Option<usize> },
+    Body { needs_input: bool },
     Trailer,
 }
 
 /// Metadata reads and DEFLATE share unread bytes across gzip members. A new
 /// DEFLATE chunk starts at the current compressed position, even after a header.
 struct GzipInput {
-    file: File,
+    file: BufReader<File>,
     block: Box<[u8]>,
     unread: Range<usize>,
 }
 
 impl GzipInput {
-    fn fill_block(&mut self) -> io::Result<usize> {
+    fn fill_block(&mut self) -> io::Result<()> {
         if self.unread.start + CHUNK_SIZE > self.block.len() {
             self.block.copy_within(self.unread.clone(), 0);
             self.unread = 0..self.unread.len();
         }
         let end = self.unread.start + CHUNK_SIZE;
         while self.unread.end < end {
-            match self.file.read(&mut self.block[self.unread.end..]) {
+            match self.file.read(&mut self.block[self.unread.end..end]) {
                 Ok(0) => break,
                 Ok(count) => self.unread.end += count,
                 Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
                 Err(err) => return Err(err),
             }
         }
-        Ok(end.min(self.unread.end))
+        Ok(())
     }
 }
 
@@ -84,10 +84,11 @@ pub(super) struct GzipReader {
 }
 
 impl GzipReader {
-    pub(super) fn new(file: File) -> Self {
+    pub(super) fn new(file: File, capacity: usize) -> Self {
         Self {
             input: GzipInput {
-                file,
+                // gzip.open reads compressed chunks through a buffered binary file.
+                file: BufReader::with_capacity(capacity, file),
                 // Leave room to slide past small members without moving a full chunk each time.
                 block: vec![0; CHUNK_SIZE + 4096].into_boxed_slice(),
                 unread: 0..0,
@@ -99,7 +100,7 @@ impl GzipReader {
     }
 
     pub(super) fn into_file(self) -> File {
-        self.input.file
+        self.input.file.into_inner()
     }
 
     /// Skip optional metadata without allocating in proportion to its size.
@@ -146,7 +147,7 @@ impl GzipReader {
         if flags & 2 != 0 {
             self.input.read_exact(&mut [0; 2])?;
         }
-        self.phase = Phase::Body { chunk_end: None };
+        self.phase = Phase::Body { needs_input: true };
         Ok(true)
     }
 
@@ -194,12 +195,11 @@ impl GzipReader {
                     }
                 }
                 Phase::Trailer => self.trailer()?,
-                Phase::Body { chunk_end } => {
-                    let end = match chunk_end {
-                        Some(end) => end,
-                        None => self.input.fill_block()?,
-                    };
-                    let input = &self.input.block[self.input.unread.start..end];
+                Phase::Body { needs_input } => {
+                    if needs_input {
+                        self.input.fill_block()?;
+                    }
+                    let input = &self.input.block[self.input.unread.clone()];
                     let empty = input.is_empty();
                     let before = (self.decoder.total_in(), self.decoder.total_out());
                     let status = self
@@ -213,14 +213,13 @@ impl GzipReader {
                     self.input.consume(consumed);
                     if status == Status::StreamEnd {
                         self.phase = Phase::Trailer;
-                    } else if written == 0 && consumed == 0 && (chunk_end.is_none() || !empty) {
+                    } else if written == 0 && consumed == 0 && (needs_input || !empty) {
                         return Err(io::ErrorKind::UnexpectedEof.into());
                     } else {
                         // A full output can leave bytes inside the inflater.
                         // Drain those before supplying another compressed chunk.
                         self.phase = Phase::Body {
-                            chunk_end: (self.input.unread.start < end || written == out.len())
-                                .then_some(end),
+                            needs_input: self.input.unread.is_empty() && written < out.len(),
                         };
                     }
                     if written > 0 {

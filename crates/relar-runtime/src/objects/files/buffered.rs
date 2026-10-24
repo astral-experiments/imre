@@ -109,9 +109,9 @@ pub(super) struct Input {
 }
 
 impl Input {
-    pub(super) fn new(file: File, gzip: bool, binary: bool) -> Self {
+    pub(super) fn new(file: File, gzip: bool, binary: bool, capacity: usize) -> Self {
         let source = if gzip {
-            Source::Gzip(Box::new(GzipReader::new(file)))
+            Source::Gzip(Box::new(GzipReader::new(file, capacity)))
         } else {
             Source::Plain(file)
         };
