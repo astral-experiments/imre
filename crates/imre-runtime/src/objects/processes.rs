@@ -1,8 +1,8 @@
-//! Sealed synchronous Unix processes with captured strict UTF-8 text.
+//! Sealed synchronous Unix processes with inherited, redirected, or captured streams.
 //!
 //! Native launch data owns its bytes before fork. The child performs only
 //! async-signal-safe descriptor, signal, and exec operations; language owners
-//! remain in the parent. Both output pipes are drained before decoding or check.
+//! remain in the parent. All requested pipes are drained before decoding or check.
 
 use std::ffi::{CStr, CString, OsStr};
 use std::fs;
@@ -18,7 +18,7 @@ use super::exceptions::{Error, Kind, Result, finish, raise_process, raise_timeou
 use super::files::{decode_utf8_text, os_error};
 use super::mappings::{imre_dict_contains, imre_dict_new, imre_dict_set};
 use super::records::{RecordDescriptor, imre_record_new};
-use super::words::WordKind;
+use super::words::{OwnedWord, WordKind};
 use super::{Bytes, Int, Object, Storage, Str, acquire_rc, fail, object};
 
 mod asynchronous;
@@ -30,35 +30,41 @@ unsafe extern "C" {
 }
 
 /// Rich failures keep the original argv list, so later aliases affect str(error).
-/// The sealed string list cannot point back to the exception or form a cycle.
+/// Its sealed string and path elements cannot point back to the exception.
 #[derive(Clone)]
 pub(super) struct ProcessError {
     cmd: Rc<Object>,
     returncode: i32,
-    stdout: Option<Rc<Str>>,
-    stderr: Option<Rc<Str>>,
+    stdout: OwnedWord,
+    stderr: OwnedWord,
 }
 
 impl ProcessError {
-    pub(super) fn field(&self, field: u32) -> usize {
+    pub(super) fn field(&self, field: u32, tagged: bool) -> usize {
         match field {
             0 => Rc::into_raw(self.cmd.clone()) as usize,
             1 => exit_word(self.returncode),
-            2 | 4 => self
-                .stdout
-                .clone()
-                .map_or(0, |text| Rc::into_raw(text) as usize),
-            3 => self
-                .stderr
-                .clone()
-                .map_or(0, |text| Rc::into_raw(text) as usize),
+            2..=4 => {
+                let output = if field == 3 {
+                    &self.stderr
+                } else {
+                    &self.stdout
+                };
+                // SAFETY: the exception owns the immutable word with this exact kind.
+                let word = unsafe { output.kind.acquire(output.word) }.into_word();
+                if tagged && output.kind == WordKind::new(8) {
+                    word | 1
+                } else {
+                    word
+                }
+            }
             _ => fail("SystemError", "invalid process exception field"),
         }
     }
 
     pub(super) fn message(&self) -> Str {
         let mut cmd = String::new();
-        // SAFETY: this owner roots an exact acyclic list[str] during repr.
+        // SAFETY: this owner roots the original acyclic argv list during repr.
         unsafe {
             super::values::write_repr(&mut cmd, Rc::as_ptr(&self.cmd) as usize, WordKind::new(5));
         }
@@ -410,28 +416,39 @@ impl Launch {
         ))
     }
 
-    fn spawn(self, cwd: Option<&CString>) -> io::Result<Child> {
-        self.spawn_with_output(cwd, Stdio::piped(), Stdio::piped())
-    }
-
-    fn spawn_with_output(
-        self,
-        cwd: Option<&CString>,
-        stdout: Stdio,
-        stderr: Stdio,
-    ) -> io::Result<Child> {
+    fn spawn(self, cwd: Option<&CString>, streams: u32) -> io::Result<Child> {
+        // Duplicate the parent's explicit descriptors before setting up either
+        // child stream. stderr=STDOUT instead follows the child's chosen stdout.
+        fn output(mode: u32) -> io::Result<Stdio> {
+            Ok(match mode {
+                0 | 5 => Stdio::inherit(),
+                1 => Stdio::piped(),
+                2 => Stdio::null(),
+                3 => Stdio::from(io::stdout().as_fd().try_clone_to_owned()?),
+                4 => Stdio::from(io::stderr().as_fd().try_clone_to_owned()?),
+                _ => fail("SystemError", "invalid subprocess stream mode"),
+            })
+        }
         let mut command = Command::new(OsStr::from_bytes(self.argv.strings[0].as_bytes()));
+        let stderr = (streams >> 4) & 15;
         command
             .stdin(Stdio::inherit())
-            .stdout(stdout)
-            .stderr(stderr);
+            .stdout(output(streams & 15)?)
+            .stderr(output(stderr)?);
         if let Some(cwd) = cwd {
             command.current_dir(OsStr::from_bytes(cwd.as_bytes()));
         }
         // SAFETY: this private closure contains only owned immutable native data;
         // exec_child performs no allocation, locking, callback, or language drop.
         // It never returns Ok, so Command cannot fall through to libc execvp.
-        unsafe { command.pre_exec(move || self.exec_child()) };
+        unsafe {
+            command.pre_exec(move || {
+                if stderr == 5 && libc::dup2(libc::STDOUT_FILENO, libc::STDERR_FILENO) < 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                self.exec_child()
+            })
+        };
         command.spawn()
     }
 }
@@ -506,18 +523,20 @@ fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
         Deadline::Integer(seconds) => crate::floats::int_to_float(seconds)?,
         Deadline::Float(seconds) => *seconds,
     };
-    let mut stdout = child
-        .child
-        .stdout
-        .take()
-        .expect("captured stdout was configured");
-    let mut stderr = child
-        .child
-        .stderr
-        .take()
-        .expect("captured stderr was configured");
-    nonblocking(stdout.as_raw_fd()).map_err(os_error)?;
-    nonblocking(stderr.as_raw_fd()).map_err(os_error)?;
+    let mut stdout = child.child.stdout.take();
+    let mut stderr = child.child.stderr.take();
+    let fds = [
+        stdout.as_ref().map_or(-1, AsRawFd::as_raw_fd),
+        stderr.as_ref().map_or(-1, AsRawFd::as_raw_fd),
+    ];
+    if fds == [-1, -1] {
+        // With no selector CPython simply waits, even for NaN, +inf or large
+        // finite deadlines that poll() would have rejected converting to ms.
+        return wait_timeout(&mut child, started, timeout, [Vec::new(), Vec::new()]);
+    }
+    for fd in fds.into_iter().filter(|&fd| fd >= 0) {
+        nonblocking(fd).map_err(os_error)?;
+    }
     if timeout.is_nan() {
         return Err(Error::new(
             Kind::ValueError,
@@ -548,14 +567,14 @@ fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
         Duration::ZERO
     };
     let deadline = started + duration;
-    let mut polls = [stdout.as_raw_fd(), stderr.as_raw_fd()].map(|fd| libc::pollfd {
+    let mut polls = fds.map(|fd| libc::pollfd {
         fd,
         events: libc::POLLIN,
         revents: 0,
     });
     let mut outputs = [Vec::new(), Vec::new()];
     let mut observed = [false; 2];
-    let mut remaining = 2;
+    let mut remaining = fds.iter().filter(|&&fd| fd >= 0).count();
     let mut buffer = [0_u8; 32 * 1024];
     while remaining != 0 {
         let now = Instant::now();
@@ -595,9 +614,9 @@ fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
                 continue;
             }
             let result = if index == 0 {
-                stdout.read(&mut buffer)
+                stdout.as_mut().expect("polled stdout").read(&mut buffer)
             } else {
-                stderr.read(&mut buffer)
+                stderr.as_mut().expect("polled stderr").read(&mut buffer)
             };
             match result {
                 Ok(count) => {
@@ -618,20 +637,29 @@ fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
             }
         }
     }
-    // Both streams can close while the child keeps running. CPython's wait
-    // timeout has no output payload, even when communicate previously read data.
-    let mut delay = Duration::from_micros(500);
+    wait_timeout(&mut child, started, timeout, outputs)
+}
+
+/// After all configured pipes close, a timeout no longer carries partial output.
+fn wait_timeout(
+    child: &mut ChildGuard,
+    started: Instant,
+    timeout: f64,
+    outputs: [Vec<u8>; 2],
+) -> Result<Captured> {
+    let mut delay = Duration::from_millis(1);
     loop {
         if let Some(status) = child.try_wait().map_err(os_error)? {
             let [stdout, stderr] = outputs;
             return Ok(Captured::Completed(status, stdout, stderr));
         }
-        let now = Instant::now();
-        if now >= deadline {
+        let remaining = timeout - started.elapsed().as_secs_f64();
+        if remaining <= 0.0 {
             child.terminate().map_err(os_error)?;
             return Ok(Captured::TimedOut(None, None));
         }
-        std::thread::sleep(delay.min(deadline - now));
+        let sleep = Duration::try_from_secs_f64(remaining).unwrap_or(delay);
+        std::thread::sleep(delay.min(sleep));
         delay = (delay * 2).min(Duration::from_millis(50));
     }
 }
@@ -860,7 +888,7 @@ pub extern "C" fn imre_environ_copy() -> *const Object {
 ///
 /// # Safety
 /// Root an exact list[str], nullable UTF-8 cwd, and nullable dict[str, str]. `check`
-/// is 0 or 1. `descriptor` is immutable static metadata with fields [5, 2, 3, 3].
+/// is 0 or 1. `descriptor` is immutable static metadata with a string-list field, an integer, and two None/str/bytes stream fields.
 /// Enter with pending clear. Success transfers one fully initialized record owner;
 /// null means pending must be checked before using the result. Inputs are borrowed.
 #[unsafe(no_mangle)]
@@ -872,7 +900,7 @@ pub unsafe extern "C" fn imre_subprocess_run(
     descriptor: *const RecordDescriptor,
 ) -> *mut usize {
     // SAFETY: this public entrypoint forwards its exact rooted input contract.
-    unsafe { run_process(args, cwd, env, check, None, descriptor) }
+    unsafe { run_process(args, cwd, env, check, 0x11, None, descriptor) }
 }
 
 /// Runs the same sealed text process with an optional exact float deadline.
@@ -897,6 +925,7 @@ pub unsafe extern "C" fn imre_subprocess_run_timeout(
             cwd,
             env,
             check,
+            0x11,
             timeout.as_ref().copied().map(Deadline::Float),
             descriptor,
         )
@@ -922,6 +951,7 @@ pub unsafe extern "C" fn imre_subprocess_run_timeout_int(
             cwd,
             env,
             check,
+            0x11,
             Some(Deadline::Integer(Int::clone(&Int::borrow(timeout)))),
             descriptor,
         )
@@ -979,9 +1009,7 @@ pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *c
         if argv.is_empty() {
             return Err(Error::new(Kind::IndexError, "list index out of range"));
         }
-        let child = Launch::new(argv, None)?
-            .spawn_with_output(None, Stdio::piped(), Stdio::inherit())
-            .map_err(os_error)?;
+        let child = Launch::new(argv, None)?.spawn(None, 1).map_err(os_error)?;
         let (status, stdout, _) = capture(child).map_err(os_error)?;
         Ok((status, Rc::new(decode_utf8_text(stdout)?)))
     });
@@ -994,8 +1022,14 @@ pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *c
                 returncode: status
                     .code()
                     .unwrap_or_else(|| -status.signal().unwrap_or(0)),
-                stdout: Some(stdout),
-                stderr: None,
+                // SAFETY: each field transfers one decoded string or no owner.
+                stdout: unsafe {
+                    OwnedWord::from_owned(Rc::into_raw(stdout) as usize, WordKind::new(3))
+                },
+                stderr: OwnedWord {
+                    word: 0,
+                    kind: WordKind::new(0),
+                },
             });
             std::ptr::null()
         }
@@ -1016,19 +1050,17 @@ pub unsafe extern "C" fn imre_subprocess_to_stderr(args: *const Object, check: u
             return Err(Error::new(Kind::IndexError, "list index out of range"));
         }
         let launch = Launch::new(argv, None)?;
-        let output = io::stderr()
-            .as_fd()
-            .try_clone_to_owned()
-            .map_err(os_error)?;
-        let child = launch
-            .spawn_with_output(None, output.into(), Stdio::inherit())
-            .map_err(os_error)?;
+        let child = launch.spawn(None, 4).map_err(os_error)?;
         ChildGuard {
             child,
             reaped: false,
         }
         .wait()
         .map_err(os_error)
+    };
+    let absent = || OwnedWord {
+        word: 0,
+        kind: WordKind::new(0),
     };
     match run() {
         Ok(status) if check != 0 && !status.success() => raise_process(ProcessError {
@@ -1037,8 +1069,8 @@ pub unsafe extern "C" fn imre_subprocess_to_stderr(args: *const Object, check: u
             returncode: status
                 .code()
                 .unwrap_or_else(|| -status.signal().unwrap_or(0)),
-            stdout: None,
-            stderr: None,
+            stdout: absent(),
+            stderr: absent(),
         }),
         Ok(_) => {}
         Err(error) => error.raise(),
@@ -1088,12 +1120,68 @@ unsafe fn prepare_process(
     }
 }
 
+/// Launch with the requested POSIX stream descriptors and a nullable deadline.
+///
+/// # Safety
+/// Inputs are rooted through the call. The descriptor contains a string list,
+/// an integer and two stream fields of kind None, str or bytes. A nonzero
+/// deadline is either a rooted integer word (2) or a nullable float pointer (7).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_subprocess_run_modes(
+    args: *const Object,
+    cwd: *const Str,
+    env: *const Object,
+    check: u32,
+    streams: u32,
+    deadline_kind: u32,
+    deadline: usize,
+    descriptor: *const RecordDescriptor,
+) -> *mut usize {
+    if streams & 256 != 0 {
+        return Error::new(
+            Kind::ValueError,
+            "stdout and stderr arguments may not be used with capture_output.",
+        )
+        .returning(std::ptr::null_mut());
+    }
+    if streams & 15 == 5 {
+        return Error::new(Kind::ValueError, "STDOUT can only be used for stderr")
+            .returning(std::ptr::null_mut());
+    }
+    // SAFETY: the caller supplies either None, a rooted integer, or a nullable float.
+    unsafe {
+        let timeout = match deadline_kind {
+            0 => None,
+            2 => Some(Deadline::Integer(Int::clone(&Int::borrow(deadline)))),
+            7 => (deadline as *const f64)
+                .as_ref()
+                .copied()
+                .map(Deadline::Float),
+            _ => fail("SystemError", "invalid process deadline kind"),
+        };
+        run_process(args, cwd, env, check, streams, timeout, descriptor)
+    }
+}
+
+/// Convert the drained bytes into the exact field type declared by the call site.
+fn completed_stream(data: Vec<u8>, kind: WordKind) -> Result<OwnedWord> {
+    let word = match kind.raw() {
+        0 => 0,
+        3 => Rc::into_raw(Rc::new(decode_utf8_text(data)?)) as usize,
+        8 => Rc::into_raw(Rc::new(data)) as usize,
+        _ => fail("SystemError", "invalid process output field kind"),
+    };
+    // SAFETY: each arm transfers its correctly typed owned allocation, or None.
+    Ok(unsafe { OwnedWord::from_owned(word, kind) })
+}
+
 /// Shares launch validation and successful records without changing no-timeout IO.
 unsafe fn run_process(
     args: *const Object,
     cwd: *const Str,
     env: *const Object,
     check: u32,
+    streams: u32,
     timeout: Option<Deadline>,
     descriptor: *const RecordDescriptor,
 ) -> *mut usize {
@@ -1104,7 +1192,7 @@ unsafe fn run_process(
         Err(error) => return error.returning(std::ptr::null_mut()),
     };
     let captured = launch
-        .spawn(cwd.as_ref())
+        .spawn(cwd.as_ref(), streams)
         .map_err(os_error)
         .and_then(|child| {
             if let Some(timeout) = &timeout {
@@ -1133,11 +1221,13 @@ unsafe fn run_process(
         let returncode = status
             .code()
             .unwrap_or_else(|| -status.signal().unwrap_or(0));
+        // SAFETY: the compiler’s four-field descriptor outlives this run.
+        let kinds = unsafe { [*(*descriptor).kinds.add(2), *(*descriptor).kinds.add(3)] };
         // Python decodes stdout before stderr, even when check=True would fail.
         Ok((
             returncode,
-            Rc::new(decode_utf8_text(stdout)?),
-            Rc::new(decode_utf8_text(stderr)?),
+            completed_stream(stdout, WordKind::new(kinds[0]))?,
+            completed_stream(stderr, WordKind::new(kinds[1]))?,
         ))
     })();
     let (returncode, stdout, stderr) = match result {
@@ -1151,8 +1241,8 @@ unsafe fn run_process(
         raise_process(ProcessError {
             cmd: args,
             returncode,
-            stdout: Some(stdout),
-            stderr: Some(stderr),
+            stdout,
+            stderr,
         });
         return std::ptr::null_mut();
     }
@@ -1162,14 +1252,16 @@ unsafe fn run_process(
         let result = imre_record_new(descriptor);
         result.cast::<*const Object>().write(Rc::into_raw(args));
         result.add(1).write(exit_word(returncode));
-        result
-            .add(2)
-            .cast::<*const Str>()
-            .write(Rc::into_raw(stdout));
-        result
-            .add(3)
-            .cast::<*const Str>()
-            .write(Rc::into_raw(stderr));
+        for (index, stream) in [stdout, stderr].into_iter().enumerate() {
+            let field = result.add(index + 2);
+            if stream.kind == WordKind::new(0) {
+                field.write(0);
+            } else {
+                field
+                    .cast::<*const ()>()
+                    .write(stream.into_word() as *const ());
+            }
+        }
         result
     }
 }
@@ -1178,7 +1270,7 @@ unsafe fn run_process(
 ///
 /// # Safety
 /// `record` is a rooted, fully initialized sealed CompletedProcess record with
-/// fields [5, 2, 3, 3]. Enter with pending clear and check it immediately afterward.
+/// a string-list field, an integer, and two None/str/bytes stream fields. Enter with pending clear and check it immediately afterward.
 /// Neither the record nor any field owner is consumed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_subprocess_check(record: *const usize) {
@@ -1190,15 +1282,15 @@ pub unsafe extern "C" fn imre_subprocess_check(record: *const usize) {
     // SAFETY: each exact pointer field remains rooted while acquiring its owner;
     // no field reference or record borrow escapes into pending error replacement.
     let error = unsafe {
+        let acquire_stream = |index| {
+            let kind = WordKind::new(*super::records::descriptor(record).kinds.add(index));
+            kind.acquire(kind.read_record_field(record.add(index)))
+        };
         ProcessError {
             cmd: acquire_rc(record.cast::<*const Object>().read() as usize),
             returncode,
-            stdout: Some(acquire_rc(
-                record.add(2).cast::<*const Str>().read() as usize
-            )),
-            stderr: Some(acquire_rc(
-                record.add(3).cast::<*const Str>().read() as usize
-            )),
+            stdout: acquire_stream(2),
+            stderr: acquire_stream(3),
         }
     };
     raise_process(error);
@@ -1877,7 +1969,7 @@ mod tests {
             Err(_) => panic!("controlled launch preparation failed"),
         };
         launch.descriptors = Descriptors::Snapshot(vec![inherited.as_raw_fd()]);
-        let (status, stdout, _) = capture(launch.spawn(None).unwrap()).unwrap();
+        let (status, stdout, _) = capture(launch.spawn(None, 0x11).unwrap()).unwrap();
         assert!(status.success());
         assert_eq!(stdout, b"closed\n");
 

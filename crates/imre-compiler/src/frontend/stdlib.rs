@@ -581,7 +581,7 @@ impl Checker<'_> {
             });
         }
         if field.conversion != ast::ConversionFlag::Repr
-            && matches!(value.ty, Type::Class(_) | Type::CompletedProcess)
+            && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(_))
         {
             return self.record_text(value, field);
         }

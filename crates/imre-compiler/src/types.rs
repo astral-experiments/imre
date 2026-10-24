@@ -91,7 +91,7 @@ impl Types {
             | Type::TextIO
             | Type::BinaryIO
             | Type::Path
-            | Type::CompletedProcess
+            | Type::CompletedProcess(_)
             | Type::EventLoop
             | Type::TaskGroup
             | Type::GeneratorContext
@@ -391,7 +391,7 @@ impl Types {
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::Path
-            | Type::CompletedProcess
+            | Type::CompletedProcess(_)
             | Type::EventLoop
             | Type::Coroutine(_)
             | Type::Task(_)

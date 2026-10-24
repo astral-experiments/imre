@@ -1246,7 +1246,7 @@ fn annotation_at(
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
-            return Ok(Type::CompletedProcess);
+            return Ok(Type::CompletedProcess(crate::ir::ProcessCapture::TEXT));
         }
         _ => {}
     }
@@ -1307,14 +1307,18 @@ fn annotation_at(
                 Some(Binding::Intrinsic(Intrinsic::CompletedProcess))
             ) =>
         {
-            if nested(&value.slice)? != Type::Str {
-                return Err(error(
-                    source,
-                    expression,
-                    "CompletedProcess requires str output",
-                ));
-            }
-            Ok(Type::CompletedProcess)
+            let capture = match nested(&value.slice)? {
+                Type::Str => crate::ir::ProcessCapture::TEXT,
+                Type::Bytes => crate::ir::ProcessCapture::BYTES,
+                _ => {
+                    return Err(error(
+                        source,
+                        expression,
+                        "CompletedProcess requires str or bytes output",
+                    ));
+                }
+            };
+            Ok(Type::CompletedProcess(capture))
         }
         ast::Expr::Subscript(value)
             if matches!(
@@ -3706,11 +3710,11 @@ impl<'a> Checker<'a> {
             let before_handler = name.and_then(|_| self.take_breaks());
             let capture_depth = self.captured_process_errors.len();
             if let (Some(slot), Some(target)) = (name, &handler.name)
-                && processes::captures_errors(&try_.body, &body)
                 && !narrowing::assigned_names(&handler.body).contains(target.as_str())
             {
-                self.captured_process_errors
-                    .push(processes::captured_fields(slot, &body, self.types));
+                let view =
+                    processes::process_error_view(slot, &try_.body, &body, self.types, &kinds);
+                self.captured_process_errors.push(view);
             }
             let (handler_body, falls) = self.block(&handler.body)?;
             self.captured_process_errors.truncate(capture_depth);
@@ -4756,7 +4760,7 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::AsyncProcess(_)) {
                     return self.async_returncode(receiver, attribute);
                 }
-                if receiver.ty == Type::CompletedProcess {
+                if matches!(receiver.ty, Type::CompletedProcess(_)) {
                     return self.process_attribute(receiver, attribute);
                 }
                 if matches!(receiver.ty, Type::Exception | Type::TimeoutExpired) {
@@ -5359,7 +5363,7 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Path {
                 return self.path_method(receiver, attribute, call);
             }
-            if receiver.ty == Type::CompletedProcess {
+            if matches!(receiver.ty, Type::CompletedProcess(_)) {
                 return self.process_method(receiver, attribute, call);
             }
             if matches!(
@@ -5878,7 +5882,7 @@ impl<'a> Checker<'a> {
                 });
             }
             if matches!(name.id.as_str(), "str" | "print")
-                && (matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess)
+                && (matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess(_))
                     || self.types.is_counter(args[0].ty))
             {
                 let text = self.record_text(args.into_iter().next().unwrap(), call)?;

@@ -157,14 +157,14 @@ impl Verifier<'_> {
         let fields = match receiver {
             Type::Class(class) => self.module.class_fields[class].clone(),
             Type::Tuple(_) => self.module.types.fields(receiver).unwrap(),
-            Type::CompletedProcess => {
+            Type::CompletedProcess(capture) => {
                 return match field {
                     0 => require(
                         self.module.types.element(value) == Some(Type::Str),
                         "process args field must be list[str]",
                     ),
                     1 => same(value, Type::Int),
-                    2 | 3 => same(value, Type::Str),
+                    2 | 3 => same(value, capture.stream(field == 2)),
                     _ => Err(format!("invalid process field #{field}")),
                 };
             }
