@@ -707,6 +707,16 @@ pub unsafe extern "C" fn relar_str_literal(data: *const u8, length: usize) -> *c
 }
 
 /// # Safety
+/// The compiler supplies immutable UTF-8 bytes that remain readable for
+/// the program's lifetime. A zero-length span may be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_static_literal(data: *const u8, length: usize) -> *const Str {
+    // SAFETY: the compiler's string globals have static storage duration.
+    let literal: &'static str = unsafe { text(data, length) };
+    Rc::into_raw(Rc::new(Str::const_new(literal)))
+}
+
+/// # Safety
 /// The argument must be a live string handle or null during slot cleanup.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_str_retain(value: *const Str) {

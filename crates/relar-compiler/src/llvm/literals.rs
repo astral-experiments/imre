@@ -63,7 +63,7 @@ impl Emitter<'_, '_> {
             (
                 &self.string_literals,
                 Type::Str,
-                "relar_str_literal",
+                "relar_str_static_literal",
                 "relar_str_release",
             ),
             (

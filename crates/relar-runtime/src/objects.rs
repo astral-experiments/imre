@@ -403,15 +403,20 @@ pub unsafe extern "C" fn relar_seq_repeat(value: *const Object, count: usize) ->
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_str_concat(a: *const Str, b: *const Str) -> *const Str {
     // SAFETY: both immutable strings remain rooted for this call.
-    let (a, b) = unsafe { (&*a, &*b) };
-    let length = a
+    let (left, right) = unsafe { (&*a, &*b) };
+    if left.is_empty() || right.is_empty() {
+        let retained = if left.is_empty() { b } else { a };
+        // SAFETY: the caller roots the original immutable string handle.
+        return Rc::into_raw(unsafe { acquire_rc::<Str>(retained as usize) });
+    }
+    let length = left
         .len()
-        .checked_add(b.len())
+        .checked_add(right.len())
         .unwrap_or_else(|| fail("MemoryError", "string is too large"));
     let mut result = Str::try_with_capacity(length)
         .unwrap_or_else(|_| fail("MemoryError", "string allocation failed"));
-    result.push_str(a);
-    result.push_str(b);
+    result.push_str(left);
+    result.push_str(right);
     Rc::into_raw(Rc::new(result))
 }
 
@@ -545,7 +550,7 @@ pub unsafe extern "C" fn relar_str_concat_parts(
     count: usize,
 ) -> *const Str {
     // SAFETY: this entry point has the builder's same fragment-lifetime contract.
-    Rc::into_raw(Rc::new(unsafe { concat_parts(parts, count) }))
+    Rc::into_raw(unsafe { concat_parts(parts, count) })
 }
 
 /// Appends already evaluated fragments, reusing uniquely owned string storage.
@@ -575,14 +580,11 @@ pub unsafe extern "C" fn relar_str_concat_parts_owned(
         // SAFETY: the caller provides this initialized, disjoint descriptor array.
         unsafe { std::slice::from_raw_parts(parts, count) }
     };
-    let length = concatenated_length(
-        owner.len(),
-        parts.iter().map(|part| {
-            // SAFETY: the consumed owner also roots direct self-borrowed fragments.
-            unsafe { part.as_str() }.len()
-        }),
-    )
-    .unwrap_or_else(|| fail("MemoryError", "string is too large"));
+    // SAFETY: the caller and the consumed owner root all fragments through the call.
+    let (length, shared) = unsafe { concat_size(owner.len(), parts) };
+    if let Some(shared) = shared {
+        return Rc::into_raw(shared);
+    }
     if length == owner.len() {
         return Rc::into_raw(owner);
     }
@@ -641,6 +643,38 @@ pub unsafe extern "C" fn relar_str_concat_parts_owned(
     Rc::into_raw(Rc::new(result))
 }
 
+/// Appends a compiler-pooled literal, retaining its root for an empty prefix.
+///
+/// # Safety
+/// The caller transfers one left owner. The root points to a live Str handle
+/// containing exactly the immutable, program-lifetime UTF-8 span in data.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_append_literal_owned(
+    left: *const Str,
+    root: *const *const Str,
+    data: *const u8,
+    length: usize,
+) -> *const Str {
+    if length == 0 {
+        return left;
+    }
+    // SAFETY: the caller transfers this exact owner. Static bytes cannot
+    // overlap a writable heap buffer.
+    let mut owner = unsafe { Rc::from_raw(left) };
+    // SAFETY: the nonempty static span is disjoint from writable heap storage.
+    if unsafe { append_reserved(&mut owner, data, length) } {
+        return Rc::into_raw(owner);
+    }
+    // SAFETY: the program owns the literal root throughout the call.
+    let literal = unsafe { root.read() };
+    let part = StringPart {
+        data: literal.cast(),
+        length: usize::MAX,
+    };
+    // SAFETY: the descriptor stays live and the left owner transfers.
+    unsafe { relar_str_concat_parts_owned(Rc::into_raw(owner), &part, 1) }
+}
+
 /// Appends one disjoint UTF-8 span, retaining unique string storage and growing
 /// it geometrically only when the existing capacity cannot hold the suffix.
 ///
@@ -662,7 +696,19 @@ pub unsafe extern "C" fn relar_str_append_utf8_owned(
     }
     // SAFETY: the caller transfers this exact live owner, including on copying.
     let mut owner = unsafe { Rc::from_raw(left) };
-    if let Some(value) = Rc::get_mut(&mut owner)
+    // SAFETY: the caller supplies a disjoint nonempty span.
+    if unsafe { append_reserved(&mut owner, data, length) } {
+        return Rc::into_raw(owner);
+    }
+    // SAFETY: the unchanged owner and nonempty disjoint UTF-8 span are transferred.
+    unsafe { append_utf8_slow(owner, data, length) }
+}
+
+/// # Safety
+/// The readable nonempty UTF-8 span must be disjoint from a writable heap buffer.
+#[inline]
+unsafe fn append_reserved(owner: &mut Rc<Str>, data: *const u8, length: usize) -> bool {
+    if let Some(value) = Rc::get_mut(owner)
         && value.is_heap_allocated()
     {
         let initial = value.len();
@@ -675,11 +721,10 @@ pub unsafe extern "C" fn relar_str_append_utf8_owned(
                 std::ptr::copy_nonoverlapping(data, output, length);
                 value.set_len(initial + length);
             }
-            return Rc::into_raw(owner);
+            return true;
         }
     }
-    // SAFETY: the unchanged owner and nonempty disjoint UTF-8 span are transferred.
-    unsafe { append_utf8_slow(owner, data, length) }
+    false
 }
 
 /// Keeps inline/static storage, growth, and shared-owner copying outside the
@@ -727,24 +772,50 @@ fn concatenated_length(initial: usize, lengths: impl IntoIterator<Item = usize>)
         .filter(|&length| length <= isize::MAX as usize)
 }
 
+/// Returns a retained owner when its bytes make up the entire result.
+///
+/// # Safety
+/// All fragments obey the rooted handle and borrowed UTF-8 span contracts.
+unsafe fn concat_size(initial: usize, parts: &[StringPart]) -> (usize, Option<Rc<Str>>) {
+    let mut handle = None;
+    let length = concatenated_length(
+        initial,
+        parts.iter().map(|part| {
+            // SAFETY: the caller roots every handle and byte span through the call.
+            let size = unsafe { part.as_str() }.len();
+            if initial == 0 && size != 0 && part.length == usize::MAX {
+                handle = Some((part.data, size));
+            }
+            size
+        }),
+    )
+    .unwrap_or_else(|| fail("MemoryError", "string is too large"));
+    let shared = handle.filter(|&(_, size)| size == length).map(|(data, _)| {
+        // SAFETY: the sentinel selected a live Str handle which the caller roots.
+        unsafe { acquire_rc::<Str>(data as usize) }
+    });
+    (length, shared)
+}
+
 /// Builds a complete concatenation before publishing it or accessing a writer.
 ///
 /// # Safety
 /// The descriptors, handles, and spans obey `relar_str_concat_parts`'s contract.
-unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Str {
+unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Rc<Str> {
     let parts = if count == 0 {
         &[]
     } else {
         // SAFETY: the compiler supplies a readable descriptor array of this length.
         unsafe { std::slice::from_raw_parts(parts, count) }
     };
-    let length = parts.iter().fold(0_usize, |length, part| {
-        // SAFETY: every fragment remains immutable and rooted throughout this call.
-        let text = unsafe { part.as_str() };
-        length
-            .checked_add(text.len())
-            .unwrap_or_else(|| fail("MemoryError", "string is too large"))
-    });
+    // SAFETY: all descriptor sources remain rooted through this call.
+    let (length, shared) = unsafe { concat_size(0, parts) };
+    if let Some(shared) = shared {
+        return shared;
+    }
+    if length == 0 {
+        return text::owned_string("");
+    }
     let mut result = Str::try_with_capacity(length)
         .unwrap_or_else(|_| fail("MemoryError", "string allocation failed"));
     {
@@ -770,7 +841,7 @@ unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Str {
     // SAFETY: exactly `length` bytes were initialized within capacity; joining
     // complete UTF-8 fragments preserves UTF-8, including the full-inline case.
     unsafe { result.set_len(length) };
-    result
+    Rc::new(result)
 }
 
 /// Python also treats the four ASCII information separators as whitespace.
@@ -978,6 +1049,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn concatenation_retains_the_only_nonempty_string_handle() {
+        let text = Rc::new(Str::new("a heap-backed concatenation operand"));
+        let empty = Rc::new(Str::new(""));
+        let parts = [
+            StringPart {
+                data: Rc::as_ptr(&empty).cast(),
+                length: usize::MAX,
+            },
+            StringPart {
+                data: Rc::as_ptr(&text).cast(),
+                length: usize::MAX,
+            },
+            StringPart {
+                data: Rc::as_ptr(&empty).cast(),
+                length: usize::MAX,
+            },
+        ];
+        // SAFETY: both input owners root all three descriptors through each call.
+        unsafe {
+            for result in [
+                relar_str_concat(Rc::as_ptr(&text), Rc::as_ptr(&empty)),
+                relar_str_concat(Rc::as_ptr(&empty), Rc::as_ptr(&text)),
+                relar_str_concat_parts(parts.as_ptr(), parts.len()),
+            ] {
+                assert!(Rc::ptr_eq(&Rc::from_raw(result), &text));
+            }
+        }
+        assert_eq!(Rc::strong_count(&text), 1);
+
+        let literal = "static bytes that exceed inline capacity";
+        // SAFETY: the literal has static storage. Each call transfers one owner.
+        let handle = unsafe { crate::relar_str_static_literal(literal.as_ptr(), literal.len()) };
+        let part = StringPart {
+            data: handle.cast(),
+            length: usize::MAX,
+        };
+        let empty = Rc::into_raw(Rc::new(Str::default()));
+        // SAFETY: the descriptor and its source remain live, and the empty owner transfers.
+        let result = unsafe { Rc::from_raw(relar_str_concat_parts_owned(empty, &part, 1)) };
+        // SAFETY: recover the constructor's original owner exactly once.
+        let original = unsafe { Rc::from_raw(handle) };
+        assert!(Rc::ptr_eq(&result, &original));
+        assert_eq!(result.as_static_str(), Some(literal));
+    }
+
+    #[test]
     fn concatenation_initializes_inline_tag_and_heap_boundaries() {
         for (length, ending) in [
             (0, ""),
@@ -1036,7 +1153,7 @@ mod tests {
             assert_eq!(result.is_heap_allocated(), length > 24);
             assert_eq!(reused.as_str(), expected);
             assert_eq!(reused.is_heap_allocated(), length > 24);
-            result.push_str("!");
+            Rc::make_mut(&mut result).push_str("!");
             Rc::get_mut(&mut reused).unwrap().push_str("!");
             assert_eq!(result.as_str(), format!("{expected}!"));
             assert_eq!(reused.as_str(), result.as_str());

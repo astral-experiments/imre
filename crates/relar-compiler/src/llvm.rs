@@ -2244,7 +2244,20 @@ impl Emitter<'_, '_> {
         let (scratch, count, owners) = self.concat_parts(expressions[1..].to_vec());
         let left = self.take_slot(slot);
         self.forget(&left);
-        let instruction = if count == 1 && disjoint {
+        let instruction = if let [_, suffix] = expressions.as_slice()
+            && let ExprKind::Str(value) = &suffix.kind
+            && value.len() > INLINE_CONCAT_LITERAL
+        {
+            let id = self.intern_literal(value.as_bytes(), Type::Str);
+            let root = self.output.literal_ref(id);
+            let bytes = self.output.string_name(id, "str");
+            let bytes = self.output.used(self.output.string_owner(id), bytes);
+            format!(
+                "call ptr @relar_str_append_literal_owned(ptr {}, ptr @{root}, ptr @{bytes}, i64 {})",
+                left.operand,
+                value.len()
+            )
+        } else if count == 1 && disjoint {
             // Literals live in static storage; indexed characters were copied
             // into unique scratch (or point to an immutable ASCII literal).
             // Neither can overlap the runtime allocation being consumed.
@@ -2388,8 +2401,17 @@ impl Emitter<'_, '_> {
                 continue;
             }
             let (data, length) = if let ExprKind::Str(value) = &expression.kind {
-                let name = self.byte_array(value.as_bytes().to_vec());
-                (format!("@{name}"), value.len().to_string())
+                if value.len() <= INLINE_CONCAT_LITERAL {
+                    let name = self.byte_array(value.as_bytes().to_vec());
+                    (format!("@{name}"), value.len().to_string())
+                } else {
+                    let id = self.intern_literal(value.as_bytes(), Type::Str);
+                    let root = self.output.literal_ref(id);
+                    (
+                        self.instruction(format!("load ptr, ptr @{root}")),
+                        "-1".into(),
+                    )
+                }
             } else {
                 let operand = self.operand(expression);
                 let data = operand.value.operand.clone();
@@ -4544,6 +4566,9 @@ fn expression_preserves_local(expression: &Expr, slot: usize, locals: usize) -> 
     !written[slot]
 }
 
+// Keep literals that fit in CompactString's three inline words on the raw append path.
+const INLINE_CONCAT_LITERAL: usize = 3 * size_of::<usize>();
+
 /// Flattens only exact string additions, preserving both source nesting shapes'
 /// leaf order without evaluating through calls or other expression boundaries.
 fn concat_leaves(expression: &Expr) -> Vec<&Expr> {
@@ -4907,6 +4932,7 @@ declare ptr @relar_str_concat(ptr, ptr)
 declare ptr @relar_str_concat_parts(ptr, i64)
 declare ptr @relar_str_concat_parts_owned(ptr, ptr, i64)
 declare ptr @relar_str_append_utf8_owned(ptr, ptr, i64)
+declare ptr @relar_str_append_literal_owned(ptr, ptr, ptr, i64)
 declare i32 @relar_str_get_part(ptr, i64, ptr, ptr)
 declare ptr @relar_int_str_part(i64, ptr, ptr)
 declare ptr @relar_str_split_whitespace(ptr)
@@ -4956,7 +4982,7 @@ declare i32 @relar_int_compare(i64, i64)
 declare void @relar_print_int(i64)
 declare void @relar_print_bool(i32)
 declare void @relar_print_none()
-declare ptr @relar_str_literal(ptr, i64)
+declare ptr @relar_str_static_literal(ptr, i64)
 declare ptr @relar_regex_compile(ptr, i64)
 declare ptr @relar_regex_search(ptr, ptr)
 declare ptr @relar_regex_group(ptr, i64, i32)
@@ -5335,6 +5361,25 @@ mod tests {
     }
 
     #[test]
+    fn long_concat_literals_use_rooted_fragments_and_the_direct_append() {
+        let literal = "a literal that exceeds the inline string capacity";
+        let llvm = compile(
+            &format!("def build(empty: str) -> str:\n    value = empty\n    value = value + '{literal}'\n    return empty + '{literal}' + value\nprint(build(''))\n"),
+            &CompileOptions { address_sanitizer: false },
+        ).unwrap();
+        let body = llvm
+            .split_once("define internal ptr @fn_0(")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        assert!(body.contains("call ptr @relar_str_append_literal_owned("));
+        assert!(body.contains("call ptr @relar_str_concat_parts("));
+        assert!(body.contains("load ptr, ptr @literal_"));
+    }
+
+    #[test]
     fn string_constants_are_rooted_once_and_cleared_on_both_main_exits() {
         let llvm = compile(
             "def text() -> str:\n    return 'shared'\nprint('shared')\nprint(text())\n",
@@ -5343,7 +5388,10 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(llvm.matches("call ptr @relar_str_literal(").count(), 1);
+        assert_eq!(
+            llvm.matches("call ptr @relar_str_static_literal(").count(),
+            1
+        );
         for operation in ["init", "clear"] {
             assert!(llvm.contains(&format!(
                 "define internal void @relar_{operation}_literals() sanitize_address {{"
@@ -5356,7 +5404,7 @@ mod tests {
             .split_once("\n}")
             .unwrap()
             .0;
-        assert!(!body.contains("@relar_str_literal("));
+        assert!(!body.contains("@relar_str_static_literal("));
         assert!(body.contains("@relar_str_retain("));
         let main = llvm.split_once("define i32 @main(").unwrap().1;
         assert_eq!(main.matches("call void @relar_init_literals()").count(), 1);
