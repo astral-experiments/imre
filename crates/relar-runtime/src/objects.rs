@@ -924,10 +924,18 @@ struct LineIterator {
     offsets: LineOffsets,
 }
 
+fn owned_line(source: &Rc<Str>, range: std::ops::Range<usize>) -> Rc<Str> {
+    if range == (0..source.len()) {
+        Rc::clone(source)
+    } else {
+        text::owned_string(&source[range])
+    }
+}
+
 impl LineIterator {
     fn next(&mut self) -> Option<(OwnedWord, Option<OwnedWord>)> {
         let range = self.offsets.next(&self.owner)?;
-        let line = text::owned_string(&self.owner[range]);
+        let line = owned_line(&self.owner, range);
         // SAFETY: the new string transfers one owner of the exact element kind.
         let line =
             unsafe { OwnedWord::from_owned(Rc::into_raw(line) as usize, words::WordKind::new(3)) };
@@ -958,17 +966,17 @@ pub unsafe extern "C" fn relar_str_splitlines_iter(value: *const Str) -> *const 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
-    let value = unsafe { &*value };
-    let mut offsets = LineOffsets::new(value);
+    let value = unsafe { std::mem::ManuallyDrop::new(Rc::from_raw(value)) };
+    let mut offsets = LineOffsets::new(&value);
     let mut result = Words::new(3);
-    while let Some(range) = offsets.next(value) {
+    while let Some(range) = offsets.next(&value) {
         result
             .values
             .try_reserve(1)
             .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
         result
             .values
-            .push(Rc::into_raw(text::owned_string(&value[range])) as usize);
+            .push(Rc::into_raw(owned_line(&value, range)) as usize);
     }
     Rc::into_raw(result.into_object())
 }
@@ -1797,6 +1805,25 @@ mod tests {
         }
         assert!(weak.upgrade().is_none());
     }
+    #[test]
+    fn one_complete_line_retains_the_input_in_both_split_paths() {
+        let source = Rc::new(Str::from("line".repeat(1024)));
+        let mut cursor = LineIterator {
+            offsets: LineOffsets::new(&source),
+            owner: Rc::clone(&source),
+        };
+        let (word, _) = cursor.next().unwrap();
+        // SAFETY: the iterator transfers a Str owner, and source roots the eager split.
+        unsafe {
+            let streamed = Rc::from_raw(word.into_word() as *const Str);
+            let parts = relar_str_splitlines(Rc::as_ptr(&source));
+            let listed = Rc::from_raw(relar_seq_get(parts, Int::small(0).unwrap().0) as *const Str);
+            relar_object_release(parts);
+            assert!(Rc::ptr_eq(&source, &listed));
+            assert!(Rc::ptr_eq(&source, &streamed));
+        }
+    }
+
     #[test]
     fn splitlines_distinguishes_every_python_boundary_and_retains_interior_empty_lines() {
         for (source, expected) in [
