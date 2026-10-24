@@ -4,7 +4,7 @@ use super::*;
 
 /// Recognizes constructions whose only work after evaluating the arguments is
 /// writing each field once in order. The previous class instance may release
-/// its fields during those writes, so admit only scalar, resource-free fields.
+/// its fields during those writes, so admit only fields with resource-free contents.
 pub(super) fn replacement_fields<'a>(module: &Module, expression: &'a Expr) -> Option<&'a [Expr]> {
     if let ExprKind::Tuple(fields) = &expression.kind {
         return Some(fields);
@@ -34,7 +34,7 @@ pub(super) fn replacement_fields<'a>(module: &Module, expression: &'a Expr) -> O
             || !matches!(value.kind, ExprKind::Local(slot) if params.get(field) == Some(&slot))
             || !matches!(
                 ty,
-                Type::Int | Type::Bool | Type::Float | Type::Str | Type::Bytes
+                Type::Int | Type::Bool | Type::Float | Type::Str | Type::Bytes | Type::ListInt
             )
         {
             return None;
@@ -164,6 +164,17 @@ mod tests {
             "../../../../tests/fixtures/classes/record_reuse.py"
         ));
         assert!(eligible.contains("call ptr @relar_record_cached_result("));
+
+        let list_fields = compile(include_str!(
+            "../../../../tests/fixtures/classes/record_reuse_list.py"
+        ));
+        let cached = "call ptr @relar_record_cached_result(";
+        assert!(list_fields.contains(cached));
+        let streams = list_fields
+            .split("\ndefine ")
+            .find(|body| body.contains("call ptr @relar_text_open("))
+            .unwrap();
+        assert!(!streams.contains(cached));
 
         let ordinary = compile(
             r#"
