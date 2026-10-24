@@ -30,6 +30,88 @@ struct Storage {
 #[derive(Default)]
 pub(crate) struct Types(RefCell<Storage>);
 
+#[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+impl Types {
+    /// Checks an identity without using the unchecked shape accessors below.
+    pub(crate) fn verify_type(&self, ty: Type, classes: usize) -> Result<(), String> {
+        let storage = self.0.borrow();
+        let valid = match ty {
+            Type::StrLiteral(id) => {
+                matches!(storage.shapes.get(id), Some(Shape::StringLiterals(_)))
+            }
+            Type::List(id) => matches!(storage.shapes.get(id), Some(Shape::List(_))),
+            Type::Dict(id) => matches!(
+                storage.shapes.get(id),
+                Some(Shape::Dict(..) | Shape::DefaultListDict(..))
+            ),
+            Type::Set(id) => matches!(storage.shapes.get(id), Some(Shape::Set(_))),
+            Type::Tuple(id) => matches!(storage.shapes.get(id), Some(Shape::Tuple(_))),
+            Type::Callable(id) => matches!(storage.shapes.get(id), Some(Shape::Callable(..))),
+            Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
+            Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
+            Type::Class(id) | Type::StrEnum(id) => id < classes,
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::Str
+            | Type::Bytes
+            | Type::ListInt
+            | Type::StringKeys
+            | Type::Iterator
+            | Type::Exception
+            | Type::TimeoutExpired
+            | Type::TextIO
+            | Type::BinaryIO
+            | Type::Path
+            | Type::CompletedProcess
+            | Type::RegexPattern
+            | Type::RegexMatch
+            | Type::JsonValue
+            | Type::JsonObject
+            | Type::None => true,
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(format!("invalid type identity {ty}"))
+        }
+    }
+
+    /// Interned structural types refer to earlier shapes; nominal class edges are separate.
+    pub(crate) fn verify_shapes(&self, classes: usize) -> Result<(), String> {
+        let storage = self.0.borrow();
+        for (id, shape) in storage.shapes.iter().enumerate() {
+            let children: Vec<Type> = match shape {
+                Shape::StringLiterals(_) => Vec::new(),
+                Shape::List(ty) | Shape::Set(ty) | Shape::Optional(ty) => vec![*ty],
+                Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => vec![*key, *value],
+                Shape::Tuple(fields) | Shape::Union(fields) => fields.clone(),
+                Shape::Callable(params, returns) => {
+                    params.iter().copied().chain([*returns]).collect()
+                }
+            };
+            for child in children {
+                self.verify_type(child, classes)?;
+                if let Type::StrLiteral(child_id)
+                | Type::List(child_id)
+                | Type::Dict(child_id)
+                | Type::Set(child_id)
+                | Type::Tuple(child_id)
+                | Type::Callable(child_id)
+                | Type::Optional(child_id)
+                | Type::Union(child_id) = child
+                    && child_id >= id
+                {
+                    return Err(format!(
+                        "type shape #{id} contains a forward or cyclic reference to {child}"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Types {
     pub(crate) fn string_literal(&self, mut values: Vec<String>) -> Type {
         values.sort_unstable();

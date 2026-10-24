@@ -9,6 +9,18 @@ pub(super) struct LocalState {
     pub(super) narrowed: HashMap<usize, Type>,
 }
 
+impl LocalState {
+    pub(super) fn retain_common(
+        &mut self,
+        assigned: &HashSet<usize>,
+        narrowed: &HashMap<usize, Type>,
+    ) {
+        self.assigned.retain(|slot| assigned.contains(slot));
+        self.narrowed
+            .retain(|slot, ty| narrowed.get(slot) == Some(ty));
+    }
+}
+
 /// Removes storage-only optional/union promotions while preserving RHS evaluation.
 pub(super) fn unpromoted(value: Expr) -> Expr {
     match value.kind {
@@ -38,10 +50,7 @@ impl Checker<'_> {
         let mut states = states.into_iter();
         let mut joined = states.next().expect("a checked expression has an exit");
         for state in states {
-            joined.assigned.retain(|slot| state.assigned.contains(slot));
-            joined
-                .narrowed
-                .retain(|slot, ty| state.narrowed.get(slot) == Some(ty));
+            joined.retain_common(&state.assigned, &state.narrowed);
         }
         self.restore_state(joined);
     }

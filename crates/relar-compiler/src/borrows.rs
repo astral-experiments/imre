@@ -774,7 +774,7 @@ mod tests {
 
     fn emitted_body(module: &Module, id: usize) -> String {
         let ranges = crate::ranges::analyze(module);
-        let llvm = crate::llvm::emit(module, &ranges, false);
+        let llvm = crate::llvm::emit(module, &ranges, false).unwrap();
         llvm.split_once(&format!("@fn_{id}("))
             .unwrap()
             .1

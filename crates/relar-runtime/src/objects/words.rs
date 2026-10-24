@@ -222,10 +222,13 @@ pub struct SequenceLayout {
     inline_words: usize,
 }
 
-/// Offsets within a rooted sequence handle. Querying this once keeps Rust's
-/// enum and inline-buffer layout on the runtime side of the ABI.
+/// Generated main calls this once before running user code. Returning the
+/// sequence offsets keeps Rust's enum and inline-buffer layout private.
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_seq_layout() -> SequenceLayout {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    crate::run_start::wait_for_cleanup();
+
     let mut sample = Words::new(0);
     sample.values.push(0);
     // One non-owning word fits inline and needs no destructor.

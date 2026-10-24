@@ -736,10 +736,10 @@ print(total([10, 20]))
 "#;
         let graph = crate::modules::SourceGraph::single(source).unwrap();
         let mut module = crate::frontend::lower(&graph).unwrap();
-        let before = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        let before = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
         assert_eq!(before.matches("call ptr @relar_record_new(").count(), 2);
         scalarize(&mut module);
-        let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
         assert!(!after.contains("call ptr @relar_record_new("));
         let function = &module.functions[0];
         fn collect_cleared(body: &[Statement], locals: &[Type], cleared: &mut Vec<Type>) {
@@ -789,7 +789,7 @@ def replace() -> str:
             },
         };
         scalarize(&mut module);
-        let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
         assert!(!after.contains("call ptr @relar_record_new("));
         let Statement::Scope {
             body,
@@ -826,7 +826,7 @@ def calculate(left: int, right: int) -> int:
         .unwrap();
         let mut module = crate::frontend::lower(&graph).unwrap();
         scalarize(&mut module);
-        let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
         assert!(!after.contains("call ptr @relar_record_new("));
         assert_eq!(after.matches("call i64 @fn_0(").count(), 2);
     }
@@ -849,12 +849,14 @@ def total(left: str, right: str, start: int) -> int:
         ] {
             let graph = crate::modules::SourceGraph::single(source).unwrap();
             let mut module = crate::frontend::lower(&graph).unwrap();
-            let before = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+            let before =
+                crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
             assert_eq!(before.matches("call ptr @relar_record_new(").count(), 1);
 
             scalarize(&mut module);
 
-            let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+            let after =
+                crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
             assert!(!after.contains("call ptr @relar_record_new("));
         }
     }
@@ -925,7 +927,7 @@ def total(left: int, right: int) -> int:
         .unwrap();
         let mut module = crate::frontend::lower(&graph).unwrap();
         scalarize(&mut module);
-        let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
         assert_eq!(after.matches("call ptr @relar_record_new(").count(), 1);
         assert_eq!(after.matches("call ptr @fn_0(").count(), 1);
     }
@@ -963,12 +965,12 @@ def scoped(fail: bool) -> str:
                 clear: vec![tuple],
             },
         }));
-        let before = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        let before = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
         assert_eq!(before.matches("call ptr @relar_record_new(").count(), 1);
 
         scalarize(&mut module);
 
-        let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
         assert!(!after.contains("call ptr @relar_record_new("));
         let function = &module.functions[0];
         let [

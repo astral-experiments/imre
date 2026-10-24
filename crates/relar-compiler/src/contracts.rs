@@ -226,6 +226,73 @@ impl Builtin {
     }
 }
 
+#[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+impl Builtin {
+    /// Checks the representations consumed by specialized list and range lowerings.
+    /// Dominance, aliasing and the truth of recorded bounds remain pass proofs.
+    pub(crate) fn verify_specialization(
+        &self,
+        args: &[Expr],
+        result: Type,
+        types: &crate::types::Types,
+    ) -> Result<(), &'static str> {
+        use crate::ir::ExprKind;
+
+        let signature = |params: &[Type], returns| {
+            result == returns && args.iter().map(|arg| arg.ty).eq(params.iter().copied())
+        };
+        let bounds = |min, max| min <= max && min >= -(1_i64 << 62) && max < (1_i64 << 62);
+        let index = |value: &Expr| match &value.kind {
+            ExprKind::Local(_) => true,
+            ExprKind::Int(value) => value.parse::<u64>().is_ok_and(|value| value < (1 << 62)),
+            _ => false,
+        };
+        let valid = match self {
+            Self::ListGetI32 => signature(&[Type::ListInt, Type::Int], Type::Int),
+            Self::ListGetBounded { min, max } | Self::ListGetBoundedInBounds { min, max } => {
+                signature(&[Type::ListInt, Type::Int], Type::Int)
+                    && bounds(*min, *max)
+                    && (!matches!(self, Self::ListGetBoundedInBounds { .. })
+                        || (matches!(args[0].kind, ExprKind::Local(_)) && index(&args[1])))
+            }
+            Self::SequenceGetInBounds => matches!(args, [source, cursor]
+                if matches!(source.ty, Type::List(_))
+                    && types.element(source.ty) == Some(result)
+                    && matches!(source.kind, ExprKind::Local(_))
+                    && cursor.ty == Type::Int && index(cursor)),
+            Self::IntBounded { min, max } => {
+                signature(&[Type::Int], Type::Int)
+                    && bounds(*min, *max)
+                    && matches!(args[0].kind, ExprKind::Local(_))
+            }
+            Self::ListAllI32 => signature(
+                &[Type::ListInt, Type::Int, Type::Int, Type::Int],
+                Type::Bool,
+            ),
+            Self::ListReserveRange => {
+                signature(
+                    &[Type::ListInt, Type::Int, Type::Int, Type::Int, Type::Int],
+                    Type::None,
+                ) && matches!(args[4].kind, ExprKind::Int(_))
+                    && index(&args[4])
+            }
+            Self::ListDistinct => matches!(args, [left, right]
+                if types.element(left.ty).is_some() && types.element(right.ty).is_some() && result == Type::Bool),
+            Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
+            Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
+            Self::TupleCacheNew => args.is_empty() && matches!(result, Type::Tuple(_)),
+            Self::TupleCacheResult => matches!(args, [value]
+                if matches!(value.kind, ExprKind::Local(_)) && matches!(result, Type::Tuple(_)) && value.ty == result),
+            _ => true,
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err("invalid specialized operation operands, result or bounds")
+        }
+    }
+}
+
 impl Binary {
     /// Conservative operation effect before operand-specific conversion checks.
     pub(crate) fn may_raise(self) -> bool {
@@ -256,6 +323,64 @@ impl Binary {
             )
     }
 }
+
+/// A native symbol, its borrowed inputs, and the convention for consuming its result.
+pub(crate) struct RuntimeCall<R, const N: usize> {
+    pub(crate) symbol: &'static str,
+    pub(crate) params: [RuntimeParam; N],
+    pub(crate) result: R,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RuntimeParam {
+    Value(Type),
+    /// A decoded, nonnegative index. A tagged integer word also lowers to `i64`.
+    NativeIndex,
+}
+
+const INT_LIST: RuntimeParam = RuntimeParam::Value(Type::ListInt);
+const TAGGED_INT: RuntimeParam = RuntimeParam::Value(Type::Int);
+
+/// A successful call transfers one integer word. Raw zero signals a pending error.
+pub(crate) struct OwnedIntOrError;
+pub(crate) struct InfallibleVoid;
+/// One signals success. Zero signals a pending error.
+pub(crate) struct StatusOrError;
+
+pub(crate) const LIST_GET: RuntimeCall<OwnedIntOrError, 2> = RuntimeCall {
+    symbol: "relar_list_get",
+    params: [INT_LIST, TAGGED_INT],
+    result: OwnedIntOrError,
+};
+pub(crate) const LIST_APPEND: RuntimeCall<InfallibleVoid, 2> = RuntimeCall {
+    symbol: "relar_list_append",
+    params: [INT_LIST, TAGGED_INT],
+    result: InfallibleVoid,
+};
+pub(crate) const LIST_POP: RuntimeCall<OwnedIntOrError, 1> = RuntimeCall {
+    symbol: "relar_list_pop",
+    params: [INT_LIST],
+    result: OwnedIntOrError,
+};
+pub(crate) const LIST_SET: RuntimeCall<StatusOrError, 3> = RuntimeCall {
+    symbol: "relar_list_set",
+    params: [INT_LIST, TAGGED_INT, TAGGED_INT],
+    result: StatusOrError,
+};
+pub(crate) const LIST_SET_INDEX: RuntimeCall<StatusOrError, 3> = RuntimeCall {
+    symbol: "relar_list_set_index",
+    params: [INT_LIST, RuntimeParam::NativeIndex, TAGGED_INT],
+    result: StatusOrError,
+};
+pub(crate) const LIST_COPY_INDEX: RuntimeCall<StatusOrError, 3> = RuntimeCall {
+    symbol: "relar_list_copy_index",
+    params: [
+        INT_LIST,
+        RuntimeParam::NativeIndex,
+        RuntimeParam::NativeIndex,
+    ],
+    result: StatusOrError,
+};
 
 /// Error checks for the emitter's generic native call helpers. Specialized
 /// lowerings that emit checked instructions directly retain their own control flow.
@@ -329,13 +454,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_int_true_divide"
                 | "relar_assert_fail"
                 | "relar_range_step_zero"
-                | "relar_list_get"
-                | "relar_list_set"
                 | "relar_list_get_index"
-                | "relar_list_set_index"
                 | "relar_list_borrow_index"
-                | "relar_list_copy_index"
-                | "relar_list_pop"
                 | "relar_list_repeat"
                 | "relar_list_slice"
                 | "relar_list_slice_sum"

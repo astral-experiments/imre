@@ -5,11 +5,13 @@ import errno
 import os
 import pty
 import selectors
+import signal
 import subprocess
 import sys
 import tempfile
 import termios
 import time
+from contextlib import suppress
 from pathlib import Path
 
 PROGRAMS = {
@@ -229,19 +231,27 @@ def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
     path = "./scripts/show args.py"
     program_args = ["--opt-level", "", "two words", "--", "--help", "--allocator", "jemalloc"]
     expected = [path, *program_args, "current working directory", "inherited environment"]
-    with subprocess.Popen(
-        [compiler, "run", path, *flags, "--", *program_args], cwd=directory, env=env,
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    ) as process:
-        visible_output(process.stdout.fileno(), ("\n".join(expected) + "\n").encode(), 60)
-        # An interpreter can still need this path after the parent has spawned it.
-        executables = list(scratch.glob("*/program"))
-        assert len(executables) == 1, "run removed its executable before the child finished"
-        assert set(scratch.rglob("*")) == {executables[0], executables[0].parent}
-        out, error = process.communicate(b"from stdin\n", timeout=60)
-    assert process.returncode == 0 and not error, (process.returncode, error)
-    same_output(out, b"from stdin\n", "relar run stdin")
-    assert not list(scratch.iterdir()) and not (directory / source.stem).exists()
+    ready = ("\n".join(expected) + "\n").encode()
+    for interrupt in (False, True):
+        with subprocess.Popen(
+            [compiler, "run", path, *flags, "--", *program_args], cwd=directory, env=env,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+        ) as process:
+            try:
+                visible_output(process.stdout.fileno(), ready, 60)
+                assert not list(scratch.iterdir()), "run left temporary files while the child waited for input"
+                if interrupt:
+                    os.killpg(process.pid, signal.SIGKILL)
+                out, error = process.communicate(None if interrupt else b"from stdin\n", timeout=60)
+            finally:
+                if process.returncode is None:
+                    with suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=10)
+        expected_code = -signal.SIGKILL if interrupt else 0
+        assert process.returncode == expected_code and not error, (process.returncode, error)
+        same_output(out, b"" if interrupt else b"from stdin\n", "relar run stdin")
+        assert not list(scratch.iterdir()) and not (directory / source.stem).exists()
     rejected = [
         (["--allocator", "other"], b"--allocator expects system or jemalloc"),
         (["--allocator", "jemalloc", "--sanitize"], b"incompatible with --sanitize"),
@@ -263,7 +273,7 @@ def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
     before = source.read_bytes()
     collision = run([*compiled, "--emit-llvm", path], cwd=directory, input=b"")
     assert collision.returncode and b"distinct paths" in collision.stderr and source.read_bytes() == before
-    return 4 + len(rejected)
+    return 5 + len(rejected)
 
 
 def main() -> None:

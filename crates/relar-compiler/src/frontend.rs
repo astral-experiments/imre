@@ -111,36 +111,10 @@ impl ClassInfo {
             .collect::<Result<Vec<_>, _>>()?;
         // Reference counting is sufficient only while no accepted field graph can
         // close a cycle. This concerns storage types, not method signatures.
-        fn visit_type(ty: Type, fields: &[Vec<Type>], types: &Types, states: &mut [u8]) -> bool {
-            if let Type::Class(id) = ty {
-                visit(id, fields, types, states)
-            } else {
-                types
-                    .children(ty)
-                    .into_iter()
-                    .all(|child| visit_type(child, fields, types, states))
-            }
-        }
-        fn visit(id: usize, fields: &[Vec<Type>], types: &Types, states: &mut [u8]) -> bool {
-            if states[id] != 0 {
-                return states[id] == 2;
-            }
-            states[id] = 1;
-            if !fields[id]
-                .iter()
-                .all(|&ty| visit_type(ty, fields, types, states))
-            {
-                return false;
-            }
-            states[id] = 2;
-            true
-        }
-        let mut states = vec![0; fields.len()];
-        for (id, class) in declarations.definitions.iter().enumerate() {
-            if !visit(id, &fields, types, &mut states) {
-                return Err(graph.modules[class.definition.module].error(&class.node,
-                    "cyclic heap types are unsupported; class fields must form an acyclic ownership graph"));
-            }
+        if let Some(id) = Self::cyclic_field_root(&fields, types) {
+            let class = &declarations.definitions[id];
+            return Err(graph.modules[class.definition.module].error(&class.node,
+                "cyclic heap types are unsupported; class fields must form an acyclic ownership graph"));
         }
         let parsers = argparse::Parsers::collect(graph, types, &mut declarations, &mut fields)?;
         Ok(Self {
@@ -149,6 +123,39 @@ impl ClassInfo {
             declarations,
             fields,
         })
+    }
+
+    fn cyclic_field_root(fields: &[Vec<Type>], types: &Types) -> Option<usize> {
+        enum Step {
+            Visit(Type),
+            Finish(usize),
+        }
+        let mut states = vec![0; fields.len()];
+        let mut pending = Vec::new();
+        for root in 0..fields.len() {
+            if states[root] != 0 {
+                continue;
+            }
+            pending.push(Step::Visit(Type::Class(root)));
+            while let Some(step) = pending.pop() {
+                match step {
+                    Step::Finish(id) => states[id] = 2,
+                    Step::Visit(Type::Class(id)) => match states[id] {
+                        1 => return Some(root),
+                        2 => {}
+                        _ => {
+                            states[id] = 1;
+                            pending.push(Step::Finish(id));
+                            pending.extend(fields[id].iter().copied().map(Step::Visit));
+                        }
+                    },
+                    Step::Visit(ty) => {
+                        pending.extend(types.children(ty).into_iter().map(Step::Visit));
+                    }
+                }
+            }
+        }
+        None
     }
 }
 
@@ -465,19 +472,6 @@ pub(crate) fn lower_with_owners(
             "recursive calls are unsupported in this prototype",
         ));
     }
-    fn visit(id: usize, graph: &[HashSet<usize>], states: &mut [u8]) -> bool {
-        if states[id] != 0 {
-            return states[id] == 2;
-        }
-        states[id] = 1;
-        for &callee in &graph[id] {
-            if !visit(callee, graph, states) {
-                return false;
-            }
-        }
-        states[id] = 2;
-        true
-    }
     let mut entry = None;
     for (module_id, module) in graph.modules.iter().enumerate() {
         if module_id != graph.entry {
@@ -559,11 +553,8 @@ pub(crate) fn lower_with_owners(
     for function in functions.iter().chain([&entry]) {
         callables::validate_storage(function, &types)?;
     }
-    let mut states = vec![0; functions.len()];
-    for (id, diagnostic) in recursion_errors.into_iter().enumerate() {
-        if !visit(id, &call_graph, &mut states) {
-            return Err(diagnostic);
-        }
+    if let Some(id) = recursive_call_root(&call_graph) {
+        return Err(recursion_errors.swap_remove(id));
     }
     for initialization in &initializations {
         initialization.validate(
@@ -741,6 +732,34 @@ fn signature(
         returns: returns.unwrap_or(Type::None),
         method,
     })
+}
+
+fn recursive_call_root(graph: &[HashSet<usize>]) -> Option<usize> {
+    let mut states = vec![0; graph.len()];
+    let mut path = Vec::new();
+    for root in 0..graph.len() {
+        if states[root] != 0 {
+            continue;
+        }
+        states[root] = 1;
+        path.push((root, graph[root].iter()));
+        while let Some((id, callees)) = path.last_mut() {
+            let Some(&callee) = callees.next() else {
+                states[*id] = 2;
+                path.pop();
+                continue;
+            };
+            match states[callee] {
+                1 => return Some(root),
+                2 => {}
+                _ => {
+                    states[callee] = 1;
+                    path.push((callee, graph[callee].iter()));
+                }
+            }
+        }
+    }
+    None
 }
 
 fn error(source: &str, node: &impl Ranged, message: &str) -> String {
@@ -2835,10 +2854,7 @@ impl<'a> Checker<'a> {
         self.reachable &= body_falls;
         let (orelse, else_falls) = self.block(&try_.orelse)?;
         self.reachable = reachable;
-        let mut exits = Vec::new();
-        if body_falls && else_falls {
-            exits.push((self.assigned.clone(), self.narrowed.clone()));
-        }
+        let mut normal_exit = (body_falls && else_falls).then(|| self.local_state());
 
         let mut handler_assigned = before.clone();
         for name in narrowing::deleted_names(&try_.body) {
@@ -2916,7 +2932,11 @@ impl<'a> Checker<'a> {
                 }
             }
             if falls {
-                exits.push((self.assigned.clone(), self.narrowed.clone()));
+                if let Some(exit) = &mut normal_exit {
+                    exit.retain_common(&self.assigned, &self.narrowed);
+                } else {
+                    normal_exit = Some(self.local_state());
+                }
             }
             handlers.push(ir::ExceptHandler {
                 kinds,
@@ -2925,12 +2945,10 @@ impl<'a> Checker<'a> {
             });
         }
 
-        let mut normal_assigned = exits.first().map(|exit| exit.0.clone()).unwrap_or_default();
-        let mut normal_facts = exits.first().map(|exit| exit.1.clone()).unwrap_or_default();
-        for (assigned, facts) in &exits[1.min(exits.len())..] {
-            normal_assigned.retain(|slot| assigned.contains(slot));
-            normal_facts.retain(|slot, ty| facts.get(slot) == Some(ty));
-        }
+        let has_normal_exit = normal_exit.is_some();
+        let (mut normal_assigned, normal_facts) = normal_exit
+            .map(|exit| (exit.assigned, exit.narrowed))
+            .unwrap_or_default();
 
         self.assigned = before;
         self.narrowed = before_facts;
@@ -3015,7 +3033,7 @@ impl<'a> Checker<'a> {
                 orelse,
                 finalbody,
             }],
-            !exits.is_empty() && final_falls,
+            has_normal_exit && final_falls,
         ))
     }
 
@@ -4596,6 +4614,17 @@ impl<'a> Checker<'a> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn long_call_chains_can_be_checked_with_or_without_a_cycle() {
+        use std::collections::HashSet;
+
+        let mut graph: Vec<_> = (1..=40_000).map(|id| HashSet::from([id])).collect();
+        graph.push(HashSet::new());
+        assert_eq!(super::recursive_call_root(&graph), None);
+        graph.last_mut().unwrap().insert(0);
+        assert_eq!(super::recursive_call_root(&graph), Some(0));
+    }
+
+    #[test]
     fn literal_string_comprehensions_keep_inline_iteration() {
         crate::compile(
             "values = [outer + inner for outer in [\"a\", \"b\"] for inner in [\"1\", \"2\"]]\nprint(len(values))\n",
@@ -4629,5 +4658,19 @@ mod tests {
             let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
             assert!(llvm.contains("call ptr @relar_seq_new("), "{source}");
         }
+    }
+
+    #[test]
+    fn deeply_nested_field_graphs_preserve_cycle_detection() {
+        use super::{ClassInfo, Type, Types};
+
+        let types = Types::default();
+        let mut fields: Vec<_> = (1..=20_000)
+            .map(|id| vec![types.list(Type::Class(id))])
+            .collect();
+        fields.push(vec![Type::Int]);
+        assert_eq!(ClassInfo::cyclic_field_root(&fields, &types), None);
+        fields.last_mut().unwrap().push(types.list(Type::Class(0)));
+        assert_eq!(ClassInfo::cyclic_field_root(&fields, &types), Some(0));
     }
 }

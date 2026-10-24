@@ -868,7 +868,7 @@ def transform(data: list[int], cursor: int, output: list[int]) -> None:
             if matches!(args[1].kind, ExprKind::Local(i) if i == *slot)));
         assert!(matches!(fallback.as_slice(), [Statement::While(test, _, _)]
             if while_arguments(test).is_some()));
-        let llvm = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        let llvm = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
         assert!(llvm.contains("call i64 @relar_list_get("));
     }
 

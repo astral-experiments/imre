@@ -69,7 +69,7 @@ jobs:
       - run: cargo test --workspace --locked
       - name: Free disk space for native test binaries
         run: cargo clean --profile dev
-      - run: cargo build --workspace --release --locked
+      - run: cargo build --workspace --release --locked --features relar-compiler/verify-ir
       - name: Check native build caching, linker options, and status
         run: |
           # Exercise the distro toolchain without setup-python's LD_LIBRARY_PATH.

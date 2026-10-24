@@ -18,6 +18,8 @@ mod ranges;
 mod reductions;
 mod tuples;
 mod types;
+#[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+mod verify;
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -30,15 +32,16 @@ pub struct CompileOptions {
 
 /// Checks source syntax, ty diagnostics, and Relar's exact type contract.
 pub fn check(source: &str) -> Result<(), String> {
-    frontend::lower(&modules::SourceGraph::single(source)?).map(|_| ())
+    let module = frontend::lower(&modules::SourceGraph::single(source)?)?;
+    verify_after(&module, "lowering")
 }
 
 /// Compiles a checked module to LLVM IR; the resulting executable uses no CPython.
 pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String> {
     let mut module = frontend::lower(&modules::SourceGraph::single(source)?)?;
-    specialize(&mut module);
+    specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
-    Ok(llvm::emit(&module, &ranges, options.address_sanitizer))
+    llvm::emit(&module, &ranges, options.address_sanitizer)
 }
 
 /// The generated IR and every source file that must be protected from output writes.
@@ -70,7 +73,8 @@ impl SourceInputs {
 
 /// Checks a closed first-party module graph, inferring its package root when omitted.
 pub fn check_file(path: &Path, module_root: Option<&Path>) -> Result<(), String> {
-    frontend::lower(&modules::SourceGraph::load(path, module_root)?).map(|_| ())
+    let module = frontend::lower(&modules::SourceGraph::load(path, module_root)?)?;
+    verify_after(&module, "lowering")
 }
 
 /// Compiles one entry module and its statically resolved first-party dependencies.
@@ -81,10 +85,10 @@ pub fn compile_file(
 ) -> Result<Compilation, String> {
     let graph = modules::SourceGraph::load(path, module_root)?;
     let mut module = frontend::lower(&graph)?;
-    specialize(&mut module);
+    specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
     Ok(Compilation {
-        llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer),
+        llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer)?,
         source_inputs: graph.inputs,
         input_paths: graph
             .modules
@@ -113,7 +117,7 @@ pub fn compile_file_units(
 ) -> Result<UnitCompilation, String> {
     let graph = modules::SourceGraph::load(path, module_root)?;
     let (mut module, owners) = frontend::lower_with_owners(&graph)?;
-    specialize(&mut module);
+    specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
     let names = graph
         .modules
@@ -134,13 +138,34 @@ pub fn compile_file_units(
     })
 }
 
-fn specialize(module: &mut ir::Module) {
+fn specialize(module: &mut ir::Module) -> Result<(), String> {
+    verify_after(module, "lowering")?;
     tuples::scalarize(module);
+    verify_after(module, "tuple scalarization")?;
     list_bounds::specialize(module);
+    verify_after(module, "list bounds specialization")?;
     list_specialization::specialize(module);
+    verify_after(module, "list specialization")?;
     range_specialization::specialize(module);
+    verify_after(module, "range specialization")?;
     reductions::specialize(module);
+    verify_after(module, "reduction specialization")?;
     guarded_text::specialize(module);
+    verify_after(module, "guarded text specialization")
+}
+
+/// Names the first stage that produces malformed IR, before later passes consume it.
+fn verify_after(module: &ir::Module, stage: &str) -> Result<(), String> {
+    #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+    {
+        verify::module(module)
+            .map_err(|error| format!("internal compiler error: invalid IR after {stage}: {error}"))
+    }
+    #[cfg(not(any(debug_assertions, test, feature = "verify-ir")))]
+    {
+        let _ = (module, stage);
+        Ok(())
+    }
 }
 
 /// Applies Python's source preprocessing before Ruff, ty, and source-range checks.
@@ -218,6 +243,44 @@ mod tests {
     }
 
     #[test]
+    fn elif_chains_count_toward_branch_depth() {
+        let flat = format!("if False: pass\n{}", "elif False: pass\n".repeat(10_000));
+        let nested = format!(
+            "if False: pass\n{}else:\n    if False: pass\n{}",
+            "elif False: pass\n".repeat(60),
+            "    elif False: pass\n".repeat(60)
+        );
+        for source in [flat, nested] {
+            let error = super::check(&source).unwrap_err();
+            assert!(error.contains("syntax complexity limit"), "{error}");
+        }
+        super::check(&"if False: pass\nelif False: pass\n".repeat(128)).unwrap();
+    }
+
+    #[test]
+    fn limits_exception_handlers_per_try_statement() {
+        let handler = "except ValueError:\n    pass\n";
+        let chain = |count| format!("try:\n    pass\n{}", handler.repeat(count));
+        super::check(&chain(96)).unwrap();
+        let error = super::check(&chain(97)).unwrap_err();
+        assert!(error.contains("exception handler limit"), "{error}");
+        super::check(&chain(2).repeat(100)).unwrap();
+        let inner: String = chain(96)
+            .lines()
+            .map(|line| format!("    {line}\n"))
+            .collect();
+        super::check(&format!("try:\n{inner}{}", handler.repeat(96))).unwrap();
+    }
+
+    #[test]
+    fn joins_only_falling_exception_handler_exits() {
+        let source = "def choose(value: int) -> str:\n    try:\n        if value == 0:\n            raise ValueError('zero')\n        raise IndexError('one')\n    except ValueError:\n        word = 'zero'\n    except IndexError:\n        return 'one'\n    return word\n";
+        super::check(source).unwrap();
+        let missing = source.replace("return 'one'", "pass");
+        assert!(super::check(&missing).is_err());
+    }
+
+    #[test]
     fn sealed_exception_fields_keep_runtime_guards_and_reject_unknown_attributes() {
         let llvm = compile(
             "def fields(error: Exception) -> tuple[int, list[str], str, str, str]:\n    return error.returncode, error.cmd, error.stdout, error.output, error.stderr\n",
@@ -276,6 +339,45 @@ def first(stream: Stream) -> str:
     }
 
     #[test]
+    fn limits_match_flow_snapshots_within_the_enclosing_scope() {
+        let locals: String = (0..4000).map(|i| format!("    a{i}=0\n")).collect();
+        let case = "        case 0: pass\n";
+        let wide = case.repeat(600);
+        let header = "def big(value: int) -> None:\n";
+        let subject = "    match value:\n";
+        let error = super::check(&format!("{header}{locals}{subject}{wide}")).unwrap_err();
+        assert!(
+            error.contains("match statement exceeds the flow analysis limit"),
+            "{error}"
+        );
+        super::check(&format!(
+            "{header}{locals}{subject}{case}def small(value: int) -> None:\n{subject}{wide}"
+        ))
+        .unwrap();
+    }
+
+    #[test]
+    fn context_manager_depth_counts_flat_and_nested_items() {
+        let managers = |n| vec!["f"; n].join(", ");
+        let file = "f = open('/dev/null', 'rb')\n";
+        let flat = format!("{file}with {}:\n    pass\n", managers(10_000));
+        let nested = format!(
+            "{file}with {}:\n    with {}:\n        pass\n",
+            managers(60),
+            managers(60)
+        );
+        for source in [flat, nested] {
+            let error = super::check(&source).unwrap_err();
+            assert!(
+                error.contains("context manager nesting exceeds 96 levels"),
+                "{error}"
+            );
+        }
+        let sequential = format!("{file}{}", "with f, f:\n    pass\n".repeat(100));
+        super::check(&sequential).unwrap();
+    }
+
+    #[test]
     fn file_iterators_pull_typed_lines_and_keep_reads_in_the_loop() {
         let source = r#"
 from gzip import open
@@ -313,6 +415,31 @@ def first(path: str) -> bytes:
         assert!(llvm.contains("define i32 @main()"));
         assert!(!llvm.contains("call void @relar_args_init"));
         assert!(!llvm.contains("call void @relar_args_clear"));
+    }
+
+    #[test]
+    fn nested_finally_emission_stays_bounded() {
+        fn indent(body: &str) -> String {
+            body.lines().map(|line| format!("    {line}\n")).collect()
+        }
+        fn program(depth: usize, nested_cleanup: bool) -> String {
+            let mut body = "pass\n".to_owned();
+            for _ in 0..depth {
+                let nested = indent(&body);
+                body = if nested_cleanup {
+                    format!("try:\n    int(text)\nfinally:\n{nested}")
+                } else {
+                    format!("try:\n{nested}finally:\n    int(text)\n")
+                };
+            }
+            format!("def f(text: str) -> None:\n{}f('1')\n", indent(&body))
+        }
+        let options = CompileOptions::default();
+        let shallow = compile(&program(8, false), &options).unwrap();
+        let deep = compile(&program(12, false), &options).unwrap();
+        assert!(deep.len() < 2 * shallow.len());
+        let error = compile(&program(14, true), &options).unwrap_err();
+        assert!(error.contains("finally cleanup expansion"), "{error}");
     }
 
     #[test]

@@ -6,6 +6,10 @@ rust-version.workspace = true
 repository.workspace = true
 license.workspace = true
 
+[features]
+# Keep pass-boundary verification enabled in release differential tests.
+verify-ir = []
+
 [dependencies]
 blake3 = "1"
 serde = { version = "1", features = ["derive"] }
@@ -24,6 +28,9 @@ salsa-macro-rules.workspace = true
 regex.workspace = true
 regex-syntax.workspace = true
 tempfile = "=3.23.0"
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.190"
 
 [[bin]]
 name = "relar"
