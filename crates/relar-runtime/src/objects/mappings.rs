@@ -623,6 +623,17 @@ impl Mapping {
             .map(|entry| (&*entry.key, entry.value))
     }
 
+    pub(super) fn integer_entries(&self) -> impl Iterator<Item = (&Int, usize)> {
+        let Tables::Int(table) = &self.tables else {
+            fail("SystemError", "expected an integer-key dictionary");
+        };
+        table
+            .entries
+            .iter()
+            .flatten()
+            .map(|entry| (&entry.key.0, entry.value))
+    }
+
     /// Transfers two exact owners only for a new key. Duplicate inputs are
     /// dropped together, preserving existing entries during strict decoding.
     pub(super) fn insert_unique(&mut self, key: OwnedWord, value: OwnedWord) -> bool {

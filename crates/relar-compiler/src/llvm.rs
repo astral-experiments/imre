@@ -74,6 +74,7 @@ impl Type {
             | Self::TextIO
             | Self::Logger
             | Self::RegexPattern
+            | Self::JsonRoot
             | Self::JsonValue
             | Self::JsonObject
             | Self::RegexMatch
@@ -115,6 +116,7 @@ impl Type {
             | Self::TextIO
             | Self::Logger
             | Self::RegexPattern
+            | Self::JsonRoot
             | Self::JsonValue
             | Self::JsonObject
             | Self::RegexMatch
@@ -663,6 +665,7 @@ impl Emitter<'_, '_> {
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::RegexPattern
+            | Type::JsonRoot
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
@@ -3174,6 +3177,7 @@ impl Emitter<'_, '_> {
                 | Type::AsyncProcess(_)
                 | Type::Logger
                 | Type::RegexPattern
+                | Type::JsonRoot
                 | Type::JsonValue
                 | Type::JsonObject
                 | Type::RegexMatch
@@ -3580,20 +3584,22 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::JsonLoad | Builtin::JsonLoads => Value {
+            Builtin::JsonLoads => Value {
                 ty: returns,
                 operand: self.checked_instruction(format!(
-                    "call ptr @relar_json_{}(ptr {})",
-                    if matches!(builtin, Builtin::JsonLoad) {
-                        "load"
-                    } else {
-                        "loads"
-                    },
+                    "call ptr @relar_json_loads(ptr {})",
                     args[0].value.operand
                 )),
                 small_integer: false,
             },
             Builtin::JsonSelect(path) => self.json_select(path, returns, &args),
+            Builtin::JsonIndex => self.call(
+                "relar_json_index",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::JsonIter => self.call("relar_json_iter", returns, &[&args[0].value]),
+            Builtin::JsonLen => self.call("relar_json_len", returns, &[&args[0].value]),
             Builtin::JsonGet { key, empty_list } => self.json_get(key, *empty_list, returns, &args),
             Builtin::JsonAdd => {
                 self.call("relar_json_add", returns, &[&args[0].value, &args[1].value])
@@ -3630,16 +3636,40 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::JsonEncode(schema) => {
+            Builtin::JsonEncode(schema)
+            | Builtin::JsonDumps(schema)
+            | Builtin::JsonDump(schema) => {
                 let schema = self.output.global_ref(json::schema_name(*schema));
                 let word = self.word(&args[0].value);
                 let ascii = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
+                let indent = self.word(&args[1].value);
+                let operand = if matches!(builtin, Builtin::JsonEncode(_)) {
+                    self.checked_instruction(format!("call ptr @relar_json_encode(i64 {word}, ptr @{schema}, i64 {indent}, i32 {ascii})"))
+                } else {
+                    let indent_ty = self
+                        .module
+                        .types
+                        .payload(args[1].value.ty)
+                        .unwrap_or(args[1].value.ty);
+                    let text_indent =
+                        u32::from(matches!(indent_ty, Type::Str | Type::StrLiteral(_)));
+                    let nan = self.instruction(format!("zext i1 {} to i32", args[3].value.operand));
+                    let common = format!(
+                        "i64 {word}, ptr @{schema}, i64 {indent}, i32 {text_indent}, i32 {ascii}, i32 {nan}"
+                    );
+                    if matches!(builtin, Builtin::JsonDump(_)) {
+                        self.checked_instruction(format!(
+                            "call i32 @relar_json_dump({common}, ptr {})",
+                            args[4].value.operand
+                        ));
+                        "0".to_owned()
+                    } else {
+                        self.checked_instruction(format!("call ptr @relar_json_dumps({common})"))
+                    }
+                };
                 Value {
                     ty: returns,
-                    operand: self.checked_instruction(format!(
-                        "call ptr @relar_json_encode(i64 {word}, ptr @{schema}, i64 {}, i32 {ascii})",
-                        args[1].value.operand,
-                    )),
+                    operand,
                     small_integer: false,
                 }
             }
@@ -4378,7 +4408,7 @@ impl Emitter<'_, '_> {
             Builtin::IsNone => Value {
                 ty: Type::Bool,
                 operand: match args[0].value.ty {
-                    Type::JsonValue => {
+                    Type::JsonRoot | Type::JsonValue => {
                         let bit = self.instruction(format!(
                             "call i32 @relar_json_null(ptr {})",
                             args[0].value.operand
@@ -4445,6 +4475,7 @@ impl Emitter<'_, '_> {
                     | Type::AsyncProcess(_)
                     | Type::Logger
                     | Type::RegexPattern
+                    | Type::JsonRoot
                     | Type::JsonValue
                     | Type::JsonObject
                     | Type::RegexMatch
@@ -4661,6 +4692,7 @@ impl Emitter<'_, '_> {
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::RegexPattern
+            | Type::JsonRoot
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
@@ -4713,6 +4745,7 @@ impl Emitter<'_, '_> {
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::RegexPattern
+            | Type::JsonRoot
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
@@ -5253,6 +5286,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::AsyncProcess(_)
         | Type::Logger
         | Type::RegexPattern
+        | Type::JsonRoot
         | Type::JsonValue
         | Type::JsonObject
         | Type::RegexMatch
@@ -5512,8 +5546,10 @@ declare ptr @relar_record_try_new(ptr)
 declare ptr @relar_tuple_probe(ptr, ptr)
 declare ptr @relar_json_decode(ptr, ptr)
 declare ptr @relar_json_loads(ptr)
-declare ptr @relar_json_load(ptr)
-declare i64 @relar_json_get(ptr, ptr, i64, i32, i64)
+declare ptr @relar_json_index(ptr, i64)
+declare ptr @relar_json_iter(ptr)
+declare i64 @relar_json_len(ptr)
+declare i64 @relar_json_get(ptr, ptr, i64, i32, i32, i64)
 declare ptr @relar_json_add(ptr, ptr)
 declare ptr @relar_json_get_receiver(ptr)
 declare ptr @relar_json_add_fields(ptr, ptr, i64, i64, ptr, i64, i64)
@@ -5524,6 +5560,8 @@ declare i32 @relar_json_null(ptr)
 declare ptr @relar_toml_decode(ptr, ptr)
 declare ptr @relar_toml_keys(ptr)
 declare ptr @relar_json_encode(i64, ptr, i64, i32)
+declare ptr @relar_json_dumps(i64, ptr, i64, i32, i32, i32)
+declare i32 @relar_json_dump(i64, ptr, i64, i32, i32, i32, ptr)
 declare ptr @relar_record_try_cached_result(ptr)
 declare void @relar_record_retain(ptr)
 declare void @relar_record_release(ptr)

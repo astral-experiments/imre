@@ -67,7 +67,7 @@ impl Checker<'_> {
     pub(super) fn path_text(&self, value: Expr, node: &impl Ranged) -> Result<Expr, String> {
         match value.ty {
             Type::Str => Ok(value),
-            Type::JsonValue => self.coerce(value, Type::Str, node),
+            Type::JsonRoot | Type::JsonValue => self.coerce(value, Type::Str, node),
             ty if self
                 .types
                 .members(ty)

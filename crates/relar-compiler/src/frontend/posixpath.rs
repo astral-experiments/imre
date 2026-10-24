@@ -61,7 +61,8 @@ impl Checker<'_> {
                     .is_some_and(|members| members == [Type::Str, Type::Path])
             {
                 value
-            } else if join && matches!(value.ty, Type::Union(_) | Type::JsonValue) {
+            } else if join && matches!(value.ty, Type::Union(_) | Type::JsonRoot | Type::JsonValue)
+            {
                 self.path_text(value, expression)?
             } else {
                 self.fspath_value(value, expression)?

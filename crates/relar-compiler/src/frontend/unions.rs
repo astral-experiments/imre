@@ -168,7 +168,7 @@ impl Checker<'_> {
             };
             return Ok(documents::op(op, Type::Bool, vec![value]));
         }
-        if value.ty == Type::JsonValue
+        if matches!(value.ty, Type::JsonRoot | Type::JsonValue)
             && matches!(
                 self.instance_types(classes)?.as_slice(),
                 [InstanceType::Exact(Type::Int)]
@@ -181,7 +181,7 @@ impl Checker<'_> {
         }
         if matches!(
             self.types.payload(value.ty).unwrap_or(value.ty),
-            Type::JsonValue | Type::JsonObject
+            Type::JsonRoot | Type::JsonValue | Type::JsonObject
         ) {
             return Err(error(
                 self.source,

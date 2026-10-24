@@ -186,13 +186,17 @@ impl Builtin {
             | Self::DictGet
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
-            | Self::JsonLoad
             | Self::JsonLoads
             | Self::HashRecord
             | Self::JsonGet { .. }
             | Self::JsonGetReceiver
             | Self::JsonAdd
             | Self::JsonAddFields(_, _)
+            | Self::JsonDumps(_)
+            | Self::JsonDump(_)
+            | Self::JsonIndex
+            | Self::JsonIter
+            | Self::JsonLen
             | Self::JsonSelect(_)
             | Self::ListGet
             | Self::ListGetBounded { .. }
@@ -499,6 +503,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || matches!(
             name,
             "int_floordiv"
+                | "relar_json_index"
+                | "relar_json_iter"
+                | "relar_json_len"
+                | "relar_json_get_receiver"
+                | "relar_json_add"
                 | "int_mod"
                 | "int_lshift"
                 | "int_rshift"
@@ -530,8 +539,6 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_bytes_decode_splitlines"
                 | "relar_bytes_decode"
                 | "relar_toml_keys"
-                | "relar_json_add"
-                | "relar_json_get_receiver"
                 | "relar_bytes_validate_utf8"
                 | "relar_binary_open"
                 | "relar_binary_read"

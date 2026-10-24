@@ -160,7 +160,7 @@ impl Checker<'_> {
         }
         if matches!(
             self.types.payload(value.ty).unwrap_or(value.ty),
-            Type::JsonValue | Type::JsonObject
+            Type::JsonRoot | Type::JsonValue | Type::JsonObject
         ) {
             return Err(error(
                 self.source,

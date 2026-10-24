@@ -550,6 +550,9 @@ impl Checker<'_> {
                         documents::ANY
                     });
                 }
+                if receiver.ty == Type::JsonRoot {
+                    return Some(Type::JsonValue);
+                }
                 self.types
                     .mapping(receiver.ty)
                     .map(|(_, value)| value)

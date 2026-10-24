@@ -99,6 +99,7 @@ impl Types {
             | Type::Logger
             | Type::RegexPattern
             | Type::RegexMatch
+            | Type::JsonRoot
             | Type::JsonValue
             | Type::JsonObject
             | Type::None => true,

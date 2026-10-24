@@ -67,30 +67,31 @@ impl View {
         let mut values = Vec::new();
         let mut tables = Vec::new();
         for (name, child) in entries(&self.nodes[index]) {
-            match &self.nodes[child] {
-                Node::Object(_) => tables.push((name, child, false)),
+            let (view, child) = self.resolved(child);
+            match &view.nodes[child] {
+                Node::Object(_) => tables.push((name, view, child, false)),
                 Node::Array(items)
                     if !items.is_empty()
                         && items
                             .iter()
-                            .all(|&i| matches!(self.nodes[i], Node::Object(_))) =>
+                            .all(|&i| matches!(view.nodes[i], Node::Object(_))) =>
                 {
                     let mut inline = true;
                     for &item in items {
                         let mut rendered = String::new();
-                        self.literal(item, 0, &mut rendered)?;
+                        view.literal(item, 0, &mut rendered)?;
                         if rendered.chars().count() + 5 > 100 || rendered.contains('\n') {
                             inline = false;
                             break;
                         }
                     }
                     if inline {
-                        values.push((name, child));
+                        values.push((name, view, child));
                     } else {
-                        tables.extend(items.iter().map(|&item| (name, item, true)));
+                        tables.extend(items.iter().map(|&item| (name, view, item, true)));
                     }
                 }
-                _ => values.push((name, child)),
+                _ => values.push((name, view, child)),
             }
         }
         let mut written = array || !name.is_empty() && (!values.is_empty() || tables.is_empty());
@@ -99,13 +100,13 @@ impl View {
         } else if written {
             writeln!(out, "[{name}]").unwrap();
         }
-        for (key_name, child) in values {
+        for (key_name, view, child) in values {
             let mut literal = String::new();
-            self.literal(child, 0, &mut literal)?;
+            view.literal(child, 0, &mut literal)?;
             writeln!(out, "{} = {literal}", key(key_name)).unwrap();
             written = true;
         }
-        for (part, child, array) in tables {
+        for (part, view, child, array) in tables {
             if written {
                 out.push('\n');
             }
@@ -115,7 +116,7 @@ impl View {
             } else {
                 format!("{name}.{part}")
             };
-            self.table(child, &path, array, out)?;
+            view.table(child, &path, array, out)?;
             written = true;
         }
         Ok(())
@@ -123,6 +124,7 @@ impl View {
 
     fn literal(&self, index: usize, depth: usize, out: &mut String) -> Result<(), Error> {
         match &self.nodes[index] {
+            Node::Deferred(array) => return array.view().literal(array.view().index, depth, out),
             Node::Null => {
                 return Err(Error::new(
                     Kind::TypeError,
@@ -182,14 +184,23 @@ impl View {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{Nodes, push_node};
+    use super::super::{Nodes, Source, push_node};
     use super::*;
     use std::rc::Rc;
 
     fn render(json: &str) -> Result<String, Error> {
         let mut nodes = Vec::new();
         let raw: &serde_json::value::RawValue = serde_json::from_str(json).unwrap();
-        let index = push_node(&mut nodes, raw).unwrap();
+        let index = push_node(
+            &mut nodes,
+            raw,
+            Source {
+                text: json,
+                original: None,
+                shared: None,
+            },
+        )
+        .unwrap();
         let value = View {
             nodes: Nodes::Document(Rc::new(nodes)),
             index,
@@ -211,6 +222,13 @@ mod tests {
         assert_eq!(
             render(&json).ok().unwrap(),
             format!("[[outer.children]]\nk = \"{wide}\"\n\n[[outer.children]]\nk = \"é\"\n")
+        );
+        // The same array-table decision must hold across an eagerly parsed or deferred span.
+        let rows = vec![format!(r#"{{"k":"{wide}"}}"#); 40].join(",");
+        let json = format!(r#"{{"children":[{rows}]}}"#);
+        assert_eq!(
+            render(&json).ok().unwrap(),
+            vec![format!("[[outer.children]]\nk = \"{wide}\"\n"); 40].join("\n"),
         );
         assert!(render(r#"{"value":null}"#).is_err());
     }

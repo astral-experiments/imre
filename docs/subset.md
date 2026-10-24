@@ -157,21 +157,26 @@ A generator expression evaluates its leftmost iterable and acquires that iterato
 
 ## Typed JSON boundaries
 
-`json.loads(text)` accepts a Unicode string containing a JSON array. Iteration
-preserves input order. A function can receive a decoded object as
-`dict[str, Any]` and read nested literal string keys. Selecting into an
-annotated `str`, `int`, or another object checks that exact type at the read,
-including the nullable forms. Integers retain their full precision. A missing
-key raises `KeyError`; a value of the wrong type raises `TypeError`. Duplicate
-keys use the last value. Comparing a selected value with a string literal
-supports filters such as `if row["severity"] == "major"`. The object view is
-read-only. Dynamic keys, decoder options, and general `Any` annotations are
-outside this boundary. Malformed JSON raises `json.JSONDecodeError` (a
-`ValueError`), and nesting is limited to 128 containers. Strings use Unicode
-scalar values, and numeric literals follow the standard JSON grammar.
+`json.loads(text)` and `json.load(stream)` accept JSON arrays, objects, and
+scalars. `json.load` reads a native UTF-8 text stream from its current
+position, including streams opened with `open(path)`. A document supports literal string keys, integer indices, length,
+truth tests, and iteration. Array iteration yields values and object iteration
+yields keys in insertion order. Select a value into a concrete scalar or
+`dict[str, Any]` at a checked boundary. The latter is a read-only JSON view,
+with literal-key `.get()`, scalar or empty-list defaults, and nested iteration.
+Original array roots keep their mutable list identity. Malformed JSON raises
+`json.JSONDecodeError`, and nesting is limited to 128 containers. Strings use
+Unicode scalar values. Integers retain their exact precision. The standard
+reader also recognizes `NaN`, `Infinity`, and `-Infinity`.
 
-`json.load(stream)` reads a UTF-8 text stream from its current position. A
-literal `get` on a JSON object can supply an integer default or a fresh `[]`.
+`json.dumps(value)` returns a string and `json.dump(value, stream)` writes to
+a text stream. Both accept scalar values, typed lists, tuples, dictionaries
+with string or integer keys, and parsed documents. Keyword options include
+`indent` (integer, string, or `None`), `ensure_ascii` and `allow_nan`.
+Defaults match Python's separators, escaping and nonfinite number spellings.
+Dynamic hooks, arbitrary mapping keys, and general `Any` remain outside this
+boundary.
+
 An array selected into `list[dict[str, Any]]` exposes read-only row views that
 can outlive the file. The list supports indexing, iteration, concatenation,
 and slicing. Item assignment and mutating list methods are rejected, including
@@ -562,7 +567,7 @@ Construction creates the directory immediately. A local can hold the manager bef
 
 ## UTF-8 files and process arguments
 
-`open(path, "r", encoding="utf-8")` and `open(path, "w", encoding="utf-8")` return a sealed `typing.TextIO` handle. The path is a string or native `Path`. Reading defaults to strict UTF-8, so `open(path)` and `open(path, "r")` are equivalent. Writing requires an explicit UTF-8 encoding and creates or truncates the file. Handles can be passed, returned, stored in fields or containers, and aliased; every alias observes the same open/closed state.
+`open(path, "r", encoding="utf-8")` and `open(path, "w", encoding="utf-8")` return a sealed `typing.TextIO` handle. The path is a string or native `Path`. Reading defaults to strict UTF-8, so `open(path)` and `open(path, "r")` are equivalent. `open(path, "w")` creates or truncates the file and writes UTF-8 by default. Handles can be passed, returned, stored in fields or containers, and aliased; every alias observes the same open/closed state.
 
 `read()` consumes the remaining file and decodes strict UTF-8, translating CRLF and bare CR to LF. Further reads at EOF return the empty string. `write(text)` writes UTF-8 and returns the number of Unicode scalar characters, including embedded NULs. `flush()` makes buffered output visible to the operating system; it does not promise durable storage. `close()` flushes and closes, marks the shared handle closed even on a close failure, and succeeds on repeated calls. `.closed` is read-only. Entering, reading, writing, or flushing a closed handle raises `ValueError`. Reading a write-only handle or writing a read-only handle raises `io.UnsupportedOperation`, which matches both `OSError` and `ValueError`.
 
