@@ -599,6 +599,29 @@ pub extern "C" fn relar_exception_reraise() {
     }
 }
 
+/// An integer passed to SystemExit first has to fit the platform's C long.
+#[derive(Clone, Debug)]
+pub(crate) enum ExitStatus {
+    Code(i32),
+    Overflow,
+}
+
+impl ExitStatus {
+    pub(crate) fn from_i64(value: Option<i64>) -> Self {
+        value.map_or(Self::Overflow, |code| Self::Code(code as i32))
+    }
+
+    pub(crate) fn report(self) -> i32 {
+        match self {
+            Self::Code(code) => code,
+            Self::Overflow => {
+                eprintln!("OverflowError: Python int too large to convert to C long");
+                -1
+            }
+        }
+    }
+}
+
 /// Reports and consumes the pending error after generated-code cleanup. Returning
 /// the exit status lets the C entry point finish normally, including sanitizer
 /// teardown. A failed best-effort stdout flush preserves the original error.
@@ -629,13 +652,7 @@ pub extern "C" fn relar_error_unhandled() -> i32 {
             if message.is_empty() {
                 return 0;
             }
-            return message.parse::<i64>().map_or_else(
-                |_| {
-                    eprintln!("OverflowError: Python int too large to convert to C long");
-                    -1
-                },
-                |code| code as i32,
-            );
+            return ExitStatus::from_i64(message.parse::<i64>().ok()).report();
         }
         chain.push((kind, message));
         current = cause;

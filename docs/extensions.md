@@ -10,6 +10,8 @@ to `sys.path`. Relar compiles the probe and its imported modules to native code.
 An isolated command can add a literal directory this way while ignoring
 `PYTHONPATH` and the current directory.
 
+To run a standalone script, use `uv run --python relar app.py`.
+
 ## Build with uv
 
 `relar build-target` prints the native target as JSON. Add `--output-dir`

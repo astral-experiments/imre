@@ -41,6 +41,17 @@ def main():
         version = find("--show-version").split(".")
         assert version[:2] == target["python_version"].split("."), version
 
+        app = root / "app.py"
+        app.write_text(
+            "import sys\nprint(f'{sys.implementation.name} {sys.argv[1]}')\n"
+        )
+        output = subprocess.check_output(
+            ["uv", "run", "--python", "relar", "app.py", "hello"],
+            cwd=root,
+            env=env,
+        )
+        assert output == b"relar hello\n", output
+
 
 if __name__ == "__main__":
     main()

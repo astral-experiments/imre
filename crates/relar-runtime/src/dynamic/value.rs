@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use super::Context;
+use crate::objects::exceptions::ExitStatus;
 
 pub(super) type Id = u64;
 pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
@@ -15,12 +16,6 @@ pub(super) const TRUE: Id = 2;
 pub(super) struct Location {
     pub file: &'static str,
     pub line: u32,
-}
-
-#[derive(Clone, Debug)]
-pub(super) enum ExitStatus {
-    Code(i32),
-    Overflow,
 }
 
 #[derive(Clone, Debug)]
@@ -57,10 +52,7 @@ impl Context {
             error.exit_status = match args {
                 [] | [NONE] => Some(ExitStatus::Code(0)),
                 [code] => match self.heap.get(*code) {
-                    Value::Int(i) => Some(match i.to_i64() {
-                        Some(i) => ExitStatus::Code(i as i32),
-                        None => ExitStatus::Overflow,
-                    }),
+                    Value::Int(i) => Some(ExitStatus::from_i64(i.to_i64())),
                     Value::Bool(b) => Some(ExitStatus::Code(i32::from(*b))),
                     _ => None,
                 },

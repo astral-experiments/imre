@@ -506,7 +506,22 @@ pub(super) fn call(
             eprintln!("Warning: {}", ctx.str_value(argument(args, 0)?)?);
             NONE
         }
-        "sys.exit" => return Err(ctx.exception("SystemExit", args)),
+        "sys.exit" => {
+            // PyErr_SetObject normalizes a tuple as the exception's constructor
+            // arguments and propagates a supplied SystemExit instance directly.
+            if let [arg] = args {
+                match ctx.heap.get(*arg) {
+                    Value::None => return Err(ctx.exception("SystemExit", &[])),
+                    Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
+                        let items = items.clone();
+                        return Err(ctx.exception("SystemExit", &items));
+                    }
+                    Value::Raised(error) if error.kind == "SystemExit" => return Err(error.clone()),
+                    _ => {}
+                }
+            }
+            return Err(ctx.exception("SystemExit", args));
+        }
         name if name.starts_with("os.path.")
             || name.starts_with("file.")
             || name == "subprocess.run" =>

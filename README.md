@@ -28,6 +28,8 @@ $ relar -I -B -c 'import sys; print(sys.implementation.name)'
 relar
 $ uv python find relar
 /path/to/bin/relar
+$ uv run --python relar hello.py
+Hello, world!
 ```
 
 For discovery, put `relar` on `PATH`. Stock uv runs its Python probe under Relar

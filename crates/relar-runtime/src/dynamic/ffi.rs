@@ -342,11 +342,7 @@ pub(super) unsafe extern "C" fn relar_dyn_finish(ctx: *mut Context) -> i32 {
     match ctx.module("__main__") {
         Ok(_) => 0,
         Err(e) if e.kind == "SystemExit" => match e.exit_status {
-            Some(super::value::ExitStatus::Code(code)) => code,
-            Some(super::value::ExitStatus::Overflow) => {
-                eprintln!("OverflowError: Python int too large to convert to C long");
-                -1
-            }
+            Some(status) => status.report(),
             None => {
                 eprintln!("{}", e.message);
                 1
