@@ -1,15 +1,34 @@
-//! Program-owned literals share immutable strings and compiled regexes between evaluations.
+//! Program-owned literals share immutable values between evaluations.
 
 use super::*;
+
+fn lazy_constructor(ty: Type) -> Option<&'static str> {
+    match ty {
+        Type::Bytes => Some("relar_bytes_literal"),
+        Type::Int => Some("relar_int_literal"),
+        _ => None,
+    }
+}
 
 impl Emitter<'_, '_> {
     /// Returns an owned reference while the pool keeps its root until main exits.
     pub(super) fn pooled_literal(&mut self, contents: &[u8], ty: Type) -> Value {
         let id = self.intern_literal(contents, ty);
         let name = self.output.literal_ref(id);
+        let repr = ty.llvm();
+        let operand = if let Some(init) = lazy_constructor(ty) {
+            let bytes = self.output.string_name(id, "str");
+            let bytes = self.output.used(self.output.string_owner(id), bytes);
+            self.instruction(format!(
+                "call {repr} @{init}_once(ptr @{name}, ptr @{bytes}, i64 {})",
+                contents.len()
+            ))
+        } else {
+            self.instruction(format!("load {repr}, ptr @{name}"))
+        };
         let value = Value {
             ty,
-            operand: self.instruction(format!("load ptr, ptr @{name}")),
+            operand,
             small_integer: false,
         };
         self.retain(&value);
@@ -19,8 +38,10 @@ impl Emitter<'_, '_> {
     pub(super) fn intern_literal(&mut self, contents: &[u8], ty: Type) -> usize {
         let pool = match ty {
             Type::Str => &mut self.string_literals,
+            Type::Bytes => &mut self.bytes_literals,
+            Type::Int => &mut self.integer_literals,
             Type::RegexPattern => &mut self.regex_literals,
-            _ => unreachable!("only strings and regexes have pooled literals"),
+            _ => unreachable!("unsupported pooled literal type"),
         };
         if let Some(&id) = pool.get(contents) {
             id
@@ -35,46 +56,90 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// Eager initialization has no user effects and bounds retention by source
-    /// constants. Main releases locals/globals first, then these final roots on
-    /// both successful and exceptional exits; there is no process-lifetime leak.
+    /// Main releases the literal roots after locals/globals on either exit.
+    /// Bytes and heap integers initialize on first use to preserve cold branches.
     pub(super) fn literal_pool(&mut self) {
-        let literals = [
+        let pools = [
             (
                 &self.string_literals,
+                Type::Str,
                 "relar_str_literal",
                 "relar_str_release",
             ),
             (
                 &self.regex_literals,
+                Type::RegexPattern,
                 "relar_regex_compile",
                 "relar_object_release",
             ),
-        ]
-        .into_iter()
-        .flat_map(|(pool, init, release)| {
+            (
+                &self.bytes_literals,
+                Type::Bytes,
+                "relar_bytes_literal",
+                "relar_bytes_release",
+            ),
+            (
+                &self.integer_literals,
+                Type::Int,
+                "relar_int_literal",
+                "relar_int_release",
+            ),
+        ];
+        let literals = pools.into_iter().flat_map(|(pool, ty, init, release)| {
             pool.iter()
-                .map(move |(bytes, id)| (bytes, id, init, release))
+                .map(move |(bytes, id)| (bytes, id, ty, init, release))
         });
-        for (_, id, _, _) in literals.clone() {
+        for (_, id, ty, _, _) in literals.clone() {
             let owner = self.output.string_owner(*id);
             let name = self.output.string_name(*id, "literal");
-            self.output
-                .global(owner, &name, "global", "ptr")
-                .push_str("null\n");
+            writeln!(
+                self.output.global(owner, &name, "global", ty.llvm()),
+                "{}",
+                ty.initial()
+            )
+            .unwrap();
         }
         let attributes = if self.sanitize {
             " sanitize_address"
         } else {
             ""
         };
+        for (pool, ty, init, _) in pools {
+            if pool.is_empty() || lazy_constructor(ty).is_none() {
+                continue;
+            }
+            let repr = ty.llvm();
+            let initial = ty.initial();
+            // Heap integers never equal tagged zero. Bytes owners are non-null.
+            writeln!(
+                self.output.common(),
+                "
+define internal {repr} @{init}_once(ptr %root, ptr %data, i64 %length){attributes} {{
+entry:
+  %cached = load {repr}, ptr %root
+  %empty = icmp eq {repr} %cached, {initial}
+  br i1 %empty, label %initialize, label %ready
+initialize:
+  %fresh = call {repr} @{init}(ptr %data, i64 %length)
+  store {repr} %fresh, ptr %root
+  br label %ready
+ready:
+  %value = phi {repr} [ %cached, %entry ], [ %fresh, %initialize ]
+  ret {repr} %value
+}}"
+            )
+            .unwrap();
+        }
         self.output.common().push('\n');
         writeln!(
             self.output.entry_buffer(),
             "define internal void @relar_init_literals(){attributes} {{\nentry:"
         )
         .unwrap();
-        for (bytes, id, init, _) in literals.clone() {
+        for (bytes, id, ty, init, _) in literals.clone() {
+            if lazy_constructor(ty).is_some() {
+                continue;
+            }
             let bytes_name = self.output.string_name(*id, "str");
             let root = self.output.string_name(*id, "literal");
             writeln!(
@@ -104,11 +169,13 @@ impl Emitter<'_, '_> {
                 .entry_buffer()
                 .push_str("  call void @relar_str_enum_table(ptr null, i64 0)\n");
         }
-        for (_, id, _, release) in literals {
+        for (_, id, ty, _, release) in literals {
+            let repr = ty.llvm();
+            let initial = ty.initial();
             let root = self.output.string_name(*id, "literal");
             writeln!(
                 self.output.entry_buffer(),
-                "  %literal_{id} = load ptr, ptr @{root}\n  store ptr null, ptr @{root}\n  call void @{release}(ptr %literal_{id})"
+                "  %literal_{id} = load {repr}, ptr @{root}\n  store {repr} {initial}, ptr @{root}\n  call void @{release}({repr} %literal_{id})"
             )
             .unwrap();
         }
