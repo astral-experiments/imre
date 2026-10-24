@@ -286,8 +286,8 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                     left.compare_entry(right, position)
                 }
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
-                (Storage::Path { text: left, .. }, Storage::Path { text: right, .. }) => {
-                    Comparison::Done(left == right)
+                (left @ Storage::Path { .. }, right @ Storage::Path { .. }) => {
+                    Comparison::Done(left.path() == right.path())
                 }
                 _ => Comparison::Done(false),
             })
@@ -353,9 +353,9 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         Storage::Set(set) => {
                             format_entry(owner, set.repr_entry(output, position), &mut pending)
                         }
-                        Storage::Path { text, .. } => {
+                        path @ Storage::Path { .. } => {
                             output.push_str("PosixPath(");
-                            super::exceptions::push_string_repr(text, output);
+                            super::exceptions::push_string_repr(path.path(), output);
                             output.push(')');
                             None
                         }
