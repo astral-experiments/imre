@@ -91,6 +91,8 @@ def main() -> None:
             sys.executable,
             ROOT / "scripts/pack_extension_wheel.py",
             stage,
+            "--relar",
+            compiler,
             "--name",
             "retainer",
             "--version",
@@ -101,7 +103,7 @@ def main() -> None:
         (wheel,) = dist.glob("*.whl")
         _, _, _, tags = parse_wheel_filename(wheel.name)
         (tag,) = tags
-        assert (tag.interpreter, tag.abi) == ("rl312", "relar1")
+        assert (tag.interpreter, tag.abi) == ("relar312", "relar1")
         pip = (
             sys.executable,
             "-m",
@@ -118,7 +120,7 @@ def main() -> None:
         run(
             *pip,
             "--implementation",
-            "rl",
+            "relar",
             "--python-version",
             "3.12",
             "--abi",

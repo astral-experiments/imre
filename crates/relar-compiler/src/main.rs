@@ -27,6 +27,7 @@ const PYTHON_HEADER: &str = include_str!("../../relar-runtime/include/Python.h")
 
 const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY]
        relar extension-header
+       relar build-target [--output-dir DIRECTORY]
        relar wheel PROJECT [--out-dir DIR] [--overlay DIR] [--python PYTHON]
        relar build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]
        relar run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]
@@ -84,6 +85,9 @@ fn run() -> Result<ExitCode, String> {
     }
     if command == "wheel" {
         return wheel::run(args);
+    }
+    if command == "build-target" {
+        return wheel::report(args);
     }
     let execute = command == "run";
     if command != "build" && command != "check" && !execute {

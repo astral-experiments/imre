@@ -15,6 +15,9 @@ packages = ["retained_values"]
 [tool.setuptools.package-data]
 retained_values = ["*.pyi", "format.txt"]
 
+[tool.setuptools.cmdclass]
+bdist_wheel = "extconfig.ProjectWheel"
+
 [[tool.setuptools.ext-modules]]
 name = "retained_values.retainer"
 sources = ["native/module.c", "native/retainer.c"]

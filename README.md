@@ -39,7 +39,7 @@ or runs two versions of ty on flake8, Sphinx, Prefect, and Trio.
 
 Relar supports:
 
-- Statically resolved imports, including [native wheels built from setuptools projects](docs/extensions.md)
+- Statically resolved imports, including [native wheels built with setuptools or scikit-build-core](docs/extensions.md)
 - Functions with exact declared or inferred signatures
 - Classes and dataclasses with fixed fields
 - String enums with named members and aliases, and string-valued `Literal` annotations

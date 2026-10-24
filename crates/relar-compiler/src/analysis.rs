@@ -73,7 +73,7 @@ impl Session {
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
         let mut settings = ProgramSettings::empty(&vendored);
-        settings.python_version.version = ruff_python_ast::PythonVersion::PY312;
+        settings.python_version.version = crate::PYTHON_VERSION;
         let mut roots = vec![SystemPathBuf::from(root)];
         for path in extension_roots {
             let path = path.to_str().ok_or("extension paths must be valid UTF-8")?;

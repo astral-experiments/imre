@@ -22,6 +22,12 @@ mod types;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
+/// Python language version used by type checking and native wheel consumers.
+pub const PYTHON_VERSION: ruff_python_ast::PythonVersion = ruff_python_ast::PythonVersion::PY312;
+
+/// File extension of installed native archives linked into an application.
+pub const NATIVE_ARCHIVE_EXTENSION: &str = "relar.a";
+
 #[derive(Default)]
 pub struct CompileOptions {
     /// Marks generated functions for LLVM's AddressSanitizer pass.

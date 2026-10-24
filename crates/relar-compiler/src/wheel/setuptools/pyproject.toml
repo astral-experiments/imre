@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "relar-setuptools"
+version = "0.1.1"
+description = "Build setuptools extensions for a Relar target"
+requires-python = ">=3.11"
+license = "MIT OR Apache-2.0"
+
+[project.entry-points."setuptools.finalize_distribution_options"]
+relar = "relar_setuptools:activate"
+
+[tool.setuptools]
+py-modules = ["relar_setuptools"]

@@ -825,7 +825,7 @@ impl Loader {
                 (package, true, None)
             } else {
                 self.inputs.missing.push(package);
-                let archive = base.with_extension("relar.a");
+                let archive = base.with_extension(crate::NATIVE_ARCHIVE_EXTENSION);
                 let installed = self.extension_roots.contains(root);
                 if installed && archive.is_file() {
                     if !stub.is_file() {
