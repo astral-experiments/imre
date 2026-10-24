@@ -43,16 +43,77 @@ fn permute<T>(values: &mut [T], order: &mut [usize]) {
 /// Long path-like strings often share the same leading bytes. For a large
 /// stable sort, find that prefix once before comparing the remaining bytes.
 ///
+pub(super) enum StringSort {
+    Stable { reverse: bool },
+    Distinct,
+}
+
 /// # Safety
 /// Each word is an immutable string rooted for the entire sort.
-unsafe fn sort_strings(values: &mut [usize], reverse: bool) {
+pub(super) unsafe fn sort_strings(values: &mut [usize], mode: StringSort) {
     // SAFETY: the list keeps these owners live, including while they move.
     let bytes = |word: usize| unsafe { (&*(word as *const Str)).as_bytes() };
     let skip = shared_prefix(values.iter().map(|&word| bytes(word)));
-    values.sort_by(|&left, &right| {
-        let order = bytes(left)[skip..].cmp(&bytes(right)[skip..]);
-        if reverse { order.reverse() } else { order }
-    });
+    let compare = |&left: &usize, &right: &usize| bytes(left)[skip..].cmp(&bytes(right)[skip..]);
+    match mode {
+        StringSort::Stable { reverse: false } => values.sort_by(compare),
+        StringSort::Stable { reverse: true } => values.sort_by(|left, right| compare(right, left)),
+        StringSort::Distinct => sort_distinct_words(values, compare),
+    }
+}
+
+/// Merge a handful of ascending runs with a fallible scratch buffer. Random
+/// input and a failed reservation both use the allocation-free general sort.
+fn sort_distinct_words(
+    values: &mut [usize],
+    compare: impl Fn(&usize, &usize) -> std::cmp::Ordering,
+) {
+    let mut breaks = smallvec::SmallVec::<[usize; 8]>::new();
+    for index in 1..values.len() {
+        if compare(&values[index - 1], &values[index]).is_gt() {
+            if breaks.len() == breaks.capacity() {
+                values.sort_unstable_by(compare);
+                return;
+            }
+            breaks.push(index);
+        }
+    }
+    let mut scratch = Vec::new();
+    let ends = breaks
+        .iter()
+        .copied()
+        .skip(1)
+        .chain(std::iter::once(values.len()));
+    for (&split, end) in breaks.iter().zip(ends) {
+        if end - split <= 8 {
+            for index in split..end {
+                let word = values[index];
+                let dest = values[..index].partition_point(|other| compare(other, &word).is_lt());
+                values[dest..=index].rotate_right(1);
+            }
+            continue;
+        }
+        scratch.clear();
+        if scratch.try_reserve_exact(split).is_err() {
+            values.sort_unstable_by(compare);
+            return;
+        }
+        scratch.extend_from_slice(&values[..split]);
+        let (mut left, mut right) = (0, split);
+        for dest in 0..end {
+            if left == split {
+                // The unconsumed right suffix already starts at its final position.
+                break;
+            }
+            if right < end && compare(&values[right], &scratch[left]).is_lt() {
+                values[dest] = values[right];
+                right += 1;
+            } else {
+                values[dest] = scratch[left];
+                left += 1;
+            }
+        }
+    }
 }
 
 /// Returns a byte prefix shared by every key only when its removal pays for a
@@ -251,7 +312,12 @@ pub unsafe extern "C" fn relar_sort_by_keys(
             object(values.cast()).0.with_mut(|storage| {
                 let values = storage.sequence_mut();
                 values.check_kind(key_kind);
-                sort_strings(&mut values.values, reverse != 0);
+                sort_strings(
+                    &mut values.values,
+                    StringSort::Stable {
+                        reverse: reverse != 0,
+                    },
+                );
             });
         }
         return;
@@ -531,6 +597,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn distinct_word_sort_handles_run_boundaries() {
+        for runs in 1..=10 {
+            for length in [0, 1, 7, 8, 31, 129] {
+                let mut words: Vec<_> = (0..runs)
+                    .flat_map(|start| (start..length).step_by(runs))
+                    .collect();
+                super::sort_distinct_words(&mut words, usize::cmp);
+                assert!(words.into_iter().eq(0..length));
+            }
+        }
+    }
+
+    #[test]
     fn empty_named_fields_do_not_reserve_the_template_length() {
         let template = "{x}".repeat(20_000) + "{y}";
         let result = format_named(&template, |name| match name {
@@ -599,7 +678,7 @@ mod tests {
                 expected.sort_by(|a, b| if reverse { b.cmp(a) } else { a.cmp(b) });
                 let mut words: Vec<_> = keys.iter().map(|s| Rc::as_ptr(s) as usize).collect();
                 // SAFETY: keys owns each immutable string until the comparison finishes.
-                unsafe { sort_strings(&mut words, reverse) };
+                unsafe { sort_strings(&mut words, StringSort::Stable { reverse }) };
                 assert!(
                     expected
                         .into_iter()
