@@ -13,6 +13,8 @@ pub(crate) enum Type {
     StrEnum(usize),
     Bytes,
     ListInt,
+    /// Native storage for a private append-only integer list consumed by bytes().
+    ByteOutput,
     Class(usize),
     List(usize),
     Dict(usize),
@@ -73,6 +75,7 @@ impl std::fmt::Display for Type {
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
             Self::ListInt => "list[int]",
+            Self::ByteOutput => "private byte output",
             Self::None => "None",
             Self::Iterator => "iterator",
             Self::Exception => "Exception",
