@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use super::exceptions::{Error, Kind, Result, finish, raise_process, raise_timeout};
 use super::files::{decode_utf8_text, os_error};
-use super::mappings::{imre_dict_contains, imre_dict_new, imre_dict_set};
+use super::mappings::{StringPairs, imre_dict_contains, imre_dict_new, imre_dict_set};
 use super::records::{RecordDescriptor, imre_record_new};
 use super::words::{OwnedWord, WordKind};
 use super::{Bytes, Int, Object, Storage, Str, acquire_rc, fail, object};
@@ -217,13 +217,42 @@ unsafe impl Send for CStrings {}
 unsafe impl Sync for CStrings {}
 
 impl CStrings {
-    fn new(strings: Vec<CString>) -> Self {
-        let mut pointers = strings
-            .iter()
-            .map(|value| value.as_ptr())
-            .collect::<Vec<_>>();
+    fn new(strings: Vec<CString>) -> Result<Self> {
+        let size = strings.len().checked_add(1).ok_or_else(Error::allocation)?;
+        let mut pointers = Vec::new();
+        pointers
+            .try_reserve_exact(size)
+            .map_err(|_| Error::allocation())?;
+        pointers.extend(strings.iter().map(|value| value.as_ptr()));
         pointers.push(std::ptr::null());
-        Self { strings, pointers }
+        Ok(Self { strings, pointers })
+    }
+
+    fn from_environment(env: StringPairs) -> Result<Self> {
+        let mut strings = Vec::new();
+        strings
+            .try_reserve_exact(env.len())
+            .map_err(|_| Error::allocation())?;
+        for (key, value) in env {
+            let size = key
+                .len()
+                .checked_add(value.len())
+                .and_then(|n| n.checked_add(2))
+                .ok_or_else(Error::allocation)?;
+            let mut entry = Vec::new();
+            entry
+                .try_reserve_exact(size)
+                .map_err(|_| Error::allocation())?;
+            entry.extend_from_slice(key.as_bytes());
+            entry.push(b'=');
+            entry.extend_from_slice(value.as_bytes());
+            entry.push(0);
+            strings.push(
+                CString::from_vec_with_nul(entry)
+                    .map_err(|_| Error::new(Kind::ValueError, "embedded null byte"))?,
+            );
+        }
+        Self::new(strings)
     }
 }
 
@@ -369,7 +398,7 @@ struct Launch {
 
 impl Launch {
     /// Prepares native launch data after validating nonempty argv and env names.
-    fn new(argv: Vec<CString>, env: Option<Vec<(Str, Str)>>) -> Result<Self> {
+    fn new(argv: Vec<CString>, env: Option<StringPairs>) -> Result<Self> {
         let program = &argv[0];
         let search = if program.as_bytes().contains(&b'/') {
             None
@@ -377,7 +406,7 @@ impl Launch {
             let inherited;
             let path = if let Some(env) = &env {
                 env.iter()
-                    .find(|(key, _)| key == "PATH")
+                    .find(|(key, _)| key.as_str() == "PATH")
                     .map(|(_, value)| value.as_bytes())
             } else {
                 inherited = std::env::var_os("PATH");
@@ -385,22 +414,9 @@ impl Launch {
             };
             Some(PathSearch::new(path.unwrap_or(b"/bin:/usr/bin"), program)?)
         };
-        let env = env
-            .map(|env| {
-                env.into_iter()
-                    .map(|(key, value)| {
-                        let mut entry = Vec::with_capacity(key.len() + value.len() + 1);
-                        entry.extend_from_slice(key.as_bytes());
-                        entry.push(b'=');
-                        entry.extend_from_slice(value.as_bytes());
-                        cstring(&entry)
-                    })
-                    .collect::<Result<Vec<_>>>()
-                    .map(CStrings::new)
-            })
-            .transpose()?;
+        let env = env.map(CStrings::from_environment).transpose()?;
         Ok(Self {
-            argv: CStrings::new(argv),
+            argv: CStrings::new(argv)?,
             env,
             search,
             descriptors: Descriptors::prepare().map_err(os_error)?,
@@ -1164,7 +1180,7 @@ unsafe fn prepare_process(
                     fail("SystemError", "expected an environment dictionary");
                 };
                 mapping.string_pairs()
-            }))
+            })?)
         };
         if env
             .as_ref()
@@ -1448,6 +1464,18 @@ mod tests {
             }
         }
         result
+    }
+
+    #[test]
+    fn environment_entries_preserve_values_and_reject_embedded_nuls() {
+        let pairs = vec![(Rc::new(Str::from("KEY")), Rc::new(Str::from("value=λ")))];
+        let strings = CStrings::from_environment(pairs).ok().unwrap();
+        assert_eq!(strings.strings[0].to_bytes(), "KEY=value=λ".as_bytes());
+        let nul = vec![(
+            Rc::new(Str::from("KEY")),
+            Rc::new(Str::from("before\0after")),
+        )];
+        assert!(CStrings::from_environment(nul).is_err());
     }
 
     #[test]
@@ -2091,7 +2119,9 @@ mod tests {
             .into_iter()
             .map(|entry| CString::new(entry).unwrap())
             .collect(),
-        );
+        )
+        .ok()
+        .unwrap();
         // SAFETY: the immutable CStrings owner roots the terminated native array.
         let copy = unsafe { environment_snapshot(entries.pointers.as_ptr()) }
             .unwrap_or_else(|_| panic!("controlled environment unexpectedly failed"));
@@ -2101,18 +2131,23 @@ mod tests {
                 let Storage::Dictionary(mapping) = storage else {
                     panic!("environment snapshot must be a dictionary");
                 };
-                mapping.string_pairs()
+                mapping.string_pairs().ok().unwrap()
             })
         };
         assert_eq!(
-            pairs,
+            pairs
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str()))
+                .collect::<Vec<_>>(),
             [
-                (Str::new(""), Str::new("allowed")),
-                (Str::new("IMRE_KEY"), Str::new("first")),
-                (Str::new("IMRE_VALUE"), Str::new("left=right")),
+                ("", "allowed"),
+                ("IMRE_KEY", "first"),
+                ("IMRE_VALUE", "left=right"),
             ]
         );
-        let entries = CStrings::new(vec![CString::new(b"KEY=\xff".as_slice()).unwrap()]);
+        let entries = CStrings::new(vec![CString::new(b"KEY=\xff".as_slice()).unwrap()])
+            .ok()
+            .unwrap();
         // SAFETY: the immutable array is valid but contains undecodable value text.
         match unsafe { environment_snapshot(entries.pointers.as_ptr()) } {
             Ok(_) => panic!("non-UTF-8 environment unexpectedly succeeded"),

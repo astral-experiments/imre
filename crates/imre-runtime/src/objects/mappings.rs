@@ -19,6 +19,8 @@ use super::exceptions::{Error, Kind};
 use super::words::{NULLABLE, OwnedWord, WordKind};
 use super::{Bytes, Int, List, Object, Storage, StorageCell, Str, acquire_rc, fail, object};
 
+pub(super) type StringPairs = Vec<(Rc<Str>, Rc<Str>)>;
+
 #[derive(Clone)]
 struct IntKey(Int);
 
@@ -661,24 +663,24 @@ impl Mapping {
         true
     }
 
-    /// Copies exact string entries in insertion order before a process launch.
+    /// Retains exact string entries in insertion order while preparing a process launch.
     /// No borrowed table storage or language owner crosses the fork boundary.
-    pub(super) fn string_pairs(&self) -> Vec<(Str, Str)> {
+    pub(super) fn string_pairs(&self) -> Result<StringPairs, Error> {
         if self.tables.key_kind() != 3 || self.value_kind.raw() != 3 {
             fail("SystemError", "expected a string-to-string dictionary");
         }
-        let mut pairs = Vec::with_capacity(self.tables.len());
+        let mut pairs = Vec::new();
+        pairs
+            .try_reserve_exact(self.tables.len())
+            .map_err(|_| Error::allocation())?;
         self.tables.all(|key, value| {
             // SAFETY: the checked exact dictionary roots both immutable strings.
             unsafe {
-                pairs.push((
-                    (*(key as *const Str)).clone(),
-                    (*(value as *const Str)).clone(),
-                ));
+                pairs.push((acquire_rc::<Str>(key), acquire_rc::<Str>(value)));
             }
             true
         });
-        pairs
+        Ok(pairs)
     }
 
     pub(super) fn is_empty(&self) -> bool {
