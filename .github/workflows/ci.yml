@@ -104,6 +104,8 @@ jobs:
           for suite in build_cache module_objects link_cache build_output; do
             env -i HOME="$RUNNER_TEMP" PATH=/usr/bin:/bin python3 "tests/$suite.py" --compiler target/release/relar
           done
+      - name: Run vendored CPython Counter methods in native Relar
+        run: python3 benchmarks/cpython_stdlib/native_counter.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/cpython-counter.json"
       - name: Compare Ruff’s reporters with CPython
         run: |
           target/release/relar build examples/conformance_report/upstream/conformance.py -o "$RUNNER_TEMP/ruff-conformance"

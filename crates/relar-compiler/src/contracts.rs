@@ -235,6 +235,8 @@ impl Builtin {
             | Self::TomlKeys => Contract::new(true, Unknown),
             Self::BytesIter
             | Self::DefaultListDict
+            | Self::CounterNew
+            | Self::CounterTotal
             | Self::DictAsBase
             | Self::DictIter(_)
             | Self::ExceptionWithCause

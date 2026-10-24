@@ -281,6 +281,19 @@ main()
 # Every rejected program must reach the checker. Cycle cases additionally require
 # the ownership-graph diagnostic, rather than an unsupported-annotation rejection.
 REJECTED = {
+    "counter_wrong_key": "from collections import Counter\nc = Counter[int]()\nc.update(['str'])",
+    "counter_wrong_count": "from collections import Counter\nc = Counter({'key': 'not an int'})",
+    "counter_wrong_generic": "from collections import Counter\nc = Counter[bytes]()",
+    "counter_plain_dict": "from collections import Counter\nc: Counter[str] = {'key': 1}",
+    "counter_schema": """
+        from collections import Counter
+        from dataclasses import dataclass
+        from relar.json import decode
+        @dataclass
+        class Box:
+            counts: Counter[str]
+        box = decode("{}", Box)
+    """,
     "set_empty_without_context": "values = set()\n",
     "set_iterable_constructor": "values: set[int] = set([1, 2])\n",
     "set_copy_wrong_element": "original = {1, 2}\nvalues: set[str] = set(original)\n",
@@ -974,6 +987,8 @@ def main() -> None:
             assert checked.returncode > 0 and checked.stderr, (name, checked)
             if name.endswith("class_cycle"):
                 assert "cyclic heap types" in checked.stderr, (name, checked.stderr)
+            if name == "counter_schema":
+                assert "JSON schemas require ordinary dictionaries" in checked.stderr, checked.stderr
             passed += 1
 
         cases = [
