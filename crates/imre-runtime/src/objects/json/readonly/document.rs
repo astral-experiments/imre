@@ -69,14 +69,19 @@ impl Value {
             })
         }
     }
-    fn snapshot(&self, nodes: &mut Vec<Node>) -> usize {
-        let node = match self {
+    fn leaf(&self) -> Node {
+        match self {
             Self::Null => Node::Null,
             Self::Bool(x) => Node::Bool(*x),
             Self::Integer(x) => Node::Integer(x.clone()),
             Self::Float(x) => Node::Float(*x),
             Self::String(x) => Node::String(x.clone()),
             Self::Datetime(x) => Node::Datetime(x.clone()),
+            Self::Array(_) | Self::Table(_) => unreachable!("document leaf"),
+        }
+    }
+    fn snapshot(&self, nodes: &mut Vec<Node>) -> usize {
+        let node = match self {
             Self::Array(a) => Node::Array(
                 Self::elements(a)
                     .iter()
@@ -89,6 +94,7 @@ impl Value {
                     .map(|(key, value)| ((**key).clone(), Self::read(value).snapshot(nodes)))
                     .collect(),
             ),
+            _ => self.leaf(),
         };
         let index = nodes.len();
         nodes.push(node);
@@ -101,6 +107,55 @@ impl Value {
             nodes: Nodes::Document(Rc::new(nodes)),
             index,
         }
+    }
+
+    fn try_snapshot(&self, nodes: &mut Vec<Node>) -> Result<usize, Error> {
+        let node = match self {
+            // SAFETY: these read-only walks invoke no Python code. The list or table
+            // roots each child for its visit, including aliased nested containers.
+            Self::Array(a) => unsafe {
+                a.0.with(|storage| {
+                    let values = &storage.sequence().values;
+                    let mut children = Vec::new();
+                    children
+                        .try_reserve_exact(values.len())
+                        .map_err(|_| Error::allocation())?;
+                    for &word in values {
+                        children
+                            .push(Self::read(object(word as *const Object)).try_snapshot(nodes)?);
+                    }
+                    Ok(Node::Array(children))
+                })?
+            },
+            Self::Table(t) => unsafe {
+                t.0.with(|storage| {
+                    let mut fields = Vec::new();
+                    for (key, word) in storage.dictionary().string_entries() {
+                        fields.try_reserve(1).map_err(|_| Error::allocation())?;
+                        let key = Str::try_new(key).map_err(|_| Error::allocation())?;
+                        fields.push((
+                            key,
+                            Self::read(object(word as *const Object)).try_snapshot(nodes)?,
+                        ));
+                    }
+                    Ok(Node::Object(fields))
+                })?
+            },
+            _ => self.leaf(),
+        };
+        let index = nodes.len();
+        nodes.try_reserve(1).map_err(|_| Error::allocation())?;
+        nodes.push(node);
+        Ok(index)
+    }
+
+    pub(in crate::objects) fn try_view(&self) -> Result<View, Error> {
+        let mut nodes = Vec::new();
+        let index = self.try_snapshot(&mut nodes)?;
+        Ok(View {
+            nodes: Nodes::Document(Rc::new(nodes)),
+            index,
+        })
     }
     fn from_json(view: &View, index: usize) -> Self {
         if index == view.index
@@ -302,7 +357,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 Value::from_toml(&DeValue::Table(parsed.into_inner()))?.word()
             }
             22 | 27 => {
-                let view = doc(a).view();
+                let view = doc(a).try_view()?;
                 let mut text = String::new();
                 let result = view.table(view.index, "", false, &mut text);
                 if op == 27 {
@@ -313,7 +368,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 }
                 result?;
                 if op == 22 {
-                    Rc::into_raw(Rc::new(Str::new(text))) as usize
+                    Rc::into_raw(Rc::new(Str::from(text))) as usize
                 } else {
                     0
                 }

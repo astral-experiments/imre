@@ -66,13 +66,14 @@ unsafe fn prepare(record: *const usize) -> Result<(), Error> {
             // SAFETY: every projected field is an initialized JSON/document object.
             let field = unsafe { object(*record.add(index) as *const Object) };
             if index != 0 {
+                text.try_reserve(1).map_err(|_| Error::allocation())?;
                 text.push('\n');
             }
             // SAFETY: the rooted immutable JSON view cannot mutate while rendering.
             unsafe {
                 field.0.with(|storage| match storage {
                     Storage::Json(view) => view.toml_table(name, &mut text),
-                    Storage::Document(value) => value.view().toml_table(name, &mut text),
+                    Storage::Document(value) => value.try_view()?.toml_table(name, &mut text),
                     _ => unreachable!("checked TOML projection"),
                 })
             }?;
