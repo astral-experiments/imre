@@ -1,6 +1,6 @@
 # CPython standard-library compatibility benchmark
 
-The `upstream` directory contains the complete CPython 3.14.5 test entries for `sys`, `os`, `genericpath`, `posixpath`, `pathlib`, `json`, `subprocess` and `hashlib`, including files in the two test packages. The [manifest](UPSTREAM.json) records the release commit and each unmodified Git blob. [Upstream source](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test) · [CPython license](upstream/LICENSE)
+The `upstream` directory contains the complete, unmodified CPython 3.14.5 test modules and packages used by these benchmarks. The [manifest](UPSTREAM.json) records the release commit and each unmodified Git blob. [Upstream source](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test) · [CPython license](upstream/LICENSE)
 
 ## Native SHA-256 vector calls
 
@@ -42,11 +42,22 @@ Use `--cpython-source /path/to/cpython-3.14.5` if the interpreter needs a source
 
 ## Full CPython reference run
 
-Use a CPython interpreter built from the exact release in the manifest with its normal test modules installed. Its `Lib/test` provides the shared `test.support`, helper programs and reference runner for the vendored suites.
+Use a test-enabled CPython interpreter built from the release in the manifest. Discover the suite names in the vendored directory, then run their matching copies in the release tree. This lets unittest discover the JSON and pathlib package tests with their original support modules.
 
 ```sh
-/path/to/cpython-3.14.5/python -m test -j1 \
-    test_sys test_os test_genericpath test_posixpath test_pathlib test_json test_subprocess test_hashlib
+reference_python=/path/to/cpython-3.14.5/python
+"$reference_python" -m test --list-tests --testdir benchmarks/cpython_stdlib/upstream/Lib/test |
+    "$reference_python" -m test -j1 --fromfile /dev/stdin
 ```
 
 This run records what upstream passes and skips on the host. Native compatibility uses the separate Relar results. An infrastructure error in a stripped interpreter is visible until it is reproduced with a test-enabled CPython build.
+
+## Native Counter cases
+
+`native_counter.py` compiles the complete CPython `TestCounter.test_total`, `test_invariant_for_the_in_operator` and `test_eq` methods into standalone executables. The typed assertion adapters compare both native operands and count every executed assertion. The three tests must execute 1, 6 and 2 assertions respectively. The manifest pins the entire upstream `test_collections.py` file. The typed subset uses integer counts, so the upstream `test_update`, which also stores `None`, is outside this gate.
+
+```sh
+python3 benchmarks/cpython_stdlib/native_counter.py \
+    --relar /path/to/relar --runtime /path/to/librelar_runtime.a \
+    --clang /path/to/clang --result native-counter.json
+```

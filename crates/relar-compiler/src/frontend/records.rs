@@ -182,9 +182,14 @@ pub(super) fn field_default(
     };
     let concrete = types.payload(ty).unwrap_or(ty);
     let kind = match factory {
+        ContainerFactory::Counter if types.is_counter(concrete) => {
+            ExprKind::Builtin(Builtin::CounterNew, Vec::new())
+        }
         ContainerFactory::List if types.element(concrete).is_some() => ExprKind::List(Vec::new()),
         ContainerFactory::Dict
-            if types.mapping(concrete).is_some() && !types.is_default_list_dict(concrete) =>
+            if types.mapping(concrete).is_some()
+                && !types.is_default_list_dict(concrete)
+                && !types.is_counter(concrete) =>
         {
             let (key, value) = types.mapping(concrete).unwrap();
             ExprKind::Dict {
@@ -201,7 +206,7 @@ pub(super) fn field_default(
             return Err(error(
                 source,
                 &field.annotation,
-                "a default factory must match its exact list, dict, or set field type",
+                "a default factory must match its exact list, dict, set, or Counter field type",
             ));
         }
     };

@@ -2950,7 +2950,7 @@ impl Emitter<'_, '_> {
                 };
                 self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
             }
-            Type::Path | Type::List(_) => {
+            Type::Path | Type::List(_) | Type::Dict(_) => {
                 let operation = if left.ty == Type::Path {
                     "path"
                 } else {
@@ -3026,7 +3026,6 @@ impl Emitter<'_, '_> {
                 right.operand
             )),
             Type::ListInt
-            | Type::Dict(_)
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
@@ -3867,6 +3866,18 @@ impl Emitter<'_, '_> {
                 &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
             ),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
+            Builtin::CounterNew => {
+                let (key, _) = self.module.types.mapping(returns).unwrap();
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_counter_new(i32 {})",
+                        representation_kind(key, &self.module.types)
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::CounterTotal => self.call("relar_counter_total", returns, &[&args[0].value]),
             Builtin::DefaultListDict => {
                 let (key, list) = self.module.types.mapping(returns).unwrap();
                 let element = self.module.types.element(list).unwrap();
@@ -4574,9 +4585,11 @@ impl Emitter<'_, '_> {
         if matches!(list.ty, Type::Dict(_)) {
             let key = self.word(index);
             let lookup = format!("call i64 @relar_dict_get(ptr {}, i64 {key})", list.operand);
-            // A sealed list factory supplies every missing subscription. The
-            // receiver and key have already completed their own error checks.
-            let word = if self.module.types.is_default_list_dict(list.ty) {
+            // Default-list and Counter subscriptions both produce a missing
+            // value. Receiver and key evaluation has already checked for errors.
+            let word = if self.module.types.is_default_list_dict(list.ty)
+                || self.module.types.is_counter(list.ty)
+            {
                 self.instruction(lookup)
             } else {
                 self.checked_instruction(lookup)
@@ -5124,6 +5137,8 @@ define internal i64 @relar_seq_borrow_index_proven_fast(ptr %sequence, i64 %inde
 declare ptr @relar_seq_repeat(ptr, i64)
 declare ptr @relar_dict_new(i32, i32)
 declare ptr @relar_default_list_dict_new(i32, i32)
+declare ptr @relar_counter_new(i32)
+declare i64 @relar_counter_total(ptr)
 declare ptr @relar_key_union(ptr, ptr)
 declare ptr @relar_sorted_string_keys(ptr, i64)
 declare ptr @relar_sorted_record_rows(ptr, i64, ptr, ptr)

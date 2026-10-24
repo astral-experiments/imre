@@ -85,6 +85,40 @@ impl Checker<'_> {
             ));
         }
         let source = &call.arguments.args[0];
+        let mut method_input = None;
+        if call.arguments.args.len() == 1
+            && call.arguments.keywords.is_empty()
+            && let ast::Expr::Call(view) = source
+            && self.resolve(&view.func).is_none()
+            && view.arguments.args.is_empty()
+            && view.arguments.keywords.is_empty()
+            && let ast::Expr::Attribute(method) = &*view.func
+            && method.attr.as_str() == "values"
+            && self.class_reference(&method.value).is_none()
+        {
+            let receiver = self.expr(&method.value)?;
+            if self.types.is_counter(receiver.ty) {
+                return Ok(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(Builtin::CounterTotal, vec![receiver]),
+                });
+            }
+            // A first-party values method still produces its usual iterable.
+            // Use the already checked receiver, including any walrus bindings.
+            let (Type::Class(class) | Type::StrEnum(class)) = receiver.ty else {
+                return Err(error(
+                    self.source,
+                    view,
+                    "values() in sum requires a Counter",
+                ));
+            };
+            let iterable = self.class_method_call(view, method, class, Some(receiver))?;
+            method_input = Some(Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            });
+        }
         if matches!(source, ast::Expr::ListComp(_)) {
             let subtotal = self.sum_comprehension(source)?;
             let start = self.sum_start(call)?;
@@ -92,7 +126,9 @@ impl Checker<'_> {
         }
         let generator = matches!(source, ast::Expr::Generator(_));
         let mut zip_sum = None;
-        let (input, convert) = if let ast::Expr::Generator(generator) = source
+        let (input, convert) = if let Some(input) = method_input {
+            (input, false)
+        } else if let ast::Expr::Generator(generator) = source
             && self.zip_sum_rhs == Some(call.range())
         {
             (

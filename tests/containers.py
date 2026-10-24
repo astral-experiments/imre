@@ -281,6 +281,11 @@ main()
 # Every rejected program must reach the checker. Cycle cases additionally require
 # the ownership-graph diagnostic, rather than an unsupported-annotation rejection.
 REJECTED = {
+    "counter_wrong_key": "from collections import Counter\nc = Counter[int]()\nc.update(['str'])",
+    "counter_wrong_count": "from collections import Counter\nc = Counter({'key': 'not an int'})",
+    "counter_wrong_generic": "from collections import Counter\nc = Counter[bytes]()",
+    "counter_plain_dict": "from collections import Counter\nc: Counter[str] = {'key': 1}",
+    "counter_schema": "from collections import Counter\nfrom relar import json\nc = json.decode('{}', type=Counter[str])",
     "set_empty_without_context": "values = set()\n",
     "set_iterable_constructor": "values: set[int] = set([1, 2])\n",
     "set_copy_constructor": "original = {1, 2}\nvalues: set[int] = set(original)\n",
