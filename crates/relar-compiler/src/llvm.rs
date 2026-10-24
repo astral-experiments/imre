@@ -3519,6 +3519,7 @@ impl Emitter<'_, '_> {
             }
             Builtin::Repr => self.value_repr(&args[0].value),
             Builtin::Str => match args[0].value.ty {
+                Type::Path => self.call("relar_path_text", Type::Str, &[&args[0].value]),
                 Type::Str | Type::StrLiteral(_) => {
                     return Value {
                         ty: Type::Str,

@@ -113,3 +113,17 @@ impl Checker<'_> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn formats_path_arguments_by_their_path_text() {
+        let source = r#"
+import logging
+from pathlib import Path
+logger = logging.getLogger("example")
+logger.info("Checking %s", Path("input"))
+"#;
+        crate::compile(source, &Default::default()).unwrap();
+    }
+}
