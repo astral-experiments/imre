@@ -43,16 +43,23 @@ fn permute<T>(values: &mut [T], order: &mut [usize]) {
 /// Long path-like strings often share the same leading bytes. For a large
 /// stable sort, find that prefix once before comparing the remaining bytes.
 ///
+pub(super) enum StringSort {
+    Stable { reverse: bool },
+    Distinct,
+}
+
 /// # Safety
 /// Each word is an immutable string rooted for the entire sort.
-unsafe fn sort_strings(values: &mut [usize], reverse: bool) {
+pub(super) unsafe fn sort_strings(values: &mut [usize], mode: StringSort) {
     // SAFETY: the list keeps these owners live, including while they move.
     let bytes = |word: usize| unsafe { (&*(word as *const Str)).as_bytes() };
     let skip = shared_prefix(values.iter().map(|&word| bytes(word)));
-    values.sort_by(|&left, &right| {
-        let order = bytes(left)[skip..].cmp(&bytes(right)[skip..]);
-        if reverse { order.reverse() } else { order }
-    });
+    let compare = |&left: &usize, &right: &usize| bytes(left)[skip..].cmp(&bytes(right)[skip..]);
+    match mode {
+        StringSort::Stable { reverse: false } => values.sort_by(compare),
+        StringSort::Stable { reverse: true } => values.sort_by(|left, right| compare(right, left)),
+        StringSort::Distinct => values.sort_unstable_by(compare),
+    }
 }
 
 /// Returns a byte prefix shared by every key only when its removal pays for a
@@ -251,7 +258,12 @@ pub unsafe extern "C" fn relar_sort_by_keys(
             object(values.cast()).0.with_mut(|storage| {
                 let values = storage.sequence_mut();
                 values.check_kind(key_kind);
-                sort_strings(&mut values.values, reverse != 0);
+                sort_strings(
+                    &mut values.values,
+                    StringSort::Stable {
+                        reverse: reverse != 0,
+                    },
+                );
             });
         }
         return;
@@ -589,7 +601,7 @@ mod tests {
                 expected.sort_by(|a, b| if reverse { b.cmp(a) } else { a.cmp(b) });
                 let mut words: Vec<_> = keys.iter().map(|s| Rc::as_ptr(s) as usize).collect();
                 // SAFETY: keys owns each immutable string until the comparison finishes.
-                unsafe { sort_strings(&mut words, reverse) };
+                unsafe { sort_strings(&mut words, StringSort::Stable { reverse }) };
                 assert!(
                     expected
                         .into_iter()

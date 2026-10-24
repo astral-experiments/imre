@@ -1274,28 +1274,36 @@ pub unsafe extern "C" fn relar_sorted_string_keys(
         }
         // SAFETY: duplicate handles are skipped, so each nested read is of a
         // distinct immutable table. Only acquired string owners escape the reads.
-        unsafe {
+        let gathered = unsafe {
             object(source).0.with(|storage| {
                 let table = strings(storage);
                 result
                     .values
-                    .reserve(table.index.len().saturating_sub(result.values.len()));
+                    .try_reserve(table.index.len().saturating_sub(result.values.len()))
+                    .ok()?;
                 for entry in table.entries.iter().flatten() {
                     if !previous.iter().any(|&other| {
                         object(other).0.with(|storage| {
                             strings(storage).position(entry.hash, &entry.key).is_some()
                         })
                     }) {
+                        // Disjoint inputs can exceed the initial reservation.
+                        result.values.try_reserve(1).ok()?;
                         result.values.push(entry.key.clone().into_word());
                     }
                 }
-            });
+                Some(())
+            })
+        };
+        if gathered.is_none() {
+            super::exceptions::sequence_allocation_failed();
+            return std::ptr::null();
         }
     }
-    let list = Rc::into_raw(result.into_object());
-    // SAFETY: the freshly materialized list owns every exact string.
-    unsafe { super::stdlib::relar_sort_by_keys(list.cast(), 3, list.cast(), 3, 0) };
-    list
+    // SAFETY: the buffer owns every exact string. Its keys are distinct so their
+    // relative order needs no stable-sort scratch allocation.
+    unsafe { super::stdlib::sort_strings(&mut result.values, super::stdlib::StringSort::Distinct) };
+    Rc::into_raw(result.into_object())
 }
 
 /// Creates a fresh set from two evaluated key views or sets. A direct view
