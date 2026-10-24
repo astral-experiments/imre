@@ -1039,11 +1039,14 @@ impl Emitter<'_, '_> {
         })
     }
 
+    fn owns_slot(&self, slot: usize) -> bool {
+        !self.borrowed_params[slot] && !self.borrowed_locals[slot]
+    }
+
     /// Transfers a local's ownership to the returned value and leaves a valid
     /// empty/immediate value behind for subsequent reassignment or cleanup.
     fn take_slot(&mut self, slot: usize) -> Value {
-        debug_assert!(!self.borrowed_params[slot]);
-        debug_assert!(!self.borrowed_locals[slot]);
+        debug_assert!(self.owns_slot(slot));
         let value = self.borrow_slot(slot);
         self.line(format!(
             "store {} {}, ptr %local{slot}",
@@ -1487,7 +1490,7 @@ impl Emitter<'_, '_> {
                 break;
             }
             if let Some(next) = statements.peek()
-                && self.append_pair(statement, next)
+                && (self.move_cleared_local(statement, next) || self.append_pair(statement, next))
             {
                 statements.next();
             } else {
@@ -1501,6 +1504,21 @@ impl Emitter<'_, '_> {
                 "statement changed its enclosing expression owners"
             );
         }
+    }
+
+    /// A copy immediately followed by clearing its private source transfers one owner.
+    fn move_cleared_local(&mut self, first: &Statement, second: &Statement) -> bool {
+        if let Statement::Assign(target, value) = first
+            && let ExprKind::Local(source) = value.kind
+            && matches!(second, Statement::Clear(slot) if *slot == source)
+            && *target != source
+            && self.owns_slot(source)
+            && self.owns_slot(*target)
+        {
+            self.statement(&Statement::Move(*target, source));
+            return true;
+        }
+        false
     }
 
     /// Combines two appends whose already-evaluated operands cannot change.
@@ -1983,6 +2001,15 @@ impl Emitter<'_, '_> {
             ExprKind::Scope { body, value, clear } => {
                 self.cleanups.push(Cleanup::Slots(clear.clone()));
                 self.block(body);
+                // Unpacking returns a captured item and clears its slot before
+                // evaluating the next target. Hand its owner to the result.
+                if let ExprKind::Local(slot) = value.kind
+                    && clear.as_slice() == [slot]
+                    && self.owns_slot(slot)
+                {
+                    self.cleanups.pop();
+                    return self.take_slot(slot);
+                }
                 let value = self.expr(value);
                 self.cleanups.pop();
                 self.clear_slots(clear);
@@ -5436,6 +5463,57 @@ mod tests {
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn adjacent_local_handoffs_emit_a_move() {
+        use crate::ir::{Expr, ExprKind, Statement, Type};
+
+        let local = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Local(0),
+        };
+        let graph = crate::modules::SourceGraph::single(
+            "def transfer(source: str, target: str) -> str:\n    return target\n",
+        )
+        .unwrap();
+        let emit = |handoff: Vec<Statement>| {
+            let mut module = crate::frontend::lower(&graph).unwrap();
+            module.functions[0].body.splice(..0, handoff);
+            let ranges = crate::ranges::analyze(&module);
+            super::emit(&module, &ranges, false).unwrap()
+        };
+        let moved = emit(vec![Statement::Move(1, 0)]);
+        let copy = Statement::Assign(1, local.clone());
+        assert_eq!(emit(vec![copy.clone(), Statement::Clear(0)]), moved);
+        let take = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Scope {
+                body: vec![],
+                value: Box::new(local.clone()),
+                clear: vec![0],
+            },
+        };
+        assert_eq!(emit(vec![Statement::Assign(1, take)]), moved);
+
+        // A read between the copy and clear still observes the source owner.
+        let read = Statement::Expr(Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(crate::ir::Builtin::Len, vec![local.clone()]),
+        });
+        let separated = emit(vec![copy, read, Statement::Clear(0)]);
+        assert_eq!(
+            separated.matches("call void @relar_str_retain(").count(),
+            moved.matches("call void @relar_str_retain(").count() + 1
+        );
+
+        // A self-assignment followed by clear must leave the source empty.
+        let own_copy = emit(vec![Statement::Assign(0, local), Statement::Clear(0)]);
+        let just_clear = emit(vec![Statement::Clear(0)]);
+        assert_eq!(
+            own_copy.matches("call void @relar_str_retain(").count(),
+            just_clear.matches("call void @relar_str_retain(").count() + 1
+        );
     }
 
     #[test]
