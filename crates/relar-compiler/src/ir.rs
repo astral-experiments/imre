@@ -412,6 +412,8 @@ pub(crate) enum Builtin {
     ListDistinct,
     StringGet,
     StringIter,
+    /// Iterates Python line boundaries on a rooted immutable string.
+    SplitLinesIter,
     /// Linear Unicode iteration from the final code point toward the first.
     StringReverseIter,
     /// Private, initially zeroed tuple storage for iterator result caching.

@@ -217,6 +217,7 @@ impl Builtin {
             | Self::SortDetach
             | Self::SortedRecordRows { .. }
             | Self::SortedStringKeys
+            | Self::SplitLinesIter
             | Self::StringIter
             | Self::StringReverseIter
             | Self::TextClosed
@@ -280,6 +281,7 @@ impl Builtin {
                 if types.element(left.ty).is_some() && types.element(right.ty).is_some() && result == Type::Bool),
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
+            Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
             Self::TupleCacheNew => args.is_empty() && matches!(result, Type::Tuple(_)),
             Self::TupleCacheResult => matches!(args, [value]
                 if matches!(value.kind, ExprKind::Local(_)) && matches!(result, Type::Tuple(_)) && value.ty == result),

@@ -1364,6 +1364,7 @@ pub unsafe extern "C" fn relar_mapping_iter_next(
     let next = unsafe {
         object(value).0.with_mut(|storage| match storage {
             Storage::StringIterator(iterator) => Ok(iterator.next()),
+            Storage::LineIterator(iterator) => Ok(iterator.next()),
             Storage::BytesIterator(iterator) => Ok(iterator.next()),
             _ => storage.mapping_iterator_mut().next(),
         })
