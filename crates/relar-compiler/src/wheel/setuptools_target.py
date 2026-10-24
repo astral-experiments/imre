@@ -50,7 +50,7 @@ def _archive(output, inputs):
 
 def _target_headers(command, include, host_headers):
     # setuptools puts flags from CFLAGS/CPPFLAGS *before* Extension.include_dirs.
-    # Retarget the final C/C++ compiler invocation, including split -I arguments.
+    # Retarget C/C++ command arguments, including split -I arguments.
     result = []
     args = iter(command)
     for arg in args:
@@ -99,15 +99,22 @@ def install_target(include_dir, overlay_dir=None, system_libraries=()):
             Path(sysconfig.get_path(name)).resolve()
             for name in ("include", "platinclude")
         }
-        upstream_spawn = compiler.spawn
 
-        def spawn(command, **kwargs):
-            if "-c" in command:
-                command = _target_headers(command, include, host_headers)
-            return upstream_spawn(command, **kwargs)
+        def target_dirs(dirs):
+            return [
+                str(include),
+                *(p for p in dirs if Path(p).resolve() not in host_headers),
+            ]
 
-        compiler.spawn = spawn
-        compiler.add_include_dir(str(include))
+        compiler.set_include_dirs(target_dirs(compiler.include_dirs))
+        for ext in self.extensions:
+            ext.include_dirs = target_dirs(ext.include_dirs)
+            ext.extra_compile_args = _target_headers(
+                ext.extra_compile_args, include, host_headers
+            )
+        for name in ("compiler_so", "compiler_so_cxx", "compiler_cxx"):
+            if flags := getattr(compiler, name, None):
+                setattr(compiler, name, _target_headers(flags, include, host_headers))
         self.force = compiler.force = True
 
         def link(
