@@ -620,19 +620,31 @@ impl Mapping {
 
     /// # Safety
     /// Both tables and all values are rooted and immutable for this traversal.
-    pub(super) unsafe fn equal(&self, other: &Self) -> bool {
-        self.tables.key_kind() == other.tables.key_kind()
-            && self.value_kind == other.value_kind
-            && self.tables.len() == other.tables.len()
-            && self.tables.all(|key, left| {
-                // SAFETY: the key kind matches, and both tables root their values.
-                unsafe {
-                    other
-                        .tables
-                        .lookup(key)
-                        .is_some_and(|right| super::values::equal(left, right, self.value_kind))
-                }
-            })
+    pub(super) unsafe fn compare_entry(
+        &self,
+        other: &Self,
+        position: usize,
+    ) -> super::values::Comparison {
+        use super::values::Comparison;
+        if self.tables.key_kind() != other.tables.key_kind()
+            || self.value_kind != other.value_kind
+            || self.tables.len() != other.tables.len()
+        {
+            return Comparison::Done(false);
+        }
+        let Some((next, key, left)) = self.tables.next(position) else {
+            return Comparison::Done(true);
+        };
+        // SAFETY: table kinds match and both tables retain their entries.
+        match unsafe { other.tables.lookup(key.word) } {
+            Some(right) => Comparison::Child {
+                left,
+                right,
+                kind: self.value_kind,
+                resume: Some(next),
+            },
+            None => Comparison::Done(false),
+        }
     }
 
     /// # Safety
