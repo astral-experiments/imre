@@ -3722,11 +3722,15 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::ListReserveRange if args[0].value.ty == Type::ByteOutput => none(),
             Builtin::ListReserveRange => {
                 let count = self.index_word(&args[4].value, true);
+                let name = if args[0].value.ty == Type::ByteOutput {
+                    "relar_byte_output_reserve_range"
+                } else {
+                    "relar_list_reserve_range"
+                };
                 self.line(format!(
-                    "call void @relar_list_reserve_range(ptr {}, i64 {}, i64 {}, i64 {}, i64 {count})",
+                    "call void @{name}(ptr {}, i64 {}, i64 {}, i64 {}, i64 {count})",
                     args[0].value.operand,
                     args[1].value.operand,
                     args[2].value.operand,
@@ -4916,6 +4920,7 @@ declare ptr @relar_bytes_slice(ptr, i64, i64, i64)
 declare ptr @relar_bytes_count(i64)
 declare ptr @relar_bytes_list(ptr)
 declare ptr @relar_byte_output_new()
+declare void @relar_byte_output_reserve_range(ptr, i64, i64, i64, i64)
 declare void @relar_byte_output_append(ptr, i64)
 declare void @relar_byte_output_append_pair(ptr, i64, i64)
 declare ptr @relar_byte_output_finish(ptr)

@@ -35,6 +35,37 @@ pub extern "C" fn relar_byte_output_new() -> *const Object {
     )))))
 }
 
+/// Hints at most 256 bytes per private buffer. A loop can break or raise before
+/// filling its output, and a failed hint must leave the next append unchanged.
+///
+/// # Safety
+/// Root the private builder and all three canonical range arguments.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_byte_output_reserve_range(
+    output: *const Object,
+    start: usize,
+    stop: usize,
+    step: usize,
+    per_iteration: usize,
+) {
+    // SAFETY: the caller supplies the same captured operands as the range loop.
+    let Some(trips) = (unsafe { crate::small_range_trips(start, stop, step) }) else {
+        return;
+    };
+    let capacity = trips.saturating_mul(per_iteration).min(256);
+    // SAFETY: the private output is rooted and no storage borrow escapes.
+    unsafe {
+        super::object(output).0.with_mut(|storage| {
+            let Storage::ByteOutput(output) = storage else {
+                unreachable!()
+            };
+            if output.bytes.is_empty() && output.bytes.capacity() < capacity {
+                let _ = output.bytes.try_reserve_exact(capacity);
+            }
+        });
+    }
+}
+
 /// # Safety
 /// Root the private output and its canonical integer arguments for this call.
 unsafe fn append_bytes<const N: usize>(output: *const Object, words: [usize; N]) {
@@ -673,6 +704,14 @@ mod tests {
         // SAFETY: the sole owner roots this private builder through conversion.
         unsafe {
             let output = Rc::from_raw(relar_byte_output_new());
+            relar_byte_output_reserve_range(Rc::as_ptr(&output), 1, 2001, 3, usize::MAX);
+            output.0.with(|storage| {
+                let Storage::ByteOutput(output) = storage else {
+                    unreachable!()
+                };
+                assert_eq!(output.bytes.capacity(), 256);
+                assert!(output.bytes.is_empty());
+            });
             relar_byte_output_append_pair(Rc::as_ptr(&output), 1, 511);
             let buffer = output.0.with(|storage| {
                 let Storage::ByteOutput(output) = storage else {
