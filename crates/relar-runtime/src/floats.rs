@@ -96,16 +96,36 @@ pub unsafe extern "C" fn relar_int_float(value: usize) -> f64 {
 }
 
 pub(super) fn int_to_float(value: &Int) -> Result<f64> {
-    let converted = value
-        .as_small()
-        .map_or_else(|| value.big().to_f64().unwrap(), |value| value as f64);
-    if converted.is_infinite() {
+    if let Some(value) = value.as_small() {
+        return Ok(value as f64);
+    }
+    let value = value.big();
+    let mut digits = value.magnitude().iter_u64_digits().rev();
+    let magnitude = match digits.len() {
+        0 | 1 => digits.next().unwrap_or(0) as f64,
+        2..=16 => {
+            let high = u128::from(digits.next().unwrap());
+            let low = u128::from(digits.next().unwrap());
+            let shift = 64 * digits.len() as i32;
+            // The top two words contain more than 53 bits. A nonzero tail
+            // distinguishes an exact midpoint from a value just above it.
+            let sticky = u128::from(digits.any(|digit| digit != 0));
+            ((high << 64 | low | sticky) as f64) * 2.0_f64.powi(shift)
+        }
+        // More than 1024 magnitude bits always exceed the finite binary64 range.
+        _ => f64::INFINITY,
+    };
+    if magnitude.is_infinite() {
         Err(Error::new(
             Kind::OverflowError,
             "int too large to convert to float",
         ))
     } else {
-        Ok(converted)
+        Ok(if value.is_negative() {
+            -magnitude
+        } else {
+            magnitude
+        })
     }
 }
 
