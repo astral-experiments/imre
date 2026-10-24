@@ -26,6 +26,8 @@ const JEMALLOC_RUNTIME: &str = "librelar_runtime_jemalloc.a";
 const PYTHON_HEADER: &str = include_str!("../../relar-runtime/include/Python.h");
 
 const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY]
+       relar [-I] [-B] -c COMMAND [ARGUMENTS...]
+       relar [-I] [-B] SOURCE.py [ARGUMENTS...]
        relar extension-header
        relar build-target [--output-dir DIRECTORY]
        relar wheel PROJECT [--out-dir DIR] [--overlay DIR] [--python PYTHON]
@@ -89,17 +91,32 @@ fn run() -> Result<ExitCode, String> {
     if command == "build-target" {
         return wheel::report(args);
     }
-    let execute = command == "run";
-    if command != "build" && command != "check" && !execute {
-        return Err(USAGE.to_owned());
-    }
-    if args
-        .peek()
-        .is_some_and(|arg| arg == "--help" || arg == "-h")
-    {
-        println!("{USAGE}");
-        return Ok(ExitCode::SUCCESS);
-    }
+    let build_options = if command == "run" || command == "build" || command == "check" {
+        if args
+            .peek()
+            .is_some_and(|arg| arg == "--help" || arg == "-h")
+        {
+            println!("{USAGE}");
+            return Ok(ExitCode::SUCCESS);
+        }
+        BuildOptions::parse(&command, &mut args)?
+    } else {
+        let invocation = match cli::python_invocation(command.clone(), &mut args) {
+            Ok(invocation) => invocation,
+            Err(message) => {
+                eprintln!("{message}");
+                return Ok(ExitCode::from(2));
+            }
+        };
+        if let relar_compiler::PythonSource::Script(path) = &invocation.source
+            && let Err(error) = std::fs::metadata(path)
+        {
+            eprintln!("relar: can't open file {}: {error}", path.display());
+            return Ok(ExitCode::from(2));
+        }
+        BuildOptions::for_python(invocation)?
+    };
+    let execute = command == "run" || build_options.compile.python.is_some();
     let BuildOptions {
         source_path,
         help,
@@ -117,7 +134,7 @@ fn run() -> Result<ExitCode, String> {
         optimization,
         compile: options,
         link,
-    } = BuildOptions::parse(&command, &mut args)?;
+    } = build_options;
     if help {
         println!("{USAGE}");
         return Ok(ExitCode::SUCCESS);
@@ -214,7 +231,7 @@ fn run() -> Result<ExitCode, String> {
         .filter(|_| !no_cache && options.extension_paths.is_empty())
         .and_then(|native| {
             build_cache::Cache::open(
-                &source_path,
+                (&source_path, options.python.as_ref()),
                 module_root.as_deref(),
                 &optimization,
                 &runtime,
@@ -244,7 +261,7 @@ fn run() -> Result<ExitCode, String> {
             progress.cached(label);
             if execute {
                 progress.running(&source_path);
-                return run_program(&output, &source_path, args);
+                return run_program(&output, &source_path, args, options.python.is_some());
             }
             return Ok(ExitCode::SUCCESS);
         }
@@ -446,7 +463,7 @@ fn run() -> Result<ExitCode, String> {
         drop(temporary);
         drop(scratch);
         drop(stage);
-        return run_program(&output, &source_path, args);
+        return run_program(&output, &source_path, args, options.python.is_some());
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -531,8 +548,15 @@ fn run_program(
     output: &Path,
     source: &Path,
     args: impl Iterator<Item = OsString>,
+    python: bool,
 ) -> Result<ExitCode, String> {
     let mut program = Command::new(output);
+    if python {
+        program.env(
+            "RELAR_PYTHON",
+            std::env::current_exe().map_err(|e| e.to_string())?,
+        );
+    }
     #[cfg(unix)]
     program.arg0(source);
     // An ELF interpreter may reopen the executable after spawn returns.

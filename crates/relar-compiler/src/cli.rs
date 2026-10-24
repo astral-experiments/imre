@@ -2,7 +2,7 @@ use std::env;
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
-use relar_compiler::CompileOptions;
+use relar_compiler::{CompileOptions, PythonInvocation, PythonSource};
 
 use super::build_output::Verbosity;
 use super::{Allocator, USAGE};
@@ -44,19 +44,50 @@ pub(super) enum Relro {
 }
 
 impl BuildOptions {
+    fn defaults() -> Self {
+        Self {
+            clang: cfg!(target_os = "macos").then(|| OsString::from("clang")),
+            optimization: "3".into(),
+            ..Self::default()
+        }
+    }
+
     pub fn parse(
         command: &OsStr,
         args: &mut impl Iterator<Item = OsString>,
     ) -> Result<Self, String> {
-        let mut options = Self {
-            clang: cfg!(target_os = "macos").then(|| OsString::from("clang")),
-            optimization: "3".into(),
-            ..Self::default()
-        };
+        let mut options = Self::defaults();
         if command != "check" {
             options.read(command, &mut environment_flags()?.into_iter(), false)?;
         }
         options.read(command, args, true)?;
+        Ok(options)
+    }
+
+    pub fn for_python(invocation: PythonInvocation) -> Result<Self, String> {
+        let mut options = Self {
+            verbosity: Verbosity::Quiet,
+            source_path: Some(invocation.argv0().to_owned()),
+            ..Self::defaults()
+        };
+        if !invocation.isolated {
+            options.read(
+                OsStr::new("run"),
+                &mut environment_flags()?.into_iter(),
+                false,
+            )?;
+            if let Some(paths) = env::var_os("PYTHONPATH") {
+                for mut path in env::split_paths(&paths) {
+                    if path.as_os_str().is_empty() {
+                        path.push(".");
+                    }
+                    if path.is_dir() {
+                        options.compile.extension_paths.push(path);
+                    }
+                }
+            }
+        }
+        options.compile.python = Some(invocation);
         Ok(options)
     }
 
@@ -126,6 +157,68 @@ impl BuildOptions {
         }
         Ok(())
     }
+}
+
+/// Stop parsing as soon as the command string or script is known. Every remaining
+/// argument, including an option or a literal "--", belongs to the Python program.
+pub(super) fn python_invocation(
+    mut arg: OsString,
+    args: &mut impl Iterator<Item = OsString>,
+) -> Result<PythonInvocation, String> {
+    let mut isolated = false;
+    let mut dont_write_bytecode = false;
+    let source = 'options: loop {
+        if arg == "--" {
+            break PythonSource::Script(args.next().ok_or("expected script after --")?.into());
+        }
+        if !arg.as_encoded_bytes().starts_with(b"-") {
+            break PythonSource::Script(arg.into());
+        }
+        if arg == "-" {
+            return Err("reading a Python program from standard input is unsupported".into());
+        }
+        let mut flags = arg.to_str().ok_or("interpreter options must be UTF-8")?[1..].chars();
+        while let Some(flag) = flags.next() {
+            match flag {
+                'I' => isolated = true,
+                'B' => dont_write_bytecode = true,
+                'c' => {
+                    let code = if flags.as_str().is_empty() {
+                        args.next()
+                            .ok_or("-c requires a command string")?
+                            .into_string()
+                            .map_err(|_| "-c requires UTF-8 source")?
+                    } else {
+                        flags.as_str().to_owned()
+                    };
+                    break 'options PythonSource::Command(code);
+                }
+                _ => return Err(format!("Unknown interpreter option: -{flag}\n{USAGE}")),
+            }
+        }
+        arg = args.next().ok_or(USAGE)?;
+    };
+    if !isolated && python_env_flag("PYTHONDONTWRITEBYTECODE") {
+        dont_write_bytecode = true;
+    }
+    Ok(PythonInvocation {
+        source,
+        isolated,
+        safe_path: isolated || env::var_os("PYTHONSAFEPATH").is_some_and(|v| !v.is_empty()),
+        no_user_site: isolated || python_env_flag("PYTHONNOUSERSITE"),
+        dont_write_bytecode,
+    })
+}
+
+/// Python's integer-valued environment flags accept a nonnumeric string as true.
+fn python_env_flag(name: &str) -> bool {
+    env::var_os(name).is_some_and(|value| {
+        !value.is_empty()
+            && value
+                .to_str()
+                .and_then(|s| s.trim_ascii_start().parse::<i32>().ok())
+                != Some(0)
+    })
 }
 
 impl LinkOptions {

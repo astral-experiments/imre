@@ -12,7 +12,7 @@ enum Shape {
     Dict(Type, Type),
     DefaultListDict(Type, Type),
     Set(Type),
-    Tuple(Vec<Type>),
+    Tuple(Vec<Type>, Option<&'static [&'static str]>),
     Callable(Vec<Type>, Type),
     Optional(Type),
     Union(Vec<Type>),
@@ -237,7 +237,27 @@ impl Types {
     }
 
     pub(crate) fn tuple(&self, elements: Vec<Type>) -> Type {
-        Type::Tuple(self.intern(Shape::Tuple(elements)))
+        Type::Tuple(self.intern(Shape::Tuple(elements, None)))
+    }
+
+    /// Both interpreter versions have the same named, read-only tuple layout.
+    pub(crate) fn version_info(&self) -> Type {
+        Type::Tuple(self.intern(Shape::Tuple(
+            vec![Type::Int, Type::Int, Type::Int, Type::Str, Type::Int],
+            Some(&["major", "minor", "micro", "releaselevel", "serial"]),
+        )))
+    }
+
+    pub(crate) fn named_tuple_field(&self, ty: Type, name: &str) -> Option<(usize, Type)> {
+        let Type::Tuple(id) = ty else {
+            return None;
+        };
+        let storage = self.0.borrow();
+        let Shape::Tuple(fields, Some(names)) = &storage.shapes[id] else {
+            return None;
+        };
+        let index = names.iter().position(|&field| field == name)?;
+        Some((index, fields[index]))
     }
 
     /// Callable types describe full positional calls; names and defaults remain
@@ -307,7 +327,7 @@ impl Types {
             return None;
         };
         match &self.0.borrow().shapes[id] {
-            Shape::Tuple(fields) => Some(fields.clone()),
+            Shape::Tuple(fields, _) => Some(fields.clone()),
             _ => unreachable!("tuple type identity has a tuple shape"),
         }
     }
@@ -320,7 +340,7 @@ impl Types {
             .iter()
             .enumerate()
             .filter_map(|(id, shape)| match shape {
-                Shape::Tuple(fields) => Some((Type::Tuple(id), fields.clone())),
+                Shape::Tuple(fields, _) => Some((Type::Tuple(id), fields.clone())),
                 _ => None,
             })
             .collect()

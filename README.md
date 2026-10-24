@@ -19,6 +19,21 @@ $ ./hello
 Hello, world!
 ```
 
+You can also run the file or a command string directly. Both compile to native code.
+
+```console
+$ relar hello.py
+Hello, world!
+$ relar -I -B -c 'import sys; print(sys.implementation.name)'
+relar
+$ uv python find relar
+/path/to/bin/relar
+```
+
+For discovery, put `relar` on `PATH`. Stock uv runs its Python probe under Relar
+to find the executable. For building and installing extension wheels, see the
+[uv build instructions](docs/extensions.md#build-with-uv).
+
 > [!WARNING]
 > This README includes human edits; all code changes, PR summaries, and additional
 > documentation were authored entirely by GPT-6 Astra in [Codex](https://openai.com/codex/).

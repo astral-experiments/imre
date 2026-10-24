@@ -11,7 +11,9 @@ mod args;
 mod bytes;
 pub(crate) mod exceptions;
 mod files;
+pub(crate) mod interpreter_stdlib;
 mod json;
+pub(crate) use json::write_string as write_json_string;
 mod mappings;
 mod paths;
 mod processes;
@@ -22,6 +24,7 @@ mod stdlib;
 mod string_enums;
 mod tempdirs;
 mod text;
+pub(crate) use text::split_parts;
 mod unions;
 mod values;
 mod words;
@@ -773,7 +776,7 @@ unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Str {
 }
 
 /// Python also treats the four ASCII information separators as whitespace.
-fn python_whitespace(value: char) -> bool {
+pub(crate) fn python_whitespace(value: char) -> bool {
     value.is_whitespace() || matches!(value, '\u{001c}'..='\u{001f}')
 }
 
@@ -849,7 +852,7 @@ pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Objec
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { &*value };
     let mut result = Words::new(3);
-    let mut push = |part: &str| {
+    split_lines(value, false, |part| {
         result
             .values
             .try_reserve(1)
@@ -857,14 +860,19 @@ pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Objec
         result
             .values
             .push(Rc::into_raw(Rc::new(Str::new(part))) as usize);
-    };
+    });
+    Rc::into_raw(result.into_object())
+}
+
+/// Visit Python line boundaries, treating CRLF as one and dropping a final empty field.
+pub(crate) fn split_lines<'a>(value: &'a str, keep_ends: bool, mut push: impl FnMut(&'a str)) {
     let single = value
         .strip_suffix("\r\n")
         .or_else(|| value.strip_suffix(['\r', '\n']))
         .unwrap_or(value);
     if !value.is_empty() && plain_ascii_line(single.as_bytes()) {
-        push(single);
-        return Rc::into_raw(result.into_object());
+        push(if keep_ends { value } else { single });
+        return;
     }
     let mut start = 0;
     let bytes = value.as_bytes();
@@ -876,11 +884,9 @@ pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Objec
     if ordinary {
         while let Some(offset) = memchr::memchr2(b'\r', b'\n', &bytes[start..]) {
             let at = start + offset;
-            push(&value[start..at]);
-            start = at + 1;
-            if bytes[at] == b'\r' && bytes.get(start) == Some(&b'\n') {
-                start += 1;
-            }
+            let end = at + 1 + usize::from(bytes[at] == b'\r' && bytes.get(at + 1) == Some(&b'\n'));
+            push(&value[start..if keep_ends { end } else { at }]);
+            start = end;
         }
     } else {
         let mut chars = value.char_indices().peekable();
@@ -897,19 +903,19 @@ pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Objec
                     | '\u{2028}'
                     | '\u{2029}'
             ) {
-                push(&value[start..at]);
-                start = at + character.len_utf8();
+                let mut end = at + character.len_utf8();
                 if character == '\r' && chars.peek().is_some_and(|(_, next)| *next == '\n') {
                     chars.next();
-                    start += 1;
+                    end += 1;
                 }
+                push(&value[start..if keep_ends { end } else { at }]);
+                start = end;
             }
         }
     }
     if start < value.len() {
         push(&value[start..]);
     }
-    Rc::into_raw(result.into_object())
 }
 
 #[cfg(test)]

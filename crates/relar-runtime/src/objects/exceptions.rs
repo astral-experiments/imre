@@ -212,6 +212,10 @@ impl Error {
         }
     }
 
+    pub(crate) fn into_parts(self) -> (&'static str, Str) {
+        (self.kind.name(), self.message)
+    }
+
     pub(crate) fn index() -> Self {
         Self::new(Kind::IndexError, "list index out of range")
     }
@@ -625,7 +629,13 @@ pub extern "C" fn relar_error_unhandled() -> i32 {
             if message.is_empty() {
                 return 0;
             }
-            return message.parse::<i64>().unwrap_or(-1) as i32;
+            return message.parse::<i64>().map_or_else(
+                |_| {
+                    eprintln!("OverflowError: Python int too large to convert to C long");
+                    -1
+                },
+                |code| code as i32,
+            );
         }
         chain.push((kind, message));
         current = cause;

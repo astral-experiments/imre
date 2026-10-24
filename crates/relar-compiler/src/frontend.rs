@@ -3398,6 +3398,43 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::Executable), vec![]),
             });
         }
+        match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::SysVersionInfo)) => {
+                return Ok(self.version_info(crate::LANGUAGE_VERSION));
+            }
+            Some(Binding::Intrinsic(Intrinsic::ImplementationVersion)) => {
+                return Ok(self.version_info(crate::implementation_version()));
+            }
+            Some(Binding::Intrinsic(Intrinsic::ImplementationName)) => {
+                return Ok(unpacking::string(crate::IMPLEMENTATION_NAME));
+            }
+            Some(Binding::Intrinsic(Intrinsic::ImplementationCacheTag)) => {
+                // Relar's native build cache does not produce Python bytecode.
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                });
+            }
+            Some(Binding::Intrinsic(Intrinsic::PythonFlag(flag))) => {
+                use crate::modules::PythonFlag;
+                let (ty, set) = match flag {
+                    PythonFlag::Isolated => (Type::Int, self.graph.isolated),
+                    PythonFlag::SafePath => (Type::Bool, self.graph.safe_path),
+                    PythonFlag::NoUserSite => (Type::Int, self.graph.no_user_site),
+                    PythonFlag::DontWriteBytecode => (Type::Bool, self.graph.dont_write_bytecode),
+                    PythonFlag::DontWriteBytecodeFlag => {
+                        (Type::Int, self.graph.dont_write_bytecode)
+                    }
+                };
+                let kind = if ty == Type::Bool {
+                    ExprKind::Bool(set)
+                } else {
+                    ExprKind::Int(u8::from(set).to_string())
+                };
+                return Ok(Expr { ty, kind });
+            }
+            _ => {}
+        }
         let (ty, kind) = match expression {
             ast::Expr::NumberLiteral(value) => match &value.value {
                 ast::Number::Int(value) => (Type::Int, ExprKind::Int(value.to_string())),
@@ -3439,6 +3476,9 @@ impl<'a> Checker<'a> {
                 ExprKind::Str(
                     self.graph
                         .module_filename(self.module)
+                        .ok_or_else(|| {
+                            error(self.source, expression, "__file__ is not defined for -c")
+                        })?
                         .to_string_lossy()
                         .into_owned(),
                 ),
@@ -3885,6 +3925,15 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Some((field, ty)) = self
+                    .types
+                    .named_tuple_field(receiver.ty, attribute.attr.as_str())
+                {
+                    return Ok(Expr {
+                        ty,
+                        kind: ExprKind::Field(Box::new(receiver), field),
+                    });
+                }
                 if let Type::StrEnum(class) = receiver.ty {
                     match attribute.attr.as_str() {
                         "name" => {

@@ -48,6 +48,8 @@ pub(crate) enum IntrinsicModule {
     Argparse,
     Future,
     Sys,
+    SysImplementation,
+    SysFlags,
     Typing,
     Dataclasses,
     Pathlib,
@@ -81,7 +83,12 @@ pub(crate) enum Intrinsic {
     FutureAnnotations,
     Stderr,
     SysExecutable,
+    PythonFlag(PythonFlag),
     SysExit,
+    SysVersionInfo,
+    ImplementationVersion,
+    ImplementationName,
+    ImplementationCacheTag,
     ShlexSplit,
     Final,
     Argv,
@@ -131,6 +138,15 @@ pub(crate) enum Intrinsic {
     Unquote,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PythonFlag {
+    Isolated,
+    NoUserSite,
+    SafePath,
+    DontWriteBytecode,
+    DontWriteBytecodeFlag,
+}
+
 impl IntrinsicModule {
     fn named(name: &str) -> Option<Self> {
         match name {
@@ -165,6 +181,12 @@ impl IntrinsicModule {
     }
 
     fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::Sys && name == "implementation" {
+            return Some(Binding::IntrinsicModule(Self::SysImplementation));
+        }
+        if self == Self::Sys && name == "flags" {
+            return Some(Binding::IntrinsicModule(Self::SysFlags));
+        }
         if self == Self::Urllib && name == "parse" {
             return Some(Binding::IntrinsicModule(Self::UrllibParse));
         }
@@ -187,7 +209,22 @@ impl IntrinsicModule {
             }
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
+            (Self::Sys, "dont_write_bytecode") => {
+                Intrinsic::PythonFlag(PythonFlag::DontWriteBytecode)
+            }
+            (Self::SysFlags, "isolated" | "ignore_environment") => {
+                Intrinsic::PythonFlag(PythonFlag::Isolated)
+            }
+            (Self::SysFlags, "no_user_site") => Intrinsic::PythonFlag(PythonFlag::NoUserSite),
+            (Self::SysFlags, "safe_path") => Intrinsic::PythonFlag(PythonFlag::SafePath),
+            (Self::SysFlags, "dont_write_bytecode") => {
+                Intrinsic::PythonFlag(PythonFlag::DontWriteBytecodeFlag)
+            }
             (Self::Sys, "exit") => Intrinsic::SysExit,
+            (Self::Sys, "version_info") => Intrinsic::SysVersionInfo,
+            (Self::SysImplementation, "name") => Intrinsic::ImplementationName,
+            (Self::SysImplementation, "cache_tag") => Intrinsic::ImplementationCacheTag,
+            (Self::SysImplementation, "version") => Intrinsic::ImplementationVersion,
             (Self::Shlex, "split") => Intrinsic::ShlexSplit,
             (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
@@ -277,18 +314,22 @@ pub(crate) struct SourceGraph {
     pub(crate) modules: Vec<SourceModule>,
     pub(crate) entry: ModuleId,
     /// The absolute entry spelling used for Python's `__file__`.
-    entry_filename: PathBuf,
+    entry_filename: Option<PathBuf>,
+    pub(crate) isolated: bool,
+    pub(crate) safe_path: bool,
+    pub(crate) no_user_site: bool,
+    pub(crate) dont_write_bytecode: bool,
     /// Imports precede executable statements, so dependency completion order
     /// also gives Python's module initialization order.
     pub(crate) initialization: Vec<ModuleId>,
 }
 
 impl SourceGraph {
-    pub(crate) fn module_filename(&self, module: ModuleId) -> &Path {
+    pub(crate) fn module_filename(&self, module: ModuleId) -> Option<&Path> {
         if module == self.entry {
-            &self.entry_filename
+            self.entry_filename.as_deref()
         } else {
-            &self.modules[module].path
+            Some(&self.modules[module].path)
         }
     }
 
@@ -314,14 +355,39 @@ impl SourceGraph {
             source,
         )?;
         loader.scan(entry)?;
-        loader.finish(entry, filename)
+        loader.finish(entry, Some(filename), None)
     }
 
     pub(crate) fn load(
         entry: &Path,
         module_root: Option<&Path>,
         extension_paths: &[PathBuf],
+        python: Option<&crate::PythonInvocation>,
     ) -> Result<Self, String> {
+        let safe_path = python.is_some_and(|invocation| invocation.safe_path);
+        if let Some(crate::PythonSource::Command(code)) =
+            python.map(|invocation| &invocation.source)
+        {
+            let root = std::env::current_dir().map_err(|err| err.to_string())?;
+            // ty needs an absolute source identity. Command text has no on-disk file or __file__.
+            let virtual_path = root.join("<string>.py");
+            let mut loader = Loader::new(root, extension_paths)?;
+            loader.allow_imports = !safe_path;
+            let diagnostic =
+                |error: String| error.replace(virtual_path.to_string_lossy().as_ref(), "<string>");
+            let id = loader
+                .add(
+                    virtual_path.clone(),
+                    virtual_path.clone(),
+                    "__main__".into(),
+                    false,
+                    code,
+                )
+                .map_err(diagnostic)?;
+            loader.modules[id].path = PathBuf::from("<string>");
+            loader.scan(id)?;
+            return loader.finish(id, None, python).map_err(diagnostic);
+        }
         // __file__ preserves the invoked spelling, including symlinks and '..'.
         // Use the canonical path below for import resolution and containment.
         let filename = std::env::current_dir()
@@ -333,10 +399,12 @@ impl SourceGraph {
         if entry.extension().and_then(|value| value.to_str()) != Some("py") {
             return Err("entry source must be a .py file".into());
         }
-        if entry.file_name().and_then(|value| value.to_str()) == Some("__init__.py") {
+        if python.is_none()
+            && entry.file_name().and_then(|value| value.to_str()) == Some("__init__.py")
+        {
             return Err("use a program module or package __main__.py as the entry source".into());
         }
-        let inferred = module_root.is_none();
+        let inferred = module_root.is_none() && python.is_none();
         let root = if let Some(root) = module_root {
             root.canonicalize()
                 .map_err(|error| format!("{}: {error}", root.display()))?
@@ -345,7 +413,7 @@ impl SourceGraph {
                 .parent()
                 .ok_or("entry source has no parent")?
                 .to_path_buf();
-            while root.join("__init__.py").is_file() {
+            while inferred && root.join("__init__.py").is_file() {
                 root = root
                     .parent()
                     .ok_or("package has no module root")?
@@ -359,23 +427,26 @@ impl SourceGraph {
         let relative = entry
             .strip_prefix(&root)
             .map_err(|_| "entry source must be inside the module root")?;
-        let name = relative
-            .with_extension("")
-            .components()
-            .map(|part| {
-                part.as_os_str()
-                    .to_str()
-                    .ok_or("module paths must be valid UTF-8")
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .join(".");
-        let source = std::fs::read_to_string(&entry)
-            .map_err(|error| format!("{}: {error}", entry.display()))?;
+        let name = if python.is_some() {
+            "__main__".to_owned()
+        } else {
+            relative
+                .with_extension("")
+                .components()
+                .map(|part| {
+                    part.as_os_str()
+                        .to_str()
+                        .ok_or("module paths must be valid UTF-8")
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .join(".")
+        };
         let mut loader = Loader::new(root, extension_paths)?;
+        loader.allow_imports = !safe_path;
         if inferred {
             loader.inputs.missing.push(loader.root.join("__init__.py"));
         }
-        let id = loader.add(entry.clone(), entry, name.clone(), false, &source)?;
+        let id = loader.add_file(entry.clone(), entry, name.clone(), false)?;
         // Like `python -m package.program`, package initialization precedes the entry.
         // The entry itself is __main__, and is deliberately not attached as a package child.
         if let Some((package, _)) = name.rsplit_once('.') {
@@ -387,7 +458,7 @@ impl SourceGraph {
             }
         }
         loader.scan(id)?;
-        loader.finish(id, filename)
+        loader.finish(id, Some(filename), python)
     }
 
     /// Resolves namespace paths while leaving local-value attributes to the expression checker.
@@ -458,6 +529,23 @@ impl Loader {
         })
     }
 
+    fn add_file(
+        &mut self,
+        path: PathBuf,
+        identity: PathBuf,
+        name: String,
+        is_package: bool,
+    ) -> Result<ModuleId, String> {
+        let source = std::fs::read_to_string(&path)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        self.inputs.files.push((
+            path.clone(),
+            identity.clone(),
+            blake3::hash(source.as_bytes()).to_hex().to_string(),
+        ));
+        self.add(path, identity, name, is_package, &source)
+    }
+
     fn add(
         &mut self,
         path: PathBuf,
@@ -466,11 +554,6 @@ impl Loader {
         is_package: bool,
         source: &str,
     ) -> Result<ModuleId, String> {
-        self.inputs.files.push((
-            path.clone(),
-            identity.clone(),
-            blake3::hash(source.as_bytes()).to_hex().to_string(),
-        ));
         let source = crate::normalize_source(source)
             .map_err(|error| format!("{}: {error}", path.display()))?
             .into_owned();
@@ -494,12 +577,21 @@ impl Loader {
         Ok(id)
     }
 
-    fn finish(mut self, entry: ModuleId, entry_filename: PathBuf) -> Result<SourceGraph, String> {
+    fn finish(
+        mut self,
+        entry: ModuleId,
+        entry_filename: Option<PathBuf>,
+        python: Option<&crate::PythonInvocation>,
+    ) -> Result<SourceGraph, String> {
         self.session.check()?;
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
         Ok(SourceGraph {
             entry_filename,
+            isolated: python.is_some_and(|invocation| invocation.isolated),
+            safe_path: python.is_some_and(|invocation| invocation.safe_path),
+            no_user_site: python.is_some_and(|invocation| invocation.no_user_site),
+            dont_write_bytecode: python.is_some_and(|invocation| invocation.dont_write_bytecode),
             inputs: self.inputs,
             session: self.session,
             modules: self.modules,
@@ -767,8 +859,10 @@ impl Loader {
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
-        if !self.allow_imports {
-            return Err("imports require a source file and a first-party module root".into());
+        if !self.allow_imports && self.extension_roots.is_empty() {
+            return Err(format!(
+                "no import search path for first-party module {name:?}"
+            ));
         }
         if let Some(&id) = self.by_name.get(name) {
             if self.loading.contains(&id) {
@@ -814,7 +908,9 @@ impl Loader {
         let roots = std::iter::once(&self.root).chain(&self.extension_roots);
         let mut resolved = None;
         for (root_index, root) in roots.enumerate() {
-            if parent_root.is_some_and(|index| index != root_index) {
+            if (!self.allow_imports && root_index == 0)
+                || parent_root.is_some_and(|index| index != root_index)
+            {
                 continue;
             }
             let base = root.join(&relative);
@@ -890,11 +986,9 @@ impl Loader {
                 self.modules[previous].name
             ));
         }
-        let source = std::fs::read_to_string(&path)
-            .map_err(|error| format!("{}: {error}", path.display()))?;
         // ty resolves logical import paths; canonical identities enforce containment
         // and uniqueness without breaking a single internal symlink's import name.
-        let id = self.add(path, identity, name.to_owned(), is_package, &source)?;
+        let id = self.add_file(path, identity, name.to_owned(), is_package)?;
         self.modules[id].root_index = root_index;
         self.modules[id].archive = archive;
         self.scan(id)?;

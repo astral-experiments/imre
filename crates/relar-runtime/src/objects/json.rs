@@ -19,6 +19,7 @@ use super::words::{OwnedWord, WordKind, Words};
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish};
 
 mod encode;
+pub(crate) use encode::write_string;
 pub(super) mod readonly;
 mod syntax;
 mod toml;

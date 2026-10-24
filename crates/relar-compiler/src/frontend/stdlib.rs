@@ -18,6 +18,25 @@ fn local_key_union(expr: &Expr, dictionaries: &mut Vec<Expr>) -> bool {
 }
 
 impl Checker<'_> {
+    /// Materialize the named fields as an immutable tuple using the native layout.
+    pub(super) fn version_info(&self, components: [u64; 3]) -> Expr {
+        let integer = |value: u64| Expr {
+            ty: Type::Int,
+            kind: ExprKind::Int(value.to_string()),
+        };
+        let [major, minor, micro] = components.map(integer);
+        Expr {
+            ty: self.types.version_info(),
+            kind: ExprKind::Tuple(vec![
+                major,
+                minor,
+                micro,
+                unpacking::string("final"),
+                integer(0),
+            ]),
+        }
+    }
+
     /// Captures arguments before acquisition, materializes the source before key
     /// calls, and keeps the source argument rooted until the sorted result escapes.
     pub(super) fn sorted_call(

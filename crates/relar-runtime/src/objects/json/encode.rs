@@ -34,46 +34,49 @@ fn plain_ascii(bytes: &[u8]) -> bool {
         .all(|&byte| (b' '..=b'~').contains(&byte) && byte != b'"' && byte != b'\\')
 }
 
-impl Encoder {
-    /// JSON's escapes differ from Python repr, including UTF-16 surrogate pairs
-    /// for non-BMP characters when ensure_ascii is requested.
-    fn string(&mut self, value: &str) {
-        const HEX: &[u8; 16] = b"0123456789abcdef";
-        self.output.push('"');
-        if plain_ascii(value.as_bytes()) {
-            self.output.push_str(value);
-            self.output.push('"');
-            return;
-        }
-        for character in value.chars() {
-            match character {
-                '"' => self.output.push_str("\\\""),
-                '\\' => self.output.push_str("\\\\"),
-                '\u{8}' => self.output.push_str("\\b"),
-                '\u{c}' => self.output.push_str("\\f"),
-                '\n' => self.output.push_str("\\n"),
-                '\r' => self.output.push_str("\\r"),
-                '\t' => self.output.push_str("\\t"),
-                '\0'..='\u{1f}' => {
-                    let value = character as usize;
-                    self.output.push_str("\\u00");
-                    self.output.push(char::from(HEX[value >> 4]));
-                    self.output.push(char::from(HEX[value & 15]));
-                }
-                _ if self.ensure_ascii && !(' '..='~').contains(&character) => {
-                    let mut buffer = [0; 2];
-                    for &unit in character.encode_utf16(&mut buffer).iter() {
-                        self.output.push_str("\\u");
-                        for shift in [12, 8, 4, 0] {
-                            self.output
-                                .push(char::from(HEX[usize::from((unit >> shift) & 15)]));
-                        }
+/// JSON's escapes differ from Python repr, including UTF-16 surrogate pairs
+/// for non-BMP characters when ensure_ascii is requested.
+pub(crate) fn write_string(output: &mut String, value: &str, ensure_ascii: bool) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    output.push('"');
+    if plain_ascii(value.as_bytes()) {
+        output.push_str(value);
+        output.push('"');
+        return;
+    }
+    for character in value.chars() {
+        match character {
+            '"' => output.push_str("\\\""),
+            '\\' => output.push_str("\\\\"),
+            '\u{8}' => output.push_str("\\b"),
+            '\u{c}' => output.push_str("\\f"),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            '\0'..='\u{1f}' => {
+                let value = character as usize;
+                output.push_str("\\u00");
+                output.push(char::from(HEX[value >> 4]));
+                output.push(char::from(HEX[value & 15]));
+            }
+            _ if ensure_ascii && !(' '..='~').contains(&character) => {
+                let mut buffer = [0; 2];
+                for &unit in character.encode_utf16(&mut buffer).iter() {
+                    output.push_str("\\u");
+                    for shift in [12, 8, 4, 0] {
+                        output.push(char::from(HEX[usize::from((unit >> shift) & 15)]));
                     }
                 }
-                _ => self.output.push(character),
             }
+            _ => output.push(character),
         }
-        self.output.push('"');
+    }
+    output.push('"');
+}
+
+impl Encoder {
+    fn string(&mut self, value: &str) {
+        write_string(&mut self.output, value, self.ensure_ascii);
     }
 
     fn newline(&mut self, depth: usize) -> Result<(), Error> {

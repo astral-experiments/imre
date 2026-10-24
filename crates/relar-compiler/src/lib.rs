@@ -3,6 +3,7 @@ mod borrows;
 mod callables;
 mod classes;
 mod contracts;
+mod dynamic;
 mod effects;
 mod fixed_regex;
 mod frontend;
@@ -25,6 +26,27 @@ use std::path::{Path, PathBuf};
 /// Python language version used by type checking and native wheel consumers.
 pub const PYTHON_VERSION: ruff_python_ast::PythonVersion = ruff_python_ast::PythonVersion::PY312;
 
+/// Python's implementation identifier, also used in native wheel tags.
+pub const IMPLEMENTATION_NAME: &str = "relar";
+
+/// Relar targets the language version without claiming CPython's patch releases.
+pub const LANGUAGE_VERSION: [u64; 3] =
+    [PYTHON_VERSION.major as u64, PYTHON_VERSION.minor as u64, 0];
+
+/// Components of the Relar release reported by `sys.implementation.version`.
+pub fn implementation_version() -> [u64; 3] {
+    [
+        env!("CARGO_PKG_VERSION_MAJOR"),
+        env!("CARGO_PKG_VERSION_MINOR"),
+        env!("CARGO_PKG_VERSION_PATCH"),
+    ]
+    .map(|value| {
+        value
+            .parse()
+            .expect("Cargo version components are integers")
+    })
+}
+
 /// File extension of installed native archives linked into an application.
 pub const NATIVE_ARCHIVE_EXTENSION: &str = "relar.a";
 
@@ -34,6 +56,31 @@ pub struct CompileOptions {
     pub address_sanitizer: bool,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
     pub extension_paths: Vec<PathBuf>,
+    /// Python command-line execution uses script search paths and can isolate imports.
+    pub python: Option<PythonInvocation>,
+}
+
+pub struct PythonInvocation {
+    pub source: PythonSource,
+    pub isolated: bool,
+    pub safe_path: bool,
+    pub no_user_site: bool,
+    pub dont_write_bytecode: bool,
+}
+
+pub enum PythonSource {
+    Command(String),
+    Script(PathBuf),
+}
+
+impl PythonInvocation {
+    /// The first program argument, preserving the spelling supplied on the command line.
+    pub fn argv0(&self) -> &Path {
+        match &self.source {
+            PythonSource::Command(_) => Path::new("-c"),
+            PythonSource::Script(path) => path,
+        }
+    }
 }
 
 /// Checks source syntax, ty diagnostics, and Relar's exact type contract.
@@ -89,12 +136,43 @@ pub fn check_file_with_extensions(
     module_root: Option<&Path>,
     extension_paths: &[PathBuf],
 ) -> Result<(), String> {
-    frontend::lower(&modules::SourceGraph::load(
+    let options = CompileOptions {
+        extension_paths: extension_paths.to_vec(),
+        ..CompileOptions::default()
+    };
+    with_source(
         path,
         module_root,
-        extension_paths,
-    )?)
-    .map(|_| ())
+        &options,
+        |graph| frontend::lower(&graph).map(|_| ()),
+        |_| (),
+    )
+}
+
+/// Keep concrete layouts and their existing checks whenever the typed compiler
+/// succeeds. Only source using the import-path or system metadata APIs can
+/// request the native object operations used by Python tooling modules.
+fn with_source<T>(
+    path: &Path,
+    module_root: Option<&Path>,
+    options: &CompileOptions,
+    typed: impl FnOnce(modules::SourceGraph) -> Result<T, String>,
+    boxed: impl FnOnce(Compilation) -> T,
+) -> Result<T, String> {
+    let result = modules::SourceGraph::load(
+        path,
+        module_root,
+        &options.extension_paths,
+        options.python.as_ref(),
+    )
+    .and_then(typed);
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) => match dynamic::compile(path, module_root, options)? {
+            Some(compilation) => Ok(boxed(compilation)),
+            None => Err(error),
+        },
+    }
 }
 
 /// Compiles one entry module and its statically resolved first-party dependencies.
@@ -103,24 +181,32 @@ pub fn compile_file(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
-    let graph = modules::SourceGraph::load(path, module_root, &options.extension_paths)?;
-    let mut module = frontend::lower(&graph)?;
-    specialize(&mut module);
-    let ranges = ranges::analyze(&module);
-    Ok(Compilation {
-        llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer),
-        extension_archives: graph
-            .modules
-            .iter()
-            .filter_map(|m| m.archive.clone())
-            .collect(),
-        source_inputs: graph.inputs,
-        input_paths: graph
-            .modules
-            .into_iter()
-            .map(|module| module.path)
-            .collect(),
-    })
+    with_source(
+        path,
+        module_root,
+        options,
+        |graph| {
+            let mut module = frontend::lower(&graph)?;
+            specialize(&mut module);
+            let ranges = ranges::analyze(&module);
+            Ok(Compilation {
+                llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer),
+                extension_archives: graph
+                    .modules
+                    .iter()
+                    .filter_map(|m| m.archive.clone())
+                    .collect(),
+                input_paths: graph
+                    .inputs
+                    .files
+                    .iter()
+                    .map(|(path, _, _)| path.clone())
+                    .collect(),
+                source_inputs: graph.inputs,
+            })
+        },
+        |c| c,
+    )
 }
 
 pub struct CodegenUnit {
@@ -142,32 +228,52 @@ pub fn compile_file_units(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<UnitCompilation, String> {
-    let graph = modules::SourceGraph::load(path, module_root, &options.extension_paths)?;
-    let (mut module, owners) = frontend::lower_with_owners(&graph)?;
-    specialize(&mut module);
-    let ranges = ranges::analyze(&module);
-    let names = graph
-        .modules
-        .iter()
-        .map(|m| m.name.clone())
-        .collect::<Vec<_>>();
-    Ok(UnitCompilation {
-        units: llvm::emit_units(
-            &module,
-            &ranges,
-            options.address_sanitizer,
-            &owners,
-            &names,
-            graph.entry,
-        )?,
-        extension_archives: graph
-            .modules
-            .iter()
-            .filter_map(|m| m.archive.clone())
-            .collect(),
-        input_paths: graph.modules.into_iter().map(|m| m.path).collect(),
-        source_inputs: graph.inputs,
-    })
+    with_source(
+        path,
+        module_root,
+        options,
+        |graph| {
+            let (mut module, owners) = frontend::lower_with_owners(&graph)?;
+            specialize(&mut module);
+            let ranges = ranges::analyze(&module);
+            let names = graph
+                .modules
+                .iter()
+                .map(|m| m.name.clone())
+                .collect::<Vec<_>>();
+            Ok(UnitCompilation {
+                units: llvm::emit_units(
+                    &module,
+                    &ranges,
+                    options.address_sanitizer,
+                    &owners,
+                    &names,
+                    graph.entry,
+                )?,
+                extension_archives: graph
+                    .modules
+                    .iter()
+                    .filter_map(|m| m.archive.clone())
+                    .collect(),
+                input_paths: graph
+                    .inputs
+                    .files
+                    .iter()
+                    .map(|(path, _, _)| path.clone())
+                    .collect(),
+                source_inputs: graph.inputs,
+            })
+        },
+        |compilation| UnitCompilation {
+            units: vec![CodegenUnit {
+                name: "__main__".to_owned(),
+                llvm_ir: compilation.llvm_ir,
+            }],
+            input_paths: compilation.input_paths,
+            source_inputs: compilation.source_inputs,
+            extension_archives: compilation.extension_archives,
+        },
+    )
 }
 
 fn specialize(module: &mut ir::Module) {
