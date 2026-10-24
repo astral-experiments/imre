@@ -78,14 +78,17 @@ impl Parser {
         if let Some(index) = self.options.iter().position(|option| option.flag == flag) {
             return Token::Option(index, explicit);
         }
-        if arg.starts_with("--") {
-            let help = "--help".starts_with(flag);
+        if flag.starts_with("--") || flag == "-" {
+            let mut names: Vec<_> = ["-h", "--help"]
+                .into_iter()
+                .filter(|name| name.starts_with(flag))
+                .collect();
+            let help = !names.is_empty();
             let matches = self
                 .options
                 .iter()
                 .enumerate()
                 .filter(|(_, option)| option.flag.starts_with(flag));
-            let mut names = if help { vec!["--help"] } else { Vec::new() };
             let mut option = None;
             for (index, matched) in matches {
                 names.push(&matched.flag);

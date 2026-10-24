@@ -21,6 +21,8 @@ CASES = {
         ["--item-kind=blue", "--items", "red"],
         ["--items", "red", "--", "tail"],
         ["--help=none"],
+        ["-=", "--help"],
+        ["-=value"],
         ["-hhh=x"],
         ["-hh-x"],
         ["-hx"],
