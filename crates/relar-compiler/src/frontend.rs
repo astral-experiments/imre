@@ -5184,27 +5184,6 @@ impl<'a> Checker<'a> {
             if matches!(receiver.ty, Type::Document(_)) {
                 return self.document_method(call, attribute, receiver);
             }
-            if receiver.ty == Type::Path && attribute.attr.as_str() == "open" {
-                let mode = match call.arguments.args.as_ref() {
-                    [] => "r",
-                    [ast::Expr::StringLiteral(mode)] => {
-                        check_string(mode, self.source)?;
-                        mode.value.to_str()
-                    }
-                    _ => {
-                        return Err(error(
-                            self.source,
-                            call,
-                            "Path.open requires a literal supported mode",
-                        ));
-                    }
-                };
-                let path = Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Path(ir::PathOperation::Text), vec![receiver]),
-                };
-                return self.open_mode(call, false, mode, path);
-            }
             if receiver.ty == Type::Path {
                 return self.path_method(receiver, attribute, call);
             }
