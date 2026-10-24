@@ -10,6 +10,31 @@ fn lazy_constructor(ty: Type) -> Option<&'static str> {
     }
 }
 
+fn immutable_literal(value: &Expr) -> bool {
+    match &value.kind {
+        ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Bool(_)
+        | ExprKind::None
+        | ExprKind::Str(_)
+        | ExprKind::Bytes(_) => true,
+        ExprKind::Negate(inner)
+        | ExprKind::Not(inner)
+        | ExprKind::Present(inner)
+        | ExprKind::Absent(inner) => immutable_literal(inner),
+        ExprKind::Binary(_, left, right)
+            if matches!(
+                value.ty,
+                Type::Int | Type::Float | Type::Bool | Type::Str | Type::Bytes
+            ) =>
+        {
+            immutable_literal(left) && immutable_literal(right)
+        }
+        ExprKind::Tuple(values) => values.iter().all(immutable_literal),
+        _ => false,
+    }
+}
+
 impl Emitter<'_, '_> {
     /// Returns an owned reference while the pool keeps its root until main exits.
     pub(super) fn pooled_literal(&mut self, contents: &[u8], ty: Type) -> Value {
@@ -56,6 +81,49 @@ impl Emitter<'_, '_> {
         }
     }
 
+    pub(super) fn tuple(&mut self, ty: Type, values: &[Expr]) -> Value {
+        let cache = if values.iter().all(immutable_literal) {
+            let unit = self.output.current;
+            let roots = self.tuple_literals.entry(unit).or_default();
+            let root = self
+                .output
+                .global_ref(format!("tuple_literal_{unit}_{}", roots.len()));
+            roots.push(root.clone());
+            let prior = self.instruction(format!("load ptr, ptr @{root}"));
+            let missing = self.instruction(format!("icmp eq ptr {prior}, null"));
+            let build = self.label();
+            let ready = self.label();
+            self.branch(&missing, &build, &ready);
+            self.start(&build);
+            Some((root, ready))
+        } else {
+            None
+        };
+
+        let object = self.record(ty);
+        for (field, value) in values.iter().enumerate() {
+            let value = self.operand(value);
+            self.set_field(&object, field, &value.value);
+            self.release_operand(&value);
+        }
+        let Some((root, ready)) = cache else {
+            return object;
+        };
+        // Transfer the constructor's owner to the root. Each evaluation takes
+        // its own reference, just as it would for a freshly allocated tuple.
+        self.line(format!("store ptr {}, ptr @{root}", object.operand));
+        self.forget(&object);
+        self.jump(&ready);
+        self.start(&ready);
+        let value = Value {
+            ty,
+            operand: self.instruction(format!("load ptr, ptr @{root}")),
+            small_integer: false,
+        };
+        self.retain(&value);
+        value
+    }
+
     /// Main releases the literal roots after locals/globals on either exit.
     /// Bytes and heap integers initialize on first use to preserve cold branches.
     pub(super) fn literal_pool(&mut self) {
@@ -98,6 +166,11 @@ impl Emitter<'_, '_> {
                 ty.initial()
             )
             .unwrap();
+        }
+        for root in self.tuple_literals.values().flatten() {
+            self.output
+                .global(self.output.entry, root, "global", "ptr")
+                .push_str("null\n");
         }
         let attributes = if self.sanitize {
             " sanitize_address"
@@ -176,6 +249,13 @@ ready:
             writeln!(
                 self.output.entry_buffer(),
                 "  %literal_{id} = load {repr}, ptr @{root}\n  store {repr} {initial}, ptr @{root}\n  call void @{release}({repr} %literal_{id})"
+            )
+            .unwrap();
+        }
+        for root in self.tuple_literals.values().flatten() {
+            writeln!(
+                self.output.entry_buffer(),
+                "  %{root} = load ptr, ptr @{root}\n  store ptr null, ptr @{root}\n  call void @relar_record_release(ptr %{root})"
             )
             .unwrap();
         }
