@@ -109,6 +109,14 @@ print(output.closed)
 with open("empty.txt", "r", encoding="utf-8") as empty:
     print(empty.read())
     print(empty.read())
+with open("buffered.txt", "w", encoding="utf-8") as writer:
+    for size in [122880, 8191, 2]:
+        writer.write(bytes(size).decode())
+        with open("buffered.txt", "rb") as reader:
+            print(len(reader.read()))
+    writer.flush()
+    with open("buffered.txt", "rb") as reader:
+        print(len(reader.read()))
 """,
     "splitlines_and_formatting": r"""
 def nothing() -> None:
