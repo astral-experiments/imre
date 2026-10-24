@@ -147,6 +147,21 @@ impl Session {
         if let Some(error) = limits.error {
             return Err(format!("{path}: {error}"));
         }
+        // ty materializes every field of a starred tuple display before lowering.
+        // Relar supports starred assignment targets and list displays.
+        if parsed
+            .tokens()
+            .iter()
+            .any(|token| token.kind() == TokenKind::Star)
+            && ruff_python_ast::helpers::any_over_body(&parsed.syntax().body, |expr| {
+                matches!(expr, Expr::Tuple(tuple) if tuple.ctx == ruff_python_ast::ExprContext::Load
+                    && tuple.elts.iter().any(|elt| matches!(elt, Expr::Starred(_))))
+            })
+        {
+            return Err(format!(
+                "{path}: Relar: starred elements in tuple displays are unsupported"
+            ));
+        }
         inferred_shapes::check(&parsed.syntax().body, parsed.tokens().len())
             .map_err(|error| format!("{path}: {error}"))?;
         self.files.push(file);
