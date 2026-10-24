@@ -6,7 +6,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::os::unix::fs::DirBuilderExt;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use num_traits::ToPrimitive;
 
@@ -16,6 +16,10 @@ use super::{Int, Object, Storage, StorageCell, Str, fail, files, object};
 #[derive(Clone)]
 pub(super) enum PathText {
     Flat(Rc<Str>),
+    WithParent {
+        text: Rc<Str>,
+        parent: Weak<Str>,
+    },
     Joined {
         parts: JoinedParts,
         spelling: std::cell::OnceCell<Rc<Str>>,
@@ -37,16 +41,35 @@ enum Prefix {
 }
 
 impl PathText {
+    fn parent(&mut self) -> Rc<Str> {
+        if let Self::WithParent { parent, .. } = self
+            && let Some(shared) = parent.upgrade()
+        {
+            return shared;
+        }
+        let text = self.spelling();
+        let shared = Rc::new(Str::from(parent(text)));
+        if shared.len() > size_of::<Str>() {
+            // Derived paths own the spelling. Discarding the last derived
+            // owner frees the string even while the source path stays rooted.
+            *self = Self::WithParent {
+                text: Rc::clone(text),
+                parent: Rc::downgrade(&shared),
+            };
+        }
+        shared
+    }
+
     fn cached(&self) -> Option<&Rc<Str>> {
         match self {
-            Self::Flat(text) => Some(text),
+            Self::Flat(text) | Self::WithParent { text, .. } => Some(text),
             Self::Joined { spelling, .. } => spelling.get(),
         }
     }
 
     fn prefix(&self) -> Prefix {
         match self {
-            Self::Flat(text) => Prefix::Flat(Rc::clone(text)),
+            Self::Flat(text) | Self::WithParent { text, .. } => Prefix::Flat(Rc::clone(text)),
             Self::Joined { parts, spelling } => match spelling.get() {
                 Some(text) => Prefix::Flat(Rc::clone(text)),
                 None => Prefix::Joined(Rc::new(parts.clone())),
@@ -56,14 +79,14 @@ impl PathText {
 
     fn is_absolute(&self) -> bool {
         match self {
-            Self::Flat(text) => text.starts_with('/'),
+            Self::Flat(text) | Self::WithParent { text, .. } => text.starts_with('/'),
             Self::Joined { parts, .. } => parts.absolute,
         }
     }
 
     fn spelling(&self) -> &Rc<Str> {
         match self {
-            Self::Flat(text) => text,
+            Self::Flat(text) | Self::WithParent { text, .. } => text,
             Self::Joined { parts, spelling } => spelling.get_or_init(|| parts.render()),
         }
     }
@@ -489,15 +512,20 @@ pub unsafe extern "C" fn relar_path_suffix(path: *const Object) -> *const Str {
 }
 
 /// # Safety
-/// Root an exact Path. This lexical parent never follows symlinks or collapses
+/// Root an exact Path with no overlapping storage borrow. This lexical parent
+/// never follows symlinks or collapses
 /// `..`; roots and the current-directory path are their own parents.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_path_parent(path: *const Object) -> *const Object {
-    // SAFETY: the new spelling is owned before the original storage borrow ends.
+    // SAFETY: the rooted exact Path is accessed exclusively. Computing and
+    // caching its lexical parent never invokes user code or borrows another Path.
     let parent = unsafe {
-        object(path)
-            .0
-            .with(|storage| Str::from(parent(storage.path())))
+        object(path).0.with_mut(|storage| {
+            let Storage::Path { text, .. } = storage else {
+                fail("SystemError", "expected a path object");
+            };
+            text.parent()
+        })
     };
     new_path(parent)
 }
@@ -1076,6 +1104,27 @@ mod tests {
         let text = Rc::new(Str::from(text));
         // SAFETY: the input is rooted and the new path transfers one owner.
         unsafe { Rc::from_raw(relar_path_new(Rc::as_ptr(&text))) }
+    }
+
+    #[test]
+    fn live_parents_share_their_large_spelling() {
+        let prefix = "a-long-directory-component-that-cannot-fit-inline";
+        // SAFETY: each returned raw pointer transfers one owner. All calls borrow
+        // a live exact Path, and each returned owner is recovered just once.
+        unsafe {
+            let path = Rc::from_raw(new_path(Str::from(format!("{prefix}/leaf"))));
+            let first = Rc::from_raw(relar_path_parent(Rc::as_ptr(&path)));
+            let second = Rc::from_raw(relar_path_parent(Rc::as_ptr(&path)));
+            assert!(!Rc::ptr_eq(&first, &second));
+            let first_text = Rc::from_raw(relar_path_text(Rc::as_ptr(&first)));
+            let second_text = Rc::from_raw(relar_path_text(Rc::as_ptr(&second)));
+            assert!(Rc::ptr_eq(&first_text, &second_text));
+            let old = Rc::downgrade(&first_text);
+            drop((first_text, second_text, first, second));
+            assert!(old.upgrade().is_none());
+            let fresh = Rc::from_raw(relar_path_parent(Rc::as_ptr(&path)));
+            assert!(fresh.0.with(|storage| storage.path() == prefix));
+        }
     }
 
     #[test]
