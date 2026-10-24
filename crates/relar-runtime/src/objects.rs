@@ -49,7 +49,7 @@ enum Storage {
     Exception(exceptions::Exception),
     File(Box<files::FileState>),
     Path {
-        text: Rc<Str>,
+        text: paths::PathText,
         name: std::cell::OnceCell<Rc<Str>>,
     },
     PathIterator(Box<paths::PathIterator>),

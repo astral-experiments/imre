@@ -6,13 +6,43 @@ use std::io::IsTerminal;
 
 use icu_properties::props::{EnumeratedProperty, GeneralCategory, GeneralCategoryGroup};
 
+use super::super::python_whitespace;
 use super::{Kind, OptionSpec, Parser};
+
+/// Parse the positive decimal width accepted by shutil.get_terminal_size().
+fn positive_columns(value: &str) -> Option<usize> {
+    let value = value.trim();
+    let digits = value.strip_prefix('+').unwrap_or(value);
+    let mut width = 0usize;
+    let mut count = 0;
+    for group in digits.split('_') {
+        if group.is_empty() {
+            return None;
+        }
+        for ch in group.chars() {
+            let digit = crate::integer_text::decimal_digit(ch)?;
+            width = width.saturating_mul(10).saturating_add(usize::from(digit));
+            count += 1;
+        }
+    }
+    // Beyond the minimum threshold, CPython's decimal conversion guard can
+    // reject a width even when it consists almost entirely of leading zeroes.
+    if count > 640 {
+        let limit = std::env::var("PYTHONINTMAXSTRDIGITS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(4300);
+        if limit != 0 && count > limit {
+            return None;
+        }
+    }
+    (width > 0).then_some(width)
+}
 
 pub(super) fn width() -> usize {
     let columns = std::env::var("COLUMNS")
         .ok()
-        .and_then(|value| value.parse().ok())
-        .filter(|&value| value > 0)
+        .and_then(|value| positive_columns(&value))
         .or_else(|| {
             let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
             // SAFETY: ioctl writes a winsize to this buffer only on success.
@@ -156,7 +186,12 @@ fn word_chunks(word: &str, chunks: &mut VecDeque<String>) {
 
 fn wrap(text: &str, width: usize) -> Vec<String> {
     let mut chunks = VecDeque::new();
-    for word in text.trim().split_ascii_whitespace() {
+    // argparse collapses ASCII regex whitespace, then strips Python whitespace.
+    for word in text
+        .trim_matches(python_whitespace)
+        .split([' ', '\t', '\n', '\r', '\x0b', '\x0c'])
+        .filter(|word| !word.is_empty())
+    {
         if !chunks.is_empty() {
             chunks.push_back(" ".into());
         }
@@ -164,10 +199,15 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
     }
     let mut lines = Vec::new();
     while !chunks.is_empty() {
-        if !lines.is_empty() && chunks.front().is_some_and(|chunk| chunk.trim().is_empty()) {
+        if !lines.is_empty()
+            && chunks
+                .front()
+                .is_some_and(|chunk| chunk.chars().all(python_whitespace))
+        {
             chunks.pop_front();
         }
         let mut line = String::new();
+        let mut last_start = 0;
         let mut size = 0;
         while let Some(chunk) = chunks.front() {
             let length = len(chunk);
@@ -175,6 +215,7 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
                 break;
             }
             size += length;
+            last_start = line.len();
             line.push_str(&chunks.pop_front().unwrap());
         }
         if let Some(chunk) = chunks.front_mut()
@@ -191,12 +232,16 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
                 .rfind('-')
                 .filter(|&pos| prefix[..pos].chars().any(|ch| ch != '-'))
                 .map_or(boundary, |pos| pos + 1);
+            last_start = line.len();
             line.push_str(&chunk[..end]);
             chunk.drain(..end);
         }
-        let line = line.trim_end_matches(' ');
+        // textwrap discards a trailing whitespace-only chunk in its entirety.
+        if line[last_start..].chars().all(python_whitespace) {
+            line.truncate(last_start);
+        }
         if !line.is_empty() {
-            lines.push(line.to_owned());
+            lines.push(line);
         }
     }
     lines
@@ -331,7 +376,7 @@ impl Parser {
             } else {
                 position
             };
-            if help.trim().is_empty() {
+            if help.chars().all(python_whitespace) {
                 if fits {
                     output.push_str(&" ".repeat(padding));
                     output.push('\n');

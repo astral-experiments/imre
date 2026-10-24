@@ -215,13 +215,14 @@ impl Builtin {
             | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
-            | Self::SortedRecordRows { .. }
             | Self::SortedStringKeys
             | Self::SplitLinesIter
             | Self::StringIter
             | Self::StringReverseIter
             | Self::TextClosed => Contract::new(false, Unknown),
-            Self::TupleCacheNew | Self::TupleCacheResult => Contract::new(true, Unknown),
+            Self::SortedRecordRows { .. } | Self::TupleCacheNew | Self::TupleCacheResult => {
+                Contract::new(true, Unknown)
+            }
         }
     }
 }

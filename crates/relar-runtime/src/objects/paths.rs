@@ -13,16 +13,123 @@ use num_traits::ToPrimitive;
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Int, Object, Storage, StorageCell, Str, fail, files, object};
 
+#[derive(Clone)]
+pub(super) enum PathText {
+    Flat(Rc<Str>),
+    Joined {
+        parts: JoinedParts,
+        spelling: std::cell::OnceCell<Rc<Str>>,
+    },
+}
+
+#[derive(Clone)]
+pub(super) struct JoinedParts {
+    parent: Prefix,
+    child: Rc<Str>,
+    absolute: bool,
+}
+
+#[derive(Clone)]
+enum Prefix {
+    Empty,
+    Flat(Rc<Str>),
+    Joined(Rc<JoinedParts>),
+}
+
+impl PathText {
+    fn cached(&self) -> Option<&Rc<Str>> {
+        match self {
+            Self::Flat(text) => Some(text),
+            Self::Joined { spelling, .. } => spelling.get(),
+        }
+    }
+
+    fn prefix(&self) -> Prefix {
+        match self {
+            Self::Flat(text) => Prefix::Flat(Rc::clone(text)),
+            Self::Joined { parts, spelling } => match spelling.get() {
+                Some(text) => Prefix::Flat(Rc::clone(text)),
+                None => Prefix::Joined(Rc::new(parts.clone())),
+            },
+        }
+    }
+
+    fn is_absolute(&self) -> bool {
+        match self {
+            Self::Flat(text) => text.starts_with('/'),
+            Self::Joined { parts, .. } => parts.absolute,
+        }
+    }
+
+    fn spelling(&self) -> &Rc<Str> {
+        match self {
+            Self::Flat(text) => text,
+            Self::Joined { parts, spelling } => spelling.get_or_init(|| parts.render()),
+        }
+    }
+}
+
+impl JoinedParts {
+    fn render(&self) -> Rc<Str> {
+        match &self.parent {
+            Prefix::Empty => {
+                return if is_normalized(&self.child) {
+                    Rc::clone(&self.child)
+                } else {
+                    Rc::new(normalize(&self.child))
+                };
+            }
+            Prefix::Flat(base) => return Rc::new(join(base, &self.child)),
+            Prefix::Joined(_) => {}
+        }
+
+        // Collect unrendered components without materializing ancestor spellings.
+        let mut children = vec![self.child.as_str()];
+        let mut prefix = &self.parent;
+        while let Prefix::Joined(parts) = prefix {
+            children.push(parts.child.as_str());
+            prefix = &parts.parent;
+        }
+        let mut result = Str::default();
+        if let Prefix::Flat(base) = prefix
+            && base.as_str() != "."
+        {
+            result.push_str(base);
+        }
+        for child in children.into_iter().rev() {
+            append_components(&mut result, child);
+        }
+        if result.is_empty() {
+            result.push('.');
+        }
+        Rc::new(result)
+    }
+}
+
+impl Drop for JoinedParts {
+    fn drop(&mut self) {
+        // Release uniquely owned ancestry iteratively, including unrendered paths.
+        let mut parent = std::mem::replace(&mut self.parent, Prefix::Empty);
+        while let Prefix::Joined(node) = parent {
+            let Some(mut parts) = Rc::into_inner(node) else {
+                break;
+            };
+            parent = std::mem::replace(&mut parts.parent, Prefix::Empty);
+        }
+    }
+}
+
 impl Storage {
     pub(super) fn path(&self) -> &str {
         self.path_text()
     }
 
     fn path_name(&self) -> &Rc<Str> {
-        let Self::Path { text, name: cached } = self else {
+        let Self::Path { name: cached, .. } = self else {
             fail("SystemError", "expected a path object");
         };
         cached.get_or_init(|| {
+            let text = self.path_text();
             let component = name(text);
             if component.len() == text.len() {
                 Rc::clone(text)
@@ -33,6 +140,10 @@ impl Storage {
     }
 
     fn path_text(&self) -> &Rc<Str> {
+        self.path_value().spelling()
+    }
+
+    fn path_value(&self) -> &PathText {
         match self {
             Self::Path { text, .. } => text,
             _ => fail("SystemError", "expected a path object"),
@@ -56,14 +167,22 @@ fn is_normalized(path: &str) -> bool {
 /// POSIX normalization removes empty and dot components while retaining `..`
 /// and exactly two leading slashes, which may have implementation-defined meaning.
 pub(super) fn normalize(path: &str) -> Str {
-    let root = if path.starts_with("//") && !path.starts_with("///") {
-        "//"
-    } else if path.starts_with('/') {
-        "/"
-    } else {
-        ""
-    };
-    let mut result = Str::from(root);
+    let mut result = Str::default();
+    append_components(&mut result, path);
+    if result.is_empty() {
+        result.push('.');
+    }
+    result
+}
+
+fn append_components(result: &mut Str, path: &str) {
+    if path.starts_with('/') {
+        result.clear();
+        result.push('/');
+        if path.starts_with("//") && !path.starts_with("///") {
+            result.push('/');
+        }
+    }
     for part in path
         .split('/')
         .filter(|part| !part.is_empty() && *part != ".")
@@ -73,10 +192,6 @@ pub(super) fn normalize(path: &str) -> Str {
         }
         result.push_str(part);
     }
-    if result.is_empty() {
-        result.push('.');
-    }
-    result
 }
 
 fn join(path: &str, child: &str) -> Str {
@@ -102,8 +217,12 @@ fn join(path: &str, child: &str) -> Str {
 }
 
 fn new_path(path: impl Into<Rc<Str>>) -> *const Object {
+    path_with_text(PathText::Flat(path.into()))
+}
+
+fn path_with_text(text: PathText) -> *const Object {
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Path {
-        text: path.into(),
+        text,
         name: std::cell::OnceCell::new(),
     }))))
 }
@@ -261,9 +380,36 @@ pub unsafe extern "C" fn relar_path_new(text: *const Str) -> *const Object {
 /// the left path; otherwise both operands are joined without resolving symlinks.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_path_join(path: *const Object, child: *const Str) -> *const Object {
-    // SAFETY: lexical work has no callbacks and only an owned string escapes.
-    let joined = unsafe { object(path).0.with(|storage| join(storage.path(), &*child)) };
-    new_path(joined)
+    // SAFETY: the caller roots both operands until the result owns its child
+    // and, for a relative component, its immutable parent spelling.
+    unsafe {
+        object(path).0.with(|storage| {
+            let parent = storage.path_value();
+            let child_text = &*child;
+            if matches!(child_text.as_str(), "" | ".") {
+                return path_with_text(parent.clone());
+            }
+            if let Some(base) = parent.cached()
+                && base.len().saturating_add(child_text.len()) < size_of::<Str>()
+            {
+                return new_path(join(base, child_text));
+            }
+            let child_absolute = child_text.starts_with('/');
+            Rc::increment_strong_count(child);
+            path_with_text(PathText::Joined {
+                parts: JoinedParts {
+                    parent: if child_absolute {
+                        Prefix::Empty
+                    } else {
+                        parent.prefix()
+                    },
+                    child: Rc::from_raw(child),
+                    absolute: child_absolute || parent.is_absolute(),
+                },
+                spelling: std::cell::OnceCell::new(),
+            })
+        })
+    }
 }
 
 /// # Safety
@@ -364,7 +510,7 @@ pub unsafe extern "C" fn relar_path_is_absolute(path: *const Object) -> u32 {
     unsafe {
         object(path)
             .0
-            .with(|storage| u32::from(storage.path().starts_with('/')))
+            .with(|storage| u32::from(storage.path_value().is_absolute()))
     }
 }
 
@@ -993,6 +1139,43 @@ mod tests {
         }
         result.sort();
         result
+    }
+
+    #[test]
+    fn joined_spelling_is_deferred_and_owns_its_operands() {
+        let parent = path("/parent");
+        let mut child = Rc::new(Str::from(
+            "child/./a-long-component-that-needs-character-storage",
+        ));
+        // SAFETY: both inputs are rooted through the join, whose result owns
+        // its operands. Each later text call transfers one independent owner.
+        unsafe {
+            let joined = Rc::from_raw(relar_path_join(Rc::as_ptr(&parent), Rc::as_ptr(&child)));
+            drop(parent);
+            Rc::make_mut(&mut child).push('!');
+            let tail = Rc::new(Str::from(".."));
+            let descendant = Rc::from_raw(relar_path_join(Rc::as_ptr(&joined), Rc::as_ptr(&tail)));
+            let rendered = Rc::from_raw(relar_path_text(Rc::as_ptr(&descendant)));
+            assert_eq!(
+                rendered.as_str(),
+                "/parent/child/a-long-component-that-needs-character-storage/.."
+            );
+            assert_eq!(relar_path_is_absolute(Rc::as_ptr(&joined)), 1);
+            joined.0.with(|storage| {
+                let PathText::Joined { spelling, .. } = storage.path_value() else {
+                    panic!("expected a deferred path");
+                };
+                assert!(spelling.get().is_none());
+            });
+            let first = Rc::from_raw(relar_path_text(Rc::as_ptr(&joined)));
+            let second = Rc::from_raw(relar_path_text(Rc::as_ptr(&joined)));
+            drop(joined);
+            assert!(Rc::ptr_eq(&first, &second));
+            assert_eq!(
+                first.as_str(),
+                "/parent/child/a-long-component-that-needs-character-storage"
+            );
+        }
     }
 
     #[test]
