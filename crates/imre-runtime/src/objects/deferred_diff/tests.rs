@@ -204,7 +204,10 @@ fn suffix_sort_is_stable_beyond_the_stack_scratch_size() {
     let values = (0..1025)
         .map(|index| format!("{index:04}:{}", index % 7))
         .collect::<Vec<_>>();
-    let borrowed = values.iter().map(|value| value.as_str()).collect::<Vec<_>>();
+    let borrowed = values
+        .iter()
+        .map(|value| value.as_str())
+        .collect::<Vec<_>>();
     let plain = list(&borrowed);
     // SAFETY: the ordinary string list roots all elements through the sort.
     let sorted = unsafe { Rc::from_raw(imre_str_list_sorted_suffix(Rc::as_ptr(&plain), 5)) };
@@ -212,7 +215,7 @@ fn suffix_sort_is_stable_beyond_the_stack_scratch_size() {
         .flat_map(|remainder| {
             (remainder..1025)
                 .step_by(7)
-                .map(|index| format!("{index:04}:{remainder}"))
+                .map(move |index| format!("{index:04}:{remainder}"))
         })
         .collect::<Vec<_>>();
     assert_eq!(rows(&sorted), expected);
