@@ -98,6 +98,12 @@ fn which(cmd: &[u8], mode: &Int, path: Option<&[u8]>) -> LookupResult {
     }
     let mut seen = HashSet::new();
     for dir in path.split(|&b| b == b':') {
+        if seen.len() == seen.capacity() {
+            if seen.contains(dir) {
+                continue;
+            }
+            seen.try_reserve(1).map_err(|_| LookupError::Allocation)?;
+        }
         if seen.insert(dir)
             && let Some(found) = candidate(dir, cmd, mode)?
         {
