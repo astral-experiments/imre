@@ -43,13 +43,13 @@ def measure(commands, args, expected, cpus, output, live):
         "commands": commands, "arguments": args, "cpus": sorted(cpus), "environment": env,
         "bytes": len(expected), "sha256": digest(expected), "warmup_ns": samples[0],
         "order": order, "samples_ns": samples[1:], "median_ms": medians,
-        "relar_over_rust": medians["relar"] / medians["rust"],
+        "imre_over_rust": medians["imre"] / medians["rust"],
     }
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for flag in ("fixtures", "python", "previous", "relar", "codon", "rust", "output"):
+    for flag in ("fixtures", "python", "previous", "imre", "codon", "rust", "output"):
         parser.add_argument("--" + flag, type=Path, required=True)
     parser.add_argument("--cpu", type=int, required=True)
     parser.add_argument("--full-matrix", action="store_true",
@@ -69,7 +69,7 @@ def main():
     python = args.python.absolute()  # Preserve a venv's interpreter symlink.
     commands = {"cpython": original_command(python)}
     commands.update({name: [str(getattr(args, name).resolve(strict=True))]
-                     for name in ("codon", "previous", "relar", "rust")})
+                     for name in ("codon", "previous", "imre", "rust")})
     files = [Path(command[0]) for command in commands.values()]
     files.extend([Path(__file__), APP / "original.py", APP / "upstream/conformance.py"])
     if args.live:
@@ -79,7 +79,7 @@ def main():
         files.extend([old_ty, new_ty, APP / "original_live.py"])
     artifacts = [file_id(p) for p in files]
     cases, inputs = {}, {}
-    with tempfile.TemporaryDirectory(prefix="relar-render-cases-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="imre-render-cases-") as tmp:
         output = Path(tmp) / "report.md"
         for scale in (1, 10):
             for state in (("changed", "unchanged") if args.full_matrix else ("changed",)):
@@ -117,7 +117,7 @@ def main():
     record = {"schema": 1, "invocation": sys.argv, "host": platform.uname()._asdict(),
               "artifacts": artifacts, "fixtures": inputs, "suite_revision": REVISION, "cases": cases}
     args.output.write_bytes(gzip.compress(json.dumps(record, indent=2).encode(), mtime=0))
-    if any(case["relar_over_rust"] > 2 for case in cases.values()):
+    if any(case["imre_over_rust"] > 2 for case in cases.values()):
         raise SystemExit("a report exceeded 2x Rust")
 
 

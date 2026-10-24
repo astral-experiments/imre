@@ -3,7 +3,7 @@
   "started_at_utc": "2026-10-19T18:03:46.200387+00:00",
   "complete": true,
   "guards_passed": true,
-  "method": "Separate whole-process DHAT and Callgrind profiles of the exact timed Relar and Rust ThinLTO binaries. Every process handles 64 KiB of raw data using repeated codec calls, including startup, checksum and file I/O. Full output, checksum, inputs, binaries, records, profiling tools and retained artifacts are verified.",
+  "method": "Separate whole-process DHAT and Callgrind profiles of the exact timed Imre and Rust ThinLTO binaries. Every process handles 64 KiB of raw data using repeated codec calls, including startup, checksum and file I/O. Full output, checksum, inputs, binaries, records, profiling tools and retained artifacts are verified.",
   "instruction_measurement": "Instrumented Callgrind guest instruction counts (Ir), not CPU cycles, CPU time, or wall-time performance. Inclusive and exclusive annotations are retained separately.",
   "allocation_measurement": "DHAT requested heap bytes/blocks over the whole process, including runtime and I/O allocations; not RSS. Global peak uses gb/gbk contributions, not independent allocation-point maxima. Exit-live totals alone are not a leak diagnosis.",
   "benchmark_record_sha256": "204b8fbab5dfa29845619031909a67b6ce7c1453fa557a7b400064e683edcf4b",
@@ -37,77 +37,77 @@
     "upstream_3": "994a7cd4277317f211dffab8eb9cf1a322d6a2e4f41f375fd226ee5ff25c20b3"
   },
   "timed_binary_sha256": {
-    "relar": "9d7619afb8ceb43830dc676b7137947d2222336a44c693c36a2642fa6d3c8a09",
+    "imre": "9d7619afb8ceb43830dc676b7137947d2222336a44c693c36a2642fa6d3c8a09",
     "rust": "3c80e8e21f0752df74dd084d080872a7fe8a845e05c1e8f87370d8e67372c6de"
   },
   "guarded_inputs": {
     "benchmark_record": {
-      "path": "/tmp/relar-string-reuse-thinlto.json",
+      "path": "/tmp/imre-string-reuse-thinlto.json",
       "sha256": "204b8fbab5dfa29845619031909a67b6ce7c1453fa557a7b400064e683edcf4b",
       "bytes": 732550
     },
     "rust_build_record": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/build-record.json",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/build-record.json",
       "sha256": "1f4eee99fa3b2c61b5970cbcee518a85f6cc3efcab74fed428533a292f73c366",
       "bytes": 20945
     },
     "validation": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/validation.json",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/validation.json",
       "sha256": "f9b634b1035e7a1585724f94851aa1d5ee04b983188cd1fca533a29d11a555dd",
       "bytes": 336600
     },
     "llvm": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45.ll",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45.ll",
       "sha256": "6663a3e07b32b84bf651d1641f5451994293f0294e524187f2ed329ee3523197",
       "bytes": 183350
     },
     "profiler": {
-      "path": "/tmp/relar-string-reuse-profile.py",
+      "path": "/tmp/imre-string-reuse-profile.py",
       "sha256": "7bd082aedd142473b0eb42564c43861dbcb5e9cee0f91110da7ad2cfe55f86db",
       "bytes": 19692
     },
-    "binary_relar": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45",
+    "binary_imre": {
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45",
       "sha256": "9d7619afb8ceb43830dc676b7137947d2222336a44c693c36a2642fa6d3c8a09",
       "bytes": 3663672
     },
     "binary_rust": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
       "sha256": "3c80e8e21f0752df74dd084d080872a7fe8a845e05c1e8f87370d8e67372c6de",
       "bytes": 696824
     },
     "tool_valgrind_launcher": {
-      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+      "path": "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
       "sha256": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9",
       "bytes": 528
     },
     "tool_valgrind_binary": {
-      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind.bin",
+      "path": "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind.bin",
       "sha256": "def5fdcf6ae64a4d3e6af3786b622978d8313e0734ecf3f6cbe71d8be9e274c8",
       "bytes": 22688
     },
     "tool_callgrind_annotate": {
-      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+      "path": "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
       "sha256": "e0ac7a2c69db1268d19ff52bd59e65289444f14f09c4daad1adee3ef215b6d4f",
       "bytes": 44669
     },
     "tool_dhat": {
-      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/dhat-amd64-linux",
+      "path": "/home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/dhat-amd64-linux",
       "sha256": "cbe15a883012c617da1359656425faed0b1a049fce329801a31cb5f45c5d71fc",
       "bytes": 2346656
     },
     "tool_callgrind": {
-      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/callgrind-amd64-linux",
+      "path": "/home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/callgrind-amd64-linux",
       "sha256": "825eb197d519240c112e03ed00f40a8bbe1a0a0614f79ea95e28c67e8695cb03",
       "bytes": 2482912
     },
     "tool_core_preload": {
-      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_core-amd64-linux.so",
+      "path": "/home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_core-amd64-linux.so",
       "sha256": "87edd6ad90b12bb5fe58f2ea2235db5b6a3d637657488f3e06d07e482354a8c5",
       "bytes": 14024
     },
     "tool_dhat_preload": {
-      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so",
+      "path": "/home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so",
       "sha256": "1cb4fa3188da5492822b33976fe83a150809e39515cc37fe2e52d605a8197436",
       "bytes": 96200
     },
@@ -126,63 +126,63 @@
       "sha256": "021044895e95be79dc2f110367607e684119afbc8ce75f6f0eec94844e0acec7",
       "bytes": 30905176
     },
-    "timed_encode-64_relar_input": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/encode-64/relar/input.bin",
+    "timed_encode-64_imre_input": {
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/encode-64/imre/input.bin",
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
       "bytes": 64
     },
-    "timed_encode-64_relar_output": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/encode-64/relar/output.bin",
+    "timed_encode-64_imre_output": {
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/encode-64/imre/output.bin",
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
       "bytes": 96
     },
     "timed_encode-64_rust_input": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/encode-64/rust/input.bin",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/encode-64/rust/input.bin",
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
       "bytes": 64
     },
     "timed_encode-64_rust_output": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/encode-64/rust/output.bin",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/encode-64/rust/output.bin",
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
       "bytes": 96
     },
-    "timed_encode-16384_relar_input": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/encode-16384/relar/input.bin",
+    "timed_encode-16384_imre_input": {
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/encode-16384/imre/input.bin",
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
       "bytes": 16384
     },
-    "timed_encode-16384_relar_output": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/encode-16384/relar/output.bin",
+    "timed_encode-16384_imre_output": {
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/encode-16384/imre/output.bin",
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
       "bytes": 24576
     },
     "timed_encode-16384_rust_input": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/encode-16384/rust/input.bin",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/encode-16384/rust/input.bin",
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
       "bytes": 16384
     },
     "timed_encode-16384_rust_output": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/encode-16384/rust/output.bin",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/encode-16384/rust/output.bin",
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
       "bytes": 24576
     },
-    "timed_decode-bytes-16384_relar_input": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/decode-bytes-16384/relar/input.bin",
+    "timed_decode-bytes-16384_imre_input": {
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/decode-bytes-16384/imre/input.bin",
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
       "bytes": 24576
     },
-    "timed_decode-bytes-16384_relar_output": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/decode-bytes-16384/relar/output.bin",
+    "timed_decode-bytes-16384_imre_output": {
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/decode-bytes-16384/imre/output.bin",
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
       "bytes": 16384
     },
     "timed_decode-bytes-16384_rust_input": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/decode-bytes-16384/rust/input.bin",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/decode-bytes-16384/rust/input.bin",
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
       "bytes": 24576
     },
     "timed_decode-bytes-16384_rust_output": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/decode-bytes-16384/rust/output.bin",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/decode-bytes-16384/rust/output.bin",
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
       "bytes": 16384
     }
@@ -190,7 +190,7 @@
   "tool_versions": {
     "valgrind": {
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--version"
       ],
       "returncode": 0,
@@ -199,7 +199,7 @@
     },
     "callgrind_annotate": {
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
         "--version"
       ],
       "returncode": 255,
@@ -217,7 +217,7 @@
     }
   },
   "environment": {
-    "VALGRIND_LIB": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind",
+    "VALGRIND_LIB": "/home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind",
     "VALGRIND_OPTS": "",
     "LC_ALL": "C"
   },
@@ -270,20 +270,20 @@
   "profiles": [
     {
       "label": "encode-64",
-      "engine": "relar",
+      "engine": "imre",
       "tool": "dhat",
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=dhat",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-string-reuse-profile/encode-64-relar-dhat/valgrind.log",
-        "--dhat-out-file=/tmp/relar-string-reuse-profile/encode-64-relar-dhat/profile.json",
-        "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45",
+        "--log-file=/tmp/imre-string-reuse-profile/encode-64-imre-dhat/valgrind.log",
+        "--dhat-out-file=/tmp/imre-string-reuse-profile/encode-64-imre-dhat/profile.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45",
         "encode",
-        "/tmp/relar-string-reuse-profile/encode-64-relar-dhat/input.bin",
-        "/tmp/relar-string-reuse-profile/encode-64-relar-dhat/output.bin",
+        "/tmp/imre-string-reuse-profile/encode-64-imre-dhat/input.bin",
+        "/tmp/imre-string-reuse-profile/encode-64-imre-dhat/output.bin",
         "1024"
       ],
       "returncode": 0,
@@ -309,7 +309,7 @@
           "bytes": 299008,
           "blocks": 4096,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x241390: alloc (library/alloc/src/alloc.rs:101)",
             "0x241390: do_alloc (heap.rs:412)",
             "0x241390: alloc (heap.rs:466)",
@@ -318,47 +318,47 @@
             "0x22473B: with_additional (heap.rs:126)",
             "0x22473B: reserve (mod.rs:275)",
             "0x22473B: try_reserve (lib.rs:557)",
-            "0x22473B: relar_runtime::objects::append_utf8_slow (objects.rs:609)",
-            "0x20FDA1: fn_3 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x22473B: imre_runtime::objects::append_utf8_slow (objects.rs:609)",
+            "0x20FDA1: fn_3 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 98304,
           "blocks": 1024,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x210059: fn_3 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x210059: fn_3 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 40960,
           "blocks": 1024,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x20F59B: fn_3 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x20F59B: fn_3 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 40960,
           "blocks": 1024,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x210100: fn_3 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x210100: fn_3 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 8192,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
             "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
             "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -369,16 +369,16 @@
             "0x2289ED: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
             "0x2289ED: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
             "0x2289ED: UnknownInlinedFun (library/std/src/io/buffered/bufwriter.rs:122)",
-            "0x2289ED: relar_runtime::objects::files::open (files.rs:230)",
-            "0x20D84D: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x2289ED: imre_runtime::objects::files::open (files.rs:230)",
+            "0x20D84D: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 8192,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
             "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
             "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -390,26 +390,26 @@
             "0x217D59: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
             "0x217D59: UnknownInlinedFun (library/std/src/io/buffered/bufwriter.rs:122)",
             "0x217D59: {closure#0} (lib.rs:208)",
-            "0x217D59: <relar_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
-            "0x214873: call_once<fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
-            "0x214873: {closure#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
-            "0x214873: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<relar_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
-            "0x186C68: <std::sys::sync::once::futex::Once>::call (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x21529B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>>> (library/std/src/sync/once.rs:226)",
-            "0x21529B: force<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
-            "0x21529B: deref<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
-            "0x21529B: write_output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:218)",
-            "0x21529B: output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:229)",
-            "0x21529B: relar_runtime::output_bytes (lib.rs:236)",
-            "0x20DC88: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x217D59: <imre_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
+            "0x214873: call_once<fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
+            "0x214873: {closure#0}<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
+            "0x214873: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<imre_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
+            "0x186C68: <std::sys::sync::once::futex::Once>::call (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x21529B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>>> (library/std/src/sync/once.rs:226)",
+            "0x21529B: force<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
+            "0x21529B: deref<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
+            "0x21529B: write_output<imre_runtime::output_bytes::{closure_env#0}> (lib.rs:218)",
+            "0x21529B: output<imre_runtime::output_bytes::{closure_env#0}> (lib.rs:229)",
+            "0x21529B: imre_runtime::output_bytes (lib.rs:236)",
+            "0x20DC88: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 2188,
           "blocks": 5,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x22E1B5: alloc (library/alloc/src/alloc.rs:101)",
             "0x22E1B5: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
             "0x22E1B5: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -428,16 +428,16 @@
             "0x223537: insert<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize> (mappings.rs:247)",
             "0x223537: insert<usize> (mappings.rs:255)",
             "0x223537: {closure#1} (mappings.rs:569)",
-            "0x223537: with_mut<relar_runtime::objects::Storage, core::option::Option<(relar_runtime::objects::words::OwnedWord, relar_runtime::objects::words::OwnedWord)>, relar_runtime::objects::mappings::relar_dict_set::{closure_env#1}> (lib.rs:160)",
-            "0x223537: relar_dict_set (mappings.rs:566)",
-            "0x213CC7: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x223537: with_mut<imre_runtime::objects::Storage, core::option::Option<(imre_runtime::objects::words::OwnedWord, imre_runtime::objects::words::OwnedWord)>, imre_runtime::objects::mappings::imre_dict_set::{closure_env#1}> (lib.rs:160)",
+            "0x223537: imre_dict_set (mappings.rs:566)",
+            "0x213CC7: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 1984,
           "blocks": 5,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x230B17: alloc (library/alloc/src/alloc.rs:101)",
             "0x230B17: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
             "0x230B17: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -445,44 +445,44 @@
             "0x230B17: <alloc::raw_vec::RawVecInner>::finish_grow (library/alloc/src/raw_vec/mod.rs:560)",
             "0x223388: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:529)",
             "0x223388: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:694)",
-            "0x223388: try_reserve<core::option::Option<relar_runtime::objects::mappings::Entry<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize>>, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:351)",
-            "0x223388: try_reserve<core::option::Option<relar_runtime::objects::mappings::Entry<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize>>, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1536)",
+            "0x223388: try_reserve<core::option::Option<imre_runtime::objects::mappings::Entry<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize>>, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:351)",
+            "0x223388: try_reserve<core::option::Option<imre_runtime::objects::mappings::Entry<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize>>, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1536)",
             "0x223388: insert<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize> (mappings.rs:124)",
             "0x223388: insert<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize> (mappings.rs:247)",
             "0x223388: insert<usize> (mappings.rs:255)",
             "0x223388: {closure#1} (mappings.rs:569)",
-            "0x223388: with_mut<relar_runtime::objects::Storage, core::option::Option<(relar_runtime::objects::words::OwnedWord, relar_runtime::objects::words::OwnedWord)>, relar_runtime::objects::mappings::relar_dict_set::{closure_env#1}> (lib.rs:160)",
-            "0x223388: relar_dict_set (mappings.rs:566)",
-            "0x213CC7: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x223388: with_mut<imre_runtime::objects::Storage, core::option::Option<(imre_runtime::objects::words::OwnedWord, imre_runtime::objects::words::OwnedWord)>, imre_runtime::objects::mappings::imre_dict_set::{closure_env#1}> (lib.rs:160)",
+            "0x223388: imre_dict_set (mappings.rs:566)",
+            "0x213CC7: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         }
       ],
       "files": {
-        "encode-64-relar-dhat/command.json": {
+        "encode-64-imre-dhat/command.json": {
           "sha256": "b68d5d3f32e4725b5c7b2204d77603599f6aa0c9e36e3bbdd2a55061aa3f7226",
           "bytes": 837
         },
-        "encode-64-relar-dhat/input.bin": {
+        "encode-64-imre-dhat/input.bin": {
           "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
           "bytes": 64
         },
-        "encode-64-relar-dhat/output.bin": {
+        "encode-64-imre-dhat/output.bin": {
           "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
           "bytes": 96
         },
-        "encode-64-relar-dhat/process-stderr.txt": {
+        "encode-64-imre-dhat/process-stderr.txt": {
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "bytes": 0
         },
-        "encode-64-relar-dhat/profile.json": {
+        "encode-64-imre-dhat/profile.json": {
           "sha256": "3fa3517ce9368d717646cd71f2b67a51dd15285eccc95585f6bb5ea4aac185df",
           "bytes": 23258
         },
-        "encode-64-relar-dhat/stdout.txt": {
+        "encode-64-imre-dhat/stdout.txt": {
           "sha256": "87c12b1e467a0331b46d6373e962d4afbe75c2580a129a3c9d9b18e8bb102cf4",
           "bytes": 10
         },
-        "encode-64-relar-dhat/valgrind.log": {
+        "encode-64-imre-dhat/valgrind.log": {
           "sha256": "bf56800393f568f7d10bcf31445a59b564fd47cbd4a5bc78ae1695b0a0a055c9",
           "bytes": 976
         }
@@ -490,22 +490,22 @@
     },
     {
       "label": "encode-64",
-      "engine": "relar",
+      "engine": "imre",
       "tool": "callgrind",
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=callgrind",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-string-reuse-profile/encode-64-relar-callgrind/valgrind.log",
-        "--callgrind-out-file=/tmp/relar-string-reuse-profile/encode-64-relar-callgrind/profile.callgrind",
+        "--log-file=/tmp/imre-string-reuse-profile/encode-64-imre-callgrind/valgrind.log",
+        "--callgrind-out-file=/tmp/imre-string-reuse-profile/encode-64-imre-callgrind/profile.callgrind",
         "--dump-instr=yes",
         "--collect-jumps=yes",
-        "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45",
+        "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45",
         "encode",
-        "/tmp/relar-string-reuse-profile/encode-64-relar-callgrind/input.bin",
-        "/tmp/relar-string-reuse-profile/encode-64-relar-callgrind/output.bin",
+        "/tmp/imre-string-reuse-profile/encode-64-imre-callgrind/input.bin",
+        "/tmp/imre-string-reuse-profile/encode-64-imre-callgrind/output.bin",
         "1024"
       ],
       "returncode": 0,
@@ -528,11 +528,11 @@
         {
           "inclusive": "no",
           "command": [
-            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
             "--auto=no",
             "--inclusive=no",
             "--threshold=100",
-            "/tmp/relar-string-reuse-profile/encode-64-relar-callgrind/profile.callgrind"
+            "/tmp/imre-string-reuse-profile/encode-64-imre-callgrind/profile.callgrind"
           ],
           "returncode": 0,
           "stdout_sha256": "e1f54761e0c016f879ff779ec5ee01ede9c48e5a60bbbfb37a9c1456869ca44e",
@@ -541,11 +541,11 @@
         {
           "inclusive": "yes",
           "command": [
-            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
             "--auto=no",
             "--inclusive=yes",
             "--threshold=100",
-            "/tmp/relar-string-reuse-profile/encode-64-relar-callgrind/profile.callgrind"
+            "/tmp/imre-string-reuse-profile/encode-64-imre-callgrind/profile.callgrind"
           ],
           "returncode": 0,
           "stdout_sha256": "cba9b4137004da27c89a64b7a0ed22436fd8061f7df924dd16341497019a3a9c",
@@ -553,47 +553,47 @@
         }
       ],
       "files": {
-        "encode-64-relar-callgrind/command.json": {
+        "encode-64-imre-callgrind/command.json": {
           "sha256": "1b9c42af0b002e583c2db3aba20f11730e2e1f0768264f0012b66535aac6f2e2",
           "bytes": 928
         },
-        "encode-64-relar-callgrind/functions-inclusive-no-stderr.txt": {
+        "encode-64-imre-callgrind/functions-inclusive-no-stderr.txt": {
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "bytes": 0
         },
-        "encode-64-relar-callgrind/functions-inclusive-no.txt": {
+        "encode-64-imre-callgrind/functions-inclusive-no.txt": {
           "sha256": "e1f54761e0c016f879ff779ec5ee01ede9c48e5a60bbbfb37a9c1456869ca44e",
           "bytes": 80941
         },
-        "encode-64-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+        "encode-64-imre-callgrind/functions-inclusive-yes-stderr.txt": {
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "bytes": 0
         },
-        "encode-64-relar-callgrind/functions-inclusive-yes.txt": {
+        "encode-64-imre-callgrind/functions-inclusive-yes.txt": {
           "sha256": "cba9b4137004da27c89a64b7a0ed22436fd8061f7df924dd16341497019a3a9c",
           "bytes": 81549
         },
-        "encode-64-relar-callgrind/input.bin": {
+        "encode-64-imre-callgrind/input.bin": {
           "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
           "bytes": 64
         },
-        "encode-64-relar-callgrind/output.bin": {
+        "encode-64-imre-callgrind/output.bin": {
           "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
           "bytes": 96
         },
-        "encode-64-relar-callgrind/process-stderr.txt": {
+        "encode-64-imre-callgrind/process-stderr.txt": {
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "bytes": 0
         },
-        "encode-64-relar-callgrind/profile.callgrind": {
+        "encode-64-imre-callgrind/profile.callgrind": {
           "sha256": "52faadc4a14d1ba67f57a7b78911b306dbdac7db2b6f115397b1445ae6a11f51",
           "bytes": 251452
         },
-        "encode-64-relar-callgrind/stdout.txt": {
+        "encode-64-imre-callgrind/stdout.txt": {
           "sha256": "87c12b1e467a0331b46d6373e962d4afbe75c2580a129a3c9d9b18e8bb102cf4",
           "bytes": 10
         },
-        "encode-64-relar-callgrind/valgrind.log": {
+        "encode-64-imre-callgrind/valgrind.log": {
           "sha256": "a34d71a285255124abc09c4c3f2748f375557a0a83d65458303d5ecdd29d951d",
           "bytes": 635
         }
@@ -604,17 +604,17 @@
       "engine": "rust",
       "tool": "dhat",
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=dhat",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-string-reuse-profile/encode-64-rust-dhat/valgrind.log",
-        "--dhat-out-file=/tmp/relar-string-reuse-profile/encode-64-rust-dhat/profile.json",
-        "/home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
+        "--log-file=/tmp/imre-string-reuse-profile/encode-64-rust-dhat/valgrind.log",
+        "--dhat-out-file=/tmp/imre-string-reuse-profile/encode-64-rust-dhat/profile.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
         "encode",
-        "/tmp/relar-string-reuse-profile/encode-64-rust-dhat/input.bin",
-        "/tmp/relar-string-reuse-profile/encode-64-rust-dhat/output.bin",
+        "/tmp/imre-string-reuse-profile/encode-64-rust-dhat/input.bin",
+        "/tmp/imre-string-reuse-profile/encode-64-rust-dhat/output.bin",
         "1024"
       ],
       "returncode": 0,
@@ -640,7 +640,7 @@
           "bytes": 98304,
           "blocks": 1024,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x11EC87: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
             "0x11EC87: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
             "0x11EC87: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -658,93 +658,93 @@
             "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
             "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
             "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 1024,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x4918294: _IO_file_doallocate (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x4928603: _IO_doallocbuf (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x4925963: _IO_file_underflow (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x4919EEF: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x49312EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 1024,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x1442F5: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1442F5: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
             "0x120195: base45_reference::main (main.rs:207)",
             "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
             "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
             "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 544,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x177A4D: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x172F39: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x177A4D: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x172F39: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 472,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x4918F5E: fopen (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x4931195: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 360,
           "blocks": 2,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x4919E64: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x49312EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 222,
           "blocks": 5,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x11EA1B: base45_reference::main (main.rs:198)",
             "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
             "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
             "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 152,
           "blocks": 1,
           "frames": [
-            "0x484D953: calloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x484D953: calloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x492CF5A: ??? (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x492D29F: pthread_attr_setaffinity_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x49310E7: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         }
       ],
@@ -784,19 +784,19 @@
       "engine": "rust",
       "tool": "callgrind",
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=callgrind",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-string-reuse-profile/encode-64-rust-callgrind/valgrind.log",
-        "--callgrind-out-file=/tmp/relar-string-reuse-profile/encode-64-rust-callgrind/profile.callgrind",
+        "--log-file=/tmp/imre-string-reuse-profile/encode-64-rust-callgrind/valgrind.log",
+        "--callgrind-out-file=/tmp/imre-string-reuse-profile/encode-64-rust-callgrind/profile.callgrind",
         "--dump-instr=yes",
         "--collect-jumps=yes",
-        "/home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
+        "/home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
         "encode",
-        "/tmp/relar-string-reuse-profile/encode-64-rust-callgrind/input.bin",
-        "/tmp/relar-string-reuse-profile/encode-64-rust-callgrind/output.bin",
+        "/tmp/imre-string-reuse-profile/encode-64-rust-callgrind/input.bin",
+        "/tmp/imre-string-reuse-profile/encode-64-rust-callgrind/output.bin",
         "1024"
       ],
       "returncode": 0,
@@ -819,11 +819,11 @@
         {
           "inclusive": "no",
           "command": [
-            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
             "--auto=no",
             "--inclusive=no",
             "--threshold=100",
-            "/tmp/relar-string-reuse-profile/encode-64-rust-callgrind/profile.callgrind"
+            "/tmp/imre-string-reuse-profile/encode-64-rust-callgrind/profile.callgrind"
           ],
           "returncode": 0,
           "stdout_sha256": "64c0ca0de8afcfee48fcdea4d7f384c63799082c70cd0a0a1ac5df6151032bbc",
@@ -832,11 +832,11 @@
         {
           "inclusive": "yes",
           "command": [
-            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
             "--auto=no",
             "--inclusive=yes",
             "--threshold=100",
-            "/tmp/relar-string-reuse-profile/encode-64-rust-callgrind/profile.callgrind"
+            "/tmp/imre-string-reuse-profile/encode-64-rust-callgrind/profile.callgrind"
           ],
           "returncode": 0,
           "stdout_sha256": "327e57ce398af9c5726622de5e163151fc22d4c11649696c74f3ae8c1ef90057",
@@ -892,20 +892,20 @@
     },
     {
       "label": "encode-16384",
-      "engine": "relar",
+      "engine": "imre",
       "tool": "dhat",
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=dhat",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-string-reuse-profile/encode-16384-relar-dhat/valgrind.log",
-        "--dhat-out-file=/tmp/relar-string-reuse-profile/encode-16384-relar-dhat/profile.json",
-        "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45",
+        "--log-file=/tmp/imre-string-reuse-profile/encode-16384-imre-dhat/valgrind.log",
+        "--dhat-out-file=/tmp/imre-string-reuse-profile/encode-16384-imre-dhat/profile.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45",
         "encode",
-        "/tmp/relar-string-reuse-profile/encode-16384-relar-dhat/input.bin",
-        "/tmp/relar-string-reuse-profile/encode-16384-relar-dhat/output.bin",
+        "/tmp/imre-string-reuse-profile/encode-16384-imre-dhat/input.bin",
+        "/tmp/imre-string-reuse-profile/encode-16384-imre-dhat/output.bin",
         "4"
       ],
       "returncode": 0,
@@ -931,7 +931,7 @@
           "bytes": 418252,
           "blocks": 72,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x241390: alloc (library/alloc/src/alloc.rs:101)",
             "0x241390: do_alloc (heap.rs:412)",
             "0x241390: alloc (heap.rs:466)",
@@ -940,39 +940,39 @@
             "0x22473B: with_additional (heap.rs:126)",
             "0x22473B: reserve (mod.rs:275)",
             "0x22473B: try_reserve (lib.rs:557)",
-            "0x22473B: relar_runtime::objects::append_utf8_slow (objects.rs:609)",
-            "0x20FDA1: fn_3 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x22473B: imre_runtime::objects::append_utf8_slow (objects.rs:609)",
+            "0x20FDA1: fn_3 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 98304,
           "blocks": 4,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x210059: fn_3 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x210059: fn_3 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 16384,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x18EE6F: <alloc::raw_vec::RawVecInner>::finish_grow (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x1BDA23: <std::fs::File as std::io::Read>::read_to_end (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x2282B8: <relar_runtime::objects::files::FileState>::read_bytes (files.rs:116)",
-            "0x20B44E: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x18EE6F: <alloc::raw_vec::RawVecInner>::finish_grow (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x1BDA23: <std::fs::File as std::io::Read>::read_to_end (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x2282B8: <imre_runtime::objects::files::FileState>::read_bytes (files.rs:116)",
+            "0x20B44E: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 8192,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
             "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
             "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -983,16 +983,16 @@
             "0x2289ED: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
             "0x2289ED: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
             "0x2289ED: UnknownInlinedFun (library/std/src/io/buffered/bufwriter.rs:122)",
-            "0x2289ED: relar_runtime::objects::files::open (files.rs:230)",
-            "0x20D84D: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x2289ED: imre_runtime::objects::files::open (files.rs:230)",
+            "0x20D84D: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 8192,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
             "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
             "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -1004,26 +1004,26 @@
             "0x217D59: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
             "0x217D59: UnknownInlinedFun (library/std/src/io/buffered/bufwriter.rs:122)",
             "0x217D59: {closure#0} (lib.rs:208)",
-            "0x217D59: <relar_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
-            "0x214873: call_once<fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
-            "0x214873: {closure#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
-            "0x214873: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<relar_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
-            "0x186C68: <std::sys::sync::once::futex::Once>::call (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x21529B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>>> (library/std/src/sync/once.rs:226)",
-            "0x21529B: force<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
-            "0x21529B: deref<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
-            "0x21529B: write_output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:218)",
-            "0x21529B: output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:229)",
-            "0x21529B: relar_runtime::output_bytes (lib.rs:236)",
-            "0x20DC88: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x217D59: <imre_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
+            "0x214873: call_once<fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
+            "0x214873: {closure#0}<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
+            "0x214873: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<imre_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
+            "0x186C68: <std::sys::sync::once::futex::Once>::call (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x21529B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>>> (library/std/src/sync/once.rs:226)",
+            "0x21529B: force<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
+            "0x21529B: deref<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
+            "0x21529B: write_output<imre_runtime::output_bytes::{closure_env#0}> (lib.rs:218)",
+            "0x21529B: output<imre_runtime::output_bytes::{closure_env#0}> (lib.rs:229)",
+            "0x21529B: imre_runtime::output_bytes (lib.rs:236)",
+            "0x20DC88: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 2188,
           "blocks": 5,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x22E1B5: alloc (library/alloc/src/alloc.rs:101)",
             "0x22E1B5: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
             "0x22E1B5: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -1042,16 +1042,16 @@
             "0x223537: insert<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize> (mappings.rs:247)",
             "0x223537: insert<usize> (mappings.rs:255)",
             "0x223537: {closure#1} (mappings.rs:569)",
-            "0x223537: with_mut<relar_runtime::objects::Storage, core::option::Option<(relar_runtime::objects::words::OwnedWord, relar_runtime::objects::words::OwnedWord)>, relar_runtime::objects::mappings::relar_dict_set::{closure_env#1}> (lib.rs:160)",
-            "0x223537: relar_dict_set (mappings.rs:566)",
-            "0x213CC7: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x223537: with_mut<imre_runtime::objects::Storage, core::option::Option<(imre_runtime::objects::words::OwnedWord, imre_runtime::objects::words::OwnedWord)>, imre_runtime::objects::mappings::imre_dict_set::{closure_env#1}> (lib.rs:160)",
+            "0x223537: imre_dict_set (mappings.rs:566)",
+            "0x213CC7: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 1984,
           "blocks": 5,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x230B17: alloc (library/alloc/src/alloc.rs:101)",
             "0x230B17: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
             "0x230B17: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -1059,22 +1059,22 @@
             "0x230B17: <alloc::raw_vec::RawVecInner>::finish_grow (library/alloc/src/raw_vec/mod.rs:560)",
             "0x223388: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:529)",
             "0x223388: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:694)",
-            "0x223388: try_reserve<core::option::Option<relar_runtime::objects::mappings::Entry<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize>>, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:351)",
-            "0x223388: try_reserve<core::option::Option<relar_runtime::objects::mappings::Entry<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize>>, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1536)",
+            "0x223388: try_reserve<core::option::Option<imre_runtime::objects::mappings::Entry<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize>>, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:351)",
+            "0x223388: try_reserve<core::option::Option<imre_runtime::objects::mappings::Entry<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize>>, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1536)",
             "0x223388: insert<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize> (mappings.rs:124)",
             "0x223388: insert<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize> (mappings.rs:247)",
             "0x223388: insert<usize> (mappings.rs:255)",
             "0x223388: {closure#1} (mappings.rs:569)",
-            "0x223388: with_mut<relar_runtime::objects::Storage, core::option::Option<(relar_runtime::objects::words::OwnedWord, relar_runtime::objects::words::OwnedWord)>, relar_runtime::objects::mappings::relar_dict_set::{closure_env#1}> (lib.rs:160)",
-            "0x223388: relar_dict_set (mappings.rs:566)",
-            "0x213CC7: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x223388: with_mut<imre_runtime::objects::Storage, core::option::Option<(imre_runtime::objects::words::OwnedWord, imre_runtime::objects::words::OwnedWord)>, imre_runtime::objects::mappings::imre_dict_set::{closure_env#1}> (lib.rs:160)",
+            "0x223388: imre_dict_set (mappings.rs:566)",
+            "0x213CC7: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 1760,
           "blocks": 44,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x223BB3: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
             "0x223BB3: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
             "0x223BB3: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -1084,38 +1084,38 @@
             "0x223BB3: UnknownInlinedFun (library/alloc/src/rc.rs:426)",
             "0x223BB3: UnknownInlinedFun (sequences.rs:307)",
             "0x223BB3: {closure#0} (mappings.rs:705)",
-            "0x223BB3: with_mut<relar_runtime::objects::Storage, core::result::Result<core::option::Option<(relar_runtime::objects::words::OwnedWord, core::option::Option<relar_runtime::objects::words::OwnedWord>)>, relar_runtime::objects::mappings::IterationError>, relar_runtime::objects::mappings::relar_mapping_iter_next::{closure_env#0}> (lib.rs:160)",
-            "0x223BB3: relar_mapping_iter_next (mappings.rs:704)",
-            "0x213A48: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x223BB3: with_mut<imre_runtime::objects::Storage, core::result::Result<core::option::Option<(imre_runtime::objects::words::OwnedWord, core::option::Option<imre_runtime::objects::words::OwnedWord>)>, imre_runtime::objects::mappings::IterationError>, imre_runtime::objects::mappings::imre_mapping_iter_next::{closure_env#0}> (lib.rs:160)",
+            "0x223BB3: imre_mapping_iter_next (mappings.rs:704)",
+            "0x213A48: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         }
       ],
       "files": {
-        "encode-16384-relar-dhat/command.json": {
+        "encode-16384-imre-dhat/command.json": {
           "sha256": "b35640d6c0b3405e5c843849ad88438910705c1ab97bdaa5c6eec8dc28bc0ff1",
           "bytes": 849
         },
-        "encode-16384-relar-dhat/input.bin": {
+        "encode-16384-imre-dhat/input.bin": {
           "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
           "bytes": 16384
         },
-        "encode-16384-relar-dhat/output.bin": {
+        "encode-16384-imre-dhat/output.bin": {
           "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
           "bytes": 24576
         },
-        "encode-16384-relar-dhat/process-stderr.txt": {
+        "encode-16384-imre-dhat/process-stderr.txt": {
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "bytes": 0
         },
-        "encode-16384-relar-dhat/profile.json": {
+        "encode-16384-imre-dhat/profile.json": {
           "sha256": "72b53fab994c90cf8e23490b6baa79d06ad2c500dba1f945c5837320e2a9950d",
           "bytes": 23186
         },
-        "encode-16384-relar-dhat/stdout.txt": {
+        "encode-16384-imre-dhat/stdout.txt": {
           "sha256": "8e8c0127b4f42951ac48cff4324e2ed83f06607d085d370c1570948f6f5e4cdf",
           "bytes": 9
         },
-        "encode-16384-relar-dhat/valgrind.log": {
+        "encode-16384-imre-dhat/valgrind.log": {
           "sha256": "538ba0f076f2fdff923812270e168f9ab98307849ca257159d6a06e396b06e2c",
           "bytes": 981
         }
@@ -1123,22 +1123,22 @@
     },
     {
       "label": "encode-16384",
-      "engine": "relar",
+      "engine": "imre",
       "tool": "callgrind",
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=callgrind",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-string-reuse-profile/encode-16384-relar-callgrind/valgrind.log",
-        "--callgrind-out-file=/tmp/relar-string-reuse-profile/encode-16384-relar-callgrind/profile.callgrind",
+        "--log-file=/tmp/imre-string-reuse-profile/encode-16384-imre-callgrind/valgrind.log",
+        "--callgrind-out-file=/tmp/imre-string-reuse-profile/encode-16384-imre-callgrind/profile.callgrind",
         "--dump-instr=yes",
         "--collect-jumps=yes",
-        "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45",
+        "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45",
         "encode",
-        "/tmp/relar-string-reuse-profile/encode-16384-relar-callgrind/input.bin",
-        "/tmp/relar-string-reuse-profile/encode-16384-relar-callgrind/output.bin",
+        "/tmp/imre-string-reuse-profile/encode-16384-imre-callgrind/input.bin",
+        "/tmp/imre-string-reuse-profile/encode-16384-imre-callgrind/output.bin",
         "4"
       ],
       "returncode": 0,
@@ -1161,11 +1161,11 @@
         {
           "inclusive": "no",
           "command": [
-            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
             "--auto=no",
             "--inclusive=no",
             "--threshold=100",
-            "/tmp/relar-string-reuse-profile/encode-16384-relar-callgrind/profile.callgrind"
+            "/tmp/imre-string-reuse-profile/encode-16384-imre-callgrind/profile.callgrind"
           ],
           "returncode": 0,
           "stdout_sha256": "65c2fe7d15067e0e4bc043ebcfc02363e1dd1dcb4d5076d28ca67877fa4026a7",
@@ -1174,11 +1174,11 @@
         {
           "inclusive": "yes",
           "command": [
-            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
             "--auto=no",
             "--inclusive=yes",
             "--threshold=100",
-            "/tmp/relar-string-reuse-profile/encode-16384-relar-callgrind/profile.callgrind"
+            "/tmp/imre-string-reuse-profile/encode-16384-imre-callgrind/profile.callgrind"
           ],
           "returncode": 0,
           "stdout_sha256": "3434e59d892af3f9ad03dc52b20c2e0115699959ecf757a33289157c50768671",
@@ -1186,47 +1186,47 @@
         }
       ],
       "files": {
-        "encode-16384-relar-callgrind/command.json": {
+        "encode-16384-imre-callgrind/command.json": {
           "sha256": "b69d6faf1ad030327a9c331f4d11d6ab2468c0d24872671a6055005b2983a7a3",
           "bytes": 940
         },
-        "encode-16384-relar-callgrind/functions-inclusive-no-stderr.txt": {
+        "encode-16384-imre-callgrind/functions-inclusive-no-stderr.txt": {
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "bytes": 0
         },
-        "encode-16384-relar-callgrind/functions-inclusive-no.txt": {
+        "encode-16384-imre-callgrind/functions-inclusive-no.txt": {
           "sha256": "65c2fe7d15067e0e4bc043ebcfc02363e1dd1dcb4d5076d28ca67877fa4026a7",
           "bytes": 81895
         },
-        "encode-16384-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+        "encode-16384-imre-callgrind/functions-inclusive-yes-stderr.txt": {
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "bytes": 0
         },
-        "encode-16384-relar-callgrind/functions-inclusive-yes.txt": {
+        "encode-16384-imre-callgrind/functions-inclusive-yes.txt": {
           "sha256": "3434e59d892af3f9ad03dc52b20c2e0115699959ecf757a33289157c50768671",
           "bytes": 81895
         },
-        "encode-16384-relar-callgrind/input.bin": {
+        "encode-16384-imre-callgrind/input.bin": {
           "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
           "bytes": 16384
         },
-        "encode-16384-relar-callgrind/output.bin": {
+        "encode-16384-imre-callgrind/output.bin": {
           "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
           "bytes": 24576
         },
-        "encode-16384-relar-callgrind/process-stderr.txt": {
+        "encode-16384-imre-callgrind/process-stderr.txt": {
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "bytes": 0
         },
-        "encode-16384-relar-callgrind/profile.callgrind": {
+        "encode-16384-imre-callgrind/profile.callgrind": {
           "sha256": "f3cc4f458980e5675a941402473641c0bc73359a8b0d7597a55a9c6b0cc9145d",
           "bytes": 251826
         },
-        "encode-16384-relar-callgrind/stdout.txt": {
+        "encode-16384-imre-callgrind/stdout.txt": {
           "sha256": "8e8c0127b4f42951ac48cff4324e2ed83f06607d085d370c1570948f6f5e4cdf",
           "bytes": 9
         },
-        "encode-16384-relar-callgrind/valgrind.log": {
+        "encode-16384-imre-callgrind/valgrind.log": {
           "sha256": "cdb08fa81566b45610a2c885291df0918d346b5b1d148adfdd850d38581eac1b",
           "bytes": 638
         }
@@ -1237,17 +1237,17 @@
       "engine": "rust",
       "tool": "dhat",
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=dhat",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-string-reuse-profile/encode-16384-rust-dhat/valgrind.log",
-        "--dhat-out-file=/tmp/relar-string-reuse-profile/encode-16384-rust-dhat/profile.json",
-        "/home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
+        "--log-file=/tmp/imre-string-reuse-profile/encode-16384-rust-dhat/valgrind.log",
+        "--dhat-out-file=/tmp/imre-string-reuse-profile/encode-16384-rust-dhat/profile.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
         "encode",
-        "/tmp/relar-string-reuse-profile/encode-16384-rust-dhat/input.bin",
-        "/tmp/relar-string-reuse-profile/encode-16384-rust-dhat/output.bin",
+        "/tmp/imre-string-reuse-profile/encode-16384-rust-dhat/input.bin",
+        "/tmp/imre-string-reuse-profile/encode-16384-rust-dhat/output.bin",
         "4"
       ],
       "returncode": 0,
@@ -1273,7 +1273,7 @@
           "bytes": 98304,
           "blocks": 4,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x11EC87: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
             "0x11EC87: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
             "0x11EC87: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -1291,96 +1291,96 @@
             "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
             "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
             "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 16384,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x17930B: std::fs::read::inner (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x17930B: std::fs::read::inner (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
             "0x11E890: UnknownInlinedFun (library/std/src/fs.rs:348)",
             "0x11E890: base45_reference::main (main.rs:206)",
             "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
             "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
             "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 1024,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x4918294: _IO_file_doallocate (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x4928603: _IO_doallocbuf (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x4925963: _IO_file_underflow (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x4919EEF: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x49312EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 1024,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x1442F5: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1442F5: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
             "0x120195: base45_reference::main (main.rs:207)",
             "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
             "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
             "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 544,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x177A4D: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x172F39: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x177A4D: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x172F39: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 472,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x4918F5E: fopen (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x4931195: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 360,
           "blocks": 2,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x4919E64: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x49312EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 225,
           "blocks": 5,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x11EA1B: base45_reference::main (main.rs:198)",
             "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
             "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
             "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         }
       ],
@@ -1420,19 +1420,19 @@
       "engine": "rust",
       "tool": "callgrind",
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=callgrind",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-string-reuse-profile/encode-16384-rust-callgrind/valgrind.log",
-        "--callgrind-out-file=/tmp/relar-string-reuse-profile/encode-16384-rust-callgrind/profile.callgrind",
+        "--log-file=/tmp/imre-string-reuse-profile/encode-16384-rust-callgrind/valgrind.log",
+        "--callgrind-out-file=/tmp/imre-string-reuse-profile/encode-16384-rust-callgrind/profile.callgrind",
         "--dump-instr=yes",
         "--collect-jumps=yes",
-        "/home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
+        "/home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
         "encode",
-        "/tmp/relar-string-reuse-profile/encode-16384-rust-callgrind/input.bin",
-        "/tmp/relar-string-reuse-profile/encode-16384-rust-callgrind/output.bin",
+        "/tmp/imre-string-reuse-profile/encode-16384-rust-callgrind/input.bin",
+        "/tmp/imre-string-reuse-profile/encode-16384-rust-callgrind/output.bin",
         "4"
       ],
       "returncode": 0,
@@ -1455,11 +1455,11 @@
         {
           "inclusive": "no",
           "command": [
-            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
             "--auto=no",
             "--inclusive=no",
             "--threshold=100",
-            "/tmp/relar-string-reuse-profile/encode-16384-rust-callgrind/profile.callgrind"
+            "/tmp/imre-string-reuse-profile/encode-16384-rust-callgrind/profile.callgrind"
           ],
           "returncode": 0,
           "stdout_sha256": "d9816a869468f99420f2ddc93554650000cf24b5da4a2d72e3e9bd43e1bb94f5",
@@ -1468,11 +1468,11 @@
         {
           "inclusive": "yes",
           "command": [
-            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
             "--auto=no",
             "--inclusive=yes",
             "--threshold=100",
-            "/tmp/relar-string-reuse-profile/encode-16384-rust-callgrind/profile.callgrind"
+            "/tmp/imre-string-reuse-profile/encode-16384-rust-callgrind/profile.callgrind"
           ],
           "returncode": 0,
           "stdout_sha256": "5455e6dc133f4f657d6046ebdab4a7be71612edb390a4e9dd28e7c3579c3bfe0",
@@ -1528,20 +1528,20 @@
     },
     {
       "label": "decode-bytes-16384",
-      "engine": "relar",
+      "engine": "imre",
       "tool": "dhat",
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=dhat",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-dhat/valgrind.log",
-        "--dhat-out-file=/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-dhat/profile.json",
-        "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45",
+        "--log-file=/tmp/imre-string-reuse-profile/decode-bytes-16384-imre-dhat/valgrind.log",
+        "--dhat-out-file=/tmp/imre-string-reuse-profile/decode-bytes-16384-imre-dhat/profile.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45",
         "decode-bytes",
-        "/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-dhat/input.bin",
-        "/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-dhat/output.bin",
+        "/tmp/imre-string-reuse-profile/decode-bytes-16384-imre-dhat/input.bin",
+        "/tmp/imre-string-reuse-profile/decode-bytes-16384-imre-dhat/output.bin",
         "4"
       ],
       "returncode": 0,
@@ -1567,7 +1567,7 @@
           "bytes": 3932000,
           "blocks": 98300,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x223BB3: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
             "0x223BB3: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
             "0x223BB3: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -1577,38 +1577,38 @@
             "0x223BB3: UnknownInlinedFun (library/alloc/src/rc.rs:426)",
             "0x223BB3: UnknownInlinedFun (sequences.rs:307)",
             "0x223BB3: {closure#0} (mappings.rs:705)",
-            "0x223BB3: with_mut<relar_runtime::objects::Storage, core::result::Result<core::option::Option<(relar_runtime::objects::words::OwnedWord, core::option::Option<relar_runtime::objects::words::OwnedWord>)>, relar_runtime::objects::mappings::IterationError>, relar_runtime::objects::mappings::relar_mapping_iter_next::{closure_env#0}> (lib.rs:160)",
-            "0x223BB3: relar_mapping_iter_next (mappings.rs:704)",
-            "0x210667: fn_4 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x20D24A: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x223BB3: with_mut<imre_runtime::objects::Storage, core::result::Result<core::option::Option<(imre_runtime::objects::words::OwnedWord, core::option::Option<imre_runtime::objects::words::OwnedWord>)>, imre_runtime::objects::mappings::IterationError>, imre_runtime::objects::mappings::imre_mapping_iter_next::{closure_env#0}> (lib.rs:160)",
+            "0x223BB3: imre_mapping_iter_next (mappings.rs:704)",
+            "0x210667: fn_4 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20D24A: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 2097024,
           "blocks": 56,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x210884: fn_4 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x20D24A: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x210884: fn_4 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20D24A: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 1048448,
           "blocks": 52,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x211B69: fn_4 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x20D24A: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x211B69: fn_4 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20D24A: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 98304,
           "blocks": 4,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x2412B4: alloc (library/alloc/src/alloc.rs:101)",
             "0x2412B4: do_alloc (heap.rs:412)",
             "0x2412B4: alloc (heap.rs:466)",
@@ -1619,40 +1619,40 @@
             "0x22CE4B: new<&str> (lib.rs:192)",
             "0x22CE4B: from (lib.rs:2150)",
             "0x22CE4B: {closure#0} (bytes.rs:351)",
-            "0x22CE4B: map<&str, core::str::error::Utf8Error, *const compact_str::CompactString, relar_runtime::objects::bytes::relar_bytes_decode::{closure_env#0}> (library/core/src/result.rs:836)",
-            "0x22CE4B: relar_bytes_decode (bytes.rs:351)",
-            "0x2104C5: fn_4 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x20D24A: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x22CE4B: map<&str, core::str::error::Utf8Error, *const compact_str::CompactString, imre_runtime::objects::bytes::imre_bytes_decode::{closure_env#0}> (library/core/src/result.rs:836)",
+            "0x22CE4B: imre_bytes_decode (bytes.rs:351)",
+            "0x2104C5: fn_4 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20D24A: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 65536,
           "blocks": 4,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x211D43: fn_4 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x20D24A: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x211D43: fn_4 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20D24A: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 24576,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x18EE6F: <alloc::raw_vec::RawVecInner>::finish_grow (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x1BDA23: <std::fs::File as std::io::Read>::read_to_end (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x2282B8: <relar_runtime::objects::files::FileState>::read_bytes (files.rs:116)",
-            "0x20B44E: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x18EE6F: <alloc::raw_vec::RawVecInner>::finish_grow (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x1BDA23: <std::fs::File as std::io::Read>::read_to_end (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x2282B8: <imre_runtime::objects::files::FileState>::read_bytes (files.rs:116)",
+            "0x20B44E: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 8192,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
             "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
             "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -1663,16 +1663,16 @@
             "0x2289ED: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
             "0x2289ED: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
             "0x2289ED: UnknownInlinedFun (library/std/src/io/buffered/bufwriter.rs:122)",
-            "0x2289ED: relar_runtime::objects::files::open (files.rs:230)",
-            "0x20D84D: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x2289ED: imre_runtime::objects::files::open (files.rs:230)",
+            "0x20D84D: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         },
         {
           "bytes": 8192,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
             "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
             "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -1684,48 +1684,48 @@
             "0x217D59: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
             "0x217D59: UnknownInlinedFun (library/std/src/io/buffered/bufwriter.rs:122)",
             "0x217D59: {closure#0} (lib.rs:208)",
-            "0x217D59: <relar_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
-            "0x214873: call_once<fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
-            "0x214873: {closure#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
-            "0x214873: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<relar_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
-            "0x186C68: <std::sys::sync::once::futex::Once>::call (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x21529B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>>> (library/std/src/sync/once.rs:226)",
-            "0x21529B: force<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
-            "0x21529B: deref<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
-            "0x21529B: write_output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:218)",
-            "0x21529B: output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:229)",
-            "0x21529B: relar_runtime::output_bytes (lib.rs:236)",
-            "0x20DC88: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
-            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+            "0x217D59: <imre_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
+            "0x214873: call_once<fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
+            "0x214873: {closure#0}<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
+            "0x214873: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<imre_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
+            "0x186C68: <std::sys::sync::once::futex::Once>::call (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x21529B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>>> (library/std/src/sync/once.rs:226)",
+            "0x21529B: force<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
+            "0x21529B: deref<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
+            "0x21529B: write_output<imre_runtime::output_bytes::{closure_env#0}> (lib.rs:218)",
+            "0x21529B: output<imre_runtime::output_bytes::{closure_env#0}> (lib.rs:229)",
+            "0x21529B: imre_runtime::output_bytes (lib.rs:236)",
+            "0x20DC88: fn_2 (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45)"
           ]
         }
       ],
       "files": {
-        "decode-bytes-16384-relar-dhat/command.json": {
+        "decode-bytes-16384-imre-dhat/command.json": {
           "sha256": "ab34b1ca5f53d15dd8b036880b7758dac7ffb77923c7fa954faf5319472d647e",
           "bytes": 885
         },
-        "decode-bytes-16384-relar-dhat/input.bin": {
+        "decode-bytes-16384-imre-dhat/input.bin": {
           "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
           "bytes": 24576
         },
-        "decode-bytes-16384-relar-dhat/output.bin": {
+        "decode-bytes-16384-imre-dhat/output.bin": {
           "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
           "bytes": 16384
         },
-        "decode-bytes-16384-relar-dhat/process-stderr.txt": {
+        "decode-bytes-16384-imre-dhat/process-stderr.txt": {
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "bytes": 0
         },
-        "decode-bytes-16384-relar-dhat/profile.json": {
+        "decode-bytes-16384-imre-dhat/profile.json": {
           "sha256": "c0e9179ef5c0a66417230f3432a14d45857b7031c736ba5d10e154f77d105c79",
           "bytes": 26267
         },
-        "decode-bytes-16384-relar-dhat/stdout.txt": {
+        "decode-bytes-16384-imre-dhat/stdout.txt": {
           "sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d",
           "bytes": 9
         },
-        "decode-bytes-16384-relar-dhat/valgrind.log": {
+        "decode-bytes-16384-imre-dhat/valgrind.log": {
           "sha256": "310751dbde2f53e025b62208d1a1f746890600a77a7f2933d5f1feae387fc6ce",
           "bytes": 1014
         }
@@ -1733,22 +1733,22 @@
     },
     {
       "label": "decode-bytes-16384",
-      "engine": "relar",
+      "engine": "imre",
       "tool": "callgrind",
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=callgrind",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-callgrind/valgrind.log",
-        "--callgrind-out-file=/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-callgrind/profile.callgrind",
+        "--log-file=/tmp/imre-string-reuse-profile/decode-bytes-16384-imre-callgrind/valgrind.log",
+        "--callgrind-out-file=/tmp/imre-string-reuse-profile/decode-bytes-16384-imre-callgrind/profile.callgrind",
         "--dump-instr=yes",
         "--collect-jumps=yes",
-        "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45",
+        "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45",
         "decode-bytes",
-        "/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-callgrind/input.bin",
-        "/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-callgrind/output.bin",
+        "/tmp/imre-string-reuse-profile/decode-bytes-16384-imre-callgrind/input.bin",
+        "/tmp/imre-string-reuse-profile/decode-bytes-16384-imre-callgrind/output.bin",
         "4"
       ],
       "returncode": 0,
@@ -1771,11 +1771,11 @@
         {
           "inclusive": "no",
           "command": [
-            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
             "--auto=no",
             "--inclusive=no",
             "--threshold=100",
-            "/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-callgrind/profile.callgrind"
+            "/tmp/imre-string-reuse-profile/decode-bytes-16384-imre-callgrind/profile.callgrind"
           ],
           "returncode": 0,
           "stdout_sha256": "416d488b10c35b705764bec354300ee3a5b82607c3ea30f00af0118654799701",
@@ -1784,11 +1784,11 @@
         {
           "inclusive": "yes",
           "command": [
-            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
             "--auto=no",
             "--inclusive=yes",
             "--threshold=100",
-            "/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-callgrind/profile.callgrind"
+            "/tmp/imre-string-reuse-profile/decode-bytes-16384-imre-callgrind/profile.callgrind"
           ],
           "returncode": 0,
           "stdout_sha256": "268826b8c360ecd33e03f779ff73bf9284c15876652b7178dd8939fb7a1dc0d7",
@@ -1796,47 +1796,47 @@
         }
       ],
       "files": {
-        "decode-bytes-16384-relar-callgrind/command.json": {
+        "decode-bytes-16384-imre-callgrind/command.json": {
           "sha256": "2fae8d3336018fac0b9505366265d103f4db463d4adb8214503a7a80ab4a2cb0",
           "bytes": 976
         },
-        "decode-bytes-16384-relar-callgrind/functions-inclusive-no-stderr.txt": {
+        "decode-bytes-16384-imre-callgrind/functions-inclusive-no-stderr.txt": {
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "bytes": 0
         },
-        "decode-bytes-16384-relar-callgrind/functions-inclusive-no.txt": {
+        "decode-bytes-16384-imre-callgrind/functions-inclusive-no.txt": {
           "sha256": "416d488b10c35b705764bec354300ee3a5b82607c3ea30f00af0118654799701",
           "bytes": 84612
         },
-        "decode-bytes-16384-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+        "decode-bytes-16384-imre-callgrind/functions-inclusive-yes-stderr.txt": {
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "bytes": 0
         },
-        "decode-bytes-16384-relar-callgrind/functions-inclusive-yes.txt": {
+        "decode-bytes-16384-imre-callgrind/functions-inclusive-yes.txt": {
           "sha256": "268826b8c360ecd33e03f779ff73bf9284c15876652b7178dd8939fb7a1dc0d7",
           "bytes": 85244
         },
-        "decode-bytes-16384-relar-callgrind/input.bin": {
+        "decode-bytes-16384-imre-callgrind/input.bin": {
           "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
           "bytes": 24576
         },
-        "decode-bytes-16384-relar-callgrind/output.bin": {
+        "decode-bytes-16384-imre-callgrind/output.bin": {
           "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
           "bytes": 16384
         },
-        "decode-bytes-16384-relar-callgrind/process-stderr.txt": {
+        "decode-bytes-16384-imre-callgrind/process-stderr.txt": {
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "bytes": 0
         },
-        "decode-bytes-16384-relar-callgrind/profile.callgrind": {
+        "decode-bytes-16384-imre-callgrind/profile.callgrind": {
           "sha256": "de3de264588ccb70a3f2b79ea00fd2c52fd32784a4c2afd10ac9cfd6d249d9db",
           "bytes": 264443
         },
-        "decode-bytes-16384-relar-callgrind/stdout.txt": {
+        "decode-bytes-16384-imre-callgrind/stdout.txt": {
           "sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d",
           "bytes": 9
         },
-        "decode-bytes-16384-relar-callgrind/valgrind.log": {
+        "decode-bytes-16384-imre-callgrind/valgrind.log": {
           "sha256": "6dbc3af84960e83bf7226aae8b815c084bf8a525b3978df0062d0e584b5fc431",
           "bytes": 658
         }
@@ -1847,17 +1847,17 @@
       "engine": "rust",
       "tool": "dhat",
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=dhat",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-dhat/valgrind.log",
-        "--dhat-out-file=/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-dhat/profile.json",
-        "/home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
+        "--log-file=/tmp/imre-string-reuse-profile/decode-bytes-16384-rust-dhat/valgrind.log",
+        "--dhat-out-file=/tmp/imre-string-reuse-profile/decode-bytes-16384-rust-dhat/profile.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
         "decode-bytes",
-        "/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-dhat/input.bin",
-        "/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-dhat/output.bin",
+        "/tmp/imre-string-reuse-profile/decode-bytes-16384-rust-dhat/input.bin",
+        "/tmp/imre-string-reuse-profile/decode-bytes-16384-rust-dhat/output.bin",
         "4"
       ],
       "returncode": 0,
@@ -1883,7 +1883,7 @@
           "bytes": 65536,
           "blocks": 4,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x120741: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
             "0x120741: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
             "0x120741: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -1903,96 +1903,96 @@
             "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
             "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
             "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 24576,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x17930B: std::fs::read::inner (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x17930B: std::fs::read::inner (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
             "0x11E890: UnknownInlinedFun (library/std/src/fs.rs:348)",
             "0x11E890: base45_reference::main (main.rs:206)",
             "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
             "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
             "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 1024,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x4918294: _IO_file_doallocate (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x4928603: _IO_doallocbuf (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x4925963: _IO_file_underflow (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x4919EEF: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x49312EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 1024,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x1442F5: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1442F5: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
             "0x120195: base45_reference::main (main.rs:207)",
             "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
             "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
             "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 544,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-            "0x177A4D: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x172F39: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x177A4D: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x172F39: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 472,
           "blocks": 1,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x4918F5E: fopen (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x4931195: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 360,
           "blocks": 2,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x4919E64: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "0x49312EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         },
         {
           "bytes": 243,
           "blocks": 5,
           "frames": [
-            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
             "0x11EA1B: base45_reference::main (main.rs:198)",
             "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
             "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
             "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
-            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
           ]
         }
       ],
@@ -2032,19 +2032,19 @@
       "engine": "rust",
       "tool": "callgrind",
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=callgrind",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-callgrind/valgrind.log",
-        "--callgrind-out-file=/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-callgrind/profile.callgrind",
+        "--log-file=/tmp/imre-string-reuse-profile/decode-bytes-16384-rust-callgrind/valgrind.log",
+        "--callgrind-out-file=/tmp/imre-string-reuse-profile/decode-bytes-16384-rust-callgrind/profile.callgrind",
         "--dump-instr=yes",
         "--collect-jumps=yes",
-        "/home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
+        "/home/dev-user/code/oss/imre/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
         "decode-bytes",
-        "/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-callgrind/input.bin",
-        "/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-callgrind/output.bin",
+        "/tmp/imre-string-reuse-profile/decode-bytes-16384-rust-callgrind/input.bin",
+        "/tmp/imre-string-reuse-profile/decode-bytes-16384-rust-callgrind/output.bin",
         "4"
       ],
       "returncode": 0,
@@ -2067,11 +2067,11 @@
         {
           "inclusive": "no",
           "command": [
-            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
             "--auto=no",
             "--inclusive=no",
             "--threshold=100",
-            "/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-callgrind/profile.callgrind"
+            "/tmp/imre-string-reuse-profile/decode-bytes-16384-rust-callgrind/profile.callgrind"
           ],
           "returncode": 0,
           "stdout_sha256": "e57afd14ef8cc77d945813b5bf0119013b8eadb8291bbef4aec5d1f56f387e1e",
@@ -2080,11 +2080,11 @@
         {
           "inclusive": "yes",
           "command": [
-            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
             "--auto=no",
             "--inclusive=yes",
             "--threshold=100",
-            "/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-callgrind/profile.callgrind"
+            "/tmp/imre-string-reuse-profile/decode-bytes-16384-rust-callgrind/profile.callgrind"
           ],
           "returncode": 0,
           "stdout_sha256": "f16b11c368acd3e8b1c2c7510b9221b9706c3234c99b7d1db513c742a9df71ac",

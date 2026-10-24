@@ -1,6 +1,6 @@
 # Typing-conformance report
 
-Relar compiles Ruff's complete conformance reporter directly to a native executable.
+Imre compiles Ruff's complete conformance reporter directly to a native executable.
 It discovers the files in a typing conformance checkout, runs two versions of ty,
 compares their diagnostics, and renders a Markdown or GitHub HTML report.
 The [upstream source](upstream/conformance.py) is pinned to Ruff commit
@@ -9,17 +9,17 @@ recorded in [UPSTREAM.json](upstream/UPSTREAM.json).
 
 ## Run directly from a checkout
 
-From the Relar repository root, run the original script with a
+From the Imre repository root, run the original script with a
 [python/typing](https://github.com/python/typing) checkout and two ty executables.
 
 ```sh
-relar run examples/conformance_report/upstream/conformance.py -- \
+imre run examples/conformance_report/upstream/conformance.py -- \
   --tests-path /absolute/path/to/typing/conformance \
   --old-ty /absolute/path/to/old/ty --new-ty /absolute/path/to/new/ty
 ```
 
 You can pass a Ruff checkout's `scripts/conformance.py` at the pinned revision
-as the source. Use `relar build scripts/conformance.py -o conformance` to keep
+as the source. Use `imre build scripts/conformance.py -o conformance` to keep
 the executable. Run `./conformance --help` for the original CLI. Each ty command
 can contain multiple words, such as `--old-ty uvx ty@0.0.60`.
 
@@ -30,7 +30,7 @@ prints a confirmation followed by the report to stderr. Set
 `CONFORMANCE_SUITE_COMMIT` to use a specific revision in report links.
 
 Running ty 0.0.60 and 0.0.90 on 146 files, the original program took 583–588 ms
-in Relar and 569–572 ms in Rust. [Full CLI comparison](../../benchmarks/results/2026-10-23-original-conformance.md)
+in Imre and 569–572 ms in Rust. [Full CLI comparison](../../benchmarks/results/2026-10-23-original-conformance.md)
 
 ## Run the typed port
 
@@ -38,7 +38,7 @@ The port also supports atomic output and replaying captured diagnostics. To use 
 build its entry point and pass the suite and two ty executables.
 
 ```sh
-relar build examples/conformance_report/__main__.py --module-root examples \
+imre build examples/conformance_report/__main__.py --module-root examples \
   -o /tmp/conformance-report
 
 /tmp/conformance-report --suite /absolute/path/to/typing/conformance \
@@ -76,7 +76,7 @@ Python 3.15 and later use their standard-library TOML 1.1 parser.
 
 ## Replay a captured comparison
 
-From the Relar repository root, replay the included 146-file capture with one
+From the Imre repository root, replay the included 146-file capture with one
 native build and run. The resulting Markdown report compares ty 0.0.60 and 0.0.90.
 
 ```sh
@@ -85,12 +85,12 @@ python3 benchmarks/conformance_grouping_inputs.py --scales 1 \
   --archive benchmarks/results/2026-10-22-collector-ownership-study.tar.xz \
   --output "$workdir/inputs"
 panel="$workdir/inputs/1x/changed"
-relar run examples/conformance_report/__main__.py --module-root examples -- \
+imre run examples/conformance_report/__main__.py --module-root examples -- \
   --manifest "$panel/manifest.json" --old "$panel/old.json" --new "$panel/new.json" \
   --format github --output "$workdir/report.md"
 ```
 
-On Linux, add `--allocator jemalloc` before the `--` in the `relar run` command
+On Linux, add `--allocator jemalloc` before the `--` in the `imre run` command
 to use the allocator measured in the grouping benchmarks.
 
 To capture a new comparison, prepare a checkout of [python/typing](https://github.com/python/typing) at
@@ -104,7 +104,7 @@ python3 examples/conformance_report/prepare.py \
   --old-ty /absolute/path/to/old/ty --new-ty /absolute/path/to/new/ty \
   --output-dir /tmp/conformance-input
 
-relar build examples/conformance_report/__main__.py --module-root examples \
+imre build examples/conformance_report/__main__.py --module-root examples \
   -o /tmp/conformance-report
 
 /tmp/conformance-report --manifest /tmp/conformance-input/manifest.json \
@@ -137,7 +137,7 @@ render reports for the measured program. Test paths are the already resolved
 absolute identities produced by preparation. Inputs must use UTF-8 and complete
 GitLab diagnostic records with integer positions; unknown JSON fields are ignored.
 
-Relar compiles Ruff’s `group_diagnostics_by_key`, `diagnostics_are_equivalent`,
+Imre compiles Ruff’s `group_diagnostics_by_key`, `diagnostics_are_equivalent`,
 `collect_file_stats`, `compute_stats`, and `collect_diagnostic_entries` directly.
 These functions group diagnostics by path and tag, compare fingerprints, include
 files with no cases in the statistics, and sort the final entries. Their source
@@ -171,7 +171,7 @@ report generation, atomic publication, and cleanup. Separate frozen-input
 compute timings expose report performance independently of analyzer latency.
 
 ```sh
-relar build examples/conformance_report/compute.py --module-root examples \
+imre build examples/conformance_report/compute.py --module-root examples \
   -o /tmp/conformance-compute
 /tmp/conformance-compute --manifest /tmp/conformance-input/manifest.json \
   --old /tmp/conformance-input/old.json --new /tmp/conformance-input/new.json \
@@ -191,7 +191,7 @@ the captured inputs when sharing them.
 The live benchmark runs ty 0.0.90 on both sides for its unchanged case and
 0.0.60 → 0.0.90 for changed reports. The [checkout comparison](../../benchmarks/results/2026-10-21-live-conformance.md)
 includes complete workflow timings, separate report-computation timings,
-and reproducible evidence for CPython, Relar, Codon, and Rust.
+and reproducible evidence for CPython, Imre, Codon, and Rust.
 The [fixed-regex comparison](../../benchmarks/results/2026-10-22-fixed-regex.md)
 times Ruff’s original pattern against the previous scanner on the same checkout
 and verifies the text and offsets of each captured annotation.
@@ -201,8 +201,8 @@ also times complete and repeated reports and includes Rust controls that
 specialize the common one- and two-diagnostic cases.
 The [in-place sort comparison](../../benchmarks/results/2026-10-22-entry-sort.md)
 measures Ruff’s unchanged diagnostic entry collector and full reports against
-the previous Relar port, CPython, native Codon, and Rust.
-In 972 pairs, each side has a single diagnostic. Relar compares the six
+the previous Imre port, CPython, native Codon, and Rust.
+In 972 pairs, each side has a single diagnostic. Imre compares the six
 fingerprint fields directly in these pairs, avoiding two temporary tuples and
 two sorted lists per pair. The [collector profiles and timings](../../benchmarks/results/2026-10-22-collector-ownership.md)
 measure the effect across all 1,269 groups.
@@ -235,7 +235,7 @@ The diagnostic grouping study compares ordered groups, fingerprint equivalence,
 per-file statistics, and complete reports on 146 and 1,460 source files.
 [Timings, memory, and checkout-path sensitivity](../../benchmarks/results/2026-10-23-diagnostic-grouping.md)
 
-On Linux, `relar build script.py --allocator jemalloc` selects a separate archive.
+On Linux, `imre build script.py --allocator jemalloc` selects a separate archive.
 The [allocator comparison](../../benchmarks/results/2026-10-23-diagnostic-allocator.md)
 measures grouping and complete reports against Rust using both allocator choices.
 
@@ -255,11 +255,11 @@ grouping, statistics, and rendering functions with a bounded CLI, per-child
 timeout, typed configuration checks, and atomic publication. It is an upstream
 adapter, not the unchanged upstream CLI. The live validator checks complete
 reports, exception categories, child reaping, existing-output preservation, and
-filesystem effects across upstream Python, typed Python, Relar, Codon, and Rust.
+filesystem effects across upstream Python, typed Python, Imre, Codon, and Rust.
 
 The native Codon build uses explicit TOML, subprocess, and temporary-directory
 adapters backed by the independent Rust library in `benchmarks/native_platform`.
-That library contains no report computation and links neither Python nor Relar.
+That library contains no report computation and links neither Python nor Imre.
 Its calls and serialization costs are included in live timings; the Rust
 reference uses the same platform library. The declared adapters accommodate
 Codon's context-manager behavior and native error representation while keeping

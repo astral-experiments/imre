@@ -1,4 +1,4 @@
-"""Compare unchanged Luhn in balanced Relar/CPython/Rust process batches."""
+"""Compare unchanged Luhn in balanced Imre/CPython/Rust process batches."""
 
 import argparse
 import base64
@@ -46,7 +46,7 @@ def baseline_provenance(record, hashes, upstream, rust_record, target, thinlto):
         not record.get("input_guards_passed")
         or record.get("dirty") is not False
         or record.get("binary_sha256") != hashes["baseline"]
-        or record.get("validation", {}).get("relar", {}).get("binary_sha256")
+        or record.get("validation", {}).get("imre", {}).get("binary_sha256")
         != hashes["baseline"]
         or record.get("upstream") != upstream
     ):
@@ -228,10 +228,10 @@ def measure(workload: dict, commands: dict, directory: Path, args) -> dict:
         f"{left}_over_{right}": summaries[left]["median_seconds"]
         / summaries[right]["median_seconds"]
         for left, right in (
-            ("cpython", "relar"),
-            ("relar", "rust"),
+            ("cpython", "imre"),
+            ("imre", "rust"),
             ("cpython", "rust"),
-            ("baseline", "relar"),
+            ("baseline", "imre"),
             ("baseline", "rust"),
             ("cpython", "baseline"),
         )
@@ -244,7 +244,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True)
     parser.add_argument("--runtime", type=Path, required=True)
-    parser.add_argument("--relar-build-record", type=Path)
+    parser.add_argument("--imre-build-record", type=Path)
     parser.add_argument("--python", default="python3")
     parser.add_argument("--rust", type=Path, required=True)
     parser.add_argument("--rust-build-record", type=Path)
@@ -268,7 +268,7 @@ def main() -> None:
         default=validator.OPERATIONS,
     )
     parser.add_argument("--native-only", action="store_true")
-    parser.add_argument("--baseline", type=Path, help="preserved Relar executable")
+    parser.add_argument("--baseline", type=Path, help="preserved Imre executable")
     parser.add_argument(
         "--baseline-record", type=Path, help="its original benchmark JSON"
     )
@@ -366,7 +366,7 @@ def main() -> None:
     assert rust_record["binary_sha256"] == shared.sha256(rust)
     thinlto = args.lto_linker is not None
     assert rust_record["thinlto"] == thinlto, (
-        "Rust and Relar must use matching build modes"
+        "Rust and Imre must use matching build modes"
     )
     environment = rust_record["environment"]
     assert environment["CARGO_PROFILE_RELEASE_OPT_LEVEL"] == "3"
@@ -381,15 +381,15 @@ def main() -> None:
     assert environment["CARGO_ENCODED_RUSTFLAGS"] == (None if thinlto else "")
     if args.lto_linker:
         paths["lto_linker"] = args.lto_linker.absolute()
-    relar_record = None
-    if args.relar_build_record:
-        paths["relar_build_record"] = args.relar_build_record.resolve(strict=True)
-        relar_record = json.loads(paths["relar_build_record"].read_text())
+    imre_record = None
+    if args.imre_build_record:
+        paths["imre_build_record"] = args.imre_build_record.resolve(strict=True)
+        imre_record = json.loads(paths["imre_build_record"].read_text())
         assert {shared.sha256(compiler), shared.sha256(paths["runtime"])} <= set(
-            relar_record["sha256"].values()
+            imre_record["sha256"].values()
         )
-        for name, value in relar_record["source_sha256"].items():
-            paths["relar_source:" + name] = ROOT / name
+        for name, value in imre_record["source_sha256"].items():
+            paths["imre_source:" + name] = ROOT / name
             assert shared.sha256(ROOT / name) == value
     binary, llvm, validation_path = (
         artifacts / "luhn",
@@ -468,7 +468,7 @@ def main() -> None:
     ]
     run_checked(validation_command)
     validation = json.loads(validation_path.read_text())
-    assert validation["relar"]["binary_sha256"] == binary_hash
+    assert validation["imre"]["binary_sha256"] == binary_hash
     assert validation["rust"]["binary_sha256"] == hashes["rust"]
     baseline_validation_command = None
     baseline_validation = None
@@ -485,8 +485,8 @@ def main() -> None:
         ]
         run_checked(baseline_validation_command)
         baseline_validation = json.loads(baseline_validation_path.read_text())
-        assert baseline_validation["relar"]["binary_sha256"] == hashes["baseline"]
-    commands = {"relar": [str(binary)], "rust": [str(rust)]}
+        assert baseline_validation["imre"]["binary_sha256"] == hashes["baseline"]
+    commands = {"imre": [str(binary)], "rust": [str(rust)]}
     if baseline is not None:
         commands["baseline"] = [str(paths["baseline"])]
     if not args.native_only:
@@ -516,7 +516,7 @@ def main() -> None:
             ),
             None,
         ),
-        "relar_build_record": relar_record,
+        "imre_build_record": imre_record,
         "rust_build_record": rust_record,
         "validation_command": validation_command,
         "validation": validation,
@@ -531,8 +531,8 @@ def main() -> None:
         "engine_orders": engine_orders(commands),
         "order_method": "Four engines use label rotations of [0, 1, 3, 2]; two or three engines use all permutations. Each schedule balances engine positions and directed adjacent pairs within rounds. Transitions between rounds are not balanced. The schedule is fixed before measurement.",
         "ratio_interpretation": {
-            "baseline_over_relar": "Preserved Relar median / current Relar median; higher means improvement.",
-            "relar_over_rust": "Current Relar median / Rust median; lower is better.",
+            "baseline_over_imre": "Preserved Imre median / current Imre median; higher means improvement.",
+            "imre_over_rust": "Current Imre median / Rust median; lower is better.",
         },
         "workload_source": "preserved baseline inputs"
         if baseline

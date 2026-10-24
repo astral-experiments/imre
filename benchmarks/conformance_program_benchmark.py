@@ -69,7 +69,7 @@ def replay(fixtures, checkout, scale, work):
         log = shlex.quote(str(suite / f"{side}.argv"))
         exe.write_text(
             "#!/bin/sh\n"
-            f'if [ "${{RELAR_BENCH_AUDIT:-}}" = 1 ]; then printf \'%s\\0\' "$PWD" "$@" > {log}; fi\n'
+            f'if [ "${{IMRE_BENCH_AUDIT:-}}" = 1 ]; then printf \'%s\\0\' "$PWD" "$@" > {log}; fi\n'
             f"exec /bin/cat {shlex.quote(str(payload))}\n"
         )
         exe.chmod(0o755)
@@ -100,7 +100,7 @@ def case(commands, suite, children, fmt, cpus, cycles, home, audit):
     argv = {
         key: [
             *cmd,
-            *(original_args if key in ("relar", "cpython") else native_args),
+            *(original_args if key in ("imre", "cpython") else native_args),
             *common,
         ]
         for key, cmd in commands.items()
@@ -129,7 +129,7 @@ def case(commands, suite, children, fmt, cpus, cycles, home, audit):
             checked = subprocess.run(
                 cmd,
                 cwd=suite,
-                env={**env, "RELAR_BENCH_AUDIT": "1"},
+                env={**env, "IMRE_BENCH_AUDIT": "1"},
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 check=True,
@@ -180,8 +180,8 @@ def case(commands, suite, children, fmt, cpus, cycles, home, audit):
     }
     return {
         "median_ms": medians,
-        "relar_over_rust": medians["relar"] / medians["rust"],
-        "cpython_over_relar": medians["cpython"] / medians["relar"],
+        "imre_over_rust": medians["imre"] / medians["rust"],
+        "cpython_over_imre": medians["cpython"] / medians["imre"],
         "order": design * cycles,
         "warmup_ns": samples[0],
         "samples_ns": samples[1:],
@@ -196,7 +196,7 @@ def case(commands, suite, children, fmt, cpus, cycles, home, audit):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("fixtures", "checkout", "python", "relar", "codon", "rust", "output"):
+    for name in ("fixtures", "checkout", "python", "imre", "codon", "rust", "output"):
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--cpu", required=True, type=int)
     parser.add_argument("--live", nargs=2, metavar=("OLD_TY", "NEW_TY"), type=Path)
@@ -226,7 +226,7 @@ def main():
     commands.update(
         {
             key: [str(getattr(args, key).resolve(strict=True))]
-            for key in ("codon", "relar", "rust")
+            for key in ("codon", "imre", "rust")
         }
     )
     build_records = [
@@ -264,7 +264,7 @@ def main():
     with (
         nullcontext(args.work_dir)
         if args.work_dir
-        else tempfile.TemporaryDirectory(prefix="relar-original-cli-")
+        else tempfile.TemporaryDirectory(prefix="imre-original-cli-")
     ) as tmp:
         work = Path(tmp)
         for scale in (1, 10):

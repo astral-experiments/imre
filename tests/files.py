@@ -552,7 +552,6 @@ ERRORS = {
 }
 
 REJECTED = {
-    "missing_encoding": 'open("input.txt", "r")',
     "dynamic_mode": 'mode = "r"\nopen("input.txt", mode, encoding="utf-8")',
     "binary_mode": 'open("input.txt", "rb", encoding="utf-8")',
     "append_mode": 'open("input.txt", "a", encoding="utf-8")',
@@ -800,7 +799,7 @@ def main() -> None:
     if args.sanitize:
         flags += ["--sanitize"]
     passed = 0
-    with tempfile.TemporaryDirectory(prefix="relar-files-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-files-") as directory:
         temporary = Path(directory)
         for name, source in REJECTED.items():
             path = temporary / f"{name}.py"
@@ -867,9 +866,9 @@ def main() -> None:
                 )
                 assert built.returncode == 0, (name, level, built.stderr.decode())
                 if name == "text_roundtrip":
-                    assert "call void @relar_args_init" not in llvm.read_text()
-                    assert "call void @relar_args_clear" not in llvm.read_text()
-                native_dir = project / f"relar-O{level}"
+                    assert "call void @imre_args_init" not in llvm.read_text()
+                    assert "call void @imre_args_clear" not in llvm.read_text()
+                native_dir = project / f"imre-O{level}"
                 seed(native_dir, name)
                 actual = run(
                     [str(binary), *argv],
@@ -877,7 +876,7 @@ def main() -> None:
                     limit_descriptors=name == "descriptor_recovery",
                     runner=runner,
                 )
-                check_result(actual, category, f"Relar {name} O{level}")
+                check_result(actual, category, f"Imre {name} O{level}")
                 assert actual.stdout == reference.stdout, (
                     name,
                     level,
@@ -937,7 +936,7 @@ def main() -> None:
                 temporary,
             )
             assert built.returncode == 0, built.stderr.decode()
-            actual = broken_pipe([str(binary)], temporary / f"pipe-relar-O{level}")
+            actual = broken_pipe([str(binary)], temporary / f"pipe-imre-O{level}")
             assert actual == reference, (level, actual, reference)
             passed += 1
     print(

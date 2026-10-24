@@ -24,8 +24,8 @@ if sys.flags.optimize:
 sys.dont_write_bytecode = True
 PREFIX = '2026-10-21-native-paths'
 REVISION = 'cec52a5a963343f974ac774db5e9f25a7e7fc5ba'
-ENGINES = ('relar', 'port', 'original', 'rust')
-COMPUTE_ENGINES = ('relar', 'original', 'rust')
+ENGINES = ('imre', 'port', 'original', 'rust')
+COMPUTE_ENGINES = ('imre', 'original', 'rust')
 
 
 def sha(data):
@@ -172,7 +172,7 @@ def main():
     assert build['revision'] == REVISION and build['source_matches_revision'] and build['input_guards_passed']
     assert all(source[name]['sha256'] == value for name, value in build['source_sha256'].items())
     build_root = Path(manifest['build']['path']).parent
-    for key, name in {'compiler': 'relar', 'normal_runtime': 'normal_runtime.a', 'thinlto_runtime': 'thinlto_runtime.a', 'asan_runtime': 'asan_runtime.a'}.items():
+    for key, name in {'compiler': 'imre', 'normal_runtime': 'normal_runtime.a', 'thinlto_runtime': 'thinlto_runtime.a', 'asan_runtime': 'asan_runtime.a'}.items():
         assert identity(build_root / name)['sha256'] == build['sha256'][key]
 
     validation_root = Path(manifest['language_validation_root'])
@@ -213,11 +213,11 @@ def main():
         assert row['returncode'] == 0 and row['checks'] == 67
         assert 'Passed 67 ' in retained(row['log']).decode()
 
-    context = load('/tmp/relar-path-timing-context.json')
+    context = load('/tmp/imre-path-timing-context.json')
     assert context['revision'] == REVISION and context['status'] == 'passed' and context['cpu'] == 31
     assert [row['mode'] for row in context['windows']] == ['normal', 'thinlto']
     assert all(row['exit_code'] == 0 for row in context['windows'])
-    assert context['commands'] == load('/tmp/relar-path-timing-commands.json')
+    assert context['commands'] == load('/tmp/imre-path-timing-commands.json')
     for row in context['windows']:
         assert row['command'] == context['commands'][row['mode']]
         retained(row['log'])

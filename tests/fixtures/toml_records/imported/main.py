@@ -1,4 +1,4 @@
-from relar.toml import decode as decode_toml
+from imre.toml import decode as decode_toml
 from models import Group
 import facade
 

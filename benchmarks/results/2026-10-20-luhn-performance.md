@@ -1,24 +1,24 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # Optimizing unchanged Luhn toward Rust performance
 
-Relar compiles the original, unannotated [`mmcloughlin/luhn` 0.2.0](https://github.com/mmcloughlin/luhn/tree/d6f3fa71072f99334a4c1d2a3f062fa93982797f) without rewriting its source. This change removes the dominant temporary objects and checked arithmetic from its hot paths through general compiler and runtime optimizations.
+Imre compiles the original, unannotated [`mmcloughlin/luhn` 0.2.0](https://github.com/mmcloughlin/luhn/tree/d6f3fa71072f99334a4c1d2a3f062fa93982797f) without rewriting its source. This change removes the dominant temporary objects and checked arithmetic from its hot paths through general compiler and runtime optimizations.
 
-With ThinLTO, **4,096-digit calls take 1.21–1.35× Rust's time**, or 21–35% more. They run **27.7–29.4× faster than the preserved Relar build** and 44.6–47.6× faster than CPython.
+With ThinLTO, **4,096-digit calls take 1.21–1.35× Rust's time**, or 21–35% more. They run **27.7–29.4× faster than the preserved Imre build** and 44.6–47.6× faster than CPython.
 
 Short-call Rust parity remains open: 16-digit calls take **2.77–4.11× Rust's time**; 256-digit calls take 1.35–1.59×. Ordinary linking takes 1.44–1.61× Rust's time at 4,096 digits and 3.77–6.10× at 16 digits.
 
-The [implementation PR](https://github.com/viarius-experiments/relar/pull/55) remains in the existing GitHub stack. The upstream Python module, typed driver, upstream tests and license, and independent Rust implementation are unchanged. The previous [compatibility report](2026-10-20-luhn.md) retains the original measurements; the comparison here reruns its preserved Relar binaries alongside the new build on the same inputs.
+The [implementation PR](https://github.com/viarius-experiments/imre/pull/55) remains in the existing GitHub stack. The upstream Python module, typed driver, upstream tests and license, and independent Rust implementation are unchanged. The previous [compatibility report](2026-10-20-luhn.md) retains the original measurements; the comparison here reruns its preserved Imre binaries alongside the new build on the same inputs.
 
 ## Wall-time comparison
 
 Each workload process handles **16 MiB of ASCII digits** through repeated calls at the indicated input size. Each build family uses eight warmup rounds and twelve measured rounds. Four fixed engine orders balance positions and directed adjacent pairs within each round; transitions between rounds are not balanced.
 
-Values are median milliseconds with inclusive quartiles in brackets. **Previous / current** and **CPython / Relar** are speedups, so higher is better. **Relar / Rust** is a time ratio, so lower is better. Quartiles describe the observed samples, not confidence intervals.
+Values are median milliseconds with inclusive quartiles in brackets. **Previous / current** and **CPython / Imre** are speedups, so higher is better. **Imre / Rust** is a time ratio, so lower is better. Quartiles describe the observed samples, not confidence intervals.
 
 ### Ordinary linking
 
-| API / digits | Relar ms [Q1–Q3] | Rust ms [Q1–Q3] | CPython ms [Q1–Q3] | Previous Relar ms | Previous / current | Relar / Rust | CPython / Relar |
+| API / digits | Imre ms [Q1–Q3] | Rust ms [Q1–Q3] | CPython ms [Q1–Q3] | Previous Imre ms | Previous / current | Imre / Rust | CPython / Imre |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | `checksum` / 16 | 105.330 [104.615–105.706] | 27.918 [27.609–28.696] | 2082.708 [2072.469–2111.350] | 1876.665 | 17.817× | 3.773× | 19.773× |
 | `verify` / 16 | 128.170 [127.796–128.703] | 29.069 [28.964–29.197] | 2119.008 [2111.875–2129.423] | 1870.014 | 14.590× | 4.409× | 16.533× |
@@ -35,7 +35,7 @@ Values are median milliseconds with inclusive quartiles in brackets. **Previous 
 
 ### ThinLTO
 
-| API / digits | Relar ms [Q1–Q3] | Rust ms [Q1–Q3] | CPython ms [Q1–Q3] | Previous Relar ms | Previous / current | Relar / Rust | CPython / Relar |
+| API / digits | Imre ms [Q1–Q3] | Rust ms [Q1–Q3] | CPython ms [Q1–Q3] | Previous Imre ms | Previous / current | Imre / Rust | CPython / Imre |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | `checksum` / 16 | 75.905 [75.148–76.243] | 25.640 [25.580–25.709] | 2072.757 [2064.871–2080.538] | 1245.621 | 16.410× | 2.960× | 27.307× |
 | `verify` / 16 | 74.961 [74.473–76.201] | 27.101 [27.048–27.143] | 2110.346 [2096.037–2118.328] | 1251.026 | 16.689× | 2.766× | 28.153× |
@@ -54,12 +54,12 @@ The [Rust reference](../reference/luhn_checksum/README.md) implements the same e
 
 Native engines use matching ordinary or ThinLTO configurations. ThinLTO uses matched LLVM import and inline budgets of 1,000. The build families ran separately with their own interleaved baselines; their difference does not isolate the effect of ThinLTO.
 
-| Build family | Relar ms | Rust ms | CPython ms | Previous Relar ms |
+| Build family | Imre ms | Rust ms | CPython ms | Previous Imre ms |
 |---|---:|---:|---:|---:|
 | Ordinary | 2.366 | 2.356 | 26.136 | 2.671 |
 | ThinLTO | 2.402 | 2.157 | 26.715 | 2.387 |
 
-The empty-input, one-call controls expose startup and protocol overhead. They are retained without subtraction. Across both build families, the control is at most 7.88% of current Relar's median workload time, 9.68% of Rust's, 1.85% of CPython's, and 0.27% of the previous Relar build's.
+The empty-input, one-call controls expose startup and protocol overhead. They are retained without subtraction. Across both build families, the control is at most 7.88% of current Imre's median workload time, 9.68% of Rust's, 1.85% of CPython's, and 0.27% of the previous Imre build's.
 
 ## What changed
 
@@ -72,7 +72,7 @@ The original profile identified character construction, integer parsing, destruc
 
 The accumulator proof directly selects native arithmetic without redundant LLVM assumptions that hide the recurrence. LLVM retains its ordinary transformation legality and profitability decisions. The result is not a Luhn intrinsic: the transformations apply to the corresponding typed IR patterns.
 
-The approach follows useful ideas in scriptc's [array pipeline lowering](https://github.com/vercel-labs/scriptc/blob/dfb0bed8c1e4e387f6901ccb155d0d6b952f6c0a/packages/compiler/src/frontend/lowering/containers/array-pipelines.ts#L555), [guarded dense-array loops](https://github.com/vercel-labs/scriptc/blob/dfb0bed8c1e4e387f6901ccb155d0d6b952f6c0a/packages/compiler/src/backend/llvm/dense-array-loops.ts#L1), and [integer range analysis](https://github.com/vercel-labs/scriptc/blob/dfb0bed8c1e4e387f6901ccb155d0d6b952f6c0a/packages/compiler/src/ir/integer-ranges.ts#L11): expose concrete storage, eliminate unobservable intermediates, and supply facts at the point where they hold. Relar implements its own proofs in Rust and preserves the supported Python behavior.
+The approach follows useful ideas in scriptc's [array pipeline lowering](https://github.com/vercel-labs/scriptc/blob/dfb0bed8c1e4e387f6901ccb155d0d6b952f6c0a/packages/compiler/src/frontend/lowering/containers/array-pipelines.ts#L555), [guarded dense-array loops](https://github.com/vercel-labs/scriptc/blob/dfb0bed8c1e4e387f6901ccb155d0d6b952f6c0a/packages/compiler/src/backend/llvm/dense-array-loops.ts#L1), and [integer range analysis](https://github.com/vercel-labs/scriptc/blob/dfb0bed8c1e4e387f6901ccb155d0d6b952f6c0a/packages/compiler/src/ir/integer-ranges.ts#L11): expose concrete storage, eliminate unobservable intermediates, and supply facts at the point where they hold. Imre implements its own proofs in Rust and preserves the supported Python behavior.
 
 Private storage reuse retains at most two empty buffers totaling 512 KiB and two empty headers totaling 80 bytes per thread on the supported 64-bit layout, excluding allocator/TLS bookkeeping. No element owner is retained in either cache. Aliased headers cannot be reused; cache reentry or thread-local teardown uses ordinary destruction.
 
@@ -82,12 +82,12 @@ After wall timing, separate Callgrind and DHAT runs profiled the **exact timed T
 
 | Workload | Engine | Allocated bytes | Allocation blocks | Peak live bytes | Guest instructions |
 |---|---|---:|---:|---:|---:|
-| 16 digits × 65,536 calls | Relar | 18,716 | 33 | 10,331 | 69,886,356 |
+| 16 digits × 65,536 calls | Imre | 18,716 | 33 | 10,331 | 69,886,356 |
 | 16 digits × 65,536 calls | Rust | 4,114 | 19 | 1,922 | 23,285,675 |
-| 4,096 digits × 64 calls | Relar | 59,532 | 34 | 47,051 | 6,514,902 |
+| 4,096 digits × 64 calls | Imre | 59,532 | 34 | 47,051 | 6,514,902 |
 | 4,096 digits × 64 calls | Rust | 8,191 | 19 | 5,999 | 5,125,319 |
 
-For the same 64 checksum calls on 4,096 digits, Relar now executes **6,514,902 guest instructions**, down from 212,067,563 in the preserved baseline: **a 32.55× reduction**. Requested heap allocation falls from 23,105,570 bytes in 395,039 blocks to **59,532 bytes in 34 blocks**—99.742% fewer bytes. The baseline executable matches the one in the final timing comparison; the Rust executable, input, repetition count, complete output, and accumulated checksum also match the original profile. These are whole-process Callgrind/DHAT measurements, including startup and I/O, not CPU-time percentages or elapsed-time estimates.
+For the same 64 checksum calls on 4,096 digits, Imre now executes **6,514,902 guest instructions**, down from 212,067,563 in the preserved baseline: **a 32.55× reduction**. Requested heap allocation falls from 23,105,570 bytes in 395,039 blocks to **59,532 bytes in 34 blocks**—99.742% fewer bytes. The baseline executable matches the one in the final timing comparison; the Rust executable, input, repetition count, complete output, and accumulated checksum also match the original profile. These are whole-process Callgrind/DHAT measurements, including startup and I/O, not CPU-time percentages or elapsed-time estimates.
 
 The remaining large-input instruction cost is concentrated in digit conversion and tagged storage (**38.24%** of process instructions), checksum code itself (**30.29%**), the strided subtotal (**17.80%**), and list release (**7.18%**). These are disjoint checksum call subtrees plus checksum self cost; the subtotal already includes normalization. The final checksum loop is **scalar**, executing 15 instructions per selected digit. Runtime conversion, the stride-two subtotal, and the immediate-value release scan execute SIMD instructions. On 16-digit inputs, conversion costs about 344 instructions per call, subtotal 266 (including 65 for normalization), release 169, and checksum self 232. Helper setup, ownership, and cache work matter much more at this size.
 
@@ -105,7 +105,7 @@ There are **no recurring character-string, divmod-pair, slice-list, or comprehen
 
 These are whole-process guest instruction and requested allocation counts, not hardware cycles, CPU time, RSS, or latency predictions. Callgrind self costs and inclusive call-edge costs are reported separately to avoid double counting. DHAT cumulative allocation differs from peak live allocation. Profiles include startup, input decoding, file I/O, checksum accumulation, and cleanup. They directly attribute `checksum`; they do not by themselves establish the cause of other APIs' timing gaps.
 
-For this checksum workload, removing more allocator calls is therefore no longer the main opportunity. The remaining work includes materializing tagged digits, reading them again for the subtotal and destruction scan, and scalar checksum arithmetic. Generic streaming/fusion or stronger value-proof propagation could address those costs while preserving eager validation and error order. The independent Rust reference already streams over the string and produces the same tested outputs. Separate audited timings put checksum at **1.35× Rust time** for 4,096 digits and **2.96×** for 16 digits, while improving on the preserved Relar baseline by **29.21×** and **16.41×**, respectively. These checksum profiles do not explain the separate `verify`, `generate`, or `append` gaps.
+For this checksum workload, removing more allocator calls is therefore no longer the main opportunity. The remaining work includes materializing tagged digits, reading them again for the subtotal and destruction scan, and scalar checksum arithmetic. Generic streaming/fusion or stronger value-proof propagation could address those costs while preserving eager validation and error order. The independent Rust reference already streams over the string and produces the same tested outputs. Separate audited timings put checksum at **1.35× Rust time** for 4,096 digits and **2.96×** for 16 digits, while improving on the preserved Imre baseline by **29.21×** and **16.41×**, respectively. These checksum profiles do not explain the separate `verify`, `generate`, or `append` gaps.
 
 ## Compatibility and validation
 
@@ -115,7 +115,7 @@ Cases cover all 760 Unicode 16 decimal characters, mixed digit families, empty/r
 
 The frozen full matrix passes **129 command jobs**, including formatting, strict workspace Clippy, **190 Rust unit tests**, **4,256 generic checks**, all six application oracles, and unchanged Base45 validation. The 81 language/library suite invocations cover 27 suites across ordinary, ThinLTO, and sanitizer configurations; paired optimization levels are grouped within one invocation. The independent [validation audit](2026-10-20-luhn-performance-validation-audit.json) records exact counts and rehashes every retained native artifact.
 
-GitHub CI also [passes at the measured implementation revision](https://github.com/viarius-experiments/relar/actions/runs/39405086975), using the repository's normal Rust toolchain.
+GitHub CI also [passes at the measured implementation revision](https://github.com/viarius-experiments/imre/actions/runs/39405086975), using the repository's normal Rust toolchain.
 
 ASan/LSan instruments generated code and the custom runtime with leak detection enabled at O0/O1. The compiler, prebuilt Rust standard library, and Rust references are not sanitizer-instrumented. Historical exhaustive Unicode audits remain applicable by exact byte identity of the relevant implementation; they were not rerun over all code points for this change.
 
@@ -125,7 +125,7 @@ The scope remains the library's string API through a strict UTF-8 driver. It doe
 
 Compiler/runtime builds, full validation, timing, and final profiles all use the same clean source revision: **8b54eae6572a93926265d78562656dd395ad28b0**. Later report and documentation commits do not move those validation claims to a new source revision. The [build record](2026-10-20-luhn-performance-build.json) identifies exact source, tools, commands, archives, and executables.
 
-Measurements ran on an AMD EPYC-Milan host pinned to CPU 0, outside ptrace tracing. CPython 3.14.5 uses PGO/LTO, with the GIL enabled and JIT disabled. Relar uses Clang 18 at O3; the independent Rust reference uses Ohm 1.98.1-1, rustc 1.98.1-dev, and LLVM 22.1.8.
+Measurements ran on an AMD EPYC-Milan host pinned to CPU 0, outside ptrace tracing. CPython 3.14.5 uses PGO/LTO, with the GIL enabled and JIT disabled. Imre uses Clang 18 at O3; the independent Rust reference uses Ohm 1.98.1-1, rustc 1.98.1-dev, and LLVM 22.1.8.
 
 Timing includes startup, imports, one input read, repeated unchanged-library calls, checksum accumulation, one final complete output write, and exit. Preparation, compilation, hashing, and verification are outside the clock. OS caches are warm; output is not fsynced. Task-owned builds, tests, profiles, and audit sweeps were paused during measurement. Unrelated shared-host activity and frequency remain uncontrolled.
 

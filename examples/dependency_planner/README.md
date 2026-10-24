@@ -1,6 +1,6 @@
 # Dependency planner
 
-This first-party package schedules tasks with dependency constraints and unlimited workers. It produces a deterministic topological order, each task's earliest start and finish, the total completion time, a critical path, and a named-task lookup. The exact same package runs under CPython or compiles to an independent Relar executable.
+This first-party package schedules tasks with dependency constraints and unlimited workers. It produces a deterministic topological order, each task's earliest start and finish, the total completion time, a critical path, and a named-task lookup. The exact same package runs under CPython or compiles to an independent Imre executable.
 
 The implementation uses static modules, typed classes and methods, lists of task objects, nested successor lists, whitespace-tokenized string lists, fixed tuples, string concatenation, and an optional task return narrowed with `is None`. Dependency edges are integer IDs rather than object references: the semantic graph may contain cycles, while the runtime object graph remains acyclic. No compiler-specific helper replaces the scheduling algorithm.
 
@@ -58,9 +58,9 @@ Build and validate the native executable with the compiler's module root set to 
 ```sh
 cargo build --release --workspace --locked
 mkdir -p benchmarks/local/dependency-planner
-target/release/relar build examples/dependency_planner/__main__.py \
+target/release/imre build examples/dependency_planner/__main__.py \
   --module-root examples \
-  --runtime target/release/librelar_runtime.a \
+  --runtime target/release/libimre_runtime.a \
   -o benchmarks/local/dependency-planner/dependency_planner
 python3.14 benchmarks/dependency_validate.py \
   --binary benchmarks/local/dependency-planner/dependency_planner \
@@ -77,8 +77,8 @@ Once correctness passes and concurrent builds have stopped:
 
 ```sh
 python3.14 benchmarks/dependency_benchmark.py \
-  --compiler target/release/relar \
-  --runtime target/release/librelar_runtime.a \
+  --compiler target/release/imre \
+  --runtime target/release/libimre_runtime.a \
   --python python3.14 \
   --output benchmarks/local/dependency-planner.json
 ```
@@ -95,8 +95,8 @@ To compare a new native build with a preserved baseline in the same session, sup
 
 ```sh
 python3.14 benchmarks/dependency_benchmark.py \
-  --compiler target/release/relar \
-  --runtime target/release/librelar_runtime.a \
+  --compiler target/release/imre \
+  --runtime target/release/libimre_runtime.a \
   --baseline benchmarks/local/dependency-planner-final/dependency_planner \
   --baseline-record benchmarks/results/2026-10-17-dependency-planner-baseline.json \
   --python python3.14 --sizes 128 2048 16384 --shapes layered wide \
@@ -106,4 +106,4 @@ python3.14 benchmarks/dependency_benchmark.py \
 
 The baseline is never rebuilt. Its executable hash and all package source hashes must match the supplied record before compilation or validation proceeds; output paths must not overwrite either baseline input. The result retains the record's hash, revision, source/tool/artifact hashes, tool versions, and compilation provenance. Both native executables independently pass all 135 oracle cases before timing, and every subsequent run must match complete output. Source files, tools, both native executables, and the baseline record are checked again after measurement.
 
-In this mode each warmup or sample is a triplet. The six execution orders repeat in a cycle, with adjacent orders reversing each other; the default twelve measured triplets use every order twice. Use a multiple of six samples to balance every implementation's execution position and immediate predecessor. The default two warmup triplets prime every implementation but do not cover all six orders. Summaries retain the CPython/Relar ratio and add baseline/Relar and CPython/baseline ratios, each computed from medians in the same session. Omitting both baseline arguments retains the two-way paired benchmark.
+In this mode each warmup or sample is a triplet. The six execution orders repeat in a cycle, with adjacent orders reversing each other; the default twelve measured triplets use every order twice. Use a multiple of six samples to balance every implementation's execution position and immediate predecessor. The default two warmup triplets prime every implementation but do not cover all six orders. Summaries retain the CPython/Imre ratio and add baseline/Imre and CPython/baseline ratios, each computed from medians in the same session. Omitting both baseline arguments retains the two-way paired benchmark.

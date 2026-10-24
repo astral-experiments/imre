@@ -1,4 +1,4 @@
-"""Generate the Relar and CPython scenic-score replays from the pinned upstream files.
+"""Generate the Imre and CPython scenic-score replays from the pinned upstream files.
 
 Use tree_house_grid.py and input/sample_input.txt from
 derailed-dash/Advent-of-Code at 1e795c921cd9f824dba16df59eda61d9df33e8d7,
@@ -27,7 +27,7 @@ class Grid:
 
 """
 
-# Relar uses explicit loops for the upstream scorer's four stored generators.
+# Imre uses explicit loops for the upstream scorer's four stored generators.
 SCORE_POINT = """\
     def get_scenic_score_for_point(self, point: Point) -> int:
         x = point.x
@@ -91,13 +91,13 @@ def main() -> None:
     point = "".join(lines[51:57])
     traversal = "".join(lines[98:111])
     reference_grid = "".join(lines[57:139])
-    relar = "from dataclasses import dataclass\n\n" + point + GRID_INIT + traversal + SCORE_POINT
+    imre = "from dataclasses import dataclass\n\n" + point + GRID_INIT + traversal + SCORE_POINT
     reference = "from dataclasses import dataclass\nimport math\n\n" + point + reference_grid
     args.output.mkdir(parents=True, exist_ok=True)
     for name, program in [
-        ("scenic.py", relar + fixture + PRINT_SCORES),
+        ("scenic.py", imre + fixture + PRINT_SCORES),
         ("scenic_reference.py", reference + fixture + PRINT_SCORES),
-        ("scenic_timing.py", relar + fixture + TIMING_DRIVER),
+        ("scenic_timing.py", imre + fixture + TIMING_DRIVER),
     ]:
         (args.output / name).write_text(program, encoding="utf-8")
 

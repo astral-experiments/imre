@@ -14,7 +14,7 @@
       "benchmarks/reference/telemetry_comparison/README.md",
       "benchmarks/telemetry_benchmark.py"
     ],
-    "patch": "diff --git a/benchmarks/reference/telemetry_comparison/README.md b/benchmarks/reference/telemetry_comparison/README.md\nindex dce3c17..76a1b51 100644\n--- a/benchmarks/reference/telemetry_comparison/README.md\n+++ b/benchmarks/reference/telemetry_comparison/README.md\n@@ -60,6 +60,11 @@ executables against the independent oracle and CPython. Timing rechecks every\n recorded source, tool, binary, LLVM, and validation hash before and after running.\n For ThinLTO, select the corresponding Rust build and Relar runtime and add\n `--lto-linker /path/to/ld.lld` to both commands. Matching modes are required.\n+The compile command always passes an explicit target, defaulting to the Rust\n+host when `--target` is omitted. Relar's build target must match that host, and the\n+produced executable's ELF class, byte order, and machine must match the Rust\n+executable. Relar's emitted LLVM text has no target directive; it is retained and\n+hashed without treating it as target evidence.\n \n Defaults are 16, 256, and 4,096 samples, with report, full-scan predicates/search,\n and early-exit predicate/search workloads. Repetition counts target 1,048,576\ndiff --git a/benchmarks/telemetry_benchmark.py b/benchmarks/telemetry_benchmark.py\nindex 862a1eb..3c0aa6b 100644\n--- a/benchmarks/telemetry_benchmark.py\n+++ b/benchmarks/telemetry_benchmark.py\n@@ -45,6 +45,18 @@ def rust_host(record: dict) -> str:\n     )\n \n \n+def elf_target(path: Path) -> dict:\n+    with path.open(\"rb\") as stream:\n+        header = stream.read(20)\n+    assert len(header) == 20 and header[:5] == b\"\\x7fELF\\x02\", \"expected 64-bit ELF\"\n+    byte_order = {1: \"little\", 2: \"big\"}[header[5]]\n+    return {\n+        \"bits\": 64,\n+        \"byte_order\": byte_order,\n+        \"machine\": int.from_bytes(header[18:20], byte_order),\n+    }\n+\n+\n def workloads(sizes: list[int], batch_pairs: int, scenarios) -> list[dict]:\n     generator = random.Random(20261020)\n     result = []\n@@ -258,8 +270,8 @@ def prepare(args, paths, hashes, rust_record, relar_record, revision, dirty) -> d\n         \"--emit-llvm\",\n         str(llvm),\n     ]\n-    if args.target:\n-        command += [\"--target\", args.target]\n+    effective_target = args.target or rust_host(rust_record)\n+    command += [\"--target\", effective_target]\n     if args.lto_linker:\n         command += [\"--lto-linker\", str(paths[\"lto_linker\"])]\n     artifacts.mkdir(parents=True, exist_ok=True)\n@@ -283,12 +295,8 @@ def prepare(args, paths, hashes, rust_record, relar_record, revision, dirty) -> d\n     assert validation[\"input_guards_passed\"]\n     assert validation[\"source_and_binary_sha256\"][\"relar\"] == shared.sha256(binary)\n     assert validation[\"source_and_binary_sha256\"][\"rust\"] == hashes[\"rust\"]\n-    llvm_target = next(\n-        line.split('\"')[1]\n-        for line in llvm.read_text().splitlines()\n-        if line.startswith(\"target triple\")\n-    )\n-    assert llvm_target == rust_host(rust_record), \"emitted LLVM and Rust targets differ\"\n+    native_elf = elf_target(binary)\n+    assert native_elf == elf_target(paths[\"rust\"]), \"Relar and Rust ELF targets differ\"\n     assert hashes == {name: shared.sha256(path) for name, path in paths.items()}\n     return {\n         \"schema\": 1,\n@@ -302,7 +310,8 @@ def prepare(args, paths, hashes, rust_record, relar_record, revision, dirty) -> d\n         \"binary_sha256\": shared.sha256(binary),\n         \"llvm\": str(llvm),\n         \"llvm_sha256\": shared.sha256(llvm),\n-        \"llvm_target\": llvm_target,\n+        \"effective_target\": effective_target,\n+        \"native_elf\": native_elf,\n         \"validation_path\": str(validation_path),\n         \"validation_sha256\": shared.sha256(validation_path),\n         \"validation_command\": validation_command,\n@@ -323,6 +332,16 @@ def verify_preparation(record: dict, args, paths, hashes, revision, dirty) -> No\n     assert record[\"requested_target\"] == args.target and record[\"thinlto\"] == (\n         args.lto_linker is not None\n     )\n+    assert record[\"effective_target\"] == (\n+        args.target or rust_host(record[\"rust_build_record\"])\n+    )\n+    command = record[\"compile_command\"]\n+    assert command[command.index(\"--target\") + 1] == record[\"effective_target\"]\n+    assert (\n+        record[\"native_elf\"]\n+        == elf_target(Path(record[\"binary\"]))\n+        == elf_target(paths[\"rust\"])\n+    )\n     assert record[\"source_and_tool_paths\"] == {\n         name: str(path) for name, path in paths.items()\n     }\n",
+    "patch": "diff --git a/benchmarks/reference/telemetry_comparison/README.md b/benchmarks/reference/telemetry_comparison/README.md\nindex dce3c17..76a1b51 100644\n--- a/benchmarks/reference/telemetry_comparison/README.md\n+++ b/benchmarks/reference/telemetry_comparison/README.md\n@@ -60,6 +60,11 @@ executables against the independent oracle and CPython. Timing rechecks every\n recorded source, tool, binary, LLVM, and validation hash before and after running.\n For ThinLTO, select the corresponding Rust build and Imre runtime and add\n `--lto-linker /path/to/ld.lld` to both commands. Matching modes are required.\n+The compile command always passes an explicit target, defaulting to the Rust\n+host when `--target` is omitted. Imre's build target must match that host, and the\n+produced executable's ELF class, byte order, and machine must match the Rust\n+executable. Imre's emitted LLVM text has no target directive; it is retained and\n+hashed without treating it as target evidence.\n \n Defaults are 16, 256, and 4,096 samples, with report, full-scan predicates/search,\n and early-exit predicate/search workloads. Repetition counts target 1,048,576\ndiff --git a/benchmarks/telemetry_benchmark.py b/benchmarks/telemetry_benchmark.py\nindex 862a1eb..3c0aa6b 100644\n--- a/benchmarks/telemetry_benchmark.py\n+++ b/benchmarks/telemetry_benchmark.py\n@@ -45,6 +45,18 @@ def rust_host(record: dict) -> str:\n     )\n \n \n+def elf_target(path: Path) -> dict:\n+    with path.open(\"rb\") as stream:\n+        header = stream.read(20)\n+    assert len(header) == 20 and header[:5] == b\"\\x7fELF\\x02\", \"expected 64-bit ELF\"\n+    byte_order = {1: \"little\", 2: \"big\"}[header[5]]\n+    return {\n+        \"bits\": 64,\n+        \"byte_order\": byte_order,\n+        \"machine\": int.from_bytes(header[18:20], byte_order),\n+    }\n+\n+\n def workloads(sizes: list[int], batch_pairs: int, scenarios) -> list[dict]:\n     generator = random.Random(20261020)\n     result = []\n@@ -258,8 +270,8 @@ def prepare(args, paths, hashes, rust_record, imre_record, revision, dirty) -> d\n         \"--emit-llvm\",\n         str(llvm),\n     ]\n-    if args.target:\n-        command += [\"--target\", args.target]\n+    effective_target = args.target or rust_host(rust_record)\n+    command += [\"--target\", effective_target]\n     if args.lto_linker:\n         command += [\"--lto-linker\", str(paths[\"lto_linker\"])]\n     artifacts.mkdir(parents=True, exist_ok=True)\n@@ -283,12 +295,8 @@ def prepare(args, paths, hashes, rust_record, imre_record, revision, dirty) -> d\n     assert validation[\"input_guards_passed\"]\n     assert validation[\"source_and_binary_sha256\"][\"imre\"] == shared.sha256(binary)\n     assert validation[\"source_and_binary_sha256\"][\"rust\"] == hashes[\"rust\"]\n-    llvm_target = next(\n-        line.split('\"')[1]\n-        for line in llvm.read_text().splitlines()\n-        if line.startswith(\"target triple\")\n-    )\n-    assert llvm_target == rust_host(rust_record), \"emitted LLVM and Rust targets differ\"\n+    native_elf = elf_target(binary)\n+    assert native_elf == elf_target(paths[\"rust\"]), \"Imre and Rust ELF targets differ\"\n     assert hashes == {name: shared.sha256(path) for name, path in paths.items()}\n     return {\n         \"schema\": 1,\n@@ -302,7 +310,8 @@ def prepare(args, paths, hashes, rust_record, imre_record, revision, dirty) -> d\n         \"binary_sha256\": shared.sha256(binary),\n         \"llvm\": str(llvm),\n         \"llvm_sha256\": shared.sha256(llvm),\n-        \"llvm_target\": llvm_target,\n+        \"effective_target\": effective_target,\n+        \"native_elf\": native_elf,\n         \"validation_path\": str(validation_path),\n         \"validation_sha256\": shared.sha256(validation_path),\n         \"validation_command\": validation_command,\n@@ -323,6 +332,16 @@ def verify_preparation(record: dict, args, paths, hashes, revision, dirty) -> No\n     assert record[\"requested_target\"] == args.target and record[\"thinlto\"] == (\n         args.lto_linker is not None\n     )\n+    assert record[\"effective_target\"] == (\n+        args.target or rust_host(record[\"rust_build_record\"])\n+    )\n+    command = record[\"compile_command\"]\n+    assert command[command.index(\"--target\") + 1] == record[\"effective_target\"]\n+    assert (\n+        record[\"native_elf\"]\n+        == elf_target(Path(record[\"binary\"]))\n+        == elf_target(paths[\"rust\"])\n+    )\n     assert record[\"source_and_tool_paths\"] == {\n         name: str(path) for name, path in paths.items()\n     }\n",
     "patch_sha256": "8e3672d3e78fa7bfde47318d0f383e1b2eb62ac650feaf17627a7000370245d7",
     "reason": "Only the benchmark target-verification harness and its guide may differ. Compiler, runtime, examples, validators, tests, and Rust reference sources remain unchanged from full validation."
   },
@@ -25,7 +25,7 @@
     "preparation.json": "1e7e649d58ed3f5884534101b986c9b00a0af9a275a4387cbb7a17eb087e0ad8",
     "benchmark-record.json": "bbe69e51b7b9315bfc3e755020999443671c7f3987a3298e033610b301c87401",
     "timing-status.json": "9b51cc7cefb0a1ba31a7688c0770431b4918c7ce79a103f2be9316c3b4de524f",
-    "relar-build-record.json": "120625e9b161aaff2d66721c01187a7b6e0c46bed23616d79ff18a2279c7cfb2",
+    "imre-build-record.json": "120625e9b161aaff2d66721c01187a7b6e0c46bed23616d79ff18a2279c7cfb2",
     "rust-build-record.json": "8c3f620a640be0003bce06c98b9af484e4d17552d159f585a7d5975c1ef8f223",
     "validation-index.json": "bc0e3cdc9a33fddf3c21825adec31b58f3f2e41ec574bd213f2f97725c94aa8a",
     "prepared-validation.json": "1f302bfa6668545ee137e9b704895d6ff9b471df874e4ee6e23f1b2bb5a7e248",
@@ -39,11 +39,11 @@
   },
   "guarded_inputs": {
     "compiler": {
-      "path": "/tmp/relar-iterator-validation-v1/artifacts/relar",
+      "path": "/tmp/imre-iterator-validation-v1/artifacts/imre",
       "sha256": "acfd940e8ef5447c235913d9a3102022a20ceeec34de00bbe5737edd00fa8726"
     },
     "runtime": {
-      "path": "/tmp/relar-iterator-validation-v1/artifacts/thinlto-runtime.a",
+      "path": "/tmp/imre-iterator-validation-v1/artifacts/thinlto-runtime.a",
       "sha256": "be60a663e11415f045dcce2fc38dc31dda8a4b08535535234aaa47d90d961fff"
     },
     "python": {
@@ -55,335 +55,335 @@
       "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
     },
     "rust": {
-      "path": "/tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference",
+      "path": "/tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference",
       "sha256": "84e2eee85f3e938072b50811dbf4d57db18a380b51ad3ea164705937e66bf2b9"
     },
     "rust_build_record": {
-      "path": "/tmp/relar-iterator-validation-v1/references/telemetry-thinlto/build-record.json",
+      "path": "/tmp/imre-iterator-validation-v1/references/telemetry-thinlto/build-record.json",
       "sha256": "8c3f620a640be0003bce06c98b9af484e4d17552d159f585a7d5975c1ef8f223"
     },
     "harness": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/telemetry_benchmark.py",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/telemetry_benchmark.py",
       "sha256": "ea03e2bee2516f0d8cf60c50b1b6e7dd55a6c879bf4d4e8649df51df85d313ed"
     },
     "validator": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/telemetry_validate.py",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/telemetry_validate.py",
       "sha256": "42e2ea6e8c2d2979dd62bf6b5fb170a080c1e6d9a32f742ce12c3d5115a6b158"
     },
     "shared_harness": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/benchmark.py",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/benchmark.py",
       "sha256": "918e4913559181301f80cb214ebf5f44fb0bf550d30de8eb2ab80d086e896d35"
     },
     "shared_validator": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/validate.py",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/validate.py",
       "sha256": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49"
     },
     "filesystem_validator": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/manifest_validate.py",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/manifest_validate.py",
       "sha256": "94e54062e0b62187b6f25bad35aca8a9698379a9c88bb13cf5026d56028199d9"
     },
     "batch_validator": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/batch_validate.py",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/batch_validate.py",
       "sha256": "08dcf6b321c11b9aa81661b5c62bf89b7fcda465e63c503e67479bbff21b7546"
     },
     "incremental_validator": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/incremental_validate.py",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/incremental_validate.py",
       "sha256": "55d274d0f699704053df287bd9e318167f993b5e1d1e5ffe72f13f9b79080ed4"
     },
     "example:README.md": {
-      "path": "/home/dev-user/code/oss/relar/examples/telemetry_comparison/README.md",
+      "path": "/home/dev-user/code/oss/imre/examples/telemetry_comparison/README.md",
       "sha256": "2ce079350605aeaca685d4c36d726b92ccc093f8c84c8c7c34d21876339fe845"
     },
     "example:__init__.py": {
-      "path": "/home/dev-user/code/oss/relar/examples/telemetry_comparison/__init__.py",
+      "path": "/home/dev-user/code/oss/imre/examples/telemetry_comparison/__init__.py",
       "sha256": "63864644686852bd293ea84f78a5ef59dfc28aaf605559d6c2b591ef1835184f"
     },
     "example:__main__.py": {
-      "path": "/home/dev-user/code/oss/relar/examples/telemetry_comparison/__main__.py",
+      "path": "/home/dev-user/code/oss/imre/examples/telemetry_comparison/__main__.py",
       "sha256": "0c457b5ef1aeca368d63be75089952bf9149b9e9009e194ab3176dd081d46e38"
     },
     "example:compare.py": {
-      "path": "/home/dev-user/code/oss/relar/examples/telemetry_comparison/compare.py",
+      "path": "/home/dev-user/code/oss/imre/examples/telemetry_comparison/compare.py",
       "sha256": "f4d69b8aab34996c2fff650170ad23468da18522b26eb5e8179c42aa607f6086"
     },
     "example:load.py": {
-      "path": "/home/dev-user/code/oss/relar/examples/telemetry_comparison/load.py",
+      "path": "/home/dev-user/code/oss/imre/examples/telemetry_comparison/load.py",
       "sha256": "f95d0e21bb99565d379f49ca9b97a2bcc4c4ee4b698b88b0b10dabc59907e1d4"
     },
     "example:model.py": {
-      "path": "/home/dev-user/code/oss/relar/examples/telemetry_comparison/model.py",
+      "path": "/home/dev-user/code/oss/imre/examples/telemetry_comparison/model.py",
       "sha256": "cfec837f4b112c6b06c0199c05d692b82a3167b4faf7eeb38fde558c7b1a3331"
     },
     "example:sample/observed.txt": {
-      "path": "/home/dev-user/code/oss/relar/examples/telemetry_comparison/sample/observed.txt",
+      "path": "/home/dev-user/code/oss/imre/examples/telemetry_comparison/sample/observed.txt",
       "sha256": "2f4c66bbc99b3b89c3ff39d2c6cb33450678d7c35368851baf30f8a3ed83f991"
     },
     "example:sample/reference.txt": {
-      "path": "/home/dev-user/code/oss/relar/examples/telemetry_comparison/sample/reference.txt",
+      "path": "/home/dev-user/code/oss/imre/examples/telemetry_comparison/sample/reference.txt",
       "sha256": "ab04e9ef5f13cc040bae0a60254a9baca8ed67c064aa3c07569cfb6935a09490"
     },
     "rust_source:Cargo.toml": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/reference/telemetry_comparison/Cargo.toml",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/reference/telemetry_comparison/Cargo.toml",
       "sha256": "401c6ac76f260005fd63bb98a242f1f2145cfe1b94fe752f18811c2107d8903b"
     },
     "rust_source:Cargo.lock": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/reference/telemetry_comparison/Cargo.lock",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/reference/telemetry_comparison/Cargo.lock",
       "sha256": "6b5e62236087fcaa6944b026699e21702c167b9bebebff8b3a13086e8cd50956"
     },
     "rust_source:build.py": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/reference/telemetry_comparison/build.py",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/reference/telemetry_comparison/build.py",
       "sha256": "6a5214ad88629aa961031f94b15192405f292cdddbb7bc21bf073f170f632885"
     },
     "rust_source:src/main.rs": {
-      "path": "/home/dev-user/code/oss/relar/benchmarks/reference/telemetry_comparison/src/main.rs",
+      "path": "/home/dev-user/code/oss/imre/benchmarks/reference/telemetry_comparison/src/main.rs",
       "sha256": "ffd3e23f30a7f7c05324e67c353f7d073c0a21f5ad47e201959d964eab23bd8b"
     },
     "lto_linker": {
       "path": "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld",
       "sha256": "bf1b9bc68d0f70523a95618cb9be2e4d04698564229838cfe29eb913bba7ce67"
     },
-    "relar_build_record": {
-      "path": "/tmp/relar-iterator-validation-v1/build.json",
+    "imre_build_record": {
+      "path": "/tmp/imre-iterator-validation-v1/build.json",
       "sha256": "120625e9b161aaff2d66721c01187a7b6e0c46bed23616d79ff18a2279c7cfb2"
     },
-    "relar_source:Cargo.lock": {
-      "path": "/home/dev-user/code/oss/relar/Cargo.lock",
+    "imre_source:Cargo.lock": {
+      "path": "/home/dev-user/code/oss/imre/Cargo.lock",
       "sha256": "2b9832b6edec9b6066514222c67ff76ca5e8d1236bb303b793dd1d9747a432ea"
     },
-    "relar_source:Cargo.toml": {
-      "path": "/home/dev-user/code/oss/relar/Cargo.toml",
+    "imre_source:Cargo.toml": {
+      "path": "/home/dev-user/code/oss/imre/Cargo.toml",
       "sha256": "b79be453d2d2bb2c7fe24b6b58c230367fe7ddab7126d77a92667390157a21b6"
     },
-    "relar_source:crates/relar-compiler/Cargo.toml": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/Cargo.toml",
+    "imre_source:crates/imre-compiler/Cargo.toml": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/Cargo.toml",
       "sha256": "4a6b0b45c3b3a62ac54a7fd173ca140302659763507092ca94c3c285367887db"
     },
-    "relar_source:crates/relar-compiler/src/analysis.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/analysis.rs",
+    "imre_source:crates/imre-compiler/src/analysis.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/analysis.rs",
       "sha256": "57968f1065f966e82f6e5246bb4043d1fab33458ed9f809eafffae6a5528281c"
     },
-    "relar_source:crates/relar-compiler/src/classes.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/classes.rs",
+    "imre_source:crates/imre-compiler/src/classes.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/classes.rs",
       "sha256": "6a814832cb34bed165e4f146d5b31e1d4e221763ff9a0b5766de8353d0c237c5"
     },
-    "relar_source:crates/relar-compiler/src/effects.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/effects.rs",
+    "imre_source:crates/imre-compiler/src/effects.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/effects.rs",
       "sha256": "62b8b740c97754a9cc0b76cac074e14fc09f0e44f765b7d20f5bc3267bf499e9"
     },
-    "relar_source:crates/relar-compiler/src/frontend.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend.rs",
+    "imre_source:crates/imre-compiler/src/frontend.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend.rs",
       "sha256": "8513c7db99e8a7359f179db4e2818e60d017b3a0ac2f561c74344551b6da52fd"
     },
-    "relar_source:crates/relar-compiler/src/frontend/assignments.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/assignments.rs",
+    "imre_source:crates/imre-compiler/src/frontend/assignments.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/assignments.rs",
       "sha256": "a57afd5e332eac11967df5ba970f9531e34c68f9c750544a53998491c932a920"
     },
-    "relar_source:crates/relar-compiler/src/frontend/calls.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/calls.rs",
+    "imre_source:crates/imre-compiler/src/frontend/calls.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/calls.rs",
       "sha256": "a9feaaef898fb693af8b077b18cfa3131c3339e5277ea27c180568993bd9eb30"
     },
-    "relar_source:crates/relar-compiler/src/frontend/comprehensions.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/comprehensions.rs",
+    "imre_source:crates/imre-compiler/src/frontend/comprehensions.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/comprehensions.rs",
       "sha256": "73b0de5958e0593398a3a14f09e863f6ff5e322912c5883471b08a8d1038c939"
     },
-    "relar_source:crates/relar-compiler/src/frontend/comprehensions/slices.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/comprehensions/slices.rs",
+    "imre_source:crates/imre-compiler/src/frontend/comprehensions/slices.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/comprehensions/slices.rs",
       "sha256": "6e6202da04ccfee2c4895a778386b60547da0421be302476ae80747010b5113f"
     },
-    "relar_source:crates/relar-compiler/src/frontend/expansions.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/expansions.rs",
+    "imre_source:crates/imre-compiler/src/frontend/expansions.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/expansions.rs",
       "sha256": "298b0dddf6dbcfd412fbfdd22a0ed3928d5452e90c73e558baa274f671ff7d2f"
     },
-    "relar_source:crates/relar-compiler/src/frontend/inference.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/inference.rs",
+    "imre_source:crates/imre-compiler/src/frontend/inference.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/inference.rs",
       "sha256": "a876932206b4aac2dc44001069b724bed048ae82680eefc56a67d95a5d6dd0b0"
     },
-    "relar_source:crates/relar-compiler/src/frontend/iterables.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/iterables.rs",
+    "imre_source:crates/imre-compiler/src/frontend/iterables.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/iterables.rs",
       "sha256": "f7ecb79bd0c2aa93040c3e718ee305687e2aab6cbefcf9f8ed47f922a1626afb"
     },
-    "relar_source:crates/relar-compiler/src/frontend/matching.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/matching.rs",
+    "imre_source:crates/imre-compiler/src/frontend/matching.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/matching.rs",
       "sha256": "a773a2ea540e6f02c12e872aa22b605d34e06be7f8c37ac054e8bb3d1e3c926e"
     },
-    "relar_source:crates/relar-compiler/src/frontend/module_values.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/module_values.rs",
+    "imre_source:crates/imre-compiler/src/frontend/module_values.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/module_values.rs",
       "sha256": "a7d6ef3f5ed4f446a59231290e809f8ce505f1f3bce816bb5ac4520bf9153668"
     },
-    "relar_source:crates/relar-compiler/src/frontend/pipelines.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/pipelines.rs",
+    "imre_source:crates/imre-compiler/src/frontend/pipelines.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/pipelines.rs",
       "sha256": "6d3e0f588c231acb92e0371ee239493f4f8b07bc73759b5a1d65327601e459cf"
     },
-    "relar_source:crates/relar-compiler/src/frontend/truthiness.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/truthiness.rs",
+    "imre_source:crates/imre-compiler/src/frontend/truthiness.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/truthiness.rs",
       "sha256": "cfabe32776fd75c3ed0d5f9d73b59f1fcb5e02fce394979d92a31261756a37fe"
     },
-    "relar_source:crates/relar-compiler/src/frontend/unions.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/unions.rs",
+    "imre_source:crates/imre-compiler/src/frontend/unions.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/unions.rs",
       "sha256": "3b649582a176b5e8b3e11087f4e7673c03e52849dd72ef8eaa4eb4ccff4575d5"
     },
-    "relar_source:crates/relar-compiler/src/frontend/unpacking.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/unpacking.rs",
+    "imre_source:crates/imre-compiler/src/frontend/unpacking.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/unpacking.rs",
       "sha256": "a99d5a5c34daaeaf24dc15f3eccec808f6e1f023e2976a88dd11522e962cebf1"
     },
-    "relar_source:crates/relar-compiler/src/ir.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/ir.rs",
+    "imre_source:crates/imre-compiler/src/ir.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/ir.rs",
       "sha256": "2fbb43fbe180fbd9d03bca4f2528c4c3e14432a7a8ab5c2fdc299f477883007a"
     },
-    "relar_source:crates/relar-compiler/src/lib.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/lib.rs",
+    "imre_source:crates/imre-compiler/src/lib.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/lib.rs",
       "sha256": "e514666bed358f9098ae1093746fd79592e5c99913f77b759800fb5e184cdf11"
     },
-    "relar_source:crates/relar-compiler/src/list_bounds.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/list_bounds.rs",
+    "imre_source:crates/imre-compiler/src/list_bounds.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/list_bounds.rs",
       "sha256": "a49c4990d935091c57d66cf48d181baac3bc8dab4c6784b425299bbd95826b65"
     },
-    "relar_source:crates/relar-compiler/src/list_specialization.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/list_specialization.rs",
+    "imre_source:crates/imre-compiler/src/list_specialization.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/list_specialization.rs",
       "sha256": "e0b3f5fa378bc6a699c6cddfb246f6679ec9c048a42adf6be9192c4450f5dafb"
     },
-    "relar_source:crates/relar-compiler/src/llvm.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/llvm.rs",
+    "imre_source:crates/imre-compiler/src/llvm.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/llvm.rs",
       "sha256": "0b938bf968ba9b3c1b3fa2fb22f6be22a262f5d44708168bdadf70e665a9f6d7"
     },
-    "relar_source:crates/relar-compiler/src/llvm/truthiness.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/llvm/truthiness.rs",
+    "imre_source:crates/imre-compiler/src/llvm/truthiness.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/llvm/truthiness.rs",
       "sha256": "563aebbc63733b2dea66914fb2954e00bc98bb24036f7f06eca54c070ad36913"
     },
-    "relar_source:crates/relar-compiler/src/llvm/unions.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/llvm/unions.rs",
+    "imre_source:crates/imre-compiler/src/llvm/unions.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/llvm/unions.rs",
       "sha256": "7843e286ec562426a413be2bb402d2ce9655cb6a3f5b55c9a7f71bd47dd0bd5c"
     },
-    "relar_source:crates/relar-compiler/src/main.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/main.rs",
+    "imre_source:crates/imre-compiler/src/main.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/main.rs",
       "sha256": "ab847928d668c12c534af1bb7efbefeccafa533426bf9123218e9e05df3757dc"
     },
-    "relar_source:crates/relar-compiler/src/modules.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/modules.rs",
+    "imre_source:crates/imre-compiler/src/modules.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/modules.rs",
       "sha256": "66c33131f512c16cd1342dd5897043e860539e2809216f92204545948610ab95"
     },
-    "relar_source:crates/relar-compiler/src/narrowing.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/narrowing.rs",
+    "imre_source:crates/imre-compiler/src/narrowing.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/narrowing.rs",
       "sha256": "857ddb8b64f6d6bc380305f06581cf77923e3d5f197ea9edb871594d49427298"
     },
-    "relar_source:crates/relar-compiler/src/range_specialization.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/range_specialization.rs",
+    "imre_source:crates/imre-compiler/src/range_specialization.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/range_specialization.rs",
       "sha256": "38f56876e1f789bab8681ca00eb359da79e1403b991e091f265419f146d5e49d"
     },
-    "relar_source:crates/relar-compiler/src/ranges.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/ranges.rs",
+    "imre_source:crates/imre-compiler/src/ranges.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/ranges.rs",
       "sha256": "abd4ab76f97fc7a14140d3dde7b8c9ddbe38bf92d3b0400ee494f49d0bba7bff"
     },
-    "relar_source:crates/relar-compiler/src/reductions.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/reductions.rs",
+    "imre_source:crates/imre-compiler/src/reductions.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/reductions.rs",
       "sha256": "a387438971545405e0dc4c3363bebcfea8c63605c764ef8a48ed4160bc7bf738"
     },
-    "relar_source:crates/relar-compiler/src/tuples.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/tuples.rs",
+    "imre_source:crates/imre-compiler/src/tuples.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/tuples.rs",
       "sha256": "2e4dee67aa2a4e6c5af8e2d496bb1cb0ce4b60e3a59f95429d3d55f976f44908"
     },
-    "relar_source:crates/relar-compiler/src/types.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-compiler/src/types.rs",
+    "imre_source:crates/imre-compiler/src/types.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-compiler/src/types.rs",
       "sha256": "f83a88a2a6bd0fde9ebf5c92bfb0cc009c373236b209df146031b2a795073b51"
     },
-    "relar_source:crates/relar-runtime/Cargo.toml": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-runtime/Cargo.toml",
+    "imre_source:crates/imre-runtime/Cargo.toml": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-runtime/Cargo.toml",
       "sha256": "806bc5245a6f1d6743ef85c06372f19d458029d434e4781dcb5c57b4edbfd5b4"
     },
-    "relar_source:crates/relar-runtime/src/floats.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-runtime/src/floats.rs",
+    "imre_source:crates/imre-runtime/src/floats.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-runtime/src/floats.rs",
       "sha256": "63e69d21ce4394fa2721ae7f26c71b924287415bc3eb5f2c8859593fe78944b0"
     },
-    "relar_source:crates/relar-runtime/src/integer_text.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-runtime/src/integer_text.rs",
+    "imre_source:crates/imre-runtime/src/integer_text.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-runtime/src/integer_text.rs",
       "sha256": "61483a52ce8c37bfe88e03413c7cd4027e39183d3d88fbf1977720a6c1c2bbdf"
     },
-    "relar_source:crates/relar-runtime/src/lib.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-runtime/src/lib.rs",
+    "imre_source:crates/imre-runtime/src/lib.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-runtime/src/lib.rs",
       "sha256": "a75cea3f8a59937322a320bdd678007de17c4becdf73acd36af11238a2f4e976"
     },
-    "relar_source:crates/relar-runtime/src/objects.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects.rs",
+    "imre_source:crates/imre-runtime/src/objects.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects.rs",
       "sha256": "69efa0595bf7a452d9ab552f5a7b91549c5a72ac3d5e4337cbcb43d9cef9fad5"
     },
-    "relar_source:crates/relar-runtime/src/objects/args.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/args.rs",
+    "imre_source:crates/imre-runtime/src/objects/args.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/args.rs",
       "sha256": "e2faa1539ab313b526b318632fd18362d0800c68188ec92edfcf14dc9d439bb8"
     },
-    "relar_source:crates/relar-runtime/src/objects/bytes.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/bytes.rs",
+    "imre_source:crates/imre-runtime/src/objects/bytes.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/bytes.rs",
       "sha256": "780e25e931911be9168a1617dee1efebbeb9a37a5d7fd758a5ad58af4f7beafa"
     },
-    "relar_source:crates/relar-runtime/src/objects/exceptions.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/exceptions.rs",
+    "imre_source:crates/imre-runtime/src/objects/exceptions.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/exceptions.rs",
       "sha256": "d45fbf733e3eda43f8b3f9fe052f8ca5b79c2a46f5aceff3e61fa98acab76ff6"
     },
-    "relar_source:crates/relar-runtime/src/objects/files.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/files.rs",
+    "imre_source:crates/imre-runtime/src/objects/files.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/files.rs",
       "sha256": "8ea8ccfa19926e4b0bbfcda7aa6f26c960b73f39f8b75c7368fef9889a351c11"
     },
-    "relar_source:crates/relar-runtime/src/objects/mappings.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/mappings.rs",
+    "imre_source:crates/imre-runtime/src/objects/mappings.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/mappings.rs",
       "sha256": "8241b8f2bcedc6318b3c6c9dc8a6d1f6a92e158c2d80ae04891dd06647a44b86"
     },
-    "relar_source:crates/relar-runtime/src/objects/records.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/records.rs",
+    "imre_source:crates/imre-runtime/src/objects/records.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/records.rs",
       "sha256": "69052d2d31fb62bcb0522936873243a41e130d984d173e8cdd90cce131853ac4"
     },
-    "relar_source:crates/relar-runtime/src/objects/sequences.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/sequences.rs",
+    "imre_source:crates/imre-runtime/src/objects/sequences.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/sequences.rs",
       "sha256": "8a1ca698e765e6d3f428d69f8401439a0d1fa26422a80779ef50985e5a0b8925"
     },
-    "relar_source:crates/relar-runtime/src/objects/unions.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/unions.rs",
+    "imre_source:crates/imre-runtime/src/objects/unions.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/unions.rs",
       "sha256": "f9abb7076cf25d629c463e42f1465d6026785ab4d9ea342c0822aa42841ff011"
     },
-    "relar_source:crates/relar-runtime/src/objects/words.rs": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/words.rs",
+    "imre_source:crates/imre-runtime/src/objects/words.rs": {
+      "path": "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/words.rs",
       "sha256": "f66d4e18f93554c3f9445195807d41c354ce32b148719b095480a61319fb2449"
     },
-    "relar_source:rust-toolchain.toml": {
-      "path": "/home/dev-user/code/oss/relar/rust-toolchain.toml",
+    "imre_source:rust-toolchain.toml": {
+      "path": "/home/dev-user/code/oss/imre/rust-toolchain.toml",
       "sha256": "7553618f800829444096beea3dce84c3d07585efda504c19adb6787369bbd9e8"
     },
     "prepared_llvm": {
-      "path": "/tmp/relar-telemetry-prepared-thinlto/telemetry.ll",
+      "path": "/tmp/imre-telemetry-prepared-thinlto/telemetry.ll",
       "sha256": "4040e42a57c6aad6d402705e74d717b5b92bf5d49376c0dd770a0567b9aea0b3"
     },
     "prepared_validation": {
-      "path": "/tmp/relar-telemetry-prepared-thinlto/validation.json",
+      "path": "/tmp/imre-telemetry-prepared-thinlto/validation.json",
       "sha256": "1f302bfa6668545ee137e9b704895d6ff9b471df874e4ee6e23f1b2bb5a7e248"
     },
     "validation_index": {
-      "path": "/tmp/relar-iterator-validation-v1/index.json",
+      "path": "/tmp/imre-iterator-validation-v1/index.json",
       "sha256": "bc0e3cdc9a33fddf3c21825adec31b58f3f2e41ec574bd213f2f97725c94aa8a"
     },
     "tool_valgrind": {
-      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+      "path": "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
       "sha256": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9"
     },
     "tool_annotate": {
-      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+      "path": "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
       "sha256": "e0ac7a2c69db1268d19ff52bd59e65289444f14f09c4daad1adee3ef215b6d4f"
     },
     "tool_valgrind_binary": {
-      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind.bin",
+      "path": "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind.bin",
       "sha256": "def5fdcf6ae64a4d3e6af3786b622978d8313e0734ecf3f6cbe71d8be9e274c8"
     },
     "tool_callgrind": {
-      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/callgrind-amd64-linux",
+      "path": "/home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/callgrind-amd64-linux",
       "sha256": "825eb197d519240c112e03ed00f40a8bbe1a0a0614f79ea95e28c67e8695cb03"
     },
     "tool_dhat": {
-      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/dhat-amd64-linux",
+      "path": "/home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/dhat-amd64-linux",
       "sha256": "cbe15a883012c617da1359656425faed0b1a049fce329801a31cb5f45c5d71fc"
     },
     "tool_core_preload": {
-      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_core-amd64-linux.so",
+      "path": "/home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_core-amd64-linux.so",
       "sha256": "87edd6ad90b12bb5fe58f2ea2235db5b6a3d637657488f3e06d07e482354a8c5"
     },
     "tool_dhat_preload": {
-      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so",
+      "path": "/home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so",
       "sha256": "1cb4fa3188da5492822b33976fe83a150809e39515cc37fe2e52d605a8197436"
     },
     "tool_perl": {
@@ -399,48 +399,48 @@
       "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
     },
     "preparation": {
-      "path": "/tmp/relar-telemetry-prepared-thinlto.json",
+      "path": "/tmp/imre-telemetry-prepared-thinlto.json",
       "sha256": "1e7e649d58ed3f5884534101b986c9b00a0af9a275a4387cbb7a17eb087e0ad8"
     },
     "benchmark": {
-      "path": "/tmp/relar-telemetry-full-v1-thinlto.json",
+      "path": "/tmp/imre-telemetry-full-v1-thinlto.json",
       "sha256": "bbe69e51b7b9315bfc3e755020999443671c7f3987a3298e033610b301c87401"
     },
     "timing_status": {
-      "path": "/tmp/relar-telemetry-full-v1-timing-status.json",
+      "path": "/tmp/imre-telemetry-full-v1-timing-status.json",
       "sha256": "9b51cc7cefb0a1ba31a7688c0770431b4918c7ce79a103f2be9316c3b4de524f"
     },
     "binary": {
-      "path": "/tmp/relar-telemetry-prepared-thinlto/telemetry",
+      "path": "/tmp/imre-telemetry-prepared-thinlto/telemetry",
       "sha256": "eca51301d8709642983f62f82c7afc34f4876afd10d70935b457356657231ca9"
     },
     "profiler": {
-      "path": "/tmp/relar-telemetry-profile.py",
+      "path": "/tmp/imre-telemetry-profile.py",
       "sha256": "79112b7ad3b92e45ea9ebf3113cf8bc8e80b20e94a4683cd57143255c879d3d1"
     }
   },
   "environment": {
-    "VALGRIND_LIB": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind",
+    "VALGRIND_LIB": "/home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind",
     "VALGRIND_OPTS": "",
     "LC_ALL": "C"
   },
   "profiles": [
     {
-      "engine": "relar",
+      "engine": "imre",
       "tool": "callgrind",
       "repetitions": 128,
       "pairs": 524288,
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=callgrind",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-telemetry-profile/relar-callgrind-128/valgrind.log",
-        "--callgrind-out-file=/tmp/relar-telemetry-profile/relar-callgrind-128/profile.callgrind",
+        "--log-file=/tmp/imre-telemetry-profile/imre-callgrind-128/valgrind.log",
+        "--callgrind-out-file=/tmp/imre-telemetry-profile/imre-callgrind-128/profile.callgrind",
         "--dump-instr=yes",
         "--collect-jumps=yes",
-        "/tmp/relar-telemetry-prepared-thinlto/telemetry",
+        "/tmp/imre-telemetry-prepared-thinlto/telemetry",
         "alert",
         "reference.txt",
         "observed.txt",
@@ -448,9 +448,9 @@
         "3",
         "128"
       ],
-      "cwd": "/tmp/relar-telemetry-profile/relar-callgrind-128/work",
+      "cwd": "/tmp/imre-telemetry-profile/imre-callgrind-128/work",
       "environment": {
-        "VALGRIND_LIB": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind",
+        "VALGRIND_LIB": "/home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind",
         "VALGRIND_OPTS": "",
         "LC_ALL": "C"
       },
@@ -490,7 +490,7 @@
             "incoming_inclusive_instructions": 163890048
           },
           {
-            "name": "relar_seq_get",
+            "name": "imre_seq_get",
             "self_instructions": 53895168,
             "self_fraction": 0.2342739509278215,
             "calls": 1056768,
@@ -525,14 +525,14 @@
             "incoming_inclusive_instructions": 15271015
           },
           {
-            "name": "relar_mapping_iter_next",
+            "name": "imre_mapping_iter_next",
             "self_instructions": 3661248,
             "self_fraction": 0.015914878199963765,
             "calls": 87432,
             "incoming_inclusive_instructions": 3661248
           },
           {
-            "name": "relar_str_split_whitespace",
+            "name": "imre_str_split_whitespace",
             "self_instructions": 3451578,
             "self_fraction": 0.015003475172311334,
             "calls": 8194,
@@ -546,7 +546,7 @@
             "incoming_inclusive_instructions": 3595660
           },
           {
-            "name": "<relar_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
+            "name": "<imre_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
             "self_instructions": 2785340,
             "self_fraction": 0.012107441737212848,
             "calls": 557068,
@@ -560,14 +560,14 @@
             "incoming_inclusive_instructions": 62475447
           },
           {
-            "name": "relar_str_splitlines",
+            "name": "imre_str_splitlines",
             "self_instructions": 2385415,
             "self_fraction": 0.010369029680963038,
             "calls": 2,
             "incoming_inclusive_instructions": 4118888
           },
           {
-            "name": "relar_int_parse",
+            "name": "imre_int_parse",
             "self_instructions": 2299590,
             "self_fraction": 0.009995961693896363,
             "calls": 16388,
@@ -581,7 +581,7 @@
             "incoming_inclusive_instructions": 2320398
           },
           {
-            "name": "<relar_runtime::objects::words::WordKind>::release",
+            "name": "<imre_runtime::objects::words::WordKind>::release",
             "self_instructions": 1499557,
             "self_fraction": 0.006518342108729881,
             "calls": 32781,
@@ -595,7 +595,7 @@
             "incoming_inclusive_instructions": 9757172
           },
           {
-            "name": "<alloc::rc::Rc<relar_runtime::objects::Object>>::drop_slow",
+            "name": "<alloc::rc::Rc<imre_runtime::objects::Object>>::drop_slow",
             "self_instructions": 1409795,
             "self_fraction": 0.006128160592212796,
             "calls": 24590,
@@ -623,7 +623,7 @@
             "incoming_inclusive_instructions": 9418240
           },
           {
-            "name": "relar_runtime::objects::sequences::string_character",
+            "name": "imre_runtime::objects::sequences::string_character",
             "self_instructions": 950504,
             "self_fraction": 0.004131693725357681,
             "calls": 32776,
@@ -644,7 +644,7 @@
             "incoming_inclusive_instructions": 229650095
           },
           {
-            "name": "relar_str_slice",
+            "name": "imre_str_slice",
             "self_instructions": 723766,
             "self_fraction": 0.003146098744273803,
             "calls": 4062,
@@ -658,7 +658,7 @@
             "incoming_inclusive_instructions": 1788678
           },
           {
-            "name": "<relar_runtime::objects::words::WordKind>::release'2",
+            "name": "<imre_runtime::objects::words::WordKind>::release'2",
             "self_instructions": 458752,
             "self_fraction": 0.0019941239173062782,
             "calls": 16384,
@@ -693,7 +693,7 @@
             "incoming_inclusive_instructions": 3097332
           },
           {
-            "name": "<relar_runtime::objects::sequences::SliceIndices>::new",
+            "name": "<imre_runtime::objects::sequences::SliceIndices>::new",
             "self_instructions": 243720,
             "self_fraction": 0.001059413105830353,
             "calls": 4062,
@@ -952,7 +952,7 @@
             "incoming_inclusive_instructions": 811
           },
           {
-            "name": "relar_sys_argv",
+            "name": "imre_sys_argv",
             "self_instructions": 531,
             "self_fraction": 2.30817478744427e-06,
             "calls": 2,
@@ -973,7 +973,7 @@
             "incoming_inclusive_instructions": 738
           },
           {
-            "name": "relar_runtime::objects::files::open",
+            "name": "imre_runtime::objects::files::open",
             "self_instructions": 511,
             "self_fraction": 2.2212378839623763e-06,
             "calls": 3,
@@ -1260,7 +1260,7 @@
             "incoming_inclusive_instructions": 357
           },
           {
-            "name": "relar_str_concat_parts",
+            "name": "imre_str_concat_parts",
             "self_instructions": 151,
             "self_fraction": 6.563736212882952e-07,
             "calls": 1,
@@ -1288,14 +1288,14 @@
             "incoming_inclusive_instructions": 968
           },
           {
-            "name": "relar_text_read",
+            "name": "imre_text_read",
             "self_instructions": 138,
             "self_fraction": 5.998646340250644e-07,
             "calls": 2,
             "incoming_inclusive_instructions": 140165
           },
           {
-            "name": "relar_runtime::output_bytes",
+            "name": "imre_runtime::output_bytes",
             "self_instructions": 136,
             "self_fraction": 5.911709436768751e-07,
             "calls": 2,
@@ -1309,7 +1309,7 @@
             "incoming_inclusive_instructions": 779
           },
           {
-            "name": "relar_text_close",
+            "name": "imre_text_close",
             "self_instructions": 133,
             "self_fraction": 5.781304081545911e-07,
             "calls": 3,
@@ -1463,7 +1463,7 @@
             "incoming_inclusive_instructions": 80
           },
           {
-            "name": "<relar_runtime::objects::files::FileState>::read_bytes",
+            "name": "<imre_runtime::objects::files::FileState>::read_bytes",
             "self_instructions": 80,
             "self_fraction": 3.477476139275736e-07,
             "calls": 2,
@@ -1477,7 +1477,7 @@
             "incoming_inclusive_instructions": 2936
           },
           {
-            "name": "relar_runtime::flush_stdout",
+            "name": "imre_runtime::flush_stdout",
             "self_instructions": 77,
             "self_fraction": 3.347070784052896e-07,
             "calls": 1,
@@ -1554,7 +1554,7 @@
             "incoming_inclusive_instructions": 68
           },
           {
-            "name": "relar_text_flush",
+            "name": "imre_text_flush",
             "self_instructions": 67,
             "self_fraction": 2.912386266643429e-07,
             "calls": 1,
@@ -1568,7 +1568,7 @@
             "incoming_inclusive_instructions": 229652058
           },
           {
-            "name": "relar_int_str",
+            "name": "imre_int_str",
             "self_instructions": 64,
             "self_fraction": 2.781980911420589e-07,
             "calls": 1,
@@ -1582,7 +1582,7 @@
             "incoming_inclusive_instructions": 63
           },
           {
-            "name": "<relar_runtime::objects::files::FileState as core::ops::drop::Drop>::drop",
+            "name": "<imre_runtime::objects::files::FileState as core::ops::drop::Drop>::drop",
             "self_instructions": 57,
             "self_fraction": 2.477701749233962e-07,
             "calls": 3,
@@ -1645,7 +1645,7 @@
             "incoming_inclusive_instructions": 131
           },
           {
-            "name": "relar_str_literal",
+            "name": "imre_str_literal",
             "self_instructions": 49,
             "self_fraction": 2.1299541353063885e-07,
             "calls": 1,
@@ -1820,7 +1820,7 @@
             "incoming_inclusive_instructions": 34
           },
           {
-            "name": "relar_bool_str",
+            "name": "imre_bool_str",
             "self_instructions": 34,
             "self_fraction": 1.4779273591921879e-07,
             "calls": 1,
@@ -1855,7 +1855,7 @@
             "incoming_inclusive_instructions": 232
           },
           {
-            "name": "<relar_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once",
+            "name": "<imre_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once",
             "self_instructions": 33,
             "self_fraction": 1.434458907451241e-07,
             "calls": 1,
@@ -1918,7 +1918,7 @@
             "incoming_inclusive_instructions": 30
           },
           {
-            "name": "relar_str_equal",
+            "name": "imre_str_equal",
             "self_instructions": 29,
             "self_fraction": 1.2605851004874542e-07,
             "calls": 1,
@@ -2107,14 +2107,14 @@
             "incoming_inclusive_instructions": 153
           },
           {
-            "name": "<std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<relar_runtime::Output>>>::force::{closure#0}>::{closure#0}",
+            "name": "<std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<imre_runtime::Output>>>::force::{closure#0}>::{closure#0}",
             "self_instructions": 22,
             "self_fraction": 9.563059383008274e-08,
             "calls": 1,
             "incoming_inclusive_instructions": 652
           },
           {
-            "name": "relar_str_release",
+            "name": "imre_str_release",
             "self_instructions": 22,
             "self_fraction": 9.563059383008274e-08,
             "calls": 2,
@@ -2268,7 +2268,7 @@
             "incoming_inclusive_instructions": 18
           },
           {
-            "name": "relar_object_release",
+            "name": "imre_object_release",
             "self_instructions": 18,
             "self_fraction": 7.824321313370406e-08,
             "calls": 2,
@@ -2380,14 +2380,14 @@
             "incoming_inclusive_instructions": 19054
           },
           {
-            "name": "<std::sync::once::Once>::call_once::<relar_runtime::initialize_io::{closure#0}>::{closure#0}",
+            "name": "<std::sync::once::Once>::call_once::<imre_runtime::initialize_io::{closure#0}>::{closure#0}",
             "self_instructions": 15,
             "self_fraction": 6.520267761142005e-08,
             "calls": 1,
             "incoming_inclusive_instructions": 135
           },
           {
-            "name": "<relar_runtime::objects::args::ARGUMENTS::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<core::option::Option<relar_runtime::objects::args::Arguments>>>>,)>>::call_once",
+            "name": "<imre_runtime::objects::args::ARGUMENTS::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<core::option::Option<imre_runtime::objects::args::Arguments>>>>,)>>::call_once",
             "self_instructions": 15,
             "self_fraction": 6.520267761142005e-08,
             "calls": 3,
@@ -2520,7 +2520,7 @@
             "incoming_inclusive_instructions": 9
           },
           {
-            "name": "relar_seq_len",
+            "name": "imre_seq_len",
             "self_instructions": 9,
             "self_fraction": 3.912160656685203e-08,
             "calls": 1,
@@ -2548,7 +2548,7 @@
             "incoming_inclusive_instructions": 162
           },
           {
-            "name": "<relar_runtime::objects::args::ARGV::{K#0}::{closure#0} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::RefCell<core::option::Option<alloc::rc::Rc<relar_runtime::objects::Object>>>>>,)>>::call_once",
+            "name": "<imre_runtime::objects::args::ARGV::{K#0}::{closure#0} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::RefCell<core::option::Option<alloc::rc::Rc<imre_runtime::objects::Object>>>>>,)>>::call_once",
             "self_instructions": 9,
             "self_fraction": 3.912160656685203e-08,
             "calls": 1,
@@ -2758,7 +2758,7 @@
             "incoming_inclusive_instructions": 2943
           },
           {
-            "name": "std::sys::thread_local::native::eager::destroy::<core::cell::RefCell<core::option::Option<alloc::rc::Rc<relar_runtime::objects::Object>>>>",
+            "name": "std::sys::thread_local::native::eager::destroy::<core::cell::RefCell<core::option::Option<alloc::rc::Rc<imre_runtime::objects::Object>>>>",
             "self_instructions": 7,
             "self_fraction": 3.042791621866269e-08,
             "calls": 1,
@@ -2986,21 +2986,21 @@
       "annotations": [
         {
           "command": [
-            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
             "--auto=no",
             "--inclusive=no",
             "--threshold=100",
-            "/tmp/relar-telemetry-profile/relar-callgrind-128/profile.callgrind"
+            "/tmp/imre-telemetry-profile/imre-callgrind-128/profile.callgrind"
           ],
           "returncode": 0
         },
         {
           "command": [
-            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
             "--auto=no",
             "--inclusive=yes",
             "--threshold=100",
-            "/tmp/relar-telemetry-profile/relar-callgrind-128/profile.callgrind"
+            "/tmp/imre-telemetry-profile/imre-callgrind-128/profile.callgrind"
           ],
           "returncode": 0
         }
@@ -3022,19 +3022,19 @@
       }
     },
     {
-      "engine": "relar",
+      "engine": "imre",
       "tool": "dhat",
       "repetitions": 128,
       "pairs": 524288,
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=dhat",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-telemetry-profile/relar-dhat-128/valgrind.log",
-        "--dhat-out-file=/tmp/relar-telemetry-profile/relar-dhat-128/profile.json",
-        "/tmp/relar-telemetry-prepared-thinlto/telemetry",
+        "--log-file=/tmp/imre-telemetry-profile/imre-dhat-128/valgrind.log",
+        "--dhat-out-file=/tmp/imre-telemetry-profile/imre-dhat-128/profile.json",
+        "/tmp/imre-telemetry-prepared-thinlto/telemetry",
         "alert",
         "reference.txt",
         "observed.txt",
@@ -3042,9 +3042,9 @@
         "3",
         "128"
       ],
-      "cwd": "/tmp/relar-telemetry-profile/relar-dhat-128/work",
+      "cwd": "/tmp/imre-telemetry-profile/imre-dhat-128/work",
       "environment": {
-        "VALGRIND_LIB": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind",
+        "VALGRIND_LIB": "/home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind",
         "VALGRIND_OPTS": "",
         "LC_ALL": "C"
       },
@@ -3084,7 +3084,7 @@
             "bytes": 327680,
             "blocks": 8192,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x2357F4: alloc (library/alloc/src/alloc.rs:101)",
               "0x2357F4: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x2357F4: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -3092,17 +3092,17 @@
               "0x2357F4: box_new_uninit (library/alloc/src/boxed.rs:248)",
               "0x2357F4: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
               "0x2357F4: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
-              "0x2357F4: relar_str_split_whitespace (objects.rs:736)",
-              "0x22554A: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x2357F4: imre_str_split_whitespace (objects.rs:736)",
+              "0x22554A: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 327680,
             "blocks": 8192,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x2357F4: alloc (library/alloc/src/alloc.rs:101)",
               "0x2357F4: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x2357F4: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -3110,97 +3110,97 @@
               "0x2357F4: box_new_uninit (library/alloc/src/boxed.rs:248)",
               "0x2357F4: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
               "0x2357F4: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
-              "0x2357F4: relar_str_split_whitespace (objects.rs:736)",
-              "0x22554A: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x2357F4: imre_str_split_whitespace (objects.rs:736)",
+              "0x22554A: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EB87: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 262144,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x235960: alloc (library/alloc/src/alloc.rs:101)",
               "0x235960: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x235960: alloc_impl (library/alloc/src/alloc.rs:332)",
               "0x235960: allocate (library/alloc/src/alloc.rs:449)",
               "0x235960: box_new_uninit (library/alloc/src/boxed.rs:248)",
-              "0x235960: new<alloc::rc::RcInner<relar_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
-              "0x235960: new<relar_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
-              "0x235960: relar_str_split_whitespace (objects.rs:738)",
-              "0x22554A: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x235960: new<alloc::rc::RcInner<imre_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
+              "0x235960: new<imre_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
+              "0x235960: imre_str_split_whitespace (objects.rs:738)",
+              "0x22554A: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 262144,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x22378F: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x22378F: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x22566D: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 262144,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x22378F: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x22378F: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x2257F8: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 262144,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x235960: alloc (library/alloc/src/alloc.rs:101)",
               "0x235960: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x235960: alloc_impl (library/alloc/src/alloc.rs:332)",
               "0x235960: allocate (library/alloc/src/alloc.rs:449)",
               "0x235960: box_new_uninit (library/alloc/src/boxed.rs:248)",
-              "0x235960: new<alloc::rc::RcInner<relar_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
-              "0x235960: new<relar_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
-              "0x235960: relar_str_split_whitespace (objects.rs:738)",
-              "0x22554A: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x235960: new<alloc::rc::RcInner<imre_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
+              "0x235960: new<imre_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
+              "0x235960: imre_str_split_whitespace (objects.rs:738)",
+              "0x22554A: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EB87: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 262144,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x22378F: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x22378F: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x22566D: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EB87: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 262144,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x22378F: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x22378F: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x2257F8: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EB87: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163880,
             "blocks": 4097,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x235ED0: alloc (library/alloc/src/alloc.rs:101)",
               "0x235ED0: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x235ED0: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -3208,17 +3208,17 @@
               "0x235ED0: box_new_uninit (library/alloc/src/boxed.rs:248)",
               "0x235ED0: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
               "0x235ED0: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
-              "0x235ED0: relar_str_splitlines (objects.rs:772)",
-              "0x2243B4: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x235ED0: imre_str_splitlines (objects.rs:772)",
+              "0x2243B4: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163880,
             "blocks": 4097,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x235ED0: alloc (library/alloc/src/alloc.rs:101)",
               "0x235ED0: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x235ED0: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -3226,120 +3226,120 @@
               "0x235ED0: box_new_uninit (library/alloc/src/boxed.rs:248)",
               "0x235ED0: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
               "0x235ED0: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
-              "0x235ED0: relar_str_splitlines (objects.rs:772)",
-              "0x2243B4: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x235ED0: imre_str_splitlines (objects.rs:772)",
+              "0x2243B4: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EB87: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x222CCE: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x222CCE: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x22566D: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x222E08: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x222E08: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x22566D: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x222F77: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x222F77: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x22566D: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x2230BE: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x2230BE: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x22566D: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x223727: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x223727: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x22566D: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x222CCE: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x222CCE: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x2257F8: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x222E08: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x222E08: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x2257F8: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x222F77: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x222F77: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x2257F8: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x2230BE: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x2230BE: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x2257F8: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x223727: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x223727: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x2257F8: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           }
         ]
@@ -3357,19 +3357,19 @@
       }
     },
     {
-      "engine": "relar",
+      "engine": "imre",
       "tool": "dhat",
       "repetitions": 256,
       "pairs": 1048576,
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=dhat",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-telemetry-profile/relar-dhat-256/valgrind.log",
-        "--dhat-out-file=/tmp/relar-telemetry-profile/relar-dhat-256/profile.json",
-        "/tmp/relar-telemetry-prepared-thinlto/telemetry",
+        "--log-file=/tmp/imre-telemetry-profile/imre-dhat-256/valgrind.log",
+        "--dhat-out-file=/tmp/imre-telemetry-profile/imre-dhat-256/profile.json",
+        "/tmp/imre-telemetry-prepared-thinlto/telemetry",
         "alert",
         "reference.txt",
         "observed.txt",
@@ -3377,9 +3377,9 @@
         "3",
         "256"
       ],
-      "cwd": "/tmp/relar-telemetry-profile/relar-dhat-256/work",
+      "cwd": "/tmp/imre-telemetry-profile/imre-dhat-256/work",
       "environment": {
-        "VALGRIND_LIB": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind",
+        "VALGRIND_LIB": "/home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind",
         "VALGRIND_OPTS": "",
         "LC_ALL": "C"
       },
@@ -3419,7 +3419,7 @@
             "bytes": 327680,
             "blocks": 8192,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x2357F4: alloc (library/alloc/src/alloc.rs:101)",
               "0x2357F4: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x2357F4: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -3427,17 +3427,17 @@
               "0x2357F4: box_new_uninit (library/alloc/src/boxed.rs:248)",
               "0x2357F4: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
               "0x2357F4: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
-              "0x2357F4: relar_str_split_whitespace (objects.rs:736)",
-              "0x22554A: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x2357F4: imre_str_split_whitespace (objects.rs:736)",
+              "0x22554A: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 327680,
             "blocks": 8192,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x2357F4: alloc (library/alloc/src/alloc.rs:101)",
               "0x2357F4: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x2357F4: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -3445,97 +3445,97 @@
               "0x2357F4: box_new_uninit (library/alloc/src/boxed.rs:248)",
               "0x2357F4: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
               "0x2357F4: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
-              "0x2357F4: relar_str_split_whitespace (objects.rs:736)",
-              "0x22554A: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x2357F4: imre_str_split_whitespace (objects.rs:736)",
+              "0x22554A: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EB87: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 262144,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x235960: alloc (library/alloc/src/alloc.rs:101)",
               "0x235960: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x235960: alloc_impl (library/alloc/src/alloc.rs:332)",
               "0x235960: allocate (library/alloc/src/alloc.rs:449)",
               "0x235960: box_new_uninit (library/alloc/src/boxed.rs:248)",
-              "0x235960: new<alloc::rc::RcInner<relar_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
-              "0x235960: new<relar_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
-              "0x235960: relar_str_split_whitespace (objects.rs:738)",
-              "0x22554A: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x235960: new<alloc::rc::RcInner<imre_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
+              "0x235960: new<imre_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
+              "0x235960: imre_str_split_whitespace (objects.rs:738)",
+              "0x22554A: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 262144,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x22378F: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x22378F: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x22566D: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 262144,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x22378F: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x22378F: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x2257F8: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 262144,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x235960: alloc (library/alloc/src/alloc.rs:101)",
               "0x235960: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x235960: alloc_impl (library/alloc/src/alloc.rs:332)",
               "0x235960: allocate (library/alloc/src/alloc.rs:449)",
               "0x235960: box_new_uninit (library/alloc/src/boxed.rs:248)",
-              "0x235960: new<alloc::rc::RcInner<relar_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
-              "0x235960: new<relar_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
-              "0x235960: relar_str_split_whitespace (objects.rs:738)",
-              "0x22554A: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x235960: new<alloc::rc::RcInner<imre_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
+              "0x235960: new<imre_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
+              "0x235960: imre_str_split_whitespace (objects.rs:738)",
+              "0x22554A: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EB87: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 262144,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x22378F: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x22378F: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x22566D: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EB87: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 262144,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x22378F: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x22378F: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x2257F8: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EB87: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163880,
             "blocks": 4097,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x235ED0: alloc (library/alloc/src/alloc.rs:101)",
               "0x235ED0: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x235ED0: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -3543,17 +3543,17 @@
               "0x235ED0: box_new_uninit (library/alloc/src/boxed.rs:248)",
               "0x235ED0: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
               "0x235ED0: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
-              "0x235ED0: relar_str_splitlines (objects.rs:772)",
-              "0x2243B4: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x235ED0: imre_str_splitlines (objects.rs:772)",
+              "0x2243B4: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163880,
             "blocks": 4097,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x235ED0: alloc (library/alloc/src/alloc.rs:101)",
               "0x235ED0: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x235ED0: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -3561,120 +3561,120 @@
               "0x235ED0: box_new_uninit (library/alloc/src/boxed.rs:248)",
               "0x235ED0: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
               "0x235ED0: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
-              "0x235ED0: relar_str_splitlines (objects.rs:772)",
-              "0x2243B4: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x235ED0: imre_str_splitlines (objects.rs:772)",
+              "0x2243B4: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EB87: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x222CCE: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x222CCE: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x22566D: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x222E08: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x222E08: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x22566D: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x222F77: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x222F77: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x22566D: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x2230BE: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x2230BE: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x22566D: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x223727: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x223727: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x22566D: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x222CCE: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x222CCE: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x2257F8: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x222E08: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x222E08: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x2257F8: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x222F77: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x222F77: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x2257F8: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x2230BE: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x2230BE: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x2257F8: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           },
           {
             "bytes": 163840,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x223727: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
-              "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x223727: fn_11 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x2257F8: fn_12 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x20EA20: fn_4 (in /tmp/imre-telemetry-prepared-thinlto/telemetry)",
+              "0x227ABB: main (in /tmp/imre-telemetry-prepared-thinlto/telemetry)"
             ]
           }
         ]
@@ -3697,16 +3697,16 @@
       "repetitions": 128,
       "pairs": 524288,
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=callgrind",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-telemetry-profile/rust-callgrind-128/valgrind.log",
-        "--callgrind-out-file=/tmp/relar-telemetry-profile/rust-callgrind-128/profile.callgrind",
+        "--log-file=/tmp/imre-telemetry-profile/rust-callgrind-128/valgrind.log",
+        "--callgrind-out-file=/tmp/imre-telemetry-profile/rust-callgrind-128/profile.callgrind",
         "--dump-instr=yes",
         "--collect-jumps=yes",
-        "/tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference",
+        "/tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference",
         "alert",
         "reference.txt",
         "observed.txt",
@@ -3714,9 +3714,9 @@
         "3",
         "128"
       ],
-      "cwd": "/tmp/relar-telemetry-profile/rust-callgrind-128/work",
+      "cwd": "/tmp/imre-telemetry-profile/rust-callgrind-128/work",
       "environment": {
-        "VALGRIND_LIB": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind",
+        "VALGRIND_LIB": "/home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind",
         "VALGRIND_OPTS": "",
         "LC_ALL": "C"
       },
@@ -6427,21 +6427,21 @@
       "annotations": [
         {
           "command": [
-            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
             "--auto=no",
             "--inclusive=no",
             "--threshold=100",
-            "/tmp/relar-telemetry-profile/rust-callgrind-128/profile.callgrind"
+            "/tmp/imre-telemetry-profile/rust-callgrind-128/profile.callgrind"
           ],
           "returncode": 0
         },
         {
           "command": [
-            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/callgrind_annotate",
             "--auto=no",
             "--inclusive=yes",
             "--threshold=100",
-            "/tmp/relar-telemetry-profile/rust-callgrind-128/profile.callgrind"
+            "/tmp/imre-telemetry-profile/rust-callgrind-128/profile.callgrind"
           ],
           "returncode": 0
         }
@@ -6468,14 +6468,14 @@
       "repetitions": 128,
       "pairs": 524288,
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=dhat",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-telemetry-profile/rust-dhat-128/valgrind.log",
-        "--dhat-out-file=/tmp/relar-telemetry-profile/rust-dhat-128/profile.json",
-        "/tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference",
+        "--log-file=/tmp/imre-telemetry-profile/rust-dhat-128/valgrind.log",
+        "--dhat-out-file=/tmp/imre-telemetry-profile/rust-dhat-128/profile.json",
+        "/tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference",
         "alert",
         "reference.txt",
         "observed.txt",
@@ -6483,9 +6483,9 @@
         "3",
         "128"
       ],
-      "cwd": "/tmp/relar-telemetry-profile/rust-dhat-128/work",
+      "cwd": "/tmp/imre-telemetry-profile/rust-dhat-128/work",
       "environment": {
-        "VALGRIND_LIB": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind",
+        "VALGRIND_LIB": "/home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind",
         "VALGRIND_OPTS": "",
         "LC_ALL": "C"
       },
@@ -6525,7 +6525,7 @@
             "bytes": 524032,
             "blocks": 11,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1AFA0D: alloc (library/alloc/src/alloc.rs:101)",
               "0x1AFA0D: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x1AFA0D: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -6542,15 +6542,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 524032,
             "blocks": 11,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1AFA0D: alloc (library/alloc/src/alloc.rs:101)",
               "0x1AFA0D: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x1AFA0D: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -6567,15 +6567,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 262144,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -6596,15 +6596,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 262144,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -6625,15 +6625,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 262080,
             "blocks": 12,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1AFACD: alloc (library/alloc/src/alloc.rs:101)",
               "0x1AFACD: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x1AFACD: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -6651,15 +6651,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 262080,
             "blocks": 12,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1AFACD: alloc (library/alloc/src/alloc.rs:101)",
               "0x1AFACD: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x1AFACD: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -6677,15 +6677,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 131008,
             "blocks": 11,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -6709,15 +6709,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 131008,
             "blocks": 11,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -6741,15 +6741,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 45745,
             "blocks": 1,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1A4E7B: {closure#1} (main.rs:112)",
               "0x1A4E7B: telemetry_reference::load (main.rs:110)",
               "0x1A08E7: telemetry_reference::run (main.rs:457)",
@@ -6757,15 +6757,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 45743,
             "blocks": 1,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1A4E7B: {closure#1} (main.rs:112)",
               "0x1A4E7B: telemetry_reference::load (main.rs:110)",
               "0x1A098C: telemetry_reference::run (main.rs:458)",
@@ -6773,15 +6773,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 32768,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -6802,15 +6802,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 32768,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -6831,15 +6831,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 32768,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -6860,15 +6860,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 32768,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -6889,15 +6889,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 19580,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -6917,15 +6917,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 19580,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -6945,15 +6945,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 15937,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -6973,15 +6973,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 15935,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -7001,36 +7001,36 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 1024,
             "blocks": 1,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x4A01294: _IO_file_doallocate (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
               "0x4A11603: _IO_doallocbuf (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
               "0x4A0E963: _IO_file_underflow (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
               "0x4A02EEF: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
               "0x4A1A2EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-              "0x18938D: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18938D: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 1024,
             "blocks": 1,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x15A915: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x15A915: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
               "0x1A6AC1: telemetry_reference::main (main.rs:522)",
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           }
         ]
@@ -7053,14 +7053,14 @@
       "repetitions": 256,
       "pairs": 1048576,
       "command": [
-        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "/home/dev-user/.cache/imre/profiling-tools/root/usr/bin/valgrind",
         "--tool=dhat",
         "--command-line-only=yes",
         "--num-callers=32",
         "--error-exitcode=97",
-        "--log-file=/tmp/relar-telemetry-profile/rust-dhat-256/valgrind.log",
-        "--dhat-out-file=/tmp/relar-telemetry-profile/rust-dhat-256/profile.json",
-        "/tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference",
+        "--log-file=/tmp/imre-telemetry-profile/rust-dhat-256/valgrind.log",
+        "--dhat-out-file=/tmp/imre-telemetry-profile/rust-dhat-256/profile.json",
+        "/tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference",
         "alert",
         "reference.txt",
         "observed.txt",
@@ -7068,9 +7068,9 @@
         "3",
         "256"
       ],
-      "cwd": "/tmp/relar-telemetry-profile/rust-dhat-256/work",
+      "cwd": "/tmp/imre-telemetry-profile/rust-dhat-256/work",
       "environment": {
-        "VALGRIND_LIB": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind",
+        "VALGRIND_LIB": "/home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind",
         "VALGRIND_OPTS": "",
         "LC_ALL": "C"
       },
@@ -7110,7 +7110,7 @@
             "bytes": 524032,
             "blocks": 11,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1AFA0D: alloc (library/alloc/src/alloc.rs:101)",
               "0x1AFA0D: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x1AFA0D: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -7127,15 +7127,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 524032,
             "blocks": 11,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1AFA0D: alloc (library/alloc/src/alloc.rs:101)",
               "0x1AFA0D: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x1AFA0D: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -7152,15 +7152,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 262144,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -7181,15 +7181,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 262144,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -7210,15 +7210,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 262080,
             "blocks": 12,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1AFACD: alloc (library/alloc/src/alloc.rs:101)",
               "0x1AFACD: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x1AFACD: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -7236,15 +7236,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 262080,
             "blocks": 12,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1AFACD: alloc (library/alloc/src/alloc.rs:101)",
               "0x1AFACD: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
               "0x1AFACD: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -7262,15 +7262,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 131008,
             "blocks": 11,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -7294,15 +7294,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 131008,
             "blocks": 11,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -7326,15 +7326,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 45745,
             "blocks": 1,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1A4E7B: {closure#1} (main.rs:112)",
               "0x1A4E7B: telemetry_reference::load (main.rs:110)",
               "0x1A08E7: telemetry_reference::run (main.rs:457)",
@@ -7342,15 +7342,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 45743,
             "blocks": 1,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1A4E7B: {closure#1} (main.rs:112)",
               "0x1A4E7B: telemetry_reference::load (main.rs:110)",
               "0x1A098C: telemetry_reference::run (main.rs:458)",
@@ -7358,15 +7358,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 32768,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -7387,15 +7387,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 32768,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -7416,15 +7416,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 32768,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -7445,15 +7445,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 32768,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -7474,15 +7474,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 19580,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -7502,15 +7502,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 19580,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -7530,15 +7530,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 15937,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -7558,15 +7558,15 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 15935,
             "blocks": 4096,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
               "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -7586,36 +7586,36 @@
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 1024,
             "blocks": 1,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
               "0x4A01294: _IO_file_doallocate (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
               "0x4A11603: _IO_doallocbuf (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
               "0x4A0E963: _IO_file_underflow (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
               "0x4A02EEF: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
               "0x4A1A2EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-              "0x18938D: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18938D: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           },
           {
             "bytes": 1024,
             "blocks": 1,
             "frames": [
-              "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-              "0x15A915: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+              "0x15A915: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
               "0x1A6AC1: telemetry_reference::main (main.rs:522)",
               "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
               "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
               "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
-              "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
-              "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+              "0x18973B: std::rt::lang_start_internal (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+              "0x1AE5AB: main (in /tmp/imre-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
             ]
           }
         ]
@@ -7729,10 +7729,10 @@
       "expected_directories": []
     }
   },
-  "method": "Exact timed ThinLTO Relar/Rust binaries; whole-process Callgrind and DHAT at 128 queries, DHAT again at 256. Original timed input bytes, only repeat argument changed. Independent complete stdout/checksum/filesystem oracle after every process. No wall-time samples or builds.",
+  "method": "Exact timed ThinLTO Imre/Rust binaries; whole-process Callgrind and DHAT at 128 queries, DHAT again at 256. Original timed input bytes, only repeat argument changed. Independent complete stdout/checksum/filesystem oracle after every process. No wall-time samples or builds.",
   "limits": "Callgrind Ir counts guest instructions, not CPU cycles or wall-time speedup. Inclusive costs overlap. DHAT counts requested heap bytes/blocks, not RSS; gb/gbk share the global peak. Exit-live counts alone do not establish leaks. Two-count allocation slopes are descriptive, not a proof of linearity.",
   "allocation_growth": {
-    "relar": {
+    "imre": {
       "allocated_bytes": {
         "at_128_queries": 7100626,
         "at_256_queries": 7105746,

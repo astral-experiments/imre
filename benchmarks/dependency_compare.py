@@ -1,4 +1,4 @@
-"""Compile optimized Relar once, then compare five planner implementations.
+"""Compile optimized Imre once, then compare five planner implementations.
 
 The saved baseline and both Rust references are prebuilt. Ten Williams orders
 balance positions and within-round predecessors; the default repeats them three
@@ -24,7 +24,7 @@ dependency = SimpleNamespace(**runpy.run_path(str(DEPENDENCY_HARNESS)))
 shared = dependency.shared
 validator = dependency.validator
 boundaries = SimpleNamespace(**runpy.run_path(str(REFERENCE / "check_boundaries.py")))
-ENGINES = ("cpython", "baseline", "relar", "rust_bigint", "rust_i64")
+ENGINES = ("cpython", "baseline", "imre", "rust_bigint", "rust_i64")
 BASE_ORDER = (0, 1, 4, 2, 3)
 ORDERS = tuple(
     tuple(ENGINES[(value + shift) % len(ENGINES)] for value in order)
@@ -237,7 +237,7 @@ def compare(args: argparse.Namespace) -> dict:
     commands = {
         "cpython": validator.python_command(str(python_path)),
         "baseline": [str(inputs["baseline"])],
-        "relar": [str(binary)],
+        "imre": [str(binary)],
         "rust_bigint": [str(inputs["rust_bigint"])],
         "rust_i64": [str(inputs["rust_i64"])],
     }
@@ -267,13 +267,13 @@ def compare(args: argparse.Namespace) -> dict:
         ratios = {
             f"{numerator}_over_{denominator}": medians[numerator] / medians[denominator]
             for numerator, denominator in (
-                ("baseline", "relar"),
+                ("baseline", "imre"),
                 ("cpython", "baseline"),
-                ("cpython", "relar"),
+                ("cpython", "imre"),
                 ("baseline", "rust_bigint"),
                 ("baseline", "rust_i64"),
-                ("relar", "rust_bigint"),
-                ("relar", "rust_i64"),
+                ("imre", "rust_bigint"),
+                ("imre", "rust_i64"),
                 ("rust_bigint", "rust_i64"),
                 ("cpython", "rust_bigint"),
                 ("cpython", "rust_i64"),
@@ -323,7 +323,7 @@ def compare(args: argparse.Namespace) -> dict:
     return {
         "schema_version": 3,
         "example": "dependency_planner",
-        "comparison": "baseline and optimized Relar vs unchanged CPython and direct Rust BigInt/checked-i64 references",
+        "comparison": "baseline and optimized Imre vs unchanged CPython and direct Rust BigInt/checked-i64 references",
         "started_at_utc": started,
         "completed_at_utc": datetime.now(timezone.utc).isoformat(),
         "git": {"revision": revision, "dirty": dirty},
@@ -343,7 +343,7 @@ def compare(args: argparse.Namespace) -> dict:
         "baseline_provenance": provenance,
         "rust_build_record": rust_record,
         "tools": {
-            "relar": compiler_version,
+            "imre": compiler_version,
             "clang": clang_version,
             "lto_linker": linker_version,
             "cpython": python_info,
@@ -386,7 +386,7 @@ def compare(args: argparse.Namespace) -> dict:
                     "<package-root>",
                 ],
                 "baseline": ["<baseline-binary>"],
-                "relar": ["<optimized-binary>"],
+                "imre": ["<optimized-binary>"],
                 "rust_bigint": ["<rust-bigint-binary>"],
                 "rust_i64": ["<rust-i64-binary>"],
             },

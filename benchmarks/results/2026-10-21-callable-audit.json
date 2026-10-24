@@ -1,6 +1,6 @@
 {
   "build_record_sha256": "018f3bb93a1bb93dae45c56b262965f0edabeb8aaf1fcfa7e0bf6648c27046c0",
-  "common_git_directory": "/home/dev-user/code/oss/relar/.git",
+  "common_git_directory": "/home/dev-user/code/oss/imre/.git",
   "execution_counts": {
     "gates": 54,
     "measured": 648,
@@ -13,13 +13,13 @@
   "preparations": {
     "normal": {
       "binary_sha256": "c16ec44b03c9e690c0fb293aa511e98384781ea3439991ee214a93cae9f939cd",
-      "path": "/tmp/relar-record-final-prep-normal.json",
+      "path": "/tmp/imre-record-final-prep-normal.json",
       "sha256": "4326f545b915a42dabe4c8155149a8a5d622101527146d9aeb0f52336e826544",
       "validation_cases": 122
     },
     "thinlto": {
       "binary_sha256": "e26252853ac6cc13232a72660c24e89f849d6c44e57a35677e10cc4c8e5c9c53",
-      "path": "/tmp/relar-record-final-prep-thinlto.json",
+      "path": "/tmp/imre-record-final-prep-thinlto.json",
       "sha256": "5fab40140eaf5cfe26d62cee1d8e9846b2901ce198bf2c8e97e9888a6dbb1832",
       "validation_cases": 122
     }
@@ -27,19 +27,19 @@
   "revision": "848477f3d06fb1afe6d4bdd93dae4b107c90229a",
   "schema": 1,
   "scope": "Independent oracle recheck of retained application executions; no new native runs or full compiler matrix",
-  "source_checkout": "/home/dev-user/.codex/worktrees/relar-callable-verification",
+  "source_checkout": "/home/dev-user/.codex/worktrees/imre-callable-verification",
   "source_files": 461,
   "source_tree": "2e48bc953779943f47d6faff18350f88e6d129a5",
   "status": "passed",
   "timing": {
     "normal": {
-      "path": "/tmp/relar-record-final-normal.json",
+      "path": "/tmp/imre-record-final-normal.json",
       "rows": [
         {
-          "cpython_over_relar": 13.070375198053782,
+          "cpython_over_imre": 13.070375198053782,
           "label": "empty-control",
           "records": 0,
-          "relar_over_rust": 0.9841226841478877,
+          "imre_over_rust": 0.9841226841478877,
           "repetitions": 1,
           "summary": {
             "cpython": {
@@ -49,7 +49,7 @@
               "p25_seconds": 0.03028105125,
               "p75_seconds": 0.0312036365
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.006127038,
               "median_seconds": 0.0023740395,
               "min_seconds": 0.002245541,
@@ -66,10 +66,10 @@
           }
         },
         {
-          "cpython_over_relar": 26.682452402599683,
+          "cpython_over_imre": 26.682452402599683,
           "label": "gross-full-32",
           "records": 32,
-          "relar_over_rust": 3.817883846121546,
+          "imre_over_rust": 3.817883846121546,
           "repetitions": 262144,
           "summary": {
             "cpython": {
@@ -79,7 +79,7 @@
               "p25_seconds": 1.376035476,
               "p75_seconds": 1.43581467625
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.054074677,
               "median_seconds": 0.0523715315,
               "min_seconds": 0.051794101,
@@ -96,10 +96,10 @@
           }
         },
         {
-          "cpython_over_relar": 22.20017200387202,
+          "cpython_over_imre": 22.20017200387202,
           "label": "gross-selective-32",
           "records": 32,
-          "relar_over_rust": 2.9069286954234523,
+          "imre_over_rust": 2.9069286954234523,
           "repetitions": 262144,
           "summary": {
             "cpython": {
@@ -109,7 +109,7 @@
               "p25_seconds": 0.6261359507500001,
               "p75_seconds": 0.642548433
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.028952816,
               "median_seconds": 0.028424941500000002,
               "min_seconds": 0.028033704,
@@ -126,10 +126,10 @@
           }
         },
         {
-          "cpython_over_relar": 27.835298592229194,
+          "cpython_over_imre": 27.835298592229194,
           "label": "net-full-32",
           "records": 32,
-          "relar_over_rust": 4.2137887965235405,
+          "imre_over_rust": 4.2137887965235405,
           "repetitions": 262144,
           "summary": {
             "cpython": {
@@ -139,7 +139,7 @@
               "p25_seconds": 1.5837964924999999,
               "p75_seconds": 1.6312851855000001
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.059592591,
               "median_seconds": 0.057798364500000005,
               "min_seconds": 0.056508889,
@@ -156,10 +156,10 @@
           }
         },
         {
-          "cpython_over_relar": 22.49355137508188,
+          "cpython_over_imre": 22.49355137508188,
           "label": "net-selective-32",
           "records": 32,
-          "relar_over_rust": 3.0029106487962087,
+          "imre_over_rust": 3.0029106487962087,
           "repetitions": 262144,
           "summary": {
             "cpython": {
@@ -169,7 +169,7 @@
               "p25_seconds": 0.6507916355000001,
               "p75_seconds": 0.6584835452500001
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.032004867,
               "median_seconds": 0.029034562,
               "min_seconds": 0.028624674,
@@ -186,10 +186,10 @@
           }
         },
         {
-          "cpython_over_relar": 27.103821325383286,
+          "cpython_over_imre": 27.103821325383286,
           "label": "gross-full-4096",
           "records": 4096,
-          "relar_over_rust": 3.1604355167880698,
+          "imre_over_rust": 3.1604355167880698,
           "repetitions": 2048,
           "summary": {
             "cpython": {
@@ -199,7 +199,7 @@
               "p25_seconds": 1.338486342,
               "p75_seconds": 1.3740680534999998
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.050750538,
               "median_seconds": 0.049804657,
               "min_seconds": 0.047580276,
@@ -216,10 +216,10 @@
           }
         },
         {
-          "cpython_over_relar": 24.67306479312238,
+          "cpython_over_imre": 24.67306479312238,
           "label": "gross-selective-4096",
           "records": 4096,
-          "relar_over_rust": 1.7982916464874181,
+          "imre_over_rust": 1.7982916464874181,
           "repetitions": 2048,
           "summary": {
             "cpython": {
@@ -229,7 +229,7 @@
               "p25_seconds": 0.5036855915,
               "p75_seconds": 0.509972483
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.022041757,
               "median_seconds": 0.0205300725,
               "min_seconds": 0.019952187,
@@ -246,10 +246,10 @@
           }
         },
         {
-          "cpython_over_relar": 27.651871070757966,
+          "cpython_over_imre": 27.651871070757966,
           "label": "net-full-4096",
           "records": 4096,
-          "relar_over_rust": 3.482210167212697,
+          "imre_over_rust": 3.482210167212697,
           "repetitions": 2048,
           "summary": {
             "cpython": {
@@ -259,7 +259,7 @@
               "p25_seconds": 1.49692647025,
               "p75_seconds": 1.5328661177499998
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.057327944,
               "median_seconds": 0.054896560999999996,
               "min_seconds": 0.051553362,
@@ -276,10 +276,10 @@
           }
         },
         {
-          "cpython_over_relar": 24.963723630575032,
+          "cpython_over_imre": 24.963723630575032,
           "label": "net-selective-4096",
           "records": 4096,
-          "relar_over_rust": 1.8213573027710321,
+          "imre_over_rust": 1.8213573027710321,
           "repetitions": 2048,
           "summary": {
             "cpython": {
@@ -289,7 +289,7 @@
               "p25_seconds": 0.535021027,
               "p75_seconds": 0.54122485275
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.023296924,
               "median_seconds": 0.0215922655,
               "min_seconds": 0.019811855,
@@ -309,13 +309,13 @@
       "sha256": "7146841e3b766971d369ba7e17907dcb7c31737663c4ca45e6f95e6ae167ae36"
     },
     "thinlto": {
-      "path": "/tmp/relar-record-final-thinlto.json",
+      "path": "/tmp/imre-record-final-thinlto.json",
       "rows": [
         {
-          "cpython_over_relar": 12.956375827877256,
+          "cpython_over_imre": 12.956375827877256,
           "label": "empty-control",
           "records": 0,
-          "relar_over_rust": 1.0336603226471353,
+          "imre_over_rust": 1.0336603226471353,
           "repetitions": 1,
           "summary": {
             "cpython": {
@@ -325,7 +325,7 @@
               "p25_seconds": 0.03096878725,
               "p75_seconds": 0.03209305025
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.003428022,
               "median_seconds": 0.002429708,
               "min_seconds": 0.002140506,
@@ -342,10 +342,10 @@
           }
         },
         {
-          "cpython_over_relar": 30.84957202112011,
+          "cpython_over_imre": 30.84957202112011,
           "label": "gross-full-32",
           "records": 32,
-          "relar_over_rust": 3.513103774877305,
+          "imre_over_rust": 3.513103774877305,
           "repetitions": 262144,
           "summary": {
             "cpython": {
@@ -355,7 +355,7 @@
               "p25_seconds": 1.40975984425,
               "p75_seconds": 1.4537790460000002
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.056230909,
               "median_seconds": 0.046082530999999996,
               "min_seconds": 0.045222706,
@@ -372,10 +372,10 @@
           }
         },
         {
-          "cpython_over_relar": 27.314358044382253,
+          "cpython_over_imre": 27.314358044382253,
           "label": "gross-selective-32",
           "records": 32,
-          "relar_over_rust": 2.616181752022006,
+          "imre_over_rust": 2.616181752022006,
           "repetitions": 262144,
           "summary": {
             "cpython": {
@@ -385,7 +385,7 @@
               "p25_seconds": 0.6392168287500001,
               "p75_seconds": 0.65349806275
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.026163301,
               "median_seconds": 0.023808702,
               "min_seconds": 0.023387292,
@@ -402,10 +402,10 @@
           }
         },
         {
-          "cpython_over_relar": 32.87967936352956,
+          "cpython_over_imre": 32.87967936352956,
           "label": "net-full-32",
           "records": 32,
-          "relar_over_rust": 3.7317374375446835,
+          "imre_over_rust": 3.7317374375446835,
           "repetitions": 262144,
           "summary": {
             "cpython": {
@@ -415,7 +415,7 @@
               "p25_seconds": 1.573647594,
               "p75_seconds": 1.6220839652499999
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.051931636,
               "median_seconds": 0.0485663405,
               "min_seconds": 0.047775347,
@@ -432,10 +432,10 @@
           }
         },
         {
-          "cpython_over_relar": 26.970765909095377,
+          "cpython_over_imre": 26.970765909095377,
           "label": "net-selective-32",
           "records": 32,
-          "relar_over_rust": 2.6777567258082144,
+          "imre_over_rust": 2.6777567258082144,
           "repetitions": 262144,
           "summary": {
             "cpython": {
@@ -445,7 +445,7 @@
               "p25_seconds": 0.6563836905,
               "p75_seconds": 0.6668529185000001
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.024940293,
               "median_seconds": 0.024420496,
               "min_seconds": 0.023638549,
@@ -462,10 +462,10 @@
           }
         },
         {
-          "cpython_over_relar": 30.84605855045598,
+          "cpython_over_imre": 30.84605855045598,
           "label": "gross-full-4096",
           "records": 4096,
-          "relar_over_rust": 2.934224625029228,
+          "imre_over_rust": 2.934224625029228,
           "repetitions": 2048,
           "summary": {
             "cpython": {
@@ -475,7 +475,7 @@
               "p25_seconds": 1.34715935925,
               "p75_seconds": 1.38718677225
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.047212809,
               "median_seconds": 0.0440091705,
               "min_seconds": 0.042729152,
@@ -492,10 +492,10 @@
           }
         },
         {
-          "cpython_over_relar": 29.328928059503486,
+          "cpython_over_imre": 29.328928059503486,
           "label": "gross-selective-4096",
           "records": 4096,
-          "relar_over_rust": 1.5577234924896488,
+          "imre_over_rust": 1.5577234924896488,
           "repetitions": 2048,
           "summary": {
             "cpython": {
@@ -505,7 +505,7 @@
               "p25_seconds": 0.50965920125,
               "p75_seconds": 0.53443208675
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.020956746,
               "median_seconds": 0.017484422,
               "min_seconds": 0.016569398,
@@ -522,10 +522,10 @@
           }
         },
         {
-          "cpython_over_relar": 32.31465509087321,
+          "cpython_over_imre": 32.31465509087321,
           "label": "net-full-4096",
           "records": 4096,
-          "relar_over_rust": 2.9599432515382773,
+          "imre_over_rust": 2.9599432515382773,
           "repetitions": 2048,
           "summary": {
             "cpython": {
@@ -535,7 +535,7 @@
               "p25_seconds": 1.5356325662499999,
               "p75_seconds": 1.5988222634999998
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.054446347,
               "median_seconds": 0.048050961,
               "min_seconds": 0.046626227,
@@ -552,10 +552,10 @@
           }
         },
         {
-          "cpython_over_relar": 28.834011647419818,
+          "cpython_over_imre": 28.834011647419818,
           "label": "net-selective-4096",
           "records": 4096,
-          "relar_over_rust": 1.655488996625382,
+          "imre_over_rust": 1.655488996625382,
           "repetitions": 2048,
           "summary": {
             "cpython": {
@@ -565,7 +565,7 @@
               "p25_seconds": 0.5172880820000001,
               "p75_seconds": 0.53066109875
             },
-            "relar": {
+            "imre": {
               "max_seconds": 0.025082938,
               "median_seconds": 0.018145478,
               "min_seconds": 0.016943955,

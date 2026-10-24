@@ -6,24 +6,24 @@
   },
   "asan_application": {
     "preparation": {
-      "path": "/home/dev-user/.cache/relar-workspaces-20261021/asan-application/record.json",
+      "path": "/home/dev-user/.cache/imre-workspaces-20261021/asan-application/record.json",
       "sha256": "8cfcde80e19d3e68dccd0715a769b199c80d16da62c61063f85d42996ae56bed"
     },
     "validation": {
-      "path": "/home/dev-user/.cache/relar-workspaces-20261021/asan-application/validation.json",
+      "path": "/home/dev-user/.cache/imre-workspaces-20261021/asan-application/validation.json",
       "sha256": "81092adad6c86aaa7e45118460aa4f4841ba30eb9d72f8d91dd12f000ad06367"
     }
   },
   "audit": {
-    "path": "/home/dev-user/.cache/relar-workspaces-20261021/publication/2026-10-21-native-workspaces-audit.json",
+    "path": "/home/dev-user/.cache/imre-workspaces-20261021/publication/2026-10-21-native-workspaces-audit.json",
     "sha256": "a1891d553fa486c76684a0dee4c0778a16b8f58df6139cdbf3750c9878e348b7"
   },
   "audit_script": {
-    "path": "/home/dev-user/.cache/relar-workspaces-20261021/publication/2026-10-21-native-workspaces-audit.py",
+    "path": "/home/dev-user/.cache/imre-workspaces-20261021/publication/2026-10-21-native-workspaces-audit.py",
     "sha256": "be8c01ed0d9e9e9f4a8085a48c6e3917534c4b8a43c6fc3505a59e0de5209ff8"
   },
   "build": {
-    "path": "/home/dev-user/.cache/relar-workspaces-20261021/build/build-record.json",
+    "path": "/home/dev-user/.cache/imre-workspaces-20261021/build/build-record.json",
     "sha256": "79bbd406a6d3aad6d19e569e7429c9a37f42575f4083b87a81b13a35e0f147b7"
   },
   "deduplicated_blob_count": 900,
@@ -31,7 +31,7 @@
   "guarded_input_files": 7187,
   "guarded_input_trees": 13,
   "kind": "native-workspaces-portable-evidence",
-  "language_validation_root": "/home/dev-user/.cache/relar-workspaces-20261021/validation",
+  "language_validation_root": "/home/dev-user/.cache/imre-workspaces-20261021/validation",
   "limits": "Data-only capture preservation. Native/tool hashes were checked locally; excluded artifacts cannot be rehashed by portable replay. No native remeasurement or timestamp authentication.",
   "logical_file_count": 7154,
   "logical_index_sha256": "98477f81ab7cf2ecc55920be22e23dc19ea813ea2b39eba4f99e8dbd7f6e7c93",
@@ -4560,21 +4560,21 @@
       "sha256": "4b4f69c20b766d1dad37662499763884a3cfc1f258c5905bd78a1bdaca3bcdd4"
     }
   },
-  "packager_path": "/home/dev-user/.cache/relar-workspaces-20261021/publication/2026-10-21-native-workspaces-package.py",
+  "packager_path": "/home/dev-user/.cache/imre-workspaces-20261021/publication/2026-10-21-native-workspaces-package.py",
   "packager_sha256": "95c202da80b2fa6aa1ecfb527165a0c6d371d7e3379a64d8b8200d1b7316962b",
   "preparations": {
     "normal": {
-      "path": "/home/dev-user/.cache/relar-workspaces-20261021/benchmark-normal-prepared.json",
+      "path": "/home/dev-user/.cache/imre-workspaces-20261021/benchmark-normal-prepared.json",
       "sha256": "89e919a2cc250e6877e6636275bbdd0c9d675c33a86ff63b40f09b3f72e3b5ac"
     },
     "thinlto": {
-      "path": "/home/dev-user/.cache/relar-workspaces-20261021/benchmark-thinlto-prepared.json",
+      "path": "/home/dev-user/.cache/imre-workspaces-20261021/benchmark-thinlto-prepared.json",
       "sha256": "faa0a7b445831e573b6c19eedea284418d76e4b31e67bba46766c664ef83a3e1"
     }
   },
-  "preserved_failed_application_attempt": "/home/dev-user/.cache/relar-workspaces-20261021/failed-attempt-2e0eac8",
+  "preserved_failed_application_attempt": "/home/dev-user/.cache/imre-workspaces-20261021/failed-attempt-2e0eac8",
   "replay_sha256": "57016f91fbe268bcb4962f6cc21e439ab7fb032ecdeb3d7f4272221a37db921c",
-  "repository": "/home/dev-user/code/oss/relar-workspaces-20261021",
+  "repository": "/home/dev-user/code/oss/imre-workspaces-20261021",
   "schema": 1,
   "source_roles": {
     "compiler_build": "2e0eac85ad0eea462be9c4feeffa76497773822c",
@@ -4583,11 +4583,11 @@
   "status": "passed",
   "timings": {
     "normal": {
-      "path": "/home/dev-user/.cache/relar-workspaces-20261021/timing-normal.json",
+      "path": "/home/dev-user/.cache/imre-workspaces-20261021/timing-normal.json",
       "sha256": "a1a70bd630c9fd40f997b1906cd5a5d566df42702fece2a309934b0b4d72b905"
     },
     "thinlto": {
-      "path": "/home/dev-user/.cache/relar-workspaces-20261021/timing-thinlto.json",
+      "path": "/home/dev-user/.cache/imre-workspaces-20261021/timing-thinlto.json",
       "sha256": "57c295b4d81f75ec2dd58ad3c7abb1a0c53adc06dae2fb94fd52de92516b08aa"
     }
   }

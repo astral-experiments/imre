@@ -17,7 +17,7 @@ def main():
     assert __debug__
     compiler = args.compiler.resolve()
     checks = {}
-    with TemporaryDirectory(prefix="relar object checks ") as td:
+    with TemporaryDirectory(prefix="imre object checks ") as td:
         root = Path(td)
         project = root / "sources"
         project.mkdir()
@@ -29,7 +29,7 @@ def main():
         main.write_text(entry)
         leaf.write_text(initial)
         other.write_text("def twice(x: int) -> int:\n    return x * 2\n")
-        env = dict(os.environ, RELAR_CACHE_DIR=str(root / "cache"), RELAR_CACHE_TRACE="1")
+        env = dict(os.environ, IMRE_CACHE_DIR=str(root / "cache"), IMRE_CACHE_TRACE="1")
         target = root / "program"
 
         def build(label, flags=(), path=target):
@@ -38,7 +38,7 @@ def main():
             assert not r.stdout
             events, units = [], {}
             for line in r.stderr.splitlines():
-                family, action, *detail = line.removeprefix("relar ").split(" ")
+                family, action, *detail = line.removeprefix("imre ").split(" ")
                 if family == "cache":
                     events.append(action)
                 else:

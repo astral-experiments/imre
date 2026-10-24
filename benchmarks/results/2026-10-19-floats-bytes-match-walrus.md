@@ -1,10 +1,10 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # Floats, bytes, pattern matching, and assignment expressions
 
-Relar now compiles all four capabilities. A binary measurement parser exercises them together; the unchanged inventory reconciler checks performance against CPython, preserved Relar, and Rust BigInt. On the two large inventory workloads, ThinLTO Relar runs **2.70–3.56× faster than CPython** and takes **6.1–10.1% more time than Rust BigInt**.
+Imre now compiles all four capabilities. A binary measurement parser exercises them together; the unchanged inventory reconciler checks performance against CPython, preserved Imre, and Rust BigInt. On the two large inventory workloads, ThinLTO Imre runs **2.70–3.56× faster than CPython** and takes **6.1–10.1% more time than Rust BigInt**.
 
-[Floats](https://github.com/viarius-experiments/relar/pull/37), [bytes](https://github.com/viarius-experiments/relar/pull/38), [matching](https://github.com/viarius-experiments/relar/pull/39), and [assignment expressions](https://github.com/viarius-experiments/relar/pull/40) continue GitHub Stack 4 after the [sequence-access milestone](2026-10-18-sequence-access.md). Measurements and final validation use source commit `97cb1000565035162c31e6e455d207cf65b54993`; this report and README refresh are committed separately.
+[Floats](https://github.com/viarius-experiments/imre/pull/37), [bytes](https://github.com/viarius-experiments/imre/pull/38), [matching](https://github.com/viarius-experiments/imre/pull/39), and [assignment expressions](https://github.com/viarius-experiments/imre/pull/40) continue GitHub Stack 4 after the [sequence-access milestone](2026-10-18-sequence-access.md). Measurements and final validation use source commit `97cb1000565035162c31e6e455d207cf65b54993`; this report and README refresh are committed separately.
 
 ## Capability and example
 
@@ -15,17 +15,17 @@ Relar now compiles all four capabilities. A binary measurement parser exercises 
 
 The [integrated example](../../tests/fixtures/assignments/integrated_scalars.py) reads a binary measurement file, decodes records, matches list and typed-class patterns, accumulates optional float readings with `:=`, and writes a binary summary. It also checks rebinding, guards, signed zero, large numeric patterns, and malformed byte-number conversions. Its stdout and both output files agree with CPython under ordinary, ThinLTO, and sanitizer configurations.
 
-The [language contract](../../docs/subset.md) describes the exact boundary. Float keys/set elements, exponentiation, complex numbers, general codecs, dynamic value patterns, positional class patterns, and protocol dispatch remain unsupported. List and tuple membership/equality also remain unsupported; rejection probes check these NaN identity-sensitive operations. Relar's exact checker validates operator, assignment, argument, and return compatibility, including dead code and unused functions; ty continues to provide other semantic diagnostics. Functions containing `:=` conservatively skip range/small-integer proofs and tuple-producer scalarization until those optimizations account for rebinding.
+The [language contract](../../docs/subset.md) describes the exact boundary. Float keys/set elements, exponentiation, complex numbers, general codecs, dynamic value patterns, positional class patterns, and protocol dispatch remain unsupported. List and tuple membership/equality also remain unsupported; rejection probes check these NaN identity-sensitive operations. Imre's exact checker validates operator, assignment, argument, and return compatibility, including dead code and unused functions; ty continues to provide other semantic diagnostics. Functions containing `:=` conservatively skip range/small-integer proofs and tuple-producer scalarization until those optimizations account for rebinding.
 
 ## Inventory comparisons
 
-All six inventory source files are byte-identical to the preceding milestone. The Rust source and executable references are reused unchanged after verification. The comparison therefore holds application source fixed while changing Relar's compiler/runtime. It measures existing-program performance after this expansion; throughput of the new features requires separate workloads.
+All six inventory source files are byte-identical to the preceding milestone. The Rust source and executable references are reused unchanged after verification. The comparison therefore holds application source fixed while changing Imre's compiler/runtime. It measures existing-program performance after this expansion; throughput of the new features requires separate workloads.
 
-Times are median milliseconds. Positive change means more time than the preserved sequence-access Relar executable. Ratios use per-engine medians.
+Times are median milliseconds. Positive change means more time than the preserved sequence-access Imre executable. Ratios use per-engine medians.
 
 **Ordinary linking**
 
-| Input | CPython ms | Previous Relar ms | Current Relar ms | Rust BigInt ms | Relar time change |
+| Input | CPython ms | Previous Imre ms | Current Imre ms | Rust BigInt ms | Imre time change |
 |---|---:|---:|---:|---:|---:|
 | empty | 27.102 | 2.215 | 2.203 | 2.247 | -0.53% |
 | boundary-128 | 28.302 | 2.876 | 2.853 | 2.658 | -0.81% |
@@ -36,7 +36,7 @@ Times are median milliseconds. Positive change means more time than the preserve
 
 **ThinLTO**
 
-| Input | CPython ms | Previous Relar ms | Current Relar ms | Rust BigInt ms | Relar time change |
+| Input | CPython ms | Previous Imre ms | Current Imre ms | Rust BigInt ms | Imre time change |
 |---|---:|---:|---:|---:|---:|
 | empty | 27.374 | 2.237 | 2.231 | 2.240 | -0.23% |
 | boundary-128 | 28.307 | 2.775 | 2.838 | 2.682 | +2.27% |
@@ -45,9 +45,9 @@ Times are median milliseconds. Positive change means more time than the preserve
 | dense-16384 | 76.863 | 21.373 | 21.583 | 20.349 | +0.98% |
 | sparse-16384 | 111.025 | 40.856 | 41.159 | 37.385 | +0.74% |
 
-Across twelve comparisons, median changes range from **−0.81% to +2.27%**. The four large-workload comparisons show small median increases of **0.74–1.45%**. Every previous/current Relar interquartile range overlaps. This capability milestone makes no native speedup claim. The [summary](2026-10-19-floats-bytes-match-walrus-summary.json) retains exact statistics; interquartile ranges describe sample spread rather than confidence intervals or proof of equivalent performance.
+Across twelve comparisons, median changes range from **−0.81% to +2.27%**. The four large-workload comparisons show small median increases of **0.74–1.45%**. Every previous/current Imre interquartile range overlaps. This capability milestone makes no native speedup claim. The [summary](2026-10-19-floats-bytes-match-walrus-summary.json) retains exact statistics; interquartile ranges describe sample spread rather than confidence intervals or proof of equivalent performance.
 
-For 16,384 positive requests, ordinary Relar runs 2.17–2.82× faster than CPython and takes 18.4–20.4% more time than Rust BigInt. ThinLTO narrows the Rust gap to 6.1–10.1%. Small cases include substantial process-startup and small-file overhead. Generated LLVM differs from the preserved milestone in both modes. No new CPU or allocation profiles were collected.
+For 16,384 positive requests, ordinary Imre runs 2.17–2.82× faster than CPython and takes 18.4–20.4% more time than Rust BigInt. ThinLTO narrows the Rust gap to 6.1–10.1%. Small cases include substantial process-startup and small-file overhead. Generated LLVM differs from the preserved milestone in both modes. No new CPU or allocation profiles were collected.
 
 ## Method and provenance
 
@@ -57,7 +57,7 @@ Before timing, each mode checks the independent 204-case oracle and `/dev/full` 
 
 Fresh processes run on CPU 0 outside ptrace. Timing includes startup/imports, reading/decoding/parsing, reconciliation, rendering, buffered writes, flush/close, and exit. Builds, fixture preparation, oracles, hashing, verification, and deletion stay outside the clock. OS caches are warm; writes are not fsynced. Task-owned builds, tests, and profiling stop during measurements; CPU frequency and unrelated activity on the shared host remain uncontrolled.
 
-The host is x86-64 AMD EPYC-Milan. CPython 3.14.5 is a GIL build with the experimental JIT disabled; its recorded configuration enables PGO/LTO. Relar uses Clang 18.1.3 at `-O3`, with LLD 22.1.8 for cross-language ThinLTO and matched LLVM optimization budgets. The Rust BigInt reference preserves the eager algorithm and arbitrary-precision quantities, using native containers, borrowed strings, and direct formatting. These results apply to this complete inventory program and recorded environment.
+The host is x86-64 AMD EPYC-Milan. CPython 3.14.5 is a GIL build with the experimental JIT disabled; its recorded configuration enables PGO/LTO. Imre uses Clang 18.1.3 at `-O3`, with LLD 22.1.8 for cross-language ThinLTO and matched LLVM optimization budgets. The Rust BigInt reference preserves the eager algorithm and arbitrary-precision quantities, using native containers, borrowed strings, and direct formatting. These results apply to this complete inventory program and recorded environment.
 
 ## Validation and evidence
 

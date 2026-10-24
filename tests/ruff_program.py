@@ -1,4 +1,4 @@
-"""Compare Ruff's complete, pinned CLI on CPython and a Relar executable."""
+"""Compare Ruff's complete, pinned CLI on CPython and a Imre executable."""
 
 import argparse
 import hashlib
@@ -45,7 +45,7 @@ def main():
             "PYTHON_COLORS": "0", "PYTHONDONTWRITEBYTECODE": "1",
         }
         environment.pop("CONFORMANCE_SUITE_COMMIT", None)
-        environment.pop("RELAR_EXPECTED_PYTHON_VERSION", None)
+        environment.pop("IMRE_EXPECTED_PYTHON_VERSION", None)
 
         def compare(flags, *, status=0, file=False, error=None):
             results = []
@@ -79,9 +79,9 @@ def main():
         compare([*analyzers("same", "changed"), "--format=unknown"], status=2)
         compact = compare(analyzers("same", "same"))
         assert b"No changes detected" in compact
-        environment["RELAR_EXPECTED_PYTHON_VERSION"] = "3.13"
+        environment["IMRE_EXPECTED_PYTHON_VERSION"] = "3.13"
         compare([*analyzers("same", "changed"), "--python-version=3.13"])
-        del environment["RELAR_EXPECTED_PYTHON_VERSION"]
+        del environment["IMRE_EXPECTED_PYTHON_VERSION"]
         environment["CONFORMANCE_SUITE_COMMIT"] = "example-revision"
         for format in ("diff", "github"):
             flags = [*analyzers("same", "changed"), "--tests-path", "typing/conformance",

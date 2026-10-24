@@ -1,14 +1,16 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Temporary workspaces and atomic memory-report output
 
 The memory-report tool now retains optional subprocess transcripts and publishes completed reports atomically. Complete process runs take **1.00–1.57× Rust’s time**; file-only runs take **1.13–1.26×**, and repeated report computation takes **1.42–1.57×** across ordinary and ThinLTO builds. Every measured row, including controls, meets the ≤2× Rust target.
 
-Relar now supports direct `with tempfile.TemporaryDirectory(...)` scopes and native `Path.mkdir`, `unlink`, `rmdir`, and `replace`. Temporary directories use private permissions and clean up across normal exits, exceptions, returns, and loop transfers. The compiler keeps the original owner independently of rebinding the visible name. See the [language contract](../../docs/subset.md) and [example guide](../../examples/memory_report/README.md).
+Imre now supports direct `with tempfile.TemporaryDirectory(...)` scopes and native `Path.mkdir`, `unlink`, `rmdir`, and `replace`. Temporary directories use private permissions and clean up across normal exits, exceptions, returns, and loop transfers. The compiler keeps the original owner independently of rebinding the visible name. See the [language contract](../../docs/subset.md) and [example guide](../../examples/memory_report/README.md).
 
 ## Complete process runs
 
 Median milliseconds over 48 measured samples per engine after two warmups. Pinned ty 0.0.89 and 0.0.90 run over retained inventory and Ruff Python sources. The synthetic layouts each contain 16,256 report items per side: 64 small projects launch 128 children; two larger projects launch four. All engines receive identical synthetic child bytes. Rows labeled ‘retain transcripts’ additionally save the manifest and both decoded streams from every invocation.
 
-| Build | Workload | CPython adapter ms | Relar ms | Rust ms | Relar/Rust |
+| Build | Workload | CPython adapter ms | Imre ms | Rust ms | Imre/Rust |
 | --- | --- | ---: | ---: | ---: | ---: |
 | Ordinary | Real ty: inventory + Ruff scripts | 1071.744 | 969.030 | 973.203 | 0.996× |
 | Ordinary | 64 projects × 254 items | 433.343 | 340.121 | 262.280 | 1.297× |
@@ -29,7 +31,7 @@ Each sample includes startup, manifest validation, child execution, strict UTF-8
 
 These rows read the same reports from directories, perform the full comparison, and publish the result atomically without launching children. Startup, file reading, report processing, temporary-directory creation, publication, and cleanup are included.
 
-| Build | Workload | CPython adapter ms | Relar ms | Rust ms | Relar/Rust |
+| Build | Workload | CPython adapter ms | Imre ms | Rust ms | Imre/Rust |
 | --- | --- | ---: | ---: | ---: | ---: |
 | Ordinary | 64 projects × 254 items | 168.091 | 44.269 | 35.218 | 1.257× |
 | Ordinary | 2 projects × 8,128 items | 169.843 | 39.460 | 32.861 | 1.201× |
@@ -42,7 +44,7 @@ File-only runs are **3.80–4.63× faster than CPython**. This CPython baseline 
 
 Separate entrypoints preload report text and repeat decoding, comparison, and rendering eight times. The table divides whole-process time by eight, retaining startup, preload, checksum, and final output costs. Every pass contributes the complete report’s Unicode character count to a checked checksum; Rust black-boxes inputs and checksum contributions.
 
-| Build | Workload | CPython adapter ms/pass | Relar ms/pass | Rust ms/pass | Relar/Rust |
+| Build | Workload | CPython adapter ms/pass | Imre ms/pass | Rust ms/pass | Imre/Rust |
 | --- | --- | ---: | ---: | ---: | ---: |
 | Ordinary | 64 projects × 254 items | 60.959 | 31.400 | 20.541 | 1.529× |
 | Ordinary | 2 projects × 8,128 items | 61.543 | 29.219 | 20.631 | 1.416× |
@@ -61,7 +63,7 @@ All 269 Rust unit tests, formatting, Clippy, and 34 ordinary differential suites
 
 A separate correctness-only tee retains raw streams from the same actual ty invocation before forwarding them. It checks exact persisted text and derives the expected report independently, including under AddressSanitizer. The tee is never timed; measured real-ty rows invoke the pinned binaries directly.
 
-Measurements run serially on CPU 31 after all build and validation jobs finish. CPython 3.14.5 uses PGO/LTO with its JIT disabled. Native code uses O3, Clang 18, and Ohm 1.98.1-1, with matching ordinary/ThinLTO modes for Rust and Relar. All six engine permutations occur eight times per workload, balancing positions and directed within-round neighbors. Warmups and transitions between rounds are not balanced. Inputs are page-cache warm, output is not fsynced, and validation/file hashing occurs outside the clock. These shared-host medians do not establish a confidence interval.
+Measurements run serially on CPU 31 after all build and validation jobs finish. CPython 3.14.5 uses PGO/LTO with its JIT disabled. Native code uses O3, Clang 18, and Ohm 1.98.1-1, with matching ordinary/ThinLTO modes for Rust and Imre. All six engine permutations occur eight times per workload, balancing positions and directed within-round neighbors. Warmups and transitions between rounds are not balanced. Inputs are page-cache warm, output is not fsynced, and validation/file hashing occurs outside the clock. These shared-host medians do not establish a confidence interval.
 
 ## Evidence and reproduction
 

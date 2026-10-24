@@ -1,0 +1,257 @@
+"""Native Codon adapters for Ruff's frozen Markdown reporter."""
+
+import re
+import sys
+from collections import Counter
+from pathlib import Path
+
+
+def blocks(a: list[str], b: list[str], charjunk: bool):
+    positions = dict[str, list[int]]()
+    for j, item in enumerate(b):
+        if not charjunk or item not in (" ", "\t"):
+            positions.setdefault(item, []).append(j)
+    if len(b) >= 200:
+        positions = {item: js for item, js in positions.items() if len(js) <= len(b) // 100 + 1}
+    regions = [(0, len(a), 0, len(b))]
+    found = list[tuple[int, int, int]]()
+    while regions:
+        alo, ahi, blo, bhi = regions.pop()
+        ai, bj, size = alo, blo, 0
+        previous = dict[int, int]()
+        for i in range(alo, ahi):
+            current = dict[int, int]()
+            for j in positions.get(a[i], []):
+                if j >= bhi:
+                    break
+                if j >= blo:
+                    k = 1 + previous.get(j, 0)
+                    current[j + 1] = k
+                    if k > size:
+                        ai, bj, size = i + 1 - k, j + 1 - k, k
+            previous = current
+        for include in (False, True):
+            while ai > alo and bj > blo and (charjunk and b[bj-1] in (" ", "\t")) == include and a[ai-1] == b[bj-1]:
+                ai, bj, size = ai-1, bj-1, size+1
+            while ai+size < ahi and bj+size < bhi and (charjunk and b[bj+size] in (" ", "\t")) == include and a[ai+size] == b[bj+size]:
+                size += 1
+        if size:
+            found.append((ai, bj, size))
+            if alo < ai and blo < bj:
+                regions.append((alo, ai, blo, bj))
+            if ai+size < ahi and bj+size < bhi:
+                regions.append((ai+size, ahi, bj+size, bhi))
+    found.sort()
+    found.append((len(a), len(b), 0))
+    return found
+
+
+def replacement(a: list[str], b: list[str], edits: list[tuple[bool, str]]):
+    # CPython 3.12 first searches for a similar row, then an identical row.
+    work = [(a, b)]
+    while work:
+        old, new = work.pop()
+        identical = (-1, -1)
+        similar = (-1, -1)
+        best = 0.74
+        for j, right in enumerate(new):
+            for i, left in enumerate(old):
+                if left == right:
+                    if identical[0] < 0:
+                        identical = i, j
+                    continue
+                if 2 * min(len(left), len(right)) <= best * (len(left) + len(right)):
+                    continue
+                count = sum(size for ai, bj, size in blocks(list(left), list(right), True))
+                ratio = 2 * count / (len(left) + len(right))
+                if ratio > best:
+                    best, similar = ratio, (i, j)
+        i, j = similar if best >= 0.75 else identical
+        if i >= 0:
+            work.append((old[i+1:], new[j+1:]))
+            if old[i] != new[j]:
+                work.append(([], [new[j]]))
+                work.append(([old[i]], []))
+            work.append((old[:i], new[:j]))
+        elif len(new) < len(old):
+            edits.extend((True, row) for row in new)
+            edits.extend((False, row) for row in old)
+        else:
+            edits.extend((False, row) for row in old)
+            edits.extend((True, row) for row in new)
+
+
+def aligned_changes(old: list[str], new: list[str]):
+    edits = list[tuple[bool, str]]()
+    alo, blo = 0, 0
+    for ai, bj, size in blocks(old, new, False):
+        replacement(old[alo:ai], new[blo:bj], edits)
+        alo, blo = ai+size, bj+size
+    return sorted(edits, key=lambda pair: pair[1])
+
+
+def changes(old: list[str], new: list[str]):
+    edits = list[tuple[bool, str]]()
+    i, j = 0, 0
+    while i < len(old) and j < len(new):
+        if old[i] < new[j]:
+            edits.append((False, old[i]))
+            i += 1
+        elif new[j] < old[i]:
+            edits.append((True, new[j]))
+            j += 1
+        else:
+            row, start = old[i], j
+            while i < len(old) and j < len(new) and old[i] == row and new[j] == row:
+                i += 1
+                j += 1
+            if ((i < len(old) and old[i] == row) or (j < len(new) and new[j] == row)
+                    or (len(new) >= 200 and j - start > len(new) // 100 + 1)):
+                return aligned_changes(old, new)
+    edits.extend((False, old[k]) for k in range(i, len(old)))
+    edits.extend((True, new[k]) for k in range(j, len(new)))
+    return edits
+
+
+@tuple
+class Repository:
+    fullname: str
+    revision: str
+
+    @property
+    def url(self):
+        return "https://github.com/" + self.fullname
+
+    def url_for(self, path: str, line: int):
+        return self.url + "/blob/" + self.revision + "/" + path + (f"#L{line}" if line else "")
+
+
+@tuple
+class CheckOptions:
+    select: str = ""
+
+    def to_ruff_args(self):
+        return ["check", "--no-cache", "--exit-zero", "--no-fix", "--output-format", "concise", "--no-preview", "--select", self.select]
+
+
+@tuple
+class Project:
+    repo: Repository
+    check_options: CheckOptions
+
+
+@tuple
+class Diagnostic:
+    text: str
+    rule_code: str
+
+    def to_string(self):
+        return self.text
+
+
+class RuleChanges:
+    added_violations: Counter[str]
+    removed_violations: Counter[str]
+    added_fixes: Counter[str]
+    removed_fixes: Counter[str]
+
+    def __init__(self):
+        self.added_violations = Counter[str]()
+        self.removed_violations = Counter[str]()
+        self.added_fixes = Counter[str]()
+        self.removed_fixes = Counter[str]()
+
+    @staticmethod
+    def from_diff(diff):
+        return diff.counts
+
+    def rule_codes(self):
+        return {code for bucket in (self.added_violations, self.removed_violations, self.added_fixes, self.removed_fixes) for code in bucket.keys()}
+
+    # UPSTREAM_RULE_METHODS
+
+
+@tuple
+class CheckDiff:
+    changed: bool
+    parsed_lines: list[Diagnostic]
+    counts: RuleChanges
+
+    def __bool__(self):
+        return self.changed
+
+    @staticmethod
+    def from_simple_diff(diff):
+        return diff
+
+
+@tuple
+class Comparison:
+    diff: CheckDiff
+    repo: Repository
+
+
+@tuple
+class Result:
+    errored: list[tuple[Project, str]]
+    completed: list[tuple[Project, Comparison]]
+
+
+# UPSTREAM_MARKDOWN
+
+
+def add_permalink_to_diagnostic_line(repo: Repository, line: str):
+    m = CHECK_DIFF_LINE_RE.match(line)
+    if m is None:
+        return line
+    url = repo.url_for(m[3].__val__(), int(m[4].__val__()))
+    return f"{m[1].__val__()} <a href='{url}'>{m[2].__val__()}</a> {m[5].__val__()}"
+
+
+def diagnostics(path: Path):
+    raw = open(str(path), "rb").read()
+    lines = raw.decode("utf-8").splitlines()
+    return sorted(line for line in lines if not CHECK_SUMMARY_LINE_RE.match(line))
+
+
+def compare(old: list[str], new: list[str]):
+    edits = changes(old, new)
+    added = {row for sign, row in edits if sign}
+    removed = {row for sign, row in edits if not sign}
+    parsed = list[Diagnostic]()
+    counts = RuleChanges()
+    for sign, row in edits:
+        m = CHECK_DIAGNOSTIC_LINE_RE.match(("+ " if sign else "- ") + row)
+        if m is None:
+            continue
+        location, code, fix, message = m["location"].__val__(), m["code"].__val__(), m["fixable"] is not None, m["message"].__val__()
+        alternate = location + ": " + code + " " + ("" if fix else "[*] ") + message
+        if alternate in (removed if sign else added):
+            if sign == fix:
+                counts.added_fixes[code] += 1
+            else:
+                counts.removed_fixes[code] += 1
+        elif sign:
+            counts.added_violations[code] += 1
+        else:
+            counts.removed_violations[code] += 1
+        text = ("+ " if sign else "- ") + location + ": " + code + " " + ("[*] " if fix else "") + message
+        parsed.append(Diagnostic(text, code))
+    return CheckDiff(bool(edits), parsed, counts)
+
+
+def main(directory: Path, copies: int):
+    completed = list[tuple[Project, Comparison]]()
+    rows = (directory / "projects.tsv").read_text().splitlines()
+    for copy in range(copies):
+        for row in rows:
+            owner, name, revision, old, new = row.split("\t")
+            fullname = f"{owner}/{name}" + (f"-copy-{copy}" if copy else "")
+            repo = Repository(fullname, revision)
+            project = Project(repo, CheckOptions("ALL"))
+            diff = compare(diagnostics(directory / old), diagnostics(directory / new))
+            completed.append((project, Comparison(diff, repo)))
+    print(markdown_check_result(Result([], completed)), end="")
+
+
+main(Path(sys.argv[1]), int(sys.argv[2]))

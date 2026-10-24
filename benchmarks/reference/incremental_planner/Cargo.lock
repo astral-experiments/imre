@@ -37,7 +37,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "relar-incremental-reference"
+name = "imre-incremental-reference"
 version = "0.1.0"
 dependencies = [
  "num-bigint",

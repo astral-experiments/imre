@@ -164,7 +164,7 @@ def dhat(path: Path) -> dict:
         points.append(item)
         entry = "other"
         for frame in stack:
-            match = re.search(r": (relar_[a-z_]+) ", frame)
+            match = re.search(r": (imre_[a-z_]+) ", frame)
             if match:
                 entry = match[1]
                 break
@@ -266,7 +266,7 @@ def profile(args: argparse.Namespace) -> None:
     valgrind = Path(
         args.valgrind
         or shutil.which("valgrind")
-        or Path.home() / ".cache/relar/profiling-tools/root/usr/bin/valgrind"
+        or Path.home() / ".cache/imre/profiling-tools/root/usr/bin/valgrind"
     )
     valgrind = Path(shutil.which(str(valgrind)) or valgrind).resolve()
     library = args.valgrind_lib or os.environ.get("VALGRIND_LIB")
@@ -478,7 +478,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--valgrind",
-        help="Executable or command name; default: PATH, then the Relar tool cache",
+        help="Executable or command name; default: PATH, then the Imre tool cache",
     )
     parser.add_argument(
         "--valgrind-lib",

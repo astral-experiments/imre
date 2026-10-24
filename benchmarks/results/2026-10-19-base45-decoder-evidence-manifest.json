@@ -107,83 +107,83 @@
       "bytes": 732349,
       "sha256": "6261ac54da8ae7eaf4b9dc35569e8d6f683889e11403d9320fa248d4d97c89f3"
     },
-    "profiles/current/decode-bytes-1024-relar-callgrind/command.json": {
+    "profiles/current/decode-bytes-1024-imre-callgrind/command.json": {
       "bytes": 1161,
       "sha256": "939a512a1233c7013a32d4dae3ecaab513704ea3523e011b584fd4f75e35340f"
     },
-    "profiles/current/decode-bytes-1024-relar-callgrind/decoder-instructions.asm": {
+    "profiles/current/decode-bytes-1024-imre-callgrind/decoder-instructions.asm": {
       "bytes": 164389,
       "sha256": "61f5a83e7095d7e46f9b742b2bdc9bbd7509252c777cd481ccea7ef5cf24d2a6"
     },
-    "profiles/current/decode-bytes-1024-relar-callgrind/decoder-instructions.json": {
+    "profiles/current/decode-bytes-1024-imre-callgrind/decoder-instructions.json": {
       "bytes": 12224,
       "sha256": "14ca2b6139ef72ae90c8b276c622b45c766e6f2fd15c7406b5bf58b09c092748"
     },
-    "profiles/current/decode-bytes-1024-relar-callgrind/functions-inclusive-no-stderr.txt": {
+    "profiles/current/decode-bytes-1024-imre-callgrind/functions-inclusive-no-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-bytes-1024-relar-callgrind/functions-inclusive-no.txt": {
+    "profiles/current/decode-bytes-1024-imre-callgrind/functions-inclusive-no.txt": {
       "bytes": 85944,
       "sha256": "a9ee4921293ece7bb3c38a09cc5ff15a3b84f88e5b9333afdfe02a723bbd615e"
     },
-    "profiles/current/decode-bytes-1024-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+    "profiles/current/decode-bytes-1024-imre-callgrind/functions-inclusive-yes-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-bytes-1024-relar-callgrind/functions-inclusive-yes.txt": {
+    "profiles/current/decode-bytes-1024-imre-callgrind/functions-inclusive-yes.txt": {
       "bytes": 85944,
       "sha256": "c443879cda7c96d9d0ee637dad6c8c549a309eae4eb79088165b68a15222204e"
     },
-    "profiles/current/decode-bytes-1024-relar-callgrind/input.bin": {
+    "profiles/current/decode-bytes-1024-imre-callgrind/input.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "profiles/current/decode-bytes-1024-relar-callgrind/output.bin": {
+    "profiles/current/decode-bytes-1024-imre-callgrind/output.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "profiles/current/decode-bytes-1024-relar-callgrind/process-stderr.txt": {
+    "profiles/current/decode-bytes-1024-imre-callgrind/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-bytes-1024-relar-callgrind/profile.callgrind": {
+    "profiles/current/decode-bytes-1024-imre-callgrind/profile.callgrind": {
       "bytes": 255054,
       "sha256": "cf023a00f571dd8afa2af25ee433cad6715c96e98309863b288ae4a7713550e5"
     },
-    "profiles/current/decode-bytes-1024-relar-callgrind/stdout.txt": {
+    "profiles/current/decode-bytes-1024-imre-callgrind/stdout.txt": {
       "bytes": 9,
       "sha256": "868db3f46a2179d39542992cf8e553c4f33be21946652a64208ed4feced7f3bf"
     },
-    "profiles/current/decode-bytes-1024-relar-callgrind/valgrind.log": {
+    "profiles/current/decode-bytes-1024-imre-callgrind/valgrind.log": {
       "bytes": 718,
       "sha256": "c8850894735172e81953aefbcc5f7390d553c121942bc91afa2650e1947769ee"
     },
-    "profiles/current/decode-bytes-1024-relar-dhat/command.json": {
+    "profiles/current/decode-bytes-1024-imre-dhat/command.json": {
       "bytes": 1070,
       "sha256": "0a4ee29659a46d51023897d53205cd1679fdf6b5f2fc2dccc5b0a43b2303c859"
     },
-    "profiles/current/decode-bytes-1024-relar-dhat/input.bin": {
+    "profiles/current/decode-bytes-1024-imre-dhat/input.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "profiles/current/decode-bytes-1024-relar-dhat/output.bin": {
+    "profiles/current/decode-bytes-1024-imre-dhat/output.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "profiles/current/decode-bytes-1024-relar-dhat/process-stderr.txt": {
+    "profiles/current/decode-bytes-1024-imre-dhat/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-bytes-1024-relar-dhat/profile.json": {
+    "profiles/current/decode-bytes-1024-imre-dhat/profile.json": {
       "bytes": 26893,
       "sha256": "4f43e62e4b718254d8f1f0bfe76dfcb02596186055a02d0a8dc2f4baad95d434"
     },
-    "profiles/current/decode-bytes-1024-relar-dhat/stdout.txt": {
+    "profiles/current/decode-bytes-1024-imre-dhat/stdout.txt": {
       "bytes": 9,
       "sha256": "868db3f46a2179d39542992cf8e553c4f33be21946652a64208ed4feced7f3bf"
     },
-    "profiles/current/decode-bytes-1024-relar-dhat/valgrind.log": {
+    "profiles/current/decode-bytes-1024-imre-dhat/valgrind.log": {
       "bytes": 1098,
       "sha256": "1478865552f0e82c18c02ad7d44a8df8ee932e9f6850628b1b96e0ac18771caa"
     },
@@ -259,83 +259,83 @@
       "bytes": 1104,
       "sha256": "1a78ad9d4c33ea959f0c013d5a5182a57b1be23ffdd916baeb93225612cce385"
     },
-    "profiles/current/decode-bytes-16384-relar-callgrind/command.json": {
+    "profiles/current/decode-bytes-16384-imre-callgrind/command.json": {
       "bytes": 1165,
       "sha256": "5dee1235d91ffcb0976f9239f4dc8f06b89b23d16164d46e1531d0173fce8311"
     },
-    "profiles/current/decode-bytes-16384-relar-callgrind/decoder-instructions.asm": {
+    "profiles/current/decode-bytes-16384-imre-callgrind/decoder-instructions.asm": {
       "bytes": 164389,
       "sha256": "f787f96a509d85c103468199fb2513d76fba43fb15590a971aa67d72956be2d8"
     },
-    "profiles/current/decode-bytes-16384-relar-callgrind/decoder-instructions.json": {
+    "profiles/current/decode-bytes-16384-imre-callgrind/decoder-instructions.json": {
       "bytes": 11966,
       "sha256": "e12948eb189b3c1e87b0021b67c06a8407de2be000704340a1bfd72d8f18c513"
     },
-    "profiles/current/decode-bytes-16384-relar-callgrind/functions-inclusive-no-stderr.txt": {
+    "profiles/current/decode-bytes-16384-imre-callgrind/functions-inclusive-no-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-bytes-16384-relar-callgrind/functions-inclusive-no.txt": {
+    "profiles/current/decode-bytes-16384-imre-callgrind/functions-inclusive-no.txt": {
       "bytes": 87395,
       "sha256": "8606bf5d165a86f2a07899209e9a4291c344d2e432c5139ae67a86d50a7e826d"
     },
-    "profiles/current/decode-bytes-16384-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+    "profiles/current/decode-bytes-16384-imre-callgrind/functions-inclusive-yes-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-bytes-16384-relar-callgrind/functions-inclusive-yes.txt": {
+    "profiles/current/decode-bytes-16384-imre-callgrind/functions-inclusive-yes.txt": {
       "bytes": 87395,
       "sha256": "82b31afadc3911d390ad842d1358e43885e175549b8ddd919a8e5d85648822f1"
     },
-    "profiles/current/decode-bytes-16384-relar-callgrind/input.bin": {
+    "profiles/current/decode-bytes-16384-imre-callgrind/input.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "profiles/current/decode-bytes-16384-relar-callgrind/output.bin": {
+    "profiles/current/decode-bytes-16384-imre-callgrind/output.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "profiles/current/decode-bytes-16384-relar-callgrind/process-stderr.txt": {
+    "profiles/current/decode-bytes-16384-imre-callgrind/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-bytes-16384-relar-callgrind/profile.callgrind": {
+    "profiles/current/decode-bytes-16384-imre-callgrind/profile.callgrind": {
       "bytes": 258954,
       "sha256": "6c75faf88337d59f00dddfaddc54f7f63be1db115f0c2ae04044069c12efe2fa"
     },
-    "profiles/current/decode-bytes-16384-relar-callgrind/stdout.txt": {
+    "profiles/current/decode-bytes-16384-imre-callgrind/stdout.txt": {
       "bytes": 9,
       "sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d"
     },
-    "profiles/current/decode-bytes-16384-relar-callgrind/valgrind.log": {
+    "profiles/current/decode-bytes-16384-imre-callgrind/valgrind.log": {
       "bytes": 719,
       "sha256": "c56d386aa79c3d9ed82266c3c507ea44ad7f8ff4bf12e7f5d97ddb133b7e347e"
     },
-    "profiles/current/decode-bytes-16384-relar-dhat/command.json": {
+    "profiles/current/decode-bytes-16384-imre-dhat/command.json": {
       "bytes": 1074,
       "sha256": "0915bb8b8a1f203a5c6b1d3c4f43a18c7c319a54bba920eb1a63bf81260e1455"
     },
-    "profiles/current/decode-bytes-16384-relar-dhat/input.bin": {
+    "profiles/current/decode-bytes-16384-imre-dhat/input.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "profiles/current/decode-bytes-16384-relar-dhat/output.bin": {
+    "profiles/current/decode-bytes-16384-imre-dhat/output.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "profiles/current/decode-bytes-16384-relar-dhat/process-stderr.txt": {
+    "profiles/current/decode-bytes-16384-imre-dhat/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-bytes-16384-relar-dhat/profile.json": {
+    "profiles/current/decode-bytes-16384-imre-dhat/profile.json": {
       "bytes": 26836,
       "sha256": "af324256a1cdbf58622f80acf29b36dc07e0e6f185eac5a6332644a9770a8f4c"
     },
-    "profiles/current/decode-bytes-16384-relar-dhat/stdout.txt": {
+    "profiles/current/decode-bytes-16384-imre-dhat/stdout.txt": {
       "bytes": 9,
       "sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d"
     },
-    "profiles/current/decode-bytes-16384-relar-dhat/valgrind.log": {
+    "profiles/current/decode-bytes-16384-imre-dhat/valgrind.log": {
       "bytes": 1101,
       "sha256": "a27f6b23b091d059087fd1bd565120dac841c9a912455120f420b0b9f9d10ccd"
     },
@@ -411,83 +411,83 @@
       "bytes": 1108,
       "sha256": "8503419592b2513dc8f63630377997dfcb8a683d7c2e30e838264939aa19431e"
     },
-    "profiles/current/decode-bytes-64-relar-callgrind/command.json": {
+    "profiles/current/decode-bytes-64-imre-callgrind/command.json": {
       "bytes": 1153,
       "sha256": "fc105a40ddb4f578f396d1ffba37e3232379d4be4622ee3edf18ed5ab72db918"
     },
-    "profiles/current/decode-bytes-64-relar-callgrind/decoder-instructions.asm": {
+    "profiles/current/decode-bytes-64-imre-callgrind/decoder-instructions.asm": {
       "bytes": 164389,
       "sha256": "4bcae02ae0d5297596a7ee51c9292243ea75a9d6431e6b83da6c304c8682a685"
     },
-    "profiles/current/decode-bytes-64-relar-callgrind/decoder-instructions.json": {
+    "profiles/current/decode-bytes-64-imre-callgrind/decoder-instructions.json": {
       "bytes": 12868,
       "sha256": "16c0e3c4a58ded7d30bffba267368a0a175a026f6045f657adcc7f5277bddcb8"
     },
-    "profiles/current/decode-bytes-64-relar-callgrind/functions-inclusive-no-stderr.txt": {
+    "profiles/current/decode-bytes-64-imre-callgrind/functions-inclusive-no-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-bytes-64-relar-callgrind/functions-inclusive-no.txt": {
+    "profiles/current/decode-bytes-64-imre-callgrind/functions-inclusive-no.txt": {
       "bytes": 85645,
       "sha256": "02b8ecd8fdd44cc84bdea1cfb152ee5b088ff2781368db6b85be542b2cc57c79"
     },
-    "profiles/current/decode-bytes-64-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+    "profiles/current/decode-bytes-64-imre-callgrind/functions-inclusive-yes-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-bytes-64-relar-callgrind/functions-inclusive-yes.txt": {
+    "profiles/current/decode-bytes-64-imre-callgrind/functions-inclusive-yes.txt": {
       "bytes": 86285,
       "sha256": "c56475b148704321c83138294589f41c9897a82ca856a2efb05fa210966275be"
     },
-    "profiles/current/decode-bytes-64-relar-callgrind/input.bin": {
+    "profiles/current/decode-bytes-64-imre-callgrind/input.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "profiles/current/decode-bytes-64-relar-callgrind/output.bin": {
+    "profiles/current/decode-bytes-64-imre-callgrind/output.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "profiles/current/decode-bytes-64-relar-callgrind/process-stderr.txt": {
+    "profiles/current/decode-bytes-64-imre-callgrind/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-bytes-64-relar-callgrind/profile.callgrind": {
+    "profiles/current/decode-bytes-64-imre-callgrind/profile.callgrind": {
       "bytes": 255360,
       "sha256": "35cfea9d4d804926c1e5456a5d6b867c9e062a4ba0d64ecdd28e7a2e459e91cf"
     },
-    "profiles/current/decode-bytes-64-relar-callgrind/stdout.txt": {
+    "profiles/current/decode-bytes-64-imre-callgrind/stdout.txt": {
       "bytes": 10,
       "sha256": "32bf19927ee9525ef75cced17067a264e900522f9ca080f83f0b56b4d5a5f2ab"
     },
-    "profiles/current/decode-bytes-64-relar-callgrind/valgrind.log": {
+    "profiles/current/decode-bytes-64-imre-callgrind/valgrind.log": {
       "bytes": 716,
       "sha256": "e86bb6d0b229574087233df81150c5409158511e55ed8b05e5bcb9081b9b3a97"
     },
-    "profiles/current/decode-bytes-64-relar-dhat/command.json": {
+    "profiles/current/decode-bytes-64-imre-dhat/command.json": {
       "bytes": 1062,
       "sha256": "87547f44299d803fb83dd82d1b5466349a45868f142c4affc761dd16c7c79137"
     },
-    "profiles/current/decode-bytes-64-relar-dhat/input.bin": {
+    "profiles/current/decode-bytes-64-imre-dhat/input.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "profiles/current/decode-bytes-64-relar-dhat/output.bin": {
+    "profiles/current/decode-bytes-64-imre-dhat/output.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "profiles/current/decode-bytes-64-relar-dhat/process-stderr.txt": {
+    "profiles/current/decode-bytes-64-imre-dhat/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-bytes-64-relar-dhat/profile.json": {
+    "profiles/current/decode-bytes-64-imre-dhat/profile.json": {
       "bytes": 26979,
       "sha256": "41520fab9d36736968d872016c7ba41a8d0f05ee8cf0900fe38f8189d31f650d"
     },
-    "profiles/current/decode-bytes-64-relar-dhat/stdout.txt": {
+    "profiles/current/decode-bytes-64-imre-dhat/stdout.txt": {
       "bytes": 10,
       "sha256": "32bf19927ee9525ef75cced17067a264e900522f9ca080f83f0b56b4d5a5f2ab"
     },
-    "profiles/current/decode-bytes-64-relar-dhat/valgrind.log": {
+    "profiles/current/decode-bytes-64-imre-dhat/valgrind.log": {
       "bytes": 1096,
       "sha256": "e9e7caf94d52299b7d3f734488c60deacfdbeeebe8ad5884160a433624c29d0b"
     },
@@ -563,83 +563,83 @@
       "bytes": 1103,
       "sha256": "3cd5391542598ccdd559f606093102e8419694fb9fda3821c8b942166498a93e"
     },
-    "profiles/current/decode-text-1024-relar-callgrind/command.json": {
+    "profiles/current/decode-text-1024-imre-callgrind/command.json": {
       "bytes": 1155,
       "sha256": "4dd23884f143cabdee131128e220279b61d43d0aa6153b3ab9ca6e2803241b48"
     },
-    "profiles/current/decode-text-1024-relar-callgrind/decoder-instructions.asm": {
+    "profiles/current/decode-text-1024-imre-callgrind/decoder-instructions.asm": {
       "bytes": 164389,
       "sha256": "79ad581603bf6a5e3ca0c8b2382c90723519ff0e0b74d95c5beb721a5fb847a9"
     },
-    "profiles/current/decode-text-1024-relar-callgrind/decoder-instructions.json": {
+    "profiles/current/decode-text-1024-imre-callgrind/decoder-instructions.json": {
       "bytes": 13852,
       "sha256": "82fecace05bac4888bc1f24b6d78ffa41cca8372b07b4ba978a1aee7e06420a4"
     },
-    "profiles/current/decode-text-1024-relar-callgrind/functions-inclusive-no-stderr.txt": {
+    "profiles/current/decode-text-1024-imre-callgrind/functions-inclusive-no-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-text-1024-relar-callgrind/functions-inclusive-no.txt": {
+    "profiles/current/decode-text-1024-imre-callgrind/functions-inclusive-no.txt": {
       "bytes": 91622,
       "sha256": "5b727b14d9a85e3bbd52a3f6ec469435929a9ee09cda76881d250d8fbe407f66"
     },
-    "profiles/current/decode-text-1024-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+    "profiles/current/decode-text-1024-imre-callgrind/functions-inclusive-yes-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-text-1024-relar-callgrind/functions-inclusive-yes.txt": {
+    "profiles/current/decode-text-1024-imre-callgrind/functions-inclusive-yes.txt": {
       "bytes": 91622,
       "sha256": "81d852ed847602db9de674d8ec043106753e6035704119a3f543a9a5ce8bd239"
     },
-    "profiles/current/decode-text-1024-relar-callgrind/input.bin": {
+    "profiles/current/decode-text-1024-imre-callgrind/input.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "profiles/current/decode-text-1024-relar-callgrind/output.bin": {
+    "profiles/current/decode-text-1024-imre-callgrind/output.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "profiles/current/decode-text-1024-relar-callgrind/process-stderr.txt": {
+    "profiles/current/decode-text-1024-imre-callgrind/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-text-1024-relar-callgrind/profile.callgrind": {
+    "profiles/current/decode-text-1024-imre-callgrind/profile.callgrind": {
       "bytes": 260564,
       "sha256": "6cd6959c3a8afb4f2d1da05a2e95e54f839487b02bf30dd517191602629a6d72"
     },
-    "profiles/current/decode-text-1024-relar-callgrind/stdout.txt": {
+    "profiles/current/decode-text-1024-imre-callgrind/stdout.txt": {
       "bytes": 9,
       "sha256": "868db3f46a2179d39542992cf8e553c4f33be21946652a64208ed4feced7f3bf"
     },
-    "profiles/current/decode-text-1024-relar-callgrind/valgrind.log": {
+    "profiles/current/decode-text-1024-imre-callgrind/valgrind.log": {
       "bytes": 715,
       "sha256": "6529cd59fd7a15d24bf73aad705569f066c015eaa8b6ae06fa06b4b8f73d96fe"
     },
-    "profiles/current/decode-text-1024-relar-dhat/command.json": {
+    "profiles/current/decode-text-1024-imre-dhat/command.json": {
       "bytes": 1064,
       "sha256": "53ee640348ba86b27c158ef52161a7699169685f6c0140018df43b440b36b3dd"
     },
-    "profiles/current/decode-text-1024-relar-dhat/input.bin": {
+    "profiles/current/decode-text-1024-imre-dhat/input.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "profiles/current/decode-text-1024-relar-dhat/output.bin": {
+    "profiles/current/decode-text-1024-imre-dhat/output.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "profiles/current/decode-text-1024-relar-dhat/process-stderr.txt": {
+    "profiles/current/decode-text-1024-imre-dhat/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-text-1024-relar-dhat/profile.json": {
+    "profiles/current/decode-text-1024-imre-dhat/profile.json": {
       "bytes": 29620,
       "sha256": "76c41a92f1d8ec09c5ac822758e94ce830c3ffab550c02390cfa8265d80e8ef8"
     },
-    "profiles/current/decode-text-1024-relar-dhat/stdout.txt": {
+    "profiles/current/decode-text-1024-imre-dhat/stdout.txt": {
       "bytes": 9,
       "sha256": "868db3f46a2179d39542992cf8e553c4f33be21946652a64208ed4feced7f3bf"
     },
-    "profiles/current/decode-text-1024-relar-dhat/valgrind.log": {
+    "profiles/current/decode-text-1024-imre-dhat/valgrind.log": {
       "bytes": 1094,
       "sha256": "4b746d2d06f56c0baa49d09301af03780aaeac6012d9ccb78594287079824024"
     },
@@ -715,83 +715,83 @@
       "bytes": 1100,
       "sha256": "a52164119b2d235bd55ba8de5c3cca146a5e6cc53ce0fc7196a7c6be06d20546"
     },
-    "profiles/current/decode-text-16384-relar-callgrind/command.json": {
+    "profiles/current/decode-text-16384-imre-callgrind/command.json": {
       "bytes": 1159,
       "sha256": "3ff2b59ec708aad6f01bffc900631eac0be8e7ae9e8377d445d88f6c03c13a5c"
     },
-    "profiles/current/decode-text-16384-relar-callgrind/decoder-instructions.asm": {
+    "profiles/current/decode-text-16384-imre-callgrind/decoder-instructions.asm": {
       "bytes": 164389,
       "sha256": "e567f62aa7632e8b010326f99548a8810f6845b83b24cb1c746938d4a479b8fd"
     },
-    "profiles/current/decode-text-16384-relar-callgrind/decoder-instructions.json": {
+    "profiles/current/decode-text-16384-imre-callgrind/decoder-instructions.json": {
       "bytes": 13531,
       "sha256": "0ad3bff4d6b834034558e6ed27f17f402f5cf88c274ca18f2d0a3d4bcabb794f"
     },
-    "profiles/current/decode-text-16384-relar-callgrind/functions-inclusive-no-stderr.txt": {
+    "profiles/current/decode-text-16384-imre-callgrind/functions-inclusive-no-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-text-16384-relar-callgrind/functions-inclusive-no.txt": {
+    "profiles/current/decode-text-16384-imre-callgrind/functions-inclusive-no.txt": {
       "bytes": 92992,
       "sha256": "c0505e702d78d4171b1e008b2ed492663d0c99a13e297d9125797d1bd9f83f88"
     },
-    "profiles/current/decode-text-16384-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+    "profiles/current/decode-text-16384-imre-callgrind/functions-inclusive-yes-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-text-16384-relar-callgrind/functions-inclusive-yes.txt": {
+    "profiles/current/decode-text-16384-imre-callgrind/functions-inclusive-yes.txt": {
       "bytes": 92992,
       "sha256": "f4fd9077365a2ca124e935f6a9e3505b45f4b8373ad802cb033053aa0bf3de56"
     },
-    "profiles/current/decode-text-16384-relar-callgrind/input.bin": {
+    "profiles/current/decode-text-16384-imre-callgrind/input.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "profiles/current/decode-text-16384-relar-callgrind/output.bin": {
+    "profiles/current/decode-text-16384-imre-callgrind/output.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "profiles/current/decode-text-16384-relar-callgrind/process-stderr.txt": {
+    "profiles/current/decode-text-16384-imre-callgrind/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-text-16384-relar-callgrind/profile.callgrind": {
+    "profiles/current/decode-text-16384-imre-callgrind/profile.callgrind": {
       "bytes": 263175,
       "sha256": "a4f0aa40b0519d5ad752cdb4f0f6cd97d1db6cb43d5db95326a8ae6e83f2c7ab"
     },
-    "profiles/current/decode-text-16384-relar-callgrind/stdout.txt": {
+    "profiles/current/decode-text-16384-imre-callgrind/stdout.txt": {
       "bytes": 9,
       "sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d"
     },
-    "profiles/current/decode-text-16384-relar-callgrind/valgrind.log": {
+    "profiles/current/decode-text-16384-imre-callgrind/valgrind.log": {
       "bytes": 716,
       "sha256": "014074698d7387c142d8e9ff0305a725206915fa0c69398de3427f1acf3abc87"
     },
-    "profiles/current/decode-text-16384-relar-dhat/command.json": {
+    "profiles/current/decode-text-16384-imre-dhat/command.json": {
       "bytes": 1068,
       "sha256": "4e0dec934db0e795ff08c7387bf4370a7610e005899f566d65fcaac3c12ee076"
     },
-    "profiles/current/decode-text-16384-relar-dhat/input.bin": {
+    "profiles/current/decode-text-16384-imre-dhat/input.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "profiles/current/decode-text-16384-relar-dhat/output.bin": {
+    "profiles/current/decode-text-16384-imre-dhat/output.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "profiles/current/decode-text-16384-relar-dhat/process-stderr.txt": {
+    "profiles/current/decode-text-16384-imre-dhat/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-text-16384-relar-dhat/profile.json": {
+    "profiles/current/decode-text-16384-imre-dhat/profile.json": {
       "bytes": 29562,
       "sha256": "ad6da0443dc5be5efd4666d4384876f7ad30fc85d91038d607436b99897d3b77"
     },
-    "profiles/current/decode-text-16384-relar-dhat/stdout.txt": {
+    "profiles/current/decode-text-16384-imre-dhat/stdout.txt": {
       "bytes": 9,
       "sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d"
     },
-    "profiles/current/decode-text-16384-relar-dhat/valgrind.log": {
+    "profiles/current/decode-text-16384-imre-dhat/valgrind.log": {
       "bytes": 1097,
       "sha256": "8ae5ea5e11844d523b9d2b3079713a426dfa1e99d2606455a5295cbf1311ddd5"
     },
@@ -867,83 +867,83 @@
       "bytes": 1104,
       "sha256": "00ab82a035cd39dad2e297e17c6dd8c75b134475c095545dcb8851230ffb2579"
     },
-    "profiles/current/decode-text-64-relar-callgrind/command.json": {
+    "profiles/current/decode-text-64-imre-callgrind/command.json": {
       "bytes": 1147,
       "sha256": "6756d432daf3a50cdabdb8867601b7df49b7e4c8b127c41076557a59f58d2877"
     },
-    "profiles/current/decode-text-64-relar-callgrind/decoder-instructions.asm": {
+    "profiles/current/decode-text-64-imre-callgrind/decoder-instructions.asm": {
       "bytes": 164389,
       "sha256": "beb79b1b6c989fc0ecb99d6257323286dd21ad662745c772005cfadfc2676ea3"
     },
-    "profiles/current/decode-text-64-relar-callgrind/decoder-instructions.json": {
+    "profiles/current/decode-text-64-imre-callgrind/decoder-instructions.json": {
       "bytes": 14619,
       "sha256": "c5026ffafa2d7d98f8474b7af8659f316a6a5055202854bebf053af3830ae163"
     },
-    "profiles/current/decode-text-64-relar-callgrind/functions-inclusive-no-stderr.txt": {
+    "profiles/current/decode-text-64-imre-callgrind/functions-inclusive-no-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-text-64-relar-callgrind/functions-inclusive-no.txt": {
+    "profiles/current/decode-text-64-imre-callgrind/functions-inclusive-no.txt": {
       "bytes": 91282,
       "sha256": "3707e029eb2a80194e766030e5ef3d571f59ff002dbd8d40493c567de3d02d65"
     },
-    "profiles/current/decode-text-64-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+    "profiles/current/decode-text-64-imre-callgrind/functions-inclusive-yes-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-text-64-relar-callgrind/functions-inclusive-yes.txt": {
+    "profiles/current/decode-text-64-imre-callgrind/functions-inclusive-yes.txt": {
       "bytes": 91957,
       "sha256": "c2cb02a2b4e8504c8db9c1c2709d73053b843806bcfe869bd90adc8033faef47"
     },
-    "profiles/current/decode-text-64-relar-callgrind/input.bin": {
+    "profiles/current/decode-text-64-imre-callgrind/input.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "profiles/current/decode-text-64-relar-callgrind/output.bin": {
+    "profiles/current/decode-text-64-imre-callgrind/output.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "profiles/current/decode-text-64-relar-callgrind/process-stderr.txt": {
+    "profiles/current/decode-text-64-imre-callgrind/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-text-64-relar-callgrind/profile.callgrind": {
+    "profiles/current/decode-text-64-imre-callgrind/profile.callgrind": {
       "bytes": 260094,
       "sha256": "3d40a5749078670b6686c06933e212f7488361fe3bc98d37e68808f7d01e4ae6"
     },
-    "profiles/current/decode-text-64-relar-callgrind/stdout.txt": {
+    "profiles/current/decode-text-64-imre-callgrind/stdout.txt": {
       "bytes": 10,
       "sha256": "32bf19927ee9525ef75cced17067a264e900522f9ca080f83f0b56b4d5a5f2ab"
     },
-    "profiles/current/decode-text-64-relar-callgrind/valgrind.log": {
+    "profiles/current/decode-text-64-imre-callgrind/valgrind.log": {
       "bytes": 713,
       "sha256": "d77566c01f7b45f3111da0a1762627989222a881706826377451cf2aa3cbfc7f"
     },
-    "profiles/current/decode-text-64-relar-dhat/command.json": {
+    "profiles/current/decode-text-64-imre-dhat/command.json": {
       "bytes": 1056,
       "sha256": "18c30426a3d5410573926c7de0c7b4cb55b476c9fcb5ae7f2ddc0b8126215ecc"
     },
-    "profiles/current/decode-text-64-relar-dhat/input.bin": {
+    "profiles/current/decode-text-64-imre-dhat/input.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "profiles/current/decode-text-64-relar-dhat/output.bin": {
+    "profiles/current/decode-text-64-imre-dhat/output.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "profiles/current/decode-text-64-relar-dhat/process-stderr.txt": {
+    "profiles/current/decode-text-64-imre-dhat/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/current/decode-text-64-relar-dhat/profile.json": {
+    "profiles/current/decode-text-64-imre-dhat/profile.json": {
       "bytes": 29732,
       "sha256": "7fd7a9d7bcc8c92400f5e8c8a4bc764dee8fe90473a68f29abd72c72faefc580"
     },
-    "profiles/current/decode-text-64-relar-dhat/stdout.txt": {
+    "profiles/current/decode-text-64-imre-dhat/stdout.txt": {
       "bytes": 10,
       "sha256": "32bf19927ee9525ef75cced17067a264e900522f9ca080f83f0b56b4d5a5f2ab"
     },
-    "profiles/current/decode-text-64-relar-dhat/valgrind.log": {
+    "profiles/current/decode-text-64-imre-dhat/valgrind.log": {
       "bytes": 1092,
       "sha256": "28c125abff1a505974a96f390719c3072b4477807adc3cfff93014c73d153a2b"
     },
@@ -1035,7 +1035,7 @@
       "bytes": 422847,
       "sha256": "29c7d58093e51fff0405725b2d7cca8aa6f2d8b9029ddf7628972a862b036665"
     },
-    "profiles/current/relar-decoder-final-profile.py": {
+    "profiles/current/imre-decoder-final-profile.py": {
       "bytes": 33999,
       "sha256": "1f09bbcbd67f8ab677d6beefcb5d93fa885cd3fac1d419fb1cfcaa1cf837abfc"
     },
@@ -1115,75 +1115,75 @@
       "bytes": 732550,
       "sha256": "204b8fbab5dfa29845619031909a67b6ce7c1453fa557a7b400064e683edcf4b"
     },
-    "profiles/previous/decode-bytes-1024-relar-callgrind/command.json": {
+    "profiles/previous/decode-bytes-1024-imre-callgrind/command.json": {
       "bytes": 992,
       "sha256": "4b89a2c6d99da7b3a209841512e1cab67e7f94734940708a6c1d5d02c407d5ba"
     },
-    "profiles/previous/decode-bytes-1024-relar-callgrind/functions-inclusive-no-stderr.txt": {
+    "profiles/previous/decode-bytes-1024-imre-callgrind/functions-inclusive-no-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-bytes-1024-relar-callgrind/functions-inclusive-no.txt": {
+    "profiles/previous/decode-bytes-1024-imre-callgrind/functions-inclusive-no.txt": {
       "bytes": 83169,
       "sha256": "2991bea94c9261be7acef8dde61aa8f19cf97263116d99193b80619cfc565877"
     },
-    "profiles/previous/decode-bytes-1024-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+    "profiles/previous/decode-bytes-1024-imre-callgrind/functions-inclusive-yes-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-bytes-1024-relar-callgrind/functions-inclusive-yes.txt": {
+    "profiles/previous/decode-bytes-1024-imre-callgrind/functions-inclusive-yes.txt": {
       "bytes": 83790,
       "sha256": "252bbdcca691c3ec4b2d47960a502427309ecc307dff4941b5938a9046bdc239"
     },
-    "profiles/previous/decode-bytes-1024-relar-callgrind/input.bin": {
+    "profiles/previous/decode-bytes-1024-imre-callgrind/input.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "profiles/previous/decode-bytes-1024-relar-callgrind/output.bin": {
+    "profiles/previous/decode-bytes-1024-imre-callgrind/output.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "profiles/previous/decode-bytes-1024-relar-callgrind/process-stderr.txt": {
+    "profiles/previous/decode-bytes-1024-imre-callgrind/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-bytes-1024-relar-callgrind/profile.callgrind": {
+    "profiles/previous/decode-bytes-1024-imre-callgrind/profile.callgrind": {
       "bytes": 261589,
       "sha256": "99913eea0ea82906b7c73cf837e651389a3405ce71d83f51a8f4369c189452fd"
     },
-    "profiles/previous/decode-bytes-1024-relar-callgrind/stdout.txt": {
+    "profiles/previous/decode-bytes-1024-imre-callgrind/stdout.txt": {
       "bytes": 9,
       "sha256": "868db3f46a2179d39542992cf8e553c4f33be21946652a64208ed4feced7f3bf"
     },
-    "profiles/previous/decode-bytes-1024-relar-callgrind/valgrind.log": {
+    "profiles/previous/decode-bytes-1024-imre-callgrind/valgrind.log": {
       "bytes": 665,
       "sha256": "161ac9f177416915ad9b6ee61bb3ae82c1e8f8958627c556399e0a292fb871de"
     },
-    "profiles/previous/decode-bytes-1024-relar-dhat/command.json": {
+    "profiles/previous/decode-bytes-1024-imre-dhat/command.json": {
       "bytes": 901,
       "sha256": "e4f3529fe7e8e9508701505dcaf7bb4c7629b6edf974bca7d04d9c00ee46374e"
     },
-    "profiles/previous/decode-bytes-1024-relar-dhat/input.bin": {
+    "profiles/previous/decode-bytes-1024-imre-dhat/input.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "profiles/previous/decode-bytes-1024-relar-dhat/output.bin": {
+    "profiles/previous/decode-bytes-1024-imre-dhat/output.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "profiles/previous/decode-bytes-1024-relar-dhat/process-stderr.txt": {
+    "profiles/previous/decode-bytes-1024-imre-dhat/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-bytes-1024-relar-dhat/profile.json": {
+    "profiles/previous/decode-bytes-1024-imre-dhat/profile.json": {
       "bytes": 26340,
       "sha256": "a12f6bf709bb105d01cab190ed354264e8a2614f22060f66aba25f2965599d88"
     },
-    "profiles/previous/decode-bytes-1024-relar-dhat/stdout.txt": {
+    "profiles/previous/decode-bytes-1024-imre-dhat/stdout.txt": {
       "bytes": 9,
       "sha256": "868db3f46a2179d39542992cf8e553c4f33be21946652a64208ed4feced7f3bf"
     },
-    "profiles/previous/decode-bytes-1024-relar-dhat/valgrind.log": {
+    "profiles/previous/decode-bytes-1024-imre-dhat/valgrind.log": {
       "bytes": 1024,
       "sha256": "ee3139579e9c9648006d31c1fe60601eadd54e6da2c011b3765683af5c103f3a"
     },
@@ -1259,75 +1259,75 @@
       "bytes": 1017,
       "sha256": "dadb6fcfad7b1eeca92f4a3f42d92509e91deb4e4aea9f663984c22a978e70bd"
     },
-    "profiles/previous/decode-bytes-16384-relar-callgrind/command.json": {
+    "profiles/previous/decode-bytes-16384-imre-callgrind/command.json": {
       "bytes": 996,
       "sha256": "6591286f44742133962df9ef31f54ae7a66bf8732b33bc83ec7754d4fa8b164e"
     },
-    "profiles/previous/decode-bytes-16384-relar-callgrind/functions-inclusive-no-stderr.txt": {
+    "profiles/previous/decode-bytes-16384-imre-callgrind/functions-inclusive-no-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-bytes-16384-relar-callgrind/functions-inclusive-no.txt": {
+    "profiles/previous/decode-bytes-16384-imre-callgrind/functions-inclusive-no.txt": {
       "bytes": 84669,
       "sha256": "b4f063568293ccce14ecec570e24c0a4a96b858dcb0cbfa4581f776523767afd"
     },
-    "profiles/previous/decode-bytes-16384-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+    "profiles/previous/decode-bytes-16384-imre-callgrind/functions-inclusive-yes-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-bytes-16384-relar-callgrind/functions-inclusive-yes.txt": {
+    "profiles/previous/decode-bytes-16384-imre-callgrind/functions-inclusive-yes.txt": {
       "bytes": 85301,
       "sha256": "717bad3982cd4eb2b3b7421b6634b5babb1e7858f5244f2d8a376b21dad68f91"
     },
-    "profiles/previous/decode-bytes-16384-relar-callgrind/input.bin": {
+    "profiles/previous/decode-bytes-16384-imre-callgrind/input.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "profiles/previous/decode-bytes-16384-relar-callgrind/output.bin": {
+    "profiles/previous/decode-bytes-16384-imre-callgrind/output.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "profiles/previous/decode-bytes-16384-relar-callgrind/process-stderr.txt": {
+    "profiles/previous/decode-bytes-16384-imre-callgrind/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-bytes-16384-relar-callgrind/profile.callgrind": {
+    "profiles/previous/decode-bytes-16384-imre-callgrind/profile.callgrind": {
       "bytes": 264614,
       "sha256": "f17608ee976a69ee9067719b72011321c2bf42f0183eeb008fa66756050d3c94"
     },
-    "profiles/previous/decode-bytes-16384-relar-callgrind/stdout.txt": {
+    "profiles/previous/decode-bytes-16384-imre-callgrind/stdout.txt": {
       "bytes": 9,
       "sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d"
     },
-    "profiles/previous/decode-bytes-16384-relar-callgrind/valgrind.log": {
+    "profiles/previous/decode-bytes-16384-imre-callgrind/valgrind.log": {
       "bytes": 666,
       "sha256": "888b3f610974d85cc5e3a75af447c8b79423f837c2cf049f208dc9957b35dbc2"
     },
-    "profiles/previous/decode-bytes-16384-relar-dhat/command.json": {
+    "profiles/previous/decode-bytes-16384-imre-dhat/command.json": {
       "bytes": 905,
       "sha256": "ab51d85ad1358b2dadac60902cfb5af59598ad9a123fc1e764248d2b7a6cd2d6"
     },
-    "profiles/previous/decode-bytes-16384-relar-dhat/input.bin": {
+    "profiles/previous/decode-bytes-16384-imre-dhat/input.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "profiles/previous/decode-bytes-16384-relar-dhat/output.bin": {
+    "profiles/previous/decode-bytes-16384-imre-dhat/output.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "profiles/previous/decode-bytes-16384-relar-dhat/process-stderr.txt": {
+    "profiles/previous/decode-bytes-16384-imre-dhat/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-bytes-16384-relar-dhat/profile.json": {
+    "profiles/previous/decode-bytes-16384-imre-dhat/profile.json": {
       "bytes": 26276,
       "sha256": "b2dcc808516c6cf86e9dbc6bdd57d918841c1001532b186bbea3fea1fe2c3de6"
     },
-    "profiles/previous/decode-bytes-16384-relar-dhat/stdout.txt": {
+    "profiles/previous/decode-bytes-16384-imre-dhat/stdout.txt": {
       "bytes": 9,
       "sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d"
     },
-    "profiles/previous/decode-bytes-16384-relar-dhat/valgrind.log": {
+    "profiles/previous/decode-bytes-16384-imre-dhat/valgrind.log": {
       "bytes": 1026,
       "sha256": "1a59e0f4ad86871500cab5ca2d5580d1bac2b58ea1b32d9a56ea4875110c1960"
     },
@@ -1403,75 +1403,75 @@
       "bytes": 1021,
       "sha256": "64f7554637e41adbcfd08351c9787ea5003295a6c8afafefb3eaee5d02ffff51"
     },
-    "profiles/previous/decode-bytes-64-relar-callgrind/command.json": {
+    "profiles/previous/decode-bytes-64-imre-callgrind/command.json": {
       "bytes": 984,
       "sha256": "1b63472011c7156148654ee48fc69eb0cb2b60b14a6e21582aab5a78f4c86a49"
     },
-    "profiles/previous/decode-bytes-64-relar-callgrind/functions-inclusive-no-stderr.txt": {
+    "profiles/previous/decode-bytes-64-imre-callgrind/functions-inclusive-no-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-bytes-64-relar-callgrind/functions-inclusive-no.txt": {
+    "profiles/previous/decode-bytes-64-imre-callgrind/functions-inclusive-no.txt": {
       "bytes": 83165,
       "sha256": "6e5aaa5236f8366cb2564ca6ea5060d9935e7ccbc2b3b588b07193fda836054f"
     },
-    "profiles/previous/decode-bytes-64-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+    "profiles/previous/decode-bytes-64-imre-callgrind/functions-inclusive-yes-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-bytes-64-relar-callgrind/functions-inclusive-yes.txt": {
+    "profiles/previous/decode-bytes-64-imre-callgrind/functions-inclusive-yes.txt": {
       "bytes": 83786,
       "sha256": "9378f6bbc52da4d4224492e6cc2b87fc322635ca248c909d2880eeeeb4a99823"
     },
-    "profiles/previous/decode-bytes-64-relar-callgrind/input.bin": {
+    "profiles/previous/decode-bytes-64-imre-callgrind/input.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "profiles/previous/decode-bytes-64-relar-callgrind/output.bin": {
+    "profiles/previous/decode-bytes-64-imre-callgrind/output.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "profiles/previous/decode-bytes-64-relar-callgrind/process-stderr.txt": {
+    "profiles/previous/decode-bytes-64-imre-callgrind/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-bytes-64-relar-callgrind/profile.callgrind": {
+    "profiles/previous/decode-bytes-64-imre-callgrind/profile.callgrind": {
       "bytes": 259250,
       "sha256": "9d5117b7f6a064811ceef0b56ba58df543cbf81b4176dd3bfb548a416eee5de6"
     },
-    "profiles/previous/decode-bytes-64-relar-callgrind/stdout.txt": {
+    "profiles/previous/decode-bytes-64-imre-callgrind/stdout.txt": {
       "bytes": 10,
       "sha256": "32bf19927ee9525ef75cced17067a264e900522f9ca080f83f0b56b4d5a5f2ab"
     },
-    "profiles/previous/decode-bytes-64-relar-callgrind/valgrind.log": {
+    "profiles/previous/decode-bytes-64-imre-callgrind/valgrind.log": {
       "bytes": 663,
       "sha256": "9ac09734692eb4aee3639c59dd2ed142f59122a5f3ebb653054edafa338eed9c"
     },
-    "profiles/previous/decode-bytes-64-relar-dhat/command.json": {
+    "profiles/previous/decode-bytes-64-imre-dhat/command.json": {
       "bytes": 893,
       "sha256": "fe065235920d632ba22273bb80c95e34565baddfdc351e6af20202667f06d3af"
     },
-    "profiles/previous/decode-bytes-64-relar-dhat/input.bin": {
+    "profiles/previous/decode-bytes-64-imre-dhat/input.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "profiles/previous/decode-bytes-64-relar-dhat/output.bin": {
+    "profiles/previous/decode-bytes-64-imre-dhat/output.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "profiles/previous/decode-bytes-64-relar-dhat/process-stderr.txt": {
+    "profiles/previous/decode-bytes-64-imre-dhat/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-bytes-64-relar-dhat/profile.json": {
+    "profiles/previous/decode-bytes-64-imre-dhat/profile.json": {
       "bytes": 26452,
       "sha256": "4d0b9c01eee32f17bb48aaebe178e548cd222eb098e8a493aaa162c8979ac72f"
     },
-    "profiles/previous/decode-bytes-64-relar-dhat/stdout.txt": {
+    "profiles/previous/decode-bytes-64-imre-dhat/stdout.txt": {
       "bytes": 10,
       "sha256": "32bf19927ee9525ef75cced17067a264e900522f9ca080f83f0b56b4d5a5f2ab"
     },
-    "profiles/previous/decode-bytes-64-relar-dhat/valgrind.log": {
+    "profiles/previous/decode-bytes-64-imre-dhat/valgrind.log": {
       "bytes": 1020,
       "sha256": "fb6909a3172cc310cd6068e6305545f9e9657ca359d87c9bd10799904112a389"
     },
@@ -1547,75 +1547,75 @@
       "bytes": 1016,
       "sha256": "dd5ba289a9cbbb286cb8015bd15e96cbd7fb88412911282c970705673a5c150f"
     },
-    "profiles/previous/decode-text-1024-relar-callgrind/command.json": {
+    "profiles/previous/decode-text-1024-imre-callgrind/command.json": {
       "bytes": 986,
       "sha256": "3736462e8025ff70ae0c4194a3bde762969be07436fa28f5dd0b5ada2ef1fdfd"
     },
-    "profiles/previous/decode-text-1024-relar-callgrind/functions-inclusive-no-stderr.txt": {
+    "profiles/previous/decode-text-1024-imre-callgrind/functions-inclusive-no-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-text-1024-relar-callgrind/functions-inclusive-no.txt": {
+    "profiles/previous/decode-text-1024-imre-callgrind/functions-inclusive-no.txt": {
       "bytes": 87439,
       "sha256": "e72db1e009e810401f0ad619cd3f1edad7cf26d3a7504ef139cda1e08f3b28d4"
     },
-    "profiles/previous/decode-text-1024-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+    "profiles/previous/decode-text-1024-imre-callgrind/functions-inclusive-yes-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-text-1024-relar-callgrind/functions-inclusive-yes.txt": {
+    "profiles/previous/decode-text-1024-imre-callgrind/functions-inclusive-yes.txt": {
       "bytes": 88086,
       "sha256": "b0477b081b3ad6378b53e88de6899972f584f6bd2767828946f0fc45657492e2"
     },
-    "profiles/previous/decode-text-1024-relar-callgrind/input.bin": {
+    "profiles/previous/decode-text-1024-imre-callgrind/input.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "profiles/previous/decode-text-1024-relar-callgrind/output.bin": {
+    "profiles/previous/decode-text-1024-imre-callgrind/output.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "profiles/previous/decode-text-1024-relar-callgrind/process-stderr.txt": {
+    "profiles/previous/decode-text-1024-imre-callgrind/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-text-1024-relar-callgrind/profile.callgrind": {
+    "profiles/previous/decode-text-1024-imre-callgrind/profile.callgrind": {
       "bytes": 263160,
       "sha256": "bc0368b97e3e71891069e2fabc15e81b478d855745dd86e6045ea74b6308cfd3"
     },
-    "profiles/previous/decode-text-1024-relar-callgrind/stdout.txt": {
+    "profiles/previous/decode-text-1024-imre-callgrind/stdout.txt": {
       "bytes": 9,
       "sha256": "868db3f46a2179d39542992cf8e553c4f33be21946652a64208ed4feced7f3bf"
     },
-    "profiles/previous/decode-text-1024-relar-callgrind/valgrind.log": {
+    "profiles/previous/decode-text-1024-imre-callgrind/valgrind.log": {
       "bytes": 662,
       "sha256": "188c3218cf9dcaff67575168cc30f82b0d5f86a5b6d08c6b92a71db56530ad88"
     },
-    "profiles/previous/decode-text-1024-relar-dhat/command.json": {
+    "profiles/previous/decode-text-1024-imre-dhat/command.json": {
       "bytes": 895,
       "sha256": "6fa20683afa7aece8d8320ee708837a3da3429f69ca268ce60f937bb987ecff7"
     },
-    "profiles/previous/decode-text-1024-relar-dhat/input.bin": {
+    "profiles/previous/decode-text-1024-imre-dhat/input.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "profiles/previous/decode-text-1024-relar-dhat/output.bin": {
+    "profiles/previous/decode-text-1024-imre-dhat/output.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "profiles/previous/decode-text-1024-relar-dhat/process-stderr.txt": {
+    "profiles/previous/decode-text-1024-imre-dhat/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-text-1024-relar-dhat/profile.json": {
+    "profiles/previous/decode-text-1024-imre-dhat/profile.json": {
       "bytes": 27386,
       "sha256": "9ef49d91cdca4d512378134bec0b05691ee6215d1c8946df01ec66925e066771"
     },
-    "profiles/previous/decode-text-1024-relar-dhat/stdout.txt": {
+    "profiles/previous/decode-text-1024-imre-dhat/stdout.txt": {
       "bytes": 9,
       "sha256": "868db3f46a2179d39542992cf8e553c4f33be21946652a64208ed4feced7f3bf"
     },
-    "profiles/previous/decode-text-1024-relar-dhat/valgrind.log": {
+    "profiles/previous/decode-text-1024-imre-dhat/valgrind.log": {
       "bytes": 1019,
       "sha256": "f449f186979125820217f35d457f8fa8d39edc6c837174f9caa728a2215996ea"
     },
@@ -1691,75 +1691,75 @@
       "bytes": 1013,
       "sha256": "d30cbc965718150e7f485de0d4e7adef3480b351b02321a723855e51f8d70a1d"
     },
-    "profiles/previous/decode-text-16384-relar-callgrind/command.json": {
+    "profiles/previous/decode-text-16384-imre-callgrind/command.json": {
       "bytes": 990,
       "sha256": "bece44fe45c5e059e2098baf8d0fdbd39ab8191f52f35558af627f12e8439705"
     },
-    "profiles/previous/decode-text-16384-relar-callgrind/functions-inclusive-no-stderr.txt": {
+    "profiles/previous/decode-text-16384-imre-callgrind/functions-inclusive-no-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-text-16384-relar-callgrind/functions-inclusive-no.txt": {
+    "profiles/previous/decode-text-16384-imre-callgrind/functions-inclusive-no.txt": {
       "bytes": 88939,
       "sha256": "aaea831a4272fe789534c03e8b9038be6e4b692a0d325289f73e464189aa9853"
     },
-    "profiles/previous/decode-text-16384-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+    "profiles/previous/decode-text-16384-imre-callgrind/functions-inclusive-yes-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-text-16384-relar-callgrind/functions-inclusive-yes.txt": {
+    "profiles/previous/decode-text-16384-imre-callgrind/functions-inclusive-yes.txt": {
       "bytes": 89597,
       "sha256": "1c5db21cc0e5eabaf8900b4fc29dbc0f43881cd2ba2b5e42d475169f91b37ad4"
     },
-    "profiles/previous/decode-text-16384-relar-callgrind/input.bin": {
+    "profiles/previous/decode-text-16384-imre-callgrind/input.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "profiles/previous/decode-text-16384-relar-callgrind/output.bin": {
+    "profiles/previous/decode-text-16384-imre-callgrind/output.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "profiles/previous/decode-text-16384-relar-callgrind/process-stderr.txt": {
+    "profiles/previous/decode-text-16384-imre-callgrind/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-text-16384-relar-callgrind/profile.callgrind": {
+    "profiles/previous/decode-text-16384-imre-callgrind/profile.callgrind": {
       "bytes": 267719,
       "sha256": "89262b994c9fab04a0ed8a448073f520643e760c0d4825b892ba818affebde41"
     },
-    "profiles/previous/decode-text-16384-relar-callgrind/stdout.txt": {
+    "profiles/previous/decode-text-16384-imre-callgrind/stdout.txt": {
       "bytes": 9,
       "sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d"
     },
-    "profiles/previous/decode-text-16384-relar-callgrind/valgrind.log": {
+    "profiles/previous/decode-text-16384-imre-callgrind/valgrind.log": {
       "bytes": 663,
       "sha256": "95621d6aa3f6f7563b479fb74c22311c98410ab0342b4c37cc3e777334facd84"
     },
-    "profiles/previous/decode-text-16384-relar-dhat/command.json": {
+    "profiles/previous/decode-text-16384-imre-dhat/command.json": {
       "bytes": 899,
       "sha256": "9eee37d9a890814720df5d0603ad42c6732f4c31e9cc7a696f98f926afff1603"
     },
-    "profiles/previous/decode-text-16384-relar-dhat/input.bin": {
+    "profiles/previous/decode-text-16384-imre-dhat/input.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "profiles/previous/decode-text-16384-relar-dhat/output.bin": {
+    "profiles/previous/decode-text-16384-imre-dhat/output.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "profiles/previous/decode-text-16384-relar-dhat/process-stderr.txt": {
+    "profiles/previous/decode-text-16384-imre-dhat/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-text-16384-relar-dhat/profile.json": {
+    "profiles/previous/decode-text-16384-imre-dhat/profile.json": {
       "bytes": 27326,
       "sha256": "d7ae29ab01f3362297533b49d9c14df933f25aa484c3ba4a0e9b442d5028ef85"
     },
-    "profiles/previous/decode-text-16384-relar-dhat/stdout.txt": {
+    "profiles/previous/decode-text-16384-imre-dhat/stdout.txt": {
       "bytes": 9,
       "sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d"
     },
-    "profiles/previous/decode-text-16384-relar-dhat/valgrind.log": {
+    "profiles/previous/decode-text-16384-imre-dhat/valgrind.log": {
       "bytes": 1022,
       "sha256": "f4b9560d8cedc79048b53d20d9705dec7f85a52d841668b7cc9d6a90da67282f"
     },
@@ -1835,75 +1835,75 @@
       "bytes": 1017,
       "sha256": "39ee7fa788f136b5701a9bdd73dfe989fb644df87aa44948b3cd177f44702703"
     },
-    "profiles/previous/decode-text-64-relar-callgrind/command.json": {
+    "profiles/previous/decode-text-64-imre-callgrind/command.json": {
       "bytes": 978,
       "sha256": "eb5833757db731352bb7fa219fbb81f6be7ac98f3e12da12f37a717a6b4b2f57"
     },
-    "profiles/previous/decode-text-64-relar-callgrind/functions-inclusive-no-stderr.txt": {
+    "profiles/previous/decode-text-64-imre-callgrind/functions-inclusive-no-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-text-64-relar-callgrind/functions-inclusive-no.txt": {
+    "profiles/previous/decode-text-64-imre-callgrind/functions-inclusive-no.txt": {
       "bytes": 87480,
       "sha256": "1d05684d6a35d6b65580183ad94c11aed5f6662a2d44cbbe7654738e9756ee86"
     },
-    "profiles/previous/decode-text-64-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+    "profiles/previous/decode-text-64-imre-callgrind/functions-inclusive-yes-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-text-64-relar-callgrind/functions-inclusive-yes.txt": {
+    "profiles/previous/decode-text-64-imre-callgrind/functions-inclusive-yes.txt": {
       "bytes": 88127,
       "sha256": "f5c94a8b90a2581b9bedd7639e1c584703bb5b9bf14a3e8ca65ac606dbccdecd"
     },
-    "profiles/previous/decode-text-64-relar-callgrind/input.bin": {
+    "profiles/previous/decode-text-64-imre-callgrind/input.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "profiles/previous/decode-text-64-relar-callgrind/output.bin": {
+    "profiles/previous/decode-text-64-imre-callgrind/output.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "profiles/previous/decode-text-64-relar-callgrind/process-stderr.txt": {
+    "profiles/previous/decode-text-64-imre-callgrind/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-text-64-relar-callgrind/profile.callgrind": {
+    "profiles/previous/decode-text-64-imre-callgrind/profile.callgrind": {
       "bytes": 263216,
       "sha256": "457b323cb29f1f424e8251fb2012d4f1e84b46dcfc9e33de165a0b12c3f8ce5a"
     },
-    "profiles/previous/decode-text-64-relar-callgrind/stdout.txt": {
+    "profiles/previous/decode-text-64-imre-callgrind/stdout.txt": {
       "bytes": 10,
       "sha256": "32bf19927ee9525ef75cced17067a264e900522f9ca080f83f0b56b4d5a5f2ab"
     },
-    "profiles/previous/decode-text-64-relar-callgrind/valgrind.log": {
+    "profiles/previous/decode-text-64-imre-callgrind/valgrind.log": {
       "bytes": 660,
       "sha256": "1c6b3061aa744f9d27497688e76e0acba13ece6a249f6994fb740112672ed6c9"
     },
-    "profiles/previous/decode-text-64-relar-dhat/command.json": {
+    "profiles/previous/decode-text-64-imre-dhat/command.json": {
       "bytes": 887,
       "sha256": "2eb50dac9d2225e3313ced899f7636ea50efbc87d4d93ab1c423097a300a5ba9"
     },
-    "profiles/previous/decode-text-64-relar-dhat/input.bin": {
+    "profiles/previous/decode-text-64-imre-dhat/input.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "profiles/previous/decode-text-64-relar-dhat/output.bin": {
+    "profiles/previous/decode-text-64-imre-dhat/output.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "profiles/previous/decode-text-64-relar-dhat/process-stderr.txt": {
+    "profiles/previous/decode-text-64-imre-dhat/process-stderr.txt": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/previous/decode-text-64-relar-dhat/profile.json": {
+    "profiles/previous/decode-text-64-imre-dhat/profile.json": {
       "bytes": 27484,
       "sha256": "de94d9ade1111cc5d853f98fdbe9c7bca5e79c24edc4c81994a8080d38f802c9"
     },
-    "profiles/previous/decode-text-64-relar-dhat/stdout.txt": {
+    "profiles/previous/decode-text-64-imre-dhat/stdout.txt": {
       "bytes": 10,
       "sha256": "32bf19927ee9525ef75cced17067a264e900522f9ca080f83f0b56b4d5a5f2ab"
     },
-    "profiles/previous/decode-text-64-relar-dhat/valgrind.log": {
+    "profiles/previous/decode-text-64-imre-dhat/valgrind.log": {
       "bytes": 1016,
       "sha256": "08998864e2207c888c2f8c19c938e9cb75b6e279263cbe47fc07795de8b17030"
     },
@@ -1983,7 +1983,7 @@
       "bytes": 36751,
       "sha256": "00a14c7f5e9be120eaa4d21a37187fdebe76bcf183f1926cff933cc48535d4a7"
     },
-    "profiles/previous/relar-decoder-baseline-profile.py": {
+    "profiles/previous/imre-decoder-baseline-profile.py": {
       "bytes": 19748,
       "sha256": "84e1449d096b5ece5f1439cdece452c72cac4b95dfc85cd9f3e34f1b07d6fec5"
     },
@@ -2059,51 +2059,51 @@
       "bytes": 20945,
       "sha256": "1f4eee99fa3b2c61b5970cbcee518a85f6cc3efcab74fed428533a292f73c366"
     },
-    "scripts/relar-cargo.sh": {
+    "scripts/imre-cargo.sh": {
       "bytes": 326,
       "sha256": "74f3f3596cf89fdecf9458d74fc47cfcf09533b8c10f3b569470f74ddbc80fd8"
     },
-    "scripts/relar-decoder-audit.py": {
+    "scripts/imre-decoder-audit.py": {
       "bytes": 48510,
       "sha256": "b5448f04f25127c9e405a44063c83a148ae0d8b7c0c40deab072258a95618dc4"
     },
-    "scripts/relar-decoder-before-after.py": {
+    "scripts/imre-decoder-before-after.py": {
       "bytes": 4255,
       "sha256": "518b337023f96be50feb5c13e2e004396252b4b3a1768ed12a6e1432c338c751"
     },
-    "scripts/relar-decoder-bench.py": {
+    "scripts/imre-decoder-bench.py": {
       "bytes": 2316,
       "sha256": "cbafbffe59507376ba21ea8bb8710e805c4c8b0c477cd9f15b0b18cb3b15225f"
     },
-    "scripts/relar-decoder-build-validation.py": {
+    "scripts/imre-decoder-build-validation.py": {
       "bytes": 3519,
       "sha256": "f908fc1f4977cda5f01caf4f8834e0696ff03cad4843775482203456e1e2535f"
     },
-    "scripts/relar-decoder-final-profile.py": {
+    "scripts/imre-decoder-final-profile.py": {
       "bytes": 33999,
       "sha256": "1f09bbcbd67f8ab677d6beefcb5d93fa885cd3fac1d419fb1cfcaa1cf837abfc"
     },
-    "scripts/relar-decoder-final-tests.py": {
+    "scripts/imre-decoder-final-tests.py": {
       "bytes": 25961,
       "sha256": "1d000cf99ab3b5f7652beca9d84be508e2f806be25bf310380f2a6ff1eec3481"
     },
-    "scripts/relar-decoder-freeze.py": {
+    "scripts/imre-decoder-freeze.py": {
       "bytes": 13691,
       "sha256": "155010488cb44c2ffd14ecc09e2a3fd867c7d2b18e0bb2dd84c668a9a488f016"
     },
-    "scripts/relar-decoder-profile-audit.py": {
+    "scripts/imre-decoder-profile-audit.py": {
       "bytes": 41390,
       "sha256": "4d1ff5cae754a64a9547efbd5b3c29b835104d6ea288d67af2bf8a1ff9e13a03"
     },
-    "scripts/relar-decoder-publish-evidence.py": {
+    "scripts/imre-decoder-publish-evidence.py": {
       "bytes": 20466,
       "sha256": "72b52460c6e393ad253d0b3d88c78b95035c5371407d38b25420022e7b18600f"
     },
-    "scripts/relar-decoder-report.py": {
+    "scripts/imre-decoder-report.py": {
       "bytes": 20639,
       "sha256": "6cc9536effef41698c03e85f1bb1cc0647bbb2d4b9a1b41aebe2ca97119c4081"
     },
-    "scripts/relar-decoder-update-guides.py": {
+    "scripts/imre-decoder-update-guides.py": {
       "bytes": 3441,
       "sha256": "5c23e4cf78f8535d9e98479ece576432ea8c7839daf3b61924104ce02ff6e396"
     },
@@ -2343,163 +2343,163 @@
       "bytes": 3251,
       "sha256": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49"
     },
-    "source/crates/relar-compiler/Cargo.toml": {
+    "source/crates/imre-compiler/Cargo.toml": {
       "bytes": 617,
       "sha256": "e6936e9d0c4e64f21889cfe158385a0c49067bb19672bc3d2df8dc1c7c1f173e"
     },
-    "source/crates/relar-compiler/src/analysis.rs": {
+    "source/crates/imre-compiler/src/analysis.rs": {
       "bytes": 8191,
       "sha256": "9d7e36d7f1f1ca55a0815128316b979f647aa1fef4c58ee10baa474ceaa0885c"
     },
-    "source/crates/relar-compiler/src/classes.rs": {
+    "source/crates/imre-compiler/src/classes.rs": {
       "bytes": 10589,
       "sha256": "61a7b33711262a841e59a47f417227e77b4ffef7e6369f6beec72bb2666a92ea"
     },
-    "source/crates/relar-compiler/src/effects.rs": {
+    "source/crates/imre-compiler/src/effects.rs": {
       "bytes": 16191,
       "sha256": "f72474a5b4fd3b9ac5e9f58d25dbd19def1c6ce53a9b77d8b8a6fb87619cf032"
     },
-    "source/crates/relar-compiler/src/frontend.rs": {
+    "source/crates/imre-compiler/src/frontend.rs": {
       "bytes": 132980,
       "sha256": "4733fe5094e7435c08116656087996dfbe041c1b6471bec6548a08264e653e3c"
     },
-    "source/crates/relar-compiler/src/frontend/assignments.rs": {
+    "source/crates/imre-compiler/src/frontend/assignments.rs": {
       "bytes": 4884,
       "sha256": "a57afd5e332eac11967df5ba970f9531e34c68f9c750544a53998491c932a920"
     },
-    "source/crates/relar-compiler/src/frontend/calls.rs": {
+    "source/crates/imre-compiler/src/frontend/calls.rs": {
       "bytes": 7269,
       "sha256": "96846d29ac6d0ccba178427a9defc548f4b5ab3461a0e24c0db546212b9db720"
     },
-    "source/crates/relar-compiler/src/frontend/comprehensions.rs": {
+    "source/crates/imre-compiler/src/frontend/comprehensions.rs": {
       "bytes": 30329,
       "sha256": "b17d65b1f9b9f878a2fd254755b2126f8b1b76388486409f6bb8e254f389d35f"
     },
-    "source/crates/relar-compiler/src/frontend/expansions.rs": {
+    "source/crates/imre-compiler/src/frontend/expansions.rs": {
       "bytes": 21359,
       "sha256": "e3d22ab30d8dd477b89a51e4efe582c0d48d92829abada21531ba27f2452a94c"
     },
-    "source/crates/relar-compiler/src/frontend/matching.rs": {
+    "source/crates/imre-compiler/src/frontend/matching.rs": {
       "bytes": 38296,
       "sha256": "a773a2ea540e6f02c12e872aa22b605d34e06be7f8c37ac054e8bb3d1e3c926e"
     },
-    "source/crates/relar-compiler/src/frontend/module_values.rs": {
+    "source/crates/imre-compiler/src/frontend/module_values.rs": {
       "bytes": 6338,
       "sha256": "a7d6ef3f5ed4f446a59231290e809f8ce505f1f3bce816bb5ac4520bf9153668"
     },
-    "source/crates/relar-compiler/src/frontend/truthiness.rs": {
+    "source/crates/imre-compiler/src/frontend/truthiness.rs": {
       "bytes": 6026,
       "sha256": "62faeca4d3f3497265711fb5cd8eacc6eb551a70845a17ff5735d25738a0ae11"
     },
-    "source/crates/relar-compiler/src/frontend/unions.rs": {
+    "source/crates/imre-compiler/src/frontend/unions.rs": {
       "bytes": 9559,
       "sha256": "3b649582a176b5e8b3e11087f4e7673c03e52849dd72ef8eaa4eb4ccff4575d5"
     },
-    "source/crates/relar-compiler/src/frontend/unpacking.rs": {
+    "source/crates/imre-compiler/src/frontend/unpacking.rs": {
       "bytes": 22694,
       "sha256": "d3a3e73ea6812f62300be034808aecc96610b24cce5cf8e4a2ade884d21840b8"
     },
-    "source/crates/relar-compiler/src/ir.rs": {
+    "source/crates/imre-compiler/src/ir.rs": {
       "bytes": 16903,
       "sha256": "7603d1610a3ca92d7c0c38b9d5154fbf8f2875c2538ae9b895375dd564273898"
     },
-    "source/crates/relar-compiler/src/lib.rs": {
+    "source/crates/imre-compiler/src/lib.rs": {
       "bytes": 7023,
       "sha256": "514938d64a888717471844b4a033ff071cc6646c85b0988eefda18f6695a768a"
     },
-    "source/crates/relar-compiler/src/list_specialization.rs": {
+    "source/crates/imre-compiler/src/list_specialization.rs": {
       "bytes": 26847,
       "sha256": "dff5ee5ce445bfba56bbbe43be7f8b41113f2a38389baa9ca1b8eb92c960e5f2"
     },
-    "source/crates/relar-compiler/src/llvm.rs": {
+    "source/crates/imre-compiler/src/llvm.rs": {
       "bytes": 156728,
       "sha256": "67953748aa49167e1a4eeaaa4f49629d04bc6c8c40fa1d6bbc6848d0447bf30b"
     },
-    "source/crates/relar-compiler/src/llvm/truthiness.rs": {
+    "source/crates/imre-compiler/src/llvm/truthiness.rs": {
       "bytes": 8021,
       "sha256": "bcc234584c40f685177d74dc21e6d7edb19170df8676c2f99e3ea30db765e18a"
     },
-    "source/crates/relar-compiler/src/llvm/unions.rs": {
+    "source/crates/imre-compiler/src/llvm/unions.rs": {
       "bytes": 3699,
       "sha256": "4ec16463e9c0ad5734e7cf28313d7b7b70fa882bafe117bf2c065e822752f852"
     },
-    "source/crates/relar-compiler/src/main.rs": {
+    "source/crates/imre-compiler/src/main.rs": {
       "bytes": 7777,
       "sha256": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c"
     },
-    "source/crates/relar-compiler/src/modules.rs": {
+    "source/crates/imre-compiler/src/modules.rs": {
       "bytes": 22758,
       "sha256": "cc69a54c52fca924b4f52920b61f9778918f486665bebcd06bf46733e47a66ac"
     },
-    "source/crates/relar-compiler/src/narrowing.rs": {
+    "source/crates/imre-compiler/src/narrowing.rs": {
       "bytes": 9860,
       "sha256": "4e62079facab3e53ab356299d1d20325ca62ec9509eac5e193a2d70f22a4d2a7"
     },
-    "source/crates/relar-compiler/src/range_specialization.rs": {
+    "source/crates/imre-compiler/src/range_specialization.rs": {
       "bytes": 18562,
       "sha256": "38f56876e1f789bab8681ca00eb359da79e1403b991e091f265419f146d5e49d"
     },
-    "source/crates/relar-compiler/src/ranges.rs": {
+    "source/crates/imre-compiler/src/ranges.rs": {
       "bytes": 85727,
       "sha256": "26350885fdda8cae2e8fcf064d0f6b1941c09b28d39eff08b89865ac708c5621"
     },
-    "source/crates/relar-compiler/src/tuples.rs": {
+    "source/crates/imre-compiler/src/tuples.rs": {
       "bytes": 31353,
       "sha256": "5f0f1ae40c22c38cb841fa7a0d29d2172765fa8806cb9c8ae575f0415031ed89"
     },
-    "source/crates/relar-compiler/src/types.rs": {
+    "source/crates/imre-compiler/src/types.rs": {
       "bytes": 9520,
       "sha256": "f83a88a2a6bd0fde9ebf5c92bfb0cc009c373236b209df146031b2a795073b51"
     },
-    "source/crates/relar-runtime/Cargo.toml": {
+    "source/crates/imre-runtime/Cargo.toml": {
       "bytes": 441,
       "sha256": "147e0977af4370fc833c67726f1be51f72fe0b413efcaa7f8f35fdb6c82ac919"
     },
-    "source/crates/relar-runtime/src/floats.rs": {
+    "source/crates/imre-runtime/src/floats.rs": {
       "bytes": 18780,
       "sha256": "99882a45e8d7d3e4f3d88221303d09f32c3c811f25f1b3e709646b0a59ace76e"
     },
-    "source/crates/relar-runtime/src/lib.rs": {
+    "source/crates/imre-runtime/src/lib.rs": {
       "bytes": 65887,
       "sha256": "a98d13ac105feaefa27ff299fa9e05728099716d890b055edacffd11f3d2c9bb"
     },
-    "source/crates/relar-runtime/src/objects.rs": {
+    "source/crates/imre-runtime/src/objects.rs": {
       "bytes": 63251,
       "sha256": "0df432dd87df2f451923fb53f0d4538bb989904691faa6e1844498852a83d717"
     },
-    "source/crates/relar-runtime/src/objects/args.rs": {
+    "source/crates/imre-runtime/src/objects/args.rs": {
       "bytes": 6684,
       "sha256": "0f7c2543368bc69da08613471c17dc7ac0981967e7840e3c30ef85dc6a044099"
     },
-    "source/crates/relar-runtime/src/objects/bytes.rs": {
+    "source/crates/imre-runtime/src/objects/bytes.rs": {
       "bytes": 24775,
       "sha256": "bd99bb28f640d2605c77c67fe1757dc43bd8f20d3a1b6e37e740fa9b78e4d87f"
     },
-    "source/crates/relar-runtime/src/objects/exceptions.rs": {
+    "source/crates/imre-runtime/src/objects/exceptions.rs": {
       "bytes": 33247,
       "sha256": "321a12eb3acaf16df308675fb0a0403a22afa8b86158a134277a0b98d0910503"
     },
-    "source/crates/relar-runtime/src/objects/files.rs": {
+    "source/crates/imre-runtime/src/objects/files.rs": {
       "bytes": 26635,
       "sha256": "aeef4b559a3b712569e2de219832228c20e416814bc7e502604e22253170341d"
     },
-    "source/crates/relar-runtime/src/objects/mappings.rs": {
+    "source/crates/imre-runtime/src/objects/mappings.rs": {
       "bytes": 61337,
       "sha256": "5954f4f939c1ec953acb2e1032007d03a591b8ee57cbfabe0adc4b2b44f0f9e0"
     },
-    "source/crates/relar-runtime/src/objects/records.rs": {
+    "source/crates/imre-runtime/src/objects/records.rs": {
       "bytes": 10110,
       "sha256": "9e8061a02eca605d6587da87dedb0ca7b2b868d98bef9abb5159bd4b7ceff75d"
     },
-    "source/crates/relar-runtime/src/objects/sequences.rs": {
+    "source/crates/imre-runtime/src/objects/sequences.rs": {
       "bytes": 23139,
       "sha256": "f3fbe51ead47bd87664fb8c35f5ba546ac3f41c4d58303314e13e96ecd434e71"
     },
-    "source/crates/relar-runtime/src/objects/unions.rs": {
+    "source/crates/imre-runtime/src/objects/unions.rs": {
       "bytes": 2888,
       "sha256": "ba98620a4482fe54aaa500ae2e49802a105896241ab77a2899e339611cf414da"
     },
-    "source/crates/relar-runtime/src/objects/words.rs": {
+    "source/crates/imre-runtime/src/objects/words.rs": {
       "bytes": 8026,
       "sha256": "b1efd10f8d46dcf2ef17bfafc4fb52760617c8f7bd22581a0cd7743e8bbc68ff"
     },
@@ -3503,11 +3503,11 @@
       "bytes": 307,
       "sha256": "0c6b51a46a53daee987bf9f9f866752dbb40633422d5e854f4bc1e94ef9fda5f"
     },
-    "timing/before-after/decode-bytes-1024/relar/input.bin": {
+    "timing/before-after/decode-bytes-1024/imre/input.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "timing/before-after/decode-bytes-1024/relar/output.bin": {
+    "timing/before-after/decode-bytes-1024/imre/output.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
@@ -3519,11 +3519,11 @@
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "timing/before-after/decode-bytes-16384/relar/input.bin": {
+    "timing/before-after/decode-bytes-16384/imre/input.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "timing/before-after/decode-bytes-16384/relar/output.bin": {
+    "timing/before-after/decode-bytes-16384/imre/output.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
@@ -3535,11 +3535,11 @@
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "timing/before-after/decode-bytes-64/relar/input.bin": {
+    "timing/before-after/decode-bytes-64/imre/input.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "timing/before-after/decode-bytes-64/relar/output.bin": {
+    "timing/before-after/decode-bytes-64/imre/output.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
@@ -3551,11 +3551,11 @@
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "timing/before-after/decode-text-1024/relar/input.bin": {
+    "timing/before-after/decode-text-1024/imre/input.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "timing/before-after/decode-text-1024/relar/output.bin": {
+    "timing/before-after/decode-text-1024/imre/output.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
@@ -3567,11 +3567,11 @@
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "timing/before-after/decode-text-16384/relar/input.bin": {
+    "timing/before-after/decode-text-16384/imre/input.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "timing/before-after/decode-text-16384/relar/output.bin": {
+    "timing/before-after/decode-text-16384/imre/output.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
@@ -3583,11 +3583,11 @@
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "timing/before-after/decode-text-64/relar/input.bin": {
+    "timing/before-after/decode-text-64/imre/input.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "timing/before-after/decode-text-64/relar/output.bin": {
+    "timing/before-after/decode-text-64/imre/output.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
@@ -3599,11 +3599,11 @@
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "timing/before-after/encode-1024/relar/input.bin": {
+    "timing/before-after/encode-1024/imre/input.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "timing/before-after/encode-1024/relar/output.bin": {
+    "timing/before-after/encode-1024/imre/output.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
@@ -3615,11 +3615,11 @@
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "timing/before-after/encode-16384/relar/input.bin": {
+    "timing/before-after/encode-16384/imre/input.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "timing/before-after/encode-16384/relar/output.bin": {
+    "timing/before-after/encode-16384/imre/output.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
@@ -3631,11 +3631,11 @@
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "timing/before-after/encode-64/relar/input.bin": {
+    "timing/before-after/encode-64/imre/input.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "timing/before-after/encode-64/relar/output.bin": {
+    "timing/before-after/encode-64/imre/output.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
@@ -3663,11 +3663,11 @@
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "timing/normal/decode-bytes-1024/relar/input.bin": {
+    "timing/normal/decode-bytes-1024/imre/input.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "timing/normal/decode-bytes-1024/relar/output.bin": {
+    "timing/normal/decode-bytes-1024/imre/output.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
@@ -3687,11 +3687,11 @@
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "timing/normal/decode-bytes-16384/relar/input.bin": {
+    "timing/normal/decode-bytes-16384/imre/input.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "timing/normal/decode-bytes-16384/relar/output.bin": {
+    "timing/normal/decode-bytes-16384/imre/output.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
@@ -3711,11 +3711,11 @@
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "timing/normal/decode-bytes-64/relar/input.bin": {
+    "timing/normal/decode-bytes-64/imre/input.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "timing/normal/decode-bytes-64/relar/output.bin": {
+    "timing/normal/decode-bytes-64/imre/output.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
@@ -3735,11 +3735,11 @@
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "timing/normal/decode-text-1024/relar/input.bin": {
+    "timing/normal/decode-text-1024/imre/input.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "timing/normal/decode-text-1024/relar/output.bin": {
+    "timing/normal/decode-text-1024/imre/output.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
@@ -3759,11 +3759,11 @@
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "timing/normal/decode-text-16384/relar/input.bin": {
+    "timing/normal/decode-text-16384/imre/input.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "timing/normal/decode-text-16384/relar/output.bin": {
+    "timing/normal/decode-text-16384/imre/output.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
@@ -3783,11 +3783,11 @@
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "timing/normal/decode-text-64/relar/input.bin": {
+    "timing/normal/decode-text-64/imre/input.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "timing/normal/decode-text-64/relar/output.bin": {
+    "timing/normal/decode-text-64/imre/output.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
@@ -3807,11 +3807,11 @@
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "timing/normal/encode-1024/relar/input.bin": {
+    "timing/normal/encode-1024/imre/input.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "timing/normal/encode-1024/relar/output.bin": {
+    "timing/normal/encode-1024/imre/output.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
@@ -3831,11 +3831,11 @@
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "timing/normal/encode-16384/relar/input.bin": {
+    "timing/normal/encode-16384/imre/input.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "timing/normal/encode-16384/relar/output.bin": {
+    "timing/normal/encode-16384/imre/output.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
@@ -3855,11 +3855,11 @@
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "timing/normal/encode-64/relar/input.bin": {
+    "timing/normal/encode-64/imre/input.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "timing/normal/encode-64/relar/output.bin": {
+    "timing/normal/encode-64/imre/output.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
@@ -3883,11 +3883,11 @@
       "bytes": 190811,
       "sha256": "87acb952ba1291dff677a1304464bfba5095c72e9a95021899e0d83c03bb5727"
     },
-    "timing/sustained/decode-bytes-1024/relar/input.bin": {
+    "timing/sustained/decode-bytes-1024/imre/input.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "timing/sustained/decode-bytes-1024/relar/output.bin": {
+    "timing/sustained/decode-bytes-1024/imre/output.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
@@ -3899,11 +3899,11 @@
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "timing/sustained/decode-bytes-16384/relar/input.bin": {
+    "timing/sustained/decode-bytes-16384/imre/input.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "timing/sustained/decode-bytes-16384/relar/output.bin": {
+    "timing/sustained/decode-bytes-16384/imre/output.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
@@ -3915,11 +3915,11 @@
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "timing/sustained/decode-bytes-64/relar/input.bin": {
+    "timing/sustained/decode-bytes-64/imre/input.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "timing/sustained/decode-bytes-64/relar/output.bin": {
+    "timing/sustained/decode-bytes-64/imre/output.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
@@ -3931,11 +3931,11 @@
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "timing/sustained/decode-text-1024/relar/input.bin": {
+    "timing/sustained/decode-text-1024/imre/input.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "timing/sustained/decode-text-1024/relar/output.bin": {
+    "timing/sustained/decode-text-1024/imre/output.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
@@ -3947,11 +3947,11 @@
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "timing/sustained/decode-text-16384/relar/input.bin": {
+    "timing/sustained/decode-text-16384/imre/input.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "timing/sustained/decode-text-16384/relar/output.bin": {
+    "timing/sustained/decode-text-16384/imre/output.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
@@ -3963,11 +3963,11 @@
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "timing/sustained/decode-text-64/relar/input.bin": {
+    "timing/sustained/decode-text-64/imre/input.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "timing/sustained/decode-text-64/relar/output.bin": {
+    "timing/sustained/decode-text-64/imre/output.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
@@ -3979,11 +3979,11 @@
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "timing/sustained/encode-1024/relar/input.bin": {
+    "timing/sustained/encode-1024/imre/input.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "timing/sustained/encode-1024/relar/output.bin": {
+    "timing/sustained/encode-1024/imre/output.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
@@ -3995,11 +3995,11 @@
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "timing/sustained/encode-16384/relar/input.bin": {
+    "timing/sustained/encode-16384/imre/input.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "timing/sustained/encode-16384/relar/output.bin": {
+    "timing/sustained/encode-16384/imre/output.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
@@ -4011,11 +4011,11 @@
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "timing/sustained/encode-64/relar/input.bin": {
+    "timing/sustained/encode-64/imre/input.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "timing/sustained/encode-64/relar/output.bin": {
+    "timing/sustained/encode-64/imre/output.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
@@ -4047,11 +4047,11 @@
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "timing/thinlto/decode-bytes-1024/relar/input.bin": {
+    "timing/thinlto/decode-bytes-1024/imre/input.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "timing/thinlto/decode-bytes-1024/relar/output.bin": {
+    "timing/thinlto/decode-bytes-1024/imre/output.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
@@ -4071,11 +4071,11 @@
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "timing/thinlto/decode-bytes-16384/relar/input.bin": {
+    "timing/thinlto/decode-bytes-16384/imre/input.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "timing/thinlto/decode-bytes-16384/relar/output.bin": {
+    "timing/thinlto/decode-bytes-16384/imre/output.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
@@ -4095,11 +4095,11 @@
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "timing/thinlto/decode-bytes-64/relar/input.bin": {
+    "timing/thinlto/decode-bytes-64/imre/input.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "timing/thinlto/decode-bytes-64/relar/output.bin": {
+    "timing/thinlto/decode-bytes-64/imre/output.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
@@ -4119,11 +4119,11 @@
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "timing/thinlto/decode-text-1024/relar/input.bin": {
+    "timing/thinlto/decode-text-1024/imre/input.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "timing/thinlto/decode-text-1024/relar/output.bin": {
+    "timing/thinlto/decode-text-1024/imre/output.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
@@ -4143,11 +4143,11 @@
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "timing/thinlto/decode-text-16384/relar/input.bin": {
+    "timing/thinlto/decode-text-16384/imre/input.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "timing/thinlto/decode-text-16384/relar/output.bin": {
+    "timing/thinlto/decode-text-16384/imre/output.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
@@ -4167,11 +4167,11 @@
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "timing/thinlto/decode-text-64/relar/input.bin": {
+    "timing/thinlto/decode-text-64/imre/input.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "timing/thinlto/decode-text-64/relar/output.bin": {
+    "timing/thinlto/decode-text-64/imre/output.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
@@ -4191,11 +4191,11 @@
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
-    "timing/thinlto/encode-1024/relar/input.bin": {
+    "timing/thinlto/encode-1024/imre/input.bin": {
       "bytes": 1024,
       "sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15"
     },
-    "timing/thinlto/encode-1024/relar/output.bin": {
+    "timing/thinlto/encode-1024/imre/output.bin": {
       "bytes": 1536,
       "sha256": "39b7bde1e042ad493fb11dd4b4dea6e553d1e26ce627cc61d463c2e6ce490643"
     },
@@ -4215,11 +4215,11 @@
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
-    "timing/thinlto/encode-16384/relar/input.bin": {
+    "timing/thinlto/encode-16384/imre/input.bin": {
       "bytes": 16384,
       "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f"
     },
-    "timing/thinlto/encode-16384/relar/output.bin": {
+    "timing/thinlto/encode-16384/imre/output.bin": {
       "bytes": 24576,
       "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1"
     },
@@ -4239,11 +4239,11 @@
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
-    "timing/thinlto/encode-64/relar/input.bin": {
+    "timing/thinlto/encode-64/imre/input.bin": {
       "bytes": 64,
       "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305"
     },
-    "timing/thinlto/encode-64/relar/output.bin": {
+    "timing/thinlto/encode-64/imre/output.bin": {
       "bytes": 96,
       "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5"
     },
@@ -4919,63 +4919,63 @@
       "bytes": 24,
       "sha256": "f83498e79d485a45cf5d880badfac061b59ec07ac7f8ea00dd9723e7ac0d2cd0"
     },
-    "validation-attempts/relar-decoder-final-matrix-launch-v2/environment-failure.json": {
+    "validation-attempts/imre-decoder-final-matrix-launch-v2/environment-failure.json": {
       "bytes": 5821,
       "sha256": "298b2730e81780ed077825635378a8cf1d27d8d3db569d30d55ac731da536990"
     },
-    "validation-attempts/relar-decoder-final-matrix-launch-v2/launch.command.sh": {
+    "validation-attempts/imre-decoder-final-matrix-launch-v2/launch.command.sh": {
       "bytes": 1306,
       "sha256": "9202ecee0cf6508359bd24b5112a5c8838a9076e8bf637116752fa5065470f38"
     },
-    "validation-attempts/relar-decoder-final-matrix-launch-v2/record.json": {
+    "validation-attempts/imre-decoder-final-matrix-launch-v2/record.json": {
       "bytes": 1564,
       "sha256": "1683dd2f9abfda75443c51ae3d2658eb3fe54ff33995c627702bae2ffe177017"
     },
-    "validation-attempts/relar-decoder-final-matrix-launch-v2/stderr": {
+    "validation-attempts/imre-decoder-final-matrix-launch-v2/stderr": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "validation-attempts/relar-decoder-final-matrix-launch-v2/stdout": {
+    "validation-attempts/imre-decoder-final-matrix-launch-v2/stdout": {
       "bytes": 21824,
       "sha256": "5f70d4820537ff394976b8d90b57c9a4a3e93108075a70eeee97aac5ccb07451"
     },
-    "validation-attempts/relar-decoder-final-matrix-launch-v3/launch.command.sh": {
+    "validation-attempts/imre-decoder-final-matrix-launch-v3/launch.command.sh": {
       "bytes": 1306,
       "sha256": "b0e695c427e2663cbd6ac99d507da7954a31c0c788140d1620b4718cf532336b"
     },
-    "validation-attempts/relar-decoder-final-matrix-launch-v3/record.json": {
+    "validation-attempts/imre-decoder-final-matrix-launch-v3/record.json": {
       "bytes": 1639,
       "sha256": "37021beba1733d9cd3db486db02f72fade0a6480ae2d8e453a6899a4fccc682c"
     },
-    "validation-attempts/relar-decoder-final-matrix-launch-v3/stderr": {
+    "validation-attempts/imre-decoder-final-matrix-launch-v3/stderr": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "validation-attempts/relar-decoder-final-matrix-launch-v3/stdout": {
+    "validation-attempts/imre-decoder-final-matrix-launch-v3/stdout": {
       "bytes": 6518,
       "sha256": "2850280e8bf79bfbf165686f0630897aa193bce13f95f051384645214232ae02"
     },
-    "validation-attempts/relar-decoder-final-matrix-launch-v3/terminal-audit.json": {
+    "validation-attempts/imre-decoder-final-matrix-launch-v3/terminal-audit.json": {
       "bytes": 1717,
       "sha256": "3a1f2a4bffa281131e73a4f5d1154832669b422213bef29ffd399017dfeb5b75"
     },
-    "validation-attempts/relar-decoder-final-matrix-launch/launch.command.sh": {
+    "validation-attempts/imre-decoder-final-matrix-launch/launch.command.sh": {
       "bytes": 1303,
       "sha256": "f9ef788c8323e758f827654930828dd86ef6a7f5e129a8e3f28b97429b8cd232"
     },
-    "validation-attempts/relar-decoder-final-matrix-launch/record.json": {
+    "validation-attempts/imre-decoder-final-matrix-launch/record.json": {
       "bytes": 710,
       "sha256": "1eeb1e40e6cd0457c5ef496ce4c6f34bc00ce6aba737e6f6fe99f47f174d67b5"
     },
-    "validation-attempts/relar-decoder-final-matrix-launch/stderr": {
+    "validation-attempts/imre-decoder-final-matrix-launch/stderr": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "validation-attempts/relar-decoder-final-matrix-launch/stdout": {
+    "validation-attempts/imre-decoder-final-matrix-launch/stdout": {
       "bytes": 2963,
       "sha256": "049b9ca1974bd78fab451ad792df239f24ce9d515b5974e4a745e11746c1f51f"
     },
-    "validation-attempts/relar-decoder-final-matrix-launch/termination.json": {
+    "validation-attempts/imre-decoder-final-matrix-launch/termination.json": {
       "bytes": 5871,
       "sha256": "8fec804be7f483903958e06fac8fc15be9c3f40aee0b7d49946b921cfff69326"
     },

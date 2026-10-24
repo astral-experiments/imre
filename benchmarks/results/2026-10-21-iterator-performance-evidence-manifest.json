@@ -17,159 +17,159 @@
   },
   "exploratory_extras": {
     "aborted-006-pilot-status": {
-      "path": "/tmp/relar-telemetry-candidate-006-pinned/pilot-status.json",
+      "path": "/tmp/imre-telemetry-candidate-006-pinned/pilot-status.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "artifact-audit-010": {
-      "path": "/tmp/relar-iterator-performance-artifact-audit-010.py",
+      "path": "/tmp/imre-iterator-performance-artifact-audit-010.py",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "branch-005-audit": {
-      "path": "/tmp/relar-telemetry-candidate-005-branch-audit.json",
+      "path": "/tmp/imre-telemetry-candidate-005-branch-audit.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "branch-005-raw": {
-      "path": "/tmp/relar-telemetry-candidate-005-branches",
+      "path": "/tmp/imre-telemetry-candidate-005-branches",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "branch-audit": {
-      "path": "/tmp/relar-telemetry-branch-audit.py",
+      "path": "/tmp/imre-telemetry-branch-audit.py",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "branch-probe": {
-      "path": "/tmp/relar-telemetry-branch-probe.py",
+      "path": "/tmp/imre-telemetry-branch-probe.py",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "compiler-inspiration": {
-      "path": "/tmp/relar-compiler-inspiration",
+      "path": "/tmp/imre-compiler-inspiration",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "original-006-prepare-status": {
-      "path": "/tmp/relar-telemetry-candidate-006/prepare-status.json",
+      "path": "/tmp/imre-telemetry-candidate-006/prepare-status.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "pilot-003-audit": {
-      "path": "/tmp/relar-telemetry-candidate-003-audit.json",
+      "path": "/tmp/imre-telemetry-candidate-003-audit.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "pilot-003-profile": {
-      "path": "/tmp/relar-telemetry-candidate-003-profile",
+      "path": "/tmp/imre-telemetry-candidate-003-profile",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "pilot-005-audit": {
-      "path": "/tmp/relar-telemetry-candidate-005-audit.json",
+      "path": "/tmp/imre-telemetry-candidate-005-audit.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "pilot-005-profile": {
-      "path": "/tmp/relar-telemetry-candidate-005-profile",
+      "path": "/tmp/imre-telemetry-candidate-005-profile",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "pilot-006-audit": {
-      "path": "/tmp/relar-telemetry-candidate-006-audit.json",
+      "path": "/tmp/imre-telemetry-candidate-006-audit.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "pilot-006-profile": {
-      "path": "/tmp/relar-telemetry-candidate-006-profile",
+      "path": "/tmp/imre-telemetry-candidate-006-profile",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "pilot-007-audit": {
-      "path": "/tmp/relar-telemetry-candidate-007-audit.json",
+      "path": "/tmp/imre-telemetry-candidate-007-audit.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "pilot-007-profile": {
-      "path": "/tmp/relar-telemetry-candidate-007-profile",
+      "path": "/tmp/imre-telemetry-candidate-007-profile",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "pilot-008-audit": {
-      "path": "/tmp/relar-telemetry-candidate-008-audit.json",
+      "path": "/tmp/imre-telemetry-candidate-008-audit.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "pilot-008-profile": {
-      "path": "/tmp/relar-telemetry-candidate-008-profile",
+      "path": "/tmp/imre-telemetry-candidate-008-profile",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "pilot-009-audit": {
-      "path": "/tmp/relar-telemetry-candidate-009-audit.json",
+      "path": "/tmp/imre-telemetry-candidate-009-audit.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "pilot-009-profile": {
-      "path": "/tmp/relar-telemetry-candidate-009-profile",
+      "path": "/tmp/imre-telemetry-candidate-009-profile",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "pilot-010-audit": {
-      "path": "/tmp/relar-telemetry-candidate-010-audit.json",
+      "path": "/tmp/imre-telemetry-candidate-010-audit.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "pilot-010-profile": {
-      "path": "/tmp/relar-telemetry-candidate-010-profile",
+      "path": "/tmp/imre-telemetry-candidate-010-profile",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "pilot-audit": {
-      "path": "/tmp/relar-telemetry-candidate-audit.py",
+      "path": "/tmp/imre-telemetry-candidate-audit.py",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "pilot-profile": {
-      "path": "/tmp/relar-telemetry-profile.py",
+      "path": "/tmp/imre-telemetry-profile.py",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "publication-commands": {
-      "path": "/tmp/relar-iterator-performance-publication-commands.json",
+      "path": "/tmp/imre-iterator-performance-publication-commands.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "publication-plan": {
-      "path": "/tmp/relar-iterator-performance-publication-plan.md",
+      "path": "/tmp/imre-iterator-performance-publication-plan.md",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "relocated-006-prepare-status": {
-      "path": "/tmp/relar-telemetry-candidate-006-pinned/prepare-status.json",
+      "path": "/tmp/imre-telemetry-candidate-006-pinned/prepare-status.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "relocation-adapter": {
-      "path": "/tmp/relar-telemetry-relocate-plan.py",
+      "path": "/tmp/imre-telemetry-relocate-plan.py",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "relocation-audit": {
-      "path": "/tmp/relar-telemetry-candidate-006-relocation-audit.json",
+      "path": "/tmp/imre-telemetry-candidate-006-relocation-audit.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "relocation-auditor": {
-      "path": "/tmp/relar-telemetry-relocation-audit.py",
+      "path": "/tmp/imre-telemetry-relocation-audit.py",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "relocation-derived-plan": {
-      "path": "/tmp/relar-telemetry-candidate-006-pinned/plan.json",
+      "path": "/tmp/imre-telemetry-candidate-006-pinned/plan.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "relocation-original-plan": {
-      "path": "/tmp/relar-telemetry-candidate-006/plan.json",
+      "path": "/tmp/imre-telemetry-candidate-006/plan.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "relocation-record": {
-      "path": "/tmp/relar-telemetry-candidate-006-pinned/tool-path-relocation.json",
+      "path": "/tmp/imre-telemetry-candidate-006-pinned/tool-path-relocation.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "rename-closure": {
-      "path": "/tmp/relar-rename-public-closure.json",
+      "path": "/tmp/imre-rename-public-closure.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "rename-closure-derivation": {
-      "path": "/tmp/relar-rename-public-closure.py",
+      "path": "/tmp/imre-rename-public-closure.py",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "report-renderer": {
-      "path": "/tmp/relar-iterator-performance-render-report.py",
+      "path": "/tmp/imre-iterator-performance-render-report.py",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "toolchain-original-006-index": {
-      "path": "/tmp/relar-iterator-performance-candidate-006/index.json",
+      "path": "/tmp/imre-iterator-performance-candidate-006/index.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "toolchain-setup": {
-      "path": "/tmp/relar-pinned-ohm-setup.json",
+      "path": "/tmp/imre-pinned-ohm-setup.json",
       "scope": "exploratory only; excluded from final acceptance"
     },
     "upstream-license-notices": {
-      "path": "/tmp/relar-compiler-inspiration-licenses",
+      "path": "/tmp/imre-compiler-inspiration-licenses",
       "scope": "exploratory only; excluded from final acceptance"
     }
   },
@@ -196,12 +196,12 @@
       "mode": 420,
       "sha256": "1e7459e7b3052175b6b646af8b4ffe9cbb2abef2359b256e7a9e6d2cf28177df"
     },
-    "exploratory/artifact-audit-010/relar-iterator-performance-artifact-audit-010.py": {
+    "exploratory/artifact-audit-010/imre-iterator-performance-artifact-audit-010.py": {
       "bytes": 35154,
       "mode": 420,
       "sha256": "62a987c09f783bbc82ad01dc4da64ae05202c895181081feef44a04ff20b6ccd"
     },
-    "exploratory/branch-005-audit/relar-telemetry-candidate-005-branch-audit.json": {
+    "exploratory/branch-005-audit/imre-telemetry-candidate-005-branch-audit.json": {
       "bytes": 3676,
       "mode": 420,
       "sha256": "3168962790a48522a904c2fbfd6cbad229f7b815ca1021e8ab81ce7917e135a5"
@@ -251,12 +251,12 @@
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "exploratory/branch-audit/relar-telemetry-branch-audit.py": {
+    "exploratory/branch-audit/imre-telemetry-branch-audit.py": {
       "bytes": 11663,
       "mode": 420,
       "sha256": "9a70e3b77b924a1aa544a9125b6bc483b26c5d0e7daf9f46e75dfede6075b52c"
     },
-    "exploratory/branch-probe/relar-telemetry-branch-probe.py": {
+    "exploratory/branch-probe/imre-telemetry-branch-probe.py": {
       "bytes": 2527,
       "mode": 420,
       "sha256": "4f67b84bb386cf55645bfe390959881d7cefb9fc0304766000c24f1f613f3b79"
@@ -361,7 +361,7 @@
       "mode": 420,
       "sha256": "39505a7685c35a29ce80989de746c5fe8771b90962a2bd12e0c13586e0c3cddc"
     },
-    "exploratory/pilot-003-audit/relar-telemetry-candidate-003-audit.json": {
+    "exploratory/pilot-003-audit/imre-telemetry-candidate-003-audit.json": {
       "bytes": 10593,
       "mode": 420,
       "sha256": "4b82043e3f9bfc49c4837a930e5cad0b6210a719e52410fe44cf9bcd134dc672"
@@ -431,147 +431,147 @@
       "mode": 420,
       "sha256": "61f2e8a59d092473ef1e8557fc40ce0033d9aeb59a5e8eff2cbe00f3ba53fa05"
     },
-    "exploratory/pilot-003-profile/relar-build-record.json": {
+    "exploratory/pilot-003-profile/imre-build-record.json": {
       "bytes": 18072,
       "mode": 420,
       "sha256": "dcec00b0fabdbf72b165c957150625c777daf656b9adaaaccc313f78b77d61f8"
     },
-    "exploratory/pilot-003-profile/relar-callgrind-128/command.json": {
+    "exploratory/pilot-003-profile/imre-callgrind-128/command.json": {
       "bytes": 77412,
       "mode": 420,
       "sha256": "b4b4d82c3afaa19507770695feb4128f3098cab662e64668ee5093aa79349d48"
     },
-    "exploratory/pilot-003-profile/relar-callgrind-128/inclusive-no-stderr.txt": {
+    "exploratory/pilot-003-profile/imre-callgrind-128/inclusive-no-stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-003-profile/relar-callgrind-128/inclusive-no.txt": {
+    "exploratory/pilot-003-profile/imre-callgrind-128/inclusive-no.txt": {
       "bytes": 78390,
       "mode": 420,
       "sha256": "871dabab648a02138bab4607e853a98a955207ef91c63a0f7552ffb9ea1c008c"
     },
-    "exploratory/pilot-003-profile/relar-callgrind-128/inclusive-yes-stderr.txt": {
+    "exploratory/pilot-003-profile/imre-callgrind-128/inclusive-yes-stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-003-profile/relar-callgrind-128/inclusive-yes.txt": {
+    "exploratory/pilot-003-profile/imre-callgrind-128/inclusive-yes.txt": {
       "bytes": 79024,
       "mode": 420,
       "sha256": "e3dd9e99a7d1312192308daa8c5b3d022fde2c588fc82837792173634037dd73"
     },
-    "exploratory/pilot-003-profile/relar-callgrind-128/profile.callgrind": {
+    "exploratory/pilot-003-profile/imre-callgrind-128/profile.callgrind": {
       "bytes": 279573,
       "mode": 420,
       "sha256": "b86689d17f39999d0fed34654fd9d223b4ee8a2d1bed7d9960f0aaf401d26f70"
     },
-    "exploratory/pilot-003-profile/relar-callgrind-128/stderr.txt": {
+    "exploratory/pilot-003-profile/imre-callgrind-128/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-003-profile/relar-callgrind-128/stdout.txt": {
+    "exploratory/pilot-003-profile/imre-callgrind-128/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-003-profile/relar-callgrind-128/valgrind.log": {
+    "exploratory/pilot-003-profile/imre-callgrind-128/valgrind.log": {
       "bytes": 578,
       "mode": 420,
       "sha256": "53a04dfa0a7b873ca889891fd6a80b8538bcb9f3f446e639a983de5153385e21"
     },
-    "exploratory/pilot-003-profile/relar-callgrind-128/work/observed.txt": {
+    "exploratory/pilot-003-profile/imre-callgrind-128/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-003-profile/relar-callgrind-128/work/reference.txt": {
+    "exploratory/pilot-003-profile/imre-callgrind-128/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-003-profile/relar-callgrind-128/work/report.txt": {
+    "exploratory/pilot-003-profile/imre-callgrind-128/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "exploratory/pilot-003-profile/relar-dhat-128/command.json": {
+    "exploratory/pilot-003-profile/imre-dhat-128/command.json": {
       "bytes": 17155,
       "mode": 420,
       "sha256": "69ee30104070116199a3abffa2f4f02a4769098950f201e9ca39d3394d88fe00"
     },
-    "exploratory/pilot-003-profile/relar-dhat-128/profile.json": {
+    "exploratory/pilot-003-profile/imre-dhat-128/profile.json": {
       "bytes": 41024,
       "mode": 420,
       "sha256": "ca897d04c69fa4af74d7c5266be05333d90c7a4f316cd2938e67d508cb699248"
     },
-    "exploratory/pilot-003-profile/relar-dhat-128/stderr.txt": {
+    "exploratory/pilot-003-profile/imre-dhat-128/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-003-profile/relar-dhat-128/stdout.txt": {
+    "exploratory/pilot-003-profile/imre-dhat-128/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-003-profile/relar-dhat-128/valgrind.log": {
+    "exploratory/pilot-003-profile/imre-dhat-128/valgrind.log": {
       "bytes": 970,
       "mode": 420,
       "sha256": "a6c570395d8a6f4a42bbf71e6d2bb2cc042808bea027177efaf2d0414865518f"
     },
-    "exploratory/pilot-003-profile/relar-dhat-128/work/observed.txt": {
+    "exploratory/pilot-003-profile/imre-dhat-128/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-003-profile/relar-dhat-128/work/reference.txt": {
+    "exploratory/pilot-003-profile/imre-dhat-128/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-003-profile/relar-dhat-128/work/report.txt": {
+    "exploratory/pilot-003-profile/imre-dhat-128/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "exploratory/pilot-003-profile/relar-dhat-256/command.json": {
+    "exploratory/pilot-003-profile/imre-dhat-256/command.json": {
       "bytes": 17156,
       "mode": 420,
       "sha256": "31801a8c835b70c6334b8cf31ba205d61915d00c71439da47663cf55bade7578"
     },
-    "exploratory/pilot-003-profile/relar-dhat-256/profile.json": {
+    "exploratory/pilot-003-profile/imre-dhat-256/profile.json": {
       "bytes": 41031,
       "mode": 420,
       "sha256": "a4429d8ece310c80c71596bc70ab90ff6ffd99aa32189cab6fecf4be65c97ffa"
     },
-    "exploratory/pilot-003-profile/relar-dhat-256/stderr.txt": {
+    "exploratory/pilot-003-profile/imre-dhat-256/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-003-profile/relar-dhat-256/stdout.txt": {
+    "exploratory/pilot-003-profile/imre-dhat-256/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-003-profile/relar-dhat-256/valgrind.log": {
+    "exploratory/pilot-003-profile/imre-dhat-256/valgrind.log": {
       "bytes": 971,
       "mode": 420,
       "sha256": "966b82c3bbf821db120ddd736a70f2ab821c7cd4313b4787bcc23a7ed4f2d4a0"
     },
-    "exploratory/pilot-003-profile/relar-dhat-256/work/observed.txt": {
+    "exploratory/pilot-003-profile/imre-dhat-256/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-003-profile/relar-dhat-256/work/reference.txt": {
+    "exploratory/pilot-003-profile/imre-dhat-256/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-003-profile/relar-dhat-256/work/report.txt": {
+    "exploratory/pilot-003-profile/imre-dhat-256/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -736,7 +736,7 @@
       "mode": 420,
       "sha256": "b96120a247159e626b9a7418333c9516104828550a7246e7ddff00b9f9c700eb"
     },
-    "exploratory/pilot-005-audit/relar-telemetry-candidate-005-audit.json": {
+    "exploratory/pilot-005-audit/imre-telemetry-candidate-005-audit.json": {
       "bytes": 10040,
       "mode": 420,
       "sha256": "8b4bc8d77efdef1562260347bc8b2cecab6d4504409e495bbd5bf75abd788e8c"
@@ -806,147 +806,147 @@
       "mode": 420,
       "sha256": "61f2e8a59d092473ef1e8557fc40ce0033d9aeb59a5e8eff2cbe00f3ba53fa05"
     },
-    "exploratory/pilot-005-profile/relar-build-record.json": {
+    "exploratory/pilot-005-profile/imre-build-record.json": {
       "bytes": 18184,
       "mode": 420,
       "sha256": "f86688b87b377707fc4b2272f648b3871b40c2cdeed6a734977b2f4c5a7f9ed6"
     },
-    "exploratory/pilot-005-profile/relar-callgrind-128/command.json": {
+    "exploratory/pilot-005-profile/imre-callgrind-128/command.json": {
       "bytes": 77113,
       "mode": 420,
       "sha256": "9108dc6791721d095c6f07dfc9f7058a7f187202dbe383772550c3853c45402c"
     },
-    "exploratory/pilot-005-profile/relar-callgrind-128/inclusive-no-stderr.txt": {
+    "exploratory/pilot-005-profile/imre-callgrind-128/inclusive-no-stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-005-profile/relar-callgrind-128/inclusive-no.txt": {
+    "exploratory/pilot-005-profile/imre-callgrind-128/inclusive-no.txt": {
       "bytes": 77860,
       "mode": 420,
       "sha256": "b4e9d39c77a2e66936036bde3ad456a3b8aed3b176a52082a175f564077e3bc4"
     },
-    "exploratory/pilot-005-profile/relar-callgrind-128/inclusive-yes-stderr.txt": {
+    "exploratory/pilot-005-profile/imre-callgrind-128/inclusive-yes-stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-005-profile/relar-callgrind-128/inclusive-yes.txt": {
+    "exploratory/pilot-005-profile/imre-callgrind-128/inclusive-yes.txt": {
       "bytes": 78490,
       "mode": 420,
       "sha256": "0b582fad1179d148def051312b172676e44223d46541f3772918fcda2a7f1a7d"
     },
-    "exploratory/pilot-005-profile/relar-callgrind-128/profile.callgrind": {
+    "exploratory/pilot-005-profile/imre-callgrind-128/profile.callgrind": {
       "bytes": 274325,
       "mode": 420,
       "sha256": "e2e4583bb9c2f36d8d142d94635138848352f268a902a4640930caf78ce429c5"
     },
-    "exploratory/pilot-005-profile/relar-callgrind-128/stderr.txt": {
+    "exploratory/pilot-005-profile/imre-callgrind-128/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-005-profile/relar-callgrind-128/stdout.txt": {
+    "exploratory/pilot-005-profile/imre-callgrind-128/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-005-profile/relar-callgrind-128/valgrind.log": {
+    "exploratory/pilot-005-profile/imre-callgrind-128/valgrind.log": {
       "bytes": 576,
       "mode": 420,
       "sha256": "8b22b164db7ee43433a15b574c58ddedc6af9d1a212a8aa6a0a4a86115dcae5f"
     },
-    "exploratory/pilot-005-profile/relar-callgrind-128/work/observed.txt": {
+    "exploratory/pilot-005-profile/imre-callgrind-128/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-005-profile/relar-callgrind-128/work/reference.txt": {
+    "exploratory/pilot-005-profile/imre-callgrind-128/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-005-profile/relar-callgrind-128/work/report.txt": {
+    "exploratory/pilot-005-profile/imre-callgrind-128/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "exploratory/pilot-005-profile/relar-dhat-128/command.json": {
+    "exploratory/pilot-005-profile/imre-dhat-128/command.json": {
       "bytes": 17155,
       "mode": 420,
       "sha256": "5581ef90eb5151f533d76e2692e5511cf572c5e909f23142ba8dcb3177f3318d"
     },
-    "exploratory/pilot-005-profile/relar-dhat-128/profile.json": {
+    "exploratory/pilot-005-profile/imre-dhat-128/profile.json": {
       "bytes": 41004,
       "mode": 420,
       "sha256": "6a23aaeb877e970544b8e246678ccfde4951975580e467c68652df7dbee7cb54"
     },
-    "exploratory/pilot-005-profile/relar-dhat-128/stderr.txt": {
+    "exploratory/pilot-005-profile/imre-dhat-128/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-005-profile/relar-dhat-128/stdout.txt": {
+    "exploratory/pilot-005-profile/imre-dhat-128/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-005-profile/relar-dhat-128/valgrind.log": {
+    "exploratory/pilot-005-profile/imre-dhat-128/valgrind.log": {
       "bytes": 969,
       "mode": 420,
       "sha256": "90b3917c28c817f1ec1020a10662cb9a9a8a9fe3e79350db0e2fb3b659de714a"
     },
-    "exploratory/pilot-005-profile/relar-dhat-128/work/observed.txt": {
+    "exploratory/pilot-005-profile/imre-dhat-128/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-005-profile/relar-dhat-128/work/reference.txt": {
+    "exploratory/pilot-005-profile/imre-dhat-128/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-005-profile/relar-dhat-128/work/report.txt": {
+    "exploratory/pilot-005-profile/imre-dhat-128/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "exploratory/pilot-005-profile/relar-dhat-256/command.json": {
+    "exploratory/pilot-005-profile/imre-dhat-256/command.json": {
       "bytes": 17156,
       "mode": 420,
       "sha256": "3551767fac39b202b1cea9c80aaa0f3a8a296401e1a89354ad9b0e768b5accfe"
     },
-    "exploratory/pilot-005-profile/relar-dhat-256/profile.json": {
+    "exploratory/pilot-005-profile/imre-dhat-256/profile.json": {
       "bytes": 41013,
       "mode": 420,
       "sha256": "4d807100082cb82efa02eb0c5e15a1b241d05001d23dedec30c80605d6af1980"
     },
-    "exploratory/pilot-005-profile/relar-dhat-256/stderr.txt": {
+    "exploratory/pilot-005-profile/imre-dhat-256/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-005-profile/relar-dhat-256/stdout.txt": {
+    "exploratory/pilot-005-profile/imre-dhat-256/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-005-profile/relar-dhat-256/valgrind.log": {
+    "exploratory/pilot-005-profile/imre-dhat-256/valgrind.log": {
       "bytes": 969,
       "mode": 420,
       "sha256": "0f5ad78799f4724947698fd4be2f84d1f3a7bff6a338ee8f964703b3d84b05fa"
     },
-    "exploratory/pilot-005-profile/relar-dhat-256/work/observed.txt": {
+    "exploratory/pilot-005-profile/imre-dhat-256/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-005-profile/relar-dhat-256/work/reference.txt": {
+    "exploratory/pilot-005-profile/imre-dhat-256/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-005-profile/relar-dhat-256/work/report.txt": {
+    "exploratory/pilot-005-profile/imre-dhat-256/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -1111,7 +1111,7 @@
       "mode": 420,
       "sha256": "27564fef9c5a43e323a57702d158c965add067a725e48316a9c9a5f7f5242bca"
     },
-    "exploratory/pilot-006-audit/relar-telemetry-candidate-006-audit.json": {
+    "exploratory/pilot-006-audit/imre-telemetry-candidate-006-audit.json": {
       "bytes": 10020,
       "mode": 420,
       "sha256": "c79333811e7357db8b41d07c428cebdf6178e6f56db43a616b57f3957692b468"
@@ -1181,147 +1181,147 @@
       "mode": 420,
       "sha256": "61f2e8a59d092473ef1e8557fc40ce0033d9aeb59a5e8eff2cbe00f3ba53fa05"
     },
-    "exploratory/pilot-006-profile/relar-build-record.json": {
+    "exploratory/pilot-006-profile/imre-build-record.json": {
       "bytes": 19431,
       "mode": 420,
       "sha256": "615307de6920b387ccde79d01483bf50b5b5711c183ed5f79b18832493903201"
     },
-    "exploratory/pilot-006-profile/relar-callgrind-128/command.json": {
+    "exploratory/pilot-006-profile/imre-callgrind-128/command.json": {
       "bytes": 77021,
       "mode": 420,
       "sha256": "e746292a74ffae8226e8705184d1e102a2b59c6b2c4879caf707f2b71989fb77"
     },
-    "exploratory/pilot-006-profile/relar-callgrind-128/inclusive-no-stderr.txt": {
+    "exploratory/pilot-006-profile/imre-callgrind-128/inclusive-no-stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-006-profile/relar-callgrind-128/inclusive-no.txt": {
+    "exploratory/pilot-006-profile/imre-callgrind-128/inclusive-no.txt": {
       "bytes": 77978,
       "mode": 420,
       "sha256": "378ce0123d33e3142519be7cc66c5a45a1f525b34d9cde53d86ef2cec1773be1"
     },
-    "exploratory/pilot-006-profile/relar-callgrind-128/inclusive-yes-stderr.txt": {
+    "exploratory/pilot-006-profile/imre-callgrind-128/inclusive-yes-stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-006-profile/relar-callgrind-128/inclusive-yes.txt": {
+    "exploratory/pilot-006-profile/imre-callgrind-128/inclusive-yes.txt": {
       "bytes": 78606,
       "mode": 420,
       "sha256": "7ebf5f4328edb9e86b985a59403203d56c2f932b78817fcd9d11f89119ec1871"
     },
-    "exploratory/pilot-006-profile/relar-callgrind-128/profile.callgrind": {
+    "exploratory/pilot-006-profile/imre-callgrind-128/profile.callgrind": {
       "bytes": 273960,
       "mode": 420,
       "sha256": "770d17117c3923166c50c0a97f4ff0ea576ff2683ef451d2ff16eada756feda3"
     },
-    "exploratory/pilot-006-profile/relar-callgrind-128/stderr.txt": {
+    "exploratory/pilot-006-profile/imre-callgrind-128/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-006-profile/relar-callgrind-128/stdout.txt": {
+    "exploratory/pilot-006-profile/imre-callgrind-128/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-006-profile/relar-callgrind-128/valgrind.log": {
+    "exploratory/pilot-006-profile/imre-callgrind-128/valgrind.log": {
       "bytes": 528,
       "mode": 420,
       "sha256": "30d579bb158a0b7bc5e594f39e25b7c03ce6f2d20cb4bff765b656b321df97bd"
     },
-    "exploratory/pilot-006-profile/relar-callgrind-128/work/observed.txt": {
+    "exploratory/pilot-006-profile/imre-callgrind-128/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-006-profile/relar-callgrind-128/work/reference.txt": {
+    "exploratory/pilot-006-profile/imre-callgrind-128/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-006-profile/relar-callgrind-128/work/report.txt": {
+    "exploratory/pilot-006-profile/imre-callgrind-128/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "exploratory/pilot-006-profile/relar-dhat-128/command.json": {
+    "exploratory/pilot-006-profile/imre-dhat-128/command.json": {
       "bytes": 17530,
       "mode": 420,
       "sha256": "68a58fc034458b6cefb7f0ceede89de49e64bab3c5553c2ae82ebc51197db5ba"
     },
-    "exploratory/pilot-006-profile/relar-dhat-128/profile.json": {
+    "exploratory/pilot-006-profile/imre-dhat-128/profile.json": {
       "bytes": 41245,
       "mode": 420,
       "sha256": "20346fd108607940787bd2e886d04a8506e638d57e359c52f2796963c4fa8287"
     },
-    "exploratory/pilot-006-profile/relar-dhat-128/stderr.txt": {
+    "exploratory/pilot-006-profile/imre-dhat-128/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-006-profile/relar-dhat-128/stdout.txt": {
+    "exploratory/pilot-006-profile/imre-dhat-128/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-006-profile/relar-dhat-128/valgrind.log": {
+    "exploratory/pilot-006-profile/imre-dhat-128/valgrind.log": {
       "bytes": 897,
       "mode": 420,
       "sha256": "ec7b376a44d8b2192f9470bf45edb412b077433c51c8cffccd0fa583111142d4"
     },
-    "exploratory/pilot-006-profile/relar-dhat-128/work/observed.txt": {
+    "exploratory/pilot-006-profile/imre-dhat-128/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-006-profile/relar-dhat-128/work/reference.txt": {
+    "exploratory/pilot-006-profile/imre-dhat-128/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-006-profile/relar-dhat-128/work/report.txt": {
+    "exploratory/pilot-006-profile/imre-dhat-128/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "exploratory/pilot-006-profile/relar-dhat-256/command.json": {
+    "exploratory/pilot-006-profile/imre-dhat-256/command.json": {
       "bytes": 17531,
       "mode": 420,
       "sha256": "047e05afdf862f03b297dca67e85d5327807bb48d84136b80edada2b26cf58c8"
     },
-    "exploratory/pilot-006-profile/relar-dhat-256/profile.json": {
+    "exploratory/pilot-006-profile/imre-dhat-256/profile.json": {
       "bytes": 41247,
       "mode": 420,
       "sha256": "d7a877325b40cdd9172d633430025454e6b1fd109b50fc84f25b6792166f68f5"
     },
-    "exploratory/pilot-006-profile/relar-dhat-256/stderr.txt": {
+    "exploratory/pilot-006-profile/imre-dhat-256/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-006-profile/relar-dhat-256/stdout.txt": {
+    "exploratory/pilot-006-profile/imre-dhat-256/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-006-profile/relar-dhat-256/valgrind.log": {
+    "exploratory/pilot-006-profile/imre-dhat-256/valgrind.log": {
       "bytes": 897,
       "mode": 420,
       "sha256": "90139eb904820d0353877b60071f04d335e1d52ee357f14792fe9a77853bded4"
     },
-    "exploratory/pilot-006-profile/relar-dhat-256/work/observed.txt": {
+    "exploratory/pilot-006-profile/imre-dhat-256/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-006-profile/relar-dhat-256/work/reference.txt": {
+    "exploratory/pilot-006-profile/imre-dhat-256/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-006-profile/relar-dhat-256/work/report.txt": {
+    "exploratory/pilot-006-profile/imre-dhat-256/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -1486,7 +1486,7 @@
       "mode": 420,
       "sha256": "96d8cd309cc9fcf66af9382c13320de99ddcf2c3b36f675b0430115e79837fcc"
     },
-    "exploratory/pilot-007-audit/relar-telemetry-candidate-007-audit.json": {
+    "exploratory/pilot-007-audit/imre-telemetry-candidate-007-audit.json": {
       "bytes": 10031,
       "mode": 420,
       "sha256": "9790abf062be22adc3188ea67538c53222c9e6ae7c3c691fcc5175de00c01c9c"
@@ -1556,147 +1556,147 @@
       "mode": 420,
       "sha256": "61f2e8a59d092473ef1e8557fc40ce0033d9aeb59a5e8eff2cbe00f3ba53fa05"
     },
-    "exploratory/pilot-007-profile/relar-build-record.json": {
+    "exploratory/pilot-007-profile/imre-build-record.json": {
       "bytes": 19236,
       "mode": 420,
       "sha256": "9f2f00ccedaae8120d3f4208adbf66f76e93c0f3174cd1d0470206147b8eaffa"
     },
-    "exploratory/pilot-007-profile/relar-callgrind-128/command.json": {
+    "exploratory/pilot-007-profile/imre-callgrind-128/command.json": {
       "bytes": 76989,
       "mode": 420,
       "sha256": "31e75e2de02addf83f14d467656df00eef9daa84c23b452227d780662bd93d64"
     },
-    "exploratory/pilot-007-profile/relar-callgrind-128/inclusive-no-stderr.txt": {
+    "exploratory/pilot-007-profile/imre-callgrind-128/inclusive-no-stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-007-profile/relar-callgrind-128/inclusive-no.txt": {
+    "exploratory/pilot-007-profile/imre-callgrind-128/inclusive-no.txt": {
       "bytes": 77553,
       "mode": 420,
       "sha256": "832fcbd1a9539b51f46c156bb67fd39ac734134394302e220ddca93ea18cbb15"
     },
-    "exploratory/pilot-007-profile/relar-callgrind-128/inclusive-yes-stderr.txt": {
+    "exploratory/pilot-007-profile/imre-callgrind-128/inclusive-yes-stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-007-profile/relar-callgrind-128/inclusive-yes.txt": {
+    "exploratory/pilot-007-profile/imre-callgrind-128/inclusive-yes.txt": {
       "bytes": 78181,
       "mode": 420,
       "sha256": "359af94ffb1b81f7f45722d53954a08b9b37d6cb5ef7e26b95d56e1b073f3e32"
     },
-    "exploratory/pilot-007-profile/relar-callgrind-128/profile.callgrind": {
+    "exploratory/pilot-007-profile/imre-callgrind-128/profile.callgrind": {
       "bytes": 273427,
       "mode": 420,
       "sha256": "3d60fcf463906417c59a664c203858c90c9598309fca91bbf234d7be9c389518"
     },
-    "exploratory/pilot-007-profile/relar-callgrind-128/stderr.txt": {
+    "exploratory/pilot-007-profile/imre-callgrind-128/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-007-profile/relar-callgrind-128/stdout.txt": {
+    "exploratory/pilot-007-profile/imre-callgrind-128/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-007-profile/relar-callgrind-128/valgrind.log": {
+    "exploratory/pilot-007-profile/imre-callgrind-128/valgrind.log": {
       "bytes": 523,
       "mode": 420,
       "sha256": "78798117827ec7b3200018ebd355af512018099d0801261b7e5b52eba00da43e"
     },
-    "exploratory/pilot-007-profile/relar-callgrind-128/work/observed.txt": {
+    "exploratory/pilot-007-profile/imre-callgrind-128/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-007-profile/relar-callgrind-128/work/reference.txt": {
+    "exploratory/pilot-007-profile/imre-callgrind-128/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-007-profile/relar-callgrind-128/work/report.txt": {
+    "exploratory/pilot-007-profile/imre-callgrind-128/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "exploratory/pilot-007-profile/relar-dhat-128/command.json": {
+    "exploratory/pilot-007-profile/imre-dhat-128/command.json": {
       "bytes": 17155,
       "mode": 420,
       "sha256": "f53df9826840328e1a074faae1703f8bb7af39aa41e196ab34cd260754156d24"
     },
-    "exploratory/pilot-007-profile/relar-dhat-128/profile.json": {
+    "exploratory/pilot-007-profile/imre-dhat-128/profile.json": {
       "bytes": 41010,
       "mode": 420,
       "sha256": "bc31638b277786dac36fdd97056e32e41256a4a37e58959e9111d053bb17fcde"
     },
-    "exploratory/pilot-007-profile/relar-dhat-128/stderr.txt": {
+    "exploratory/pilot-007-profile/imre-dhat-128/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-007-profile/relar-dhat-128/stdout.txt": {
+    "exploratory/pilot-007-profile/imre-dhat-128/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-007-profile/relar-dhat-128/valgrind.log": {
+    "exploratory/pilot-007-profile/imre-dhat-128/valgrind.log": {
       "bytes": 892,
       "mode": 420,
       "sha256": "d5b38e67748530298aabda082f71197035e98e8152917877c553bc92deaa3d42"
     },
-    "exploratory/pilot-007-profile/relar-dhat-128/work/observed.txt": {
+    "exploratory/pilot-007-profile/imre-dhat-128/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-007-profile/relar-dhat-128/work/reference.txt": {
+    "exploratory/pilot-007-profile/imre-dhat-128/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-007-profile/relar-dhat-128/work/report.txt": {
+    "exploratory/pilot-007-profile/imre-dhat-128/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "exploratory/pilot-007-profile/relar-dhat-256/command.json": {
+    "exploratory/pilot-007-profile/imre-dhat-256/command.json": {
       "bytes": 17156,
       "mode": 420,
       "sha256": "8d53644246e613ff7b0caedfd29d3124ec7153a4c1327c06d7806b00c8e089f1"
     },
-    "exploratory/pilot-007-profile/relar-dhat-256/profile.json": {
+    "exploratory/pilot-007-profile/imre-dhat-256/profile.json": {
       "bytes": 41012,
       "mode": 420,
       "sha256": "827375b7f380eea051c50b4e738b5e9505f58982a662fc84ad75f61bb67c89dc"
     },
-    "exploratory/pilot-007-profile/relar-dhat-256/stderr.txt": {
+    "exploratory/pilot-007-profile/imre-dhat-256/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-007-profile/relar-dhat-256/stdout.txt": {
+    "exploratory/pilot-007-profile/imre-dhat-256/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-007-profile/relar-dhat-256/valgrind.log": {
+    "exploratory/pilot-007-profile/imre-dhat-256/valgrind.log": {
       "bytes": 892,
       "mode": 420,
       "sha256": "3c18a8f9aea4b570f7b0debb410faa75032c28a8c95cb622d5d7c8151c4c6a62"
     },
-    "exploratory/pilot-007-profile/relar-dhat-256/work/observed.txt": {
+    "exploratory/pilot-007-profile/imre-dhat-256/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-007-profile/relar-dhat-256/work/reference.txt": {
+    "exploratory/pilot-007-profile/imre-dhat-256/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-007-profile/relar-dhat-256/work/report.txt": {
+    "exploratory/pilot-007-profile/imre-dhat-256/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -1861,7 +1861,7 @@
       "mode": 420,
       "sha256": "5041314a7877a43e6deaaccea94dd6e7ac0c16a517ba10c1e4c2830a2da8e648"
     },
-    "exploratory/pilot-008-audit/relar-telemetry-candidate-008-audit.json": {
+    "exploratory/pilot-008-audit/imre-telemetry-candidate-008-audit.json": {
       "bytes": 10008,
       "mode": 420,
       "sha256": "1142f0aef65ab9ef208c680be8831a76191601a774453676676917f0f4eb5ae0"
@@ -1931,147 +1931,147 @@
       "mode": 420,
       "sha256": "61f2e8a59d092473ef1e8557fc40ce0033d9aeb59a5e8eff2cbe00f3ba53fa05"
     },
-    "exploratory/pilot-008-profile/relar-build-record.json": {
+    "exploratory/pilot-008-profile/imre-build-record.json": {
       "bytes": 19236,
       "mode": 420,
       "sha256": "3132628783f4f00c94c14a0922fb178b27fdb6a0ccd38da350e808ed9c77b3b6"
     },
-    "exploratory/pilot-008-profile/relar-callgrind-128/command.json": {
+    "exploratory/pilot-008-profile/imre-callgrind-128/command.json": {
       "bytes": 76985,
       "mode": 420,
       "sha256": "707dd56b366a043edde00189974c581c78c856fb8634bc5eec3e6516f9db6253"
     },
-    "exploratory/pilot-008-profile/relar-callgrind-128/inclusive-no-stderr.txt": {
+    "exploratory/pilot-008-profile/imre-callgrind-128/inclusive-no-stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-008-profile/relar-callgrind-128/inclusive-no.txt": {
+    "exploratory/pilot-008-profile/imre-callgrind-128/inclusive-no.txt": {
       "bytes": 77553,
       "mode": 420,
       "sha256": "7dbacd4b04462e1cf369d361d985a02c2623dfdaa9392a70275f39ebdd3ea94b"
     },
-    "exploratory/pilot-008-profile/relar-callgrind-128/inclusive-yes-stderr.txt": {
+    "exploratory/pilot-008-profile/imre-callgrind-128/inclusive-yes-stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-008-profile/relar-callgrind-128/inclusive-yes.txt": {
+    "exploratory/pilot-008-profile/imre-callgrind-128/inclusive-yes.txt": {
       "bytes": 78181,
       "mode": 420,
       "sha256": "7c6207c57742f02dd3f3d50e5c0f58cd08630450e4678a42781a40c6bd5db8fb"
     },
-    "exploratory/pilot-008-profile/relar-callgrind-128/profile.callgrind": {
+    "exploratory/pilot-008-profile/imre-callgrind-128/profile.callgrind": {
       "bytes": 273341,
       "mode": 420,
       "sha256": "f79e665f7f03afd6c5851dbda80b1a988467dff9516dbc4716bbf7b6ba8b0011"
     },
-    "exploratory/pilot-008-profile/relar-callgrind-128/stderr.txt": {
+    "exploratory/pilot-008-profile/imre-callgrind-128/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-008-profile/relar-callgrind-128/stdout.txt": {
+    "exploratory/pilot-008-profile/imre-callgrind-128/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-008-profile/relar-callgrind-128/valgrind.log": {
+    "exploratory/pilot-008-profile/imre-callgrind-128/valgrind.log": {
       "bytes": 523,
       "mode": 420,
       "sha256": "d8fe4e22a2e0da8b23278865249f428dbd45b1a5a0455fcecace357fdb02d252"
     },
-    "exploratory/pilot-008-profile/relar-callgrind-128/work/observed.txt": {
+    "exploratory/pilot-008-profile/imre-callgrind-128/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-008-profile/relar-callgrind-128/work/reference.txt": {
+    "exploratory/pilot-008-profile/imre-callgrind-128/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-008-profile/relar-callgrind-128/work/report.txt": {
+    "exploratory/pilot-008-profile/imre-callgrind-128/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "exploratory/pilot-008-profile/relar-dhat-128/command.json": {
+    "exploratory/pilot-008-profile/imre-dhat-128/command.json": {
       "bytes": 17155,
       "mode": 420,
       "sha256": "94698ea4f0ae3e99a5828989dacaa0180669ed2b8e04d34bd08c02ee75f3f71f"
     },
-    "exploratory/pilot-008-profile/relar-dhat-128/profile.json": {
+    "exploratory/pilot-008-profile/imre-dhat-128/profile.json": {
       "bytes": 41010,
       "mode": 420,
       "sha256": "5cc00cfabc47202b232c409cc22f1fabb7cda469c11b8d02071b864e465c56a8"
     },
-    "exploratory/pilot-008-profile/relar-dhat-128/stderr.txt": {
+    "exploratory/pilot-008-profile/imre-dhat-128/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-008-profile/relar-dhat-128/stdout.txt": {
+    "exploratory/pilot-008-profile/imre-dhat-128/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-008-profile/relar-dhat-128/valgrind.log": {
+    "exploratory/pilot-008-profile/imre-dhat-128/valgrind.log": {
       "bytes": 892,
       "mode": 420,
       "sha256": "6cf5da19d8e5f4b093b7c358e0e6cd25750d10d02befb552372aa24431e51e0f"
     },
-    "exploratory/pilot-008-profile/relar-dhat-128/work/observed.txt": {
+    "exploratory/pilot-008-profile/imre-dhat-128/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-008-profile/relar-dhat-128/work/reference.txt": {
+    "exploratory/pilot-008-profile/imre-dhat-128/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-008-profile/relar-dhat-128/work/report.txt": {
+    "exploratory/pilot-008-profile/imre-dhat-128/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "exploratory/pilot-008-profile/relar-dhat-256/command.json": {
+    "exploratory/pilot-008-profile/imre-dhat-256/command.json": {
       "bytes": 17156,
       "mode": 420,
       "sha256": "1dafc89a1c6cb2e24e9e5b0dfb5c754c573fb9e5d4d5a266e174c28eee703c8c"
     },
-    "exploratory/pilot-008-profile/relar-dhat-256/profile.json": {
+    "exploratory/pilot-008-profile/imre-dhat-256/profile.json": {
       "bytes": 41012,
       "mode": 420,
       "sha256": "50f38389647317176f58bc938057dba2db8644f726512907c409d80ecb8fbb57"
     },
-    "exploratory/pilot-008-profile/relar-dhat-256/stderr.txt": {
+    "exploratory/pilot-008-profile/imre-dhat-256/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-008-profile/relar-dhat-256/stdout.txt": {
+    "exploratory/pilot-008-profile/imre-dhat-256/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-008-profile/relar-dhat-256/valgrind.log": {
+    "exploratory/pilot-008-profile/imre-dhat-256/valgrind.log": {
       "bytes": 892,
       "mode": 420,
       "sha256": "05d428d0f38f434c1541eca37cbb9249817255f03d0fec82b2bec100cc22f1ac"
     },
-    "exploratory/pilot-008-profile/relar-dhat-256/work/observed.txt": {
+    "exploratory/pilot-008-profile/imre-dhat-256/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-008-profile/relar-dhat-256/work/reference.txt": {
+    "exploratory/pilot-008-profile/imre-dhat-256/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-008-profile/relar-dhat-256/work/report.txt": {
+    "exploratory/pilot-008-profile/imre-dhat-256/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -2236,7 +2236,7 @@
       "mode": 420,
       "sha256": "5cede463003b6000f497cad2597419a5f9098180053c0692333469553c69a0cb"
     },
-    "exploratory/pilot-009-audit/relar-telemetry-candidate-009-audit.json": {
+    "exploratory/pilot-009-audit/imre-telemetry-candidate-009-audit.json": {
       "bytes": 10015,
       "mode": 420,
       "sha256": "2ed6ced608e110e3e1eeb5e91aa3202516f997438dc752eeede09c45be8698c8"
@@ -2306,147 +2306,147 @@
       "mode": 420,
       "sha256": "61f2e8a59d092473ef1e8557fc40ce0033d9aeb59a5e8eff2cbe00f3ba53fa05"
     },
-    "exploratory/pilot-009-profile/relar-build-record.json": {
+    "exploratory/pilot-009-profile/imre-build-record.json": {
       "bytes": 19237,
       "mode": 420,
       "sha256": "c544e6450911b3d1f74a532230a3692ee4e36e4f368f6cd48d6acf2a880f5d8d"
     },
-    "exploratory/pilot-009-profile/relar-callgrind-128/command.json": {
+    "exploratory/pilot-009-profile/imre-callgrind-128/command.json": {
       "bytes": 76990,
       "mode": 420,
       "sha256": "67f25a37677d60c41f5d267b970546f15fbb4514b7872e9ed5aa9f05a33537d8"
     },
-    "exploratory/pilot-009-profile/relar-callgrind-128/inclusive-no-stderr.txt": {
+    "exploratory/pilot-009-profile/imre-callgrind-128/inclusive-no-stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-009-profile/relar-callgrind-128/inclusive-no.txt": {
+    "exploratory/pilot-009-profile/imre-callgrind-128/inclusive-no.txt": {
       "bytes": 77553,
       "mode": 420,
       "sha256": "7cc35c81c24acb377bccc3158fb3ccdb82327f3b39a18be481e59e3abbed4ecf"
     },
-    "exploratory/pilot-009-profile/relar-callgrind-128/inclusive-yes-stderr.txt": {
+    "exploratory/pilot-009-profile/imre-callgrind-128/inclusive-yes-stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-009-profile/relar-callgrind-128/inclusive-yes.txt": {
+    "exploratory/pilot-009-profile/imre-callgrind-128/inclusive-yes.txt": {
       "bytes": 78181,
       "mode": 420,
       "sha256": "fa255b5e956f9a4bc6df6e26eea8750f54aebd0657bf0d268ce659891b854501"
     },
-    "exploratory/pilot-009-profile/relar-callgrind-128/profile.callgrind": {
+    "exploratory/pilot-009-profile/imre-callgrind-128/profile.callgrind": {
       "bytes": 272631,
       "mode": 420,
       "sha256": "293e3a85de3469c963f59d2274e3d52fdfa367d62ebefa8201211e18d97dc15d"
     },
-    "exploratory/pilot-009-profile/relar-callgrind-128/stderr.txt": {
+    "exploratory/pilot-009-profile/imre-callgrind-128/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-009-profile/relar-callgrind-128/stdout.txt": {
+    "exploratory/pilot-009-profile/imre-callgrind-128/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-009-profile/relar-callgrind-128/valgrind.log": {
+    "exploratory/pilot-009-profile/imre-callgrind-128/valgrind.log": {
       "bytes": 523,
       "mode": 420,
       "sha256": "0b8aebd0fd097b5786736d608bdc52ee63333892c6a144d41dce3fd65c4a182b"
     },
-    "exploratory/pilot-009-profile/relar-callgrind-128/work/observed.txt": {
+    "exploratory/pilot-009-profile/imre-callgrind-128/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-009-profile/relar-callgrind-128/work/reference.txt": {
+    "exploratory/pilot-009-profile/imre-callgrind-128/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-009-profile/relar-callgrind-128/work/report.txt": {
+    "exploratory/pilot-009-profile/imre-callgrind-128/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "exploratory/pilot-009-profile/relar-dhat-128/command.json": {
+    "exploratory/pilot-009-profile/imre-dhat-128/command.json": {
       "bytes": 17155,
       "mode": 420,
       "sha256": "0b37435ee23187449a42446144aca09c6fd4f6986a227f9b225a5d3a818ef1db"
     },
-    "exploratory/pilot-009-profile/relar-dhat-128/profile.json": {
+    "exploratory/pilot-009-profile/imre-dhat-128/profile.json": {
       "bytes": 41010,
       "mode": 420,
       "sha256": "2d20271234f6d7eb9505e546520abbaf1bb5766774ca251fc35f696de41fe822"
     },
-    "exploratory/pilot-009-profile/relar-dhat-128/stderr.txt": {
+    "exploratory/pilot-009-profile/imre-dhat-128/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-009-profile/relar-dhat-128/stdout.txt": {
+    "exploratory/pilot-009-profile/imre-dhat-128/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-009-profile/relar-dhat-128/valgrind.log": {
+    "exploratory/pilot-009-profile/imre-dhat-128/valgrind.log": {
       "bytes": 892,
       "mode": 420,
       "sha256": "faa94e4f6475e12c0cec4d6fec92c3b08a724d8dc86a8d5b26113242e994b486"
     },
-    "exploratory/pilot-009-profile/relar-dhat-128/work/observed.txt": {
+    "exploratory/pilot-009-profile/imre-dhat-128/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-009-profile/relar-dhat-128/work/reference.txt": {
+    "exploratory/pilot-009-profile/imre-dhat-128/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-009-profile/relar-dhat-128/work/report.txt": {
+    "exploratory/pilot-009-profile/imre-dhat-128/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "exploratory/pilot-009-profile/relar-dhat-256/command.json": {
+    "exploratory/pilot-009-profile/imre-dhat-256/command.json": {
       "bytes": 17156,
       "mode": 420,
       "sha256": "542b4f241242b0b69e44e700091aebbea69b1be41fa58708a67007d31c0c47f1"
     },
-    "exploratory/pilot-009-profile/relar-dhat-256/profile.json": {
+    "exploratory/pilot-009-profile/imre-dhat-256/profile.json": {
       "bytes": 41012,
       "mode": 420,
       "sha256": "63f1c21be08279fa737603f07002adfbb105d95621ad84de940b994c5276458f"
     },
-    "exploratory/pilot-009-profile/relar-dhat-256/stderr.txt": {
+    "exploratory/pilot-009-profile/imre-dhat-256/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-009-profile/relar-dhat-256/stdout.txt": {
+    "exploratory/pilot-009-profile/imre-dhat-256/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-009-profile/relar-dhat-256/valgrind.log": {
+    "exploratory/pilot-009-profile/imre-dhat-256/valgrind.log": {
       "bytes": 892,
       "mode": 420,
       "sha256": "336fb850ba56ee2590a7aa46620e8dc7986eac7ce5b1aa4a5817fc81ce856422"
     },
-    "exploratory/pilot-009-profile/relar-dhat-256/work/observed.txt": {
+    "exploratory/pilot-009-profile/imre-dhat-256/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-009-profile/relar-dhat-256/work/reference.txt": {
+    "exploratory/pilot-009-profile/imre-dhat-256/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-009-profile/relar-dhat-256/work/report.txt": {
+    "exploratory/pilot-009-profile/imre-dhat-256/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -2611,7 +2611,7 @@
       "mode": 420,
       "sha256": "ae8bcab84871ae2be91c9085967c5f81e51653aa03fd89c04df4418f6d0a84d3"
     },
-    "exploratory/pilot-010-audit/relar-telemetry-candidate-010-audit.json": {
+    "exploratory/pilot-010-audit/imre-telemetry-candidate-010-audit.json": {
       "bytes": 9995,
       "mode": 420,
       "sha256": "fe62c3e6f77b1fc35fc9eb619c878b67c368123289dcebedf4193a972954af15"
@@ -2681,147 +2681,147 @@
       "mode": 420,
       "sha256": "61f2e8a59d092473ef1e8557fc40ce0033d9aeb59a5e8eff2cbe00f3ba53fa05"
     },
-    "exploratory/pilot-010-profile/relar-build-record.json": {
+    "exploratory/pilot-010-profile/imre-build-record.json": {
       "bytes": 19360,
       "mode": 420,
       "sha256": "8097d46ad85ec1f91569529a8956a9d178120ef9cc8c72ffb49176b8f76c6422"
     },
-    "exploratory/pilot-010-profile/relar-callgrind-128/command.json": {
+    "exploratory/pilot-010-profile/imre-callgrind-128/command.json": {
       "bytes": 76988,
       "mode": 420,
       "sha256": "5186171a1127a9f1f0593d4361069a21c278ab2ca55befea02ac54e57e1a3707"
     },
-    "exploratory/pilot-010-profile/relar-callgrind-128/inclusive-no-stderr.txt": {
+    "exploratory/pilot-010-profile/imre-callgrind-128/inclusive-no-stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-010-profile/relar-callgrind-128/inclusive-no.txt": {
+    "exploratory/pilot-010-profile/imre-callgrind-128/inclusive-no.txt": {
       "bytes": 77553,
       "mode": 420,
       "sha256": "4bd5b270dad652e095bbbcce7afc0f6e25e367a393fdca780400486d25885ae5"
     },
-    "exploratory/pilot-010-profile/relar-callgrind-128/inclusive-yes-stderr.txt": {
+    "exploratory/pilot-010-profile/imre-callgrind-128/inclusive-yes-stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-010-profile/relar-callgrind-128/inclusive-yes.txt": {
+    "exploratory/pilot-010-profile/imre-callgrind-128/inclusive-yes.txt": {
       "bytes": 78181,
       "mode": 420,
       "sha256": "fdbaf83d0f532e98d3e216499c20c7aaa1189c238da70d4afcbbfea7826c8c17"
     },
-    "exploratory/pilot-010-profile/relar-callgrind-128/profile.callgrind": {
+    "exploratory/pilot-010-profile/imre-callgrind-128/profile.callgrind": {
       "bytes": 272308,
       "mode": 420,
       "sha256": "1bb1d7b4089fe2c8f9b6465ee0c2f2f2b6c4eb236572a26908a42a37745393e4"
     },
-    "exploratory/pilot-010-profile/relar-callgrind-128/stderr.txt": {
+    "exploratory/pilot-010-profile/imre-callgrind-128/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-010-profile/relar-callgrind-128/stdout.txt": {
+    "exploratory/pilot-010-profile/imre-callgrind-128/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-010-profile/relar-callgrind-128/valgrind.log": {
+    "exploratory/pilot-010-profile/imre-callgrind-128/valgrind.log": {
       "bytes": 523,
       "mode": 420,
       "sha256": "d45fdb3bf762e718e8a33bfa4da5da83feeb45cb82e9f1e4a889ed93a815a28c"
     },
-    "exploratory/pilot-010-profile/relar-callgrind-128/work/observed.txt": {
+    "exploratory/pilot-010-profile/imre-callgrind-128/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-010-profile/relar-callgrind-128/work/reference.txt": {
+    "exploratory/pilot-010-profile/imre-callgrind-128/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-010-profile/relar-callgrind-128/work/report.txt": {
+    "exploratory/pilot-010-profile/imre-callgrind-128/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "exploratory/pilot-010-profile/relar-dhat-128/command.json": {
+    "exploratory/pilot-010-profile/imre-dhat-128/command.json": {
       "bytes": 17155,
       "mode": 420,
       "sha256": "cef855be5fa08252e1b6706860bc1ea6bc44369889b19ace96c568840a881b79"
     },
-    "exploratory/pilot-010-profile/relar-dhat-128/profile.json": {
+    "exploratory/pilot-010-profile/imre-dhat-128/profile.json": {
       "bytes": 41009,
       "mode": 420,
       "sha256": "f38d607e3e4b8c034eaa9cdf322bf2e37e05f4c77f5a34f61368020076e4e2ec"
     },
-    "exploratory/pilot-010-profile/relar-dhat-128/stderr.txt": {
+    "exploratory/pilot-010-profile/imre-dhat-128/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-010-profile/relar-dhat-128/stdout.txt": {
+    "exploratory/pilot-010-profile/imre-dhat-128/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-010-profile/relar-dhat-128/valgrind.log": {
+    "exploratory/pilot-010-profile/imre-dhat-128/valgrind.log": {
       "bytes": 892,
       "mode": 420,
       "sha256": "fb3921c017955a7c4320cf25bafb8b16eb6fb463c33e429071e9ae2693a138ee"
     },
-    "exploratory/pilot-010-profile/relar-dhat-128/work/observed.txt": {
+    "exploratory/pilot-010-profile/imre-dhat-128/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-010-profile/relar-dhat-128/work/reference.txt": {
+    "exploratory/pilot-010-profile/imre-dhat-128/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-010-profile/relar-dhat-128/work/report.txt": {
+    "exploratory/pilot-010-profile/imre-dhat-128/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "exploratory/pilot-010-profile/relar-dhat-256/command.json": {
+    "exploratory/pilot-010-profile/imre-dhat-256/command.json": {
       "bytes": 17156,
       "mode": 420,
       "sha256": "b91956828b1fee9a9fbbc2a121950ee41bd85426493049ff0e468b372f0379ff"
     },
-    "exploratory/pilot-010-profile/relar-dhat-256/profile.json": {
+    "exploratory/pilot-010-profile/imre-dhat-256/profile.json": {
       "bytes": 41012,
       "mode": 420,
       "sha256": "6133aa4963da102f184aefb79f917e8be73ea0c125f4bca20cadb5186feed338"
     },
-    "exploratory/pilot-010-profile/relar-dhat-256/stderr.txt": {
+    "exploratory/pilot-010-profile/imre-dhat-256/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "exploratory/pilot-010-profile/relar-dhat-256/stdout.txt": {
+    "exploratory/pilot-010-profile/imre-dhat-256/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "exploratory/pilot-010-profile/relar-dhat-256/valgrind.log": {
+    "exploratory/pilot-010-profile/imre-dhat-256/valgrind.log": {
       "bytes": 892,
       "mode": 420,
       "sha256": "b404987e846237b057f9dd0dfade3dc2063368ad483ae530c25eff85c30902e0"
     },
-    "exploratory/pilot-010-profile/relar-dhat-256/work/observed.txt": {
+    "exploratory/pilot-010-profile/imre-dhat-256/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "exploratory/pilot-010-profile/relar-dhat-256/work/reference.txt": {
+    "exploratory/pilot-010-profile/imre-dhat-256/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "exploratory/pilot-010-profile/relar-dhat-256/work/report.txt": {
+    "exploratory/pilot-010-profile/imre-dhat-256/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -2986,22 +2986,22 @@
       "mode": 420,
       "sha256": "100fe17938d84112df4435aa5975a6565899a63f564facb4debf77b49b888196"
     },
-    "exploratory/pilot-audit/relar-telemetry-candidate-audit.py": {
+    "exploratory/pilot-audit/imre-telemetry-candidate-audit.py": {
       "bytes": 35438,
       "mode": 420,
       "sha256": "e9481b4d29553e59ff179cb377bcee84f860f764060115ca797c5b2681992b9c"
     },
-    "exploratory/pilot-profile/relar-telemetry-profile.py": {
+    "exploratory/pilot-profile/imre-telemetry-profile.py": {
       "bytes": 23772,
       "mode": 420,
       "sha256": "61f2e8a59d092473ef1e8557fc40ce0033d9aeb59a5e8eff2cbe00f3ba53fa05"
     },
-    "exploratory/publication-commands/relar-iterator-performance-publication-commands.json": {
+    "exploratory/publication-commands/imre-iterator-performance-publication-commands.json": {
       "bytes": 13076,
       "mode": 420,
       "sha256": "2af4526d57b643ae815921bdb2a6f94b8f0a0c6b8a89c81b9509b5a0dfa7191e"
     },
-    "exploratory/publication-plan/relar-iterator-performance-publication-plan.md": {
+    "exploratory/publication-plan/imre-iterator-performance-publication-plan.md": {
       "bytes": 18326,
       "mode": 420,
       "sha256": "858d9b6969056ce3502720924469c033f5bc8c37983483dc2ee6f9d5524cfc5f"
@@ -3011,17 +3011,17 @@
       "mode": 420,
       "sha256": "4b24c52a2a7f830cedad6f0d934385a823139f8302bce90845f58f5b0f7af3b2"
     },
-    "exploratory/relocation-adapter/relar-telemetry-relocate-plan.py": {
+    "exploratory/relocation-adapter/imre-telemetry-relocate-plan.py": {
       "bytes": 7153,
       "mode": 420,
       "sha256": "6a4025aca7fa4ab21ccb60e1dcca78ebcf51a32a4d29a179a136c76e4cb3a0e4"
     },
-    "exploratory/relocation-audit/relar-telemetry-candidate-006-relocation-audit.json": {
+    "exploratory/relocation-audit/imre-telemetry-candidate-006-relocation-audit.json": {
       "bytes": 6549,
       "mode": 420,
       "sha256": "1b4a17bbfc053e94bc2ec779a6a2559d68ade2a29012dc64d84f0e80fe404f51"
     },
-    "exploratory/relocation-auditor/relar-telemetry-relocation-audit.py": {
+    "exploratory/relocation-auditor/imre-telemetry-relocation-audit.py": {
       "bytes": 9021,
       "mode": 420,
       "sha256": "65f1f83d299f44905bc469b1a64c0bbb91a6579304b69b21febb9a4451e2a44d"
@@ -3041,17 +3041,17 @@
       "mode": 420,
       "sha256": "9e268e75cd06361e89f4219efecd08306388a7253341f5963506bad991628b09"
     },
-    "exploratory/rename-closure-derivation/relar-rename-public-closure.py": {
+    "exploratory/rename-closure-derivation/imre-rename-public-closure.py": {
       "bytes": 5638,
       "mode": 420,
       "sha256": "fa7a6a1ceee1ca25b3141b03d1084438497f92babfa69b8d79bccf568b28edca"
     },
-    "exploratory/rename-closure/relar-rename-public-closure.json": {
+    "exploratory/rename-closure/imre-rename-public-closure.json": {
       "bytes": 2489,
       "mode": 420,
       "sha256": "e2d3121b242d6d56f0d0d9f8535cab200860f8e86ab225459afb02449c1d2796"
     },
-    "exploratory/report-renderer/relar-iterator-performance-render-report.py": {
+    "exploratory/report-renderer/imre-iterator-performance-render-report.py": {
       "bytes": 27603,
       "mode": 420,
       "sha256": "adc8d57fc86360cb583fd09ec7a7bb6f569375f1c1fdabd7f3dc1aefbad8486e"
@@ -3061,7 +3061,7 @@
       "mode": 420,
       "sha256": "dcecc02513c26dd12ae869206d14c6e37c7643a328a0c354bfdb510b62ff7f2b"
     },
-    "exploratory/toolchain-setup/relar-pinned-ohm-setup.json": {
+    "exploratory/toolchain-setup/imre-pinned-ohm-setup.json": {
       "bytes": 411,
       "mode": 420,
       "sha256": "2c8adb3638b2df5721268fd3030394c80e32c89e70136e9f4caf9af5e08eaef5"
@@ -3116,17 +3116,17 @@
       "mode": 420,
       "sha256": "95bfb3e06c8d8cd47eb48eb5a1356b46444e981b467fc6d328f715f81b99d4d8"
     },
-    "helpers/planned/relar-telemetry-evidence.py": {
+    "helpers/planned/imre-telemetry-evidence.py": {
       "bytes": 13967,
       "mode": 420,
       "sha256": "6a203489299e5554b6f19a8c9b877a3a2d8fb45a8c34f9c693b3bb5b85107d01"
     },
-    "helpers/planned/relar-telemetry-final-evidence.py": {
+    "helpers/planned/imre-telemetry-final-evidence.py": {
       "bytes": 19274,
       "mode": 420,
       "sha256": "b8a824bbf58bfb5b97250b0d6110f77973cc7cbf887b086dd310303787dc2862"
     },
-    "helpers/planned/relar-telemetry-pilot.py": {
+    "helpers/planned/imre-telemetry-pilot.py": {
       "bytes": 8585,
       "mode": 420,
       "sha256": "e69533dc27f14c6159dcb0d97f7778f633823d4a6cf0aec36a81b1e9b74c0c9d"
@@ -3301,147 +3301,147 @@
       "mode": 420,
       "sha256": "0ac7a494c318de634bb18495c39d19b89f0be31af0c9baa40f1e3635dc988ccf"
     },
-    "profiles/final/relar-build-record.json": {
+    "profiles/final/imre-build-record.json": {
       "bytes": 19505,
       "mode": 420,
       "sha256": "8845cf5690cc70de723de138389a5685a44526ba214a93948b9d7f07c3dba2b1"
     },
-    "profiles/final/relar-callgrind-128/command.json": {
+    "profiles/final/imre-callgrind-128/command.json": {
       "bytes": 76841,
       "mode": 420,
       "sha256": "0f8879c54eb9320fcbe8730b0d739644a421557df68f90ca1526991d23f070bf"
     },
-    "profiles/final/relar-callgrind-128/inclusive-no-stderr.txt": {
+    "profiles/final/imre-callgrind-128/inclusive-no-stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/final/relar-callgrind-128/inclusive-no.txt": {
+    "profiles/final/imre-callgrind-128/inclusive-no.txt": {
       "bytes": 77973,
       "mode": 420,
       "sha256": "1d5d673a9e625468f30a70517d8001f28a12b021346f65adc321efe277cfc4c0"
     },
-    "profiles/final/relar-callgrind-128/inclusive-yes-stderr.txt": {
+    "profiles/final/imre-callgrind-128/inclusive-yes-stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/final/relar-callgrind-128/inclusive-yes.txt": {
+    "profiles/final/imre-callgrind-128/inclusive-yes.txt": {
       "bytes": 78601,
       "mode": 420,
       "sha256": "2fba284311ae7e6526309fbd89184f0b2581b962a1b76a60da75f8c15e5b27fd"
     },
-    "profiles/final/relar-callgrind-128/profile.callgrind": {
+    "profiles/final/imre-callgrind-128/profile.callgrind": {
       "bytes": 272407,
       "mode": 420,
       "sha256": "725981d0f7f1d36980d764757ea58b8b3d71af45b2e926d76ffea7148408a4aa"
     },
-    "profiles/final/relar-callgrind-128/stderr.txt": {
+    "profiles/final/imre-callgrind-128/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/final/relar-callgrind-128/stdout.txt": {
+    "profiles/final/imre-callgrind-128/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "profiles/final/relar-callgrind-128/valgrind.log": {
+    "profiles/final/imre-callgrind-128/valgrind.log": {
       "bytes": 528,
       "mode": 420,
       "sha256": "3959b689c058a5776ddd71eff50674cfa4d2853039f3755e8b7b2cc159cbf1e1"
     },
-    "profiles/final/relar-callgrind-128/work/observed.txt": {
+    "profiles/final/imre-callgrind-128/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "profiles/final/relar-callgrind-128/work/reference.txt": {
+    "profiles/final/imre-callgrind-128/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "profiles/final/relar-callgrind-128/work/report.txt": {
+    "profiles/final/imre-callgrind-128/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "profiles/final/relar-dhat-128/command.json": {
+    "profiles/final/imre-dhat-128/command.json": {
       "bytes": 17515,
       "mode": 420,
       "sha256": "bcc5514fa8b89d205151c8217f4865e8d9ac46f8e91b82178aec138948f4f925"
     },
-    "profiles/final/relar-dhat-128/profile.json": {
+    "profiles/final/imre-dhat-128/profile.json": {
       "bytes": 41238,
       "mode": 420,
       "sha256": "43378ddf3d1158696daddb1753424d4e98bc72810e70763b3ef31bff6b726454"
     },
-    "profiles/final/relar-dhat-128/stderr.txt": {
+    "profiles/final/imre-dhat-128/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/final/relar-dhat-128/stdout.txt": {
+    "profiles/final/imre-dhat-128/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "profiles/final/relar-dhat-128/valgrind.log": {
+    "profiles/final/imre-dhat-128/valgrind.log": {
       "bytes": 892,
       "mode": 420,
       "sha256": "9a5d4f588005050bd85beabd782cd7372f76de9193ae62c1c5fd132d9627b625"
     },
-    "profiles/final/relar-dhat-128/work/observed.txt": {
+    "profiles/final/imre-dhat-128/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "profiles/final/relar-dhat-128/work/reference.txt": {
+    "profiles/final/imre-dhat-128/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "profiles/final/relar-dhat-128/work/report.txt": {
+    "profiles/final/imre-dhat-128/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "profiles/final/relar-dhat-256/command.json": {
+    "profiles/final/imre-dhat-256/command.json": {
       "bytes": 17516,
       "mode": 420,
       "sha256": "fd421b678b3df53048f2a87f9873c31e395f1f00757ff7bef98d94045e38adce"
     },
-    "profiles/final/relar-dhat-256/profile.json": {
+    "profiles/final/imre-dhat-256/profile.json": {
       "bytes": 41241,
       "mode": 420,
       "sha256": "175ff5309e14348668e952619e3a11c9c42e76dccaa90207eccf23a25e899049"
     },
-    "profiles/final/relar-dhat-256/stderr.txt": {
+    "profiles/final/imre-dhat-256/stderr.txt": {
       "bytes": 0,
       "mode": 420,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "profiles/final/relar-dhat-256/stdout.txt": {
+    "profiles/final/imre-dhat-256/stdout.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "cc780f8178fb5da596e566bed520b9c2ac2cf8848a997354c563b077403ea4de"
     },
-    "profiles/final/relar-dhat-256/valgrind.log": {
+    "profiles/final/imre-dhat-256/valgrind.log": {
       "bytes": 892,
       "mode": 420,
       "sha256": "faab7b6e8a29d100d461a57d95dbc0a142328ca3d717a8087262f63845b9907e"
     },
-    "profiles/final/relar-dhat-256/work/observed.txt": {
+    "profiles/final/imre-dhat-256/work/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "profiles/final/relar-dhat-256/work/reference.txt": {
+    "profiles/final/imre-dhat-256/work/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "profiles/final/relar-dhat-256/work/report.txt": {
+    "profiles/final/imre-dhat-256/work/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -4001,252 +4001,252 @@
       "mode": 420,
       "sha256": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49"
     },
-    "source/crates/relar-compiler/Cargo.toml": {
+    "source/crates/imre-compiler/Cargo.toml": {
       "bytes": 619,
       "mode": 420,
       "sha256": "dc845abdf585abf868bda78ecca4fb58340eb37c508be8bb604f5b83e9143e26"
     },
-    "source/crates/relar-compiler/src/analysis.rs": {
+    "source/crates/imre-compiler/src/analysis.rs": {
       "bytes": 8192,
       "mode": 420,
       "sha256": "bf56cfa7c515ba6f053b03e126d101657923dd7d5c50ad5ada21e92e3624bd95"
     },
-    "source/crates/relar-compiler/src/borrows.rs": {
+    "source/crates/imre-compiler/src/borrows.rs": {
       "bytes": 34892,
       "mode": 420,
       "sha256": "a2086cac1fc49aac8a2b903a8633c0ae88dde26f79656c0519ec1fe479a68dda"
     },
-    "source/crates/relar-compiler/src/classes.rs": {
+    "source/crates/imre-compiler/src/classes.rs": {
       "bytes": 10667,
       "mode": 420,
       "sha256": "6a814832cb34bed165e4f146d5b31e1d4e221763ff9a0b5766de8353d0c237c5"
     },
-    "source/crates/relar-compiler/src/effects.rs": {
+    "source/crates/imre-compiler/src/effects.rs": {
       "bytes": 17245,
       "mode": 420,
       "sha256": "9381a4f8b262f2a8dd2836814a240b4ad16eca3f12db026e58ec7b3cce1c59a3"
     },
-    "source/crates/relar-compiler/src/frontend.rs": {
+    "source/crates/imre-compiler/src/frontend.rs": {
       "bytes": 136669,
       "mode": 420,
       "sha256": "81e43ab75bdd35f97c8125b5df44cb1c33e11a49a064aecd31c5e13d95d881be"
     },
-    "source/crates/relar-compiler/src/frontend/assignments.rs": {
+    "source/crates/imre-compiler/src/frontend/assignments.rs": {
       "bytes": 4884,
       "mode": 420,
       "sha256": "a57afd5e332eac11967df5ba970f9531e34c68f9c750544a53998491c932a920"
     },
-    "source/crates/relar-compiler/src/frontend/calls.rs": {
+    "source/crates/imre-compiler/src/frontend/calls.rs": {
       "bytes": 8063,
       "mode": 420,
       "sha256": "a9feaaef898fb693af8b077b18cfa3131c3339e5277ea27c180568993bd9eb30"
     },
-    "source/crates/relar-compiler/src/frontend/comprehensions.rs": {
+    "source/crates/imre-compiler/src/frontend/comprehensions.rs": {
       "bytes": 33254,
       "mode": 420,
       "sha256": "6fedd428646ea1f0c8d3955efc91261808e09c8427af8d826d0fddfdcd43fa31"
     },
-    "source/crates/relar-compiler/src/frontend/comprehensions/slices.rs": {
+    "source/crates/imre-compiler/src/frontend/comprehensions/slices.rs": {
       "bytes": 7042,
       "mode": 420,
       "sha256": "cb395ca6ff5547532ab1178cb45d1ca03fb03b370a76b17e8cce825d4cfea6c4"
     },
-    "source/crates/relar-compiler/src/frontend/expansions.rs": {
+    "source/crates/imre-compiler/src/frontend/expansions.rs": {
       "bytes": 21141,
       "mode": 420,
       "sha256": "298b0dddf6dbcfd412fbfdd22a0ed3928d5452e90c73e558baa274f671ff7d2f"
     },
-    "source/crates/relar-compiler/src/frontend/inference.rs": {
+    "source/crates/imre-compiler/src/frontend/inference.rs": {
       "bytes": 10257,
       "mode": 420,
       "sha256": "a876932206b4aac2dc44001069b724bed048ae82680eefc56a67d95a5d6dd0b0"
     },
-    "source/crates/relar-compiler/src/frontend/iterables.rs": {
+    "source/crates/imre-compiler/src/frontend/iterables.rs": {
       "bytes": 12698,
       "mode": 420,
       "sha256": "3d63e0fcabaf7de102a58a08566169a2e1b5b25036e0dfdab3ca3c94da6d3f32"
     },
-    "source/crates/relar-compiler/src/frontend/matching.rs": {
+    "source/crates/imre-compiler/src/frontend/matching.rs": {
       "bytes": 38296,
       "mode": 420,
       "sha256": "a773a2ea540e6f02c12e872aa22b605d34e06be7f8c37ac054e8bb3d1e3c926e"
     },
-    "source/crates/relar-compiler/src/frontend/module_values.rs": {
+    "source/crates/imre-compiler/src/frontend/module_values.rs": {
       "bytes": 6338,
       "mode": 420,
       "sha256": "a7d6ef3f5ed4f446a59231290e809f8ce505f1f3bce816bb5ac4520bf9153668"
     },
-    "source/crates/relar-compiler/src/frontend/pipelines.rs": {
+    "source/crates/imre-compiler/src/frontend/pipelines.rs": {
       "bytes": 46681,
       "mode": 420,
       "sha256": "4ef5028f95dc00992304c7b457d7e0131b30e1fa4957dfd39100884a30036e3f"
     },
-    "source/crates/relar-compiler/src/frontend/truthiness.rs": {
+    "source/crates/imre-compiler/src/frontend/truthiness.rs": {
       "bytes": 6115,
       "mode": 420,
       "sha256": "cfabe32776fd75c3ed0d5f9d73b59f1fcb5e02fce394979d92a31261756a37fe"
     },
-    "source/crates/relar-compiler/src/frontend/unions.rs": {
+    "source/crates/imre-compiler/src/frontend/unions.rs": {
       "bytes": 9559,
       "mode": 420,
       "sha256": "3b649582a176b5e8b3e11087f4e7673c03e52849dd72ef8eaa4eb4ccff4575d5"
     },
-    "source/crates/relar-compiler/src/frontend/unpacking.rs": {
+    "source/crates/imre-compiler/src/frontend/unpacking.rs": {
       "bytes": 23778,
       "mode": 420,
       "sha256": "a99d5a5c34daaeaf24dc15f3eccec808f6e1f023e2976a88dd11522e962cebf1"
     },
-    "source/crates/relar-compiler/src/ir.rs": {
+    "source/crates/imre-compiler/src/ir.rs": {
       "bytes": 18722,
       "mode": 420,
       "sha256": "0d682480e96c6713ee0eff1bbfa752ce74b409d363525cfcf1429f65d30fa1fc"
     },
-    "source/crates/relar-compiler/src/lib.rs": {
+    "source/crates/imre-compiler/src/lib.rs": {
       "bytes": 7240,
       "mode": 420,
       "sha256": "9823ddbdac89f6b0f86cce7950bce4521bbb189d663dadb4b3a5d8cd2118ddb4"
     },
-    "source/crates/relar-compiler/src/list_bounds.rs": {
+    "source/crates/imre-compiler/src/list_bounds.rs": {
       "bytes": 23774,
       "mode": 420,
       "sha256": "a49c4990d935091c57d66cf48d181baac3bc8dab4c6784b425299bbd95826b65"
     },
-    "source/crates/relar-compiler/src/list_specialization.rs": {
+    "source/crates/imre-compiler/src/list_specialization.rs": {
       "bytes": 35983,
       "mode": 420,
       "sha256": "98298d5a90e908af90cb2bcce48f9278a8738e79ad859d43ffb39423f4554d51"
     },
-    "source/crates/relar-compiler/src/llvm.rs": {
+    "source/crates/imre-compiler/src/llvm.rs": {
       "bytes": 192110,
       "mode": 420,
       "sha256": "9d03266917be2604ca369ddeb89cfa4c68755a28d5bae902dac92269e37ea8f4"
     },
-    "source/crates/relar-compiler/src/llvm/conditionals.rs": {
+    "source/crates/imre-compiler/src/llvm/conditionals.rs": {
       "bytes": 6458,
       "mode": 420,
       "sha256": "2e0463f23aaf7bcf74351d82536fcaf4bb53bc2b75c7a1e5367d39d1dfa85796"
     },
-    "source/crates/relar-compiler/src/llvm/integer_regions.rs": {
+    "source/crates/imre-compiler/src/llvm/integer_regions.rs": {
       "bytes": 17187,
       "mode": 420,
       "sha256": "d3168faaacc66d87657bbb913fa1a23fe083eb3f8a339c6c05b86897c4fbd8bf"
     },
-    "source/crates/relar-compiler/src/llvm/truthiness.rs": {
+    "source/crates/imre-compiler/src/llvm/truthiness.rs": {
       "bytes": 8071,
       "mode": 420,
       "sha256": "fae301b76c5cf18a2d4e88f8fb294b911b7f31794fd38d48a326e1dc194df78e"
     },
-    "source/crates/relar-compiler/src/llvm/unions.rs": {
+    "source/crates/imre-compiler/src/llvm/unions.rs": {
       "bytes": 3700,
       "mode": 420,
       "sha256": "8449e56e3d41d99ef076fd9f73c5fcbdf150205fb05a3e424d0d86a9114bb34a"
     },
-    "source/crates/relar-compiler/src/main.rs": {
+    "source/crates/imre-compiler/src/main.rs": {
       "bytes": 7785,
       "mode": 420,
       "sha256": "f8ddab45ff2562f15ce3a8ba644358b2f7499dcb052c1b1df6bfb06a072df95b"
     },
-    "source/crates/relar-compiler/src/modules.rs": {
+    "source/crates/imre-compiler/src/modules.rs": {
       "bytes": 22759,
       "mode": 420,
       "sha256": "657aab8784254ce013fda7ede720af1f6e1bf7b0d443172e3fd70c4d2103538e"
     },
-    "source/crates/relar-compiler/src/narrowing.rs": {
+    "source/crates/imre-compiler/src/narrowing.rs": {
       "bytes": 10056,
       "mode": 420,
       "sha256": "857ddb8b64f6d6bc380305f06581cf77923e3d5f197ea9edb871594d49427298"
     },
-    "source/crates/relar-compiler/src/range_specialization.rs": {
+    "source/crates/imre-compiler/src/range_specialization.rs": {
       "bytes": 18562,
       "mode": 420,
       "sha256": "38f56876e1f789bab8681ca00eb359da79e1403b991e091f265419f146d5e49d"
     },
-    "source/crates/relar-compiler/src/ranges.rs": {
+    "source/crates/imre-compiler/src/ranges.rs": {
       "bytes": 90555,
       "mode": 420,
       "sha256": "91665a1d14d6dd81fca6553dae91a3dd9ec8cf9286556964a1d8cd61afcca3a8"
     },
-    "source/crates/relar-compiler/src/reductions.rs": {
+    "source/crates/imre-compiler/src/reductions.rs": {
       "bytes": 31835,
       "mode": 420,
       "sha256": "137b517d00aaaa85d48ff0007f2e8763559ca7a6852270fc27d8c259551a2512"
     },
-    "source/crates/relar-compiler/src/tuples.rs": {
+    "source/crates/imre-compiler/src/tuples.rs": {
       "bytes": 34706,
       "mode": 420,
       "sha256": "8cb025d1d8bad4cc8424f51fbd959b6da14df173b52c6f5ae94719ce4d2c613d"
     },
-    "source/crates/relar-compiler/src/types.rs": {
+    "source/crates/imre-compiler/src/types.rs": {
       "bytes": 9520,
       "mode": 420,
       "sha256": "f83a88a2a6bd0fde9ebf5c92bfb0cc009c373236b209df146031b2a795073b51"
     },
-    "source/crates/relar-runtime/Cargo.toml": {
+    "source/crates/imre-runtime/Cargo.toml": {
       "bytes": 442,
       "mode": 420,
       "sha256": "c4b1ae43759c953db390fa7bbe0fd69120b58bd71075318176700463f4c11242"
     },
-    "source/crates/relar-runtime/src/floats.rs": {
+    "source/crates/imre-runtime/src/floats.rs": {
       "bytes": 18805,
       "mode": 420,
       "sha256": "f8a1513337174a2d8588a8990d2170aeb7a30ae6166d41240c7ef1fd403fcc03"
     },
-    "source/crates/relar-runtime/src/integer_text.rs": {
+    "source/crates/imre-runtime/src/integer_text.rs": {
       "bytes": 4438,
       "mode": 420,
       "sha256": "61483a52ce8c37bfe88e03413c7cd4027e39183d3d88fbf1977720a6c1c2bbdf"
     },
-    "source/crates/relar-runtime/src/lib.rs": {
+    "source/crates/imre-runtime/src/lib.rs": {
       "bytes": 87057,
       "mode": 420,
       "sha256": "24d4b6bebc2b621899428ca1697156180c90211fa24fb3ccf0915e7af86b99a1"
     },
-    "source/crates/relar-runtime/src/objects.rs": {
+    "source/crates/imre-runtime/src/objects.rs": {
       "bytes": 70899,
       "mode": 420,
       "sha256": "aed5ebffd33e776e3401fc5547fd1530a32a4b0d4348d4f7918a028d4ad41eac"
     },
-    "source/crates/relar-runtime/src/objects/args.rs": {
+    "source/crates/imre-runtime/src/objects/args.rs": {
       "bytes": 6724,
       "mode": 420,
       "sha256": "ae7d68f461819a46453e6904986993e681bf82b9b90401182d34b580836495af"
     },
-    "source/crates/relar-runtime/src/objects/bytes.rs": {
+    "source/crates/imre-runtime/src/objects/bytes.rs": {
       "bytes": 24830,
       "mode": 420,
       "sha256": "ad0351bf2b588031004e0dc7d7d564c8e8cef80dcf769e0827b251fa53bddf17"
     },
-    "source/crates/relar-runtime/src/objects/exceptions.rs": {
+    "source/crates/imre-runtime/src/objects/exceptions.rs": {
       "bytes": 33376,
       "mode": 420,
       "sha256": "71b06873aec04937ef2a1b40da9bd54d96c8be6840608073735df6310dc8247f"
     },
-    "source/crates/relar-runtime/src/objects/files.rs": {
+    "source/crates/imre-runtime/src/objects/files.rs": {
       "bytes": 26952,
       "mode": 420,
       "sha256": "a6ab9665b586a118e070b517fa674aa830a5ddfeb91465094612ec190d38ba93"
     },
-    "source/crates/relar-runtime/src/objects/mappings.rs": {
+    "source/crates/imre-runtime/src/objects/mappings.rs": {
       "bytes": 61496,
       "mode": 420,
       "sha256": "29e4500cdce65ff82d82a048c181b7b815db0a738291e5d8632ced03d2da6078"
     },
-    "source/crates/relar-runtime/src/objects/records.rs": {
+    "source/crates/imre-runtime/src/objects/records.rs": {
       "bytes": 13380,
       "mode": 420,
       "sha256": "6f595ec104e12cb739e763f4cab716431a7eecd2257d1500124c00a1ae43a937"
     },
-    "source/crates/relar-runtime/src/objects/sequences.rs": {
+    "source/crates/imre-runtime/src/objects/sequences.rs": {
       "bytes": 37988,
       "mode": 420,
       "sha256": "4f2a69e3318106b6940cb27192beb78611e00433831e5141399ad3056b5030fa"
     },
-    "source/crates/relar-runtime/src/objects/unions.rs": {
+    "source/crates/imre-runtime/src/objects/unions.rs": {
       "bytes": 2895,
       "mode": 420,
       "sha256": "0be6d0c6e5c9307ae89e0a3073943a52920841746906e58da3233447171aa56d"
     },
-    "source/crates/relar-runtime/src/objects/words.rs": {
+    "source/crates/imre-runtime/src/objects/words.rs": {
       "bytes": 8029,
       "mode": 420,
       "sha256": "35cd65c47ffb128265a54e95b7ff20bed6b3787f667f5d9bb7a2e2c0df38c6cb"
@@ -5831,17 +5831,17 @@
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
     },
-    "timing/artifacts/early-normal/alert-early-16/relar/observed.txt": {
+    "timing/artifacts/early-normal/alert-early-16/imre/observed.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "ea22e9e92f859aa33bcec8844f814df63b97c04885a000deabdfc470a6aec1f4"
     },
-    "timing/artifacts/early-normal/alert-early-16/relar/reference.txt": {
+    "timing/artifacts/early-normal/alert-early-16/imre/reference.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "84974e35ed0454ae357773b8021164e60317887a5ca83caf442de4fee710b85a"
     },
-    "timing/artifacts/early-normal/alert-early-16/relar/report.txt": {
+    "timing/artifacts/early-normal/alert-early-16/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
@@ -5876,17 +5876,17 @@
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
     },
-    "timing/artifacts/early-normal/alert-early-256/relar/observed.txt": {
+    "timing/artifacts/early-normal/alert-early-256/imre/observed.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "5eab449c5d37d4de450ec562f61c8a1329ddf4a39a5bd92dc8c8edf96107af4c"
     },
-    "timing/artifacts/early-normal/alert-early-256/relar/reference.txt": {
+    "timing/artifacts/early-normal/alert-early-256/imre/reference.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "80935bc61afa69b800a779ea8e45141254388570785f4ef21fc0f3d2be7bc541"
     },
-    "timing/artifacts/early-normal/alert-early-256/relar/report.txt": {
+    "timing/artifacts/early-normal/alert-early-256/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
@@ -5921,17 +5921,17 @@
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
     },
-    "timing/artifacts/early-normal/alert-early-4096/relar/observed.txt": {
+    "timing/artifacts/early-normal/alert-early-4096/imre/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "756ab77e97910edf05b1bb6d5456bba2e14090de2c18d2414f790abcce3cbd55"
     },
-    "timing/artifacts/early-normal/alert-early-4096/relar/reference.txt": {
+    "timing/artifacts/early-normal/alert-early-4096/imre/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "timing/artifacts/early-normal/alert-early-4096/relar/report.txt": {
+    "timing/artifacts/early-normal/alert-early-4096/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
@@ -5966,17 +5966,17 @@
       "mode": 420,
       "sha256": "6a60ff4a30944fc24a3c9fa13d195d6cd9611e75db9351afcfe887ae334ace9c"
     },
-    "timing/artifacts/early-normal/empty-control/relar/observed.txt": {
+    "timing/artifacts/early-normal/empty-control/imre/observed.txt": {
       "bytes": 2,
       "mode": 420,
       "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
     },
-    "timing/artifacts/early-normal/empty-control/relar/reference.txt": {
+    "timing/artifacts/early-normal/empty-control/imre/reference.txt": {
       "bytes": 2,
       "mode": 420,
       "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
     },
-    "timing/artifacts/early-normal/empty-control/relar/report.txt": {
+    "timing/artifacts/early-normal/empty-control/imre/report.txt": {
       "bytes": 108,
       "mode": 420,
       "sha256": "6a60ff4a30944fc24a3c9fa13d195d6cd9611e75db9351afcfe887ae334ace9c"
@@ -6011,17 +6011,17 @@
       "mode": 420,
       "sha256": "4af17ac1f0338a7edc5c275899123a6daa8de1288879faf955d995960629fa92"
     },
-    "timing/artifacts/early-normal/latest-recent-16/relar/observed.txt": {
+    "timing/artifacts/early-normal/latest-recent-16/imre/observed.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "97bb646dd57c73ee9cf21c6ce800a6bd3e3dec37c2855b0a9cad9ce7f22d29a7"
     },
-    "timing/artifacts/early-normal/latest-recent-16/relar/reference.txt": {
+    "timing/artifacts/early-normal/latest-recent-16/imre/reference.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "84974e35ed0454ae357773b8021164e60317887a5ca83caf442de4fee710b85a"
     },
-    "timing/artifacts/early-normal/latest-recent-16/relar/report.txt": {
+    "timing/artifacts/early-normal/latest-recent-16/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "4af17ac1f0338a7edc5c275899123a6daa8de1288879faf955d995960629fa92"
@@ -6056,17 +6056,17 @@
       "mode": 420,
       "sha256": "ad329864c706f2d53683b6951e0d85c047b7f62ecf021949631bcf0bc7f033f5"
     },
-    "timing/artifacts/early-normal/latest-recent-256/relar/observed.txt": {
+    "timing/artifacts/early-normal/latest-recent-256/imre/observed.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "047cf94c3c252bc9ead9b9044a01c3ebdb8d1d0e795ce8e32c04a122c7158aeb"
     },
-    "timing/artifacts/early-normal/latest-recent-256/relar/reference.txt": {
+    "timing/artifacts/early-normal/latest-recent-256/imre/reference.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "80935bc61afa69b800a779ea8e45141254388570785f4ef21fc0f3d2be7bc541"
     },
-    "timing/artifacts/early-normal/latest-recent-256/relar/report.txt": {
+    "timing/artifacts/early-normal/latest-recent-256/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "ad329864c706f2d53683b6951e0d85c047b7f62ecf021949631bcf0bc7f033f5"
@@ -6101,17 +6101,17 @@
       "mode": 420,
       "sha256": "3d52434753b66cc1077bf528f0fb9789591410f2acfbc2ab7330a3b71b928882"
     },
-    "timing/artifacts/early-normal/latest-recent-4096/relar/observed.txt": {
+    "timing/artifacts/early-normal/latest-recent-4096/imre/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "61edd5d461490fb6cb75e6cfeeddc4b2585f332a0a6f1fcb6d14ec24b2001a65"
     },
-    "timing/artifacts/early-normal/latest-recent-4096/relar/reference.txt": {
+    "timing/artifacts/early-normal/latest-recent-4096/imre/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "timing/artifacts/early-normal/latest-recent-4096/relar/report.txt": {
+    "timing/artifacts/early-normal/latest-recent-4096/imre/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "3d52434753b66cc1077bf528f0fb9789591410f2acfbc2ab7330a3b71b928882"
@@ -6146,17 +6146,17 @@
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "timing/artifacts/early-normal/within-early-16/relar/observed.txt": {
+    "timing/artifacts/early-normal/within-early-16/imre/observed.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "ea22e9e92f859aa33bcec8844f814df63b97c04885a000deabdfc470a6aec1f4"
     },
-    "timing/artifacts/early-normal/within-early-16/relar/reference.txt": {
+    "timing/artifacts/early-normal/within-early-16/imre/reference.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "84974e35ed0454ae357773b8021164e60317887a5ca83caf442de4fee710b85a"
     },
-    "timing/artifacts/early-normal/within-early-16/relar/report.txt": {
+    "timing/artifacts/early-normal/within-early-16/imre/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -6191,17 +6191,17 @@
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "timing/artifacts/early-normal/within-early-256/relar/observed.txt": {
+    "timing/artifacts/early-normal/within-early-256/imre/observed.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "5eab449c5d37d4de450ec562f61c8a1329ddf4a39a5bd92dc8c8edf96107af4c"
     },
-    "timing/artifacts/early-normal/within-early-256/relar/reference.txt": {
+    "timing/artifacts/early-normal/within-early-256/imre/reference.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "80935bc61afa69b800a779ea8e45141254388570785f4ef21fc0f3d2be7bc541"
     },
-    "timing/artifacts/early-normal/within-early-256/relar/report.txt": {
+    "timing/artifacts/early-normal/within-early-256/imre/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -6236,17 +6236,17 @@
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "timing/artifacts/early-normal/within-early-4096/relar/observed.txt": {
+    "timing/artifacts/early-normal/within-early-4096/imre/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "756ab77e97910edf05b1bb6d5456bba2e14090de2c18d2414f790abcce3cbd55"
     },
-    "timing/artifacts/early-normal/within-early-4096/relar/reference.txt": {
+    "timing/artifacts/early-normal/within-early-4096/imre/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "timing/artifacts/early-normal/within-early-4096/relar/report.txt": {
+    "timing/artifacts/early-normal/within-early-4096/imre/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -6281,17 +6281,17 @@
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
     },
-    "timing/artifacts/early-thinlto/alert-early-16/relar/observed.txt": {
+    "timing/artifacts/early-thinlto/alert-early-16/imre/observed.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "ea22e9e92f859aa33bcec8844f814df63b97c04885a000deabdfc470a6aec1f4"
     },
-    "timing/artifacts/early-thinlto/alert-early-16/relar/reference.txt": {
+    "timing/artifacts/early-thinlto/alert-early-16/imre/reference.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "84974e35ed0454ae357773b8021164e60317887a5ca83caf442de4fee710b85a"
     },
-    "timing/artifacts/early-thinlto/alert-early-16/relar/report.txt": {
+    "timing/artifacts/early-thinlto/alert-early-16/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
@@ -6326,17 +6326,17 @@
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
     },
-    "timing/artifacts/early-thinlto/alert-early-256/relar/observed.txt": {
+    "timing/artifacts/early-thinlto/alert-early-256/imre/observed.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "5eab449c5d37d4de450ec562f61c8a1329ddf4a39a5bd92dc8c8edf96107af4c"
     },
-    "timing/artifacts/early-thinlto/alert-early-256/relar/reference.txt": {
+    "timing/artifacts/early-thinlto/alert-early-256/imre/reference.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "80935bc61afa69b800a779ea8e45141254388570785f4ef21fc0f3d2be7bc541"
     },
-    "timing/artifacts/early-thinlto/alert-early-256/relar/report.txt": {
+    "timing/artifacts/early-thinlto/alert-early-256/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
@@ -6371,17 +6371,17 @@
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
     },
-    "timing/artifacts/early-thinlto/alert-early-4096/relar/observed.txt": {
+    "timing/artifacts/early-thinlto/alert-early-4096/imre/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "756ab77e97910edf05b1bb6d5456bba2e14090de2c18d2414f790abcce3cbd55"
     },
-    "timing/artifacts/early-thinlto/alert-early-4096/relar/reference.txt": {
+    "timing/artifacts/early-thinlto/alert-early-4096/imre/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "timing/artifacts/early-thinlto/alert-early-4096/relar/report.txt": {
+    "timing/artifacts/early-thinlto/alert-early-4096/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
@@ -6416,17 +6416,17 @@
       "mode": 420,
       "sha256": "6a60ff4a30944fc24a3c9fa13d195d6cd9611e75db9351afcfe887ae334ace9c"
     },
-    "timing/artifacts/early-thinlto/empty-control/relar/observed.txt": {
+    "timing/artifacts/early-thinlto/empty-control/imre/observed.txt": {
       "bytes": 2,
       "mode": 420,
       "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
     },
-    "timing/artifacts/early-thinlto/empty-control/relar/reference.txt": {
+    "timing/artifacts/early-thinlto/empty-control/imre/reference.txt": {
       "bytes": 2,
       "mode": 420,
       "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
     },
-    "timing/artifacts/early-thinlto/empty-control/relar/report.txt": {
+    "timing/artifacts/early-thinlto/empty-control/imre/report.txt": {
       "bytes": 108,
       "mode": 420,
       "sha256": "6a60ff4a30944fc24a3c9fa13d195d6cd9611e75db9351afcfe887ae334ace9c"
@@ -6461,17 +6461,17 @@
       "mode": 420,
       "sha256": "4af17ac1f0338a7edc5c275899123a6daa8de1288879faf955d995960629fa92"
     },
-    "timing/artifacts/early-thinlto/latest-recent-16/relar/observed.txt": {
+    "timing/artifacts/early-thinlto/latest-recent-16/imre/observed.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "97bb646dd57c73ee9cf21c6ce800a6bd3e3dec37c2855b0a9cad9ce7f22d29a7"
     },
-    "timing/artifacts/early-thinlto/latest-recent-16/relar/reference.txt": {
+    "timing/artifacts/early-thinlto/latest-recent-16/imre/reference.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "84974e35ed0454ae357773b8021164e60317887a5ca83caf442de4fee710b85a"
     },
-    "timing/artifacts/early-thinlto/latest-recent-16/relar/report.txt": {
+    "timing/artifacts/early-thinlto/latest-recent-16/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "4af17ac1f0338a7edc5c275899123a6daa8de1288879faf955d995960629fa92"
@@ -6506,17 +6506,17 @@
       "mode": 420,
       "sha256": "ad329864c706f2d53683b6951e0d85c047b7f62ecf021949631bcf0bc7f033f5"
     },
-    "timing/artifacts/early-thinlto/latest-recent-256/relar/observed.txt": {
+    "timing/artifacts/early-thinlto/latest-recent-256/imre/observed.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "047cf94c3c252bc9ead9b9044a01c3ebdb8d1d0e795ce8e32c04a122c7158aeb"
     },
-    "timing/artifacts/early-thinlto/latest-recent-256/relar/reference.txt": {
+    "timing/artifacts/early-thinlto/latest-recent-256/imre/reference.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "80935bc61afa69b800a779ea8e45141254388570785f4ef21fc0f3d2be7bc541"
     },
-    "timing/artifacts/early-thinlto/latest-recent-256/relar/report.txt": {
+    "timing/artifacts/early-thinlto/latest-recent-256/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "ad329864c706f2d53683b6951e0d85c047b7f62ecf021949631bcf0bc7f033f5"
@@ -6551,17 +6551,17 @@
       "mode": 420,
       "sha256": "3d52434753b66cc1077bf528f0fb9789591410f2acfbc2ab7330a3b71b928882"
     },
-    "timing/artifacts/early-thinlto/latest-recent-4096/relar/observed.txt": {
+    "timing/artifacts/early-thinlto/latest-recent-4096/imre/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "61edd5d461490fb6cb75e6cfeeddc4b2585f332a0a6f1fcb6d14ec24b2001a65"
     },
-    "timing/artifacts/early-thinlto/latest-recent-4096/relar/reference.txt": {
+    "timing/artifacts/early-thinlto/latest-recent-4096/imre/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "timing/artifacts/early-thinlto/latest-recent-4096/relar/report.txt": {
+    "timing/artifacts/early-thinlto/latest-recent-4096/imre/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "3d52434753b66cc1077bf528f0fb9789591410f2acfbc2ab7330a3b71b928882"
@@ -6596,17 +6596,17 @@
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "timing/artifacts/early-thinlto/within-early-16/relar/observed.txt": {
+    "timing/artifacts/early-thinlto/within-early-16/imre/observed.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "ea22e9e92f859aa33bcec8844f814df63b97c04885a000deabdfc470a6aec1f4"
     },
-    "timing/artifacts/early-thinlto/within-early-16/relar/reference.txt": {
+    "timing/artifacts/early-thinlto/within-early-16/imre/reference.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "84974e35ed0454ae357773b8021164e60317887a5ca83caf442de4fee710b85a"
     },
-    "timing/artifacts/early-thinlto/within-early-16/relar/report.txt": {
+    "timing/artifacts/early-thinlto/within-early-16/imre/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -6641,17 +6641,17 @@
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "timing/artifacts/early-thinlto/within-early-256/relar/observed.txt": {
+    "timing/artifacts/early-thinlto/within-early-256/imre/observed.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "5eab449c5d37d4de450ec562f61c8a1329ddf4a39a5bd92dc8c8edf96107af4c"
     },
-    "timing/artifacts/early-thinlto/within-early-256/relar/reference.txt": {
+    "timing/artifacts/early-thinlto/within-early-256/imre/reference.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "80935bc61afa69b800a779ea8e45141254388570785f4ef21fc0f3d2be7bc541"
     },
-    "timing/artifacts/early-thinlto/within-early-256/relar/report.txt": {
+    "timing/artifacts/early-thinlto/within-early-256/imre/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -6686,17 +6686,17 @@
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "timing/artifacts/early-thinlto/within-early-4096/relar/observed.txt": {
+    "timing/artifacts/early-thinlto/within-early-4096/imre/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "756ab77e97910edf05b1bb6d5456bba2e14090de2c18d2414f790abcce3cbd55"
     },
-    "timing/artifacts/early-thinlto/within-early-4096/relar/reference.txt": {
+    "timing/artifacts/early-thinlto/within-early-4096/imre/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "timing/artifacts/early-thinlto/within-early-4096/relar/report.txt": {
+    "timing/artifacts/early-thinlto/within-early-4096/imre/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -6731,17 +6731,17 @@
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "timing/artifacts/full-normal/alert-quiet-16/relar/observed.txt": {
+    "timing/artifacts/full-normal/alert-quiet-16/imre/observed.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "edef8588ef64f080b8700805ab24e87803e4e52d6e010c8521717ec1b97c9d82"
     },
-    "timing/artifacts/full-normal/alert-quiet-16/relar/reference.txt": {
+    "timing/artifacts/full-normal/alert-quiet-16/imre/reference.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "84974e35ed0454ae357773b8021164e60317887a5ca83caf442de4fee710b85a"
     },
-    "timing/artifacts/full-normal/alert-quiet-16/relar/report.txt": {
+    "timing/artifacts/full-normal/alert-quiet-16/imre/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -6776,17 +6776,17 @@
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "timing/artifacts/full-normal/alert-quiet-256/relar/observed.txt": {
+    "timing/artifacts/full-normal/alert-quiet-256/imre/observed.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "d537f5ef292da881d2bb082d216f55481b0dae12a0529818e874ca7cb2e82d49"
     },
-    "timing/artifacts/full-normal/alert-quiet-256/relar/reference.txt": {
+    "timing/artifacts/full-normal/alert-quiet-256/imre/reference.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "80935bc61afa69b800a779ea8e45141254388570785f4ef21fc0f3d2be7bc541"
     },
-    "timing/artifacts/full-normal/alert-quiet-256/relar/report.txt": {
+    "timing/artifacts/full-normal/alert-quiet-256/imre/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -6821,17 +6821,17 @@
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "timing/artifacts/full-normal/alert-quiet-4096/relar/observed.txt": {
+    "timing/artifacts/full-normal/alert-quiet-4096/imre/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "timing/artifacts/full-normal/alert-quiet-4096/relar/reference.txt": {
+    "timing/artifacts/full-normal/alert-quiet-4096/imre/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "timing/artifacts/full-normal/alert-quiet-4096/relar/report.txt": {
+    "timing/artifacts/full-normal/alert-quiet-4096/imre/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -6866,17 +6866,17 @@
       "mode": 420,
       "sha256": "6a60ff4a30944fc24a3c9fa13d195d6cd9611e75db9351afcfe887ae334ace9c"
     },
-    "timing/artifacts/full-normal/empty-control/relar/observed.txt": {
+    "timing/artifacts/full-normal/empty-control/imre/observed.txt": {
       "bytes": 2,
       "mode": 420,
       "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
     },
-    "timing/artifacts/full-normal/empty-control/relar/reference.txt": {
+    "timing/artifacts/full-normal/empty-control/imre/reference.txt": {
       "bytes": 2,
       "mode": 420,
       "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
     },
-    "timing/artifacts/full-normal/empty-control/relar/report.txt": {
+    "timing/artifacts/full-normal/empty-control/imre/report.txt": {
       "bytes": 108,
       "mode": 420,
       "sha256": "6a60ff4a30944fc24a3c9fa13d195d6cd9611e75db9351afcfe887ae334ace9c"
@@ -6911,17 +6911,17 @@
       "mode": 420,
       "sha256": "af5d8a21858f42808c9bcc17012b77bcc2fd6ab3b071dbd4a05f13f410470541"
     },
-    "timing/artifacts/full-normal/latest-quiet-16/relar/observed.txt": {
+    "timing/artifacts/full-normal/latest-quiet-16/imre/observed.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "edef8588ef64f080b8700805ab24e87803e4e52d6e010c8521717ec1b97c9d82"
     },
-    "timing/artifacts/full-normal/latest-quiet-16/relar/reference.txt": {
+    "timing/artifacts/full-normal/latest-quiet-16/imre/reference.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "84974e35ed0454ae357773b8021164e60317887a5ca83caf442de4fee710b85a"
     },
-    "timing/artifacts/full-normal/latest-quiet-16/relar/report.txt": {
+    "timing/artifacts/full-normal/latest-quiet-16/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "af5d8a21858f42808c9bcc17012b77bcc2fd6ab3b071dbd4a05f13f410470541"
@@ -6956,17 +6956,17 @@
       "mode": 420,
       "sha256": "af5d8a21858f42808c9bcc17012b77bcc2fd6ab3b071dbd4a05f13f410470541"
     },
-    "timing/artifacts/full-normal/latest-quiet-256/relar/observed.txt": {
+    "timing/artifacts/full-normal/latest-quiet-256/imre/observed.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "d537f5ef292da881d2bb082d216f55481b0dae12a0529818e874ca7cb2e82d49"
     },
-    "timing/artifacts/full-normal/latest-quiet-256/relar/reference.txt": {
+    "timing/artifacts/full-normal/latest-quiet-256/imre/reference.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "80935bc61afa69b800a779ea8e45141254388570785f4ef21fc0f3d2be7bc541"
     },
-    "timing/artifacts/full-normal/latest-quiet-256/relar/report.txt": {
+    "timing/artifacts/full-normal/latest-quiet-256/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "af5d8a21858f42808c9bcc17012b77bcc2fd6ab3b071dbd4a05f13f410470541"
@@ -7001,17 +7001,17 @@
       "mode": 420,
       "sha256": "af5d8a21858f42808c9bcc17012b77bcc2fd6ab3b071dbd4a05f13f410470541"
     },
-    "timing/artifacts/full-normal/latest-quiet-4096/relar/observed.txt": {
+    "timing/artifacts/full-normal/latest-quiet-4096/imre/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "timing/artifacts/full-normal/latest-quiet-4096/relar/reference.txt": {
+    "timing/artifacts/full-normal/latest-quiet-4096/imre/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "timing/artifacts/full-normal/latest-quiet-4096/relar/report.txt": {
+    "timing/artifacts/full-normal/latest-quiet-4096/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "af5d8a21858f42808c9bcc17012b77bcc2fd6ab3b071dbd4a05f13f410470541"
@@ -7046,17 +7046,17 @@
       "mode": 420,
       "sha256": "0b3a52921119f9e7ca5674be7f2b74ac7d3df91d7b2961a6edbe2af6484c8e55"
     },
-    "timing/artifacts/full-normal/report-mixed-16/relar/observed.txt": {
+    "timing/artifacts/full-normal/report-mixed-16/imre/observed.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "76b51a386d42c9472b75cda64d46c01f4b85ee2ee501f6f9d66528b924da6ee7"
     },
-    "timing/artifacts/full-normal/report-mixed-16/relar/reference.txt": {
+    "timing/artifacts/full-normal/report-mixed-16/imre/reference.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "84974e35ed0454ae357773b8021164e60317887a5ca83caf442de4fee710b85a"
     },
-    "timing/artifacts/full-normal/report-mixed-16/relar/report.txt": {
+    "timing/artifacts/full-normal/report-mixed-16/imre/report.txt": {
       "bytes": 113,
       "mode": 420,
       "sha256": "0b3a52921119f9e7ca5674be7f2b74ac7d3df91d7b2961a6edbe2af6484c8e55"
@@ -7091,17 +7091,17 @@
       "mode": 420,
       "sha256": "be2c5856a3ee3db6bc6e038f062c018397aff0691781fc961ec42c9f78b94949"
     },
-    "timing/artifacts/full-normal/report-mixed-256/relar/observed.txt": {
+    "timing/artifacts/full-normal/report-mixed-256/imre/observed.txt": {
       "bytes": 2668,
       "mode": 420,
       "sha256": "c2a7852aa6bf9e4b41a212620bb5935708c8fdbcbce420a6c987a33d0ab53733"
     },
-    "timing/artifacts/full-normal/report-mixed-256/relar/reference.txt": {
+    "timing/artifacts/full-normal/report-mixed-256/imre/reference.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "80935bc61afa69b800a779ea8e45141254388570785f4ef21fc0f3d2be7bc541"
     },
-    "timing/artifacts/full-normal/report-mixed-256/relar/report.txt": {
+    "timing/artifacts/full-normal/report-mixed-256/imre/report.txt": {
       "bytes": 117,
       "mode": 420,
       "sha256": "be2c5856a3ee3db6bc6e038f062c018397aff0691781fc961ec42c9f78b94949"
@@ -7136,17 +7136,17 @@
       "mode": 420,
       "sha256": "f890328da9d59387ab85e47a841425449c07c60f3f09774d431b45d140ddab00"
     },
-    "timing/artifacts/full-normal/report-mixed-4096/relar/observed.txt": {
+    "timing/artifacts/full-normal/report-mixed-4096/imre/observed.txt": {
       "bytes": 45747,
       "mode": 420,
       "sha256": "d98243fe266294a20400314abed61b78f5ca027d4ec9332a8e155fc6dde68704"
     },
-    "timing/artifacts/full-normal/report-mixed-4096/relar/reference.txt": {
+    "timing/artifacts/full-normal/report-mixed-4096/imre/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "timing/artifacts/full-normal/report-mixed-4096/relar/report.txt": {
+    "timing/artifacts/full-normal/report-mixed-4096/imre/report.txt": {
       "bytes": 123,
       "mode": 420,
       "sha256": "f890328da9d59387ab85e47a841425449c07c60f3f09774d431b45d140ddab00"
@@ -7181,17 +7181,17 @@
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
     },
-    "timing/artifacts/full-normal/within-quiet-16/relar/observed.txt": {
+    "timing/artifacts/full-normal/within-quiet-16/imre/observed.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "edef8588ef64f080b8700805ab24e87803e4e52d6e010c8521717ec1b97c9d82"
     },
-    "timing/artifacts/full-normal/within-quiet-16/relar/reference.txt": {
+    "timing/artifacts/full-normal/within-quiet-16/imre/reference.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "84974e35ed0454ae357773b8021164e60317887a5ca83caf442de4fee710b85a"
     },
-    "timing/artifacts/full-normal/within-quiet-16/relar/report.txt": {
+    "timing/artifacts/full-normal/within-quiet-16/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
@@ -7226,17 +7226,17 @@
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
     },
-    "timing/artifacts/full-normal/within-quiet-256/relar/observed.txt": {
+    "timing/artifacts/full-normal/within-quiet-256/imre/observed.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "d537f5ef292da881d2bb082d216f55481b0dae12a0529818e874ca7cb2e82d49"
     },
-    "timing/artifacts/full-normal/within-quiet-256/relar/reference.txt": {
+    "timing/artifacts/full-normal/within-quiet-256/imre/reference.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "80935bc61afa69b800a779ea8e45141254388570785f4ef21fc0f3d2be7bc541"
     },
-    "timing/artifacts/full-normal/within-quiet-256/relar/report.txt": {
+    "timing/artifacts/full-normal/within-quiet-256/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
@@ -7271,17 +7271,17 @@
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
     },
-    "timing/artifacts/full-normal/within-quiet-4096/relar/observed.txt": {
+    "timing/artifacts/full-normal/within-quiet-4096/imre/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "timing/artifacts/full-normal/within-quiet-4096/relar/reference.txt": {
+    "timing/artifacts/full-normal/within-quiet-4096/imre/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "timing/artifacts/full-normal/within-quiet-4096/relar/report.txt": {
+    "timing/artifacts/full-normal/within-quiet-4096/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
@@ -7316,17 +7316,17 @@
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "timing/artifacts/full-thinlto/alert-quiet-16/relar/observed.txt": {
+    "timing/artifacts/full-thinlto/alert-quiet-16/imre/observed.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "edef8588ef64f080b8700805ab24e87803e4e52d6e010c8521717ec1b97c9d82"
     },
-    "timing/artifacts/full-thinlto/alert-quiet-16/relar/reference.txt": {
+    "timing/artifacts/full-thinlto/alert-quiet-16/imre/reference.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "84974e35ed0454ae357773b8021164e60317887a5ca83caf442de4fee710b85a"
     },
-    "timing/artifacts/full-thinlto/alert-quiet-16/relar/report.txt": {
+    "timing/artifacts/full-thinlto/alert-quiet-16/imre/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -7361,17 +7361,17 @@
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "timing/artifacts/full-thinlto/alert-quiet-256/relar/observed.txt": {
+    "timing/artifacts/full-thinlto/alert-quiet-256/imre/observed.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "d537f5ef292da881d2bb082d216f55481b0dae12a0529818e874ca7cb2e82d49"
     },
-    "timing/artifacts/full-thinlto/alert-quiet-256/relar/reference.txt": {
+    "timing/artifacts/full-thinlto/alert-quiet-256/imre/reference.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "80935bc61afa69b800a779ea8e45141254388570785f4ef21fc0f3d2be7bc541"
     },
-    "timing/artifacts/full-thinlto/alert-quiet-256/relar/report.txt": {
+    "timing/artifacts/full-thinlto/alert-quiet-256/imre/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -7406,17 +7406,17 @@
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
     },
-    "timing/artifacts/full-thinlto/alert-quiet-4096/relar/observed.txt": {
+    "timing/artifacts/full-thinlto/alert-quiet-4096/imre/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "timing/artifacts/full-thinlto/alert-quiet-4096/relar/reference.txt": {
+    "timing/artifacts/full-thinlto/alert-quiet-4096/imre/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "timing/artifacts/full-thinlto/alert-quiet-4096/relar/report.txt": {
+    "timing/artifacts/full-thinlto/alert-quiet-4096/imre/report.txt": {
       "bytes": 6,
       "mode": 420,
       "sha256": "7fc755fadc1b31a6696b8ed57c69d2bfc37f5457735c8fcfae31fcbd7bba97d5"
@@ -7451,17 +7451,17 @@
       "mode": 420,
       "sha256": "6a60ff4a30944fc24a3c9fa13d195d6cd9611e75db9351afcfe887ae334ace9c"
     },
-    "timing/artifacts/full-thinlto/empty-control/relar/observed.txt": {
+    "timing/artifacts/full-thinlto/empty-control/imre/observed.txt": {
       "bytes": 2,
       "mode": 420,
       "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
     },
-    "timing/artifacts/full-thinlto/empty-control/relar/reference.txt": {
+    "timing/artifacts/full-thinlto/empty-control/imre/reference.txt": {
       "bytes": 2,
       "mode": 420,
       "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
     },
-    "timing/artifacts/full-thinlto/empty-control/relar/report.txt": {
+    "timing/artifacts/full-thinlto/empty-control/imre/report.txt": {
       "bytes": 108,
       "mode": 420,
       "sha256": "6a60ff4a30944fc24a3c9fa13d195d6cd9611e75db9351afcfe887ae334ace9c"
@@ -7496,17 +7496,17 @@
       "mode": 420,
       "sha256": "af5d8a21858f42808c9bcc17012b77bcc2fd6ab3b071dbd4a05f13f410470541"
     },
-    "timing/artifacts/full-thinlto/latest-quiet-16/relar/observed.txt": {
+    "timing/artifacts/full-thinlto/latest-quiet-16/imre/observed.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "edef8588ef64f080b8700805ab24e87803e4e52d6e010c8521717ec1b97c9d82"
     },
-    "timing/artifacts/full-thinlto/latest-quiet-16/relar/reference.txt": {
+    "timing/artifacts/full-thinlto/latest-quiet-16/imre/reference.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "84974e35ed0454ae357773b8021164e60317887a5ca83caf442de4fee710b85a"
     },
-    "timing/artifacts/full-thinlto/latest-quiet-16/relar/report.txt": {
+    "timing/artifacts/full-thinlto/latest-quiet-16/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "af5d8a21858f42808c9bcc17012b77bcc2fd6ab3b071dbd4a05f13f410470541"
@@ -7541,17 +7541,17 @@
       "mode": 420,
       "sha256": "af5d8a21858f42808c9bcc17012b77bcc2fd6ab3b071dbd4a05f13f410470541"
     },
-    "timing/artifacts/full-thinlto/latest-quiet-256/relar/observed.txt": {
+    "timing/artifacts/full-thinlto/latest-quiet-256/imre/observed.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "d537f5ef292da881d2bb082d216f55481b0dae12a0529818e874ca7cb2e82d49"
     },
-    "timing/artifacts/full-thinlto/latest-quiet-256/relar/reference.txt": {
+    "timing/artifacts/full-thinlto/latest-quiet-256/imre/reference.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "80935bc61afa69b800a779ea8e45141254388570785f4ef21fc0f3d2be7bc541"
     },
-    "timing/artifacts/full-thinlto/latest-quiet-256/relar/report.txt": {
+    "timing/artifacts/full-thinlto/latest-quiet-256/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "af5d8a21858f42808c9bcc17012b77bcc2fd6ab3b071dbd4a05f13f410470541"
@@ -7586,17 +7586,17 @@
       "mode": 420,
       "sha256": "af5d8a21858f42808c9bcc17012b77bcc2fd6ab3b071dbd4a05f13f410470541"
     },
-    "timing/artifacts/full-thinlto/latest-quiet-4096/relar/observed.txt": {
+    "timing/artifacts/full-thinlto/latest-quiet-4096/imre/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "timing/artifacts/full-thinlto/latest-quiet-4096/relar/reference.txt": {
+    "timing/artifacts/full-thinlto/latest-quiet-4096/imre/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "timing/artifacts/full-thinlto/latest-quiet-4096/relar/report.txt": {
+    "timing/artifacts/full-thinlto/latest-quiet-4096/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "af5d8a21858f42808c9bcc17012b77bcc2fd6ab3b071dbd4a05f13f410470541"
@@ -7631,17 +7631,17 @@
       "mode": 420,
       "sha256": "0b3a52921119f9e7ca5674be7f2b74ac7d3df91d7b2961a6edbe2af6484c8e55"
     },
-    "timing/artifacts/full-thinlto/report-mixed-16/relar/observed.txt": {
+    "timing/artifacts/full-thinlto/report-mixed-16/imre/observed.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "76b51a386d42c9472b75cda64d46c01f4b85ee2ee501f6f9d66528b924da6ee7"
     },
-    "timing/artifacts/full-thinlto/report-mixed-16/relar/reference.txt": {
+    "timing/artifacts/full-thinlto/report-mixed-16/imre/reference.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "84974e35ed0454ae357773b8021164e60317887a5ca83caf442de4fee710b85a"
     },
-    "timing/artifacts/full-thinlto/report-mixed-16/relar/report.txt": {
+    "timing/artifacts/full-thinlto/report-mixed-16/imre/report.txt": {
       "bytes": 113,
       "mode": 420,
       "sha256": "0b3a52921119f9e7ca5674be7f2b74ac7d3df91d7b2961a6edbe2af6484c8e55"
@@ -7676,17 +7676,17 @@
       "mode": 420,
       "sha256": "be2c5856a3ee3db6bc6e038f062c018397aff0691781fc961ec42c9f78b94949"
     },
-    "timing/artifacts/full-thinlto/report-mixed-256/relar/observed.txt": {
+    "timing/artifacts/full-thinlto/report-mixed-256/imre/observed.txt": {
       "bytes": 2668,
       "mode": 420,
       "sha256": "c2a7852aa6bf9e4b41a212620bb5935708c8fdbcbce420a6c987a33d0ab53733"
     },
-    "timing/artifacts/full-thinlto/report-mixed-256/relar/reference.txt": {
+    "timing/artifacts/full-thinlto/report-mixed-256/imre/reference.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "80935bc61afa69b800a779ea8e45141254388570785f4ef21fc0f3d2be7bc541"
     },
-    "timing/artifacts/full-thinlto/report-mixed-256/relar/report.txt": {
+    "timing/artifacts/full-thinlto/report-mixed-256/imre/report.txt": {
       "bytes": 117,
       "mode": 420,
       "sha256": "be2c5856a3ee3db6bc6e038f062c018397aff0691781fc961ec42c9f78b94949"
@@ -7721,17 +7721,17 @@
       "mode": 420,
       "sha256": "f890328da9d59387ab85e47a841425449c07c60f3f09774d431b45d140ddab00"
     },
-    "timing/artifacts/full-thinlto/report-mixed-4096/relar/observed.txt": {
+    "timing/artifacts/full-thinlto/report-mixed-4096/imre/observed.txt": {
       "bytes": 45747,
       "mode": 420,
       "sha256": "d98243fe266294a20400314abed61b78f5ca027d4ec9332a8e155fc6dde68704"
     },
-    "timing/artifacts/full-thinlto/report-mixed-4096/relar/reference.txt": {
+    "timing/artifacts/full-thinlto/report-mixed-4096/imre/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "timing/artifacts/full-thinlto/report-mixed-4096/relar/report.txt": {
+    "timing/artifacts/full-thinlto/report-mixed-4096/imre/report.txt": {
       "bytes": 123,
       "mode": 420,
       "sha256": "f890328da9d59387ab85e47a841425449c07c60f3f09774d431b45d140ddab00"
@@ -7766,17 +7766,17 @@
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
     },
-    "timing/artifacts/full-thinlto/within-quiet-16/relar/observed.txt": {
+    "timing/artifacts/full-thinlto/within-quiet-16/imre/observed.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "edef8588ef64f080b8700805ab24e87803e4e52d6e010c8521717ec1b97c9d82"
     },
-    "timing/artifacts/full-thinlto/within-quiet-16/relar/reference.txt": {
+    "timing/artifacts/full-thinlto/within-quiet-16/imre/reference.txt": {
       "bytes": 170,
       "mode": 420,
       "sha256": "84974e35ed0454ae357773b8021164e60317887a5ca83caf442de4fee710b85a"
     },
-    "timing/artifacts/full-thinlto/within-quiet-16/relar/report.txt": {
+    "timing/artifacts/full-thinlto/within-quiet-16/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
@@ -7811,17 +7811,17 @@
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
     },
-    "timing/artifacts/full-thinlto/within-quiet-256/relar/observed.txt": {
+    "timing/artifacts/full-thinlto/within-quiet-256/imre/observed.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "d537f5ef292da881d2bb082d216f55481b0dae12a0529818e874ca7cb2e82d49"
     },
-    "timing/artifacts/full-thinlto/within-quiet-256/relar/reference.txt": {
+    "timing/artifacts/full-thinlto/within-quiet-256/imre/reference.txt": {
       "bytes": 2667,
       "mode": 420,
       "sha256": "80935bc61afa69b800a779ea8e45141254388570785f4ef21fc0f3d2be7bc541"
     },
-    "timing/artifacts/full-thinlto/within-quiet-256/relar/report.txt": {
+    "timing/artifacts/full-thinlto/within-quiet-256/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
@@ -7856,17 +7856,17 @@
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
     },
-    "timing/artifacts/full-thinlto/within-quiet-4096/relar/observed.txt": {
+    "timing/artifacts/full-thinlto/within-quiet-4096/imre/observed.txt": {
       "bytes": 45743,
       "mode": 420,
       "sha256": "fe0892f8a87947f13de3d6ff1f2760d75cde0f7621c482eac9be25eeba9d3f06"
     },
-    "timing/artifacts/full-thinlto/within-quiet-4096/relar/reference.txt": {
+    "timing/artifacts/full-thinlto/within-quiet-4096/imre/reference.txt": {
       "bytes": 45745,
       "mode": 420,
       "sha256": "83ff07ddc8c961ec9c613f56d3a6f23732d52eec45948c1da4f7b99a873920e6"
     },
-    "timing/artifacts/full-thinlto/within-quiet-4096/relar/report.txt": {
+    "timing/artifacts/full-thinlto/within-quiet-4096/imre/report.txt": {
       "bytes": 5,
       "mode": 420,
       "sha256": "a9ac0c3ac83c40e1b4c3416066d63d324ee9f8c144641dfeed72d140b6557245"
@@ -10274,7 +10274,7 @@
   "performance_target": {
     "all_four_below_two": true,
     "comparison": "strictly below",
-    "individual_relar_over_rust": {
+    "individual_imre_over_rust": {
       "alert-quiet-4096": 1.72313707103483,
       "latest-quiet-4096": 1.4093460249024892,
       "report-mixed-4096": 1.3854692407298377,
@@ -10323,7 +10323,7 @@
         "cases": 194,
         "engines": [
           "cpython",
-          "relar",
+          "imre",
           "rust_bigint"
         ],
         "validation_sha256": "10630850653ad2e2eee2fe077fe11896ac8ac42691de72dc51a3174f667784a2"
@@ -10344,7 +10344,7 @@
         "cases": 204,
         "engines": [
           "cpython",
-          "relar",
+          "imre",
           "rust_bigint"
         ],
         "output_device_cases": 1,
@@ -10354,7 +10354,7 @@
         "cases": 196,
         "engines": [
           "cpython",
-          "relar",
+          "imre",
           "rust_bigint"
         ],
         "output_device_cases": 1,
@@ -10370,7 +10370,7 @@
         "cases": 258,
         "engines": [
           "cpython",
-          "relar",
+          "imre",
           "rust"
         ],
         "output_device_cases": 1,

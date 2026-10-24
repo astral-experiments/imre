@@ -3,7 +3,7 @@
 This sibling of the original dependency planner resolves target names with a
 typed dictionary, finds transitively affected targets with sets, and iterates
 lists, sets, dictionary items, and `enumerate` results directly. The same package
-runs on CPython and compiles with Relar; it imports no standard-library modules.
+runs on CPython and compiles with Imre; it imports no standard-library modules.
 
 Input contains a nonnegative target count, that many target lines, a nonnegative
 changed-name count, and that many changed-name lines:
@@ -61,8 +61,8 @@ From the repository root:
 
 ```sh
 PYTHONPATH=examples python3 -m incremental_planner < input.txt
-target/release/relar build examples/incremental_planner/__main__.py \
-  --module-root examples --runtime target/release/librelar_runtime.a \
+target/release/imre build examples/incremental_planner/__main__.py \
+  --module-root examples --runtime target/release/libimre_runtime.a \
   -o benchmarks/local/incremental_planner
 python3 benchmarks/incremental_validate.py \
   --binary benchmarks/local/incremental_planner --python python3.14

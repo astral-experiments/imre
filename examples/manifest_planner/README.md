@@ -16,8 +16,8 @@ Compile and run the same package:
 
 ```sh
 cargo build --release --workspace --locked
-target/release/relar build examples/manifest_planner/__main__.py \
-  --module-root examples --runtime target/release/librelar_runtime.a \
+target/release/imre build examples/manifest_planner/__main__.py \
+  --module-root examples --runtime target/release/libimre_runtime.a \
   --clang clang-18 --opt-level 3 --target x86_64-unknown-linux-gnu \
   -o /tmp/manifest-planner
 /tmp/manifest-planner examples/manifest_planner/sample/manifest.txt \
@@ -66,7 +66,7 @@ python3 benchmarks/manifest_validate.py --binary /tmp/manifest-planner \
 
 The [Rust reference](../../benchmarks/reference/incremental_planner/README.md) shares the existing algorithm/parser and uses BigInt. Its manifest entrypoint checks file close errors explicitly on Linux; it flushes and closes reports after success or failure without adding `fsync`.
 
-`manifest_benchmark.py` has separate three-engine groups. The unchanged incremental control compares CPython, the preserved optimized pre-file Relar binary, and the new Relar binary. The file workload compares CPython, new Relar, and Rust BigInt. Defaults retain all five prior control inputs and make six file workloads from layered/wide 16,384-target and boundary-128 all-changed inputs: two valid payload reads, or those reads interspersed with invalid-integer, missing-file, and invalid-UTF8 requests.
+`manifest_benchmark.py` has separate three-engine groups. The unchanged incremental control compares CPython, the preserved optimized pre-file Imre binary, and the new Imre binary. The file workload compares CPython, new Imre, and Rust BigInt. Defaults retain all five prior control inputs and make six file workloads from layered/wide 16,384-target and boundary-128 all-changed inputs: two valid payload reads, or those reads interspersed with invalid-integer, missing-file, and invalid-UTF8 requests.
 
 Each group uses 30 measured rounds covering all six orders five times, two warmups, one pinned CPU, and fresh processes. Every file execution has a fresh isolated working directory. Fixture creation and verification are outside the timer; startup, file operations, computation, complete report writes, flush/close, and exit are inside. Inputs are created immediately before timing and are page-cache warm. This does not measure cold-disk throughput or durable writes. The shared devbox can still introduce scheduling/frequency noise.
 
@@ -74,8 +74,8 @@ The harness requires frozen compiler/runtime and Rust build records, the preserv
 
 ```sh
 python3 benchmarks/manifest_benchmark.py \
-  --compiler "$TOOLS/relar" --runtime "$TOOLS/librelar_runtime.a" \
-  --relar-build-record "$TOOLS/build-record.json" \
+  --compiler "$TOOLS/imre" --runtime "$TOOLS/libimre_runtime.a" \
+  --imre-build-record "$TOOLS/build-record.json" \
   --baseline "$PRE_FILE/incremental_planner" --baseline-record "$PRE_FILE_RECORD" \
   --rust-bigint "$RUST/planner-manifest-bigint" \
   --rust-build-record "$RUST/build-record.json" \
@@ -84,4 +84,4 @@ python3 benchmarks/manifest_benchmark.py \
   --output benchmarks/local/manifest-normal.json
 ```
 
-The variables identify local frozen artifact directories and the corresponding baseline record. Decompress a published `.json.gz` baseline before passing it. For ThinLTO, select matching ThinLTO baseline/Rust artifacts, use the linker-plugin-LTO runtime archive, and add `--lto-linker /path/to/ld.lld`; the Rust helper's `--llvm-budget 1000` matches Relar's import/inlining budgets. Keep the lexical `ld.lld` symlink name. The [reference guide](../../benchmarks/reference/incremental_planner/README.md) documents ordinary/ThinLTO builds and provenance. Run comparisons only after other builds/profilers stop and outside ptrace.
+The variables identify local frozen artifact directories and the corresponding baseline record. Decompress a published `.json.gz` baseline before passing it. For ThinLTO, select matching ThinLTO baseline/Rust artifacts, use the linker-plugin-LTO runtime archive, and add `--lto-linker /path/to/ld.lld`; the Rust helper's `--llvm-budget 1000` matches Imre's import/inlining budgets. Keep the lexical `ld.lld` symlink name. The [reference guide](../../benchmarks/reference/incremental_planner/README.md) documents ordinary/ThinLTO builds and provenance. Run comparisons only after other builds/profilers stop and outside ptrace.

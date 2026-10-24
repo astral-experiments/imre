@@ -20,7 +20,7 @@ PACKAGE = ROOT / "examples/python_catalog"
 native = SimpleNamespace(**runpy.run_path(str(HERE / "native_tools_benchmark.py")))
 catalog = native.catalog
 builds = SimpleNamespace(**runpy.run_path(str(HERE / "live_conformance_benchmark.py")))
-ENGINES = ("original", "port", "codon", "relar", "rust", "relar_thin", "rust_thin")
+ENGINES = ("original", "port", "codon", "imre", "rust", "imre_thin", "rust_thin")
 SCALES = (1, 10)
 FORMATS = ("plain", "gzip")
 
@@ -85,7 +85,7 @@ def checked_sources():
              HERE / "catalog_validate.py", HERE / "native_tools_benchmark.py", HERE / "live_conformance_benchmark.py",
              PACKAGE / "__init__.py", PACKAGE / "__main__.py", PACKAGE / "catalog.py",
              PACKAGE / "upstream_adapter.py", PACKAGE / "upstream/fetch-download-metadata.py",
-             ROOT / "stdlib/relar/json.py"]
+             ROOT / "stdlib/imre/json.py"]
     return {str(path.relative_to(ROOT)): native.file_identity(path) for path in paths}
 
 
@@ -98,7 +98,7 @@ def verify_builds(paths, pilot):
             continue
         record = builds.verify_build_record(path, guarded)
         receipt = identify(path)
-        if name.startswith("relar"):
+        if name.startswith("imre"):
             mode = "thinlto" if name.endswith("_thin") else "normal"
             assert record["kind"] == "streaming-catalog-program-build" and record["mode"] == mode
             assert (pilot or record["source_matches_revision"]) and record["binaries"]["python_catalog"] == builds.identity(binary)
@@ -244,10 +244,10 @@ def benchmark(args):
         medians = {engine: {field: statistics.median(
             row[field] for round_ in results for row in round_ if row["engine"] == engine
         ) for field in ("elapsed_ns", "peak_rss_kib")} for engine in ENGINES}
-        ratios = {mode: {field: medians["relar" + suffix][field] / medians["rust" + suffix][field]
+        ratios = {mode: {field: medians["imre" + suffix][field] / medians["rust" + suffix][field]
                          for field in ("elapsed_ns", "peak_rss_kib")}
                   for mode, suffix in (("ordinary", ""), ("thinlto", "_thin"))}
-        case.update(medians=medians, relar_over_rust=ratios)
+        case.update(medians=medians, imre_over_rust=ratios)
         print(f"{label} {ratios}", flush=True)
     check_inputs()
     assert sources == checked_sources()
@@ -260,12 +260,12 @@ def benchmark(args):
                 cases[f"1x-{kind}"]["medians"][engine]["peak_rss_kib"]
         for engine in ENGINES} for kind in FORMATS}
     result["time_target_met"] = all(mode["elapsed_ns"] <= 2 for case in cases.values()
-                                    for mode in case["relar_over_rust"].values())
+                                    for mode in case["imre_over_rust"].values())
     result["completed"] = True
     result["completed_utc"] = native.utc()
     write_json(out / "results.json", result)
     if not args.pilot and not result["time_target_met"]:
-        raise SystemExit("A Relar/Rust median exceeds 2x; all raw data was retained")
+        raise SystemExit("A Imre/Rust median exceeds 2x; all raw data was retained")
 
 
 def main():

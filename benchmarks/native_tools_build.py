@@ -84,12 +84,12 @@ def main():
     common = ["build", "--target", host, "--locked", "--message-format=json-render-diagnostics"]
     steps = [("normal", [*common, "--release", "--workspace"], {})]
     if "thinlto" in args.modes:
-        steps.append(("thinlto", [*common, "-p", "relar-runtime", "--profile", "relar-tools-lto",
-                                 "--config", 'profile.relar-tools-lto.inherits="release"'],
+        steps.append(("thinlto", [*common, "-p", "imre-runtime", "--profile", "imre-tools-lto",
+                                 "--config", 'profile.imre-tools-lto.inherits="release"'],
                       {"RUSTFLAGS": "-Clinker-plugin-lto"}))
     if "asan" in args.modes:
-        steps.append(("asan", [*common, "-p", "relar-runtime", "--profile", "relar-tools-asan",
-                              "--config", 'profile.relar-tools-asan.inherits="release"'],
+        steps.append(("asan", [*common, "-p", "imre-runtime", "--profile", "imre-tools-asan",
+                              "--config", 'profile.imre-tools-asan.inherits="release"'],
                       {"RUSTC_BOOTSTRAP": "1", "RUSTFLAGS": "-Zsanitizer=address -Cforce-frame-pointers=yes"}))
     output.mkdir(parents=True, exist_ok=False)
     shutil.copy2(__file__, output / "build.py")
@@ -129,18 +129,18 @@ def main():
                 if message.get("reason") != "compiler-artifact":
                     continue
                 manifest = Path(message["manifest_path"]).resolve()
-                if mode == "normal" and manifest == ROOT / "crates/relar-compiler/Cargo.toml" and message["target"]["name"] == "relar" and message.get("executable"):
+                if mode == "normal" and manifest == ROOT / "crates/imre-compiler/Cargo.toml" and message["target"]["name"] == "imre" and message.get("executable"):
                     artifacts["compiler"] = Path(message["executable"])
-                if manifest == ROOT / "crates/relar-runtime/Cargo.toml":
+                if manifest == ROOT / "crates/imre-runtime/Cargo.toml":
                     for filename in message["filenames"]:
-                        if Path(filename).name == "librelar_runtime.a":
+                        if Path(filename).name == "libimre_runtime.a":
                             artifacts[mode + "_runtime"] = Path(filename)
             required = {mode + "_runtime"} | ({"compiler"} if mode == "normal" else set())
             if set(artifacts) != required:
                 raise RuntimeError(f"Cargo did not report the expected artifacts for {mode}: {artifacts}")
             record["steps"][-1]["artifacts"] = {name: str(path) for name, path in artifacts.items()}
             for name, source in artifacts.items():
-                destination = output / ("relar" if name == "compiler" else name + ".a")
+                destination = output / ("imre" if name == "compiler" else name + ".a")
                 before = digest(source)
                 shutil.copy2(source, destination)
                 if digest(source) != before or digest(destination) != before:
