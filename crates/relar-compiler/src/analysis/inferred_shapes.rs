@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use ruff_python_ast::visitor::{Visitor, walk_body, walk_expr, walk_stmt};
 use ruff_python_ast::{Comprehension, Expr, Number, Stmt, UnaryOp};
+use ruff_text_size::TextSize;
 
 const MAX_DEPTH: usize = 256;
 
@@ -15,6 +16,7 @@ pub(super) fn check(body: &[Stmt], tokens: usize) -> Result<(), &'static str> {
     let mut shapes = Shapes {
         scopes: vec![HashMap::new()],
         straight_line: HashMap::new(),
+        read_shapes: HashMap::new(),
         fixed: body
             .iter()
             .filter_map(|stmt| match stmt {
@@ -133,6 +135,7 @@ struct Shapes<'a> {
     fixed: HashSet<&'a str>,
     scopes: Vec<HashMap<&'a str, Shape>>,
     straight_line: HashMap<&'a str, Shape>,
+    read_shapes: HashMap<TextSize, Shape>,
     conditional: bool,
     exceeded: bool,
 }
@@ -156,7 +159,10 @@ impl<'a> Shapes<'a> {
                 .iter()
                 .rev()
                 .find(|(name, _)| *name == node.id.as_str())
-                .map_or_else(|| self.lookup(node.id.as_str()), |(_, shape)| shape.clone()),
+                .map(|(_, shape)| shape)
+                .or_else(|| self.read_shapes.get(&node.range.start()))
+                .cloned()
+                .unwrap_or_else(|| self.lookup(node.id.as_str())),
             Expr::Tuple(node) if !node.elts.iter().any(|elt| matches!(elt, Expr::Starred(_))) => {
                 let fields: Vec<_> = node
                     .elts
@@ -383,10 +389,76 @@ impl<'a> Visitor<'a> for Shapes<'a> {
     }
 
     fn visit_expr(&mut self, expr: &'a Expr) {
-        walk_expr(self, expr);
-        if let Expr::Named(node) = expr {
-            self.bind(&node.target, self.shape(&node.value, &[]), false);
+        self.read_shapes.clear();
+        let writes = crate::narrowing::expression_assignments(expr);
+        if writes.is_empty() {
+            return;
         }
+        // A later assignment expression can rebind a name whose previous
+        // value was already captured in a tuple. Record each affected read at
+        // evaluation time so positional projection sees the captured value.
+        struct Evaluation<'s, 'a> {
+            shapes: &'s mut Shapes<'a>,
+            writes: HashSet<String>,
+            may_skip: bool,
+        }
+        impl Evaluation<'_, '_> {
+            fn optional(&mut self, visit: impl FnOnce(&mut Self)) {
+                let previous = std::mem::replace(&mut self.may_skip, true);
+                visit(self);
+                self.may_skip = previous;
+            }
+        }
+        impl<'a> Visitor<'a> for Evaluation<'_, 'a> {
+            fn visit_expr(&mut self, expr: &'a Expr) {
+                match expr {
+                    Expr::Name(node) if self.writes.contains(node.id.as_str()) => {
+                        let value = self.shapes.lookup(node.id.as_str());
+                        self.shapes.read_shapes.insert(node.range.start(), value);
+                    }
+                    Expr::Named(node) => {
+                        self.visit_expr(&node.value);
+                        let value = self.shapes.shape(&node.value, &[]);
+                        let outer = self.shapes.conditional;
+                        self.shapes.conditional |= self.may_skip;
+                        self.shapes.bind(&node.target, value, !self.may_skip);
+                        self.shapes.conditional = outer;
+                    }
+                    Expr::BoolOp(node) => {
+                        if let Some((first, rest)) = node.values.split_first() {
+                            self.visit_expr(first);
+                            self.optional(|v| rest.iter().for_each(|item| v.visit_expr(item)));
+                        }
+                    }
+                    Expr::If(node) => {
+                        self.visit_expr(&node.test);
+                        self.optional(|v| {
+                            v.visit_expr(&node.body);
+                            v.visit_expr(&node.orelse);
+                        });
+                    }
+                    Expr::Compare(node) if node.operands.len() > 2 => {
+                        let (first, rest) = node.operands.split_at(2);
+                        first.iter().for_each(|item| self.visit_expr(item));
+                        self.optional(|v| rest.iter().for_each(|item| v.visit_expr(item)));
+                    }
+                    Expr::ListComp(_)
+                    | Expr::SetComp(_)
+                    | Expr::DictComp(_)
+                    | Expr::Generator(_) => {
+                        self.optional(|v| walk_expr(v, expr));
+                    }
+                    Expr::Lambda(_) => {}
+                    _ => walk_expr(self, expr),
+                }
+            }
+        }
+        Evaluation {
+            shapes: self,
+            writes,
+            may_skip: false,
+        }
+        .visit_expr(expr);
     }
 }
 
@@ -531,5 +603,41 @@ mod tests {
                 .map(|i| format!("def f{i}():\n    value = (1,)\n"))
                 .collect::<String>()
         ));
+    }
+
+    #[test]
+    fn tuple_fields_capture_names_before_their_assignment_expressions() {
+        for (fields, index, too_deep) in [
+            ("$name, ($name := None), $previous", 0, true),
+            ("($name := None), $name, $previous", 1, false),
+            (
+                "flag or (($name := None) is None), $name, $previous",
+                1,
+                true,
+            ),
+            (
+                "False if flag else (($name := None) is None), $name, $previous",
+                1,
+                true,
+            ),
+        ] {
+            let mut source = String::from("def f(flag: bool) -> None:\n    v0 = (1,)\n");
+            for i in 1..=MAX_DEPTH + 1 {
+                let previous = format!("v{}", i - 1);
+                let name = format!("t{i}");
+                let fields = fields
+                    .replace("$name", &name)
+                    .replace("$previous", &previous);
+                source.push_str(&format!(
+                    "    {name} = {previous} if flag else None\n    pair{i} = ({fields})\n    v{i} = (pair{i}[{index}],)\n"
+                ));
+            }
+            let result = crate::check(&source);
+            if too_deep {
+                assert!(result.unwrap_err().contains("inferred container nesting"));
+            } else {
+                result.unwrap();
+            }
+        }
     }
 }
