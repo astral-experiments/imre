@@ -4,14 +4,40 @@
 
 use super::super::{Boundaries, LineOffsets, Object, Str, Words, exceptions, owned_line};
 use super::{Deferred, View, suffix};
-use std::{cell::OnceCell, ops::Range, rc::Rc};
+use std::{
+    cell::{OnceCell, RefCell},
+    ops::Range,
+    rc::Rc,
+};
 
 pub(super) struct TextLines {
-    source: Rc<Str>,
+    source: Rc<LineSource>,
     rows: LineRanges,
     /// With only LF between retained ranges, joining with LF can copy once.
     continuous_lf: bool,
     materialized: OnceCell<Words>,
+}
+
+/// Every range, including those in filtered lists, ends before the final terminator.
+struct LineSource {
+    text: RefCell<Rc<Str>>,
+    end: usize,
+}
+
+impl LineSource {
+    /// Shares exactly the bytes a full join returns. An alias of the original
+    /// Python string must still see its terminator, so detach when one exists.
+    fn full_join(&self) -> Option<Rc<Str>> {
+        let mut text = self.text.borrow_mut();
+        if self.end != text.len() {
+            if let Some(unique) = Rc::get_mut(&mut text) {
+                unique.truncate(self.end);
+            } else {
+                *text = Rc::new(Str::try_new(&text[..self.end]).ok()?);
+            }
+        }
+        Some(Rc::clone(&text))
+    }
 }
 
 /// LF-only input needs one end offset per line. Filters and mixed line endings
@@ -95,8 +121,15 @@ impl TextLines {
             }
             rows
         };
+        let end = rows
+            .len()
+            .checked_sub(1)
+            .map_or(0, |last| rows.range(last).end);
         Self {
-            source,
+            source: Rc::new(LineSource {
+                text: RefCell::new(source),
+                end,
+            }),
             rows,
             continuous_lf,
             materialized: OnceCell::new(),
@@ -110,10 +143,11 @@ impl TextLines {
     pub(super) fn ordered(&self) -> &Words {
         self.materialized.get_or_init(|| {
             let mut result = Words::new(3);
+            let source = self.source.text.borrow();
             result.values.extend(
                 self.rows
                     .iter()
-                    .map(|row| Rc::into_raw(owned_line(&self.source, row)) as usize),
+                    .map(|row| Rc::into_raw(owned_line(&source, row)) as usize),
             );
             result.update_header();
             result
@@ -127,9 +161,10 @@ impl TextLines {
         exclude: Option<&str>,
         strip: usize,
     ) -> Words {
-        let mut rows = LineRanges::sparse(self.source.len());
+        let source = self.source.text.borrow();
+        let mut rows = LineRanges::sparse(source.len());
         for row in self.rows.iter() {
-            let text = &self.source[row.clone()];
+            let text = &source[row.clone()];
             if (text.starts_with(first) || second.is_some_and(|s| text.starts_with(s)))
                 && !exclude.is_some_and(|s| text.starts_with(s))
             {
@@ -146,7 +181,7 @@ impl TextLines {
             materialized: OnceCell::new(),
         };
         // A few short results should not keep a large discarded input alive.
-        if selection.rows.len() < 8 && self.source.len() > 32 * 1024 {
+        if selection.rows.len() < 8 && source.len() > 32 * 1024 {
             selection.ordered();
             selection.materialized.into_inner().unwrap()
         } else {
@@ -169,9 +204,16 @@ impl TextLines {
             return Rc::into_raw(Rc::new(Str::default()));
         }
         let span = self.span(separator);
-        if span == Some(0..self.source.len()) {
-            return Rc::into_raw(Rc::clone(&self.source));
+        if span == Some(0..self.source.end) {
+            return self.source.full_join().map_or_else(
+                || {
+                    exceptions::sequence_allocation_failed();
+                    std::ptr::null()
+                },
+                Rc::into_raw,
+            );
         }
+        let source = self.source.text.borrow();
         let size = if let Some(span) = &span {
             Some(span.len())
         } else {
@@ -189,13 +231,13 @@ impl TextLines {
             return std::ptr::null();
         };
         if let Some(span) = span {
-            result.push_str(&self.source[span]);
+            result.push_str(&source[span]);
         } else {
             let mut rows = self.rows.iter();
-            result.push_str(&self.source[rows.next().unwrap()]);
+            result.push_str(&source[rows.next().unwrap()]);
             for row in rows {
                 result.push_str(separator);
-                result.push_str(&self.source[row]);
+                result.push_str(&source[row]);
             }
         }
         Rc::into_raw(Rc::new(result))
@@ -221,6 +263,41 @@ impl Deferred {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn join(lines: &TextLines, separator: &str) -> Rc<Str> {
+        // SAFETY: the small test inputs fit in memory; the join transfers one owner.
+        unsafe { Rc::from_raw(lines.joined(separator)) }
+    }
+
+    #[test]
+    fn full_join_reuses_the_owned_text_through_a_trailing_line_break() {
+        for ending in ["\n", "\r\n", "\u{2029}"] {
+            let text = Rc::new(Str::from(format!("one\n\n🦀{ending}")));
+            let pointer = Rc::as_ptr(&text);
+            let lines = TextLines::new(text);
+            let joined = join(&lines, "\n");
+            assert_eq!(Rc::as_ptr(&joined), pointer);
+            assert_eq!(joined.as_str(), "one\n\n🦀");
+            assert_eq!(join(&lines, "|").as_str(), "one||🦀");
+        }
+    }
+
+    #[test]
+    fn full_join_keeps_string_aliases_and_preexisting_filtered_ranges_valid() {
+        let text = Rc::new(Str::from("+one\n-two\n+three\n"));
+        let lines = TextLines::new(Rc::clone(&text));
+        let selected = lines.filter("+", None, None, 1);
+        let selected = selected.plan().expect("deferred selection");
+        let View::Lines(selected) = &selected.0 else {
+            unreachable!()
+        };
+        let joined = join(&lines, "\n");
+        assert_eq!(text.as_str(), "+one\n-two\n+three\n");
+        assert_eq!(joined.as_str(), "+one\n-two\n+three");
+        assert_eq!(join(selected, "|").as_str(), "one|three");
+        assert!(!Rc::ptr_eq(&text, &joined));
+        assert!(Rc::ptr_eq(&join(&lines, "\n"), &joined));
+    }
 
     #[test]
     fn lf_ranges_keep_blank_lines_and_omit_only_the_final_terminator() {
