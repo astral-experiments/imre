@@ -3,11 +3,14 @@
 use super::*;
 
 /// Recognizes constructions whose only work after evaluating the arguments is
-/// writing each field once in order. The previous class instance may release
+/// writing each field once in order. The previous record may release
 /// its fields during those writes, so admit only fields with resource-free contents.
 pub(super) fn replacement_fields<'a>(module: &Module, expression: &'a Expr) -> Option<&'a [Expr]> {
     if let ExprKind::Tuple(fields) = &expression.kind {
-        return Some(fields);
+        return (!module
+            .types
+            .may_own_file(expression.ty, &module.class_fields, true))
+        .then_some(fields);
     }
     let (Type::Class(class), ExprKind::Construct { initializer, args }) =
         (expression.ty, &expression.kind)
