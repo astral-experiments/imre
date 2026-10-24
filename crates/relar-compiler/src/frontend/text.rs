@@ -205,7 +205,7 @@ impl Checker<'_> {
             _ => unreachable!("only supported text methods reach this binder"),
         };
         let arguments = self.arguments(call, &parameters, Some(receiver))?;
-        Ok(self.text_operation(operation, returns, arguments))
+        Ok(self.ordered_builtin(Builtin::Text(operation), returns, arguments))
     }
 
     /// Binds standard-library functions taking one positional or named string.
@@ -227,50 +227,6 @@ impl Checker<'_> {
         } else {
             Type::Str
         };
-        Ok(self.text_operation(operation, returns, arguments))
-    }
-
-    /// Keyword permutation happens only after supplied expressions have executed
-    /// and acquired independent roots. Identity order needs no extra scope.
-    fn text_operation(
-        &mut self,
-        operation: TextOperation,
-        returns: Type,
-        arguments: ir::CallArgs,
-    ) -> Expr {
-        if arguments
-            .order
-            .iter()
-            .copied()
-            .eq(0..arguments.values.len())
-        {
-            return Expr {
-                ty: returns,
-                kind: ExprKind::Builtin(Builtin::Text(operation), arguments.values),
-            };
-        }
-        let mut body = Vec::new();
-        let mut clear = Vec::new();
-        for value in arguments.values {
-            let slot = self.hidden(value.ty);
-            body.push(Statement::Assign(slot, value));
-            clear.push(slot);
-        }
-        let args = arguments
-            .order
-            .iter()
-            .map(|&index| self.local(clear[index]))
-            .collect();
-        Expr {
-            ty: returns,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(Expr {
-                    ty: returns,
-                    kind: ExprKind::Builtin(Builtin::Text(operation), args),
-                }),
-                clear,
-            },
-        }
+        Ok(self.ordered_builtin(Builtin::Text(operation), returns, arguments))
     }
 }

@@ -777,10 +777,10 @@ unsafe fn environment_entries<'a>(
     })
 }
 
-/// Returns the first matching value or the explicit string default.
+/// Returns the first matching value, or the supplied nullable default.
 ///
 /// # Safety
-/// `key` and `default` are rooted strings. Success transfers a single owned string.
+/// The key and any non-null default are rooted strings. A non-null result transfers one owner.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_environ_get(key: *const Str, default: *const Str) -> *const Str {
     // SAFETY: environment entries live until the call returns and the caller owns the key.
@@ -798,8 +798,10 @@ pub unsafe extern "C" fn relar_environ_get(key: *const Str, default: *const Str)
             });
         finish(result, std::ptr::null())
     } else {
-        // SAFETY: return an independent owner of the live default.
-        unsafe { Rc::increment_strong_count(default) };
+        if !default.is_null() {
+            // SAFETY: return an independent owner of the rooted default.
+            unsafe { Rc::increment_strong_count(default) };
+        }
         default
     }
 }

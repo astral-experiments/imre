@@ -4,7 +4,7 @@ The `upstream` directory contains the complete CPython 3.14.5 test entries for `
 
 ## Native POSIX path cases
 
-The five selected upstream methods take a native Relar compiler and runtime.
+The seven selected upstream methods take a native Relar compiler and runtime.
 
 ```sh
 python3 benchmarks/cpython_stdlib/native_paths.py \
@@ -12,7 +12,7 @@ python3 benchmarks/cpython_stdlib/native_paths.py \
     --clang /path/to/clang --opt-level 3 --result native-paths.json
 ```
 
-The runner verifies the upstream blob hashes and copies each complete method from CPython's `JoinTestBase` verbatim into a temporary source file. A typed fixture supplies the path constructor and `assertEqual`. Both operands, path operations, equality checks and assertion counts execute in the compiled program. The concrete POSIX fixture uses Relar's native `pathlib.Path`. The selected methods check the name, stem, suffix, parent and slash operator. Each result includes the upstream ID, the SHA-256 of the unmodified method and its assertion count. A rejected program or a failed native assertion gives the command a nonzero exit status.
+The runner verifies the upstream blob hashes and copies each complete method from CPython's `JoinTestBase` or `ReadTestBase` verbatim into a temporary source file. A typed fixture supplies the path constructor, working directory and `assertEqual`. The read fixture seeds `fileA` with the bytes used by CPython's local filesystem fixture. Both operands, path operations, equality checks and assertion counts execute in the compiled program. The concrete POSIX fixture uses Relar's native `pathlib.Path`. The selected methods check the name, stem, suffix, parent, slash operator, `joinpath` and `read_bytes`. Each result includes the upstream ID, the SHA-256 of the unmodified method and its assertion count. A rejected program or a failed native assertion gives the command a nonzero exit status.
 
 Methods that require setup, decorators, process fixtures or a richer assertion helper need a corresponding adapter before the benchmark can credit them. Each added adapter should preserve the entire upstream method, including every operand and exception assertion. Keep platform skips, deliberate compatibility exclusions, unavailable test infrastructure and actual native failures separate in reports.
 
@@ -27,6 +27,10 @@ Four complete JSON error methods use a CPython 3.14.5 test interpreter for their
 ```
 
 Use `--cpython-source /path/to/cpython-3.14.5` if the interpreter needs a source checkout for `test.support`. The original assertions run under unittest. Each input to `loads` is passed to a compiled Relar executable. The bridge forwards the native error category and its unmodified message. Methods which inspect structured error fields need additional native support before the adapter can credit them. Two successful array controls check the driver separately. The four methods run through both upstream backend fixture IDs, giving eight executions of four distinct methods.
+
+## Native os calls with upstream unittest assertions
+
+`native_os.py` runs CPython's `MiscTests.test_getcwd`, `test_getcwd_long_path`, and the PEP 519 string and bytes return tests. Each `getcwd` and `fspath` executes in the compiled driver. CPython owns the directory setup, cleanup, assertions and process transport. The runner also compares the error from a deleted working directory. Use the same compiler, runtime, clang and optional CPython source arguments as for `native_json.py`.
 
 ## Full CPython reference run
 

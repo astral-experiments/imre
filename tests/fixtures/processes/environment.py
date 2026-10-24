@@ -4,6 +4,35 @@ from pathlib import Path
 from sys import argv
 
 
+def marked(value: str) -> str:
+    print(value)
+    return value
+
+
+def lookup(key: str, default: str | None) -> str | None:
+    return os.getenv(key, default)
+
+
+def show(value: str | None) -> None:
+    if value is None:
+        print("absent")
+    else:
+        print(value)
+
+
+show(os.environ.get("RELAR_PROCESS_PARENT"))
+print(os.environ.get("RELAR_PROCESS_EMPTY") is None)
+print(os.getenv("RELAR_PROCESS_EMPTY", None) is None)
+show(lookup("RELAR_PROCESS_PARENT", None))
+show(lookup("RELAR_PROCESS_EMPTY", "fallback"))
+print(os.getenv(default=marked("eager default"), key=marked("RELAR_PROCESS_PARENT")))
+print(os.environ.get(default=marked("second default"), key=marked("RELAR_PROCESS_EMPTY")))
+print(os.getcwd().endswith("/work"))
+print(os.fspath(Path("./directory")))
+print(os.fspath(b"\xff") == b"\xff")
+print(os.fspath("directory/"))
+
+
 command = [argv[1], "-I", argv[2], "environment"]
 inherited = subprocess.run(command, capture_output=True, encoding="utf-8")
 print(inherited.stdout)

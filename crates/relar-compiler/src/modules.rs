@@ -190,6 +190,9 @@ pub(crate) enum Intrinsic {
     CalledProcessError,
     TimeoutExpired,
     Environ,
+    GetEnv,
+    GetCwd,
+    FsPath,
     Unquote,
 }
 
@@ -357,6 +360,9 @@ impl IntrinsicModule {
             (Self::Subprocess, "CalledProcessError") => Intrinsic::CalledProcessError,
             (Self::Subprocess, "TimeoutExpired") => Intrinsic::TimeoutExpired,
             (Self::Os, "environ") => Intrinsic::Environ,
+            (Self::Os, "getenv") => Intrinsic::GetEnv,
+            (Self::Os, "getcwd") => Intrinsic::GetCwd,
+            (Self::Os, "fspath") => Intrinsic::FsPath,
             (Self::UrllibParse, "unquote") => Intrinsic::Unquote,
             _ => return None,
         };

@@ -706,6 +706,7 @@ pub(crate) enum PathOperation {
     ReadText,
     ReadBytes,
     WriteText,
+    WriteBytes,
     Mkdir,
     Unlink,
     Rmdir,
@@ -782,6 +783,7 @@ pub(crate) enum ProcessOperation {
     Release,
     EnvironCopy,
     EnvironGet,
+    GetCwd,
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,

@@ -79,6 +79,7 @@ impl Builtin {
                     | PathOperation::WithName
                     | PathOperation::Resolve
                     | PathOperation::WriteText
+                    | PathOperation::WriteBytes
                     | PathOperation::Mkdir
                     | PathOperation::Unlink
                     | PathOperation::Rmdir
@@ -150,6 +151,7 @@ impl Builtin {
                 | ProcessOperation::Release
                 | ProcessOperation::EnvironCopy
                 | ProcessOperation::EnvironGet
+                | ProcessOperation::GetCwd
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)
@@ -499,6 +501,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_subprocess_run_timeout"
                 | "relar_subprocess_run_timeout_int"
                 | "relar_environ_get"
+                | "relar_getcwd"
                 | "relar_environ_copy"
                 | "relar_subprocess_check"
                 | "relar_subprocess_error_field"
@@ -536,6 +539,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_path_read_text"
                 | "relar_shutil_which"
                 | "relar_path_write_text"
+                | "relar_path_write_bytes"
                 | "relar_path_mkdir"
                 | "relar_path_unlink"
                 | "relar_path_rmdir"
