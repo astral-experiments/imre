@@ -1,0 +1,52 @@
+diff --git a/crates/toml_parser/CHANGELOG.md b/crates/toml_parser/CHANGELOG.md
+index 0ca9cd0..f434738 100644
+--- a/crates/toml_parser/CHANGELOG.md
++++ b/crates/toml_parser/CHANGELOG.md
+@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
+ <!-- next-header -->
+ ## [Unreleased] - ReleaseDate
+ 
++### Performance
++
++- Bound the initial token allocation for large inputs with few tokens.
++
+ ## [1.1.5] - 2026-10-09
+ 
+ ### Fixes
+diff --git a/crates/toml_parser/src/lexer/mod.rs b/crates/toml_parser/src/lexer/mod.rs
+index 4dbdf25..41b140e 100644
+--- a/crates/toml_parser/src/lexer/mod.rs
++++ b/crates/toml_parser/src/lexer/mod.rs
+@@ -53,7 +53,8 @@ impl<'i> Lexer<'i> {
+         // Divide before multiplying to avoid overflowing for very large inputs.
+         let estimate = (len / 7) * 2;
+         let addressable_limit = isize::MAX as usize / size_of::<Token>();
+-        let capacity = estimate.min(addressable_limit);
++        // A long key, string, or whitespace run can occupy a single token.
++        let capacity = estimate.min(addressable_limit).min(4096);
+         let mut vec = Vec::with_capacity(capacity);
+         vec.extend(self);
+         vec
+diff --git a/crates/toml_parser/src/lexer/test.rs b/crates/toml_parser/src/lexer/test.rs
+index 28bec25..6e7d553 100644
+--- a/crates/toml_parser/src/lexer/test.rs
++++ b/crates/toml_parser/src/lexer/test.rs
+@@ -4,6 +4,18 @@ use snapbox::assert_data_eq;
+ use snapbox::prelude::*;
+ use snapbox::str;
+ 
++#[test]
++fn sparse_input_has_a_bounded_reservation() {
++    let input = " ".repeat(1024 * 1024);
++    let tokens = crate::Source::new(&input).lex().into_vec();
++    assert_eq!(tokens.len(), 2); // Whitespace and EOF
++    assert!(
++        tokens.capacity() <= 4096,
++        "reserved {} slots",
++        tokens.capacity()
++    );
++}
++
+ #[test]
+ fn test_lex_ascii_char() {
+     let cases = [(
