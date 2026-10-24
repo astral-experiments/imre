@@ -15,6 +15,7 @@ mod deferred_diff;
 mod difflib;
 pub(crate) mod exceptions;
 mod files;
+mod join_buffer;
 mod joined_lines;
 mod json;
 mod logging;
@@ -49,6 +50,7 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Sequence(Words),
+    JoinBuffer(Box<join_buffer::JoinBuffer>),
     Dictionary(Box<mappings::Mapping>),
     Set(Box<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
