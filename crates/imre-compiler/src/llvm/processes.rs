@@ -11,6 +11,15 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            ProcessOperation::Executable => self.call("imre_sys_executable", Type::Str, &[]),
+            ProcessOperation::RunToStderr => {
+                let check = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                self.checked_line(format!(
+                    "call void @imre_subprocess_to_stderr(ptr {}, i32 {check})",
+                    args[0].value.operand
+                ));
+                none()
+            }
             ProcessOperation::Run | ProcessOperation::RunTimeout => {
                 let layout = self
                     .output

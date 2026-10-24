@@ -7,7 +7,7 @@
 use std::ffi::{CStr, CString, OsStr};
 use std::fs;
 use std::io::{self, Read};
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -31,8 +31,8 @@ unsafe extern "C" {
 pub(super) struct ProcessError {
     cmd: Rc<Object>,
     returncode: i32,
-    stdout: Rc<Str>,
-    stderr: Rc<Str>,
+    stdout: Option<Rc<Str>>,
+    stderr: Option<Rc<Str>>,
 }
 
 impl ProcessError {
@@ -40,8 +40,14 @@ impl ProcessError {
         match field {
             0 => Rc::into_raw(self.cmd.clone()) as usize,
             1 => exit_word(self.returncode),
-            2 | 4 => Rc::into_raw(self.stdout.clone()) as usize,
-            3 => Rc::into_raw(self.stderr.clone()) as usize,
+            2 | 4 => self
+                .stdout
+                .clone()
+                .map_or(0, |text| Rc::into_raw(text) as usize),
+            3 => self
+                .stderr
+                .clone()
+                .map_or(0, |text| Rc::into_raw(text) as usize),
             _ => fail("SystemError", "invalid process exception field"),
         }
     }
@@ -399,11 +405,20 @@ impl Launch {
     }
 
     fn spawn(self, cwd: Option<&CString>) -> io::Result<Child> {
+        self.spawn_with_output(cwd, Stdio::piped(), Stdio::piped())
+    }
+
+    fn spawn_with_output(
+        self,
+        cwd: Option<&CString>,
+        stdout: Stdio,
+        stderr: Stdio,
+    ) -> io::Result<Child> {
         let mut command = Command::new(OsStr::from_bytes(self.argv.strings[0].as_bytes()));
         command
             .stdin(Stdio::inherit())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stdout(stdout)
+            .stderr(stderr);
         if let Some(cwd) = cwd {
             command.current_dir(OsStr::from_bytes(cwd.as_bytes()));
         }
@@ -901,6 +916,65 @@ pub unsafe extern "C" fn imre_subprocess_run_timeout_int(
     }
 }
 
+/// # Safety
+/// The caller roots an exact argv list whose elements are all strings.
+unsafe fn native_argv(args: *const Object) -> Result<Vec<CString>> {
+    // SAFETY: only independent native strings escape the immutable list borrow.
+    unsafe {
+        object(args).0.with(|storage| {
+            let values = storage.sequence();
+            values.check_kind(3);
+            values
+                .values
+                .iter()
+                .map(|&word| cstring((&*(word as *const Str)).as_bytes()))
+                .collect()
+        })
+    }
+}
+
+/// Runs a child with its output forwarded directly to the parent's stderr.
+///
+/// # Safety
+/// The caller roots an exact list[str] until launch and checks pending on return.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_subprocess_to_stderr(args: *const Object, check: u32) {
+    let run = || -> Result<ExitStatus> {
+        // SAFETY: all argv owners are rooted by the caller.
+        let argv = unsafe { native_argv(args)? };
+        if argv.is_empty() {
+            return Err(Error::new(Kind::IndexError, "list index out of range"));
+        }
+        let launch = Launch::new(argv, None)?;
+        let output = io::stderr()
+            .as_fd()
+            .try_clone_to_owned()
+            .map_err(os_error)?;
+        let child = launch
+            .spawn_with_output(None, output.into(), Stdio::inherit())
+            .map_err(os_error)?;
+        ChildGuard {
+            child,
+            reaped: false,
+        }
+        .wait()
+        .map_err(os_error)
+    };
+    match run() {
+        Ok(status) if check != 0 && !status.success() => raise_process(ProcessError {
+            // SAFETY: the original list remains rooted while acquiring our owner.
+            cmd: unsafe { acquire_rc(args as usize) },
+            returncode: status
+                .code()
+                .unwrap_or_else(|| -status.signal().unwrap_or(0)),
+            stdout: None,
+            stderr: None,
+        }),
+        Ok(_) => {}
+        Err(error) => error.raise(),
+    }
+}
+
 /// Shares launch validation and successful records without changing no-timeout IO.
 unsafe fn run_process(
     args: *const Object,
@@ -940,15 +1014,7 @@ unsafe fn run_process(
                     "illegal environment variable name",
                 ));
             }
-            let argv = object(args).0.with(|storage| {
-                let values = storage.sequence();
-                values.check_kind(3);
-                values
-                    .values
-                    .iter()
-                    .map(|&word| cstring((&*(word as *const Str)).as_bytes()))
-                    .collect::<Result<Vec<_>>>()
-            })?;
+            let argv = native_argv(args)?;
             let cwd = (!cwd.is_null())
                 .then(|| cstring((&*cwd).as_bytes()))
                 .transpose()?;
@@ -1007,8 +1073,8 @@ unsafe fn run_process(
         raise_process(ProcessError {
             cmd: args,
             returncode,
-            stdout,
-            stderr,
+            stdout: Some(stdout),
+            stderr: Some(stderr),
         });
         return std::ptr::null_mut();
     }
@@ -1049,8 +1115,12 @@ pub unsafe extern "C" fn imre_subprocess_check(record: *const usize) {
         ProcessError {
             cmd: acquire_rc(record.cast::<*const Object>().read() as usize),
             returncode,
-            stdout: acquire_rc(record.add(2).cast::<*const Str>().read() as usize),
-            stderr: acquire_rc(record.add(3).cast::<*const Str>().read() as usize),
+            stdout: Some(acquire_rc(
+                record.add(2).cast::<*const Str>().read() as usize
+            )),
+            stderr: Some(acquire_rc(
+                record.add(3).cast::<*const Str>().read() as usize
+            )),
         }
     };
     raise_process(error);

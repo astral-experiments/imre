@@ -152,6 +152,11 @@ impl Checker<'_> {
             None,
         )];
         let arguments = self.arguments(call, &parameters, None)?;
-        Ok(self.ordered_builtin(Builtin::Text(operation), Type::Str, arguments))
+        let returns = if matches!(operation, TextOperation::ShlexSplit) {
+            self.types.list(Type::Str)
+        } else {
+            Type::Str
+        };
+        Ok(self.ordered_builtin(Builtin::Text(operation), returns, arguments))
     }
 }

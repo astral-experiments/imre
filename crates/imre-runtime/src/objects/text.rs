@@ -217,6 +217,66 @@ pub unsafe extern "C" fn imre_str_split(
     )
 }
 
+/// Splits POSIX shell words with Python's default comments=False. Inside double
+/// quotes only another double quote or a backslash loses its preceding escape.
+fn shell_words(source: &str) -> Result<Words> {
+    let mut parts = Words::new(3);
+    let mut word = Str::default();
+    let mut quote = None;
+    let mut started = false;
+    let mut chars = source.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            c if quote == Some(c) => quote = None,
+            '\'' | '"' if quote.is_none() => {
+                quote = Some(c);
+                started = true;
+            }
+            '\\' if quote != Some('\'') => {
+                let escaped = chars
+                    .next()
+                    .ok_or_else(|| Error::new(Kind::ValueError, "No escaped character"))?;
+                if quote == Some('"') && !matches!(escaped, '"' | '\\') {
+                    word.push('\\');
+                }
+                word.push(escaped);
+                started = true;
+            }
+            ' ' | '\r' | '\n' | '\t' if quote.is_none() => {
+                if started {
+                    parts
+                        .values
+                        .push(Rc::into_raw(Rc::new(std::mem::take(&mut word))) as usize);
+                    started = false;
+                }
+            }
+            other => {
+                word.push(other);
+                started = true;
+            }
+        }
+    }
+    if quote.is_some() {
+        return Err(Error::new(Kind::ValueError, "No closing quotation"));
+    }
+    if started {
+        parts.values.push(Rc::into_raw(Rc::new(word)) as usize);
+    }
+    Ok(parts)
+}
+
+/// # Safety
+/// The caller roots the input string. Success transfers a fresh list of strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_shlex_split(value: *const Str) -> *const Object {
+    // SAFETY: the input is immutable and rooted throughout tokenization.
+    let parts = shell_words(unsafe { &*value });
+    finish(
+        parts.map(|parts| Rc::into_raw(parts.into_object())),
+        std::ptr::null(),
+    )
+}
+
 /// Selects the final field of an ephemeral explicit-separator right split.
 ///
 /// # Safety
@@ -312,7 +372,11 @@ pub unsafe extern "C" fn imre_str_strip(
 /// # Safety
 /// Both inputs are rooted strings. A nonzero reverse flag selects endswith.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_str_affix(value: *const Str, affix: *const Str, reverse: u32) -> u32 {
+pub unsafe extern "C" fn imre_str_affix(
+    value: *const Str,
+    affix: *const Str,
+    reverse: u32,
+) -> u32 {
     // SAFETY: this immutable comparison retains no borrowed input references.
     let (source, affix) = unsafe { (&*value, &*affix) };
     u32::from(if reverse != 0 {
@@ -570,8 +634,9 @@ mod tests {
                 0,
             ));
             assert_eq!(Rc::strong_count(&source), 2);
-            let selected =
-                Rc::from_raw(super::super::imre_seq_get_index(Rc::as_ptr(&parts), 0) as *const Str);
+            let selected = Rc::from_raw(
+                super::super::imre_seq_get_index(Rc::as_ptr(&parts), 0) as *const Str
+            );
             assert!(Rc::ptr_eq(&source, &selected));
             drop(source);
             drop(parts);

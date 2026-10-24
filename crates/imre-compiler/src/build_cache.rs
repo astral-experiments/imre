@@ -408,6 +408,7 @@ impl Cache {
             3,
             module_objects,
             entry.canonicalize().ok()?,
+            env::current_dir().ok()?.join(entry).into_os_string(),
             module_root,
             opt.to_str()?,
             path.to_str()?,

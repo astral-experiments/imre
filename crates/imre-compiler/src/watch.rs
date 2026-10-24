@@ -282,6 +282,7 @@ pub(crate) fn check(
     cache: &mut AnalysisCache,
     path: &Path,
     module_root: Option<&Path>,
+    extension_paths: &[PathBuf],
     mut report: impl FnMut(Result<(), String>),
 ) -> Result<(), String> {
     let mut subscription = None;
@@ -290,6 +291,7 @@ pub(crate) fn check(
         let result = crate::check_file_with(
             path,
             module_root,
+            extension_paths,
             Some(cache),
             FileSystem(Some(&mut inputs)),
         );
@@ -319,7 +321,7 @@ mod tests {
         ] {
             std::fs::write(&entry, source).unwrap();
             let mut inputs = Inputs::default();
-            crate::check_file_with(&entry, None, None, FileSystem(Some(&mut inputs))).unwrap();
+            crate::check_file_with(&entry, None, &[], None, FileSystem(Some(&mut inputs))).unwrap();
             let current = Subscription::for_inputs(subscription, &inputs).unwrap();
             assert!(Arc::ptr_eq(
                 first.get_or_insert_with(|| Arc::clone(&current.names)),
@@ -336,7 +338,8 @@ mod tests {
         let dep = dir.path().join("dep.py");
         std::fs::write(&entry, "from dep import value\nprint(value())\n").unwrap();
         let mut inputs = Inputs::default();
-        let missing = crate::check_file_with(&entry, None, None, FileSystem(Some(&mut inputs)));
+        let missing =
+            crate::check_file_with(&entry, None, &[], None, FileSystem(Some(&mut inputs)));
         assert!(missing.unwrap_err().contains("cannot resolve"));
         std::fs::write(&dep, "def value() -> int:\n    return 1\n").unwrap();
         inputs
@@ -344,7 +347,7 @@ mod tests {
             .unwrap();
 
         let mut inputs = Inputs::default();
-        crate::check_file_with(&entry, None, None, FileSystem(Some(&mut inputs))).unwrap();
+        crate::check_file_with(&entry, None, &[], None, FileSystem(Some(&mut inputs))).unwrap();
         std::fs::write(&dep, "def value() -> int:\n    return 'one'\n").unwrap();
         inputs
             .wait_for_change(None, || panic!("reported a stale success"))

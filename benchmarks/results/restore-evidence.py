@@ -26,8 +26,9 @@ import zlib
 
 ORIGINAL_TOKENS = tuple(bytes.fromhex(value) for value in (
     "72656c6172", "52656c6172", "52454c4152",
+    "726c312d72656c617231", "2d2d696d706c656d656e746174696f6e20726c",
 ))
-TARGET_TOKENS = (b"imre", b"Imre", b"IMRE")
+TARGET_TOKENS = (b"imre", b"Imre", b"IMRE", b"im1-imre1", b"--implementation im")
 OLD_PATTERN = re.compile(b"|".join(map(re.escape, ORIGINAL_TOKENS)))
 ANY_OLD_PATTERN = re.compile(
     re.escape(ORIGINAL_TOKENS[0]), re.IGNORECASE,

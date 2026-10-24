@@ -55,9 +55,13 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
+            // Even a zero-argument call may mutate a retained native list or reenter Python.
+            Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
                 match operation {
-                    TextOperation::Split(_) | TextOperation::Partition => true,
+                    TextOperation::Split(_)
+                    | TextOperation::Partition
+                    | TextOperation::ShlexSplit => true,
                     TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
@@ -108,7 +112,9 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::Process(operation) => match operation {
-                ProcessOperation::Run
+                ProcessOperation::Executable
+                | ProcessOperation::RunToStderr
+                | ProcessOperation::Run
                 | ProcessOperation::RunTimeout
                 | ProcessOperation::EnvironCopy
                 | ProcessOperation::EnvironGet
@@ -209,7 +215,7 @@ impl Builtin {
             | Self::FileReadline
             | Self::GzipOpen
             | Self::Input
-            | Self::ParseArgs
+            | Self::ParseArgs(_)
             | Self::Pop
             | Self::Print
             | Self::SortRestore
@@ -238,6 +244,9 @@ impl Builtin {
             | Self::ExceptionWithCause
             | Self::GlobalSet(_)
             | Self::KeyUnion
+            | Self::KeySet
+            | Self::KeyIntersection
+            | Self::NamespaceView
             | Self::ListAllI32
             | Self::ListDistinct
             | Self::ListExtendUnhinted

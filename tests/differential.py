@@ -158,7 +158,11 @@ def main() -> None:
                 assert actual.stdout == reference.stdout, (name, level, actual.stdout, reference.stdout, actual.stderr)
                 if expected_error:
                     assert reference.returncode > 0 and expected_error in reference.stderr, (name, reference)
-                    assert actual.returncode > 0 and actual.stderr.startswith(expected_error + ":"), (name, actual)
+                    assert actual.returncode > 0, (name, actual)
+                    if reference.stderr.splitlines()[-1] == expected_error:
+                        assert actual.stderr == f"{expected_error}\n", (name, actual)
+                    else:
+                        assert actual.stderr.startswith(expected_error + ":"), (name, actual)
                 else:
                     assert reference.returncode == actual.returncode == 0, (name, reference.stderr, actual.stderr)
                     assert not actual.stderr, (name, actual.stderr)

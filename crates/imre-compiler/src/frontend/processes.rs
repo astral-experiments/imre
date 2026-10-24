@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::ir::{PathOperation, ProcessOperation};
-use ruff_python_ast::visitor::{Visitor, walk_expr};
+use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 
 fn operation(operation: ProcessOperation, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
@@ -87,7 +87,71 @@ fn timeout_field_type(graph: &SourceGraph) -> Option<Type> {
     }
 }
 
+/// A direct capture and CompletedProcess.check_returncode() produce text.
+/// User calls (including property getters) and explicit raises can propagate
+/// an error created elsewhere, so their handlers use the program-wide type.
+pub(super) fn captures_errors(source: &[ast::Stmt], body: &[Statement]) -> bool {
+    struct Raises(bool);
+    impl<'ast> Visitor<'ast> for Raises {
+        fn visit_stmt(&mut self, statement: &'ast ast::Stmt) {
+            if matches!(statement, ast::Stmt::Raise(_)) {
+                self.0 = true;
+            } else if !self.0 {
+                walk_stmt(self, statement);
+            }
+        }
+    }
+    let mut raises = Raises(false);
+    raises.visit_body(source);
+    let mut captured = !raises.0;
+    ir::walk_expressions(body, &mut |value| {
+        if matches!(
+            value.kind,
+            ExprKind::Call(..)
+                | ExprKind::Invoke { .. }
+                | ExprKind::Construct { .. }
+                | ExprKind::Builtin(Builtin::Process(ProcessOperation::RunToStderr), _)
+        ) {
+            captured = false;
+        }
+    });
+    captured
+}
+
 impl Checker<'_> {
+    /// An immediately discarded process result can inherit the parent's stderr
+    /// directly without materializing a CompletedProcess or buffering its output.
+    pub(super) fn process_to_stderr(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let [argv] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "redirected subprocess.run requires one argv list",
+            ));
+        };
+        let argv = self.expr_expected(argv, self.types.list(Type::Str))?;
+        let mut check = boolean(false);
+        for kw in &call.arguments.keywords {
+            match kw.arg.as_ref().map(|name| name.as_str()) {
+                Some("check") => check = self.expr_expected(&kw.value, Type::Bool)?,
+                Some("stdout")
+                    if self.resolve(&kw.value) == Some(Binding::Intrinsic(Intrinsic::Stderr)) => {}
+                _ => {
+                    return Err(error(
+                        self.source,
+                        kw,
+                        "redirected subprocess.run supports check and stdout=sys.stderr",
+                    ));
+                }
+            }
+        }
+        Ok(operation(
+            ProcessOperation::RunToStderr,
+            Type::None,
+            vec![argv, check],
+        ))
+    }
+
     /// Keywords capture their values in source order before applying the filesystem ABI.
     pub(super) fn shutil_which(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
@@ -423,7 +487,7 @@ impl Checker<'_> {
         receiver: &Expr,
         attribute: &ast::ExprAttribute,
     ) -> Option<Expr> {
-        let (field, ty) = match attribute.attr.as_str() {
+        let (field, mut ty) = match attribute.attr.as_str() {
             "cmd" => (0, self.types.list(Type::Str)),
             "returncode" => (1, Type::Int),
             "stdout" => (2, Type::Str),
@@ -431,6 +495,49 @@ impl Checker<'_> {
             "output" => (4, Type::Str),
             _ => return None,
         };
+        if matches!(field, 2..=4)
+            && !matches!(receiver.kind, ExprKind::Local(slot) if self.captured_process_errors.contains(&slot))
+        {
+            struct Redirected<'a> {
+                graph: &'a SourceGraph,
+                module: ModuleId,
+                found: bool,
+            }
+            impl<'ast> Visitor<'ast> for Redirected<'_> {
+                fn visit_expr(&mut self, expression: &'ast ast::Expr) {
+                    if let ast::Expr::Call(call) = expression
+                        && self.graph.resolve(self.module, &call.func)
+                            == Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
+                        && call
+                            .arguments
+                            .keywords
+                            .iter()
+                            .any(|kw| kw.arg.as_ref().is_some_and(|name| name == "stdout"))
+                    {
+                        self.found = true;
+                    } else if !self.found {
+                        walk_expr(self, expression);
+                    }
+                }
+            }
+            if self
+                .graph
+                .modules
+                .iter()
+                .enumerate()
+                .any(|(module, source)| {
+                    let mut visitor = Redirected {
+                        graph: self.graph,
+                        module,
+                        found: false,
+                    };
+                    visitor.visit_body(&source.parsed.syntax().body);
+                    visitor.found
+                })
+            {
+                ty = self.types.optional(ty);
+            }
+        }
         Some(operation(
             ProcessOperation::ErrorField(field),
             ty,

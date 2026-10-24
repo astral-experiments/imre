@@ -33,9 +33,13 @@ For a complete example, Imre can build Ruff’s conformance reporter directly
 from its original Python file. The executable runs two versions of ty against
 a typing checkout and renders their differences. [Run the reporter](examples/conformance_report/README.md#run-directly-from-a-checkout).
 
+Imre also runs Ruff’s original memory reporter. It compares saved JSON captures
+or runs two versions of ty on flake8, Sphinx, Prefect, and Trio.
+[Run the memory reporter](examples/memory_report/README.md#run-ruffs-original-script).
+
 Imre supports:
 
-- Statically resolved imports
+- Statically resolved imports, including [rebuilt native extension wheels](docs/extensions.md)
 - Functions with exact declared or inferred signatures
 - Classes and dataclasses with fixed fields
 - String enums with named members and aliases, and string-valued `Literal` annotations
@@ -66,9 +70,8 @@ signature. This lets Imre choose concrete representations. It aims to preserve
 Python's behavior for supported operations, including arbitrary-precision integers.
 
 Imre's runtime uses reference counting and restricts object graphs to avoid
-cycles. Compiled programs run without a Python installation, but Imre must
-implement the features and libraries they use. It cannot use arbitrary Python
-packages or CPython extensions.
+cycles. Compiled programs run without a Python installation. Their imports must
+use supported Python or native extensions rebuilt against Imre’s `Python.h`.
 
 Other projects make different trade-offs:
 

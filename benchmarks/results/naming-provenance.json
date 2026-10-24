@@ -815876,6 +815876,31 @@
         "replacement_count": 6
       }
     },
+    "benchmarks/results/2026-10-23-google-crc32c.json": {
+      "normalized_bytes": 18627,
+      "normalized_sha256": "7c5ab7bae5dcba8d142e8a8b241c5918060ba81f0a75268f918c8a827aba60dd",
+      "original_bytes": 18662,
+      "original_sha256": "ba4943d4e1f00eeb3dc32dff71a98e351ed15cd60fdff0ef2dd5478e5553211c",
+      "restoration": {
+        "encoding": "bytes",
+        "kind": "text",
+        "positions_zlib_hex": "78da1dccb10983501486d18fff72df0357c8624ab649449b144ee002629532034430601bc52e4e903e607ced29ce5334e24c41ce439cf8666cc62ff036aac8cbe8239f24b3514706630d2ce2e2cce2ea4ca2f543ca243767149d73ffdf914eec03101892",
+        "replacement_count": 35
+      }
+    },
+    "benchmarks/results/2026-10-23-google-crc32c.md": {
+      "normalized_bytes": 3666,
+      "normalized_sha256": "53854cd119ee74b22abc08404aa82276ea657a4c1c0afe83859b4c1921d41d41",
+      "original_bytes": 3532,
+      "original_sha256": "04bea5905b6814d62b4a5c7fe9b6679c2a301f147c2f3f54c5c8ea3e89f858e2",
+      "restoration": {
+        "encoding": "bytes",
+        "kind": "text",
+        "markdown_note": true,
+        "positions_zlib_hex": "78dad363ec60649cc1c8b89389919df1003be31a46c64d8c8c5b9818af31325e6162dcc4c408007b3d075d",
+        "replacement_count": 12
+      }
+    },
     "benchmarks/results/2026-10-23-incremental-native-linker-9a7f9951.json.gz": {
       "normalized_bytes": 30008,
       "normalized_sha256": "48bbf09368a191db659b1ad65387a0a744b02b9bb9029bb9e08b9c9faa866ac2",
@@ -815989,6 +816014,122 @@
         "kind": "text",
         "markdown_note": true,
         "positions_zlib_hex": "78dad362dcc3c228c1f88285f12c33e32d7ec6e52c4ccb5919b4990044b50534",
+        "replacement_count": 9
+      }
+    },
+    "benchmarks/results/2026-10-23-original-memory-live.json.gz": {
+      "normalized_bytes": 3807,
+      "normalized_sha256": "af8d0c277ca203b4aceedd49aded0f4a3a9061570910b686a4af021589284f4d",
+      "original_bytes": 3807,
+      "original_sha256": "956a88712ba1c3b5ca37c35937e6f0184de61b7381834ce4a3d5844b6b31d3f3",
+      "restoration": {
+        "deflate": {
+          "level": 9,
+          "memory_level": 8,
+          "strategy": 0,
+          "window_bits": -15
+        },
+        "encoder_zlib_version": "1.3.2",
+        "header_hex": "1f8b08000000000002ff",
+        "kind": "gzip-deflate",
+        "payload": {
+          "normalized_bytes": 9151,
+          "normalized_sha256": "f231f319e32eda6931b9c1cc5778ca1c567a20bd7744f7f0e698af77f60547bd",
+          "original_bytes": 9163,
+          "original_sha256": "f70848d190391624c6d64f440d37da57c41e178be4542200b17451d94bdef05b",
+          "restoration": {
+            "encoding": "bytes",
+            "kind": "text",
+            "positions_zlib_hex": "78da736298c9cfd0c4ced0230a223f7130ec656438c2c8709691e10013c3364610020090c30819",
+            "replacement_count": 12
+          }
+        },
+        "trailer_hex": "a6874386cb230000"
+      }
+    },
+    "benchmarks/results/2026-10-23-original-memory-live.md": {
+      "normalized_bytes": 4299,
+      "normalized_sha256": "4d3db1b3e8c3680b5af918a1debf882fdba7ea1bd3b17145fb831d06f1cfda46",
+      "original_bytes": 4164,
+      "original_sha256": "4b5553d297d3d84e6e55baae2131a804248e3d5329f7ce51bf430dfdfaf5db1d",
+      "restoration": {
+        "encoding": "bytes",
+        "kind": "text",
+        "markdown_note": true,
+        "positions_zlib_hex": "78da5bc1cc98c0b88c83f12b0be34a26c6f98c8ccb99183d18ff30331d61646a656200007b730746",
+        "replacement_count": 11
+      }
+    },
+    "benchmarks/results/2026-10-23-original-memory-profile.json.gz": {
+      "normalized_bytes": 2680,
+      "normalized_sha256": "b9d673aaeb107ea65092bcf6622b7e099a4f9dc930e9029036dacaf73f434e04",
+      "original_bytes": 2684,
+      "original_sha256": "9a521370025275d2b585dbbb68973a84611a3a1d4f427c22fa2b7851c87bc0a1",
+      "restoration": {
+        "deflate": {
+          "level": 9,
+          "memory_level": 8,
+          "strategy": 0,
+          "window_bits": -15
+        },
+        "encoder_zlib_version": "1.3.2",
+        "header_hex": "1f8b08000000000002ff",
+        "kind": "gzip-deflate",
+        "payload": {
+          "normalized_bytes": 8110,
+          "normalized_sha256": "27f277ae175bd11607d584319bfc8951326ed57dd2c7164073f5a2987d35a74f",
+          "original_bytes": 8146,
+          "original_sha256": "0d7d1cbea6d2180f9acbdc49503885d4865a0527b7c2ac9bc058849b2902046d",
+          "restoration": {
+            "encoding": "bytes",
+            "kind": "text",
+            "positions_zlib_hex": "78da5b29c8b09e876122338303c33d4686978c0c671819841964192c81641c830f49f00a2b03003dd40d67",
+            "replacement_count": 36
+          }
+        },
+        "trailer_hex": "e84b371cd21f0000"
+      }
+    },
+    "benchmarks/results/2026-10-23-original-memory-report.json.gz": {
+      "normalized_bytes": 5652,
+      "normalized_sha256": "13708d602513a956e58c87bf8002737661dd895754d46eeaae654a8b3b628b46",
+      "original_bytes": 5646,
+      "original_sha256": "ffec654468462c6f603b8a5c278f316528ef05eaa034ad520fbb7e53c61e2cfa",
+      "restoration": {
+        "deflate": {
+          "level": 9,
+          "memory_level": 8,
+          "strategy": 0,
+          "window_bits": -15
+        },
+        "encoder_zlib_version": "1.3.2",
+        "header_hex": "1f8b08000000000002ff",
+        "kind": "gzip-deflate",
+        "payload": {
+          "normalized_bytes": 24983,
+          "normalized_sha256": "4df2ca9f9c6f19879f817125ccdebbfa35089c4b2a09b30e7f34017535b70b4e",
+          "original_bytes": 25197,
+          "original_sha256": "346ce0597a1e1165f642024c4cd479ca5211ae64ce9f050d4383fa0e3208f974",
+          "restoration": {
+            "encoding": "bytes",
+            "kind": "text",
+            "positions_zlib_hex": "78da736438c2c8708e89613d2308ed6064d06098c2c8a0c2d0cec8b08e91a1958d419f611613c36b4686e92c0cc20cb20c960cca0c710c7e0cfe408c80fe482c5419109ccf0a34653613c32b02a6e087b341a64c43758b12d8144c57f861719d3fc2941998a6f802e57c91f4f8a2e986c9fb83e9a920537a99185ea299e243129c0c326502ba29b1249a12ccd0c8c8e0c6200f741a00257e4828",
+            "replacement_count": 214
+          }
+        },
+        "trailer_hex": "fcf5ea3a6d620000"
+      }
+    },
+    "benchmarks/results/2026-10-23-original-memory-report.md": {
+      "normalized_bytes": 4458,
+      "normalized_sha256": "aa3612b1a8be7febcefc72db8ee531036b3d8b7a2dbba5c4a3147bd62bb5d778",
+      "original_bytes": 4321,
+      "original_sha256": "67d889b164b85587cff32e1295d76b40a843ba4ff702f7d12926df7c473215cf",
+      "restoration": {
+        "encoding": "bytes",
+        "kind": "text",
+        "markdown_note": true,
+        "positions_zlib_hex": "78da9362fccac4788c895182f1090b631733633b2fd31c56064d2600434104cf",
         "replacement_count": 9
       }
     },
@@ -819117,7 +819258,7 @@
   ],
   "project": "Imre",
   "restoration_utility": "benchmarks/results/restore-evidence.py",
-  "restoration_utility_sha256": "eac83a8a578943c667fd5daabfac63fd6d62cf027c13992ec8836bb77125bcf1",
+  "restoration_utility_sha256": "e65e5bf6131488bd34f5f3587820e0f57564c13b842fc959b15c7e4b0ac69a6f",
   "schema": 2,
   "support_blobs": {
     "benchmarks/results/naming-data/1acad04b7d443ae2f7563797fd1cfefbf4436c97def32e347646ee2770f6995c.hex": {
@@ -819193,11 +819334,15 @@
   "token_code_original_hex": [
     "72656c6172",
     "52656c6172",
-    "52454c4152"
+    "52454c4152",
+    "726c312d72656c617231",
+    "2d2d696d706c656d656e746174696f6e20726c"
   ],
   "token_code_target": [
     "imre",
     "Imre",
-    "IMRE"
+    "IMRE",
+    "im1-imre1",
+    "--implementation im"
   ]
 }

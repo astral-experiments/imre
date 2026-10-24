@@ -863,7 +863,11 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
                 "\nThe above exception was the direct cause of the following exception:\n"
             );
         }
-        let _ = writeln!(stderr, "{}: {message}", kind.name());
+        if message.is_empty() {
+            let _ = writeln!(stderr, "{}", kind.name());
+        } else {
+            let _ = writeln!(stderr, "{}: {message}", kind.name());
+        }
     }
     1
 }
@@ -1103,7 +1107,8 @@ mod tests {
             let argument = argument.map(|value| Rc::new(Str::new(value)));
             let pointer = argument.as_ref().map_or(std::ptr::null(), Rc::as_ptr);
             // SAFETY: the nullable argument remains rooted throughout construction.
-            let error = unsafe { Rc::from_raw(imre_exception_new(Kind::KeyError as u32, pointer)) };
+            let error =
+                unsafe { Rc::from_raw(imre_exception_new(Kind::KeyError as u32, pointer)) };
             drop(argument);
             assert_eq!(message(&error).as_str(), expected);
         }

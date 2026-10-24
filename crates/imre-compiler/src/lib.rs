@@ -31,6 +31,8 @@ use std::path::{Path, PathBuf};
 pub struct CompileOptions {
     /// Marks generated functions for LLVM's AddressSanitizer pass.
     pub address_sanitizer: bool,
+    /// Explicit installation roots containing rebuilt native modules and their type stubs.
+    pub extension_paths: Vec<PathBuf>,
 }
 
 /// Checks source syntax, ty diagnostics, and Imre's exact type contract.
@@ -52,6 +54,8 @@ pub struct Compilation {
     pub llvm_ir: String,
     pub input_paths: Vec<PathBuf>,
     pub source_inputs: SourceInputs,
+    /// Native archives reached by the static import graph, in link order.
+    pub extension_archives: Vec<PathBuf>,
 }
 
 /// Files and failed import lookups observed by the source loader.
@@ -76,16 +80,27 @@ impl SourceInputs {
 
 /// Checks a closed first-party module graph, inferring its package root when omitted.
 pub fn check_file(path: &Path, module_root: Option<&Path>) -> Result<(), String> {
-    check_file_with(path, module_root, None, Default::default())
+    check_file_with_extensions(path, module_root, &[])
+}
+
+/// Checks first-party code against the declarations in explicitly installed extension wheels.
+pub fn check_file_with_extensions(
+    path: &Path,
+    module_root: Option<&Path>,
+    extension_paths: &[PathBuf],
+) -> Result<(), String> {
+    check_file_with(path, module_root, extension_paths, None, Default::default())
 }
 
 fn check_file_with(
     path: &Path,
     module_root: Option<&Path>,
+    extension_paths: &[PathBuf],
     cache: Option<&mut analysis::AnalysisCache>,
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
-    let mut graph = modules::SourceGraph::load_with(path, module_root, filesystem)?;
+    let mut graph =
+        modules::SourceGraph::load_with(path, module_root, extension_paths, filesystem)?;
     let (module, _) = checked_lower_with(&mut graph, cache)?;
     verify_after(&module, "lowering")
 }
@@ -96,12 +111,17 @@ pub fn compile_file(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
-    let mut graph = modules::SourceGraph::load(path, module_root)?;
+    let mut graph = modules::SourceGraph::load(path, module_root, &options.extension_paths)?;
     let (mut module, _) = checked_lower(&mut graph)?;
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
     Ok(Compilation {
         llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer)?,
+        extension_archives: graph
+            .modules
+            .iter()
+            .filter_map(|m| m.archive.clone())
+            .collect(),
         source_inputs: graph.inputs,
         input_paths: graph
             .modules
@@ -120,6 +140,8 @@ pub struct UnitCompilation {
     pub units: Vec<CodegenUnit>,
     pub input_paths: Vec<PathBuf>,
     pub source_inputs: SourceInputs,
+    /// Native archives reached by the static import graph, in link order.
+    pub extension_archives: Vec<PathBuf>,
 }
 
 /// Reuses ty's semantic queries across revisions of a first-party program in this process.
@@ -133,7 +155,13 @@ pub struct IncrementalCompiler {
 impl IncrementalCompiler {
     /// Checks the current revision, including unused definitions in every reachable file.
     pub fn check_file(&mut self, path: &Path, module_root: Option<&Path>) -> Result<(), String> {
-        check_file_with(path, module_root, Some(&mut self.cache), Default::default())
+        check_file_with(
+            path,
+            module_root,
+            &[],
+            Some(&mut self.cache),
+            Default::default(),
+        )
     }
 
     /// Reports an initial check and subsequent source changes until interrupted. Source
@@ -144,7 +172,18 @@ impl IncrementalCompiler {
         module_root: Option<&Path>,
         report: impl FnMut(Result<(), String>),
     ) -> Result<(), String> {
-        watch::check(&mut self.cache, path, module_root, report)
+        self.watch_file_with_extensions(path, module_root, &[], report)
+    }
+
+    /// Watches the current revision and declarations in installed extension wheels.
+    pub fn watch_file_with_extensions(
+        &mut self,
+        path: &Path,
+        module_root: Option<&Path>,
+        extension_paths: &[PathBuf],
+        report: impl FnMut(Result<(), String>),
+    ) -> Result<(), String> {
+        watch::check(&mut self.cache, path, module_root, extension_paths, report)
     }
 
     /// Checks the current revision and emits the same codegen units as [`compile_file_units`].
@@ -173,7 +212,7 @@ fn compile_file_units_with(
     options: &CompileOptions,
     cache: Option<&mut analysis::AnalysisCache>,
 ) -> Result<UnitCompilation, String> {
-    let mut graph = modules::SourceGraph::load(path, module_root)?;
+    let mut graph = modules::SourceGraph::load(path, module_root, &options.extension_paths)?;
     let (mut module, owners) = checked_lower_with(&mut graph, cache)?;
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
@@ -191,6 +230,11 @@ fn compile_file_units_with(
             &names,
             graph.entry,
         )?,
+        extension_archives: graph
+            .modules
+            .iter()
+            .filter_map(|m| m.archive.clone())
+            .collect(),
         input_paths: graph.modules.into_iter().map(|m| m.path).collect(),
         source_inputs: graph.inputs,
     })

@@ -19,6 +19,9 @@ IMPORT = "from imre.json import decode\n"
 ITEM = "class Item:\n    value: int\n    def __init__(self, value: int) -> None:\n        self.value = value\n"
 
 REJECTED = {
+    "mutate_json_rows": 'from typing import Any\ndef mutate(rows: list[dict[str, Any]], other: dict[str, Any]) -> None:\n    rows[0] = other\n',
+    "sort_json_alias": 'from typing import Any\ndef mutate(rows: list[dict[str, Any]]) -> None:\n    rows.sort(key=lambda row: 1)\ndef pass_alias(rows: list[dict[str, Any]]) -> None:\n    alias = rows\n    mutate(alias)\n',
+    "append_json_rows": 'from typing import Any\ndef mutate(rows: list[dict[str, Any]]) -> None:\n    rows.append(rows[0])\n',
     "dynamic_json_key": 'import json\nkey = "field"\nrows = json.loads("[]")\nvalue = rows[0][key]\n',
     "write_json_object": 'from typing import Any\ndef write(row: dict[str, Any]) -> None:\n    row["field"] = 1\n',
     "nested_json_list_mutation": 'import json\nfrom typing import Any\nrows: list[dict[str, Any]] = json.loads("{}").get("rows", [])\nrows.pop()\n',

@@ -91,6 +91,9 @@ impl Emitter<'_, '_> {
             TextOperation::Unquote => {
                 self.instruction(format!("call ptr @imre_str_unquote(ptr {source})"))
             }
+            TextOperation::ShlexSplit => {
+                self.checked_instruction(format!("call ptr @imre_shlex_split(ptr {source})"))
+            }
         };
         self.owned(Value {
             ty: returns,

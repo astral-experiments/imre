@@ -339,6 +339,15 @@ pub(crate) enum Compare {
 
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    /// Runs the static archive's module initializer in ordinary import order.
+    ExtensionImport(String),
+    /// Calls a checked declaration in a rebuilt extension's method table.
+    ExtensionCall {
+        module: String,
+        method: String,
+        kinds: Vec<u8>,
+        result_kind: u8,
+    },
     StrEnumMember {
         class: usize,
         member: usize,
@@ -470,7 +479,10 @@ pub(crate) enum Builtin {
     SplitLines,
     RStrip,
     SysArgv,
-    ParseArgs,
+    /// The child layout descriptors follow the literal subcommand order.
+    ParseArgs(Vec<usize>),
+    /// Retags a namespace after its immutable command field selects a child layout.
+    NamespaceView,
     /// Decodes one string into a checked record, list, or string-key dictionary.
     JsonDecode(Type),
     JsonLoads,
@@ -525,6 +537,8 @@ pub(crate) enum Builtin {
     DictAsBase,
     /// Combines the current keys of rooted mappings/sets after both operands run.
     KeyUnion,
+    KeySet,
+    KeyIntersection,
     /// Produces sorted unique string keys from a small union of local dictionaries.
     SortedStringKeys,
     /// Each generated field reads the sorted key (0) or one input dictionary (1-based).
@@ -592,6 +606,7 @@ pub(crate) enum TextOperation {
     Partition,
     Unquote,
     Dedent,
+    ShlexSplit,
 }
 
 /// Native path operations keep their exact result types in the checked IR.
@@ -640,6 +655,8 @@ pub(crate) enum PosixPathOperation {
 /// Synchronous process operations cannot invoke language callbacks.
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
+    Executable,
+    RunToStderr,
     Run,
     RunTimeout,
     EnvironCopy,
