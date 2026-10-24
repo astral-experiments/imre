@@ -1,7 +1,7 @@
 //! Sealed UTF-8 text and byte streams. Explicit operations report language errors;
 //! final ownership cleanup only closes resources and never changes error state.
 
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::fd::IntoRawFd;
 use std::os::unix::fs::MetadataExt;
@@ -32,6 +32,7 @@ enum FileKind {
 
 enum Stream {
     Read(Input),
+    UnreadGzip { file: File, capacity: usize },
     Write(Output),
 }
 
@@ -41,6 +42,7 @@ impl Stream {
     fn close(self) -> io::Result<()> {
         let (file, flushed) = match self {
             Self::Read(input) => (input.into_file(), Ok(())),
+            Self::UnreadGzip { file, .. } => (file, Ok(())),
             Self::Write(writer) => writer.finish(),
         };
         let descriptor = file.into_raw_fd();
@@ -84,6 +86,17 @@ impl FileState {
         } else {
             "I/O operation on closed file."
         };
+        if let Some(Stream::UnreadGzip { file, capacity }) = self
+            .stream
+            .take_if(|stream| matches!(stream, Stream::UnreadGzip { .. }))
+        {
+            self.stream = Some(Stream::Read(Input::new(
+                file,
+                true,
+                self.kind == FileKind::GzipBinaryRead,
+                capacity,
+            )));
+        }
         let stream = self
             .stream
             .as_mut()
@@ -115,6 +128,9 @@ impl FileState {
                 Kind::ValueError,
                 "read length must be non-negative or -1",
             ));
+        }
+        if size == 0 && matches!(self.stream, Some(Stream::UnreadGzip { .. })) {
+            return Ok(Bytes::new());
         }
         self.input()?.read_bytes(usize::try_from(size).ok())
     }
@@ -154,7 +170,7 @@ impl FileState {
             return Err(Error::new(Kind::ValueError, "flush of closed file"));
         }
         match self.stream()? {
-            Stream::Read(_) => Ok(()),
+            Stream::Read(_) | Stream::UnreadGzip { .. } => Ok(()),
             Stream::Write(writer) => writer.flush().map_err(os_error),
         }
     }
@@ -297,7 +313,9 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
     let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
     let stream = match mode {
-        0 => Stream::Read(Input::new(file, gzip, binary, capacity)),
+        // Open the descriptor now, but allocate gzip's buffers and inflater on first read.
+        0 if gzip => Stream::UnreadGzip { file, capacity },
+        0 => Stream::Read(Input::new(file, false, binary, capacity)),
         _ => Stream::Write(Output::new(file, capacity, binary)),
     };
     Ok(FileState {
@@ -689,6 +707,32 @@ mod tests {
             input.text_line().unwrap_err().raise();
             take_error(Kind::UnicodeDecodeError);
         }
+    }
+
+    #[test]
+    fn unread_gzip_keeps_the_descriptor_without_allocating_read_buffers() {
+        let directory = Directory::new();
+        let path = directory.0.join("data.gz");
+        std::fs::write(&path, member(b"original")).unwrap();
+        let mut state = open_state(path.to_str().unwrap(), 0, true, true)
+            .ok()
+            .unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, member(b"replacement")).unwrap();
+
+        state.flush().ok().unwrap();
+        assert!(
+            state
+                .read_size(&Int::from_usize(0))
+                .ok()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(matches!(state.stream, Some(Stream::UnreadGzip { .. })));
+        assert_eq!(
+            state.read_size(&Int::from_usize(8)).ok().unwrap(),
+            b"original"
+        );
     }
 
     #[test]
