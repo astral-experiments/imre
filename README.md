@@ -90,7 +90,7 @@ Other projects make different trade-offs:
 
 For more, see the [design](docs/design.md) and [supported subset](docs/subset.md).
 
-## Benchmark
+## Benchmarks
 
 Imre and CPython 3.14.5 run the same Python programs. The Rust references read the same inputs and produce the same outputs.
 
@@ -108,8 +108,6 @@ Each result is the median of 12 fresh processes pinned to one AMD EPYC Milan CPU
 | Luhn checksum | 65,536 × 16 digits | 5.03 | 152.09 | 13.39 | 11.36× |
 | Telemetry report | 81 × 4,096 aligned pairs | 9.60 | 125.00 | 13.30 | 9.40× |
 | Conformance report | 146 files, two captured ty runs | 25.26 | 258.75 | 34.95 | 7.40× |
-
-[Workloads, timing ranges and reproduction](benchmarks/runtime-suite.md) · [Raw samples](benchmarks/results/runtime-suite.json)
 
 ## Installation
 

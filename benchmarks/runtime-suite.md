@@ -1,6 +1,6 @@
 # Rust, CPython and Imre
 
-Median elapsed time in milliseconds, including startup, imports and file I/O. Lower is faster. The [README](../README.md#benchmark) lists all six medians for each runtime.
+Median elapsed time in milliseconds, including startup, imports and file I/O. Lower is faster. The [README](../README.md#benchmarks) lists all six medians for each runtime.
 
 ![Six panels comparing median elapsed time for Rust, Imre and CPython on inventory reconciliation, Base45 decoding, Luhn checksums, telemetry and offline conformance reporting.](results/runtime-suite.svg)
 
