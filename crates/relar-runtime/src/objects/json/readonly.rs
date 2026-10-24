@@ -5,6 +5,7 @@
 mod arrays;
 mod constants;
 pub(in crate::objects) mod document;
+mod elements;
 mod values;
 mod writer;
 
@@ -471,14 +472,28 @@ impl<'de> Visitor<'de> for Fields<'_, '_> {
 
 fn build(source: Source<'_>) -> Result<*const Object, serde_json::Error> {
     let text = source.text;
-    if !text
-        .trim_start_matches([' ', '\n', '\r', '\t'])
-        .starts_with('[')
-    {
-        // Validate the entire input, including trailing data, before allocating a partial tree.
-        let raw = serde_json::from_str::<&RawValue>(text)?;
+    let trimmed = text.trim_start_matches([' ', '\n', '\r', '\t']);
+    if !trimmed.starts_with('[') {
         let mut nodes = Vec::new();
-        let index = push_node(&mut nodes, raw, source)?;
+        let index = if trimmed.starts_with('{') {
+            let mut parser = serde_json::Deserializer::from_str(trimmed);
+            let fields = parser
+                .deserialize_map(Fields(&mut nodes, source))
+                .and_then(|fields| parser.end().map(|()| fields))
+                // A structural error anywhere, including trailing data, takes precedence
+                // over a typed value error (such as an unrepresentable Unicode scalar).
+                .map_err(|error| {
+                    serde_json::from_str::<&RawValue>(text)
+                        .err()
+                        .unwrap_or(error)
+                })?;
+            let index = nodes.len();
+            nodes.push(Node::Object(fields));
+            index
+        } else {
+            let raw = serde_json::from_str::<&RawValue>(text)?;
+            push_node(&mut nodes, raw, source)?
+        };
         return Ok(View {
             nodes: Nodes::Document(Rc::new(nodes)),
             index,

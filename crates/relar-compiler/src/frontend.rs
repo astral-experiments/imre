@@ -18,6 +18,7 @@ mod callables;
 mod calls;
 mod comprehensions;
 mod contexts;
+mod counter;
 mod dataclass_values;
 mod dispatch;
 mod documents;
@@ -1773,8 +1774,9 @@ impl<'a> Checker<'a> {
         {
             return Ok(json::select(value, expected, None, None));
         }
-        if self.types.is_default_list_dict(value.ty)
+        if (self.types.is_default_list_dict(value.ty) || self.types.is_counter(value.ty))
             && !self.types.is_default_list_dict(expected)
+            && !self.types.is_counter(expected)
             && self.types.mapping(value.ty) == self.types.mapping(expected)
         {
             return Ok(Expr {
@@ -1918,7 +1920,7 @@ impl<'a> Checker<'a> {
             {
                 Expr {
                     ty: concrete,
-                    kind: ExprKind::Builtin(Builtin::Counter, Vec::new()),
+                    kind: ExprKind::Builtin(Builtin::CounterNew, Vec::new()),
                 }
             }
             ast::Expr::Lambda(lambda) => {
@@ -1963,6 +1965,12 @@ impl<'a> Checker<'a> {
                 } else {
                     self.list_call(call, self.types.element(concrete))?
                 }
+            }
+            ast::Expr::Call(call)
+                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Counter))
+                    && self.types.mapping(concrete).is_some() =>
+            {
+                self.counter(call, None, self.types.mapping(concrete).map(|(key, _)| key))?
             }
             ast::Expr::Call(call)
                 if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::DefaultDict)) =>
@@ -5022,6 +5030,18 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::TomlKeys, vec![text]),
             });
         }
+        if let ast::Expr::Subscript(s) = &*call.func
+            && self.resolve(&s.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
+        {
+            let ty = annotation(
+                &s.slice,
+                self.graph,
+                self.module,
+                &self.classes.declarations,
+                self.types,
+            )?;
+            return self.counter(call, None, Some(ty));
+        }
         match self.resolve(&call.func) {
             Some(Binding::Intrinsic(
                 kind @ (Intrinsic::RunLoop
@@ -5040,6 +5060,7 @@ impl<'a> Checker<'a> {
                     "sha256 is supported only with an immediate .hexdigest()",
                 ));
             }
+            Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
                 return Err(error(
                     self.source,
@@ -5093,12 +5114,6 @@ impl<'a> Checker<'a> {
                         Builtin::LogLevel,
                         vec![self.expr_expected(&kw.value, Type::Int)?],
                     ),
-                });
-            }
-            Some(Binding::Intrinsic(Intrinsic::Counter)) if call.arguments.is_empty() => {
-                return Ok(Expr {
-                    ty: self.types.counter(Type::Str),
-                    kind: ExprKind::Builtin(Builtin::Counter, Vec::new()),
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::Ndiff)) => {
@@ -5323,6 +5338,20 @@ impl<'a> Checker<'a> {
                     _ => {}
                 }
             }
+            if self.types.is_counter(receiver.ty) {
+                match attribute.attr.as_str() {
+                    "update" => return self.counter(call, Some(receiver), None),
+                    "total"
+                        if call.arguments.args.is_empty() && call.arguments.keywords.is_empty() =>
+                    {
+                        return Ok(Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Builtin(Builtin::CounterTotal, vec![receiver]),
+                        });
+                    }
+                    _ => {}
+                }
+            }
             if attribute.attr.as_str() == "sort" && self.types.element(receiver.ty).is_some() {
                 return self.list_sort(receiver, call);
             }
@@ -5427,23 +5456,6 @@ impl<'a> Checker<'a> {
                 });
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
-                if self.types.is_counter(receiver.ty)
-                    && attribute.attr.as_str() == "update"
-                    && let [source] = call.arguments.args.as_ref()
-                {
-                    let source = self.expr(source)?;
-                    if self.types.mapping(source.ty) != Some((key_type, Type::Int)) {
-                        return Err(error(
-                            self.source,
-                            call,
-                            "Counter.update requires a mapping of matching keys to int",
-                        ));
-                    }
-                    return Ok(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::Builtin(Builtin::CounterUpdate, vec![receiver, source]),
-                    });
-                }
                 if attribute.attr.as_str() == "keys"
                     && call.arguments.args.is_empty()
                     && let Some(view) = key_view
@@ -5814,7 +5826,8 @@ impl<'a> Checker<'a> {
                 });
             }
             if matches!(name.id.as_str(), "str" | "print")
-                && matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess)
+                && (matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess)
+                    || self.types.is_counter(args[0].ty))
             {
                 let text = self.record_text(args.into_iter().next().unwrap(), call)?;
                 return Ok(if name.id == "str" {

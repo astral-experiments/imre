@@ -209,7 +209,6 @@ impl Builtin {
             | Self::Bool
             | Self::DictContains
             | Self::DictGetDefault
-            | Self::Counter
             | Self::CounterUpdate
             | Self::EnumLookup(_)
             | Self::DictSumValues
@@ -299,6 +298,8 @@ impl Builtin {
             | Self::TomlKeys => Contract::new(true, Unknown),
             Self::BytesIter
             | Self::DefaultListDict
+            | Self::CounterNew
+            | Self::CounterTotal
             | Self::DictAsBase
             | Self::DictIter(_)
             | Self::ExceptionWithCause

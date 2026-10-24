@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use serde_json::value::RawValue;
 
-use super::{Nodes, Source, View, constants, push_array};
+use super::{Nodes, Source, View, constants, elements, push_array};
 
 pub(in crate::objects::json) struct Deferred {
     text: Rc<str>,
@@ -56,7 +56,10 @@ impl Deferred {
                     original: unmodified,
                     shared: Some((&self.text, self.range.start)),
                 };
-                let node = push_array(&mut nodes, text, source)?;
+                let node = match elements::parse(text, &mut nodes) {
+                    Some(array) => array,
+                    None => push_array(&mut nodes, text, source)?,
+                };
                 let index = nodes.len();
                 nodes.push(node);
                 Ok::<_, serde_json::Error>(View {

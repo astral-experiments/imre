@@ -26,10 +26,10 @@ pub(crate) enum FieldDefault {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ContainerFactory {
+    Counter,
     List,
     Dict,
     Set,
-    Counter,
 }
 
 /// Decorator identity follows imports and re-exports, never the spelling of an alias.

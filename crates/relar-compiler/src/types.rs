@@ -588,8 +588,8 @@ impl Types {
             return None;
         };
         match self.0.borrow().shapes[id] {
-            Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => Some((key, value)),
             Shape::Counter(key) => Some((key, Type::Int)),
+            Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => Some((key, value)),
             _ => unreachable!("dictionary type identity has a dictionary shape"),
         }
     }
@@ -740,6 +740,10 @@ impl TypeDescription<'_> {
                 self.write_str("tuple[")?;
                 self.write_types(fields, ", ")?;
             }
+            Shape::Counter(key) => {
+                self.write_str("Counter[")?;
+                self.write_type(*key)?;
+            }
             Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => {
                 self.write_str(if matches!(shape, Shape::Dict(..)) {
                     "dict["
@@ -749,10 +753,6 @@ impl TypeDescription<'_> {
                 self.write_type(*key)?;
                 self.write_str(", ")?;
                 self.write_type(*value)?;
-            }
-            Shape::Counter(key) => {
-                self.write_str("Counter[")?;
-                self.write_type(*key)?;
             }
             Shape::DirectoryContext(_) | Shape::Awaitable(_) => {
                 unreachable!("handled by the nominal type spelling")

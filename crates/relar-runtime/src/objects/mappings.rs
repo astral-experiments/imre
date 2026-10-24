@@ -426,7 +426,7 @@ impl<K: ScalarKey> Table<K, usize> {
         &mut self,
         word: usize,
         kind: WordKind,
-        factory: Option<WordKind>,
+        missing: Missing,
     ) -> Option<OwnedWord> {
         // SAFETY: the incoming key remains rooted for this whole operation.
         let key = unsafe { K::borrow(word) };
@@ -436,7 +436,14 @@ impl<K: ScalarKey> Table<K, usize> {
             // SAFETY: the table roots the stored value of the declared kind.
             return Some(unsafe { kind.acquire(value) });
         }
-        let element = factory?;
+        let element = match missing {
+            Missing::Raise => return None,
+            Missing::Zero => {
+                // SAFETY: a Counter has exact integer values. Zero is immediate.
+                return Some(unsafe { kind.acquire(Int::small(0).unwrap().0) });
+            }
+            Missing::List(element) => element,
+        };
         let list = if element.raw() == 2 {
             crate::relar_list_new() as usize
         } else {
@@ -595,12 +602,18 @@ impl AsciiIntCache {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Missing {
+    Raise,
+    List(WordKind),
+    Zero,
+}
+
 pub(super) struct Mapping {
     tables: Tables<usize>,
     value_kind: WordKind,
-    /// A sealed list factory is invoked only by a missing subscription.
-    default_list_element: Option<WordKind>,
-    counter: bool,
+    /// Only subscription consults this policy; membership and get inspect stored keys.
+    missing: Missing,
     /// Present only after a string-to-integer gather. Words borrow current table
     /// values; ASCII mutation updates the corresponding slot before old owners drop.
     ascii_int: Option<Box<AsciiIntCache>>,
@@ -703,15 +716,23 @@ impl Mapping {
         position: usize,
     ) -> super::values::Comparison {
         use super::values::Comparison;
-        if self.counter && other.counter && self.tables.key_kind() == other.tables.key_kind() {
-            // CPython treats an absent count as zero when comparing two Counters.
-            let includes = |a: &Self, b: &Self| {
-                // SAFETY: both tables root these keys and integer counts throughout comparison.
-                a.tables.all(|key, count| unsafe {
-                    super::values::equal(count, b.tables.lookup(key).unwrap_or(1), a.value_kind)
+        if self.missing == Missing::Zero && other.missing == Missing::Zero {
+            // Counts of absent keys are zero in either direction, including
+            // for another Counter nested in a record or in a sequence.
+            let agrees = |left: &Self, right: &Self| {
+                left.tables.all(|key, value| {
+                    let count = if left.tables.key_kind() == right.tables.key_kind() {
+                        // SAFETY: immutable source tables root equal key kinds.
+                        unsafe { right.tables.lookup(key) }
+                    } else {
+                        None
+                    };
+                    let count = count.unwrap_or(Int::small(0).unwrap().0);
+                    // SAFETY: both Counter values are rooted canonical integers.
+                    unsafe { crate::relar_int_compare(value, count) == 0 }
                 })
             };
-            return Comparison::Done(includes(self, other) && includes(other, self));
+            return Comparison::Done(agrees(self, other) && agrees(other, self));
         }
         if self.tables.key_kind() != other.tables.key_kind()
             || self.value_kind != other.value_kind
@@ -740,7 +761,7 @@ impl Mapping {
         output: &mut String,
         position: usize,
     ) -> Option<super::values::ReprEntry> {
-        if self.counter {
+        if self.missing == Missing::Zero {
             output.push_str("Counter(");
             if self.tables.len() != 0 {
                 let mut entries = Vec::with_capacity(self.tables.len());
@@ -748,18 +769,21 @@ impl Mapping {
                     entries.push((key, count));
                     true
                 });
-                // Stable ties follow insertion order, as in Counter.most_common().
-                // SAFETY: this mapping roots the integer counts until sorting is complete.
+                // Stable sorting preserves first appearance for ties.
+                // SAFETY: the immutable table roots both exact integer counts.
                 entries.sort_by(|a, b| unsafe { crate::relar_int_compare(b.1, a.1) }.cmp(&0));
                 output.push('{');
-                let key_kind = WordKind::new(self.tables.key_kind());
-                for (i, (key, count)) in entries.into_iter().enumerate() {
-                    if i != 0 {
+                for (index, (key, count)) in entries.into_iter().enumerate() {
+                    if index != 0 {
                         output.push_str(", ");
                     }
-                    // SAFETY: the rooted table supplies an initialized key and integer count.
+                    // SAFETY: only immutable scalar keys and integer counts are supported.
                     unsafe {
-                        super::values::write_repr(output, key, key_kind);
+                        super::values::write_repr(
+                            output,
+                            key,
+                            WordKind::new(self.tables.key_kind()),
+                        );
                         output.push_str(": ");
                         super::values::write_repr(output, count, self.value_kind);
                     }
@@ -770,14 +794,14 @@ impl Mapping {
             return None;
         }
         if position == 0 {
-            if self.default_list_element.is_some() {
+            if matches!(self.missing, Missing::List(_)) {
                 output.push_str("defaultdict(<class 'list'>, ");
             }
             output.push('{');
         }
         let Some((next, key, value)) = self.tables.next(position) else {
             output.push('}');
-            if self.default_list_element.is_some() {
+            if matches!(self.missing, Missing::List(_)) {
                 output.push(')');
             }
             return None;
@@ -796,8 +820,7 @@ impl Mapping {
         Self {
             tables: Tables::new(key_kind),
             value_kind: WordKind::new(value_kind),
-            default_list_element: None,
-            counter: false,
+            missing: Missing::Raise,
             ascii_int: None,
         }
     }
@@ -1011,7 +1034,6 @@ impl Storage {
     }
 }
 
-/// Creates a dictionary with concrete scalar keys and one shared value descriptor.
 /// Each statically decorated module function owns one typed cache for the
 /// lifetime of the program. A failed call never reaches the wrapper's insert.
 #[unsafe(no_mangle)]
@@ -1030,6 +1052,7 @@ pub extern "C" fn relar_function_cache(id: usize, key: u32, value: u32) -> *cons
     })
 }
 
+/// Creates a dictionary with concrete scalar keys and one shared value descriptor.
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_dict_new(key_kind: u32, value_kind: u32) -> *const Object {
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
@@ -1037,11 +1060,11 @@ pub extern "C" fn relar_dict_new(key_kind: u32, value_kind: u32) -> *const Objec
     )))))
 }
 
-/// Creates an insertion-ordered integer counter whose missing subscription returns zero.
+/// Constructs an integer-valued Counter with non-inserting zero subscriptions.
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_counter_new(key_kind: u32) -> *const Object {
     let mut mapping = Mapping::new(key_kind, 2);
-    mapping.counter = true;
+    mapping.missing = Missing::Zero;
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
         Box::new(mapping),
     )))))
@@ -1068,6 +1091,7 @@ pub unsafe extern "C" fn relar_counter_update(target: *const Object, source: *co
         }
     }
 }
+
 /// Sums exact integers after evaluating the dictionary and the start value.
 ///
 /// # Safety
@@ -1088,11 +1112,19 @@ pub unsafe extern "C" fn relar_dict_sum_values(mapping: *const Object, start: us
     }
 }
 
+/// # Safety
+/// `value` roots an exact Counter; addition only reads its immutable integer words.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_counter_total(value: *const Object) -> usize {
+    // SAFETY: the caller roots this integer mapping and the zero start is immediate.
+    unsafe { relar_dict_sum_values(value, Int::small(0).unwrap().0) }
+}
+
 /// Attaches the exact element descriptor to a native `defaultdict(list)`.
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_default_list_dict_new(key_kind: u32, element_kind: u32) -> *const Object {
     let mut mapping = Mapping::new(key_kind, if element_kind == 2 { 4 } else { 5 });
-    mapping.default_list_element = Some(WordKind::new(element_kind));
+    mapping.missing = Missing::List(WordKind::new(element_kind));
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
         Box::new(mapping),
     )))))
@@ -1143,8 +1175,7 @@ pub unsafe extern "C" fn relar_dict_get(value: *const Object, key: usize) -> usi
     let owned = unsafe {
         object(value).0.with_mut(|storage| {
         let mapping = storage.dictionary_mut();
-        table!(&mut mapping.tables, table => table.subscript(key, mapping.value_kind, mapping.default_list_element))
-            .or_else(|| mapping.counter.then(|| OwnedWord::from_owned(1, WordKind::new(2))))
+        table!(&mut mapping.tables, table => table.subscript(key, mapping.value_kind, mapping.missing))
     })
     };
     if let Some(owned) = owned {
@@ -1197,7 +1228,7 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
     // SAFETY: exact immutable keys, integer acquisition, and buffer allocation
     // cannot reenter. Only the internal lookup cache changes, and no borrowed
     // key/value or table address escapes this access.
-    let result = unsafe {
+    let result: Result<Vec<Int>, Error> = unsafe {
         object(value).0.with_mut(|storage| {
             let mapping = storage.dictionary_mut();
             let Tables::Str(table) = &mapping.tables else {
@@ -1221,6 +1252,15 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                 }
                 mapping.ascii_int = Some(ascii);
             }
+            let missing = |character| {
+                if mapping.missing == Missing::Zero {
+                    Ok(Int::small(0).unwrap().0)
+                } else {
+                    let mut key = Str::new("");
+                    key.push(character);
+                    Err(Error::string_key(key))
+                }
+            };
             let ascii = mapping.ascii_int.as_ref().unwrap();
             let ascii_small = ascii.heap_values == 0 && text.is_ascii();
             let length = if ascii_small {
@@ -1240,12 +1280,11 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                     // SAFETY: ascii_small proved this immutable text is ASCII,
                     // so every byte indexes within the 128-entry lookup cache.
                     let word = *ascii.values.get_unchecked(usize::from(character));
-                    if word == 0 {
-                        let mut key = Str::new("");
-                        key.push(char::from(character));
-                        return Err(Error::string_key(key));
-                    }
-                    slot.write(Int(word));
+                    slot.write(Int(if word == 0 {
+                        missing(char::from(character))?
+                    } else {
+                        word
+                    }));
                 }
                 // SAFETY: the equal-length zip initialized every slot. The
                 // cache proves all words are small integers, so an earlier
@@ -1266,11 +1305,7 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                         })
                 };
                 // Canonical Int words are nonzero, including the integer zero.
-                if word == 0 {
-                    let mut key = Str::new("");
-                    key.push(character);
-                    return Err(Error::string_key(key));
-                }
+                let word = if word == 0 { missing(character)? } else { word };
                 // SAFETY: this exact integer remains rooted by the dictionary;
                 // the copied owner belongs to the fresh result or its cleanup.
                 values.push((*Int::borrow(word)).clone());
@@ -1348,22 +1383,23 @@ pub unsafe extern "C" fn relar_dict_set(value: *const Object, key: usize, word: 
     drop(old);
 }
 /// # Safety
-/// Root the dictionary and its exact key. Missing sets KeyError; removal drops
-/// the key and value owners only after mutable storage access has ended.
+/// Root the dictionary and its exact key. Missing raises KeyError in ordinary
+/// dictionaries and is a no-op for a Counter. Drop removed owners after mutation.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_dict_delete(value: *const Object, key: usize) {
     // SAFETY: lookup/removal cannot reenter; returned values own their references.
-    let old = unsafe {
+    let (old, missing) = unsafe {
         object(value).0.with_mut(|s| {
             let mapping = s.dictionary_mut();
             mapping.update_ascii_int(key, 0);
-            mapping
+            let old = mapping
                 .tables
                 .remove(key)
-                .map(|(key, word)| (key, OwnedWord::from_owned(word, mapping.value_kind)))
+                .map(|(key, word)| (key, OwnedWord::from_owned(word, mapping.value_kind)));
+            (old, mapping.missing)
         })
     };
-    if old.is_none() {
+    if old.is_none() && missing != Missing::Zero {
         // SAFETY: the missing input remains rooted after the failed lookup.
         unsafe { missing_key(value, key) }.raise();
     }
