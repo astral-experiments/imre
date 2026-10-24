@@ -314,10 +314,56 @@ impl Descriptors {
     }
 }
 
+/// Reserve both buffers before fork so the child can reuse one candidate.
+struct PathSearch {
+    path: Vec<u8>,
+    candidate: Vec<u8>,
+}
+
+impl PathSearch {
+    fn new(path: &[u8], program: &CStr) -> Result<Self> {
+        let longest = path
+            .split(|&byte| byte == b':')
+            .map(<[u8]>::len)
+            .max()
+            .unwrap_or(0);
+        let size = longest
+            .checked_add(program.to_bytes_with_nul().len())
+            .and_then(|size| size.checked_add(1))
+            .ok_or_else(Error::allocation)?;
+        let mut candidate = Vec::new();
+        candidate
+            .try_reserve_exact(size)
+            .map_err(|_| Error::allocation())?;
+        let mut owned = Vec::new();
+        owned
+            .try_reserve_exact(path.len())
+            .map_err(|_| Error::allocation())?;
+        owned.extend_from_slice(path);
+        Ok(Self {
+            path: owned,
+            candidate,
+        })
+    }
+
+    fn visit(&mut self, program: &CStr, mut attempt: impl FnMut(*const libc::c_char)) {
+        for directory in self.path.split(|&byte| byte == b':') {
+            self.candidate.clear();
+            if !directory.is_empty() {
+                self.candidate.extend_from_slice(directory);
+                self.candidate.push(b'/');
+            }
+            self.candidate
+                .extend_from_slice(program.to_bytes_with_nul());
+            attempt(self.candidate.as_ptr().cast());
+        }
+    }
+}
+
 struct Launch {
     argv: CStrings,
     env: Option<CStrings>,
-    candidates: Vec<CString>,
+    search: Option<PathSearch>,
     descriptors: Descriptors,
 }
 
@@ -325,14 +371,20 @@ impl Launch {
     /// Prepares native launch data after validating nonempty argv and env names.
     fn new(argv: Vec<CString>, env: Option<Vec<(Str, Str)>>) -> Result<Self> {
         let program = &argv[0];
-        let path = if let Some(env) = &env {
-            env.iter()
-                .find(|(key, _)| key == "PATH")
-                .map(|(_, value)| value.as_bytes().to_vec())
+        let search = if program.as_bytes().contains(&b'/') {
+            None
         } else {
-            std::env::var_os("PATH").map(|path| path.as_bytes().to_vec())
-        }
-        .unwrap_or_else(|| b"/bin:/usr/bin".to_vec());
+            let inherited;
+            let path = if let Some(env) = &env {
+                env.iter()
+                    .find(|(key, _)| key == "PATH")
+                    .map(|(_, value)| value.as_bytes())
+            } else {
+                inherited = std::env::var_os("PATH");
+                inherited.as_deref().map(OsStrExt::as_bytes)
+            };
+            Some(PathSearch::new(path.unwrap_or(b"/bin:/usr/bin"), program)?)
+        };
         let env = env
             .map(|env| {
                 env.into_iter()
@@ -347,26 +399,10 @@ impl Launch {
                     .map(CStrings::new)
             })
             .transpose()?;
-        let candidates = if program.as_bytes().contains(&b'/') {
-            vec![program.clone()]
-        } else {
-            path.split(|&byte| byte == b':')
-                .map(|directory| {
-                    let mut candidate =
-                        Vec::with_capacity(directory.len() + program.as_bytes().len() + 1);
-                    candidate.extend_from_slice(directory);
-                    if !directory.is_empty() {
-                        candidate.push(b'/');
-                    }
-                    candidate.extend_from_slice(program.as_bytes());
-                    cstring(&candidate)
-                })
-                .collect::<Result<Vec<_>>>()?
-        };
         Ok(Self {
             argv: CStrings::new(argv),
             env,
-            candidates,
+            search,
             descriptors: Descriptors::prepare().map_err(os_error)?,
         })
     }
@@ -378,7 +414,7 @@ impl Launch {
     /// Call only from Command::pre_exec after stdio and cwd setup. Every referenced
     /// buffer was allocated in the parent; only async-signal-safe libc operations
     /// and allocation-free OS-error construction are allowed until exec or _exit.
-    unsafe fn exec_child(&self) -> io::Result<()> {
+    unsafe fn exec_child(&mut self) -> io::Result<()> {
         for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
             // SAFETY: restore_signals resets dispositions Python ignores; signal
             // is async-signal-safe and both arguments are valid signal constants.
@@ -390,18 +426,18 @@ impl Launch {
         unsafe { self.descriptors.apply()? };
         let mut saved_error = None;
         let mut last_error = libc::ENOENT;
-        for executable in &self.candidates {
+        let mut attempt = |executable| {
             // SAFETY: the immutable C arrays are NUL-terminated and live through
             // exec. None preserves the inherited environment exactly as bytes.
             unsafe {
                 if let Some(env) = &self.env {
                     libc::execve(
-                        executable.as_ptr(),
+                        executable,
                         self.argv.pointers.as_ptr(),
                         env.pointers.as_ptr(),
                     );
                 } else {
-                    libc::execv(executable.as_ptr(), self.argv.pointers.as_ptr());
+                    libc::execv(executable, self.argv.pointers.as_ptr());
                 }
             }
             last_error = io::Error::last_os_error()
@@ -410,13 +446,19 @@ impl Launch {
             if saved_error.is_none() && !matches!(last_error, libc::ENOENT | libc::ENOTDIR) {
                 saved_error = Some(last_error);
             }
+        };
+        let program = &self.argv.strings[0];
+        if let Some(search) = &mut self.search {
+            search.visit(program, attempt);
+        } else {
+            attempt(program.as_ptr());
         }
         Err(io::Error::from_raw_os_error(
             saved_error.unwrap_or(last_error),
         ))
     }
 
-    fn spawn(self, cwd: Option<&CString>, streams: u32) -> io::Result<Child> {
+    fn spawn(mut self, cwd: Option<&CString>, streams: u32) -> io::Result<Child> {
         // Duplicate the parent's explicit descriptors before setting up either
         // child stream. stderr=STDOUT instead follows the child's chosen stdout.
         fn output(mode: u32) -> io::Result<Stdio> {
@@ -1406,6 +1448,28 @@ mod tests {
             }
         }
         result
+    }
+
+    #[test]
+    fn executable_search_reuses_one_buffer_and_preserves_empty_components() {
+        let Ok(mut search) = PathSearch::new(b":bin:/longest/path::", c"tool") else {
+            panic!("reserve search buffers");
+        };
+        let buffer = search.candidate.as_ptr().cast();
+        let mut expected = [
+            c"tool",
+            c"bin/tool",
+            c"/longest/path/tool",
+            c"tool",
+            c"tool",
+        ]
+        .into_iter();
+        search.visit(c"tool", |candidate| {
+            assert_eq!(candidate, buffer);
+            // SAFETY: visit supplies a NUL-terminated candidate for the duration of the callback.
+            assert_eq!(Some(unsafe { CStr::from_ptr(candidate) }), expected.next());
+        });
+        assert!(expected.next().is_none());
     }
 
     #[test]
