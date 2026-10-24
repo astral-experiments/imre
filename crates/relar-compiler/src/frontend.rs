@@ -3240,6 +3240,15 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        // A chained method checks its receiver before its arguments. Keep the
+        // large general expression frame off that recursive path in debug builds.
+        match expression {
+            ast::Expr::Call(call) => self.call(call),
+            _ => self.non_call_expr(expression),
+        }
+    }
+
+    fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         self.reject_class_receiver_value(expression)?;
         if self.local_function_binding(expression).is_some() {
             return Err(error(
@@ -3810,7 +3819,7 @@ impl<'a> Checker<'a> {
                 }
                 (ty, ExprKind::Field(Box::new(receiver), field))
             }
-            ast::Expr::Call(call) => return self.call(call),
+            ast::Expr::Call(_) => unreachable!("call dispatched by typed_expr"),
             ast::Expr::Generator(_) => {
                 return Err(error(
                     self.source,
