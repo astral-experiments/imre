@@ -20,11 +20,10 @@ pub(crate) struct FunctionBorrows {
 
 /// Computes closed-callgraph edge preservation before deriving local roots.
 /// The separate initializer summary applies only to a newly allocated receiver.
-pub(crate) fn analyze(module: &Module) -> Vec<FunctionBorrows> {
-    let targets = Targets::analyze(module);
+pub(crate) fn analyze(module: &Module, targets: &Targets) -> Vec<FunctionBorrows> {
     let private = private::analyze(module);
-    let (preserves, initializes) = summaries(module, true, &targets, &private);
-    let (readonly, readonly_initializes) = summaries(module, false, &targets, &private);
+    let (preserves, initializes) = summaries(module, true, targets, &private);
+    let (readonly, readonly_initializes) = summaries(module, false, targets, &private);
     module
         .functions
         .iter()
@@ -37,7 +36,7 @@ pub(crate) fn analyze(module: &Module) -> Vec<FunctionBorrows> {
                 &initializes,
                 false,
                 true,
-                &targets,
+                targets,
                 private,
             ) {
                 local_roots(function, &module.types, &module.functions)
@@ -54,7 +53,7 @@ pub(crate) fn analyze(module: &Module) -> Vec<FunctionBorrows> {
                 &readonly_initializes,
                 false,
                 false,
-                &targets,
+                targets,
                 private,
             ) {
                 facts.length_roots = length_roots(function, &facts);
@@ -467,6 +466,10 @@ fn length_roots(function: &Function, facts: &FunctionBorrows) -> Vec<Option<usiz
 mod tests {
     use super::*;
     use crate::ir::CallArgs;
+
+    fn analyze(module: &Module) -> Vec<FunctionBorrows> {
+        super::analyze(module, &Targets::analyze(module))
+    }
 
     fn local(slot: usize, ty: Type) -> Expr {
         Expr {

@@ -27,13 +27,12 @@ impl ExceptionEffects {
 /// Starting pessimistically also leaves unexpected recursive cycles fallible;
 /// the current frontend rejects them, and its acyclic graph reaches a fixed
 /// point after at most one successful transition per function.
-pub(crate) fn analyze(module: &Module) -> ExceptionEffects {
-    let targets = Targets::analyze(module);
+pub(crate) fn analyze(module: &Module, targets: &Targets) -> ExceptionEffects {
     let mut functions = vec![true; module.functions.len()];
     loop {
         let mut changed = false;
         for (id, function) in module.functions.iter().enumerate() {
-            if functions[id] && !block(&function.body, &functions, &targets) {
+            if functions[id] && !block(&function.body, &functions, targets) {
                 functions[id] = false;
                 changed = true;
             }
@@ -200,6 +199,10 @@ mod tests {
     use super::*;
     use crate::ir::{Builtin, CallArgs, ExceptHandler, Function};
 
+    fn analyze(module: &Module) -> ExceptionEffects {
+        super::analyze(module, &Targets::analyze(module))
+    }
+
     fn integer() -> Expr {
         Expr {
             ty: Type::Int,
@@ -280,8 +283,11 @@ mod tests {
                 Statement::Expr(reference(0)),
             ]),
         };
-        assert_eq!(analyze(&module).functions, [false, false, false, true]);
         let targets = Targets::analyze(&module);
+        assert_eq!(
+            super::analyze(&module, &targets).functions,
+            [false, false, false, true]
+        );
         let functions = [false, false, false, true];
         assert!(expression(
             &invocation(local.clone(), vec![call(3, Vec::new())]),
