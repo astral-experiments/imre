@@ -82,7 +82,7 @@ impl BuildOptions {
                 self.watch = true;
                 continue;
             }
-            if command == "check" && flag != "--module-root" {
+            if command == "check" && flag != "--module-root" && flag != "--extension-path" {
                 return Err(USAGE.to_owned());
             }
             let mut value = || {
@@ -96,6 +96,7 @@ impl BuildOptions {
                 Some("--no-cache") => self.no_cache = true,
                 Some("--whole-program") => self.whole_program = true,
                 Some("--module-root") => self.module_root = Some(value()?.into()),
+                Some("--extension-path") => self.compile.extension_paths.push(value()?.into()),
                 Some("-o") if command == "build" => self.output = Some(value()?.into()),
                 Some("--runtime") => self.runtime = Some(value()?.into()),
                 Some("--emit-llvm") => self.llvm_path = Some(value()?.into()),
