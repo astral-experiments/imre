@@ -211,6 +211,7 @@ impl Builtin {
             | Self::ListSliceSum
             | Self::Slice
             | Self::StringFormat
+            | Self::RegexSub(_)
             | Self::StringJoin
             | Self::StringReplace
             | Self::StringGet

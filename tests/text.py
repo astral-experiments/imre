@@ -44,6 +44,10 @@ REJECTED = {
     "regex_optional_group_as_str": 'import re\ndef bad() -> str:\n    if m := re.search("(?P<x>x)?z", "z"):\n        a, = m.groups()\n        return a\n    return ""',
     "regex_aliased_dict_as_str": 'import re\ndef bad() -> str:\n    match = re.search("(?P<x>x)", "x")\n    if match is None:\n        return ""\n    groups = match.groupdict()\n    alias = groups\n    alias["x"] = None\n    return groups["x"]',
     "regex_nested_repeat": 'import re\nre.compile("(x?)*")',
+    "sub_nullable": 'import re\nre.sub("x*", "!", "xxx")',
+    "sub_invalid_group": 'import re\nre.sub("(x)", r"\\2", "none")',
+    "sub_unclosed_group": 'import re\nre.sub("(x)", r"\\g<1", "none")',
+    "sub_dynamic_template": 'import re\ndef bad(s: str) -> str:\n    return re.sub("x", s, "x")',
     "regex_invalid_unused": 'import re\ndef unused() -> None:\n    re.compile("[")',
 }
 

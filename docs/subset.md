@@ -274,6 +274,12 @@ A module-level declaration before executable statements can be shared by
 functions and imported by other modules. Rust’s `regex` and `regex-automata`
 crates implement native matching.
 
+`re.sub(pattern, replacement, text)` accepts a literal pattern that cannot match
+an empty string and a literal replacement. It replaces every nonoverlapping
+match and supports Python's numbered and named capture references, unmatched
+groups, and replacement escapes. Callable replacements, counts and flags are
+outside the supported subset.
+
 ```python
 import re
 
