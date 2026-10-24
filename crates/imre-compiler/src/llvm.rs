@@ -265,6 +265,7 @@ fn emit_program(
         terminated: false,
         loops: Vec::new(),
         locals: Vec::new(),
+        directory_slot_count: 0,
         borrowed_params: Vec::new(),
         resource_types,
         borrowed_locals: Vec::new(),
@@ -448,6 +449,7 @@ struct Emitter<'a, 'module> {
     terminated: bool,
     loops: Vec<LoopTarget>,
     locals: Vec<Type>,
+    directory_slot_count: usize,
     borrowed_params: Vec<bool>,
     resource_types: HashSet<Type>,
     borrowed_locals: Vec<bool>,
@@ -1022,6 +1024,44 @@ impl Emitter<'_, '_> {
         self.instruction(format!("load i64, ptr {element}"))
     }
 
+    fn directory_pointer(&mut self, value: &Value) -> String {
+        if self.module.types.payload(value.ty).is_some() {
+            self.instruction(format!("inttoptr i64 {} to ptr", value.operand))
+        } else {
+            value.operand.clone()
+        }
+    }
+
+    fn prepare_directory_frame(&mut self, value: &Value) {
+        if matches!(
+            self.module.types.payload(value.ty).unwrap_or(value.ty),
+            Type::DirectoryContext(_)
+        ) {
+            let pointer = self.directory_pointer(value);
+            let frame = self.instruction("load ptr, ptr %directory_frame");
+            let prepared = self.instruction(format!(
+                "call ptr @imre_prepare_directory_frame(ptr {frame}, ptr {pointer}, i64 {})",
+                self.directory_slot_count
+            ));
+            self.line(format!("store ptr {prepared}, ptr %directory_frame"));
+        }
+    }
+
+    fn with_directory_frame(&mut self, emit: impl FnOnce(&mut Self, &str)) {
+        if self.directory_slot_count == 0 {
+            return;
+        }
+        let frame = self.instruction("load ptr, ptr %directory_frame");
+        let present = self.instruction(format!("icmp ne ptr {frame}, null"));
+        let visit = self.label();
+        let done = self.label();
+        self.branch(&present, &visit, &done);
+        self.start(&visit);
+        emit(self, &frame);
+        self.jump(&done);
+        self.start(&done);
+    }
+
     /// A borrowed slot has no independent owner to release or transfer.
     fn store_borrowed(&mut self, slot: usize, value: &Value) {
         debug_assert!(self.borrowed_locals[slot]);
@@ -1031,6 +1071,7 @@ impl Emitter<'_, '_> {
             value.ty.llvm(),
             value.operand
         ));
+        self.prepare_directory_frame(value);
     }
 
     fn reset_borrowed(&mut self, slot: usize) {
@@ -1228,6 +1269,7 @@ impl Emitter<'_, '_> {
             value.ty.llvm(),
             value.operand
         ));
+        self.prepare_directory_frame(value);
         self.forget(value);
         if let Some(old) = old {
             self.release(&old);
@@ -1545,6 +1587,23 @@ impl Emitter<'_, '_> {
             function.returns.llvm()
         };
         self.start("entry");
+        let directory_slots: Vec<_> = self
+            .locals
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, &ty)| {
+                matches!(
+                    self.module.types.payload(ty).unwrap_or(ty),
+                    Type::DirectoryContext(_)
+                )
+                .then_some(slot)
+            })
+            .collect();
+        self.directory_slot_count = directory_slots.len();
+        if !directory_slots.is_empty() {
+            self.line("%directory_frame = alloca ptr");
+            self.line("store ptr null, ptr %directory_frame");
+        }
         let allocas_at = self.code.len();
         self.line(format!(
             "%function_return = alloca {}",
@@ -1588,6 +1647,7 @@ impl Emitter<'_, '_> {
                 value.ty.llvm(),
                 value.operand
             ));
+            self.prepare_directory_frame(&value);
         }
         if entry {
             let layout = self.instruction("call { i64, i64 } @imre_seq_layout()");
@@ -1605,6 +1665,9 @@ impl Emitter<'_, '_> {
             self.jump(&self.return_exit.clone());
         }
         self.start(&self.return_exit.clone());
+        self.with_directory_frame(|out, frame| {
+            out.line(format!("call void @imre_object_release(ptr {frame})"));
+        });
         self.cleanup(&cleanup_slots);
         if entry {
             if self.has_extensions {
@@ -1625,25 +1688,18 @@ impl Emitter<'_, '_> {
             self.line(format!("ret {returns} {value}"));
         }
         self.start(&self.error_exit.clone());
-        // CPython's traceback keeps the throwing frame's live directory managers
-        // until the exception is released, even for a return before entering with.
-        for slot in 0..self.locals.len() {
-            let ty = self.locals[slot];
-            if matches!(
-                self.module.types.payload(ty).unwrap_or(ty),
-                Type::DirectoryContext(_)
-            ) {
-                let value = self.borrow_slot(slot);
-                let pointer = if self.module.types.payload(ty).is_some() {
-                    self.instruction(format!("inttoptr i64 {} to ptr", value.operand))
-                } else {
-                    value.operand
-                };
-                self.line(format!(
-                    "call void @imre_error_keep_directory(ptr {pointer})"
+        self.with_directory_frame(|out, frame| {
+            for &slot in &directory_slots {
+                let value = out.borrow_slot(slot);
+                let pointer = out.directory_pointer(&value);
+                out.line(format!(
+                    "call void @imre_error_frame_keep_directory(ptr {frame}, ptr {pointer})"
                 ));
             }
-        }
+            out.line(format!(
+                "call void @imre_error_attach_directory_frame(ptr {frame})"
+            ));
+        });
         self.cleanup(&cleanup_slots);
         if entry {
             if self.has_extensions {
@@ -5635,7 +5691,9 @@ declare ptr @imre_posix_normalize(ptr, i32, i32)
 declare i32 @imre_path_is_absolute(ptr)
 declare ptr @imre_path_absolute(ptr)
 declare ptr @imre_path_resolve(ptr, i32)
-declare void @imre_error_keep_directory(ptr)
+declare ptr @imre_prepare_directory_frame(ptr, ptr, i64)
+declare void @imre_error_frame_keep_directory(ptr, ptr)
+declare void @imre_error_attach_directory_frame(ptr)
 declare ptr @imre_directory_context_new(i64, i32)
 declare i64 @imre_directory_context_enter(ptr)
 declare void @imre_directory_context_exit(ptr)

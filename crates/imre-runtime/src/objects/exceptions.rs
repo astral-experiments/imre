@@ -208,8 +208,21 @@ pub(super) struct Exception {
 struct ExceptionDetails {
     cause: Option<Rc<Object>>,
     named: Option<&'static NamedDescriptor>,
-    /// Exceptional frames retain filesystem contexts whose lifetime is observable.
-    directories: Vec<Rc<Object>>,
+    directories: Option<Rc<DirectoryFrame>>,
+}
+
+struct DirectoryFrame {
+    managers: Vec<Rc<Object>>,
+    outer: Option<Rc<DirectoryFrame>>,
+}
+
+impl Drop for DirectoryFrame {
+    fn drop(&mut self) {
+        let mut outer = self.outer.take();
+        while let Some(mut frame) = outer.and_then(Rc::into_inner) {
+            outer = frame.outer.take();
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -262,6 +275,18 @@ impl GroupMember {
 }
 
 impl Exception {
+    fn attach_directory_frame(&mut self, mut details: Rc<ExceptionDetails>) {
+        if let Some(previous) = self.details.as_deref() {
+            let fresh = Rc::get_mut(&mut details).unwrap();
+            fresh.cause.clone_from(&previous.cause);
+            fresh.named = previous.named;
+            Rc::get_mut(fresh.directories.as_mut().unwrap())
+                .unwrap()
+                .outer = previous.directories.clone();
+        }
+        self.details = Some(details);
+    }
+
     fn details_mut(&mut self) -> &mut ExceptionDetails {
         Rc::make_mut(self.details.get_or_insert_with(Default::default))
     }
@@ -389,12 +414,12 @@ pub(crate) fn finish<T>(result: Result<T>, sentinel: T) -> T {
 }
 
 thread_local! {
-    static RECORD_ALLOCATION_ERROR: Rc<Object> = new_exception(
+    static RECORD_ALLOCATION_ERROR: RefCell<Rc<Object>> = RefCell::new(new_exception(
         Kind::MemoryError, Rc::new(Str::new("record allocation failed")),
-    );
-    static SEQUENCE_ALLOCATION_ERROR: Rc<Object> = new_exception(
+    ));
+    static SEQUENCE_ALLOCATION_ERROR: RefCell<Rc<Object>> = RefCell::new(new_exception(
         Kind::MemoryError, Rc::new(Str::new("sequence allocation failed")),
-    );
+    ));
     static PENDING: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
     static ACTIVE: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
     // The non-Drop mirror lets successful calls query one TLS byte without
@@ -416,48 +441,125 @@ pub extern "C" fn imre_record_error_init() {
 
 #[cold]
 pub(super) fn record_allocation_failed() {
-    RECORD_ALLOCATION_ERROR.with(|error| replace_pending(Some(Rc::clone(error))));
+    RECORD_ALLOCATION_ERROR.with_borrow(|error| replace_pending(Some(Rc::clone(error))));
 }
 
 #[cold]
 pub(crate) fn sequence_allocation_failed() {
-    SEQUENCE_ALLOCATION_ERROR.with(|error| replace_pending(Some(Rc::clone(error))));
+    SEQUENCE_ALLOCATION_ERROR.with_borrow(|error| replace_pending(Some(Rc::clone(error))));
 }
 
 /// # Safety
-/// The exceptional frame still roots this exact directory context. An empty
-/// local slot is zero. Its payload can only be a string or path, so attaching
-/// the owner to the exception cannot form a reference cycle.
+/// The compiler supplies its current optional frame owner and a rooted nullable manager.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_error_keep_directory(manager: *const Object) {
+pub unsafe extern "C" fn imre_prepare_directory_frame(
+    frame: *const Object,
+    manager: *const Object,
+    count: usize,
+) -> *const Object {
+    // SAFETY: the caller roots the nullable manager while checking its cleanup state.
+    if !frame.is_null() || !unsafe { armed_directory(manager) } {
+        return frame;
+    }
+    let mut error = SEQUENCE_ALLOCATION_ERROR.with_borrow(|template| {
+        // SAFETY: the template is a live immutable exception.
+        unsafe { template.0.with(|storage| storage.exception().clone()) }
+    });
+    error.details = Some(Rc::new(ExceptionDetails {
+        directories: Some(Rc::new(DirectoryFrame {
+            managers: Vec::with_capacity(count),
+            outer: None,
+        })),
+        ..ExceptionDetails::default()
+    }));
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Exception(error)))))
+}
+
+unsafe fn armed_directory(manager: *const Object) -> bool {
     if manager.is_null() {
-        return;
+        return false;
     }
-    // SAFETY: the generated frame has not yet released this non-null local.
-    let armed = unsafe {
-        object(manager).0.with(|storage| {
-        matches!(storage, Storage::DirectoryContext(context) if context.needs_cleanup())
-    })
-    };
-    if !armed {
-        return;
+    // SAFETY: the compiled local roots the present manager.
+    unsafe {
+        object(manager).0.with(|storage|
+            matches!(storage, Storage::DirectoryContext(context) if context.needs_cleanup()))
     }
-    PENDING.with_borrow(|pending| {
-        if let Some(pending) = pending {
-            // SAFETY: no callback runs while adding an immutable owner to the
-            // pending exception, and a manager cannot refer back to this error.
-            unsafe {
-                pending.0.with_mut(|storage| {
-                    let Storage::Exception(exception) = storage else {
-                        unreachable!()
-                    };
-                    let roots = &mut exception.details_mut().directories;
-                    if !roots.iter().any(|root| Rc::as_ptr(root) == manager) {
-                        roots.push(acquire_rc::<Object>(manager as usize));
-                    }
-                })
-            };
+}
+
+/// # Safety
+/// The compiler owns the unpublished frame and visits at most its reserved number
+/// of nullable directory-manager slots before transferring the frame.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_error_frame_keep_directory(
+    frame: *const Object,
+    manager: *const Object,
+) {
+    // SAFETY: the frame still owns each generated local it visits.
+    if unsafe { armed_directory(manager) } {
+        // SAFETY: frame is an exclusive, unpublished traceback shell.
+        unsafe {
+            object(frame).0.with_mut(|storage| {
+                let Storage::Exception(error) = storage else {
+                    unreachable!()
+                };
+                let roots = &mut Rc::get_mut(error.details_mut().directories.as_mut().unwrap())
+                    .unwrap()
+                    .managers;
+                if !roots.iter().any(|root| Rc::as_ptr(root) == manager) {
+                    roots.push(acquire_rc::<Object>(manager as usize));
+                }
+            })
         }
+    }
+}
+
+/// # Safety
+/// The caller transfers its single prepared frame reference after recording its managers.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_error_attach_directory_frame(frame: *const Object) {
+    // SAFETY: this consumes the compiler's one reserved frame owner.
+    let frame = unsafe { Rc::from_raw(frame) };
+    // SAFETY: the frame is still private to this unwind.
+    let details = unsafe {
+        frame.0.with_mut(|storage| {
+            let Storage::Exception(error) = storage else {
+                unreachable!()
+            };
+            error.details.take().unwrap()
+        })
+    };
+    if details.directories.as_ref().unwrap().managers.is_empty() {
+        return;
+    }
+    PENDING.with_borrow(|slot| {
+        let Some(pending) = slot.as_ref() else { return };
+        if let Some(template) = [&RECORD_ALLOCATION_ERROR, &SEQUENCE_ALLOCATION_ERROR]
+            .into_iter()
+            .find(|template| template.with_borrow(|cached| Rc::ptr_eq(cached, pending)))
+        {
+            // Move the spare into the cache. Existing aliases keep the exact pending
+            // exception and its traceback, including an alias saved before a re-raise.
+            // SAFETY: the cached allocation error has an immutable message payload.
+            let mut pristine = unsafe { pending.0.with(|storage| storage.exception().clone()) };
+            pristine.details = None;
+            pristine.suppress_context = false;
+            // SAFETY: the consumed frame shell is still unpublished.
+            unsafe {
+                frame
+                    .0
+                    .with_mut(|storage| *storage = Storage::Exception(pristine))
+            };
+            template.set(frame);
+        }
+        // SAFETY: attaching preallocated roots preserves the live exception identity.
+        unsafe {
+            pending.0.with_mut(|storage| {
+                let Storage::Exception(error) = storage else {
+                    unreachable!()
+                };
+                error.attach_directory_frame(details);
+            })
+        };
     });
 }
 
@@ -1180,6 +1282,50 @@ mod tests {
         imre_list_get_index, imre_list_new, imre_list_pop, imre_list_repeat,
     };
     use num_bigint::BigInt;
+
+    #[test]
+    fn cached_memory_errors_keep_separate_directory_owners() {
+        use crate::objects::tempdirs::{imre_directory_context_new, imre_tempdir_new};
+
+        fn retained(raise: fn()) -> (Rc<Object>, Rc<Str>) {
+            let prefix = Str::from("imre-error-");
+            let suffix = Str::from("");
+            // SAFETY: both names are rooted and a null directory selects the system default.
+            let name = unsafe { imre_tempdir_new(std::ptr::null(), &prefix, &suffix) };
+            assert!(!name.is_null());
+            // SAFETY: creation transfers one string owner. The manager acquires its own reference.
+            let (name, manager) = unsafe {
+                let manager = imre_directory_context_new(name as usize, 1);
+                (Rc::from_raw(name), Rc::from_raw(manager))
+            };
+            // SAFETY: the compiler roots the manager while preparing its one traceback slot.
+            let frame =
+                unsafe { imre_prepare_directory_frame(std::ptr::null(), Rc::as_ptr(&manager), 1) };
+            raise();
+            let alias = PENDING.with_borrow(|pending| pending.as_ref().unwrap().clone());
+            // SAFETY: the compiler transfers one private frame after visiting its single local.
+            unsafe {
+                imre_error_frame_keep_directory(frame, Rc::as_ptr(&manager));
+                imre_error_attach_directory_frame(frame);
+            }
+            let error = take_pending().unwrap();
+            assert!(Rc::ptr_eq(&alias, &error));
+            (error, name)
+        }
+
+        for raise in [record_allocation_failed as fn(), sequence_allocation_failed] {
+            let (first, left) = retained(raise);
+            let (second, right) = retained(raise);
+            assert!(!Rc::ptr_eq(&first, &second));
+            let left = std::path::Path::new(left.as_str());
+            let right = std::path::Path::new(right.as_str());
+            assert!(left.is_dir() && right.is_dir());
+            drop(first);
+            assert!(!left.exists() && right.is_dir());
+            drop(second);
+            assert!(!right.exists());
+        }
+    }
 
     #[test]
     fn reraised_group_members_keep_identity_without_retaining_a_cycle() {
