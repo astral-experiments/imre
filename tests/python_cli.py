@@ -200,7 +200,8 @@ def report(text):
             "-I",
             "-B",
             "-c",
-            f"import sys\nsys.path.insert(0, {str(helpers)!r})\n"
+            f"import sys\nprint({str(helpers)!r} in sys.path)\n"
+            f"sys.path.insert(0, {str(helpers)!r})\nprint(sys.path[0])\n"
             "from report import report\nreport('a\\x1c  b\\r\\nc')\n",
         )
 
