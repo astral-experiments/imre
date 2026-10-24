@@ -48,6 +48,7 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "cast_mutable": {"main.py": 'from typing import cast as view\ndef fresh() -> list[int]:\n    print("create")\n    return [1]\nvalues = view("list[int]", fresh())\nview("list[int]", values).append(7)\nprint(values[1])\n'},
     "inferred_signature": {"main.py": IMPORT, "helper.py": "def f(value):\n    return value\n"},
     "library_effect": {"main.py": IMPORT, "helper.py": "print(7)\n" + HELPER},
     "library_state": {"main.py": "from helper import f, values\nprint(f(values[0]))\n", "helper.py": "values = [1]\n" + HELPER},
