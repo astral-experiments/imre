@@ -322,7 +322,10 @@ impl<'a> Shapes<'a> {
                         | "reversed",
                     ) => args.first().map_or(1, |e| rank(e).max(1)),
                     Some("next") => args.first().map_or(0, |e| rank(e).saturating_sub(1)),
-                    Some("len" | "int" | "float" | "str" | "bool" | "bytes" | "sum" | "print") => 0,
+                    Some(
+                        "len" | "int" | "float" | "str" | "repr" | "bool" | "bytes" | "sum"
+                        | "print",
+                    ) => 0,
                     Some(name) if self.fixed.contains(name) => 0,
                     _ => max_depth(args)
                         .max(
@@ -464,6 +467,18 @@ mod tests {
     fn limited(body: &str) -> bool {
         let parsed = parse_module(body).unwrap();
         check(&parsed.syntax().body, parsed.tokens().len()).is_err()
+    }
+
+    #[test]
+    fn repr_returns_a_scalar_for_nested_arguments() {
+        for wrap in [
+            "list(zip(repr(x)[:1]))",
+            "list(enumerate(repr(x)[:1]))",
+            "(repr(x),)",
+        ] {
+            let body = format!("x = [1]\n{}", format!("x = {wrap}\n").repeat(300));
+            assert!(!limited(&body), "{wrap}");
+        }
     }
 
     #[test]
