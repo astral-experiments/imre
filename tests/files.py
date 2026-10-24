@@ -679,6 +679,12 @@ def seed(directory: Path, case: str) -> None:
         (directory / "long-rows.txt").write_bytes(
             b"a" * 32768 + b"\n" + b"b" * 32769 + b"\r\n" + b"c" * 160000 + b"\rdone"
         )
+    if case == "stream_errors":
+        first = gzip.compress(b"\n" * 65536, compresslevel=1, mtime=0)
+        for name, length in [("partial", 131071), ("bulk", 262144)]:
+            second = bytearray(gzip.compress(b"x" * length, compresslevel=6, mtime=0))
+            second[10] &= ~1  # Clear BFINAL so the decoder encounters an invalid next block.
+            (directory / f"{name}.gz").write_bytes(first + second)
     if case.startswith("stream_"):
         # Split both a CRLF and a four-byte UTF-8 scalar at 8 KiB boundaries.
         contents = b"a" * 8191 + b"\r\n" + b"b" * 8189 + "🙂\rC\n\nD\0".encode()

@@ -2,6 +2,7 @@
 
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read};
+use std::mem::MaybeUninit;
 
 use flate2::{Crc, Decompress, FlushDecompress, Status};
 
@@ -123,10 +124,9 @@ impl GzipReader {
         self.phase = Phase::Header;
         Ok(())
     }
-}
 
-impl Read for GzipReader {
-    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+    /// Decode one raw read, initializing only the returned prefix of the destination.
+    pub(super) fn read(&mut self, out: &mut [MaybeUninit<u8>]) -> io::Result<usize> {
         if out.is_empty() {
             return Ok(0);
         }
@@ -143,7 +143,7 @@ impl Read for GzipReader {
                     let before = (self.decoder.total_in(), self.decoder.total_out());
                     let status = self
                         .decoder
-                        .decompress(input, out, FlushDecompress::None)
+                        .decompress_uninit(input, out, FlushDecompress::None)
                         .map_err(|_| {
                             io::Error::other(GzipError(Kind::ZlibError, "invalid DEFLATE stream"))
                         })?;
@@ -156,7 +156,8 @@ impl Read for GzipReader {
                         return Err(io::ErrorKind::UnexpectedEof.into());
                     }
                     if written > 0 {
-                        self.crc.update(&out[..written]);
+                        // SAFETY: total_out advanced by the initialized prefix length.
+                        self.crc.update(unsafe { out[..written].assume_init_ref() });
                         return Ok(written);
                     }
                 }
