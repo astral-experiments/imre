@@ -11,6 +11,11 @@ async def double(value: int) -> int:
     return value * 2
 
 
+async def wait_for_double(value: int) -> int:
+    results = await asyncio.gather(double(value))
+    return results[0]
+
+
 async def main() -> None:
     items: list[int] = []
     callback: Callable[[list[int], int], Awaitable[int]] = scale
@@ -46,6 +51,18 @@ async def main() -> None:
     fresh = callback(items, 5)
     print(repr(await asyncio.gather(fresh, fresh)))
     print(repr(items))
+    for coro, cancel_second in [(double(7), False), (wait_for_double(7), False), (wait_for_double(7), True)]:
+        first = asyncio.ensure_future(coro)
+        second = asyncio.ensure_future(coro)
+        if cancel_second:
+            second.cancel()
+        for scheduled in [first, second]:
+            try:
+                print(await scheduled)
+            except asyncio.CancelledError:
+                print("cancelled")
+            except RuntimeError as error:
+                print(str(error))
     results = await asyncio.gather(*list(map(double, [1, 2, 3])))
     print(sum(results))
 
