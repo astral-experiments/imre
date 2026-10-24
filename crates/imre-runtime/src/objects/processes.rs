@@ -625,7 +625,8 @@ fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
                         polls[index].fd = -1;
                         remaining -= 1;
                     } else {
-                        outputs[index].extend_from_slice(&buffer[..count]);
+                        append_output(&mut outputs[index], &buffer[..count])
+                            .map_err(capture_error)?;
                     }
                 }
                 Err(error)
@@ -693,6 +694,26 @@ fn nonblocking(fd: RawFd) -> io::Result<()> {
 
 /// Polls both streams fairly, including HUP buffers, before collecting status.
 /// Decoding happens afterward so every failure still closes pipes and reaps.
+fn append_output(output: &mut Vec<u8>, bytes: &[u8]) -> io::Result<()> {
+    output
+        .try_reserve(bytes.len())
+        .map_err(|_| io::ErrorKind::OutOfMemory)?;
+    output.extend_from_slice(bytes);
+    Ok(())
+}
+
+fn capture_allocation_failed(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::OutOfMemory && error.raw_os_error().is_none()
+}
+
+fn capture_error(error: io::Error) -> Error {
+    if capture_allocation_failed(&error) {
+        Error::allocation()
+    } else {
+        os_error(error)
+    }
+}
+
 fn capture(child: Child) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
     capture_guard(ChildGuard {
         child,
@@ -751,7 +772,7 @@ fn capture_guard(mut child: ChildGuard) -> io::Result<(ExitStatus, Vec<u8>, Vec<
                     polls[index].fd = -1;
                     remaining -= 1;
                 }
-                Ok(count) => outputs[index].extend_from_slice(&buffer[..count]),
+                Ok(count) => append_output(&mut outputs[index], &buffer[..count])?,
                 Err(error)
                     if matches!(
                         error.kind(),
@@ -1010,7 +1031,7 @@ pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *c
             return Err(Error::new(Kind::IndexError, "list index out of range"));
         }
         let child = Launch::new(argv, None)?.spawn(None, 1).map_err(os_error)?;
-        let (status, stdout, _) = capture(child).map_err(os_error)?;
+        let (status, stdout, _) = capture(child).map_err(capture_error)?;
         Ok((status, Rc::new(decode_utf8_text(stdout)?)))
     });
     match run {
@@ -1200,7 +1221,7 @@ unsafe fn run_process(
             } else {
                 capture(child)
                     .map(|(status, stdout, stderr)| Captured::Completed(status, stdout, stderr))
-                    .map_err(os_error)
+                    .map_err(capture_error)
             }
         });
     let (status, stdout, stderr) = match captured {
