@@ -549,11 +549,21 @@ impl<'a> Visitor<'a> for Shapes<'a> {
             shapes: &'s mut Shapes<'a>,
             writes: HashSet<String>,
             may_skip: bool,
+            optional_writes: Vec<(&'a str, Shape)>,
         }
         impl Evaluation<'_, '_> {
             fn optional(&mut self, visit: impl FnOnce(&mut Self)) {
                 let previous = std::mem::replace(&mut self.may_skip, true);
+                let start = self.optional_writes.len();
                 visit(self);
+                // A later read on this path saw the write, but a path that
+                // skipped it must still see the joined binding after this point.
+                for (name, _) in &self.optional_writes[start..] {
+                    self.shapes.straight_line.remove(*name);
+                }
+                if !previous {
+                    self.optional_writes.truncate(start);
+                }
                 self.may_skip = previous;
             }
         }
@@ -569,7 +579,13 @@ impl<'a> Visitor<'a> for Shapes<'a> {
                         let value = self.shapes.shape(&node.value, &[]);
                         let outer = self.shapes.conditional;
                         self.shapes.conditional |= self.may_skip;
-                        self.shapes.bind(&node.target, value, !self.may_skip);
+                        if self.may_skip
+                            && let Expr::Name(name) = &*node.target
+                        {
+                            let name = name.id.as_str();
+                            self.optional_writes.push((name, self.shapes.lookup(name)));
+                        }
+                        self.shapes.bind(&node.target, value, true);
                         self.shapes.conditional = outer;
                     }
                     Expr::BoolOp(node) => {
@@ -581,7 +597,12 @@ impl<'a> Visitor<'a> for Shapes<'a> {
                     Expr::If(node) => {
                         self.visit_expr(&node.test);
                         self.optional(|v| {
+                            let start = v.optional_writes.len();
                             v.visit_expr(&node.body);
+                            // Both arms start with the bindings after the test.
+                            for (name, shape) in v.optional_writes[start..].iter().rev() {
+                                v.shapes.straight_line.insert(name, shape.clone());
+                            }
                             v.visit_expr(&node.orelse);
                         });
                     }
@@ -605,6 +626,7 @@ impl<'a> Visitor<'a> for Shapes<'a> {
             shapes: self,
             writes,
             may_skip: false,
+            optional_writes: Vec::new(),
         }
         .visit_expr(expr);
     }
@@ -618,6 +640,35 @@ mod tests {
     fn limited(body: &str) -> bool {
         let parsed = parse_module(body).unwrap();
         check(&parsed.syntax().body, parsed.tokens().len()).is_err()
+    }
+
+    #[test]
+    fn optional_walrus_writes_are_definite_on_the_path_that_reaches_them() {
+        for expression in [
+            "(((t := None), (t,))[1] if flag else (None,))",
+            "((None,) if flag else ((t := None), (t,))[1])",
+            "[((t := None), (t,))[1] for item in [0]][0]",
+            "[(t,) for item in [0] if (t := None) is None][0]",
+            "(((t := None), (((t := x), (None,))[1] if branch else (t,)))[1] if flag else (None,))",
+        ] {
+            let step = format!("    t = x if flag else None\n    x = {expression}\n");
+            let source = format!(
+                "def f(flag: bool, branch: bool) -> int:\n    x = (None,)\n{}    return len(x)\n",
+                step.repeat(MAX_DEPTH + 1)
+            );
+            crate::check(&source).unwrap();
+        }
+    }
+
+    #[test]
+    fn optional_walrus_writes_do_not_leak_into_the_other_arm() {
+        let step =
+            "    t = x if flag else None\n    x = (((t := None), (t,))[1] if reset else (t,))\n";
+        let source = format!(
+            "def f(flag: bool, reset: bool) -> int:\n    x = (0,)\n{}",
+            step.repeat(MAX_DEPTH + 1)
+        );
+        assert!(limited(&source));
     }
 
     #[test]
