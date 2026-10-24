@@ -4,8 +4,8 @@ use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, mpsc};
+use std::time::{Duration, Instant};
 
 use notify::event::{AccessKind, AccessMode, ModifyKind};
 use notify::{EventKind, RecursiveMode, Watcher};
@@ -96,13 +96,20 @@ impl Inputs {
     }
 }
 
+struct WatchPaths {
+    directories: BTreeSet<PathBuf>,
+    names: BTreeSet<PathBuf>,
+}
+
 struct Subscription {
+    directories: BTreeSet<PathBuf>,
+    names: Arc<Mutex<BTreeSet<PathBuf>>>,
     _watcher: notify::RecommendedWatcher,
     changed: mpsc::Receiver<()>,
     rearm: Arc<AtomicBool>,
 }
 
-impl Subscription {
+impl WatchPaths {
     fn new(inputs: &Inputs) -> Result<Self, String> {
         let mut directories = BTreeSet::new();
         let mut names = BTreeSet::new();
@@ -124,6 +131,23 @@ impl Subscription {
             }
         }
 
+        Ok(Self { directories, names })
+    }
+}
+
+impl Subscription {
+    fn for_inputs(previous: Option<Self>, inputs: &Inputs) -> Result<Self, String> {
+        let WatchPaths { directories, names } = WatchPaths::new(inputs)?;
+        if let Some(previous) = previous
+            && previous.directories == directories
+            && !previous.rearm.load(Ordering::Relaxed)
+        {
+            // A change to first-party imports can select different files in the same directories.
+            *previous.names.lock().unwrap() = names;
+            return Ok(previous);
+        }
+        let names = Arc::new(Mutex::new(names));
+        let watched_names = Arc::clone(&names);
         // One wakeup covers a burst, including a directory change after a file change.
         let (send, changed) = mpsc::sync_channel(1);
         let rearm = Arc::new(AtomicBool::default());
@@ -139,6 +163,7 @@ impl Subscription {
                             EventKind::Access(_) => return,
                             _ => {}
                         }
+                        let names = watched_names.lock().unwrap();
                         if !event
                             .paths
                             .iter()
@@ -168,8 +193,8 @@ impl Subscription {
             })
             .map_err(|e| format!("could not start the file watcher: {e}"))?;
         let mut subscriptions = watcher.paths_mut();
-        for directory in directories {
-            if let Err(error) = subscriptions.add(&directory, RecursiveMode::NonRecursive) {
+        for directory in &directories {
+            if let Err(error) = subscriptions.add(directory, RecursiveMode::NonRecursive) {
                 match &error.kind {
                     // A directory can disappear during setup. The freshness check below
                     // and the periodic fallback still observe the same filesystem facts.
@@ -187,20 +212,47 @@ impl Subscription {
         }
         subscriptions.commit().map_err(|e| e.to_string())?;
         Ok(Self {
+            directories,
+            names,
             _watcher: watcher,
             changed,
             rearm,
         })
     }
+
+    fn wait_for_quiet(&self) -> Result<(), String> {
+        // Editors may write a file in several chunks. Wait for quiet after the last
+        // notification, and still check progress during a continuous stream of saves.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let timeout = deadline
+                .saturating_duration_since(Instant::now())
+                .min(Duration::from_millis(10));
+            if timeout.is_zero() {
+                return Ok(());
+            }
+            match self.changed.recv_timeout(timeout) {
+                Ok(()) => {}
+                Err(mpsc::RecvTimeoutError::Timeout) => return Ok(()),
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("file watcher stopped".into());
+                }
+            }
+        }
+    }
 }
 
 impl Inputs {
-    fn wait_for_change(&self, ready: impl FnOnce()) -> Result<(), String> {
-        let mut subscription = Subscription::new(self)?;
+    fn wait_for_change(
+        &self,
+        previous: Option<Subscription>,
+        ready: impl FnOnce(),
+    ) -> Result<Subscription, String> {
+        let mut subscription = Subscription::for_inputs(previous, self)?;
         // Subscribe before validating the bytes and lookups actually consumed. This
         // also catches a save during the first check or while subscriptions change.
         if !self.fresh() {
-            return Ok(());
+            return Ok(subscription);
         }
         ready();
         loop {
@@ -211,18 +263,16 @@ impl Inputs {
                     return Err("file watcher stopped".into());
                 }
                 Ok(()) => {
-                    // Coalesce the create, write and rename events from an editor save.
-                    std::thread::sleep(Duration::from_millis(8));
-                    let _ = subscription.changed.try_recv();
+                    subscription.wait_for_quiet()?;
                     if subscription.rearm.swap(false, Ordering::Relaxed) {
                         // An empty package directory moves the native watch closer to a
                         // still-missing __init__.py, even though the check result is unchanged.
-                        subscription = Subscription::new(self)?;
+                        subscription = Subscription::for_inputs(None, self)?;
                     }
                 }
             }
             if !self.fresh() {
-                return Ok(());
+                return Ok(subscription);
             }
         }
     }
@@ -234,6 +284,7 @@ pub(crate) fn check(
     module_root: Option<&Path>,
     mut report: impl FnMut(Result<(), String>),
 ) -> Result<(), String> {
+    let mut subscription = None;
     loop {
         let mut inputs = Inputs::default();
         let result = crate::check_file_with(
@@ -242,13 +293,41 @@ pub(crate) fn check(
             Some(cache),
             FileSystem(Some(&mut inputs)),
         );
-        inputs.wait_for_change(|| report(result))?;
+        subscription = Some(inputs.wait_for_change(subscription, || report(result))?);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edits_and_new_imports_in_watched_directories_reuse_the_subscription() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("main.py");
+        std::fs::write(
+            dir.path().join("dep.py"),
+            "def value() -> int:\n    return 1\n",
+        )
+        .unwrap();
+        let mut subscription = None;
+        let mut first = None;
+        for source in [
+            "print(1)\n",
+            "print(2)\n",
+            "from dep import value\nprint(value())\n",
+        ] {
+            std::fs::write(&entry, source).unwrap();
+            let mut inputs = Inputs::default();
+            crate::check_file_with(&entry, None, None, FileSystem(Some(&mut inputs))).unwrap();
+            let current = Subscription::for_inputs(subscription, &inputs).unwrap();
+            assert!(Arc::ptr_eq(
+                first.get_or_insert_with(|| Arc::clone(&current.names)),
+                &current.names
+            ));
+            subscription = Some(current);
+        }
+    }
 
     #[test]
     fn edits_between_loading_and_subscribing_suppress_stale_results() {
@@ -261,14 +340,14 @@ mod tests {
         assert!(missing.unwrap_err().contains("cannot resolve"));
         std::fs::write(&dep, "def value() -> int:\n    return 1\n").unwrap();
         inputs
-            .wait_for_change(|| panic!("reported a stale missing import"))
+            .wait_for_change(None, || panic!("reported a stale missing import"))
             .unwrap();
 
         let mut inputs = Inputs::default();
         crate::check_file_with(&entry, None, None, FileSystem(Some(&mut inputs))).unwrap();
         std::fs::write(&dep, "def value() -> int:\n    return 'one'\n").unwrap();
         inputs
-            .wait_for_change(|| panic!("reported a stale success"))
+            .wait_for_change(None, || panic!("reported a stale success"))
             .unwrap();
     }
 }

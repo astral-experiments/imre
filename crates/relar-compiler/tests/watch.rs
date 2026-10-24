@@ -11,9 +11,9 @@ struct Watch {
 }
 
 impl Watch {
-    fn start(entry: &Path, root: Option<&Path>) -> Self {
+    fn start(flag: &str, entry: &Path, root: Option<&Path>) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_relar"));
-        command.arg("check").arg("--watch").arg(entry);
+        command.arg("check").arg(flag).arg(entry);
         if let Some(root) = root {
             command.arg("--module-root").arg(root);
         }
@@ -81,7 +81,7 @@ fn watch_recovers_from_missing_files_and_package_shadowing() {
     let initializer = package.join("__init__.py");
     let good = "def score() -> int:\n    return 2\n";
     let bad = "def score() -> int:\n    return 'two'\n";
-    let watch = Watch::start(&entry, Some(root));
+    let watch = Watch::start("--watch", &entry, Some(root));
     let expect = |success| watch.expect(&entry, Some(root), success);
     expect(false);
     fs::write(&entry, "from dep import score\nprint(score())\n").unwrap();
@@ -128,7 +128,7 @@ fn watch_reinfers_the_root_when_a_package_appears() {
         "def score() -> int:\n    return 1\n",
     )
     .unwrap();
-    let watch = Watch::start(&entry, None);
+    let watch = Watch::start("-w", &entry, None);
     watch.expect(&entry, None, false);
     let initializer = package.join("__init__.py");
     fs::write(&initializer, "").unwrap();
@@ -155,7 +155,7 @@ fn watch_follows_the_current_target_of_a_module_symlink() {
     )
     .unwrap();
     symlink("sources/one.py", root.join("dep.py")).unwrap();
-    let watch = Watch::start(&entry, Some(root));
+    let watch = Watch::start("--watch", &entry, Some(root));
     watch.expect(&entry, Some(root), true);
     symlink("sources/two.py", root.join("saved")).unwrap();
     fs::rename(root.join("saved"), root.join("dep.py")).unwrap();

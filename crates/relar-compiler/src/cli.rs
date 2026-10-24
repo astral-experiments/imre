@@ -78,7 +78,11 @@ impl BuildOptions {
                 self.help = true;
                 break;
             }
-            if command == "check" && flag != "--module-root" && flag != "--watch" {
+            if command == "check" && (flag == "--watch" || flag == "-w") {
+                self.watch = true;
+                continue;
+            }
+            if command == "check" && flag != "--module-root" {
                 return Err(USAGE.to_owned());
             }
             let mut value = || {
@@ -91,7 +95,6 @@ impl BuildOptions {
                 Some("-v" | "--verbose") => self.verbosity = Verbosity::Verbose,
                 Some("--no-cache") => self.no_cache = true,
                 Some("--whole-program") => self.whole_program = true,
-                Some("--watch") if command == "check" => self.watch = true,
                 Some("--module-root") => self.module_root = Some(value()?.into()),
                 Some("-o") if command == "build" => self.output = Some(value()?.into()),
                 Some("--runtime") => self.runtime = Some(value()?.into()),
@@ -172,11 +175,13 @@ mod tests {
     #[test]
     fn watch_is_a_check_option() {
         for command in ["check", "build", "run"] {
-            let mut options = BuildOptions::default();
-            let mut args = ["main.py", "--watch"].map(OsString::from).into_iter();
-            let result = options.read(OsStr::new(command), &mut args, true);
-            assert_eq!(result.is_ok(), command == "check");
-            assert_eq!(options.watch, command == "check");
+            for flag in ["--watch", "-w"] {
+                let mut options = BuildOptions::default();
+                let mut args = ["main.py", flag].map(OsString::from).into_iter();
+                let result = options.read(OsStr::new(command), &mut args, true);
+                assert_eq!(result.is_ok(), command == "check");
+                assert_eq!(options.watch, command == "check");
+            }
         }
     }
 

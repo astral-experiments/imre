@@ -25,7 +25,7 @@ enum Allocator {
 
 const JEMALLOC_RUNTIME: &str = "librelar_runtime_jemalloc.a";
 
-const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY] [--watch]
+const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY] [--watch | -w]
        relar build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]
        relar run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]
 
