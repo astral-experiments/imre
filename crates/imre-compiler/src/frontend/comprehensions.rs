@@ -989,10 +989,7 @@ mod tests {
                 fused,
                 "{expression}"
             );
-            assert_eq!(
-                llvm.contains("call ptr @imre_dict_gather_bytes_int"),
-                fused
-            );
+            assert_eq!(llvm.contains("call ptr @imre_dict_gather_bytes_int"), fused);
             assert_eq!(llvm.contains("call ptr @imre_bytes_decode"), !fused);
         }
     }

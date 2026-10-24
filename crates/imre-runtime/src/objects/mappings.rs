@@ -1593,9 +1593,7 @@ mod tests {
     use crate::objects::exceptions::{
         imre_error_pending, imre_error_take, imre_exception_matches, imre_exception_message,
     };
-    use crate::objects::{
-        imre_object_release, imre_seq_append, imre_seq_get_index, imre_seq_new,
-    };
+    use crate::objects::{imre_object_release, imre_seq_append, imre_seq_get_index, imre_seq_new};
     use num_bigint::BigInt;
 
     fn integer(value: i64) -> usize {

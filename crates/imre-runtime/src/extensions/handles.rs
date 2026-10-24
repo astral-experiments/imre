@@ -4,8 +4,7 @@
 use super::{ModuleDef, Py, extensions_error};
 use crate::objects::records::{imre_record_release, imre_record_retain};
 use crate::{
-    Bytes, Int, Kind, List, imre_int_release, imre_int_retain, imre_list_release,
-    imre_list_retain,
+    Bytes, Int, Kind, List, imre_int_release, imre_int_retain, imre_list_release, imre_list_retain,
 };
 use num_bigint::BigInt;
 use smallvec::SmallVec;

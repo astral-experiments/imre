@@ -1107,8 +1107,7 @@ mod tests {
             let argument = argument.map(|value| Rc::new(Str::new(value)));
             let pointer = argument.as_ref().map_or(std::ptr::null(), Rc::as_ptr);
             // SAFETY: the nullable argument remains rooted throughout construction.
-            let error =
-                unsafe { Rc::from_raw(imre_exception_new(Kind::KeyError as u32, pointer)) };
+            let error = unsafe { Rc::from_raw(imre_exception_new(Kind::KeyError as u32, pointer)) };
             drop(argument);
             assert_eq!(message(&error).as_str(), expected);
         }

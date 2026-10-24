@@ -372,11 +372,7 @@ pub unsafe extern "C" fn imre_str_strip(
 /// # Safety
 /// Both inputs are rooted strings. A nonzero reverse flag selects endswith.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_str_affix(
-    value: *const Str,
-    affix: *const Str,
-    reverse: u32,
-) -> u32 {
+pub unsafe extern "C" fn imre_str_affix(value: *const Str, affix: *const Str, reverse: u32) -> u32 {
     // SAFETY: this immutable comparison retains no borrowed input references.
     let (source, affix) = unsafe { (&*value, &*affix) };
     u32::from(if reverse != 0 {
@@ -634,9 +630,8 @@ mod tests {
                 0,
             ));
             assert_eq!(Rc::strong_count(&source), 2);
-            let selected = Rc::from_raw(
-                super::super::imre_seq_get_index(Rc::as_ptr(&parts), 0) as *const Str
-            );
+            let selected =
+                Rc::from_raw(super::super::imre_seq_get_index(Rc::as_ptr(&parts), 0) as *const Str);
             assert!(Rc::ptr_eq(&source, &selected));
             drop(source);
             drop(parts);

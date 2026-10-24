@@ -1366,11 +1366,8 @@ impl Emitter<'_, '_> {
                 let (caught, next) = (self.label(), self.label());
                 self.branch(&matched, &caught, &next);
                 self.start(&caught);
-                let previous = self.call(
-                    "imre_exception_swap_active",
-                    Type::Exception,
-                    &[&exception],
-                );
+                let previous =
+                    self.call("imre_exception_swap_active", Type::Exception, &[&exception]);
                 self.forget(&previous);
                 if let Some(name) = handler.name {
                     self.store(name, &exception);
@@ -4031,11 +4028,9 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
-            Builtin::StringGet => self.call(
-                "imre_str_get",
-                Type::Str,
-                &[&args[0].value, &args[1].value],
-            ),
+            Builtin::StringGet => {
+                self.call("imre_str_get", Type::Str, &[&args[0].value, &args[1].value])
+            }
             Builtin::BytesGet => {
                 // Successful bytes are canonical tagged integers in 1..=511;
                 // zero uniquely signals failure, so no pending-state poll is needed.
@@ -6510,10 +6505,7 @@ def total(text: str) -> int:
                     assert!(check.contains(&format!("icmp eq i32 {status}, 0")));
                 }
             }
-            assert_eq!(
-                body.matches("call i32 @imre_list_append(").count(),
-                singles
-            );
+            assert_eq!(body.matches("call i32 @imre_list_append(").count(), singles);
         }
     }
 
