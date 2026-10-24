@@ -5,8 +5,8 @@ use std::fmt::Write;
 
 use crate::borrows::{self, FunctionBorrows};
 use crate::contracts::{
-    LIST_APPEND, LIST_COPY_INDEX, LIST_GET, LIST_POP, LIST_SET, LIST_SET_INDEX,
-    runtime_call_may_raise,
+    LIST_APPEND, LIST_BORROW_INDEX, LIST_COPY_INDEX, LIST_GET, LIST_GET_INDEX, LIST_POP, LIST_SET,
+    LIST_SET_INDEX, runtime_call_may_raise,
 };
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
@@ -2977,19 +2977,11 @@ impl Emitter<'_, '_> {
         {
             let list = self.operand(receiver);
             let index = self.operand(index);
-            let at = self.index_word(&index.value, true);
-            let word = self.checked_int_list_word(format!(
-                "call i64 @relar_list_borrow_index(ptr {}, i64 {at})",
-                list.value.operand
-            ));
+            let at = self.native_index(&index.value);
+            let borrowed = self.runtime_call(&LIST_BORROW_INDEX, [&list.value, &at]);
             self.release_operand(&index);
             self.release_operand(&list);
-            let value = self.unpack_word(word, Type::Int);
-            self.forget(&value);
-            return Operand {
-                value,
-                ownership: Ownership::Borrowed,
-            };
+            return borrowed;
         }
         self.operand(expression)
     }
@@ -3545,24 +3537,22 @@ impl Emitter<'_, '_> {
                 };
                 debug_assert!(min <= max && min >= -(1_i64 << 62) && max < (1_i64 << 62));
                 let in_bounds = matches!(builtin, Builtin::ListGetBoundedInBounds { .. });
-                let nonnegative = in_bounds || self.nonnegative_index(&expressions[1]);
-                let word = if nonnegative {
+                let word = if in_bounds {
+                    let ExprKind::Local(slot) = expressions[0].kind else {
+                        unreachable!("the in-bounds proof identifies the stable list local")
+                    };
                     let mut index = args[1].value.clone();
-                    index.small_integer |= in_bounds;
+                    index.small_integer = true;
                     let index = self.index_word(&index, true);
-                    if in_bounds {
-                        let ExprKind::Local(slot) = expressions[0].kind else {
-                            unreachable!("the in-bounds proof identifies the stable list local")
-                        };
-                        self.proven_list_word(slot, &args[0].value, &index)
-                    } else {
-                        self.checked_int_list_word(format!(
-                            "call i64 @relar_list_borrow_index(ptr {}, i64 {index})",
-                            args[0].value.operand
-                        ))
-                    }
+                    self.proven_list_word(slot, &args[0].value, &index)
+                } else if self.nonnegative_index(&expressions[1]) {
+                    let index = self.native_index(&args[1].value);
+                    self.runtime_call(&LIST_BORROW_INDEX, [&args[0].value, &index])
+                        .value
+                        .operand
                 } else {
                     self.runtime_call(&LIST_GET, [&args[0].value, &args[1].value])
+                        .into_proven_small_word()
                 };
                 let narrow = in_bounds
                     && (IntRange { min, max }).fits_u32()
@@ -3806,8 +3796,8 @@ impl Emitter<'_, '_> {
             }
             Builtin::Pop => {
                 if args[0].value.ty == Type::ListInt {
-                    let word = self.runtime_call(&LIST_POP, [&args[0].value]);
-                    self.unpack_word(word, Type::Int)
+                    self.runtime_call(&LIST_POP, [&args[0].value])
+                        .into_value(self)
                 } else {
                     let word = self.checked_instruction(format!(
                         "call i64 @relar_seq_pop(ptr {})",
@@ -4358,24 +4348,21 @@ impl Emitter<'_, '_> {
             };
             return self.unpack_word(word, returns);
         }
-        let word = if list.ty == Type::ListInt {
-            if nonnegative {
-                let index = self.index_word(index, true);
-                self.checked_int_list_word(format!(
-                    "call i64 @relar_list_get_index(ptr {}, i64 {index})",
-                    list.operand
-                ))
+        if list.ty == Type::ListInt {
+            let word = if nonnegative {
+                let index = self.native_index(index);
+                self.runtime_call(&LIST_GET_INDEX, [list, &index])
             } else {
                 self.runtime_call(&LIST_GET, [list, index])
-            }
-        } else {
-            let suffix = if nonnegative { "_index" } else { "" };
-            let index = self.index_word(index, nonnegative);
-            self.checked_instruction(format!(
-                "call i64 @relar_seq_get{suffix}(ptr {}, i64 {index})",
-                list.operand
-            ))
-        };
+            };
+            return word.into_value(self);
+        }
+        let suffix = if nonnegative { "_index" } else { "" };
+        let index = self.index_word(index, nonnegative);
+        let word = self.checked_instruction(format!(
+            "call i64 @relar_seq_get{suffix}(ptr {}, i64 {index})",
+            list.operand
+        ));
         self.unpack_word(word, returns)
     }
 
@@ -4965,9 +4952,9 @@ declare void @relar_list_release(ptr)
         output,
         "{LIST_GET}
 {LIST_SET}
-declare i64 @relar_list_get_index(ptr, i64)
+{LIST_GET_INDEX}
 {LIST_SET_INDEX}
-declare i64 @relar_list_borrow_index(ptr, i64)
+{LIST_BORROW_INDEX}
 declare i64 @relar_list_borrow_index_proven(ptr, i64) nounwind memory(argmem: read)
 declare ptr @relar_list_data_readonly(ptr) nounwind memory(argmem: read)
 {LIST_COPY_INDEX}
