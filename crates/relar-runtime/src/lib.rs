@@ -43,7 +43,7 @@ use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell, UnsafeCell};
-use std::io::{self, BufWriter, IsTerminal, Write};
+use std::io::{self, IsTerminal, Write};
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 use std::sync::{LazyLock, Mutex, Once};
@@ -367,37 +367,96 @@ fn initialize_io() {
 /// Standard output uses bounded block buffering for pipes and files, while
 /// terminals flush each printed line. LLVM supplies the process entry point, so
 /// input, fatal errors, and normal entry-point return explicitly flush it.
-struct Output {
-    writer: BufWriter<io::Stdout>,
+struct Output<W = io::Stdout> {
+    stdout: W,
+    buffer: Vec<u8>,
+    written: usize,
     line_buffered: bool,
+}
+
+impl<W: Write> Output<W> {
+    #[cold]
+    fn write_all_slow(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.flush_buffer()?;
+        if bytes.len() >= self.buffer.capacity() {
+            self.stdout.write_all(bytes)
+        } else {
+            self.buffer.extend_from_slice(bytes);
+            Ok(())
+        }
+    }
+
+    fn flush_buffer(&mut self) -> io::Result<()> {
+        while self.written < self.buffer.len() {
+            match self.stdout.write(&self.buffer[self.written..]) {
+                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+                Ok(count) => self.written += count,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        self.buffer.clear();
+        self.written = 0;
+        Ok(())
+    }
+}
+
+impl<W: Write> Write for Output<W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.len() > self.buffer.capacity() - self.buffer.len() {
+            self.flush_buffer()?;
+        }
+        if bytes.len() >= self.buffer.capacity() {
+            return self.stdout.write(bytes);
+        }
+        self.buffer.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    #[inline]
+    fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        if bytes.len() <= self.buffer.capacity() - self.buffer.len() {
+            self.buffer.extend_from_slice(bytes);
+            return Ok(());
+        }
+        self.write_all_slow(bytes)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.flush_buffer()?;
+        self.stdout.flush()
+    }
 }
 
 static OUTPUT: LazyLock<Mutex<Output>> = LazyLock::new(|| {
     initialize_io();
     let stdout = io::stdout();
     let line_buffered = stdout.is_terminal();
+    let mut buffer = Vec::new();
+    // With zero capacity every write goes directly to stdout.
+    let _ = buffer.try_reserve_exact(8 * 1024);
     Mutex::new(Output {
-        writer: BufWriter::with_capacity(8 * 1024, stdout),
+        stdout,
+        buffer,
+        written: 0,
         line_buffered,
     })
 });
 
 /// Prints one value and a newline, returning with the writer lock released.
 /// Only primitive formatters run here; they cannot call user code.
-fn write_output(
-    write: impl FnOnce(&mut BufWriter<io::Stdout>) -> io::Result<()>,
-) -> io::Result<()> {
+fn write_output(write: impl FnOnce(&mut Output) -> io::Result<()>) -> io::Result<()> {
     let mut output = OUTPUT.lock().unwrap_or_else(|poison| poison.into_inner());
-    write(&mut output.writer)?;
-    output.writer.write_all(b"\n")?;
+    write(&mut output)?;
+    output.write_all(b"\n")?;
     if output.line_buffered {
-        output.writer.flush()?;
+        output.flush()?;
     }
     Ok(())
 }
 
 /// Handles write failures only after releasing the writer lock.
-fn output(write: impl FnOnce(&mut BufWriter<io::Stdout>) -> io::Result<()>) {
+fn output(write: impl FnOnce(&mut Output) -> io::Result<()>) {
     if write_output(write).is_err() {
         Error::new(Kind::OSError, "could not write standard output").raise();
     }
@@ -428,10 +487,12 @@ fn output_bytes(value: &[u8]) {
 
 /// The caller handles errors only after this function releases the writer lock.
 fn flush_stdout() -> io::Result<()> {
-    OUTPUT
+    let Some(output) = LazyLock::get(&OUTPUT) else {
+        return Ok(());
+    };
+    output
         .lock()
         .unwrap_or_else(|poison| poison.into_inner())
-        .writer
         .flush()
 }
 
@@ -1395,6 +1456,62 @@ mod tests {
     use objects::exceptions::{
         relar_error_pending, relar_error_take, relar_exception_matches, relar_exception_message,
     };
+
+    #[test]
+    fn output_works_with_and_without_a_reserved_buffer() {
+        for capacity in [0, 8] {
+            let mut output = Output {
+                stdout: Vec::new(),
+                buffer: Vec::with_capacity(capacity),
+                written: 0,
+                line_buffered: false,
+            };
+            output.write_all(b"abc").unwrap();
+            assert_eq!(output.stdout.is_empty(), capacity != 0);
+            output.write_all(b"0123456789").unwrap();
+            output.write_all(b"z").unwrap();
+            output.flush().unwrap();
+            assert_eq!(output.stdout, b"abc0123456789z");
+        }
+    }
+
+    #[test]
+    fn output_retries_only_the_unwritten_suffix() {
+        #[derive(Default)]
+        struct Sink {
+            bytes: Vec<u8>,
+            failed: bool,
+        }
+        impl Write for Sink {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                if self.bytes.is_empty() {
+                    return self.bytes.write(&bytes[..bytes.len().min(2)]);
+                }
+                if !self.failed {
+                    self.failed = true;
+                    return Err(io::ErrorKind::BrokenPipe.into());
+                }
+                self.bytes.write(bytes)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let mut output = Output {
+            stdout: Sink::default(),
+            buffer: Vec::with_capacity(16),
+            written: 0,
+            line_buffered: false,
+        };
+        output.write_all(b"partial").unwrap();
+        assert_eq!(
+            output.flush().unwrap_err().kind(),
+            io::ErrorKind::BrokenPipe
+        );
+        output.flush().unwrap();
+        assert_eq!(output.stdout.bytes, b"partial");
+    }
 
     #[test]
     fn paired_append_preserves_order_and_independent_bigint_owners() {

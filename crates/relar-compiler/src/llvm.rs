@@ -1437,6 +1437,7 @@ impl Emitter<'_, '_> {
             self.line(format!(
                 "store {{ i64, i64 }} {layout}, ptr @sequence_layout"
             ));
+            self.line("call void @relar_record_error_init()");
             self.line("call void @relar_init_literals()");
         }
         if entry && self.uses_sys_argv {
@@ -3309,9 +3310,14 @@ impl Emitter<'_, '_> {
             | Builtin::FloatFormat { .. }
             | Builtin::Abs => self.stdlib_builtin(builtin, &args),
             Builtin::TupleCacheNew => return self.record(returns),
-            Builtin::TupleCacheResult => {
-                self.call("relar_record_cached_result", returns, &[&args[0].value])
-            }
+            Builtin::TupleCacheResult => Value {
+                ty: returns,
+                operand: self.checked_record(format!(
+                    "call ptr @relar_record_try_cached_result(ptr {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
             Builtin::GlobalGet(slot) => {
                 let value = self.borrow_global(*slot, returns);
                 self.retain(&value);
@@ -4248,10 +4254,17 @@ impl Emitter<'_, '_> {
         let layout = self.output.global_ref(format!("layout_{name}"));
         let value = Value {
             ty,
-            operand: self.instruction(format!("call ptr @relar_record_new(ptr @{layout})")),
+            operand: self.checked_record(format!("call ptr @relar_record_try_new(ptr @{layout})")),
             small_integer: false,
         };
         self.owned(value)
+    }
+
+    fn checked_record(&mut self, instruction: impl AsRef<str>) -> String {
+        let record = self.instruction(instruction);
+        let failed = self.instruction(format!("icmp eq ptr {record}, null"));
+        self.check_failed(&failed);
+        record
     }
 
     /// An unaliased record local can reuse its allocation on the next iteration.
@@ -4269,19 +4282,21 @@ impl Emitter<'_, '_> {
         let layout = self
             .output
             .global_ref(format!("layout_{}", record_name(previous.ty)));
-        let fresh = self.instruction(format!("call ptr @relar_record_new(ptr @{layout})"));
+        let fresh = self.checked_record(format!("call ptr @relar_record_try_new(ptr @{layout})"));
+        let allocated = self.current.clone();
         self.jump(&write);
         self.start(&cached);
-        let replacement = self.instruction(format!(
-            "call ptr @relar_record_cached_result(ptr {})",
+        let replacement = self.checked_record(format!(
+            "call ptr @relar_record_try_cached_result(ptr {})",
             previous.operand
         ));
+        let reused = self.current.clone();
         self.jump(&write);
         self.start(&write);
         let record = Value {
             ty: previous.ty,
             operand: self.instruction(format!(
-                "phi ptr [{fresh}, %{allocate}], [{replacement}, %{cached}]"
+                "phi ptr [{fresh}, %{allocated}], [{replacement}, %{reused}]"
             )),
             small_integer: false,
         };
@@ -4906,7 +4921,8 @@ declare ptr @relar_exception_swap_active(ptr)
 declare void @relar_exception_raise(ptr)
 declare void @relar_exception_reraise()
 declare void @relar_flush_stdout()
-declare ptr @relar_record_new(ptr)
+declare void @relar_record_error_init()
+declare ptr @relar_record_try_new(ptr)
 declare ptr @relar_tuple_probe(ptr, ptr)
 declare ptr @relar_json_decode(ptr, ptr)
 declare ptr @relar_json_loads(ptr)
@@ -4916,7 +4932,7 @@ declare i32 @relar_json_null(ptr)
 declare ptr @relar_toml_decode(ptr, ptr)
 declare ptr @relar_toml_keys(ptr)
 declare ptr @relar_json_encode(i64, ptr, i64, i32)
-declare ptr @relar_record_cached_result(ptr)
+declare ptr @relar_record_try_cached_result(ptr)
 declare void @relar_record_retain(ptr)
 declare void @relar_record_release(ptr)
 declare i32 @relar_record_equal(ptr, ptr) nounwind memory(read)
@@ -5408,6 +5424,27 @@ mod tests {
     }
 
     #[test]
+    fn record_allocation_errors_escape_nested_calls() {
+        let llvm = compile(
+            "def make(n: int) -> tuple[int, int]:\n    return (n, 1)\ndef outer(n: int) -> tuple[int, int]:\n    return make(n)\ntry:\n    print(outer(3)[0])\nexcept MemoryError:\n    print(0)\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        let body = |name: &str| {
+            llvm.split_once(&format!("define internal ptr @{name}("))
+                .unwrap()
+                .1
+                .split_once("\n}")
+                .unwrap()
+                .0
+        };
+        assert!(body("fn_0").contains("call ptr @relar_record_try_new("));
+        assert!(body("fn_0").contains("icmp eq ptr "));
+        assert!(body("fn_1").contains("call i32 @relar_error_pending()"));
+        assert!(llvm.contains("call void @relar_record_error_init()"));
+    }
+
+    #[test]
     fn immutable_tuple_literals_use_lazy_roots() {
         let llvm = compile(
             "def frozen() -> tuple[tuple[int, int], str]:\n    return ((-1, 2 + 3), 'x')\ndef dynamic(n: int) -> tuple[int, str]:\n    return (n, 'x')\ndef mutable() -> tuple[list[int], int]:\n    return ([0], 1)\nprint(frozen()[0][0])\nprint(dynamic(2)[0])\nprint(mutable()[0][0])\n",
@@ -5438,7 +5475,7 @@ mod tests {
             .split_once("\n}")
             .unwrap()
             .0;
-        assert!(!init.contains("@relar_record_new("));
+        assert!(!init.contains("@relar_record_try_new("));
     }
 
     #[test]
@@ -5602,7 +5639,7 @@ mod tests {
             "def probe(d: dict[tuple[str, int], int], x: str) -> int:\n    d.get((x, 1))\n    d.get((x, 2), 3)\n    if (x, 4) in d:\n        return d[(x, 5)]\n    return 0\n",
         );
         assert_eq!(body.matches("call ptr @relar_tuple_probe(").count(), 3);
-        assert_eq!(body.matches("call ptr @relar_record_new(").count(), 1);
+        assert_eq!(body.matches("call ptr @relar_record_try_new(").count(), 1);
     }
 
     #[test]
@@ -5633,8 +5670,8 @@ mod tests {
             "def probe(d: dict[tuple[str, str], int], x: str, y: str, write: bool) -> int:\n    key = (x, y)\n    found = d.get(key, 0)\n    if write:\n        d[key] = found + 1\n    return found\n",
         );
         let (_, after_probe) = body.split_once("call ptr @relar_tuple_probe(").unwrap();
-        assert_eq!(body.matches("call ptr @relar_record_new(").count(), 1);
-        assert!(after_probe.contains("call ptr @relar_record_new("));
+        assert_eq!(body.matches("call ptr @relar_record_try_new(").count(), 1);
+        assert!(after_probe.contains("call ptr @relar_record_try_new("));
     }
 
     #[test]
@@ -5672,7 +5709,7 @@ mod tests {
                 "def probe(d: dict[tuple[str, int], int], other: dict[tuple[str, int], int], x: str) -> int:\n    key = (x, 0)\n    found = d.get(key, 0)\n{stores}\n    return found\n"
             ));
             assert!(!body.contains("call ptr @relar_tuple_probe("));
-            assert_eq!(body.matches("call ptr @relar_record_new(").count(), 1);
+            assert_eq!(body.matches("call ptr @relar_record_try_new(").count(), 1);
         }
     }
 
