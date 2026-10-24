@@ -751,7 +751,7 @@ impl Checker<'_> {
         self.restore_state(before);
         for name in writes {
             if let Some(slot) = self.names.get(&name) {
-                self.narrowed.remove(slot);
+                self.narrowed.remove_mut(slot);
             }
         }
         let exported = self
@@ -789,7 +789,7 @@ impl Checker<'_> {
         };
         for name in display.repeated_writes(index) {
             if let Some(slot) = self.names.get(&name) {
-                self.narrowed.remove(slot);
+                self.narrowed.remove_mut(slot);
             }
         }
         self.lower_iteration(&clause.target, input, &[], |checker| {

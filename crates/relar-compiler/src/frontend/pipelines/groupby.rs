@@ -155,7 +155,7 @@ impl Checker<'_> {
         self.lower_prepared_iteration(key_target, input, &loop_.orelse, Vec::new(), |checker| {
             let output = checker.declare(members.id.as_str(), list_type, members)?;
             checker.assigned.insert(output);
-            checker.narrowed.remove(&output);
+            checker.narrowed.remove_mut(&output);
             let mut drain = vec![Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(
