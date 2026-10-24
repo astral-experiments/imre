@@ -543,12 +543,12 @@ mod tests {
     fn list_conversion_copies_all_bytes_across_chunk_boundaries() {
         for length in [0, 1, 63, 64, 65, 127, 128, 129, 255, 256, 257, 1024] {
             let expected = (0..length).map(|index| index as u8).collect::<Vec<_>>();
-            let source = Rc::new(List(StorageCell::new(
+            let source = Rc::new(List::new(
                 expected
                     .iter()
                     .map(|&byte| Int::from_usize(usize::from(byte)))
                     .collect(),
-            )));
+            ));
             let alias = source.clone();
             // SAFETY: both aliases root the exact list and conversion returns
             // one independently owned immutable bytes object.
@@ -585,7 +585,7 @@ mod tests {
             for position in [0, 1, 63, 64, 65, 127, 128] {
                 let mut values = (0..129).map(|_| Int::from_usize(17)).collect::<Vec<_>>();
                 values[position] = invalid.clone();
-                let source = Rc::new(List(StorageCell::new(values)));
+                let source = Rc::new(List::new(values));
                 // SAFETY: the source roots every exact integer while failed
                 // conversion transfers only a pending exception owner.
                 unsafe {
