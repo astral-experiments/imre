@@ -359,6 +359,10 @@ impl Storage {
             Payload::Message(message) => Rc::clone(message),
             Payload::Process(process) => Rc::new(process.message()),
             Payload::Timeout(timeout) => Rc::new(timeout.message()),
+            Payload::Key(key) if key.kind == WordKind::new(3) => {
+                // SAFETY: this owned kind-3 word is a live string.
+                Rc::new(string_repr(unsafe { &*(key.word as *const Str) }))
+            }
             Payload::Key(key) => {
                 let mut message = String::new();
                 // SAFETY: the exception owns the immutable key and its exact kind.
