@@ -309,7 +309,7 @@ pub(super) fn record_allocation_failed() {
 }
 
 #[cold]
-pub(super) fn sequence_allocation_failed() {
+pub(crate) fn sequence_allocation_failed() {
     SEQUENCE_ALLOCATION_ERROR.with(|error| replace_pending(Some(Rc::clone(error))));
 }
 

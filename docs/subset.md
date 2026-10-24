@@ -601,6 +601,8 @@ Keep each builder local. Declare parent options first, followed by each subparse
 
 ## Synchronous subprocesses
 
+On POSIX, `shutil.which(cmd, mode=os.F_OK | os.X_OK, path=None)` searches for a non-directory accessible with the requested mode. It returns an owned string, bytes, or `None`. String and native `Path` commands produce string paths, and bytes commands preserve arbitrary filename bytes. The search path accepts strings, bytes, native paths, or `None`. A command containing a directory component is checked directly. A missing `PATH` uses the platform default, an empty search path finds nothing, and empty entries in a nonempty colon-separated path search the current directory. Native string results must be representable as UTF-8. `os.F_OK`, `os.R_OK`, `os.W_OK` and `os.X_OK` are available for mode expressions.
+
 The runtime supports a sealed `subprocess.run` boundary with exact `list[str]` arguments. Capture requires literal `capture_output=True` and either `text=True` or `encoding="utf-8"`. Both forms decode strict UTF-8. `check` is a boolean expression, defaulting to false. `cwd` accepts a string, native `Path`, or a nullable form of either, and `env` accepts `dict[str, str]` or `None`. Arguments may be positional or named `args`; the other parameters are keyword-only. All supplied expressions evaluate once in source order before launching the child, even when keyword order differs from parameter order.
 
 ```python

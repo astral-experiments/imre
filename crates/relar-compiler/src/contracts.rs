@@ -117,6 +117,7 @@ impl Builtin {
                 | ProcessOperation::EnvironCopy
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
+                | ProcessOperation::Which
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)
@@ -199,8 +200,8 @@ impl Builtin {
             | Self::StringReplace
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
-            Self::SortByKeys => Contract::new(true, PreservesOwners),
-            Self::Append | Self::ListReserveRange => Contract::new(false, PreservesOwners),
+            Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
+            Self::ListReserveRange => Contract::new(false, PreservesOwners),
             Self::BinaryOpen(_)
             | Self::BinaryRead
             | Self::BinaryReadSize
@@ -382,7 +383,6 @@ const TAGGED_INT: RuntimeParam = RuntimeParam::Value(Type::Int);
 pub(crate) struct OwnedIntOrError;
 /// The word borrows the rooted list element until consumption. Raw zero signals a pending error.
 pub(crate) struct BorrowedIntOrError;
-pub(crate) struct InfallibleVoid;
 /// One signals success. Zero signals a pending error.
 pub(crate) struct StatusOrError;
 
@@ -401,10 +401,15 @@ pub(crate) const LIST_BORROW_INDEX: RuntimeCall<BorrowedIntOrError, 2> = Runtime
     params: [INT_LIST, RuntimeParam::NativeIndex],
     result: BorrowedIntOrError,
 };
-pub(crate) const LIST_APPEND: RuntimeCall<InfallibleVoid, 2> = RuntimeCall {
+pub(crate) const LIST_APPEND: RuntimeCall<StatusOrError, 2> = RuntimeCall {
     symbol: "relar_list_append",
     params: [INT_LIST, TAGGED_INT],
-    result: InfallibleVoid,
+    result: StatusOrError,
+};
+pub(crate) const LIST_APPEND_PAIR: RuntimeCall<StatusOrError, 3> = RuntimeCall {
+    symbol: "relar_list_append_pair",
+    params: [INT_LIST, TAGGED_INT, TAGGED_INT],
+    result: StatusOrError,
 };
 pub(crate) const LIST_POP: RuntimeCall<OwnedIntOrError, 1> = RuntimeCall {
     symbol: "relar_list_pop",
@@ -455,6 +460,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_subprocess_run_timeout_int"
                 | "relar_environ_get"
                 | "relar_getcwd"
+                | "relar_shutil_which"
                 | "relar_environ_copy"
                 | "relar_subprocess_check"
                 | "relar_subprocess_error_field"

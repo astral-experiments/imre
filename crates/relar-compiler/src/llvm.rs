@@ -5,8 +5,8 @@ use std::fmt::Write;
 
 use crate::borrows::{self, FunctionBorrows};
 use crate::contracts::{
-    LIST_APPEND, LIST_BORROW_INDEX, LIST_COPY_INDEX, LIST_GET, LIST_GET_INDEX, LIST_POP, LIST_SET,
-    LIST_SET_INDEX, runtime_call_may_raise,
+    LIST_APPEND, LIST_APPEND_PAIR, LIST_BORROW_INDEX, LIST_COPY_INDEX, LIST_GET, LIST_GET_INDEX,
+    LIST_POP, LIST_SET, LIST_SET_INDEX, runtime_call_may_raise,
 };
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
@@ -1617,12 +1617,17 @@ impl Emitter<'_, '_> {
         let receiver = self.operand(receiver);
         let first = self.operand(first);
         let second = self.operand(second);
-        let name = if receiver.value.ty == Type::ByteOutput {
-            "relar_byte_output_append_pair"
+        if receiver.value.ty == Type::ByteOutput {
+            self.void_call(
+                "relar_byte_output_append_pair",
+                &[&receiver.value, &first.value, &second.value],
+            );
         } else {
-            "relar_list_append_pair"
-        };
-        self.void_call(name, &[&receiver.value, &first.value, &second.value]);
+            self.runtime_call(
+                &LIST_APPEND_PAIR,
+                [&receiver.value, &first.value, &second.value],
+            );
+        }
         for operand in [&receiver, &first, &second] {
             self.release_operand(operand);
         }
@@ -5138,6 +5143,7 @@ declare ptr @relar_subprocess_run_timeout_int(ptr, ptr, ptr, i32, i64, ptr)
 declare ptr @relar_environ_copy()
 declare ptr @relar_environ_get(ptr, ptr)
 declare ptr @relar_getcwd()
+declare ptr @relar_shutil_which(ptr, i64, ptr, i32, i32)
 declare void @relar_subprocess_check(ptr)
 declare i64 @relar_subprocess_error_field(ptr, i32)
 declare i64 @relar_subprocess_timeout_field(ptr, i32)
@@ -5448,7 +5454,7 @@ declare i64 @relar_list_borrow_index_proven(ptr, i64) nounwind memory(argmem: re
 declare ptr @relar_list_data_readonly(ptr) nounwind memory(argmem: read)
 {LIST_COPY_INDEX}
 {LIST_APPEND}
-declare void @relar_list_append_pair(ptr, i64, i64)
+{LIST_APPEND_PAIR}
 {LIST_POP}"
     )
     .unwrap();
@@ -6430,12 +6436,15 @@ def total(text: str) -> int:
             ),
         ] {
             let body = function_body(source);
+            assert_eq!(body.matches("call i32 @relar_list_append_pair(").count(), 1);
+            for (call, check) in body.lines().zip(body.lines().skip(1)) {
+                if call.contains("call i32 @relar_list_append") {
+                    let status = call.trim().split_once(" = ").unwrap().0;
+                    assert!(check.contains(&format!("icmp eq i32 {status}, 0")));
+                }
+            }
             assert_eq!(
-                body.matches("call void @relar_list_append_pair(").count(),
-                1
-            );
-            assert_eq!(
-                body.matches("call void @relar_list_append(").count(),
+                body.matches("call i32 @relar_list_append(").count(),
                 singles
             );
         }
@@ -6454,19 +6463,19 @@ def total(text: str) -> int:
             let body = function_body(&format!(
                 "def push(output: list[int], other: list[int], first: int, second: int) -> None:\n{statements}"
             ));
-            assert!(!body.contains("call void @relar_list_append_pair("));
-            assert_eq!(body.matches("call void @relar_list_append(").count(), 2);
+            assert!(!body.contains("call i32 @relar_list_append_pair("));
+            assert_eq!(body.matches("call i32 @relar_list_append(").count(), 2);
         }
         let body = function_body(
             "def push(output: list[str], first: str, second: str) -> None:\n    output.append(first)\n    output.append(second)\n",
         );
-        assert!(!body.contains("call void @relar_list_append_pair("));
+        assert!(!body.contains("call i32 @relar_list_append_pair("));
         assert_eq!(body.matches("call void @relar_seq_append(").count(), 2);
         let body = function_body(
             "def push(outputs: list[list[int]], first: int, second: int) -> None:\n    outputs[0].append(first)\n    outputs[0].append(second)\n",
         );
-        assert!(!body.contains("call void @relar_list_append_pair("));
-        assert_eq!(body.matches("call void @relar_list_append(").count(), 2);
+        assert!(!body.contains("call i32 @relar_list_append_pair("));
+        assert_eq!(body.matches("call i32 @relar_list_append(").count(), 2);
     }
 
     #[test]
