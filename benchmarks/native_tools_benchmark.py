@@ -19,7 +19,7 @@ ROOT = HERE.parent
 shared = SimpleNamespace(**runpy.run_path(str(HERE / "benchmark.py")))
 catalog = SimpleNamespace(**runpy.run_path(str(HERE / "catalog_validate.py")))
 conformance = SimpleNamespace(**runpy.run_path(str(HERE / "conformance_validate.py")))
-ENGINES = ("relar", "port", "original", "codon", "rust")
+ENGINES = ("imre", "port", "original", "codon", "rust")
 PACKAGES = {"catalog": "python_catalog", "conformance": "conformance_report"}
 SENTINEL = b"replace this previous complete output\n"
 
@@ -95,18 +95,18 @@ def elf_target(path):
 def source_paths(args):
     paths = {name: Path(shared.executable(getattr(args, name))) for name in ("compiler", "python", "clang")}
     paths["runtime"] = args.runtime.resolve(strict=True)
-    paths["relar_build_record"] = args.relar_build_record.resolve(strict=True)
-    build = json.loads(paths["relar_build_record"].read_text())
+    paths["imre_build_record"] = args.imre_build_record.resolve(strict=True)
+    build = json.loads(paths["imre_build_record"].read_text())
     assert build["kind"] == "native-tools-build" and build["status"] == "passed" and build["input_guards_passed"]
     assert build["source_matches_revision"] or args.allow_dirty, "dirty compiler/runtime snapshots require --allow-dirty"
-    for name, path in (("relar_builder", HERE / "native_tools_build.py"),
-                       ("relar_retained_builder", paths["relar_build_record"].parent / "build.py")):
+    for name, path in (("imre_builder", HERE / "native_tools_build.py"),
+                       ("imre_retained_builder", paths["imre_build_record"].parent / "build.py")):
         assert shared.sha256(path) == build["driver_sha256"]
         paths[name] = path
     for name, expected in build["tool_sha256"].items():
         path = Path(build["tool_paths"][name]).resolve(strict=True)
         assert shared.sha256(path) == expected
-        paths["relar_build_tool:" + name] = path
+        paths["imre_build_tool:" + name] = path
     settings = build["environment"]
     assert settings["RUSTC"] == build["tool_paths"]["rustc"]
     assert settings["RUSTC_WRAPPER"] == settings["RUSTC_WORKSPACE_WRAPPER"] == ""
@@ -119,7 +119,7 @@ def source_paths(args):
         for kind in ("log", "messages"):
             path = Path(step[kind]).resolve(strict=True)
             assert shared.sha256(path) == step[kind + "_sha256"]
-            paths["relar_build:" + step["name"] + ":" + kind] = path
+            paths["imre_build:" + step["name"] + ":" + kind] = path
     assert build["sha256"]["compiler"] == shared.sha256(paths["compiler"])
     runtime_key = "thinlto_runtime" if args.lto_linker else "normal_runtime"
     assert build["sha256"][runtime_key] == shared.sha256(paths["runtime"])
@@ -139,7 +139,7 @@ def source_paths(args):
         for path in directory.rglob("*"):
             if path.is_file() and "__pycache__" not in path.parts:
                 paths["source:" + path.relative_to(ROOT).as_posix()] = path
-    records = {"relar": build, "rust": {}, "codon": {}}
+    records = {"imre": build, "rust": {}, "codon": {}}
     targets = set()
     for tool, package in PACKAGES.items():
         reference = HERE / "reference" / package
@@ -246,7 +246,7 @@ def commands_for(prepared, paths, tool, compute=False):
     else:
         port = (conformance.python_compute_command if compute else conformance.python_command)(paths["python"])
         original = (conformance.original_compute_command if compute else conformance.original_command)(paths["python"])
-    return {"relar": [app["compute_binary" if compute else "binary"]], "port": port, "original": original,
+    return {"imre": [app["compute_binary" if compute else "binary"]], "port": port, "original": original,
             "codon": [str(paths[tool + "_codon" + ("-compute" if compute else "")])],
             "rust": [str(paths[tool + "_rust"]), *(["--compute"] if compute else [])]}
 
@@ -431,8 +431,8 @@ def measure(row, prepared, paths, directory, args):
     result = {**{key: value for key, value in row.items() if key != "gates"}, "gates": gates,
               "engine_orders": orders, **phases, "summary": summaries,
               "ratios": {left + "_over_" + right: summaries[left]["median_seconds"] / summaries[right]["median_seconds"]
-                         for left, right in (("relar", "rust"), ("codon", "rust"), ("original", "relar"),
-                                             ("port", "relar"), ("codon", "relar"), ("original", "rust"))}}
+                         for left, right in (("imre", "rust"), ("codon", "rust"), ("original", "imre"),
+                                             ("port", "imre"), ("codon", "imre"), ("original", "rust"))}}
     if row["rounds"]:
         result["amortized_seconds"] = {engine: value["median_seconds"] / row["rounds"] for engine, value in summaries.items()}
     return result
@@ -444,7 +444,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("compiler", "catalog-rust", "conformance-rust"):
         parser.add_argument("--" + name, required=True)
-    for name in ("runtime", "relar-build-record", "catalog-codon-record", "conformance-codon-record",
+    for name in ("runtime", "imre-build-record", "catalog-codon-record", "conformance-codon-record",
                  "conformance-unchanged", "conformance-changed", "artifact-dir", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--python", default=sys.executable)
@@ -505,7 +505,7 @@ def main():
                   "engine_orders": engine_orders(), "environment": environment(Path("<engine-working-directory>")),
                   "method": "Fresh whole processes on one pinned CPU with warm filesystem caches. Each workload includes complete input reads, parsing, transformation, rendering, and one output publication. Full-byte and input/output filesystem checks are outside timing. Ten Williams orders balance measured positions and directed within-round neighbors; warmups and cross-round transitions are not balanced.",
                   "compute_method": "The catalog preloads raw NDJSON once and repeats its entire parse/select/sort/render pipeline. Conformance preloads its file manifest and identity map plus raw source/diagnostic text; every annotation scan, diagnostic parse, grouping, classification, sorting, and rendering is repeated. Complete last output and summed Unicode lengths are checked. Amortized time includes startup, preload, and final publication; zero-round controls are reported without subtraction. Rust black-boxes inputs and output contributions.",
-                  "comparison": "Relar and Rust use generic target settings with matched normal/ThinLTO modes. Codon uses its pinned native release configuration with -disable-native and -numerics=py in both rows; it is not a matched ThinLTO build. Typed and upstream CPython are separate baselines. Codon has no Python interop; its fixed-width integers and JSON duplicate-key boundary are recorded explicitly in validation.",
+                  "comparison": "Imre and Rust use generic target settings with matched normal/ThinLTO modes. Codon uses its pinned native release configuration with -disable-native and -numerics=py in both rows; it is not a matched ThinLTO build. Typed and upstream CPython are separate baselines. Codon has no Python interop; its fixed-width integers and JSON duplicate-key boundary are recorded explicitly in validation.",
                   "workloads": [], "input_guards_passed": False}
         controls = {}
         for row in prepared["workloads"]:
@@ -519,7 +519,7 @@ def main():
                 measured["preload_control_fraction"] = {engine: control["summary"][engine]["median_seconds"] / measured["summary"][engine]["median_seconds"] for engine in ENGINES}
             result["workloads"].append(measured)
             args.output.write_text(json.dumps(result, indent=2) + "\n")
-            print(f"{row['label']}: Relar/Rust={measured['ratios']['relar_over_rust']:.3f}; Codon/Rust={measured['ratios']['codon_over_rust']:.3f}", flush=True)
+            print(f"{row['label']}: Imre/Rust={measured['ratios']['imre_over_rust']:.3f}; Codon/Rust={measured['ratios']['codon_over_rust']:.3f}", flush=True)
     assert hashes == {name: shared.sha256(path) for name, path in paths.items()}
     verify(prepared, paths, hashes, args, target, revision, dirty)
     assert revision == checked(["git", "-C", ROOT, "rev-parse", "HEAD"]).strip()

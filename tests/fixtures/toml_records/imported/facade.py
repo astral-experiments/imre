@@ -1,4 +1,4 @@
-import relar.toml as wire
+import imre.toml as wire
 from models import Group
 
 

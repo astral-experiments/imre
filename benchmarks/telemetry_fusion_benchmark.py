@@ -72,7 +72,7 @@ def main():
     env = {
         k: x
         for k, x in os.environ.items()
-        if k not in ("RELARFLAGS", "RELAR_ENCODED_FLAGS")
+        if k not in ("IMREFLAGS", "IMRE_ENCODED_FLAGS")
     }
     env["XDG_CONFIG_HOME"] = str(a.work / "empty-config")
     exes = {}
@@ -80,9 +80,9 @@ def main():
     for mode in modes:
         directory = a.work / mode
         directory.mkdir(exist_ok=True)
-        compiler = directory / "relar"
+        compiler = directory / "imre"
         shutil.copy2(a.candidate if mode == "automatic" else a.baseline, compiler)
-        shutil.copy2(a.lld, directory / "relar-ld.lld")
+        shutil.copy2(a.lld, directory / "imre-ld.lld")
         package = hand if mode == "hand" else v.PACKAGE
         exe = directory / "app"
         subprocess.run(
@@ -99,7 +99,7 @@ def main():
                 exe,
             ],
             check=True,
-            env={**env, "RELAR_CACHE_DIR": str(directory / "cache")},
+            env={**env, "IMRE_CACHE_DIR": str(directory / "cache")},
         )
         exes[mode] = exe
     rng = random.Random(meta["inputs"]["seed"])

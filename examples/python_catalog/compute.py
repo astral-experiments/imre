@@ -3,7 +3,7 @@
 from pathlib import Path
 from sys import argv
 
-from relar.json import encode
+from imre.json import encode
 
 from .catalog import generate_catalog
 

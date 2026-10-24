@@ -2,7 +2,7 @@
 
 Compare a reference recording with an observed recording to detect regressions
 in a sensor, simulation, or service metric. This typed Python package runs
-unchanged on CPython and Relar. It checks complete timestamp alignment before
+unchanged on CPython and Imre. It checks complete timestamp alignment before
 answering queries, so an early alert cannot conceal a missing final sample.
 
 ```sh
@@ -12,8 +12,8 @@ PYTHONPATH=examples python3.14 -m telemetry_comparison report \
 cat /tmp/telemetry-report.txt
 
 cargo build --release --workspace --locked
-target/release/relar build examples/telemetry_comparison/__main__.py \
-  --module-root examples --runtime target/release/librelar_runtime.a \
+target/release/imre build examples/telemetry_comparison/__main__.py \
+  --module-root examples --runtime target/release/libimre_runtime.a \
   --clang clang-18 --target x86_64-unknown-linux-gnu --opt-level 3 \
   -o /tmp/telemetry-comparison
 /tmp/telemetry-comparison report \

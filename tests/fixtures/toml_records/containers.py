@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from relar import toml
+from imre import toml
 
 
 @dataclass(slots=True)

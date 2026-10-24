@@ -21,12 +21,12 @@ Build the reference and prepare the native program separately from timing:
 python3 benchmarks/reference/record_pipeline/build.py \
   --artifact-dir /tmp/record-rust
 python3 benchmarks/record_benchmark.py \
-  --compiler target/release/relar --runtime target/release/librelar_runtime.a \
+  --compiler target/release/imre --runtime target/release/libimre_runtime.a \
   --rust /tmp/record-rust/record-reference --clang clang-18 \
   --prepare-only --artifact-dir /tmp/record-prepared \
   --output /tmp/record-prepared.json
 python3 benchmarks/record_benchmark.py \
-  --compiler target/release/relar --runtime target/release/librelar_runtime.a \
+  --compiler target/release/imre --runtime target/release/libimre_runtime.a \
   --rust /tmp/record-rust/record-reference --clang clang-18 \
   --prepared-record /tmp/record-prepared.json --cpu 0 \
   --artifact-dir /tmp/record-timing --output /tmp/record-timing.json
@@ -36,7 +36,7 @@ Use a CPU allowed by the host. Preparation compiles at optimization level 3 and
 runs all complete-output oracle cases on the exact three engines. The harness
 requires committed sources by default; `--allow-dirty` marks exploratory work.
 Source, compiler, runtime, interpreter, linker, Rust build-record and executable
-hashes are checked before and after measurement. `--relar-build-record` can bind
+hashes are checked before and after measurement. `--imre-build-record` can bind
 the compiler/runtime to a separately recorded build.
 
 The four workloads are gross/net transforms with full/selective risk filters,
@@ -55,7 +55,7 @@ predecessors. Warmups and cross-round transitions are not balanced. JSON retains
 every process result, median and interquartile range. Run timing after builds,
 validation and profiling have stopped; the harness rejects ptrace execution.
 
-For matched ThinLTO, build this reference with `--thinlto`, supply a Relar runtime
+For matched ThinLTO, build this reference with `--thinlto`, supply a Imre runtime
 built with embedded LLVM bitcode, and add `--lto-linker /path/to/matching/ld.lld`
 to both preparation and measurement. Both implementations use optimization level
 3 and the existing 1,000-instruction import/inline budget; Rust uses 16 codegen

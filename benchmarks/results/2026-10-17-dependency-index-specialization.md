@@ -1,16 +1,16 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # Dependency planner: range proofs and specialized container access
 
-The unchanged Python dependency planner now takes 20.1% less time on the large wide graph than the previous optimized Relar build. With matched ThinLTO settings, the gap to the arbitrary-precision Rust reference narrows from 45.6% to 16.3%. Relar is 6.67× faster than CPython on that workload. On the large layered graph, Relar takes 9.6% less time than the previous build and 11.4% less than the Rust BigInt reference.
+The unchanged Python dependency planner now takes 20.1% less time on the large wide graph than the previous optimized Imre build. With matched ThinLTO settings, the gap to the arbitrary-precision Rust reference narrows from 45.6% to 16.3%. Imre is 6.67× faster than CPython on that workload. On the large layered graph, Imre takes 9.6% less time than the previous build and 11.4% less than the Rust BigInt reference.
 
 These measurements use implementation revision `c0cb211cabbafb9d666bea4417a9a296a9856821`. All six Python package files and the Rust reference algorithm are unchanged. Integer precision, alias-visible mutation, error ordering, heap tie-breaking, scheduling, and complete report output retain their existing semantics.
 
 ## End-to-end results
 
-Each cell is the median of 30 fresh-process runs in milliseconds. This main comparison enables ThinLTO for both Relar versions and both Rust references, with LLVM import and inline budgets of 1,000. Previous Relar is the preserved executable from [PR #12](https://github.com/viarius-experiments/relar/pull/12), with its matching build mode.
+Each cell is the median of 30 fresh-process runs in milliseconds. This main comparison enables ThinLTO for both Imre versions and both Rust references, with LLVM import and inline budgets of 1,000. Previous Imre is the preserved executable from [PR #12](https://github.com/viarius-experiments/imre/pull/12), with its matching build mode.
 
-| Graph | Tasks | CPython 3.14.5 | Previous Relar | Relar | Rust BigInt | Rust checked-i64 |
+| Graph | Tasks | CPython 3.14.5 | Previous Imre | Imre | Rust BigInt | Rust checked-i64 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Layered | 128 | 21.740 | 3.360 | 3.318 | 3.432 | 3.180 |
 | Layered | 2,048 | 32.081 | 6.658 | 6.182 | 6.576 | 5.203 |
@@ -19,13 +19,13 @@ Each cell is the median of 30 fresh-process runs in milliseconds. This main comp
 | Wide | 2,048 | 30.553 | 5.278 | 4.859 | 4.732 | 4.170 |
 | Wide | 16,384 | 116.388 | 21.850 | 17.454 | 15.011 | 12.065 |
 
-At 16,384 tasks, the layered/wide speedups over CPython are 4.04×/6.67×. Relar takes 0.886×/1.163× the Rust BigInt time, and 1.408×/1.447× the checked-i64 Rust time. The checked-i64 reference has a narrower numerical contract.
+At 16,384 tasks, the layered/wide speedups over CPython are 4.04×/6.67×. Imre takes 0.886×/1.163× the Rust BigInt time, and 1.408×/1.447× the checked-i64 Rust time. The checked-i64 reference has a narrower numerical contract.
 
-The wide Relar interquartile range is 16.764–17.875 ms, compared with 14.912–15.757 ms for Rust BigInt. The layered ranges are 29.491–30.074 ms and 32.722–34.062 ms. These describe observed spread on a shared host; they are not confidence intervals or a general language-performance claim. Small workloads remain dominated by process startup.
+The wide Imre interquartile range is 16.764–17.875 ms, compared with 14.912–15.757 ms for Rust BigInt. The layered ranges are 29.491–30.074 ms and 32.722–34.062 ms. These describe observed spread on a shared host; they are not confidence intervals or a general language-performance claim. Small workloads remain dominated by process startup.
 
 Ordinary linking also improves performance, using the original ordinary Rust release references:
 
-| Graph | Tasks | CPython 3.14.5 | Previous Relar | Relar | Rust BigInt | Rust checked-i64 |
+| Graph | Tasks | CPython 3.14.5 | Previous Imre | Imre | Rust BigInt | Rust checked-i64 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Layered | 128 | 20.495 | 3.298 | 3.279 | 3.362 | 3.097 |
 | Layered | 2,048 | 31.840 | 6.909 | 6.541 | 6.935 | 5.399 |
@@ -34,7 +34,7 @@ Ordinary linking also improves performance, using the original ordinary Rust rel
 | Wide | 2,048 | 30.478 | 5.550 | 5.184 | 4.948 | 4.235 |
 | Wide | 16,384 | 117.639 | 24.870 | 20.891 | 16.638 | 12.954 |
 
-The ordinary-link large wide workload takes 16.0% less time than the previous Relar build, but remains 25.6% slower than Rust BigInt. The optional ThinLTO configuration remains material to the main result. AOT compilation was measured separately: approximately 0.44 seconds for ordinary linking and 3.95 seconds for ThinLTO in these runs; these are individual build observations, not timing distributions.
+The ordinary-link large wide workload takes 16.0% less time than the previous Imre build, but remains 25.6% slower than Rust BigInt. The optional ThinLTO configuration remains material to the main result. AOT compilation was measured separately: approximately 0.44 seconds for ordinary linking and 3.95 seconds for ThinLTO in these runs; these are individual build observations, not timing distributions.
 
 ## What changed
 
@@ -52,7 +52,7 @@ Callgrind and DHAT profile the exact final ThinLTO executable used above, with c
 
 | Cumulative stage | Layered instructions | Wide instructions |
 | --- | ---: | ---: |
-| Previous optimized Relar ThinLTO | 205,147,254 | 145,225,371 |
+| Previous optimized Imre ThinLTO | 205,147,254 | 145,225,371 |
 | Range proofs and decoded indices | 194,584,138 | 121,441,037 |
 | Scoped container storage | 182,650,490 | 106,504,878 |
 | Proven LLVM overflow flags | 182,650,504 | 106,504,892 |
@@ -66,7 +66,7 @@ The overflow flags are justified by the proofs, but produced byte-identical `.te
 
 Allocation counts do not change in this follow-up: 233,897 blocks on the layered graph and 147,584 on the wide graph. Container header savings reduce requested bytes from 51,543,811 to 51,019,379 and from 10,078,143 to 9,553,711, respectively. Peak live bytes fall from 6,055,808 to 5,662,496 and from 5,130,272 to 4,736,960. Later stages preserve those allocation totals.
 
-The matched Rust BigInt reference uses 196,808,173 layered instructions and 81,616,504 wide instructions. Relar still executes 21.8% more wide instructions. Wide allocation counts are already nearly equal—147,584 for Relar and 147,562 for Rust—but Relar requests 9,553,711 bytes versus Rust's 7,219,551, and peaks at 4,736,960 versus 3,720,814. Tagged values, generic container representations, and remaining checked accesses are still visible in the generated program. Local interval proofs do not establish the ranges of values loaded from containers or returned from functions; extending those proofs and specializing layouts are plausible next targets.
+The matched Rust BigInt reference uses 196,808,173 layered instructions and 81,616,504 wide instructions. Imre still executes 21.8% more wide instructions. Wide allocation counts are already nearly equal—147,584 for Imre and 147,562 for Rust—but Imre requests 9,553,711 bytes versus Rust's 7,219,551, and peaks at 4,736,960 versus 3,720,814. Tagged values, generic container representations, and remaining checked accesses are still visible in the generated program. Local interval proofs do not establish the ranges of values loaded from containers or returned from functions; extending those proofs and specializing layouts are plausible next targets.
 
 The final wide profile attributes 29.75 million exclusive instructions to the entry function, including inlined planning work. Whitespace splitting accounts for 7.96 million, `malloc` for 6.77 million, buffered output for 5.16 million, `free` for 4.57 million, and integer printing for 3.32 million. Parsing, allocation, and report generation remain substantial outside the heap operations. The emitted planner contains seven borrowed-read callsites and two fused-copy callsites; these optimizations are exercised by the real program.
 
@@ -74,7 +74,7 @@ The layered program still constructs its long critical-path string through repea
 
 ## Correctness and scope
 
-Both final comparisons pass 135 independent planner-oracle cases for CPython, both Relar versions, and Rust BigInt. Checked-i64 Rust passes the 121 representable cases and explicitly excludes 14 others. Ten additional boundary cases preserve arbitrary-precision behavior and verify four checked-i64 overflow rejections. Every warmup and measured process must match full output, exit successfully, and emit no stderr.
+Both final comparisons pass 135 independent planner-oracle cases for CPython, both Imre versions, and Rust BigInt. Checked-i64 Rust passes the 121 representable cases and explicitly excludes 14 others. Ten additional boundary cases preserve arbitrary-precision behavior and verify four checked-i64 overflow rejections. Every warmup and measured process must match full output, exit successfully, and emit no stderr.
 
 Formatting, Clippy with warnings denied, ten compiler unit tests, and twelve runtime unit tests pass. The five native suites pass 358 checks across ordinary O0/O3 and 263 checks at ThinLTO O3, plus ten ThinLTO CLI checks. The same five suites pass with both the Rust runtime and generated code instrumented by AddressSanitizer, using ordinary O1 and ThinLTO O3; normal exits are also checked for leaks. All twelve runtime unit tests pass with AddressSanitizer. The Rust standard library was not rebuilt with instrumentation.
 
@@ -82,12 +82,12 @@ The added cases cover BigInt boundaries, loop widening and cursor exits, local r
 
 Measurements ran outside ptrace on CPU 0 of an AMD EPYC-Milan devbox, with builds, tests, profilers, and agent tool work paused. Each of six workloads has two warmup rounds and 30 measured rounds. Ten Williams execution orders repeat three times, balancing positions and directed adjacent pairs within a round; cross-round predecessors are not balanced. Whole-process times include startup, pipes, parsing, scheduling, reporting, and exit. CPython also imports the unchanged package. Builds, correctness gates, warmups, and output comparisons are excluded.
 
-The compiler/runtime use Ohm Rust 1.98.1-dev with LLVM 22.1.8. Generated IR enters through Clang 18.1.3; ThinLTO uses LLD 22.1.8. Relar and matched Rust ThinLTO builds use import/inlining budgets of 1,000. Ohm's experimental defaults were disabled. CPython 3.14.5 has its JIT disabled and records PGO/LTO build configuration. The Rust reference implements the same algorithm in different source, with native indices and a different representation. There is no C measurement or claim of general Rust parity.
+The compiler/runtime use Ohm Rust 1.98.1-dev with LLVM 22.1.8. Generated IR enters through Clang 18.1.3; ThinLTO uses LLD 22.1.8. Imre and matched Rust ThinLTO builds use import/inlining budgets of 1,000. Ohm's experimental defaults were disabled. CPython 3.14.5 has its JIT disabled and records PGO/LTO build configuration. The Rust reference implements the same algorithm in different source, with native indices and a different representation. There is no C measurement or claim of general Rust parity.
 
 ## Evidence and reproduction
 
 - [ThinLTO comparison](2026-10-17-dependency-index-specialization-lto.json): all raw samples, full inputs and expected outputs, validation, execution order, and source/tool/artifact hashes.
-- [Ordinary-link comparison](2026-10-17-dependency-index-specialization-normal.json): the same evidence against ordinary-link Relar and Rust controls.
+- [Ordinary-link comparison](2026-10-17-dependency-index-specialization-normal.json): the same evidence against ordinary-link Imre and Rust controls.
 - [Cumulative profiles](2026-10-17-dependency-index-specialization-profiles.json): accepted trace summaries, complete-output checks, binary/build/source identities, and trace/log hashes, including the prior baseline and matched Rust controls.
 - [Build and validation record](2026-10-17-dependency-index-specialization-build.json): clean implementation revision, source hashes, commands, toolchain, frozen artifact identities, and sanitizer scope.
 - [Previous performance report](2026-10-17-dependency-performance.md): the preserved PR #12 baseline and reference provenance.

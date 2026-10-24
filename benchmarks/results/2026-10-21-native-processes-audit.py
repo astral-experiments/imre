@@ -24,11 +24,11 @@ import tempfile
 if sys.flags.optimize:
     raise SystemExit('audit requires assertions; do not use -O')
 sys.dont_write_bytecode = True
-ROOT = Path('/home/dev-user/code/oss/relar')
+ROOT = Path('/home/dev-user/code/oss/imre')
 REVISION = 'aca68f5631795f01c3cbb2dcdc56fd92866f6620'
-ENGINES = ('relar', 'original', 'rust')
-VALIDATION_ENGINES = ('relar', 'port', 'original', 'rust')
-ASAN_ENGINES = ('original', 'port', 'relar', 'rust')
+ENGINES = ('imre', 'original', 'rust')
+VALIDATION_ENGINES = ('imre', 'port', 'original', 'rust')
+ASAN_ENGINES = ('original', 'port', 'imre', 'rust')
 INPUTS = {}
 GIT = {}
 
@@ -184,7 +184,7 @@ def check_row(validator, row, description, case, commands, *, samples, warmups,
         seconds[engine] = summary['median_seconds']
         spreads[engine] = quartiles[2] - quartiles[0]
     ratios = {f'{left}_over_{right}': seconds[left] / seconds[right]
-              for left, right in [('original', 'relar'), ('relar', 'rust'), ('original', 'rust')]}
+              for left, right in [('original', 'imre'), ('imre', 'rust'), ('original', 'rust')]}
     assert {key: value for key, value in row.items() if '_over_' in key} == ratios
     if compute and row['rounds']:
         assert row['amortized_seconds'] == {engine: seconds[engine] / row['rounds'] for engine in engines}
@@ -239,7 +239,7 @@ def check_preparation(prepared, mode):
         with Path(name).open('rb') as stream:
             header = stream.read(20)
         assert header[:6] == b'\x7fELF\x02\x01' and struct.unpack('<H', header[18:20])[0] == 62
-    build = load(paths['relar_build_record'])
+    build = load(paths['imre_build_record'])
     assert build['revision'] == REVISION and build['source_matches_revision'] and build['input_guards_passed']
     assert build['sha256']['compiler'] == hashes['compiler'] and build['sha256'][mode + '_runtime'] == hashes['runtime']
     for relative, digest in build['source_sha256'].items():
@@ -433,7 +433,7 @@ def check_workload_gates(validator, process_api, prepared, cases, timing_directo
 
 
 def check_asan(validator, process_api, prepared, cases, counts):
-    directory = Path('/tmp/relar-process-asan-application')
+    directory = Path('/tmp/imre-process-asan-application')
     record = load(directory / 'record.json')
     assert record['revision'] == REVISION and record['input_guards_passed']
     assert record['generated_code_instrumented'] and record['runtime_instrumented'] and record['outside_sandbox']
@@ -441,26 +441,26 @@ def check_asan(validator, process_api, prepared, cases, counts):
     for name, digest in record['artifacts'].items():
         guard(directory / name, digest)
     expected_hashes = {**prepared['source_and_tool_sha256'],
-                       'asan_runtime': guard('/tmp/relar-process-build/asan_runtime.a'),
-                       'prepared_record': guard('/tmp/relar-process-benchmark-normal-prepared.json')}
+                       'asan_runtime': guard('/tmp/imre-process-build/asan_runtime.a'),
+                       'prepared_record': guard('/tmp/imre-process-benchmark-normal-prepared.json')}
     assert record['source_and_tool_sha256'] == expected_hashes
-    build = load(prepared['source_and_tool_paths']['relar_build_record'])
+    build = load(prepared['source_and_tool_paths']['imre_build_record'])
     assert build['sha256']['asan_runtime'] == expected_hashes['asan_runtime']
     step = next(step for step in build['steps'] if step['name'] == 'asan')
     assert step['overrides']['RUSTFLAGS'] == '-Zsanitizer=address -Cforce-frame-pointers=yes'
     assert '-Zsanitizer=address' in Path(step['log']).read_text() or 'Finished' in Path(step['log']).read_text()
     commands = []
     for name, entry in [('memory-report', '__main__.py'), ('memory-compute', 'compute.py')]:
-        commands.append(['/tmp/relar-process-build/relar', 'build', str(ROOT / 'examples/memory_report' / entry),
+        commands.append(['/tmp/imre-process-build/imre', 'build', str(ROOT / 'examples/memory_report' / entry),
                          '--module-root', str(ROOT / 'examples'), '-o', str(directory / name),
-                         '--runtime', '/tmp/relar-process-build/asan_runtime.a', '--clang', '/usr/lib/llvm-18/bin/clang',
+                         '--runtime', '/tmp/imre-process-build/asan_runtime.a', '--clang', '/usr/lib/llvm-18/bin/clang',
                          '--opt-level', '1', '--sanitize', '--emit-llvm', str(directory / (name + '.ll'))])
         commands.append(['/usr/bin/nm', str(directory / name)])
         assert 'sanitize_address' in (directory / (name + '.ll')).read_text()
         binary = (directory / name).read_bytes()
         assert b'__asan_init' in binary and b'__asan_report_load' in binary
         assert (directory / (name + '-compile.log')).read_text() == ''
-    commands.append(['/usr/bin/nm', '-u', '/tmp/relar-process-build/asan_runtime.a'])
+    commands.append(['/usr/bin/nm', '-u', '/tmp/imre-process-build/asan_runtime.a'])
     symbols = (directory / 'runtime-symbols.log').read_text()
     assert '__asan_report_load' in symbols and '__asan_report_store' in symbols
     commands.append([prepared['source_and_tool_paths']['python'], str(ROOT / 'benchmarks/memory_validate.py'),
@@ -477,13 +477,13 @@ def check_asan(validator, process_api, prepared, cases, counts):
         assert capture['case_sha256'] == next(item['sha256'] for item in prepared['processes']['workloads'] if item['description']['label'] == case.label)
         assert capture['command'] == [str(directory / ('memory-compute' if computed else 'memory-report')), *case.arguments]
         expected = validator.compute_oracle(case) if computed else process_api.oracle(case)
-        check_capture(validator, case, expected, capture, 'relar', compute=computed, prepared_process=not computed)
+        check_capture(validator, case, expected, capture, 'imre', compute=computed, prepared_process=not computed)
         counts['asan_workload_executions'] += 1
     assert (record['ordinary_cases'], record['ordinary_executions'], record['compute_cases'], record['compute_executions'],
             record['process_cases'], record['process_executions'], record['workload_cases']) == (92, 335, 12, 48, 32, 127, 8)
     assert 'AddressSanitizer' not in json.dumps(validation) and 'LeakSanitizer' not in json.dumps(validation)
-    guard('/tmp/relar-process-asan-application.log')
-    guard('/tmp/relar-process-asan-application.py', record['artifacts']['driver.py'])
+    guard('/tmp/imre-process-asan-application.log')
+    guard('/tmp/imre-process-asan-application.py', record['artifacts']['driver.py'])
 
 
 def check_timing_command(command, prepared, timing_path, prepared_path, mode):
@@ -499,7 +499,7 @@ def check_timing_command(command, prepared, timing_path, prepared_path, mode):
             assert key is not None
             options[key].append(argument)
     expected = {'--compiler': paths['compiler'], '--runtime': paths['runtime'], '--rust': paths['rust'],
-                '--rust-build-record': paths['rust_build_record'], '--relar-build-record': paths['relar_build_record'],
+                '--rust-build-record': paths['rust_build_record'], '--imre-build-record': paths['imre_build_record'],
                 '--python': paths['python'], '--clang': paths['clang'], '--old-ty': paths['old_ty'], '--new-ty': paths['new_ty'],
                 '--ruff-source': '/home/dev-user/code/oss/ruff', '--artifact-dir': str(timing_path.with_suffix('')),
                 '--output': str(timing_path), '--prepared-record': str(prepared_path), '--cpu': '31', '--samples': '48', '--warmups': '2'}
@@ -522,21 +522,21 @@ def check_language_validation():
         if path.is_relative_to(ROOT):
             assert sha(source(path.relative_to(ROOT))) == digest
 
-    build_path = Path('/tmp/relar-process-build/build-record.json')
+    build_path = Path('/tmp/imre-process-build/build-record.json')
     build = load(build_path)
-    precheck = load('/tmp/relar-process-precheck-record.json')
+    precheck = load('/tmp/imre-process-precheck-record.json')
     assert precheck == build['precheck'] and precheck['source_guard_passed']
     assert [step['command'][2] if step['command'][0] == 'sh' else step['command'][1]
             for step in precheck['steps']] == ['fmt', 'clippy', 'test', 'diff']
     assert all(step['status'] == 0 and step['seconds'] > 0 for step in precheck['steps'])
-    guard('/tmp/relar-process-precheck.log', build['precheck_log_sha256'])
-    precheck_log = Path('/tmp/relar-process-precheck.log').read_text()
+    guard('/tmp/imre-process-precheck.log', build['precheck_log_sha256'])
+    precheck_log = Path('/tmp/imre-process-precheck.log').read_text()
     unit_results = re.findall(r'test result: (\w+)\. (\d+) passed; (\d+) failed;', precheck_log)
     assert [(int(passed), int(failed)) for status, passed, failed in unit_results if status == 'ok'] == [(138, 0), (0, 0), (123, 0), (0, 0), (0, 0)]
     assert all(status == 'ok' for status, passed, failed in unit_results)
-    for relative, digest in load('/tmp/relar-process-precheck-sources.json').items():
+    for relative, digest in load('/tmp/imre-process-precheck-sources.json').items():
         assert sha(source(relative)) == digest
-    directory = Path('/tmp/relar-process-validation/language')
+    directory = Path('/tmp/imre-process-validation/language')
     language = load(directory / 'record.json')
     assert language['revision'] == REVISION and language['status'] == 'passed'
     assert language['guards_passed'] and language['revision_unchanged']
@@ -553,7 +553,7 @@ def check_language_validation():
         assert result['returncode'] == 0 and result['seconds'] > 0
         command = result['command']
         assert command == language['commands'][name]
-        assert option(command, '--compiler') == str(build_path.parent / 'relar')
+        assert option(command, '--compiler') == str(build_path.parent / 'imre')
         runtime = {'ordinary': 'normal', 'process-thinlto': 'thinlto', 'process-asan': 'asan'}[name]
         assert option(command, '--runtime') == str(build_path.parent / (runtime + '_runtime.a'))
         guard(result['log'], result['log_sha256'])
@@ -582,13 +582,13 @@ def check_language_validation():
                 assert f'O{level}: Passed 323 upstream native calls, 289 differential cases, and 2 compile-time type rejections' in log
         elif suite == 'luhn':
             for level in (0, 3):
-                assert f'O{level}: relar: 15 upstream calls, 1144 differential cases' in log
+                assert f'O{level}: imre: 15 upstream calls, 1144 differential cases' in log
         elif suite == 'imports':
             general_checks += int(re.search(r'(\d+) import checks passed', log).group(1))
         else:
             general_checks += int(re.search(r'Passed (\d+) ', log).group(1))
     assert general_checks == 1961
-    affected = load('/tmp/relar-process-affected-record.json')
+    affected = load('/tmp/imre-process-affected-record.json')
     assert affected['revision'] == REVISION and affected['status'] == 'passed'
     assert affected['inputs_verified_before'] and affected['inputs_verified_after'] and affected['outside_sandbox']
     assert affected['build_record_sha256'] == guard(build_path) and affected['artifact_sha256'] == build['sha256']
@@ -635,14 +635,14 @@ def check_language_validation():
             'process_thinlto_checks': 78, 'process_asan_checks': 78,
             'affected_checks': affected_counts, 'focused_differential_probes': 10,
             'language_record_sha256': guard(directory / 'record.json'),
-            'affected_record_sha256': guard('/tmp/relar-process-affected-record.json')}
+            'affected_record_sha256': guard('/tmp/imre-process-affected-record.json')}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--timings-complete', required=True, action='store_true')
     parser.add_argument('--output', type=Path, default=Path('/tmp/2026-10-21-native-processes-audit.json'))
-    parser.add_argument('--context', type=Path, default=Path('/tmp/relar-process-timing-context.json'))
+    parser.add_argument('--context', type=Path, default=Path('/tmp/imre-process-timing-context.json'))
     args = parser.parse_args()
     guard(__file__)
     context = load(args.context)
@@ -662,18 +662,18 @@ def main():
         assert previous <= started < finished <= datetime.fromisoformat(context['finished_at'])
         previous = finished
         guard(window['log'])
-        assert Path(window['log']).read_text().rstrip().endswith('Saved /tmp/relar-process-timing-' + window['mode'] + '.json')
+        assert Path(window['log']).read_text().rstrip().endswith('Saved /tmp/imre-process-timing-' + window['mode'] + '.json')
     counts, modes, identities = collections.Counter(), {}, {}
-    first = load('/tmp/relar-process-benchmark-normal-prepared.json')
+    first = load('/tmp/imre-process-benchmark-normal-prepared.json')
     previous = datetime.fromisoformat(context['started_at'])
-    with tempfile.TemporaryDirectory(prefix='relar-process-data-audit-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='imre-process-data-audit-') as temporary:
         oracle_root = Path(temporary)
         benchmark, validator = reconstruct_oracle(first, oracle_root)
         process_api = benchmark['process_api']
         for mode in ('normal', 'thinlto'):
-            timing_path = Path(f'/tmp/relar-process-timing-{mode}.json')
+            timing_path = Path(f'/tmp/imre-process-timing-{mode}.json')
             timing = load(timing_path)
-            prepared_path = Path(f'/tmp/relar-process-benchmark-{mode}-prepared.json')
+            prepared_path = Path(f'/tmp/imre-process-benchmark-{mode}-prepared.json')
             prepared = load(prepared_path, timing['preparation_record_sha256'])
             assert timing['preparation'] == prepared and timing['revision'] == REVISION and not timing['dirty']
             assert timing['kind'] == 'memory-process-benchmark' and timing['input_guards_passed']
@@ -740,17 +740,17 @@ def main():
     result = {'schema': 1, 'status': 'passed', 'measurement_revision': REVISION,
               'scope': 'Independent replay of every process/compute/preload capture, retained filesystem, preparation/ASan result, balanced order, raw statistic, and Git/build/tool/source identity; no engine execution.',
               'counts': dict(counts), 'modes': modes, 'identities': identities, 'validation_suites': validation_suites,
-              'all_captured_process_cases_at_most_twice_rust': all(row['relar_over_rust'] <= 2 for row in processes),
-              'all_repeated_compute_cases_at_most_twice_rust': all(row['relar_over_rust'] <= 2 for row in compute),
-              'all_real_ty_cases_at_most_twice_rust': all(row['relar_over_rust'] <= 2 for row in real),
+              'all_captured_process_cases_at_most_twice_rust': all(row['imre_over_rust'] <= 2 for row in processes),
+              'all_repeated_compute_cases_at_most_twice_rust': all(row['imre_over_rust'] <= 2 for row in compute),
+              'all_real_ty_cases_at_most_twice_rust': all(row['imre_over_rust'] <= 2 for row in real),
               'audit_script_sha256': INPUTS[str(Path(__file__).absolute())], 'guarded_inputs': INPUTS,
               'limits': 'Reuses independently reviewed frozen oracles. Captures cannot prove historical host isolation or instruction execution. Real-workflow timings include complete ty checking. Repeated-compute estimates include preload/startup/final output and subtract no control. Upstream ties are checked semantically using retained Markdown, then their exact bytes are bound to every capture.'}
     with args.output.open('x') as stream:
         json.dump(result, stream, indent=2)
         stream.write('\n')
     print(json.dumps({'output': str(args.output), 'counts': dict(counts),
-                      'process_relar_over_rust': [row['relar_over_rust'] for row in processes],
-                      'compute_relar_over_rust': [row['relar_over_rust'] for row in compute]}, indent=2))
+                      'process_imre_over_rust': [row['imre_over_rust'] for row in processes],
+                      'compute_imre_over_rust': [row['imre_over_rust'] for row in compute]}, indent=2))
 
 
 if __name__ == '__main__':

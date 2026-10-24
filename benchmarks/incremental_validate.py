@@ -549,7 +549,7 @@ def main() -> None:
     args = parser.parse_args()
     commands = {"cpython": python_command(args.python)}
     for name, path in (
-        ("relar", args.binary),
+        ("imre", args.binary),
         ("rust_bigint", args.rust_bigint),
         ("rust_i64", args.rust_i64),
     ):

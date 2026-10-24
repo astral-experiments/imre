@@ -11,7 +11,7 @@ def environment(trace: list[str], values: dict[str, str]) -> dict[str, str]:
 
 def arguments(trace: list[str], values: dict[str, str], command: list[str]) -> list[str]:
     trace.append("args")
-    values["RELAR_PROCESS_OVERRIDE"] = "changed during args"
+    values["IMRE_PROCESS_OVERRIDE"] = "changed during args"
     return command
 
 

@@ -46,6 +46,8 @@ print(str(Path()))
 print(str(Path("base", "nested", Path("item.json"))))
 print(str(Path("base", "/reset", "last")))
 print(str(Path("base") / "child"))
+print(str(Path("base").joinpath()))
+print(str(Path("base").joinpath(segment("one"), Path("two"), segment("/reset"), "")))
 print(str("base" / Path("child")))
 print(str(Path("base") / Path("/reset")))
 print(str(Path("base") / ""))
@@ -62,3 +64,9 @@ except ValueError:
 print(Path("a/./b") == Path("a/b"))
 print(Path("a/../b") != Path("b"))
 print(Path("//a") != Path("/a"))
+for original in [".", "/", "//", "a", "//root/a", "x/../a"]:
+    for name in ["", ".", "..", "n", "a/b", "n/", "é"]:
+        try:
+            print(str(Path(original).with_name(name)))
+        except ValueError as error:
+            print(str(error))

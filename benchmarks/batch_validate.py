@@ -287,7 +287,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     commands = {"cpython": python_command(args.python)}
-    for name, path in (("relar", args.binary), ("rust_bigint", args.rust_bigint)):
+    for name, path in (("imre", args.binary), ("rust_bigint", args.rust_bigint)):
         if path is not None:
             commands[name] = [str(path.resolve(strict=True))]
     result = validate_commands(commands)

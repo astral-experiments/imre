@@ -458,7 +458,7 @@ def validate_devices(commands: dict[str, list[str]], timeout: float) -> dict:
     }
     runs = {}
     for name, command in commands.items():
-        with tempfile.TemporaryDirectory(prefix="relar-manifest-device-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="imre-manifest-device-") as temporary:
             directory = Path(temporary)
             materialize(case, directory)
             process = subprocess.run(
@@ -497,7 +497,7 @@ def validate_commands(commands: dict[str, list[str]], timeout: float = 120) -> d
         terminal += expected["returncode"] != 0
         runs = {}
         for name, command in commands.items():
-            with tempfile.TemporaryDirectory(prefix="relar-manifest-") as temporary:
+            with tempfile.TemporaryDirectory(prefix="imre-manifest-") as temporary:
                 directory = Path(temporary)
                 materialize(case, directory)
                 process = subprocess.run(
@@ -541,7 +541,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     commands = {"cpython": python_command(args.python)}
-    for name, path in (("relar", args.binary), ("rust_bigint", args.rust_bigint)):
+    for name, path in (("imre", args.binary), ("rust_bigint", args.rust_bigint)):
         if path:
             commands[name] = [str(path.resolve())]
     result = validate_commands(commands, args.timeout)

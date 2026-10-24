@@ -1,4 +1,4 @@
-"""Run four unmodified CPython JSON error tests with native Relar loads and host assertions."""
+"""Run four unmodified CPython JSON error tests with native Imre loads and host assertions."""
 import argparse
 import hashlib
 import json
@@ -53,7 +53,7 @@ def native_case(case, program, expected_calls):
         tag, message = invoke(program, document, calls)
         if tag == "JSONDecodeError":
             # Preserve the native exception category and str(error). Calling CPython's
-            # initializer would synthesize location fields which Relar has not exposed.
+            # initializer would synthesize location fields which Imre has not exposed.
             error = case.JSONDecodeError.__new__(case.JSONDecodeError)
             ValueError.__init__(error, message)
             raise error
@@ -72,7 +72,7 @@ def native_case(case, program, expected_calls):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("relar", "runtime", "clang", "result"):
+    for name in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--cpython-source", type=Path,
                         help="CPython 3.14.5 source root if the interpreter lacks test.support")
@@ -82,24 +82,24 @@ def main():
 
     tests = {}
     report = {"cpython_commit": verify_upstream(), "assertions": "host unittest",
-              "json_operations": "native Relar", "behavioral_methods": len(METHODS),
+              "json_operations": "native Imre", "behavioral_methods": len(METHODS),
               "controls": [], "tests": tests}
     try:
         decode = vendored_decode(args.cpython_source)
         source = HERE / "json_driver.py"
         report["sha256"] = {name: sha256(path) for name, path in (
-            ("driver", source), ("relar", args.relar), ("runtime", args.runtime), ("clang", args.clang))}
+            ("driver", source), ("imre", args.imre), ("runtime", args.runtime), ("clang", args.clang))}
         with tempfile.TemporaryDirectory() as tmp:
             program = Path(tmp) / "json-driver"
             ir = Path(tmp) / "driver.ll"
-            compiled = subprocess.run([args.relar.resolve(), "build", source, "-o", program,
+            compiled = subprocess.run([args.imre.resolve(), "build", source, "-o", program,
                     "--no-cache", "--opt-level", "3", "--clang", args.clang.resolve(),
                     "--runtime", args.runtime.resolve(), "--emit-llvm", ir], cwd=tmp,
                     capture_output=True, text=True, timeout=120)
             if compiled.returncode:
-                raise RuntimeError(f"Relar build failed: {compiled.stderr}")
-            if "call ptr @relar_json_loads(" not in ir.read_text():
-                raise RuntimeError("the compiled driver must call relar_json_loads")
+                raise RuntimeError(f"Imre build failed: {compiled.stderr}")
+            if "call ptr @imre_json_loads(" not in ir.read_text():
+                raise RuntimeError("the compiled driver must call imre_json_loads")
             report["sha256"]["executable"] = sha256(program)
             for text, expected in [('[]', ("array-length", "0")),
                                    ('[{"a": 1}, 99]', ("array-length", "2"))]:

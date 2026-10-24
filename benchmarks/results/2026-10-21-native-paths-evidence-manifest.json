@@ -6,11 +6,11 @@
   },
   "asan_application": {
     "preparation": {
-      "path": "/tmp/relar-path-asan-preparation-run.json",
+      "path": "/tmp/imre-path-asan-preparation-run.json",
       "sha256": "ddbac73a322422d28754e97ee89c8807abc70284d90e4e2d48b0089420c71398"
     },
     "validation": {
-      "path": "/tmp/relar-path-app-asan/validation.json",
+      "path": "/tmp/imre-path-app-asan/validation.json",
       "sha256": "4614ea0f68526b90d80a73771503e2478d7575b91e83a8944e4b72901fa20425"
     }
   },
@@ -23,7 +23,7 @@
     "sha256": "23a102e983f450a5b7e940ddf9822efe21dd16c803096060c50be9503ba2a73d"
   },
   "build": {
-    "path": "/tmp/relar-path-build/build-record.json",
+    "path": "/tmp/imre-path-build/build-record.json",
     "sha256": "330e22343cebf54c349fde602ed784dab71cce8dd90660f039505aaa7743ed42"
   },
   "deduplicated_blob_count": 678,
@@ -31,7 +31,7 @@
   "guarded_input_files": 14915,
   "guarded_input_trees": 9,
   "kind": "native-paths-portable-evidence",
-  "language_validation_root": "/tmp/relar-path-validation",
+  "language_validation_root": "/tmp/imre-path-validation",
   "limits": "Data-only capture preservation. Native/tool hashes were checked locally; excluded artifacts cannot be rehashed by portable replay. No native remeasurement or timestamp authentication.",
   "logical_file_count": 14900,
   "logical_index_sha256": "bc6e17794d8d784f577eb7cf99373041c1f6925dc0ed694aecc298d404249847",
@@ -3450,20 +3450,20 @@
       "sha256": "919840a226ef4f63fdc27b1beb670be1e72a46f3967e828a370dcb1a404541e4"
     }
   },
-  "packager_path": "/tmp/relar-path-package-evidence.py",
+  "packager_path": "/tmp/imre-path-package-evidence.py",
   "packager_sha256": "140cebd23b66b2713ab899b322fc277b76b62e1411eeb32a48b572280d2dce29",
   "preparations": {
     "normal": {
-      "path": "/tmp/relar-path-benchmark-normal-prepared.json",
+      "path": "/tmp/imre-path-benchmark-normal-prepared.json",
       "sha256": "1ebd4c3a2e667b70e09ad1d16480b8bad9675f6ef5eb67a18c428b997580965c"
     },
     "thinlto": {
-      "path": "/tmp/relar-path-benchmark-thinlto-prepared.json",
+      "path": "/tmp/imre-path-benchmark-thinlto-prepared.json",
       "sha256": "3ad0f8396eb64eddcaa51fccbb3db1966711e6a44d5e4e948051ec5a077240f5"
     }
   },
   "replay_sha256": "12c5d876edb9fa5eda15b215a36ab9d45ef9e1a20e8f6fd210c42b2e0955ef25",
-  "repository": "/home/dev-user/code/oss/relar",
+  "repository": "/home/dev-user/code/oss/imre",
   "schema": 1,
   "source_roles": {
     "measurement": "cec52a5a963343f974ac774db5e9f25a7e7fc5ba"
@@ -3471,11 +3471,11 @@
   "status": "passed",
   "timings": {
     "normal": {
-      "path": "/tmp/relar-path-timing-normal.json",
+      "path": "/tmp/imre-path-timing-normal.json",
       "sha256": "7a705acce5133f64dadd42b7a0e53cf7bb831872fdfe56820aeab2c41a25a8ad"
     },
     "thinlto": {
-      "path": "/tmp/relar-path-timing-thinlto.json",
+      "path": "/tmp/imre-path-timing-thinlto.json",
       "sha256": "d77523a66d374b9b75666cfc0daf5d8af4d81edb86a82d2591265202c68dcdb1"
     }
   }

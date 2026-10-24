@@ -1,6 +1,10 @@
 # ruff: noqa: PLW0120
 # Else suites exercise every supported cursor's exhaustion edge.
 
+from typing import Final
+
+PLATFORMS: Final = ("linux", "macos", "windows")
+
 
 def ranges(start: int, stop: int, step: int, break_at: int) -> None:
     count = 0
@@ -33,6 +37,12 @@ for value in values:
         values.append(3)
 else:
     print(len(values))
+for platform in PLATFORMS:
+    if platform == "macos":
+        continue
+    print(platform)
+else:
+    print("tuple exhausted")
 for character in "é🌍":
     print(character)
 else:

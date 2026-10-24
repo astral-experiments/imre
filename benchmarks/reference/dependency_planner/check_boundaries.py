@@ -201,7 +201,7 @@ def validate(commands: dict, timeout: float = 120) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--python", default="python3.14")
-    parser.add_argument("--relar", type=Path, required=True)
+    parser.add_argument("--imre", type=Path, required=True)
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--rust-bigint", type=Path, required=True)
     parser.add_argument("--rust-i64", type=Path, required=True)
@@ -213,7 +213,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     commands = {"cpython": validator.python_command(shared.executable(args.python))}
-    for name in ("baseline", "relar", "rust_bigint", "rust_i64"):
+    for name in ("baseline", "imre", "rust_bigint", "rust_i64"):
         path = getattr(args, name)
         if path is not None:
             commands[name] = [shared.executable(str(path))]

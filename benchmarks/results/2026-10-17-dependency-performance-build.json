@@ -1,10 +1,10 @@
 {
   "implementation_revision": "2db836788546b55cf68969aaadd8539010b4358f",
   "rustc_verbose": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8\n",
-  "cargo_wrapper": "#!/bin/sh\nexport CARGO_HOME=/home/dev-user/.cache/relar/cargo-home\nexport CARGO_TARGET_DIR=/home/dev-user/.cache/relar/target\nexport CARGO_BUILD_BUILD_DIR=/home/dev-user/.cache/ohm/shared-build\nexport CARGO_UNSTABLE_OHM_PROC_MACRO_TRUST=all\nexport CARGO_UNSTABLE_OHM_NATIVE_TOOL_TRUST=all\nexec cargo +ohm -Zohm-defaults=no \"$@\"\n",
+  "cargo_wrapper": "#!/bin/sh\nexport CARGO_HOME=/home/dev-user/.cache/imre/cargo-home\nexport CARGO_TARGET_DIR=/home/dev-user/.cache/imre/target\nexport CARGO_BUILD_BUILD_DIR=/home/dev-user/.cache/ohm/shared-build\nexport CARGO_UNSTABLE_OHM_PROC_MACRO_TRUST=all\nexport CARGO_UNSTABLE_OHM_NATIVE_TOOL_TRUST=all\nexec cargo +ohm -Zohm-defaults=no \"$@\"\n",
   "compiler_build": [
     "sh",
-    "/tmp/relar-cargo.sh",
+    "/tmp/imre-cargo.sh",
     "build",
     "--workspace",
     "--release",
@@ -12,38 +12,38 @@
   ],
   "runtime_lto_build": [
     "sh",
-    "/tmp/relar-cargo.sh",
+    "/tmp/imre-cargo.sh",
     "build",
     "-p",
-    "relar-runtime",
+    "imre-runtime",
     "--release",
     "--locked",
     "--target-dir",
-    "/home/dev-user/.cache/relar/lto-target"
+    "/home/dev-user/.cache/imre/lto-target"
   ],
   "runtime_lto_rustflags": "-Clinker-plugin-lto",
   "sha256": {
-    "benchmarks/local/dependency-final-tools/relar": "b4345600bcfaebd3f962edbf8f2027035ca54e3a1e8316a389f671a881b25401",
-    "benchmarks/local/dependency-final-tools/librelar_runtime.a": "630301a980b311b3ed9a03a6a690abd86a0c2fad5aaa41e3fcad86986a74cc3c",
-    "benchmarks/local/dependency-final-tools/librelar_runtime_lto.a": "1aa6eacab1f2cbab75dc5679a69eba00ee74c11793b19144e1d64021e0b7a9a0"
+    "benchmarks/local/dependency-final-tools/imre": "b4345600bcfaebd3f962edbf8f2027035ca54e3a1e8316a389f671a881b25401",
+    "benchmarks/local/dependency-final-tools/libimre_runtime.a": "630301a980b311b3ed9a03a6a690abd86a0c2fad5aaa41e3fcad86986a74cc3c",
+    "benchmarks/local/dependency-final-tools/libimre_runtime_lto.a": "1aa6eacab1f2cbab75dc5679a69eba00ee74c11793b19144e1d64021e0b7a9a0"
   },
   "source_sha256": {
     "Cargo.toml": "ce49064770ad21744c8ac6cea604da7408be1e5ec474e3f90206fa95f2af614f",
     "Cargo.lock": "62b84d5f29e184143562b4a022bdb96eed14d9880c922cd36e3b38ce2d3ad2b9",
-    "crates/relar-compiler/src/analysis.rs": "cbaad67d47f65e748358f891836dd07835461ab42ab41e60cdf29c1093c5b170",
-    "crates/relar-compiler/src/classes.rs": "3d02a3968dcc28bf1c040e7bae4f1b2def6911fa9187813abc213b25a400914c",
-    "crates/relar-compiler/src/frontend.rs": "98026ca31bd572ef90a7603114be02d09024ef5b91bff21cb558646dcbd5a5be",
-    "crates/relar-compiler/src/ir.rs": "3371086ec43aeca6038383ba0492cf7b4d8ab6530374c601f53208d4048cf234",
-    "crates/relar-compiler/src/lib.rs": "6202c5d258486797aa867983c06219240f75a35a5d4085e3cce5a9e6050b5131",
-    "crates/relar-compiler/src/llvm.rs": "336553acc219faa881397b92c4d557e12bdf283d06a134416a6bc4bd2983696e",
-    "crates/relar-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
-    "crates/relar-compiler/src/modules.rs": "7133088ce8840ab6e72237bb55e8d118bfa30ab2962b486d325af6a0186fe7d6",
-    "crates/relar-compiler/src/narrowing.rs": "bd97ee2f328de9b5985473c5d223a0d73f740bf56a8481a74bd1cf10e5f07d30",
-    "crates/relar-compiler/src/tuples.rs": "adf794c6fc74bcf22d7e786b3da49a8393fb83a9b5a9b9e7a0ad411e94a2a78e",
-    "crates/relar-compiler/src/types.rs": "9f7ad86c6cb4388be30fe00a93a730e31c8ba480910d6490e4d723fd02528ff4",
-    "crates/relar-runtime/src/lib.rs": "f8b188eb36d46b0a7109f979410d172150d05ab0732f7773d5fb79e2dbeade5f",
-    "crates/relar-runtime/src/objects.rs": "b5c3c204ea10a8dd520211bb6cb9268bf01318a3bf095170ebc035e5e8e81326",
-    "crates/relar-compiler/Cargo.toml": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
-    "crates/relar-runtime/Cargo.toml": "ca46c91b45fcda42d7b6073c1de9178bf9e93ad7791bbd8b4c0e94caa739fb77"
+    "crates/imre-compiler/src/analysis.rs": "cbaad67d47f65e748358f891836dd07835461ab42ab41e60cdf29c1093c5b170",
+    "crates/imre-compiler/src/classes.rs": "3d02a3968dcc28bf1c040e7bae4f1b2def6911fa9187813abc213b25a400914c",
+    "crates/imre-compiler/src/frontend.rs": "98026ca31bd572ef90a7603114be02d09024ef5b91bff21cb558646dcbd5a5be",
+    "crates/imre-compiler/src/ir.rs": "3371086ec43aeca6038383ba0492cf7b4d8ab6530374c601f53208d4048cf234",
+    "crates/imre-compiler/src/lib.rs": "6202c5d258486797aa867983c06219240f75a35a5d4085e3cce5a9e6050b5131",
+    "crates/imre-compiler/src/llvm.rs": "336553acc219faa881397b92c4d557e12bdf283d06a134416a6bc4bd2983696e",
+    "crates/imre-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
+    "crates/imre-compiler/src/modules.rs": "7133088ce8840ab6e72237bb55e8d118bfa30ab2962b486d325af6a0186fe7d6",
+    "crates/imre-compiler/src/narrowing.rs": "bd97ee2f328de9b5985473c5d223a0d73f740bf56a8481a74bd1cf10e5f07d30",
+    "crates/imre-compiler/src/tuples.rs": "adf794c6fc74bcf22d7e786b3da49a8393fb83a9b5a9b9e7a0ad411e94a2a78e",
+    "crates/imre-compiler/src/types.rs": "9f7ad86c6cb4388be30fe00a93a730e31c8ba480910d6490e4d723fd02528ff4",
+    "crates/imre-runtime/src/lib.rs": "f8b188eb36d46b0a7109f979410d172150d05ab0732f7773d5fb79e2dbeade5f",
+    "crates/imre-runtime/src/objects.rs": "b5c3c204ea10a8dd520211bb6cb9268bf01318a3bf095170ebc035e5e8e81326",
+    "crates/imre-compiler/Cargo.toml": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
+    "crates/imre-runtime/Cargo.toml": "ca46c91b45fcda42d7b6073c1de9178bf9e93ad7791bbd8b4c0e94caa739fb77"
   }
 }
