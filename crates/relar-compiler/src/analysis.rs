@@ -1,8 +1,10 @@
 //! Hosts ty's real semantic analysis and Ruff's cached parser over one source snapshot.
 
+#[cfg(test)]
+mod incremental_tests;
 mod inferred_shapes;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ruff_db::diagnostic::{Diagnostic, DisplayDiagnosticConfig, Severity};
@@ -15,6 +17,7 @@ use ruff_python_ast::visitor::{Visitor, walk_stmt};
 use ruff_python_ast::{Expr, Stmt};
 use ruff_python_parser::{Mode, lexer::lex};
 use ruff_text_size::{Ranged, TextRange, TextSize};
+use salsa::Setter;
 use ty_python_core::program::ProgramSettings;
 use ty_python_core::{Program, ProgramFile};
 use ty_python_semantic::dependency::DependencyMetadata;
@@ -40,11 +43,13 @@ struct Database {
     analysis: Arc<AnalysisSettings>,
 }
 
-/// One immutable project snapshot shared by ty's checks and Ruff's cached parser.
+/// A project database shared by ty's checks and Ruff's cached parser.
+#[derive(Clone)]
 pub(crate) struct Session {
     db: Database,
     files: Vec<File>,
     rules: Arc<RuleSelection>,
+    root: PathBuf,
 }
 
 impl Session {
@@ -122,6 +127,7 @@ impl Session {
             db,
             files: Vec::new(),
             rules: Arc::new(rules),
+            root: PathBuf::from(root),
         })
     }
 
@@ -229,29 +235,103 @@ impl Session {
 
     /// Checks every loaded file, including unused functions and inactive main guards.
     pub(crate) fn check(&mut self) -> Result<(), String> {
-        use salsa::Setter;
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(self.rules.clone());
-        let mut errors = Vec::new();
-        for &file in &self.files {
-            errors.extend(
-                self.db
-                    .check_file(file)
-                    .iter()
-                    .filter(|diagnostic| diagnostic.severity() >= Severity::Error)
-                    .map(|diagnostic| {
-                        diagnostic
-                            .display(&self.db, &DisplayDiagnosticConfig::new("relar"))
-                            .to_string()
-                    }),
-            );
-        }
+        self.errors()
+    }
+
+    fn errors(&self) -> Result<(), String> {
+        let errors: Vec<_> = self
+            .files
+            .iter()
+            .flat_map(|&file| file_errors(&self.db, file))
+            .map(String::as_str)
+            .collect();
         if errors.is_empty() {
             Ok(())
         } else {
             Err(errors.join("\n"))
         }
+    }
+}
+
+/// A per-file result depends on the ty queries it actually read, including any other source
+/// consulted to render a diagnostic. Every revision still requests the result for every file.
+#[salsa::tracked(returns(ref))]
+fn file_errors(db: &dyn Db, file: File) -> Vec<String> {
+    #[cfg(test)]
+    FILE_CHECKS.with_borrow_mut(|checks| {
+        if let Some(checks) = checks {
+            checks.push(file.path(db).to_string());
+        }
+    });
+    db.check_file(file)
+        .iter()
+        .filter(|diagnostic| diagnostic.severity() >= Severity::Error)
+        .map(|diagnostic| {
+            diagnostic
+                .display(
+                    &(db as &dyn ruff_db::Db),
+                    &DisplayDiagnosticConfig::new("relar"),
+                )
+                .to_string()
+        })
+        .collect()
+}
+
+#[cfg(test)]
+thread_local! {
+    static FILE_CHECKS: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[derive(Default)]
+pub(crate) struct DiagnosticCache {
+    previous: Option<(Session, crate::SourceInputs)>,
+}
+
+impl DiagnosticCache {
+    pub(crate) fn check(
+        &mut self,
+        fresh: &mut Session,
+        inputs: &crate::SourceInputs,
+    ) -> Result<(), String> {
+        if let Some((session, old_inputs)) = &mut self.previous
+            && session.root == fresh.root
+            && old_inputs.missing == inputs.missing
+            && old_inputs.files.len() == inputs.files.len()
+            && old_inputs
+                .files
+                .iter()
+                .zip(&inputs.files)
+                .all(|(old, new)| old.0 == new.0 && old.1 == new.1)
+        {
+            for (index, (old, new)) in old_inputs.files.iter_mut().zip(&inputs.files).enumerate() {
+                if old.2 == new.2 {
+                    continue;
+                }
+                let source = ruff_db::source::source_text(&fresh.db, fresh.files[index]);
+                let file = session.files[index];
+                let path = new.0.to_str().ok_or("module paths must be valid UTF-8")?;
+                session
+                    .db
+                    .system
+                    .fs()
+                    .write_file(path, source.as_str())
+                    .map_err(|error| error.to_string())?;
+                // An equal-size edit can even have the same mtime. The content we already
+                // parsed is the authoritative Salsa input for this revision.
+                file.set_source_text_override(&mut session.db)
+                    .to(Some(source));
+                old.2.clone_from(&new.2);
+            }
+            return session.errors();
+        }
+        // A changed search root, import miss or file identity can change name resolution.
+        // The fresh database already mirrors precisely the files selected by this load.
+        let result = fresh.check();
+        self.previous = Some((fresh.clone(), inputs.clone()));
+        result
     }
 }
 
