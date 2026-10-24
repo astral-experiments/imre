@@ -351,6 +351,44 @@ write_file()
 with open("output.txt", "r", encoding="utf-8") as stream:
     print(stream.read())
 """,
+    "nested_record_release_order": r"""
+from dataclasses import dataclass
+from typing import BinaryIO
+
+@dataclass(repr=False, eq=False)
+class Leaf:
+    stream: BinaryIO
+
+@dataclass(repr=False, eq=False)
+class Group:
+    first: Leaf
+    direct: BinaryIO
+    nested: list[Leaf]
+    pair: tuple[Leaf, Leaf]
+    last: Leaf
+
+def writer(mark: bytes) -> BinaryIO:
+    stream = open("order.bin", "ab")
+    stream.write(mark)
+    return stream
+
+def group(shared: bool) -> Group:
+    first = Leaf(writer(b"A"))
+    last = first if shared else Leaf(writer(b"D"))
+    return Group(first, writer(b"B"), [Leaf(writer(b"C")), Leaf(writer(b"E"))],
+                 (Leaf(writer(b"F")), Leaf(writer(b"G"))), last)
+
+def discard(shared: bool) -> None:
+    owner = group(shared)
+    print(owner.first.stream.closed)
+
+with open("order.bin", "wb") as empty:
+    pass
+discard(False)
+discard(True)
+with open("order.bin", "rb") as result:
+    print(result.read())
+""",
     "list_release_order": r"""
 from typing import BinaryIO
 
