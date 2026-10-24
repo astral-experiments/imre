@@ -250,6 +250,7 @@ fn pattern_elements(target: &ast::Expr) -> Option<&[ast::Expr]> {
 }
 
 /// Resolves the project-wide call graph without changing source-level namespaces.
+#[cfg(test)]
 pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     lower_with_owners(graph).map(|(module, _)| module)
 }

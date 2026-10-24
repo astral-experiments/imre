@@ -24,6 +24,11 @@ use ty_python_semantic::{
 };
 use ty_site_packages::PythonVersionWithSource;
 
+#[salsa::input(singleton)]
+struct DiagnosticRules {
+    rules: Arc<RuleSelection>,
+}
+
 #[salsa::db]
 #[derive(Clone)]
 struct Database {
@@ -32,7 +37,6 @@ struct Database {
     system: InMemorySystem,
     vendored: VendoredFileSystem,
     settings: ProgramSettings,
-    rules: Arc<RuleSelection>,
     analysis: Arc<AnalysisSettings>,
 }
 
@@ -40,6 +44,7 @@ struct Database {
 pub(crate) struct Session {
     db: Database,
     files: Vec<File>,
+    rules: Arc<RuleSelection>,
 }
 
 impl Session {
@@ -104,16 +109,19 @@ impl Session {
             system,
             vendored,
             settings,
-            rules: Arc::new(rules),
             analysis: Arc::new(AnalysisSettings {
                 respect_type_ignore_comments: false,
                 ..AnalysisSettings::default()
             }),
         };
         db.settings.search_paths.try_register_static_roots(&db);
+        // Lowering queries types with lints disabled. Tracking the rules invalidates
+        // these cached queries when the full check enables diagnostics.
+        DiagnosticRules::new(&db, Arc::default());
         Ok(Self {
             db,
             files: Vec::new(),
+            rules: Arc::new(rules),
         })
     }
 
@@ -220,7 +228,11 @@ impl Session {
     }
 
     /// Checks every loaded file, including unused functions and inactive main guards.
-    pub(crate) fn check(&self) -> Result<(), String> {
+    pub(crate) fn check(&mut self) -> Result<(), String> {
+        use salsa::Setter;
+        DiagnosticRules::get(&self.db)
+            .set_rules(&mut self.db)
+            .to(self.rules.clone());
         let mut errors = Vec::new();
         for &file in &self.files {
             errors.extend(
@@ -520,7 +532,7 @@ impl Db for Database {
     }
 
     fn rule_selection(&self, _file: File) -> &RuleSelection {
-        &self.rules
+        DiagnosticRules::get(self).rules(self)
     }
 
     fn lint_registry(&self) -> &LintRegistry {
@@ -545,5 +557,29 @@ impl Db for Database {
 
     fn dyn_clone(&self) -> Box<dyn Db> {
         Box::new(self.clone())
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_mode_tests {
+    use super::*;
+
+    #[test]
+    fn enabling_diagnostics_invalidates_quiet_checks() {
+        let root = Path::new("/project");
+        let mut session = Session::new(root).unwrap();
+        session
+            .add(&root.join("main.py"), "def f(x: int) -> None:\n    x()\n")
+            .unwrap();
+        let file = session.files[0];
+        assert!(
+            !session
+                .db
+                .check_file(file)
+                .iter()
+                .any(|d| d.severity() >= Severity::Error)
+        );
+        let message = session.check().unwrap_err();
+        assert!(message.contains("not callable"), "{message}");
     }
 }
