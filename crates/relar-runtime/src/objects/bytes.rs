@@ -75,8 +75,15 @@ pub unsafe extern "C" fn relar_bytes_literal(data: *const u8, length: usize) -> 
 pub unsafe extern "C" fn relar_bytes_retain(value: *const Bytes) {
     if !value.is_null() {
         // SAFETY: the rooted pointer identifies an exact Rc<Bytes> allocation.
-        unsafe { Rc::increment_strong_count(value) };
+        unsafe { retained(value) };
     }
+}
+
+/// Returns a new owner of the caller's rooted immutable bytes.
+unsafe fn retained(value: *const Bytes) -> *const Bytes {
+    // SAFETY: the caller roots this exact Rc<Bytes> allocation.
+    unsafe { Rc::increment_strong_count(value) };
+    value
 }
 
 /// # Safety
@@ -220,10 +227,13 @@ pub unsafe extern "C" fn relar_bytes_slice(
 ) -> *const Bytes {
     // SAFETY: all source owners remain rooted through normalization and copying.
     let result = unsafe {
-        let value = &*value;
-        SliceIndices::new(value.len(), start, stop, step).and_then(|slice| {
+        let bytes = &*value;
+        SliceIndices::new(bytes.len(), start, stop, step).and_then(|slice| {
+            if slice.is_full_forward(bytes.len()) {
+                return Ok(retained(value));
+            }
             let mut result = allocate(slice.len())?;
-            result.extend(slice.map(|at| value[at]));
+            result.extend(slice.map(|at| bytes[at]));
             Ok(Rc::into_raw(Rc::new(result)))
         })
     };
@@ -287,22 +297,26 @@ pub unsafe extern "C" fn relar_bytes_list(value: *const List) -> *const Bytes {
 }
 
 /// # Safety
-/// Both immutable byte inputs remain rooted; the result owns independent storage.
+/// Both immutable byte inputs remain rooted; the caller owns the result.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_bytes_concat(
     left: *const Bytes,
     right: *const Bytes,
 ) -> *const Bytes {
     // SAFETY: both exact immutable inputs remain rooted throughout the copy.
-    let (left, right) = unsafe { (&*left, &*right) };
+    let (left_bytes, right_bytes) = unsafe { (&*left, &*right) };
+    if left_bytes.is_empty() || right_bytes.is_empty() {
+        // SAFETY: the nonempty operand, or either empty operand, remains rooted.
+        return unsafe { retained(if left_bytes.is_empty() { right } else { left }) };
+    }
     let result = (|| {
-        let length = left
+        let length = left_bytes
             .len()
-            .checked_add(right.len())
+            .checked_add(right_bytes.len())
             .ok_or_else(|| Error::new(Kind::MemoryError, "bytes allocation failed"))?;
         let mut result = allocate(length)?;
-        result.extend_from_slice(left);
-        result.extend_from_slice(right);
+        result.extend_from_slice(left_bytes);
+        result.extend_from_slice(right_bytes);
         Ok(Rc::into_raw(Rc::new(result)))
     })();
     finish(result, std::ptr::null())
@@ -313,20 +327,22 @@ pub unsafe extern "C" fn relar_bytes_concat(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_bytes_repeat(value: *const Bytes, count: usize) -> *const Bytes {
     // SAFETY: both exact immutable inputs remain rooted throughout repetition.
-    let (value, count) = unsafe { (&*value, Int::borrow(count)) };
+    let (bytes, count) = unsafe { (&*value, Int::borrow(count)) };
     let result = (|| {
         // Conversion precedes the empty-input/negative-count fast path in Python.
         let count = native_size(&count)?.max(0) as usize;
-        let length = value
+        if count == 1 || bytes.is_empty() {
+            // SAFETY: repetition preserves this rooted immutable input.
+            return Ok(unsafe { retained(value) });
+        }
+        let length = bytes
             .len()
             .checked_mul(count)
             .filter(|length| *length <= isize::MAX as usize)
             .ok_or_else(|| Error::new(Kind::OverflowError, "repeated bytes are too long"))?;
         let mut result = allocate(length)?;
-        if !value.is_empty() {
-            for _ in 0..count {
-                result.extend_from_slice(value);
-            }
+        for _ in 0..count {
+            result.extend_from_slice(bytes);
         }
         Ok(Rc::into_raw(Rc::new(result)))
     })();
@@ -394,8 +410,7 @@ pub unsafe extern "C" fn relar_bytes_validate_utf8(value: *const Bytes) -> *cons
         return decode_error(bytes, error).returning(std::ptr::null());
     }
     // SAFETY: the rooted exact Rc<Bytes> allocation provides the returned owner.
-    unsafe { Rc::increment_strong_count(value) };
-    value
+    unsafe { retained(value) }
 }
 
 /// A cursor owns its immutable input independently of the user's source binding.
@@ -450,6 +465,26 @@ mod tests {
             assert_eq!(message.as_str(), expected);
         }
         assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn unchanged_bytes_results_share_the_input_allocation() {
+        let value = Rc::new(vec![0, 1, 2]);
+        let empty = Rc::new(Vec::new());
+        let input = Rc::as_ptr(&value);
+        let empty_ptr = Rc::as_ptr(&empty);
+        // SAFETY: the two Rc owners root the inputs, and each result transfers one owner.
+        unsafe {
+            for result in [
+                relar_bytes_slice(input, 0, 0, 0),
+                relar_bytes_repeat(input, Int::small(1).unwrap().into_raw()),
+                relar_bytes_concat(input, empty_ptr),
+                relar_bytes_concat(empty_ptr, input),
+            ] {
+                assert!(Rc::ptr_eq(&Rc::from_raw(result), &value));
+            }
+        }
+        assert_eq!(Rc::strong_count(&value), 1);
     }
 
     #[test]
