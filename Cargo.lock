@@ -1033,7 +1033,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "relar-compiler"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "blake3",
  "libc",
@@ -1057,7 +1057,7 @@ dependencies = [
 
 [[package]]
 name = "relar-runtime"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "compact_str",
  "flate2",
@@ -1084,7 +1084,7 @@ dependencies = [
 
 [[package]]
 name = "relar-runtime-jemalloc"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "relar-runtime",
  "tikv-jemallocator",
