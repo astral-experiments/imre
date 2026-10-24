@@ -102,14 +102,17 @@ impl Value {
             index,
         }
     }
-    fn from_json(view: &View, index: usize) -> Self {
+    fn from_json(view: &View, index: usize) -> Result<Self, Error> {
         if index == view.index
             && let Some(root) = view.snapshot_root()
         {
             return Self::from_json(&root, root.index);
         }
-        match &view.nodes[index] {
-            Node::Deferred(array) => Self::from_json(array.view(), array.view().index),
+        Ok(match &view.nodes[index] {
+            Node::Deferred(array) => {
+                let view = array.try_view()?;
+                return Self::from_json(view, view.index);
+            }
             Node::Null => Self::Null,
             Node::Bool(x) => Self::Bool(*x),
             Node::Integer(x) => Self::Integer(x.clone()),
@@ -117,12 +120,28 @@ impl Value {
             Node::String(x) => Self::String(x.clone()),
             Node::Datetime(x) => Self::Datetime(x.clone()),
             Node::Array(a) => {
-                Self::array(a.iter().map(|&index| Self::from_json(view, index).object()))
+                let mut words = Words::new(5);
+                words
+                    .values
+                    .try_reserve_exact(a.len())
+                    .map_err(|_| Error::allocation())?;
+                for &child in a {
+                    words.values.push(Self::from_json(view, child)?.word());
+                }
+                Self::Array(words.into_object())
             }
-            Node::Object(t) => Self::table(t.iter().map(|(key, index)| {
-                (Rc::new(key.clone()), Self::from_json(view, *index).object())
-            })),
-        }
+            Node::Object(t) => {
+                let mut pairs = Vec::new();
+                pairs
+                    .try_reserve_exact(t.len())
+                    .map_err(|_| Error::allocation())?;
+                for (key, child) in t {
+                    let key = Str::try_new(key.as_str()).map_err(|_| Error::allocation())?;
+                    pairs.push((Rc::new(key), Self::from_json(view, *child)?.object()));
+                }
+                Self::table(pairs.into_iter())
+            }
+        })
     }
     fn from_toml(node: &DeValue<'_>) -> Result<Self, Error> {
         Ok(match node {
@@ -266,8 +285,8 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 let Storage::Json(view) = s else {
                     unreachable!()
                 };
-                Value::from_json(view, view.index).word()
-            }),
+                Value::from_json(view, view.index).map(Value::word)
+            })?,
             8 => Value::Array(acquire_rc(a)).word(),
             9 => Value::Table(acquire_rc(a)).word(),
             10 => ptr(doc(a).map()?),
