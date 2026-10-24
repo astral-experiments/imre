@@ -563,6 +563,7 @@ pub(crate) enum TextOperation {
 pub(crate) enum PathOperation {
     New,
     Join,
+    WithName,
     Text,
     Name,
     Stem,
@@ -576,6 +577,8 @@ pub(crate) enum PathOperation {
     IsDir,
     ReadText,
     WriteText,
+    ReadBytes,
+    WriteBytes,
     Mkdir,
     Unlink,
     Rmdir,

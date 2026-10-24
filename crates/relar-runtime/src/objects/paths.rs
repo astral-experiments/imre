@@ -11,7 +11,7 @@ use std::rc::{Rc, Weak};
 use num_traits::ToPrimitive;
 
 use super::exceptions::{Error, Kind, Result, finish};
-use super::{Int, Object, Storage, StorageCell, Str, fail, files, object};
+use super::{Bytes, Int, Object, Storage, StorageCell, Str, fail, files, object};
 
 #[derive(Clone)]
 pub(super) enum PathText {
@@ -446,6 +446,37 @@ pub unsafe extern "C" fn relar_path_join(path: *const Object, child: *const Str)
 }
 
 /// # Safety
+/// Root the path and replacement component until the owned new path or error is returned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_path_with_name(
+    path: *const Object,
+    replacement: *const Str,
+) -> *const Object {
+    use super::exceptions::string_repr;
+    // SAFETY: both inputs are rooted and lexical operations cannot invoke callbacks.
+    let result = unsafe {
+        object(path).0.with(|storage| {
+            let path = storage.path();
+            let replacement = &*replacement;
+            if replacement.is_empty() || replacement.as_str() == "." || replacement.contains('/') {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    format!("Invalid name {}", string_repr(replacement)),
+                ));
+            }
+            if name(path).is_empty() {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    format!("PosixPath({}) has an empty name", string_repr(path)),
+                ));
+            }
+            Ok(new_path(join(parent(path), replacement)))
+        })
+    };
+    finish(result, std::ptr::null())
+}
+
+/// # Safety
 /// Both arguments are rooted exact Paths; comparison borrows immutable storage.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_path_equal(left: *const Object, right: *const Object) -> u32 {
@@ -653,6 +684,35 @@ pub unsafe extern "C" fn relar_path_write_text(path: *const Object, text: *const
         object(path)
             .0
             .with(|storage| files::write_path_text(storage.path(), &*text))
+    };
+    finish(result, 0)
+}
+
+/// # Safety
+/// Root an exact Path until the file closes and its owned bytes or error are returned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_path_read_bytes(path: *const Object) -> *const Bytes {
+    // SAFETY: the synchronous read cannot call back or invalidate the pathname.
+    let result = unsafe {
+        object(path)
+            .0
+            .with(|storage| files::read_path_bytes(storage.path()))
+    };
+    finish(
+        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        std::ptr::null(),
+    )
+}
+
+/// # Safety
+/// Root the Path and bytes through writing and closing. Success returns the byte count.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_path_write_bytes(path: *const Object, data: *const Bytes) -> usize {
+    // SAFETY: synchronous output only borrows these immutable values.
+    let result = unsafe {
+        object(path)
+            .0
+            .with(|storage| files::write_path_bytes(storage.path(), &*data))
     };
     finish(result, 0)
 }

@@ -27,6 +27,18 @@ fn boolean(value: bool) -> Expr {
     }
 }
 
+pub(super) fn file_open_mode(mode: &str) -> Option<(Type, Builtin)> {
+    Some(match mode {
+        "r" => (Type::TextIO, Builtin::TextOpen(0)),
+        "w" => (Type::TextIO, Builtin::TextOpen(1)),
+        "rb" => (Type::BinaryIO, Builtin::BinaryOpen(0)),
+        "wb" => (Type::BinaryIO, Builtin::BinaryOpen(1)),
+        "ab" => (Type::BinaryIO, Builtin::BinaryOpen(2)),
+        "xb" => (Type::BinaryIO, Builtin::BinaryOpen(3)),
+        _ => return None,
+    })
+}
+
 impl Checker<'_> {
     /// Path-like values are exactly strings or native paths; no user protocol runs.
     pub(super) fn path_argument(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
@@ -136,7 +148,33 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
-        if matches!(name, "mkdir" | "unlink" | "replace" | "resolve") {
+        if name == "joinpath" {
+            self.reject_builtin_keywords(call)?;
+            if call.arguments.args.is_empty() {
+                // Joining an empty segment gives the result its own Path identity.
+                return self.path_join(receiver, unpacking::string(""), call);
+            }
+            let mut path = receiver;
+            for argument in &call.arguments.args {
+                let child = self.expr(argument)?;
+                if !matches!(child.ty, Type::Str | Type::Path) {
+                    return Err(error(
+                        self.source,
+                        argument,
+                        "joinpath requires str or Path segments",
+                    ));
+                }
+                path = self.path_join(path, child, argument)?;
+            }
+            return Ok(path);
+        }
+        if name == "open" {
+            return self.path_open(receiver, call);
+        }
+        if matches!(
+            name,
+            "mkdir" | "unlink" | "replace" | "resolve" | "with_name" | "write_bytes"
+        ) {
             return self.path_call(receiver, name, call);
         }
         if matches!(name, "iterdir" | "glob") {
@@ -154,6 +192,7 @@ impl Checker<'_> {
             "is_dir" => (PathOperation::IsDir, Type::Bool, 0),
             "is_absolute" => (PathOperation::IsAbsolute, Type::Bool, 0),
             "read_text" => (PathOperation::ReadText, Type::Str, 0),
+            "read_bytes" => (PathOperation::ReadBytes, Type::Bytes, 0),
             "write_text" => (PathOperation::WriteText, Type::Int, 1),
             "rmdir" => (PathOperation::Rmdir, Type::None, 0),
             _ => return Err(error(self.source, call, "unsupported native Path method")),
@@ -217,6 +256,16 @@ impl Checker<'_> {
                 Type::Path,
                 vec![parameter("strict", Type::Bool, Some(boolean(false)))],
             ),
+            "with_name" => (
+                PathOperation::WithName,
+                Type::Path,
+                vec![parameter("name", Type::Str, None)],
+            ),
+            "write_bytes" => (
+                PathOperation::WriteBytes,
+                Type::Int,
+                vec![parameter("data", Type::Bytes, None)],
+            ),
             _ => unreachable!("only path methods with parameters have this signature"),
         };
         let arguments =
@@ -228,6 +277,75 @@ impl Checker<'_> {
                 }
             })?;
         Ok(self.ordered_path_operation(kind, returns, arguments))
+    }
+
+    /// Select the existing stream ABI statically so file operations and context
+    /// manager cleanup use exactly the same typed handle as builtin `open`.
+    fn path_open(&mut self, receiver: Expr, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        if call.arguments.args.len() > 1 {
+            return Err(error(
+                self.source,
+                call,
+                "Path.open accepts one positional mode",
+            ));
+        }
+        let mut mode = call.arguments.args.first();
+        let mut encoding = None;
+        for keyword in &call.arguments.keywords {
+            match keyword.arg.as_ref().map(|arg| arg.as_str()) {
+                Some("mode") if mode.is_none() => mode = Some(&keyword.value),
+                Some("encoding") if encoding.is_none() => encoding = Some(keyword),
+                _ => {
+                    return Err(error(
+                        self.source,
+                        keyword,
+                        "unexpected or repeated Path.open argument",
+                    ));
+                }
+            }
+        }
+        let mode = match mode {
+            None => "r",
+            Some(ast::Expr::StringLiteral(mode)) => {
+                check_string(mode, self.source)?;
+                mode.value.to_str()
+            }
+            Some(mode) => {
+                return Err(error(
+                    self.source,
+                    mode,
+                    "Path.open requires a literal mode",
+                ));
+            }
+        };
+        let (ty, builtin) = match mode {
+            "rt" | "tr" => file_open_mode("r"),
+            "wt" | "tw" => file_open_mode("w"),
+            "br" => file_open_mode("rb"),
+            "bw" => file_open_mode("wb"),
+            "ba" => file_open_mode("ab"),
+            "bx" => file_open_mode("xb"),
+            "a" | "at" | "ta" => Some((Type::TextIO, Builtin::TextOpen(2))),
+            "x" | "xt" | "tx" => Some((Type::TextIO, Builtin::TextOpen(3))),
+            _ => file_open_mode(mode),
+        }
+        .ok_or_else(|| error(self.source, call, "unsupported native Path.open mode"))?;
+        if let Some(encoding) = encoding {
+            if ty == Type::BinaryIO {
+                return Err(error(
+                    self.source,
+                    encoding,
+                    "binary Path.open does not accept an encoding",
+                ));
+            }
+            self.utf8_encoding_keyword(encoding)?;
+        }
+        let path = operation(PathOperation::Text, Type::Str, vec![receiver]);
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Builtin(builtin, vec![path]),
+        })
     }
 
     /// A temporary-directory manager exists only at this immediate `with`

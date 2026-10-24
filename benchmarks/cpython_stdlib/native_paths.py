@@ -18,14 +18,17 @@ TESTS = (
     ("test_join", "PathJoinTest", "test_suffix", "str"),
     ("test_join", "PathJoinTest", "test_parent", "Path"),
     ("test_join_posix", "PosixPathJoinTest", "test_div", "Path"),
+    ("test_join_posix", "PosixPathJoinTest", "test_join", "Path"),
+    ("test_read", "PathReadTest", "test_read_bytes", "bytes"),
 )
 
 
 def native_source(module, method, value_type):
     path = HERE / "upstream/Lib/test/test_pathlib" / f"{module}.py"
     data = path.read_bytes()
+    base_name = "ReadTestBase" if module == "test_read" else "JoinTestBase"
     base = next(node for node in ast.parse(data).body
-                if isinstance(node, ast.ClassDef) and node.name == "JoinTestBase")
+                if isinstance(node, ast.ClassDef) and node.name == base_name)
     test = next(node for node in base.body if isinstance(node, ast.FunctionDef) and node.name == method)
     if test.decorator_list:
         raise ValueError(f"unsupported upstream fixture for {method}")
@@ -36,9 +39,11 @@ def native_source(module, method, value_type):
     adapter = f"""from pathlib import Path
 
 class Case:
+    root: Path
     checks: int
 
     def __init__(self) -> None:
+        self.root = Path(".")
         self.checks = 0
 
     def cls(self, spelling: str) -> Path:
@@ -81,6 +86,8 @@ def main():
             source, checks, digest = native_source(module, method, value_type)
             wd = Path(tmp) / case_id
             wd.mkdir()
+            if module == "test_read":
+                (wd / "fileA").write_bytes(b"this is file A\n")
             (wd / "case.py").write_bytes(source)
             compiled = run([command[0], command[1], "case.py", *command[2:], "-o", wd / "case"], wd)
             record = {"method_sha256": digest, "assertions": checks}
