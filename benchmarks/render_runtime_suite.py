@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch, Rectangle
 from matplotlib.ticker import MaxNLocator
 
-ENGINES = {"rust": "Rust", "relar": "Relar", "cpython": "CPython"}
+ENGINES = {"rust": "Rust", "imre": "Imre", "cpython": "CPython"}
 PANEL_TITLES = {
     "Inventory (repeated)": "Inventory · repeated",
     "Inventory (distinct)": "Inventory · distinct",
@@ -129,7 +129,7 @@ def bars(ax, medians, x, y, width, *, compact=False):
     for i, (engine, name) in enumerate(ENGINES.items()):
         row_y = y + row_step * i
         ms = medians[engine]
-        highlight = engine == "relar"
+        highlight = engine == "imre"
         color = ACCENT if highlight else INK
         bar_width = plot_width * ms / ticks[-1]
         label(ax, x, row_y, name, font_size, color=color)
@@ -157,7 +157,7 @@ def bars(ax, medians, x, y, width, *, compact=False):
 def conformance_chart(case, medians, path):
     fig, ax = canvas(800, 356)
     surface(ax, 800, 356)
-    label(ax, 32, 30, "RELAR / RUNTIME BENCHMARKS", 11, color=MUTED, mono=True)
+    label(ax, 32, 30, "IMRE / RUNTIME BENCHMARKS", 11, color=MUTED, mono=True)
     label(ax, 32, 68, "OFFLINE CONFORMANCE REPORT", 26)
     label(ax, 32, 98, case["input"], 14, color=MUTED)
     rule(ax, 32, 122, 768, 122)
@@ -179,9 +179,9 @@ def workload_panels(rows, path):
     height = 148 + 252 * row_count + 36
     fig, ax = canvas(800, height)
     surface(ax, 800, height)
-    label(ax, 32, 30, "RELAR / RUNTIME BENCHMARKS", 11, color=MUTED, mono=True)
+    label(ax, 32, 30, "IMRE / RUNTIME BENCHMARKS", 11, color=MUTED, mono=True)
     label(ax, 32, 68, "RUNTIME BY WORKLOAD", 26)
-    label(ax, 32, 98, "Rust, CPython and Relar on six workloads.", 14, color=MUTED)
+    label(ax, 32, 98, "Rust, CPython and Imre on six workloads.", 14, color=MUTED)
     rule(ax, 32, 122, 768, 122)
     for i, (case, medians) in enumerate(rows):
         x, y = 32 + i % 2 * 384, 158 + i // 2 * 252
@@ -214,27 +214,27 @@ def main():
             "font.family": "sans-serif",
             "font.sans-serif": ["DejaVu Sans"],
             "svg.fonttype": "none",
-            "svg.hashsalt": "relar-runtime-suite",
+            "svg.hashsalt": "imre-runtime-suite",
         }
     )
     times = [
-        "| Workload | Input per process | Rust (ms) | CPython (ms) | Relar (ms) | CPython / Relar |",
+        "| Workload | Input per process | Rust (ms) | CPython (ms) | Imre (ms) | CPython / Imre |",
         "| --- | --- | ---: | ---: | ---: | ---: |",
     ]
     spreads = [
-        "| Workload | Rust (ms) | CPython (ms) | Relar (ms) | Output file (bytes) |",
+        "| Workload | Rust (ms) | CPython (ms) | Imre (ms) | Output file (bytes) |",
         "| --- | ---: | ---: | ---: | ---: |",
     ]
     rows = []
     for case in cases:
         medians, intervals = {}, []
-        for engine in ("rust", "cpython", "relar"):
+        for engine in ("rust", "cpython", "imre"):
             samples = [r[engine] / 1e6 for r in case["samples_ns"]]
             low, mid, high = statistics.quantiles(samples, n=4, method="inclusive")
             medians[engine] = mid
             intervals.append(f"{low:.2f}–{high:.2f}")
         cells = " | ".join(f"{mid:.2f}" for mid in medians.values())
-        speedup = medians["cpython"] / medians["relar"]
+        speedup = medians["cpython"] / medians["imre"]
         times.append(f"| {case['name']} | {case['input']} | {cells} | {speedup:.2f}× |")
         spreads.append(
             f"| {case['name']} | {' | '.join(intervals)} | {case['report_bytes']:,} |"

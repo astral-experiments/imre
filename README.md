@@ -92,13 +92,13 @@ For more, see the [design](docs/design.md) and [supported subset](docs/subset.md
 
 ## Benchmark
 
-Relar and CPython 3.14.5 run the same Python programs. The Rust references read the same inputs and produce the same outputs.
+Imre and CPython 3.14.5 run the same Python programs. The Rust references read the same inputs and produce the same outputs.
 
-![Median time to render the offline conformance report. Rust took 23.59 ms, Relar 33.04 ms, and CPython 247.01 ms.](benchmarks/results/runtime-conformance.svg)
+![Six panels comparing median elapsed time for Rust, Imre and CPython on inventory reconciliation, Base45 decoding, Luhn checksums, telemetry and offline conformance reporting.](benchmarks/results/runtime-suite.svg)
 
 Each result is the median of 12 fresh processes pinned to one AMD EPYC Milan CPU. Timings include startup, imports and file I/O.
 
-| Workload | Input per process | Rust (ms) | CPython (ms) | Relar (ms) | CPython / Relar |
+| Workload | Input per process | Rust (ms) | CPython (ms) | Imre (ms) | CPython / Imre |
 | --- | --- | ---: | ---: | ---: | ---: |
 | Inventory (repeated) | 16,384 requests, 64 SKUs | 25.30 | 77.11 | 30.04 | 2.57× |
 | Inventory (distinct) | 16,384 requests, 16,384 SKUs | 45.69 | 112.32 | 53.05 | 2.12× |

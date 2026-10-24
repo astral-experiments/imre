@@ -1,4 +1,4 @@
-"""Compare complete Rust, CPython and Relar commands on a pinned Linux CPU."""
+"""Compare complete Rust, CPython and Imre commands on a pinned Linux CPU."""
 
 import argparse
 import base64
@@ -12,7 +12,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Keep the sibling harnesses importable when Python's safe-path mode is enabled.
@@ -28,7 +28,7 @@ import telemetry_benchmark
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples"
-ENGINES = ("rust", "cpython", "relar")
+ENGINES = ("rust", "cpython", "imre")
 WARMUPS = 2
 ROUNDS = 12
 
@@ -187,8 +187,8 @@ def build(target, work, toolchain, clang):
             not in (
                 "RUSTFLAGS",
                 "CARGO_ENCODED_RUSTFLAGS",
-                "RELARFLAGS",
-                "RELAR_ENCODED_FLAGS",
+                "IMREFLAGS",
+                "IMRE_ENCODED_FLAGS",
             )
         },
         "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
@@ -197,13 +197,13 @@ def build(target, work, toolchain, clang):
         "XDG_CONFIG_HOME": str(work / "config"),
     }
     subprocess.run(
-        [*cargo, "-p", "relar-compiler", "-p", "relar-runtime"],
+        [*cargo, "-p", "imre-compiler", "-p", "imre-runtime"],
         cwd=ROOT,
         env=env,
         check=True,
     )
     release = target / "release"
-    compiler, runtime = release / "relar", release / "librelar_runtime.a"
+    compiler, runtime = release / "imre", release / "libimre_runtime.a"
     hashes = {
         "cpython": benchmark.sha256(Path(sys.executable)),
         "compiler": benchmark.sha256(compiler),
@@ -243,12 +243,12 @@ def build(target, work, toolchain, clang):
         python_args = ["-m", package] if entry == "__main__.py" else [str(source)]
         commands[package] = {
             "rust": [release / rust_name],
-            "relar": [binary],
+            "imre": [binary],
             "cpython": [sys.executable, "-s", *python_args],
         }
         hashes[package] = {
             "rust": benchmark.sha256(release / rust_name),
-            "relar": benchmark.sha256(binary),
+            "imre": benchmark.sha256(binary),
         }
     return commands, hashes
 
@@ -319,7 +319,7 @@ def main():
     def version(*command):
         return subprocess.check_output(command, cwd=ROOT, text=True).strip()
 
-    with tempfile.TemporaryDirectory(prefix="relar-suite-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="imre-suite-") as tmp:
         work = Path(tmp)
         commands, hashes = build(
             args.target_dir.resolve(), work, args.toolchain, args.clang
@@ -342,13 +342,13 @@ def main():
         result = {
             "revision": version("git", "rev-parse", "HEAD"),
             "dirty": bool(version("git", "status", "--porcelain")),
-            "date_utc": datetime.now(timezone.utc).date().isoformat(),
+            "date_utc": datetime.now(UTC).date().isoformat(),
             "os": f"{platform.system()} {platform.release()} {platform.machine()}",
             "cpu": benchmark.pin_cpu(args.cpu),
             "python": python_info,
             "rustc": version("rustc", *selected, "-Vv"),
             "clang": version(args.clang, "--version").splitlines()[0],
-            "relar": version(args.target_dir.resolve() / "release/relar", "--version"),
+            "imre": version(args.target_dir.resolve() / "release/imre", "--version"),
             "binaries_sha256": hashes,
             "cases": [],
         }

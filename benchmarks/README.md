@@ -1,10 +1,10 @@
 # Benchmarks
 
-The [Rust, CPython and Relar comparison](runtime-suite.md) covers six workloads with checked outputs, raw samples and a command to reproduce the tables and figures.
+The [Rust, CPython and Imre comparison](runtime-suite.md) covers six workloads with checked outputs, raw samples and a command to reproduce the tables and figures.
 
 ## Route planner
 
-The example computes shortest routes across weighted grids using Dijkstra's algorithm and its own binary heap. CPython and Relar execute the same `examples/route_planner.py` source, receive the same input, and must produce exactly the same output. The compiler generates LLVM IR and links a native executable against the independent Rust runtime. There is no rewritten native kernel or CPython interpreter inside that executable.
+The example computes shortest routes across weighted grids using Dijkstra's algorithm and its own binary heap. CPython and Imre execute the same `examples/route_planner.py` source, receive the same input, and must produce exactly the same output. The compiler generates LLVM IR and links a native executable against the independent Rust runtime. There is no rewritten native kernel or CPython interpreter inside that executable.
 
 The [first recorded result](results/2026-10-17-route-planner.md) includes raw samples and environment details: 2.17× faster than CPython 3.14.5 for three routes on 256 × 256 grids, using end-to-end process timings.
 
