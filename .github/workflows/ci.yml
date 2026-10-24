@@ -76,6 +76,18 @@ jobs:
       - name: Free disk space for native test binaries
         run: cargo clean --profile dev
       - run: cargo build --workspace --release --locked --features relar-compiler/verify-ir
+      - name: Get the pinned CPython unittest support
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: python/cpython
+          ref: 5607950ef232dad16d75c0cf53101d9649d89115
+          path: .cpython-stdlib-reference
+          sparse-checkout: Lib/test
+          persist-credentials: false
+      - name: Run vendored CPython methods against native Relar
+        run: |
+          python3 benchmarks/cpython_stdlib/native_paths.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --result "$RUNNER_TEMP/cpython-paths.json"
+          python3 benchmarks/cpython_stdlib/native_json.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json.json"
       - name: Check native build caching, linker options, and status
         run: |
           # Exercise the distro toolchain without setup-python's LD_LIBRARY_PATH.
