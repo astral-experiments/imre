@@ -258,6 +258,21 @@ mod tests {
     }
 
     #[test]
+    fn limits_exception_handlers_per_try_statement() {
+        let handler = "except ValueError:\n    pass\n";
+        let chain = |count| format!("try:\n    pass\n{}", handler.repeat(count));
+        super::check(&chain(96)).unwrap();
+        let error = super::check(&chain(97)).unwrap_err();
+        assert!(error.contains("exception handler limit"), "{error}");
+        super::check(&chain(2).repeat(100)).unwrap();
+        let inner: String = chain(96)
+            .lines()
+            .map(|line| format!("    {line}\n"))
+            .collect();
+        super::check(&format!("try:\n{inner}{}", handler.repeat(96))).unwrap();
+    }
+
+    #[test]
     fn sealed_exception_fields_keep_runtime_guards_and_reject_unknown_attributes() {
         let llvm = compile(
             "def fields(error: Exception) -> tuple[int, list[str], str, str, str]:\n    return error.returncode, error.cmd, error.stdout, error.output, error.stderr\n",
