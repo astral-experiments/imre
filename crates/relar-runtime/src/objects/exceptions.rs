@@ -321,12 +321,28 @@ fn take_pending() -> Option<Rc<Object>> {
 /// Uses Ruff's Python repr rules and its pinned Unicode printable categories.
 pub(crate) fn string_repr(value: &str) -> Str {
     let mut result = String::new();
-    write_string_repr(value, &mut result).expect("writing to a String cannot fail");
+    push_string_repr(value, &mut result);
     Str::from(result)
 }
 
-pub(crate) fn write_string_repr(value: &str, out: &mut impl std::fmt::Write) -> std::fmt::Result {
+pub(super) fn push_string_repr(value: &str, out: &mut String) {
     let escaped = UnicodeEscape::new_repr(value);
+    if out.is_empty()
+        && let Some(size) = escaped.layout().len.and_then(|body| body.checked_add(2))
+    {
+        out.reserve_exact(size);
+    }
+    write_escaped_string(&escaped, out).expect("writing to a String cannot fail");
+}
+
+pub(crate) fn write_string_repr(value: &str, out: &mut impl std::fmt::Write) -> std::fmt::Result {
+    write_escaped_string(&UnicodeEscape::new_repr(value), out)
+}
+
+fn write_escaped_string(
+    escaped: &UnicodeEscape<'_>,
+    out: &mut impl std::fmt::Write,
+) -> std::fmt::Result {
     let quote = escaped.layout().quote.as_char();
     out.write_char(quote)?;
     escaped.write_body(out)?;
@@ -1011,5 +1027,15 @@ mod tests {
             drop(take_error(Kind::RuntimeError));
             assert_eq!((key, value), (17, 19));
         }
+    }
+
+    #[test]
+    fn standalone_string_repr_uses_the_escaped_size() {
+        let value = "\0".repeat(16_384);
+        let rendered = string_repr(&value);
+        assert_eq!(rendered.len(), 65_538);
+        assert!(rendered.starts_with("'\\x00"));
+        assert!(rendered.ends_with("\\x00'"));
+        assert!(rendered.capacity() < 128 * 1024);
     }
 }
