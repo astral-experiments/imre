@@ -46,7 +46,7 @@ pub(super) fn decimal_digit(value: char) -> Option<u8> {
 /// ICU general-category printability predicate and CPython 3.14 `isprintable()`
 /// over all Unicode scalar values. There are no differences in the other
 /// direction. Recheck this table when updating ICU or the Python target version.
-fn newer_printable(value: char) -> bool {
+pub(super) fn newer_printable(value: char) -> bool {
     #[rustfmt::skip]
     const RANGES: &[(u32, u32)] = &[
         (0x88f, 0x890), (0xc5c, 0xc5d), (0xcdc, 0xcdd),
