@@ -188,6 +188,8 @@ fn emit_program(
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
         regex_literals: BTreeMap::new(),
+        bytes_literals: BTreeMap::new(),
+        integer_literals: BTreeMap::new(),
         enum_members: Vec::new(),
         literal_globals: literal_globals(module),
         next_value: 0,
@@ -315,6 +317,8 @@ struct Emitter<'a, 'module> {
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
+    bytes_literals: BTreeMap<Vec<u8>, usize>,
+    integer_literals: BTreeMap<Vec<u8>, usize>,
     enum_members: Vec<[usize; 3]>,
     literal_globals: Vec<Option<String>>,
     next_value: usize,
@@ -1904,32 +1908,6 @@ impl Emitter<'_, '_> {
         self.output.string_name(id, "str")
     }
 
-    fn literal(&mut self, contents: &str, ty: Type) -> Value {
-        self.literal_bytes(contents.as_bytes(), ty)
-    }
-
-    /// Emits exact source bytes without routing arbitrary byte values through UTF-8.
-    fn literal_bytes(&mut self, contents: &[u8], ty: Type) -> Value {
-        if ty == Type::Str {
-            return self.pooled_literal(contents, Type::Str);
-        }
-        let name = self.byte_array(contents.to_vec());
-        let function = match ty {
-            Type::Int => "relar_int_literal",
-            Type::Bytes => "relar_bytes_literal",
-            _ => unreachable!("literal representation was checked"),
-        };
-        Value {
-            ty,
-            operand: self.instruction(format!(
-                "call {} @{function}(ptr @{name}, i64 {})",
-                ty.llvm(),
-                contents.len()
-            )),
-            small_integer: false,
-        }
-    }
-
     /// Produces an owned result; its consumer must transfer or release that ownership.
     fn expr(&mut self, expression: &Expr) -> Value {
         let mut value = if self.can_borrow_projection(expression) {
@@ -1951,7 +1929,7 @@ impl Emitter<'_, '_> {
                 {
                     small(value)
                 } else {
-                    self.literal(value, Type::Int)
+                    self.pooled_literal(value.as_bytes(), Type::Int)
                 }
             }
             ExprKind::Float(value) => Value {
@@ -1966,9 +1944,9 @@ impl Emitter<'_, '_> {
             },
             ExprKind::Str(value) => Value {
                 ty: expression.ty,
-                ..self.literal(value, Type::Str)
+                ..self.pooled_literal(value.as_bytes(), Type::Str)
             },
-            ExprKind::Bytes(value) => self.literal_bytes(value, Type::Bytes),
+            ExprKind::Bytes(value) => self.pooled_literal(value, Type::Bytes),
             ExprKind::None => none(),
             ExprKind::Local(slot) => {
                 let mut value = self.borrow_slot(*slot);
@@ -5328,6 +5306,32 @@ mod tests {
                 .0
                 .contains("call void @relar_object_release(")
         );
+    }
+
+    #[test]
+    fn repeated_bytes_and_heap_integer_constants_share_typed_roots() {
+        let llvm = compile(
+            "def data() -> bytes:\n    return b'18446744073709551616'\ndef number() -> int:\n    return 18446744073709551616\nprint(data())\nprint(b'18446744073709551616')\nprint(number())\nprint(18446744073709551616)\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            llvm.lines()
+                .filter(|line| line.starts_with("@literal_"))
+                .count(),
+            2
+        );
+        let eager = llvm
+            .split_once("define internal void @relar_init_literals()")
+            .unwrap()
+            .1;
+        let eager = eager.split_once("\n}").unwrap().0;
+        assert!(!eager.contains("@relar_bytes_literal("));
+        assert!(!eager.contains("@relar_int_literal("));
+        assert_eq!(llvm.matches("call ptr @relar_bytes_literal(").count(), 1);
+        assert_eq!(llvm.matches("call i64 @relar_int_literal(").count(), 1);
+        assert!(llvm.contains("call void @relar_bytes_release(ptr %literal_"));
+        assert!(llvm.contains("call void @relar_int_release(i64 %literal_"));
     }
 
     #[test]
