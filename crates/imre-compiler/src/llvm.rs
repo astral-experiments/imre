@@ -518,7 +518,7 @@ impl Emitter<'_, '_> {
     /// Integer-list writes return one on success and zero with a pending error
     /// on failure. The same clear-pending entry contract as reads applies, and
     /// existing expression owners remain live until this status is checked.
-    fn checked_int_list_status(&mut self, instruction: impl AsRef<str>) {
+    fn checked_status(&mut self, instruction: impl AsRef<str>) {
         let status = self.instruction(instruction);
         let failed = self.instruction(format!("icmp eq i32 {status}, 0"));
         self.check_failed(&failed);
@@ -5046,8 +5046,8 @@ impl Emitter<'_, '_> {
             self.runtime_call(&LIST_APPEND, [list, value]);
         } else {
             let word = self.word(value);
-            self.line(format!(
-                "call void @imre_seq_append(ptr {}, i64 {word}, i32 {})",
+            self.checked_status(format!(
+                "call i32 @imre_seq_append(ptr {}, i64 {word}, i32 {})",
                 list.operand,
                 representation_kind(value.ty, &self.module.types)
             ));
@@ -5707,7 +5707,7 @@ declare i64 @imre_seq_get_index(ptr, i64)
 declare i64 @imre_seq_borrow_index_proven(ptr, i64) nounwind
 declare ptr @imre_seq_data_readonly(ptr) nounwind
 declare void @imre_seq_set_index(ptr, i64, i64, i32)
-declare void @imre_seq_append(ptr, i64, i32)
+declare i32 @imre_seq_append(ptr, i64, i32)
 declare i64 @imre_seq_pop(ptr)
 declare i64 @imre_seq_len(ptr) nounwind
 declare i32 @imre_seq_resolve_header(ptr) nounwind
@@ -6927,7 +6927,10 @@ def total(text: str) -> int:
             "def push(output: list[str], first: str, second: str) -> None:\n    output.append(first)\n    output.append(second)\n",
         );
         assert!(!body.contains("call i32 @imre_list_append_pair("));
-        assert_eq!(body.matches("call void @imre_seq_append(").count(), 2);
+        assert_eq!(body.matches("call i32 @imre_seq_append(").count(), 2);
+        for call in body.split("call i32 @imre_seq_append(").skip(1) {
+            assert!(call.lines().nth(1).unwrap().contains("icmp eq i32"));
+        }
         let body = function_body(
             "def push(outputs: list[list[int]], first: int, second: int) -> None:\n    outputs[0].append(first)\n    outputs[0].append(second)\n",
         );
