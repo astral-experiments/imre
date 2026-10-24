@@ -303,16 +303,28 @@ impl<'a> Shapes<'a> {
                 locals,
             ),
             Expr::Call(node) => {
+                let name = node.func.as_name_expr().map(|name| name.id.as_str());
+                let args = &node.arguments.args;
+                let unknown_call_depth = |receiver| {
+                    max_depth(args).max(receiver).max(
+                        node.arguments
+                            .keywords
+                            .iter()
+                            .map(|kw| rank(&kw.value))
+                            .max()
+                            .unwrap_or(0),
+                    )
+                };
                 if let Some(attr) = node.func.as_attribute_expr()
                     && attr.attr.as_str() == "pop"
                 {
                     let receiver = self.shape(&attr.value, locals);
-                    if matches!(receiver.contents, Contents::List) {
-                        return receiver.depth.saturating_sub(1);
-                    }
+                    return if matches!(receiver.contents, Contents::List) {
+                        receiver.depth.saturating_sub(1)
+                    } else {
+                        unknown_call_depth(receiver.depth)
+                    };
                 }
-                let name = node.func.as_name_expr().map(|name| name.id.as_str());
-                let args = &node.arguments.args;
                 match name {
                     // Each yielded tuple adds a level around the input elements.
                     Some("zip") => max_depth(args).max(1) + 1,
@@ -327,20 +339,11 @@ impl<'a> Shapes<'a> {
                         | "print",
                     ) => 0,
                     Some(name) if self.fixed.contains(name) => 0,
-                    _ => max_depth(args)
-                        .max(
-                            node.func
-                                .as_attribute_expr()
-                                .map_or(0, |attr| rank(&attr.value)),
-                        )
-                        .max(
-                            node.arguments
-                                .keywords
-                                .iter()
-                                .map(|kw| rank(&kw.value))
-                                .max()
-                                .unwrap_or(0),
-                        ),
+                    _ => unknown_call_depth(
+                        node.func
+                            .as_attribute_expr()
+                            .map_or(0, |attr| rank(&attr.value)),
+                    ),
                 }
             }
             Expr::BinOp(node) => rank(&node.left).max(rank(&node.right)),
@@ -524,6 +527,18 @@ mod tests {
             let last = wrap.replace("{p}", &format!("v{}", MAX_DEPTH - 1));
             assert!(limited(&format!("{body}result = {last}\n")), "{wrap}");
         }
+    }
+
+    #[test]
+    fn chained_pop_calls_visit_each_unknown_receiver_once() {
+        let levels = 36;
+        let annotation = format!("{}int{}", "list[".repeat(levels), "]".repeat(levels));
+        let source = format!(
+            "def f(x: {annotation}) -> int:\n{}    value = x{}\n    return value\n",
+            "    pass\n".repeat(115),
+            ".pop()".repeat(levels),
+        );
+        crate::check(&source).unwrap();
     }
 
     #[test]
