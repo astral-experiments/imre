@@ -291,7 +291,7 @@ pub unsafe extern "C" fn imre_shlex_split(value: *const Str) -> *const Object {
 ///
 /// # Safety
 /// Both inputs must be nonnull, immutable strings rooted for this call. Returns
-/// an independent owned string, or null with a pending empty-separator error.
+/// an owned string, or null with a pending separator or allocation error.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_rsplit_last(
     value: *const Str,
@@ -305,7 +305,7 @@ pub unsafe extern "C" fn imre_str_rsplit_last(
 ///
 /// # Safety
 /// Both inputs must be nonnull, immutable strings rooted for this call. Returns
-/// an independent owned string, or null with a pending empty-separator error.
+/// an owned string, or null with a pending separator or allocation error.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_unquote_rsplit_last(
     value: *const Str,
@@ -333,9 +333,9 @@ unsafe fn rsplit_last(value: *const Str, separator: *const Str, decode: bool) ->
     };
     let tail = &source[boundary.map_or(0, |index| index + separator.len())..];
     if decode && let Some(first) = memchr::memchr(b'%', tail.as_bytes()) {
-        Rc::into_raw(Rc::new(unquote(tail, first)))
+        owned_text(unquote(tail, first))
     } else if boundary.is_some() {
-        Rc::into_raw(Rc::new(Str::new(tail)))
+        owned_text(Str::try_new(tail).ok())
     } else {
         // SAFETY: the caller's live owner permits acquiring the result reference.
         unsafe { Rc::increment_strong_count(value) };
@@ -504,9 +504,10 @@ fn hexadecimal(byte: u8) -> Option<u8> {
 
 /// Decodes valid percent pairs, retaining malformed escapes and literal '+'.
 /// `first` identifies a percent byte; unchanged spans are copied in one chunk.
-fn unquote(source: &str, first: usize) -> Str {
+fn unquote(source: &str, first: usize) -> Option<Str> {
     let input = source.as_bytes();
-    let mut bytes = Vec::with_capacity(input.len());
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(input.len()).ok()?;
     bytes.extend_from_slice(&input[..first]);
     let mut index = first;
     loop {
@@ -526,22 +527,44 @@ fn unquote(source: &str, first: usize) -> Str {
         bytes.extend_from_slice(&input[index..index + offset]);
         index += offset;
     }
-    let decoded = String::from_utf8(bytes)
-        .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned());
-    Str::from(decoded)
+    match String::from_utf8(bytes) {
+        Ok(decoded) => Some(Str::from(decoded)),
+        Err(error) => {
+            // Each ill-formed sequence contains a decoded three-byte percent escape.
+            // Replacing it with U+FFFD therefore fits in the encoded input length.
+            let mut result = String::new();
+            result.try_reserve_exact(source.len()).ok()?;
+            for chunk in error.as_bytes().utf8_chunks() {
+                result.push_str(chunk.valid());
+                if !chunk.invalid().is_empty() {
+                    result.push('\u{fffd}');
+                }
+            }
+            Some(Str::from(result))
+        }
+    }
+}
+
+fn owned_text(result: Option<Str>) -> *const Str {
+    if let Some(text) = result {
+        Rc::into_raw(Rc::new(text))
+    } else {
+        super::exceptions::sequence_allocation_failed();
+        std::ptr::null()
+    }
 }
 
 /// Decodes percent escapes with UTF-8 replacement while preserving literal '+'.
 ///
 /// # Safety
 /// Input is a rooted scalar string. Returns one owned string reference with the
-/// default urllib.parse.unquote UTF-8/errors='replace' semantics.
+/// default urllib.parse.unquote UTF-8/errors='replace' semantics, or null on allocation failure.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_unquote(value: *const Str) -> *const Str {
     // SAFETY: input remains immutable and rooted throughout the operation.
     let source = unsafe { &*value };
     if let Some(first) = memchr::memchr(b'%', source.as_bytes()) {
-        Rc::into_raw(Rc::new(unquote(source, first)))
+        owned_text(unquote(source, first))
     } else {
         // SAFETY: the unchanged result acquires its own live reference.
         unsafe { Rc::increment_strong_count(value) };

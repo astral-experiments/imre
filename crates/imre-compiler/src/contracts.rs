@@ -61,12 +61,12 @@ impl Builtin {
                 match operation {
                     TextOperation::Split(_)
                     | TextOperation::Partition
+                    | TextOperation::Unquote
                     | TextOperation::ShlexSplit => true,
                     TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
                     | TextOperation::Find
-                    | TextOperation::Unquote
                     | TextOperation::Dedent => false,
                 },
                 PreservesLists,
@@ -552,6 +552,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_config"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
+                | "imre_str_unquote"
                 | "imre_str_join"
                 | "imre_print_str"
                 | "imre_print_bytes"
