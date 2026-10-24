@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
-use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
-use ruff_python_ast::{Comprehension, Expr, Stmt};
+use ruff_python_ast::visitor::{Visitor, walk_body, walk_expr, walk_stmt};
+use ruff_python_ast::{Comprehension, Expr, Number, Stmt, UnaryOp};
 
 const MAX_DEPTH: usize = 256;
 
@@ -13,6 +14,7 @@ pub(super) fn check(body: &[Stmt], tokens: usize) -> Result<(), &'static str> {
     }
     let mut shapes = Shapes {
         scopes: vec![HashMap::new()],
+        straight_line: HashMap::new(),
         fixed: body
             .iter()
             .filter_map(|stmt| match stmt {
@@ -41,52 +43,141 @@ fn scalar_annotation(expr: &Expr) -> bool {
         || matches!(expr, Expr::Name(name) if matches!(name.id.as_str(), "str" | "bytes" | "int" | "bool" | "float"))
 }
 
-fn bind_target<'a>(target: &'a Expr, depth: usize, bind: &mut impl FnMut(&'a str, usize)) {
+#[derive(Clone, Default)]
+struct Shape {
+    depth: usize,
+    fields: Option<Rc<[Shape]>>,
+}
+
+impl Shape {
+    fn plain(depth: usize) -> Self {
+        Self {
+            depth,
+            fields: None,
+        }
+    }
+
+    fn element(&self, index: Option<isize>) -> Self {
+        if let (Some(fields), Some(index)) = (&self.fields, index) {
+            let position = if index < 0 {
+                fields.len().checked_add_signed(index)
+            } else {
+                Some(index as usize)
+            };
+            if let Some(field) = position.and_then(|position| fields.get(position)) {
+                return field.clone();
+            }
+        }
+        Self::plain(self.depth.saturating_sub(1))
+    }
+}
+
+fn literal_index(expr: &Expr) -> Option<isize> {
+    let (expr, negative) = match expr {
+        Expr::UnaryOp(node) if node.op == UnaryOp::USub => (&*node.operand, true),
+        expr => (expr, false),
+    };
+    let Expr::NumberLiteral(node) = expr else {
+        return None;
+    };
+    let Number::Int(value) = &node.value else {
+        return None;
+    };
+    let index = isize::try_from(value.as_i64()?).ok()?;
+    if negative {
+        index.checked_neg()
+    } else {
+        Some(index)
+    }
+}
+
+fn bind_target<'a>(target: &'a Expr, shape: Shape, bind: &mut impl FnMut(&'a str, Shape)) {
     let elements = match target {
-        Expr::Name(node) => return bind(node.id.as_str(), depth),
+        Expr::Name(node) => return bind(node.id.as_str(), shape),
         // A starred target receives a list of the remaining elements.
-        Expr::Starred(node) => return bind_target(&node.value, depth + 1, bind),
+        Expr::Starred(node) => {
+            return bind_target(&node.value, Shape::plain(shape.depth + 1), bind);
+        }
         Expr::Tuple(node) => &node.elts,
         Expr::List(node) => &node.elts,
         _ => return,
     };
-    for element in elements {
-        bind_target(element, depth.saturating_sub(1), bind);
+    let fixed = !elements
+        .iter()
+        .any(|element| matches!(element, Expr::Starred(_)));
+    for (index, element) in elements.iter().enumerate() {
+        bind_target(
+            element,
+            shape.element(fixed.then_some(index as isize)),
+            bind,
+        );
     }
 }
 
 struct Shapes<'a> {
     fixed: HashSet<&'a str>,
-    scopes: Vec<HashMap<&'a str, usize>>,
+    scopes: Vec<HashMap<&'a str, Shape>>,
+    straight_line: HashMap<&'a str, Shape>,
     conditional: bool,
     exceeded: bool,
 }
 
 impl<'a> Shapes<'a> {
-    fn lookup(&self, name: &str) -> usize {
-        self.scopes
-            .iter()
-            .rev()
-            .find_map(|s| s.get(name))
-            .copied()
-            .unwrap_or(0)
+    fn scope_binding(&self, name: &str) -> Option<&Shape> {
+        self.scopes.iter().rev().find_map(|s| s.get(name))
     }
 
-    fn depth(&self, value: &Expr) -> usize {
-        self.depth_in(value, &[])
+    fn lookup(&self, name: &str) -> Shape {
+        self.straight_line
+            .get(name)
+            .or_else(|| self.scope_binding(name))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn shape(&self, value: &Expr, locals: &[(&str, Shape)]) -> Shape {
+        match value {
+            Expr::Name(node) => locals
+                .iter()
+                .rev()
+                .find(|(name, _)| *name == node.id.as_str())
+                .map_or_else(|| self.lookup(node.id.as_str()), |(_, shape)| shape.clone()),
+            Expr::Tuple(node) if !node.elts.iter().any(|elt| matches!(elt, Expr::Starred(_))) => {
+                let fields: Vec<_> = node
+                    .elts
+                    .iter()
+                    .map(|elt| self.shape(elt, locals))
+                    .collect();
+                let deepest = fields.iter().map(|field| field.depth).max().unwrap_or(0);
+                // Uniform scalar ranks need no positional metadata. Aliases
+                // share the immutable snapshots for heterogeneous tuples.
+                let distinct = fields
+                    .iter()
+                    .any(|field| field.depth != deepest || field.fields.is_some());
+                Shape {
+                    depth: deepest + 1,
+                    fields: distinct.then(|| fields.into()),
+                }
+            }
+            Expr::Subscript(node) if !matches!(&*node.slice, Expr::Slice(_)) => self
+                .shape(&node.value, locals)
+                .element(literal_index(&node.slice)),
+            Expr::Named(node) => self.shape(&node.value, locals),
+            _ => Shape::plain(self.depth_in(value, locals)),
+        }
     }
 
     fn comprehension<'v>(
         &self,
         generators: &'v [Comprehension],
         values: &[&'v Expr],
-        locals: &[(&'v str, usize)],
+        locals: &[(&'v str, Shape)],
     ) -> usize {
         let mut bindings = locals.to_vec();
         for gen_ in generators {
-            let depth = self.depth_in(&gen_.iter, &bindings).saturating_sub(1);
-            bind_target(&gen_.target, depth, &mut |name, depth| {
-                bindings.push((name, depth));
+            let element = self.shape(&gen_.iter, &bindings).element(None);
+            bind_target(&gen_.target, element, &mut |name, shape| {
+                bindings.push((name, shape));
             });
         }
         1 + values
@@ -96,15 +187,11 @@ impl<'a> Shapes<'a> {
             .unwrap_or(0)
     }
 
-    fn depth_in<'v>(&self, value: &'v Expr, locals: &[(&'v str, usize)]) -> usize {
+    fn depth_in<'v>(&self, value: &'v Expr, locals: &[(&'v str, Shape)]) -> usize {
         let rank = |e: &'v Expr| self.depth_in(e, locals);
         let max_depth = |items: &'v [Expr]| items.iter().map(rank).max().unwrap_or(0);
         match value {
-            Expr::Name(node) => locals
-                .iter()
-                .rev()
-                .find(|(name, _)| *name == node.id.as_str())
-                .map_or_else(|| self.lookup(node.id.as_str()), |(_, d)| *d),
+            Expr::Name(_) => self.shape(value, locals).depth,
             Expr::Tuple(node) => 1 + max_depth(&node.elts),
             Expr::List(node) => 1 + max_depth(&node.elts),
             Expr::Set(node) => 1 + max_depth(&node.elts),
@@ -124,7 +211,7 @@ impl<'a> Shapes<'a> {
             Expr::Named(node) => rank(&node.value),
             Expr::Starred(node) => rank(&node.value).saturating_sub(1),
             Expr::Subscript(node) if matches!(&*node.slice, Expr::Slice(_)) => rank(&node.value),
-            Expr::Subscript(node) => rank(&node.value).saturating_sub(1),
+            Expr::Subscript(_) => self.shape(value, locals).depth,
             Expr::ListComp(node) => self.comprehension(&node.generators, &[&node.elt], locals),
             Expr::SetComp(node) => self.comprehension(&node.generators, &[&node.elt], locals),
             Expr::Generator(node) => self.comprehension(&node.generators, &[&node.elt], locals),
@@ -168,18 +255,25 @@ impl<'a> Shapes<'a> {
         }
     }
 
-    fn bind(&mut self, target: &'a Expr, depth: usize) {
-        self.exceeded |= depth > MAX_DEPTH;
-        bind_target(target, depth, &mut |name, depth| {
-            self.exceeded |= depth > MAX_DEPTH;
-            let old = self.lookup(name);
-            if depth != 0 || old != 0 {
+    fn bind(&mut self, target: &'a Expr, shape: Shape, definite: bool) {
+        self.exceeded |= shape.depth > MAX_DEPTH;
+        bind_target(target, shape, &mut |name, shape| {
+            self.exceeded |= shape.depth > MAX_DEPTH;
+            let old = self.scope_binding(name).cloned().unwrap_or_default();
+            if self.conditional {
+                if definite && (old.depth != 0 || shape.depth != 0) {
+                    self.straight_line.insert(name, shape.clone());
+                } else {
+                    self.straight_line.remove(name);
+                }
+            }
+            if shape.depth != 0 || old.depth != 0 {
                 self.scopes.last_mut().unwrap().insert(
                     name,
                     if self.conditional {
-                        old.max(depth)
+                        Shape::plain(old.depth.max(shape.depth))
                     } else {
-                        depth
+                        shape
                     },
                 );
             }
@@ -188,6 +282,14 @@ impl<'a> Shapes<'a> {
 }
 
 impl<'a> Visitor<'a> for Shapes<'a> {
+    fn visit_body(&mut self, body: &'a [Stmt]) {
+        // Within an arm, a completed assignment is definite for the next
+        // statement. Across arms use the conservative facts in the scope.
+        self.straight_line.clear();
+        walk_body(self, body);
+        self.straight_line.clear();
+    }
+
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         if self.exceeded {
             return;
@@ -195,26 +297,29 @@ impl<'a> Visitor<'a> for Shapes<'a> {
         match stmt {
             Stmt::Assign(node) => {
                 self.visit_expr(&node.value);
-                let depth = self.depth(&node.value);
+                let shape = self.shape(&node.value, &[]);
                 for target in &node.targets {
-                    self.bind(target, depth);
+                    self.bind(target, shape.clone(), true);
                 }
             }
             Stmt::AnnAssign(node) => {
                 if let Some(value) = &node.value {
                     self.visit_expr(value);
-                    let depth = self.depth(value);
-                    self.bind(&node.target, depth);
+                    self.bind(&node.target, self.shape(value, &[]), true);
                 }
             }
             Stmt::FunctionDef(_) | Stmt::ClassDef(_) => {
+                self.straight_line.clear();
                 self.scopes.push(HashMap::new());
                 let outer = std::mem::take(&mut self.conditional);
                 if let Stmt::FunctionDef(function) = stmt {
                     for parameter in function.parameters.iter() {
                         let name = parameter.name().as_str();
-                        if self.lookup(name) != 0 {
-                            self.scopes.last_mut().unwrap().insert(name, 0);
+                        if self.lookup(name).depth != 0 {
+                            self.scopes
+                                .last_mut()
+                                .unwrap()
+                                .insert(name, Shape::default());
                         }
                     }
                 }
@@ -229,7 +334,11 @@ impl<'a> Visitor<'a> for Shapes<'a> {
                     Stmt::If(_) | Stmt::For(_) | Stmt::While(_) | Stmt::Match(_) | Stmt::Try(_)
                 );
                 if let Stmt::For(node) = stmt {
-                    self.bind(&node.target, self.depth(&node.iter).saturating_sub(1));
+                    self.bind(
+                        &node.target,
+                        self.shape(&node.iter, &[]).element(None),
+                        false,
+                    );
                 }
                 walk_stmt(self, stmt);
                 self.conditional = outer;
@@ -240,7 +349,7 @@ impl<'a> Visitor<'a> for Shapes<'a> {
     fn visit_expr(&mut self, expr: &'a Expr) {
         walk_expr(self, expr);
         if let Expr::Named(node) = expr {
-            self.bind(&node.target, self.depth(&node.value));
+            self.bind(&node.target, self.shape(&node.value, &[]), false);
         }
     }
 }
@@ -321,6 +430,36 @@ mod tests {
             }
             assert!(limited(&body), "{step}");
         }
+    }
+
+    #[test]
+    fn tuple_indices_and_unpacking_keep_the_selected_field_depth() {
+        for step in [
+            "x = ((x, 1)[1],)",
+            "pair = (x, 1)\nalias = pair\nx = (alias[-1],)",
+            "pair = ((x, 1),)\nx = (pair[0][1],)",
+            "pair = (x, 1)\nignored, item = pair\nx = (item,)",
+        ] {
+            let mut body = String::from("x = (1,)\n");
+            for _ in 0..300 {
+                body.push_str(step);
+                body.push('\n');
+            }
+            assert!(!limited(&body), "{step}");
+        }
+        let mut deep = String::from("x = (1,)\n");
+        deep.push_str(&"x = (x,)\n".repeat(MAX_DEPTH - 2));
+        deep.push_str("pair = (x, 1)\nx = 1\n");
+        assert!(!limited(&format!("{deep}result = ((pair[1],),)\n")));
+        assert!(limited(&format!("{deep}result = ((pair[0],),)\n")));
+        assert!(limited(&format!("{deep}result = ((pair[index],),)\n")));
+        let arms = "if flag:\n    y = pair[0]\nelse:\n    y = pair[1]\n";
+        assert!(limited(&format!("{deep}{arms}result = ((y,),)\n")));
+        let in_arm = format!(
+            "x = (1,)\nif flag:\n{}",
+            "    pair = (x, 1)\n    x = (pair[1],)\n".repeat(300)
+        );
+        assert!(!limited(&in_arm));
     }
 
     #[test]
