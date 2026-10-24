@@ -1,8 +1,8 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # Batch planner: exception recovery, performance, and live heap
 
-The framed batch planner recovers from malformed requests and continues to valid work. On the large ThinLTO batches, Relar takes **155–157 ms for layered graphs and about 90 ms for wide graphs**: **2.31–3.94× faster than CPython**, while taking **1.70–1.82× the Rust BigInt reference's time**.
+The framed batch planner recovers from malformed requests and continues to valid work. On the large ThinLTO batches, Imre takes **155–157 ms for layered graphs and about 90 ms for wide graphs**: **2.31–3.94× faster than CPython**, while taking **1.70–1.82× the Rust BigInt reference's time**.
 
 Exception support also has a measurable cost on the unchanged single-request program. Its large workloads take **6.4–9.8% longer with ordinary linking and 8.4–22.7% longer with ThinLTO** than the frozen pre-exception compiler/runtime. These are whole-process compiler/runtime deltas; this experiment does not isolate the cost of an individual exception check or throw.
 
@@ -12,7 +12,7 @@ All timed builds use clean implementation revision `1a18ba752448a800d9d21c479e59
 
 These are separate runs of the original single-request program, not comparisons of a batch with one request. Values are medians over 30 fresh processes. Positive changes mean the new compiler/runtime is slower.
 
-| Mode | Workload | CPython ms | Prior Relar ms | New Relar ms | New/prior change |
+| Mode | Workload | CPython ms | Prior Imre ms | New Imre ms | New/prior change |
 |---|---|---:|---:|---:|---:|
 | Ordinary | layered 16,384 / sparse | 114.96 | 57.11 | 60.74 | +6.4% |
 | Ordinary | layered 16,384 / all | 191.81 | 83.56 | 90.27 | +8.0% |
@@ -31,9 +31,9 @@ The 128-target case records only a 0.3% ordinary and 2.7% ThinLTO change in thes
 
 Each valid batch contains two independent copies of the corresponding all-affected planner input. Each mixed batch contains those same two valid requests plus three malformed requests after each: invalid integer text, truncated payload, and a target row missing its duration. Thus a valid batch has two requests and a mixed batch has eight. The malformed requests must emit the specified error, execute cleanup, and leave the following request usable.
 
-Values below are median whole-process milliseconds; brackets show Relar's observed 25th–75th percentiles. CPython/Relar above one favors Relar; Relar/Rust above one favors Rust.
+Values below are median whole-process milliseconds; brackets show Imre's observed 25th–75th percentiles. CPython/Imre above one favors Imre; Imre/Rust above one favors Rust.
 
-| Mode | Workload | CPython ms | Relar ms [p25–p75] | Rust BigInt ms | CPython/Relar | Relar/Rust |
+| Mode | Workload | CPython ms | Imre ms [p25–p75] | Rust BigInt ms | CPython/Imre | Imre/Rust |
 |---|---|---:|---:|---:|---:|---:|
 | Ordinary | layered 16,384 / all / valid | 368.36 | 172.36 [171.17–177.68] | 103.28 | 2.14× | 1.67× |
 | Ordinary | layered 16,384 / all / mixed | 366.99 | 171.47 [170.31–174.75] | 102.28 | 2.14× | 1.68× |
@@ -52,15 +52,15 @@ The small differences between valid and mixed medians do not measure a per-excep
 
 ## Measurement and provenance
 
-The [harness](../batch_benchmark.py) runs two independent three-engine groups: CPython/prior Relar/new Relar for the control, and CPython/new Relar/Rust BigInt for batches. Each workload has two warmup rounds and 30 measured rounds. All six engine permutations occur five times: each engine occupies each position ten times, and each directed adjacent pair within a round occurs ten times. Cross-round predecessor transitions are not separately balanced.
+The [harness](../batch_benchmark.py) runs two independent three-engine groups: CPython/prior Imre/new Imre for the control, and CPython/new Imre/Rust BigInt for batches. Each workload has two warmup rounds and 30 measured rounds. All six engine permutations occur five times: each engine occupies each position ten times, and each directed adjacent pair within a round occurs ten times. Cross-round predecessor transitions are not separately balanced.
 
 Each sample starts a fresh process pinned with the harness to CPU 0. The timer includes process creation, input delivery, parsing, computation, output transfer, and process exit. It excludes compilation, correctness validation, hashing, and the subsequent comparison of captured output. Every timed and warmup run must have the expected exit status, empty stderr, and byte-for-byte complete stdout. The raw records retain every duration, status, stderr, stdout hash and byte count, plus complete input and expected output once per workload. No samples were discarded. Both modes together contain **1,980 timed runs and 132 warmups**. The harness refuses timing under ptrace.
 
-Ordinary Relar is paired with ordinary Rust; ThinLTO Relar is paired with ThinLTO Rust. ThinLTO Rust uses the recorded explicit import and inline budgets of 1,000, matching the Relar setting. The lexical `ld.lld` path invokes the actual Rust LLD backend, whose hash is recorded; it is not the separate `gcc-ld` wrapper. The timed Relar planner builds explicitly target `x86_64-unknown-linux-gnu`; the Rust references use that same host target.
+Ordinary Imre is paired with ordinary Rust; ThinLTO Imre is paired with ThinLTO Rust. ThinLTO Rust uses the recorded explicit import and inline budgets of 1,000, matching the Imre setting. The lexical `ld.lld` path invokes the actual Rust LLD backend, whose hash is recorded; it is not the separate `gcc-ld` wrapper. The timed Imre planner builds explicitly target `x86_64-unknown-linux-gnu`; the Rust references use that same host target.
 
 The host reports an AMD EPYC-Milan processor on Linux x86-64. CPython is 3.14.5, with its GIL enabled, PGO and LTO enabled, and its available JIT disabled. The toolchains are Clang 18.1.3 and Rust 1.98.1-dev (Ohm `ohm-1.98.1-1`, commit `f62703110`), with Rust LLVM/LLD 22.1.8. Different backend versions remain a comparison limitation.
 
-This is a shared devbox, not an isolated machine. Process startup, scheduler interference, allocator behavior, and hash randomization affect these measurements. Validation and warmups precede timing, so this is not a cold-filesystem experiment. All outliers remain in the records: for example, ordinary prior Relar's wide/all control spans 48.21–239.92 ms despite a 49.99 ms median; ordinary Relar's layered/mixed batch spans 166.59–359.12 ms. The ThinLTO wide/valid Relar batch has an 89.53–91.10 ms interquartile range and an 87.91–94.04 ms full range. Percentile spreads are descriptive, not confidence intervals.
+This is a shared devbox, not an isolated machine. Process startup, scheduler interference, allocator behavior, and hash randomization affect these measurements. Validation and warmups precede timing, so this is not a cold-filesystem experiment. All outliers remain in the records: for example, ordinary prior Imre's wide/all control spans 48.21–239.92 ms despite a 49.99 ms median; ordinary Imre's layered/mixed batch spans 166.59–359.12 ms. The ThinLTO wide/valid Imre batch has an 89.53–91.10 ms interquartile range and an 87.91–94.04 ms full range. Percentile spreads are descriptive, not confidence intervals.
 
 The [ordinary raw record](2026-10-18-batch-planner-normal.json), [ThinLTO raw record](2026-10-18-batch-planner-thinlto.json), [frozen compiler/runtime build record](2026-10-18-batch-planner-build.json), and Rust [ordinary](2026-10-18-batch-planner-rust-normal-build.json) / [ThinLTO](2026-10-18-batch-planner-rust-thinlto-build.json) build records retain source, binary, IR, tool, and linked-provenance hashes. The old [ordinary](2026-10-17-incremental-planner-normal.json) and [ThinLTO](2026-10-17-incremental-planner-thinlto.json) records identify the exact reused control binaries. Independent post-run audits checked 131 source/tool/artifact identities, all 2,112 executions, order balance, and recomputed summary statistics.
 
@@ -70,7 +70,7 @@ The independent [batch oracle](../batch_validate.py) checks complete output, err
 
 Before timing, each batch engine passes all 194 cases. Each control engine passes the original 155 graph cases plus 17 parser cases. Separate validation passed 44 ordinary O0/O3 exception checks and 30 ThinLTO exception checks. Fully instrumented generated code and Rust runtime passed 30 exception checks, 209 container checks, and all 194 batch inputs with ASan/LSan enabled. The batch [sanitizer build record](2026-10-18-batch-planner-sanitizer-build.json) and [validation result](2026-10-18-batch-planner-sanitizer-validation.json) preserve that evidence. The prebuilt Rust standard library was not instrumented. Selected-feature Rust batch Clippy also passed with warnings denied.
 
-Relar's supported exception behavior deliberately omits Python tracebacks, exception context, and chaining. The mixed batches compare the supported observable behavior; they do not equate the implementations' complete exception machinery.
+Imre's supported exception behavior deliberately omits Python tracebacks, exception context, and chaining. The mixed batches compare the supported observable behavior; they do not equate the implementations' complete exception machinery.
 
 ## Live heap during repeated recovery
 
@@ -81,7 +81,7 @@ A separate ordinary-O3 executable exercises eight caught failures per iteration 
 | 100 | 800 | 346,960 | 6,408 | 18,140 | 14 | 17,408 / 3 |
 | 10,000 | 80,000 | 32,957,560 | 640,008 | 18,140 | 14 | 17,408 / 3 |
 
-Allocation traffic grows with repetitions while peak and end-live requested heap remain unchanged. The three end-live allocations are persistent I/O buffers: an 8,192-byte Relar output buffer, an 8,192-byte Rust stdin buffer, and a 1,024-byte Rust stdout buffer. None is exception-owned. This supports bounded cleanup for these exercised failure paths; it is not a proof for every program. **DHAT measures requested heap, not RSS or allocator-reserved memory.**
+Allocation traffic grows with repetitions while peak and end-live requested heap remain unchanged. The three end-live allocations are persistent I/O buffers: an 8,192-byte Imre output buffer, an 8,192-byte Rust stdin buffer, and a 1,024-byte Rust stdout buffer. None is exception-owned. This supports bounded cleanup for these exercised failure paths; it is not a proof for every program. **DHAT measures requested heap, not RSS or allocator-reserved memory.**
 
 The [memory evidence](2026-10-18-batch-planner-recovery-memory.json) contains the exact stress source, its derivation from the exception fixture, input and complete output, artifact/tool hashes, and both complete normalized DHAT traces. Normalization changes private paths only; numeric profiling data is retained. Peak/end-live sums can be recomputed from the traces' `pps` entries.
 
@@ -104,9 +104,9 @@ The control requires a preserved pre-exception binary and its matching increment
 
 ```sh
 python3 benchmarks/batch_benchmark.py \
-  --compiler benchmarks/local/batch-tools-final/relar \
-  --runtime benchmarks/local/batch-tools-final/librelar_runtime.a \
-  --relar-build-record benchmarks/local/batch-tools-final/build-record.json \
+  --compiler benchmarks/local/batch-tools-final/imre \
+  --runtime benchmarks/local/batch-tools-final/libimre_runtime.a \
+  --imre-build-record benchmarks/local/batch-tools-final/build-record.json \
   --baseline benchmarks/local/incremental-artifacts-normal-final/incremental_planner \
   --baseline-record benchmarks/results/2026-10-17-incremental-planner-normal.json \
   --rust-bigint benchmarks/local/batch-reference-normal-final/planner-batch-bigint \
@@ -137,9 +137,9 @@ for run in record["runs"]:
     (out / (stem + ".expected")).write_text(run["expected_stdout"])
 PYTHON
 
-benchmarks/local/batch-tools-final/relar build \
+benchmarks/local/batch-tools-final/imre build \
   benchmarks/local/recovery-reproduction/stress.py \
-  --runtime benchmarks/local/batch-tools-final/librelar_runtime.a \
+  --runtime benchmarks/local/batch-tools-final/libimre_runtime.a \
   --clang clang-18 --opt-level 3 \
   --emit-llvm benchmarks/local/recovery-reproduction/stress.ll \
   -o benchmarks/local/recovery-reproduction/stress

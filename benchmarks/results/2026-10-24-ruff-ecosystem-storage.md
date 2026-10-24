@@ -1,12 +1,14 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Ruff ecosystem report performance
 
-Relar took **0.94–0.96× Rust’s time** to generate Ruff’s frozen Bokeh, Superset and Zulip preview reports. All five frozen reports matched the original CPython output byte-for-byte. The unchanged `ruff-ecosystem --force-preview check` command compared Ruff 0.15.0 and 0.16.1 on 58 projects and reproduced CPython’s 76,952-byte Markdown report. [Upstream Python files and revision](../../examples/ruff_ecosystem/UPSTREAM.json) · [Samples, output hashes and build fingerprints](2026-10-24-ruff-ecosystem-storage.json.gz)
+Imre took **0.94–0.96× Rust’s time** to generate Ruff’s frozen Bokeh, Superset and Zulip preview reports. All five frozen reports matched the original CPython output byte-for-byte. The unchanged `ruff-ecosystem --force-preview check` command compared Ruff 0.15.0 and 0.16.1 on 58 projects and reproduced CPython’s 76,952-byte Markdown report. [Upstream Python files and revision](../../examples/ruff_ecosystem/UPSTREAM.json) · [Samples, output hashes and build fingerprints](2026-10-24-ruff-ecosystem-storage.json.gz)
 
 ## Frozen reports
 
-Each cell gives **wall time in milliseconds / peak RSS in MiB**. The last column compares wall time. Relar #309 comes from the previous measurement on the same inputs. [Previous measurements](2026-10-24-ruff-ecosystem-preview.md)
+Each cell gives **wall time in milliseconds / peak RSS in MiB**. The last column compares wall time. Imre #309 comes from the previous measurement on the same inputs. [Previous measurements](2026-10-24-ruff-ecosystem-preview.md)
 
-| Input | CPython | Relar #309 | Relar | Codon | Rust | Relar / Rust |
+| Input | CPython | Imre #309 | Imre | Codon | Rust | Imre / Rust |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Bokeh preview | 171,401 / 182.9 | 760 / 138.2 | 519 / 112.4 | 1,131 / 142.8 | 546 / 63.4 | 0.95× |
 | Superset preview | 1,479,775 / 410.7 | 1,986 / 331.6 | 1,370 / 267.3 | 3,799 / 647.0 | 1,433 / 151.6 | 0.96× |
@@ -16,13 +18,13 @@ Each cell gives **wall time in milliseconds / peak RSS in MiB**. The last column
 
 Bokeh, Superset and Zulip each used one warmup and six interleaved runs per native executable on Linux CPU 3. Their CPython 3.14.5 times come from one previously verified run per project. The standard Sphinx and Prefect cases used four interleaved runs per engine after one warmup, including CPython 3.12.13. Rust implements the replay independently. Codon 0.20.4 compiles Ruff’s Markdown functions with typed adapters. [Capture and replay commands](../../examples/ruff_ecosystem/README.md)
 
-The 10× standard run keeps all 20 project comparisons alive until rendering. Relar used **514.8 MiB** and Rust used **60.5 MiB**. In a sampled heap profile of #309, strings produced by splitting the inputs accounted for 403 MiB, and diff snapshot pointer arrays accounted for another 56 MiB.
+The 10× standard run keeps all 20 project comparisons alive until rendering. Imre used **514.8 MiB** and Rust used **60.5 MiB**. In a sampled heap profile of #309, strings produced by splitting the inputs accounted for 403 MiB, and diff snapshot pointer arrays accounted for another 56 MiB.
 
 ## Full 58-project command
 
-Three interleaved runs per Relar build included Git, both Ruff children for each project, and Markdown rendering. Median wall time was **30.09 s on #309 and 29.65 s on this build**. Their respective ranges were 24.17–32.47 s and 21.53–36.32 s. Median peak RSS was **825.1 → 684.6 MiB**. All 58 checkouts remained clean.
+Three interleaved runs per Imre build included Git, both Ruff children for each project, and Markdown rendering. Median wall time was **30.09 s on #309 and 29.65 s on this build**. Their respective ranges were 24.17–32.47 s and 21.53–36.32 s. Median peak RSS was **825.1 → 684.6 MiB**. All 58 checkouts remained clean.
 
-The earlier CPython 3.14.5 run took 1,950.32 s and 841.1 MiB. Its 76,952-byte report matched an individual current Relar run (31.37 s, 682.4 MiB) and the earlier #309 run (25.51 s). Both Ruff versions failed on Apache Airflow. Depending on which failure the reporter surfaces, a run can instead produce 76,980 bytes. A current run with that size matched the independently rendered CPython reference for the newer Ruff error (28.53 s, 675.9 MiB). Each report counted 436,327 added and 393,847 removed violations across 47 changed projects, 4 unchanged projects, and 7 errors. [Live benchmark](../ruff_ecosystem_live.py)
+The earlier CPython 3.14.5 run took 1,950.32 s and 841.1 MiB. Its 76,952-byte report matched an individual current Imre run (31.37 s, 682.4 MiB) and the earlier #309 run (25.51 s). Both Ruff versions failed on Apache Airflow. Depending on which failure the reporter surfaces, a run can instead produce 76,980 bytes. A current run with that size matched the independently rendered CPython reference for the newer Ruff error (28.53 s, 675.9 MiB). Each report counted 436,327 added and 393,847 removed violations across 47 changed projects, 4 unchanged projects, and 7 errors. [Live benchmark](../ruff_ecosystem_live.py)
 
 ## What changed
 

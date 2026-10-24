@@ -34,7 +34,7 @@ def main() -> None:
     if args.sanitize:
         flags += ["--sanitize"]
     records = []
-    with tempfile.TemporaryDirectory(prefix="relar-luhn-suite-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="imre-luhn-suite-") as temporary:
         directory = Path(temporary)
         for level in args.opt_levels:
             programs = {}

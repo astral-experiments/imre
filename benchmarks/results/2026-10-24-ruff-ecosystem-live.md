@@ -1,8 +1,10 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Ruff ecosystem check on 58 Git repositories
 
-Relar compiles Ruff’s ten Python modules from their pinned upstream sources. The command runs Ruff 0.15.0 and 0.16.1 on every default checkout. With the original Git revisions held fixed, both native and CPython commands reported 33,677 added violations, 4,290 removed violations, 30 changed projects, 22 unchanged projects and six project errors.
+Imre compiles Ruff’s ten Python modules from their pinned upstream sources. The command runs Ruff 0.15.0 and 0.16.1 on every default checkout. With the original Git revisions held fixed, both native and CPython commands reported 33,677 added violations, 4,290 removed violations, 30 changed projects, 22 unchanged projects and six project errors.
 
-| Complete command | CPython 3.12.13 | Relar |
+| Complete command | CPython 3.12.13 | Imre |
 | --- | ---: | ---: |
 | Cached, local origins, parallel file walks | 12.20 s | 10.34 s |
 | Cached, local origins, single CPU | 131.24 s | 124.21 s |

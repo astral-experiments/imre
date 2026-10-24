@@ -53,7 +53,7 @@ def original_command(python, compute=False):
 
 def environment():
     result = {**os.environ, "PYTHONHASHSEED": "0", "PYTHON_JIT": "0", "PYTHONPATH": "",
-              "CODON_PYTHON": "/nonexistent/relar-native-codon-libpython.so"}
+              "CODON_PYTHON": "/nonexistent/imre-native-codon-libpython.so"}
     result.pop("PYTHONHOME", None)
     return result
 
@@ -412,7 +412,7 @@ def main():
     for name in ("binary", "rust", "codon"):
         value = getattr(args, name)
         if value:
-            commands["relar" if name == "binary" else name] = [str(value.resolve(strict=True))]
+            commands["imre" if name == "binary" else name] = [str(value.resolve(strict=True))]
             if name == "rust" and args.compute:
                 commands[name].append("--compute")
     result = validate_commands(commands, include_real=not args.skip_real, compute=args.compute)

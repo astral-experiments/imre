@@ -15,11 +15,11 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            runner: ${{ github.repository == 'astral-sh/relar' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+            runner: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
           - target: aarch64-unknown-linux-gnu
-            runner: ${{ github.repository == 'astral-sh/relar' && 'github-ubuntu-24.04-aarch64-4' || 'ubuntu-24.04-arm' }}
+            runner: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-aarch64-4' || 'ubuntu-24.04-arm' }}
           - target: aarch64-apple-darwin
-            runner: ${{ github.repository == 'astral-sh/relar' && 'namespace-profile-macos-15' || 'macos-15' }}
+            runner: ${{ github.repository == 'astral-sh/imre' && 'namespace-profile-macos-15' || 'macos-15' }}
     env:
       TARGET: ${{ matrix.target }}
     steps:
@@ -36,39 +36,39 @@ jobs:
       - name: Build binary
         run: cargo build --locked --profile dist --target "$TARGET" --workspace
       - name: Test runtime
-        run: cargo test --locked --profile dist --target "$TARGET" -p relar-runtime
+        run: cargo test --locked --profile dist --target "$TARGET" -p imre-runtime
 
       - name: Archive binary
         shell: bash
         run: |
-          ARCHIVE_NAME=relar-$TARGET
+          ARCHIVE_NAME=imre-$TARGET
           ARCHIVE_FILE=$ARCHIVE_NAME.tar.gz
 
           umask 022
           mkdir -p "$ARCHIVE_NAME"
-          cp "target/$TARGET/dist/relar" "target/$TARGET/dist/librelar_runtime.a" LICENSE-APACHE LICENSE-MIT "$ARCHIVE_NAME/"
+          cp "target/$TARGET/dist/imre" "target/$TARGET/dist/libimre_runtime.a" LICENSE-APACHE LICENSE-MIT "$ARCHIVE_NAME/"
           cp examples/conformance_report/upstream/LICENSE "$ARCHIVE_NAME/LICENSE-Ruff"
-          cargo metadata --locked --format-version 1 --filter-platform "$TARGET" > "$RUNNER_TEMP/relar-packages.json"
-          typeshed_manifest=$(jq -er '.packages[] | select(.name == "ty_vendored") | .manifest_path' "$RUNNER_TEMP/relar-packages.json")
+          cargo metadata --locked --format-version 1 --filter-platform "$TARGET" > "$RUNNER_TEMP/imre-packages.json"
+          typeshed_manifest=$(jq -er '.packages[] | select(.name == "ty_vendored") | .manifest_path' "$RUNNER_TEMP/imre-packages.json")
           cp "$(dirname "$typeshed_manifest")/vendor/typeshed/LICENSE" "$ARCHIVE_NAME/LICENSE-typeshed"
           if [[ "$TARGET" == *-linux-gnu ]]; then
-            cp "target/$TARGET/dist/librelar_runtime_jemalloc.a" "$ARCHIVE_NAME/"
-            jemalloc_manifest=$(jq -er '.packages[] | select(.name == "tikv-jemalloc-sys") | .manifest_path' "$RUNNER_TEMP/relar-packages.json")
+            cp "target/$TARGET/dist/libimre_runtime_jemalloc.a" "$ARCHIVE_NAME/"
+            jemalloc_manifest=$(jq -er '.packages[] | select(.name == "tikv-jemalloc-sys") | .manifest_path' "$RUNNER_TEMP/imre-packages.json")
             cp "$(dirname "$jemalloc_manifest")/jemalloc/COPYING" "$ARCHIVE_NAME/LICENSE-jemalloc"
-            python3 scripts/bundle-linux-toolchain.py "$ARCHIVE_NAME/relar-toolchain"
+            python3 scripts/bundle-linux-toolchain.py "$ARCHIVE_NAME/imre-toolchain"
           fi
           tar czvf "$ARCHIVE_FILE" "$ARCHIVE_NAME"
           shasum -a 256 "$ARCHIVE_FILE" > "$ARCHIVE_FILE.sha256"
 
       - name: Test archived binary
         run: |
-          tar -xzf "relar-$TARGET.tar.gz" -C "$RUNNER_TEMP"
+          tar -xzf "imre-$TARGET.tar.gz" -C "$RUNNER_TEMP"
           cd "$RUNNER_TEMP"
           echo 'print(40 + 2)' > smoke.py
-          test "$("./relar-$TARGET/relar" run smoke.py)" = 42
+          test "$("./imre-$TARGET/imre" run smoke.py)" = 42
           if [[ "$TARGET" == *-linux-gnu ]]; then
-            test -s "relar-$TARGET/LICENSE-jemalloc"
-            test "$("./relar-$TARGET/relar" run smoke.py --allocator jemalloc)" = 42
+            test -s "imre-$TARGET/LICENSE-jemalloc"
+            test "$("./imre-$TARGET/imre" run smoke.py --allocator jemalloc)" = 42
           fi
 
       - name: Build and run without a system toolchain
@@ -83,16 +83,16 @@ jobs:
               cd /tmp
               for tool in clang clang-18 cc gcc ld ld.lld; do test -z "$(command -v "$tool")"; done
               tar -xz
-              bindir="$PWD/relar-$TARGET"
+              bindir="$PWD/imre-$TARGET"
               echo "print(40 + 2)" > hello.py
-              "$bindir/relar" build hello.py --verbose-link -o hello 2>link.log
-              grep -F -- "$bindir/relar-toolchain/bin/clang" link.log
-              grep -F -- "$bindir/relar-toolchain/bin/ld.lld" link.log
+              "$bindir/imre" build hello.py --verbose-link -o hello 2>link.log
+              grep -F -- "$bindir/imre-toolchain/bin/clang" link.log
+              grep -F -- "$bindir/imre-toolchain/bin/ld.lld" link.log
               test "$(./hello)" = 42
-              test "$(RELAR_CACHE_TRACE=1 "$bindir/relar" run hello.py 2>cache.log)" = 42
-              grep -Fx "relar cache hit" cache.log
-              test "$("$bindir/relar" run hello.py --allocator jemalloc)" = 42
-            ' < "relar-$TARGET.tar.gz"
+              test "$(IMRE_CACHE_TRACE=1 "$bindir/imre" run hello.py 2>cache.log)" = 42
+              grep -Fx "imre cache hit" cache.log
+              test "$("$bindir/imre" run hello.py --allocator jemalloc)" = 42
+            ' < "imre-$TARGET.tar.gz"
 
       - name: Upload binary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -106,7 +106,7 @@ jobs:
   build-global-dist-artifacts:
     name: Shell installer
     needs: build
-    runs-on: ${{ github.repository == 'astral-sh/relar' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -124,7 +124,7 @@ jobs:
       - name: Build shell installer
         shell: bash
         run: |
-          tag=$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "relar-compiler").version')
+          tag=$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "imre-compiler").version')
           dist=(uv run --locked --only-dev --python 3.12 dist)
           "${dist[@]}" manifest --tag="$tag" --artifacts=local --no-local-paths --output-format=json > "$RUNNER_TEMP/local-manifest.json"
           # Cargo-dist embeds the native archive checksums in the installer.
@@ -139,24 +139,24 @@ jobs:
               (.; .artifacts[$name].checksums.sha256 = $sha)
           ' "$RUNNER_TEMP/local-manifest.json" > target/distrib/local-dist-manifest.json
           "${dist[@]}" build --tag="$tag" --artifacts=global
-          python3 scripts/prepare-shell-installer.py target/distrib/relar-installer.sh
-          (cd target/distrib && sha256sum --binary relar-installer.sh >> sha256.sum)
+          python3 scripts/prepare-shell-installer.py target/distrib/imre-installer.sh
+          (cd target/distrib && sha256sum --binary imre-installer.sh >> sha256.sum)
       - name: Test shell installer
         run: |
-          export RELAR_DOWNLOAD_URL="file://$PWD/target/distrib"
-          export RELAR_UNMANAGED_INSTALL="$RUNNER_TEMP/relar-install"
-          sh target/distrib/relar-installer.sh
-          sh target/distrib/relar-installer.sh
+          export IMRE_DOWNLOAD_URL="file://$PWD/target/distrib"
+          export IMRE_UNMANAGED_INSTALL="$RUNNER_TEMP/imre-install"
+          sh target/distrib/imre-installer.sh
+          sh target/distrib/imre-installer.sh
           echo 'print(40 + 2)' > "$RUNNER_TEMP/hello.py"
           test "$(env -i HOME="$RUNNER_TEMP" PATH=/usr/bin:/bin \
-            "$RELAR_UNMANAGED_INSTALL/relar" run "$RUNNER_TEMP/hello.py" --verbose-link 2>"$RUNNER_TEMP/install-link.log")" = 42
-          grep -F -- "$RELAR_UNMANAGED_INSTALL/relar-toolchain/bin/clang" "$RUNNER_TEMP/install-link.log"
-          grep -F -- "$RELAR_UNMANAGED_INSTALL/relar-toolchain/bin/ld.lld" "$RUNNER_TEMP/install-link.log"
-          test "$("$RELAR_UNMANAGED_INSTALL/relar" run "$RUNNER_TEMP/hello.py" --allocator jemalloc)" = 42
+            "$IMRE_UNMANAGED_INSTALL/imre" run "$RUNNER_TEMP/hello.py" --verbose-link 2>"$RUNNER_TEMP/install-link.log")" = 42
+          grep -F -- "$IMRE_UNMANAGED_INSTALL/imre-toolchain/bin/clang" "$RUNNER_TEMP/install-link.log"
+          grep -F -- "$IMRE_UNMANAGED_INSTALL/imre-toolchain/bin/ld.lld" "$RUNNER_TEMP/install-link.log"
+          test "$("$IMRE_UNMANAGED_INSTALL/imre" run "$RUNNER_TEMP/hello.py" --allocator jemalloc)" = 42
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: build-github-installer
           if-no-files-found: error
           path: |
-            target/distrib/relar-installer.sh
+            target/distrib/imre-installer.sh
             target/distrib/sha256.sum

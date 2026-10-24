@@ -1,4 +1,4 @@
-"""Build one pinned CRC32C core for CPython, Relar, and direct C calls."""
+"""Build one pinned CRC32C core for CPython, Imre, and direct C calls."""
 
 import argparse
 import hashlib
@@ -44,7 +44,7 @@ def main():
     )
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument(
-        "--relar-include", type=Path, help="directory containing Relar's Python.h"
+        "--imre-include", type=Path, help="directory containing Imre's Python.h"
     )
     parser.add_argument("--cc", default="cc")
     parser.add_argument("--cxx", default="c++")
@@ -104,19 +104,19 @@ def main():
         output / "direct",
     )
 
-    if args.relar_include:
+    if args.imre_include:
         stage = output / "wheel/google_crc32c"
         shutil.copytree(EXAMPLE / "wheel/google_crc32c", stage, dirs_exist_ok=True)
         licenses = stage / "licenses"
         licenses.mkdir(exist_ok=True)
         shutil.copyfile(UPSTREAM / "LICENSE", licenses / "google-crc32c.txt")
         shutil.copyfile(core / "LICENSE", licenses / "crc32c.txt")
-        obj = output / "relar-crc32c.o"
-        run(*cc, "-I", args.relar_include.resolve(), "-c", extension, "-o", obj)
-        target = stage / "_crc32c.relar.a"
+        obj = output / "imre-crc32c.o"
+        run(*cc, "-I", args.imre_include.resolve(), "-c", extension, "-o", obj)
+        target = stage / "_crc32c.imre.a"
         shutil.copyfile(archive, target)
         run("ar", "rcs", target, obj)
-        (stage / "_crc32c.relar.libs").write_text(standard_library + "\n")
+        (stage / "_crc32c.imre.libs").write_text(standard_library + "\n")
 
 
 if __name__ == "__main__":

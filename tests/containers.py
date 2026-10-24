@@ -294,7 +294,7 @@ REJECTED = {
     "counter_schema": """
         from collections import Counter
         from dataclasses import dataclass
-        from relar.json import decode
+        from imre.json import decode
         @dataclass
         class Box:
             counts: Counter[str]
@@ -988,7 +988,7 @@ def main() -> None:
     compiler = str(args.compiler.resolve())
     runtime = str(args.runtime.resolve())
     passed = 0
-    with tempfile.TemporaryDirectory(prefix="relar-containers-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-containers-") as directory:
         temporary = Path(directory)
         for name, source in REJECTED.items():
             path = temporary / f"{name}.py"

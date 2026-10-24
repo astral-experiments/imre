@@ -4,10 +4,10 @@ The ten vendored Python modules are the original Ruff ecosystem package. The nat
 
 ## Run the original check command
 
-From a Relar checkout, with Git and both Ruff binaries available:
+From a Imre checkout, with Git and both Ruff binaries available:
 
 ```sh
-relar build --entry-profile examples/ruff_ecosystem/check-entry.json \
+imre build --entry-profile examples/ruff_ecosystem/check-entry.json \
   examples/ruff_ecosystem/ruff_ecosystem/__main__.py -o /tmp/ruff-ecosystem
 mkdir -p /tmp/ruff-checkouts
 /tmp/ruff-ecosystem --cache /tmp/ruff-checkouts check \
@@ -20,7 +20,7 @@ For a comparison against CPython, use a Python 3.12 environment containing `toml
 
 ```sh
 python3 benchmarks/ruff_ecosystem_live.py --python /path/to/python3.12 \
-  --relar /tmp/ruff-ecosystem --old-ruff /path/to/ruff-0.15.0 \
+  --imre /tmp/ruff-ecosystem --old-ruff /path/to/ruff-0.15.0 \
   --new-ruff /path/to/ruff-0.16.1 --cache /tmp/ruff-checkouts \
   --output-dir /tmp/ruff-live-comparison --cpu 3 --rounds 3
 ```
@@ -30,7 +30,7 @@ python3 benchmarks/ruff_ecosystem_live.py --python /path/to/python3.12 \
 `replay.py` reads frozen output from two Ruff versions and passes the sorted diagnostics to Ruff’s original ecosystem package. Captures stay outside Git. Each tab-separated row of `projects.tsv` gives the repository owner, name, commit, and the two capture filenames. A second CLI argument repeats each project under distinct names.
 
 ```sh
-relar build --reachable-only examples/ruff_ecosystem/replay.py -o /tmp/ruff-replay
+imre build --reachable-only examples/ruff_ecosystem/replay.py -o /tmp/ruff-replay
 /tmp/ruff-replay captures 1 > report.md
 python3 examples/ruff_ecosystem/replay.py captures 1 > cpython-report.md
 cmp report.md cpython-report.md
@@ -46,11 +46,11 @@ cargo build --release --locked --manifest-path benchmarks/reference/ruff_ecosyst
 python3 benchmarks/codon_native/ruff_ecosystem_build.py --codon /path/to/codon --output /tmp/ruff-replay-codon
 ```
 
-After compiling the replay with Relar, run the four-engine comparison on Linux. Use CPython 3.12 with Ruff’s ecosystem dependencies and native Codon 0.20.4. The harness measures process wall time and peak resident memory, including input reads, sorting, alignment, and Markdown output. It validates the complete output bytes every time. The 10× workload re-reads the same four files for 20 separately named project comparisons.
+After compiling the replay with Imre, run the four-engine comparison on Linux. Use CPython 3.12 with Ruff’s ecosystem dependencies and native Codon 0.20.4. The harness measures process wall time and peak resident memory, including input reads, sorting, alignment, and Markdown output. It validates the complete output bytes every time. The 10× workload re-reads the same four files for 20 separately named project comparisons.
 
 ```sh
 python3 benchmarks/ruff_ecosystem_benchmark.py bench \
-  --captures captures --python /path/to/python3.12 --relar /path/to/ruff-replay \
+  --captures captures --python /path/to/python3.12 --imre /path/to/ruff-replay \
   --codon /tmp/ruff-replay-codon --rust /path/to/ruff-ecosystem-reference \
   --cpu 3 --rounds 4 --output /tmp/ruff-ecosystem-results.json.gz
 ```
@@ -76,6 +76,6 @@ For the three-project timing comparison, write the captures under `preview/bokeh
 
 ```sh
 python3 benchmarks/ruff_ecosystem_benchmark.py preview --captures preview \
-  --relar /tmp/ruff-replay --codon /tmp/ruff-replay-codon \
+  --imre /tmp/ruff-replay --codon /tmp/ruff-replay-codon \
   --rust /path/to/ruff-ecosystem-reference --cpu 3 --output preview-results.json.gz
 ```

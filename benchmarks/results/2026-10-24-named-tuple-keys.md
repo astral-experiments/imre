@@ -1,3 +1,5 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Named-local tuple keys in the uv catalog
 
 The unchanged uv catalog builds `labels = (artifact.platform, artifact.variant)` for each artifact. The compiler captures those two strings once, probes the dictionary with a key on the stack, and creates an owned tuple on the cache-insertion path. The hand rewrite captures the strings in two Python locals and uses inline tuple literals for the probe and insertion. It leaves the outer version cache unchanged.

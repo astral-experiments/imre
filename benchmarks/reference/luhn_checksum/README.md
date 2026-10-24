@@ -16,7 +16,7 @@ library corpus.
 `src/unicode.rs` lists all 76 decimal-zero code points in Unicode 16.0, generated
 independently from CPython 3.14.5's `unicodedata` database. Each following group of
 ten contains digits 0–9. The reference performs its own decimal lookup and
-streaming arithmetic; it links no Relar runtime code.
+streaming arithmetic; it links no Imre runtime code.
 The validator checks every decimal character supported by the selected CPython.
 This is an explicit Unicode 16 comparison domain, not a claim of universal
 compatibility across newer Unicode databases.
@@ -41,7 +41,7 @@ build directory distinct from the target directory. The build helper records
 complete sources, tool identities and versions, effective flags, build output,
 and the copied executable hash. It clears inherited Rust flags and explicitly
 selects release optimization level 3 and 16 codegen units. `--thinlto` selects
-ThinLTO with LLVM import/inlining budgets of 1,000, matching Relar's expanded
+ThinLTO with LLVM import/inlining budgets of 1,000, matching Imre's expanded
 ThinLTO budgets. Use separate artifact directories for normal and ThinLTO builds.
 
 Pass the executable to `benchmarks/luhn_benchmark.py --rust`; its build record

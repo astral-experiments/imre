@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Self
-from relar.json import decode
+from imre.json import decode
 
 
 @dataclass(frozen=True, slots=True)

@@ -13,7 +13,7 @@ if name == "uv":
         "run",
         "--locked",
         "--python",
-        os.environ["RELAR_PYTHON"],
+        os.environ["IMRE_PYTHON"],
         "--script",
         os.environ["MEMORY_SETUP_SCRIPT"],
     ], args

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "comparison": "prebuilt baseline vs optimized Relar vs unchanged CPython",
+  "comparison": "prebuilt baseline vs optimized Imre vs unchanged CPython",
   "started_at_utc": "2026-10-17T15:56:10.292288+00:00",
   "completed_at_utc": "2026-10-17T15:56:24.535861+00:00",
   "git": {
@@ -58,7 +58,7 @@
         "llvm_ir": "d65c178647480bdfc6fd783497171f8b126be157043d6478dac3ee73b0aaab09"
       },
       "tools": {
-        "relar": "relar 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
+        "imre": "imre 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
         "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-18/bin",
         "cpython": {
           "implementation": "cpython",
@@ -87,7 +87,7 @@
         "returncode": 0
       },
       "compile_command": [
-        "relar",
+        "imre",
         "build",
         "examples/route_planner.py",
         "-o",
@@ -120,7 +120,7 @@
         "llvm_ir": "f2c59d959c798411e2b649f90858e1129b5b438b59e5aadd0b7425515d8e65b1"
       },
       "tools": {
-        "relar": "relar 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
+        "imre": "imre 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
         "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-18/bin",
         "cpython": {
           "implementation": "cpython",
@@ -149,7 +149,7 @@
         "returncode": 0
       },
       "compile_command": [
-        "relar",
+        "imre",
         "build",
         "examples/route_planner.py",
         "-o",

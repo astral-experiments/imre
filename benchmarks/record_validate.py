@@ -231,7 +231,7 @@ def main():
     args = parser.parse_args()
     commands = {"cpython": python_command(args.python)}
     if args.binary:
-        commands["relar"] = [str(args.binary.resolve(strict=True))]
+        commands["imre"] = [str(args.binary.resolve(strict=True))]
     if args.rust:
         commands["rust"] = [str(args.rust.resolve(strict=True))]
     result = validate_commands(commands)

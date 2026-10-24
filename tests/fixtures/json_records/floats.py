@@ -1,4 +1,4 @@
-from relar.json import decode
+from imre.json import decode
 
 
 class Number:

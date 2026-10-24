@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Self
 
-from relar.json import decode as cls
+from imre.json import decode as cls
 
 
 @dataclass

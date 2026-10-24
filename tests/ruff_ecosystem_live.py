@@ -70,7 +70,7 @@ def seed(directory):
     source = directory / "source"
     source.mkdir()
     git(source, "init", "-q", "-b", "main")
-    git(source, "config", "user.name", "Relar tests")
+    git(source, "config", "user.name", "Imre tests")
     git(source, "config", "user.email", "tests@example.invalid")
     git(source, "config", "commit.gpgSign", "false")
     (source / "ruff.toml").write_bytes(CONFIG)
@@ -79,7 +79,7 @@ def seed(directory):
     git(source, "commit", "-qm", "base")
     remote = directory / "remote.git"
     git(directory, "clone", "-q", "--bare", str(source), str(remote))
-    caches = [directory / name for name in ["cpython-cache", "relar-cache"]]
+    caches = [directory / name for name in ["cpython-cache", "imre-cache"]]
     for cache in caches:
         cache.mkdir()
         for project in PROJECTS:
@@ -96,7 +96,7 @@ def main():
     parser.add_argument("--runtime", type=Path, required=True)
     parser.add_argument("--python", default=sys.executable)
     args = parser.parse_args()
-    with tempfile.TemporaryDirectory(prefix="relar-ecosystem-live-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="imre-ecosystem-live-") as temporary:
         directory = Path(temporary)
         package = directory / "ruff_ecosystem"
         shutil.copytree(EXAMPLE / package.name, package, ignore=shutil.ignore_patterns("__pycache__"))

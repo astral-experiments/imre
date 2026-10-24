@@ -4,8 +4,8 @@
       "codon": 8.37622855153086,
       "original": 10.565409097333204,
       "port": 9.134812007637045,
-      "relar": 7.17704398448508,
-      "relar_thin": 6.843511855503482,
+      "imre": 7.17704398448508,
+      "imre_thin": 6.843511855503482,
       "rust": 7.489891960169439,
       "rust_thin": 7.177353463463919
     },
@@ -13,8 +13,8 @@
       "codon": 8.745091553235998,
       "original": 10.56126748807476,
       "port": 9.114140973095575,
-      "relar": 6.943488786838878,
-      "relar_thin": 6.544801220435077,
+      "imre": 6.943488786838878,
+      "imre_thin": 6.544801220435077,
       "rust": 7.0090928110734705,
       "rust_thin": 6.551396818526174
     }
@@ -35,11 +35,11 @@
         "elapsed_ns": 24298198917.5,
         "peak_rss_kib": 33236.0
       },
-      "relar": {
+      "imre": {
         "elapsed_ns": 1071306245.5,
         "peak_rss_kib": 16228.0
       },
-      "relar_thin": {
+      "imre_thin": {
         "elapsed_ns": 786596387.0,
         "peak_rss_kib": 16216.0
       },
@@ -65,11 +65,11 @@
         "elapsed_ns": 23896798136.5,
         "peak_rss_kib": 32138.0
       },
-      "relar": {
+      "imre": {
         "elapsed_ns": 890907464.5,
         "peak_rss_kib": 15790.0
       },
-      "relar_thin": {
+      "imre_thin": {
         "elapsed_ns": 619728314.0,
         "peak_rss_kib": 16028.0
       },
@@ -95,11 +95,11 @@
         "elapsed_ns": 2659956099.5,
         "peak_rss_kib": 32336.0
       },
-      "relar": {
+      "imre": {
         "elapsed_ns": 149268452.0,
         "peak_rss_kib": 15988.0
       },
-      "relar_thin": {
+      "imre_thin": {
         "elapsed_ns": 114940458.0,
         "peak_rss_kib": 15968.0
       },
@@ -125,11 +125,11 @@
         "elapsed_ns": 2621947390.0,
         "peak_rss_kib": 31512.0
       },
-      "relar": {
+      "imre": {
         "elapsed_ns": 128308332.0,
         "peak_rss_kib": 15560.0
       },
-      "relar_thin": {
+      "imre_thin": {
         "elapsed_ns": 94690166.0,
         "peak_rss_kib": 15796.0
       },
@@ -161,8 +161,8 @@
       "codon": 1.0,
       "original": 8.302996561323072,
       "port": 1.0278327560613558,
-      "relar": 1.0150112584438329,
-      "relar_thin": 1.0155310621242486,
+      "imre": 1.0150112584438329,
+      "imre_thin": 1.0155310621242486,
       "rust": 1.006560773480663,
       "rust_thin": 1.0069108500345543
     },
@@ -170,8 +170,8 @@
       "codon": 1.0,
       "original": 8.317561359758498,
       "port": 1.0198654480832698,
-      "relar": 1.0147814910025708,
-      "relar_thin": 1.014687262598126,
+      "imre": 1.0147814910025708,
+      "imre_thin": 1.014687262598126,
       "rust": 0.9878260869565217,
       "rust_thin": 1.0096335799071048
     }
@@ -181,7 +181,7 @@
     "statistics_match_strict": true
   },
   "record_sha256": "d3f564bf7cf3db93a77eb213c43f812daf5a3282267acc4935ca7397c73323e1",
-  "relar_over_rust": {
+  "imre_over_rust": {
     "10x-gzip": {
       "ordinary": {
         "elapsed_ns": 1.1196399383318918,

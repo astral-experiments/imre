@@ -5,23 +5,23 @@
   "revision": "8b54eae6572a93926265d78562656dd395ad28b0",
   "auditor_sha256": "780711172e2c6bf62afc9b7e90980df2fc3aeab3fc3227939a8083899a931a53",
   "input_sha256": {
-    "/tmp/relar-luhn-performance-report.md": "e3d15c9ccda684e7ca5b622b500ba9f9d496707390453430fb8ecd88404897fb",
-    "/tmp/relar-luhn-performance-benchmark-audit.json": "77642ce0fea493fb1971d092020f6989ab8c6e70199481c1df8d8189c9d62819",
-    "/tmp/relar-luhn-performance-v1-normal.json": "539f57043f061df56ea58a901cedf2c3faee2884da26486ed8e24ddb49094460",
-    "/tmp/relar-luhn-performance-v1-thinlto.json": "9279ec2e8a120885946bd355918869f801cc239483dfeb30ede626f10ff153b5",
-    "/tmp/relar-luhn-performance-short-profile/summary.json": "576b520a7ba8b03954b08bd9e69b9b366bf2d77d94164d376cbaeb7950bb0253",
-    "/tmp/relar-luhn-performance-short-profile-audit.json": "4b20b0326e30577a5a5461602079b9eaed8219a93b83461abe73b4ba43bad479",
-    "/tmp/relar-luhn-performance-short-profile/relar-dhat/profile.json": "2fd7cb4b978a023ba58678a3478261a822da0b7a6ec13dde23afdc0e8901b1db",
-    "/tmp/relar-luhn-performance-short-profile/relar-callgrind/profile.callgrind": "acbb1ee4fc414c89ed76ceefec56525ac12f46daa8d207a9da656ed1edb9820f",
-    "/tmp/relar-luhn-performance-short-profile/rust-dhat/profile.json": "059cc2128269b4fa2950312b9dd91d759f6e0e6ccd7010bf70a58cc835f751a3",
-    "/tmp/relar-luhn-performance-short-profile/rust-callgrind/profile.callgrind": "869bbbcae90bdc91d773ca714a51b6f1aac4a24b9a328b1ac5eb13b76abee515",
-    "/tmp/relar-luhn-performance-large-profile/summary.json": "31ba9b31c6fcc5b8bf21bc141e71210bcf5ff46d99da15119096965d9e32fb99",
-    "/tmp/relar-luhn-performance-large-profile-audit.json": "8f318ee9db4f2cd4262b3c54ed326b002609436cbdd8c877b3b44308444a6e51",
-    "/tmp/relar-luhn-performance-large-profile/relar-dhat/profile.json": "4177cf7480d70a244a4b8ef1e6b9af0ab45a69ba6704a5f49283b2e288453c71",
-    "/tmp/relar-luhn-performance-large-profile/relar-callgrind/profile.callgrind": "998ef42d8e5703367ee64104051add32b8ce64fd9165c3209bd798fcca5edbfb",
-    "/tmp/relar-luhn-performance-large-profile/rust-dhat/profile.json": "b53d8002bc3f21adc7bd4b91b78ee2cdbac7691d6fdda08060d42a267bb9d080",
-    "/tmp/relar-luhn-performance-large-profile/rust-callgrind/profile.callgrind": "939ad0c5f03b9b1ad248ceb4f74cf8dd02c93e59f7de87c5161704468943b65f",
-    "/tmp/relar-luhn-performance-validation-audit.json": "309776b9e38a445ee93f7af404527aeb39eb9f3c8ff9aebe4e020dc08fd10e8c"
+    "/tmp/imre-luhn-performance-report.md": "e3d15c9ccda684e7ca5b622b500ba9f9d496707390453430fb8ecd88404897fb",
+    "/tmp/imre-luhn-performance-benchmark-audit.json": "77642ce0fea493fb1971d092020f6989ab8c6e70199481c1df8d8189c9d62819",
+    "/tmp/imre-luhn-performance-v1-normal.json": "539f57043f061df56ea58a901cedf2c3faee2884da26486ed8e24ddb49094460",
+    "/tmp/imre-luhn-performance-v1-thinlto.json": "9279ec2e8a120885946bd355918869f801cc239483dfeb30ede626f10ff153b5",
+    "/tmp/imre-luhn-performance-short-profile/summary.json": "576b520a7ba8b03954b08bd9e69b9b366bf2d77d94164d376cbaeb7950bb0253",
+    "/tmp/imre-luhn-performance-short-profile-audit.json": "4b20b0326e30577a5a5461602079b9eaed8219a93b83461abe73b4ba43bad479",
+    "/tmp/imre-luhn-performance-short-profile/imre-dhat/profile.json": "2fd7cb4b978a023ba58678a3478261a822da0b7a6ec13dde23afdc0e8901b1db",
+    "/tmp/imre-luhn-performance-short-profile/imre-callgrind/profile.callgrind": "acbb1ee4fc414c89ed76ceefec56525ac12f46daa8d207a9da656ed1edb9820f",
+    "/tmp/imre-luhn-performance-short-profile/rust-dhat/profile.json": "059cc2128269b4fa2950312b9dd91d759f6e0e6ccd7010bf70a58cc835f751a3",
+    "/tmp/imre-luhn-performance-short-profile/rust-callgrind/profile.callgrind": "869bbbcae90bdc91d773ca714a51b6f1aac4a24b9a328b1ac5eb13b76abee515",
+    "/tmp/imre-luhn-performance-large-profile/summary.json": "31ba9b31c6fcc5b8bf21bc141e71210bcf5ff46d99da15119096965d9e32fb99",
+    "/tmp/imre-luhn-performance-large-profile-audit.json": "8f318ee9db4f2cd4262b3c54ed326b002609436cbdd8c877b3b44308444a6e51",
+    "/tmp/imre-luhn-performance-large-profile/imre-dhat/profile.json": "4177cf7480d70a244a4b8ef1e6b9af0ab45a69ba6704a5f49283b2e288453c71",
+    "/tmp/imre-luhn-performance-large-profile/imre-callgrind/profile.callgrind": "998ef42d8e5703367ee64104051add32b8ce64fd9165c3209bd798fcca5edbfb",
+    "/tmp/imre-luhn-performance-large-profile/rust-dhat/profile.json": "b53d8002bc3f21adc7bd4b91b78ee2cdbac7691d6fdda08060d42a267bb9d080",
+    "/tmp/imre-luhn-performance-large-profile/rust-callgrind/profile.callgrind": "939ad0c5f03b9b1ad248ceb4f74cf8dd02c93e59f7de87c5161704468943b65f",
+    "/tmp/imre-luhn-performance-validation-audit.json": "309776b9e38a445ee93f7af404527aeb39eb9f3c8ff9aebe4e020dc08fd10e8c"
   },
   "checks": {
     "timing_rows": 24,
@@ -32,7 +32,7 @@
     "profile_rows_from_raw_counters": 4
   },
   "startup_maxima_percent": {
-    "relar": 7.879118025913141,
+    "imre": 7.879118025913141,
     "rust": 9.677667528684983,
     "cpython": 1.8468073090150867,
     "baseline": 0.2674680725870671
@@ -40,7 +40,7 @@
   "profile_rows": [
     {
       "label": "short",
-      "engine": "relar",
+      "engine": "imre",
       "values": [
         18716,
         33,
@@ -60,7 +60,7 @@
     },
     {
       "label": "large",
-      "engine": "relar",
+      "engine": "imre",
       "values": [
         59532,
         34,

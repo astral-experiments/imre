@@ -16,7 +16,7 @@ import re
 from statistics import median
 
 
-ENGINES = ("original", "port", "codon", "relar", "rust", "relar_thin", "rust_thin")
+ENGINES = ("original", "port", "codon", "imre", "rust", "imre_thin", "rust_thin")
 CASES = ("1x-plain", "1x-gzip", "10x-plain", "10x-gzip")
 FIELDS = ("elapsed_ns", "peak_rss_kib")
 SOURCES = set("""
@@ -24,7 +24,7 @@ benchmarks/stream_catalog_benchmark.py benchmarks/catalog_process_usage.c benchm
 benchmarks/catalog_validate.py benchmarks/native_tools_benchmark.py benchmarks/live_conformance_benchmark.py
 examples/python_catalog/__init__.py examples/python_catalog/__main__.py examples/python_catalog/catalog.py
 examples/python_catalog/upstream_adapter.py examples/python_catalog/upstream/fetch-download-metadata.py
-stdlib/relar/json.py""".split())
+stdlib/imre/json.py""".split())
 # Published by the preceding, whole-file catalog comparison against unchanged uv.
 CATALOG = (3440812, "753cd906307c1b4f830e9348703e0110ba38fddd97293780f146f78f0ed9a3f6")
 # Independent construction of ten different releases and their upstream-rendered catalog.
@@ -105,10 +105,10 @@ def evidence(data, root, strict):
         require(build["path"] == receipt["path"] and identity(build) == identity(receipt), f"{engine} receipt")
         if engine != "codon":
             require(build["mode"] == ("thinlto" if engine.endswith("_thin") else "normal"), f"{engine} mode")
-    require(builds["relar"]["core"] == builds["relar_thin"]["core"] and
-            builds["relar"]["revision"] == builds["relar_thin"]["revision"] and
-            re.fullmatch("[0-9a-f]{40}", data["revision"]) and re.fullmatch("[0-9a-f]{40}", builds["relar"]["revision"]) and
-            re.fullmatch("[0-9a-f]{64}", builds["relar"]["core"]), "inconsistent compiler build")
+    require(builds["imre"]["core"] == builds["imre_thin"]["core"] and
+            builds["imre"]["revision"] == builds["imre_thin"]["revision"] and
+            re.fullmatch("[0-9a-f]{40}", data["revision"]) and re.fullmatch("[0-9a-f]{40}", builds["imre"]["revision"]) and
+            re.fullmatch("[0-9a-f]{64}", builds["imre"]["core"]), "inconsistent compiler build")
     require(builds["rust"]["target"] == builds["rust_thin"]["target"] and
             builds["rust"]["rustc"] == builds["rust_thin"]["rustc"] and
             builds["codon"]["release"] == "v0.20.4", "comparison toolchains differ")
@@ -119,7 +119,7 @@ def evidence(data, root, strict):
         if path.is_relative_to(recorded_root):
             require(file_id(root / path.relative_to(recorded_root)) == identity(item), f"build source differs: {name}")
     required = [root / n for n in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml")]
-    for pattern in ("crates/*/Cargo.toml", "crates/**/*.rs", "examples/python_catalog/**/*.py", "stdlib/relar/**/*.py",
+    for pattern in ("crates/*/Cargo.toml", "crates/**/*.rs", "examples/python_catalog/**/*.py", "stdlib/imre/**/*.py",
                     "benchmarks/reference/python_catalog/Cargo.*", "benchmarks/reference/python_catalog/src/*.rs",
                     "benchmarks/reference/python_catalog/build.py"):
         required.extend(root.glob(pattern))
@@ -215,9 +215,9 @@ def calculate(data, sample_count):
         values = {e: {f: median(r[f] for sample in case["samples"] for r in sample if r["engine"] == e)
                       for f in FIELDS} for e in ENGINES}
         relative = {mode: {f: values[a][f] / values[b][f] for f in FIELDS} for mode, a, b in (
-            ("ordinary", "relar", "rust"), ("thinlto", "relar_thin", "rust_thin"))}
-        require(numeric_tree(case["medians"]) and numeric_tree(case["relar_over_rust"]) and
-                values == case["medians"] and relative == case["relar_over_rust"], f"{label}: derived metrics differ")
+            ("ordinary", "imre", "rust"), ("thinlto", "imre_thin", "rust_thin"))}
+        require(numeric_tree(case["medians"]) and numeric_tree(case["imre_over_rust"]) and
+                values == case["medians"] and relative == case["imre_over_rust"], f"{label}: derived metrics differ")
         medians[label], ratios[label] = values, relative
     growth = {f: {kind: {e: medians["10x-" + kind][e][f] / medians["1x-" + kind][e][f] for e in ENGINES}
                   for kind in ("plain", "gzip")} for f in FIELDS}
@@ -226,7 +226,7 @@ def calculate(data, sample_count):
     require(data["time_target_met"] is True and all(r["elapsed_ns"] <= 2 for c in ratios.values() for r in c.values()),
             "2x wall-time target failed")
     return {"workloads": len(CASES), "measured": sample_count * len(CASES) * len(ENGINES),
-            "warmups": len(CASES) * len(ENGINES), "medians": medians, "relar_over_rust": ratios,
+            "warmups": len(CASES) * len(ENGINES), "medians": medians, "imre_over_rust": ratios,
             "peak_rss_10x_over_1x": growth["peak_rss_kib"], "elapsed_10x_over_1x": growth["elapsed_ns"]}
 
 

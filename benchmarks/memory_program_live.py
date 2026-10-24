@@ -21,7 +21,7 @@ from memory_validate import equivalent_original, expected_projects
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("source", "relar", "projects-dir", "old-ty", "new-ty", "output"):
+    for name in ("source", "imre", "projects-dir", "old-ty", "new-ty", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)
     parser.add_argument("--python", type=Path, default=Path(sys.executable))
     parser.add_argument("--samples", type=int, default=4)
@@ -38,15 +38,15 @@ def main():
     binaries = [str(tool.resolve(strict=True)) for tool in (args.old_ty, args.new_ty)]
     commands = {
         "cpython": [python, str(source)],
-        "relar": [str(args.relar.resolve(strict=True))],
+        "imre": [str(args.imre.resolve(strict=True))],
     }
-    env = {**os.environ, "RELAR_PYTHON": python, "PYTHONHASHSEED": "0", "NO_COLOR": "1"}
+    env = {**os.environ, "IMRE_PYTHON": python, "PYTHONHASHSEED": "0", "NO_COLOR": "1"}
     results = []
     for sample in range(args.samples + 1):
         # Alternate first position. Each execution produces its own eight fresh captures.
         order = tuple(commands) if sample % 2 else tuple(reversed(commands))
         for engine in order:
-            with tempfile.TemporaryDirectory(prefix="relar-memory-live-") as tmp:
+            with tempfile.TemporaryDirectory(prefix="imre-memory-live-") as tmp:
                 root = Path(tmp)
                 flags = [
                     "--old-ty",
@@ -141,7 +141,7 @@ def main():
         source,
         source.with_name("setup_primer_project.py"),
         source.with_name("setup_primer_project.py.lock"),
-        Path(commands["relar"][0]),
+        Path(commands["imre"][0]),
         Path(python),
         *(Path(b) for b in binaries),
         Path(shutil.which("uv")),

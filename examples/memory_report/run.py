@@ -6,7 +6,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from relar.json import decode
+from imre.json import decode
 
 from .model import MemoryReport, ProjectComparison
 from .publish import write_capture
@@ -85,7 +85,7 @@ def run_prepared(path: Path, old_ty: str, new_ty: str, capture_directory: str | 
         return collect_projects(manifest, old_ty, new_ty, environment, None, None)
     capture = Path(capture_directory)
     capture.mkdir()
-    with tempfile.TemporaryDirectory(dir=capture, prefix=".relar-capture-") as name:
+    with tempfile.TemporaryDirectory(dir=capture, prefix=".imre-capture-") as name:
         workspace = Path(name)
         staged_manifest = workspace / "projects.json"
         staged_manifest.write_text(manifest_text, encoding="utf-8")

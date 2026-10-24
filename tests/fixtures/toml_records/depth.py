@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from relar.toml import decode
+from imre.toml import decode
 
 
 @dataclass
