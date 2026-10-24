@@ -108,56 +108,6 @@ impl Value {
             index,
         }
     }
-
-    fn try_snapshot(&self, nodes: &mut Vec<Node>) -> Result<usize, Error> {
-        let node = match self {
-            // SAFETY: these read-only walks invoke no Python code. The list or table
-            // roots each child for its visit, including aliased nested containers.
-            Self::Array(a) => unsafe {
-                a.0.with(|storage| {
-                    let values = &storage.sequence().values;
-                    let mut children = Vec::new();
-                    children
-                        .try_reserve_exact(values.len())
-                        .map_err(|_| Error::allocation())?;
-                    for &word in values {
-                        children
-                            .push(Self::read(object(word as *const Object)).try_snapshot(nodes)?);
-                    }
-                    Ok(Node::Array(children))
-                })?
-            },
-            // SAFETY: the shared table roots its keys and each document during this read.
-            Self::Table(t) => unsafe {
-                t.0.with(|storage| {
-                    let mut fields = Vec::new();
-                    for (key, word) in storage.dictionary().string_entries() {
-                        fields.try_reserve(1).map_err(|_| Error::allocation())?;
-                        let key = Str::try_new(key).map_err(|_| Error::allocation())?;
-                        fields.push((
-                            key,
-                            Self::read(object(word as *const Object)).try_snapshot(nodes)?,
-                        ));
-                    }
-                    Ok(Node::Object(fields))
-                })?
-            },
-            _ => self.leaf(),
-        };
-        let index = nodes.len();
-        nodes.try_reserve(1).map_err(|_| Error::allocation())?;
-        nodes.push(node);
-        Ok(index)
-    }
-
-    pub(in crate::objects) fn try_view(&self) -> Result<View, Error> {
-        let mut nodes = Vec::new();
-        let index = self.try_snapshot(&mut nodes)?;
-        Ok(View {
-            nodes: Nodes::Document(Rc::new(nodes)),
-            index,
-        })
-    }
     fn from_json(view: &View, index: usize) -> Self {
         if index == view.index
             && let Some(root) = view.snapshot_root()
@@ -297,6 +247,56 @@ impl Value {
             }
             _ => false,
         }
+    }
+
+    fn try_snapshot(&self, nodes: &mut Vec<Node>) -> Result<usize, Error> {
+        let node = match self {
+            // SAFETY: these read-only walks invoke no Python code. The list or table
+            // roots each child for its visit, including aliased nested containers.
+            Self::Array(a) => unsafe {
+                a.0.with(|storage| {
+                    let values = &storage.sequence().values;
+                    let mut children = Vec::new();
+                    children
+                        .try_reserve_exact(values.len())
+                        .map_err(|_| Error::allocation())?;
+                    for &word in values {
+                        children
+                            .push(Self::read(object(word as *const Object)).try_snapshot(nodes)?);
+                    }
+                    Ok(Node::Array(children))
+                })?
+            },
+            // SAFETY: the shared table roots its keys and each document during this read.
+            Self::Table(t) => unsafe {
+                t.0.with(|storage| {
+                    let mut fields = Vec::new();
+                    for (key, word) in storage.dictionary().string_entries() {
+                        fields.try_reserve(1).map_err(|_| Error::allocation())?;
+                        let key = Str::try_new(key).map_err(|_| Error::allocation())?;
+                        fields.push((
+                            key,
+                            Self::read(object(word as *const Object)).try_snapshot(nodes)?,
+                        ));
+                    }
+                    Ok(Node::Object(fields))
+                })?
+            },
+            _ => self.leaf(),
+        };
+        let index = nodes.len();
+        nodes.try_reserve(1).map_err(|_| Error::allocation())?;
+        nodes.push(node);
+        Ok(index)
+    }
+
+    pub(in crate::objects) fn try_view(&self) -> Result<View, Error> {
+        let mut nodes = Vec::new();
+        let index = self.try_snapshot(&mut nodes)?;
+        Ok(View {
+            nodes: Nodes::Document(Rc::new(nodes)),
+            index,
+        })
     }
 }
 
