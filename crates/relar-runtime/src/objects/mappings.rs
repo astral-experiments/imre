@@ -1300,10 +1300,17 @@ pub unsafe extern "C" fn relar_sorted_string_keys(
             return std::ptr::null();
         }
     }
-    // SAFETY: the buffer owns every exact string. Its keys are distinct so their
-    // relative order needs no stable-sort scratch allocation.
-    unsafe { super::stdlib::sort_strings(&mut result.values, super::stdlib::StringSort::Distinct) };
-    Rc::into_raw(result.into_object())
+    let list = result.into_object();
+    // SAFETY: the list has not escaped and owns each distinct immutable key.
+    unsafe {
+        list.0.with_mut(|storage| {
+            let Storage::Sequence(words) = storage else {
+                unreachable!()
+            };
+            super::stdlib::sort_strings(&mut words.values, super::stdlib::StringSort::Distinct);
+        });
+    }
+    Rc::into_raw(list)
 }
 
 /// Creates a fresh set from two evaluated key views or sets. A direct view
