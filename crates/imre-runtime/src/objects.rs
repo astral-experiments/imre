@@ -19,7 +19,7 @@ mod json;
 mod logging;
 mod mappings;
 mod paths;
-mod posixpath;
+pub(crate) mod posixpath;
 mod processes;
 pub(crate) mod records;
 mod regexes;

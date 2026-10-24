@@ -48,7 +48,9 @@ Stream assertions receive the bytes that the native program wrote to its file.
 
 ## Native POSIX os.path calls with upstream unittest assertions
 
-`native_os_path.py` runs CPython's complete POSIX `test_join`, `test_basename`, `test_dirname` and `test_splitext` methods. Pass the same compiler, runtime, clang, result and optional CPython source options as the JSON runner. The original unittest setup and comparisons run in CPython. Each tested path operation, including those made by the `splitextTest` helper, calls a compiled Imre program. The runner checks the native call count for every test.
+`native_os_path.py` runs complete upstream POSIX tests for `join`, `basename`, `dirname`, `splitext`, `normpath` and `abspath`. CPython supplies unittest assertions and filesystem setup. Each tested operation calls a compiled Imre program in the fixture’s working directory. The result records each method’s native call count, including 100 calls from CPython’s 50 `normpath` cases for str and bytes. Pass the same compiler, runtime, clang, result and optional CPython source options as the JSON runner.
+
+The two user-defined `__fspath__` tests are outside the typed path subset. On Linux the upstream non-ASCII `abspath` test requests a surrogateescaped string; the result records that exclusion. Separate comparisons check raw bytes in an undecodable directory, text paths that normalize away that directory, and relative and absolute paths after the working directory is deleted.
 
 ## Native logging
 
