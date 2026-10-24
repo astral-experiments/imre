@@ -8,7 +8,9 @@ use super::{Kind, OptionSpec, Parser};
 
 /// Parse the positive decimal width accepted by shutil.get_terminal_size().
 fn positive_columns(value: &str) -> Option<usize> {
-    let value = value.trim();
+    let value = value.trim_matches(|ch: char| {
+        ch.is_whitespace() || matches!(ch, '\u{1c}'..='\u{1f}')
+    });
     let digits = value.strip_prefix('+').unwrap_or(value);
     let mut width = 0usize;
     let mut count = 0;
