@@ -23,6 +23,15 @@ pub(super) struct Prepared {
 }
 
 impl Prepared {
+    /// Only reads during a pull can observe an exception binding cleared by the consumer.
+    pub(super) fn reads_on_pull(&self, slot: usize) -> bool {
+        let mut reads = false;
+        ir::walk_expressions(&self.next, &mut |expr| {
+            reads |= matches!(expr.kind, ExprKind::Local(read) if read == slot);
+        });
+        reads
+    }
+
     /// Pulls and binds one owned item, or exits the source loop on exhaustion.
     fn bind_next(next: &mut Vec<Statement>, ready: Expr, value: usize, bindings: Vec<Statement>) {
         next.push(Statement::If(
@@ -97,6 +106,7 @@ pub(super) fn is_pipeline_expression(checker: &Checker<'_>, expression: &ast::Ex
     matches!(expression, ast::Expr::Generator(_))
         || matches!(expression, ast::Expr::Call(call)
             if checker.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain))
+            || checker.is_builtin_iter(call)
             || matches!(&*call.func, ast::Expr::Name(name)
                 if matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
             || matches!(&*call.func, ast::Expr::Attribute(attribute)
@@ -166,6 +176,15 @@ fn target_names(target: &ast::Expr, names: &mut HashSet<String>) {
 }
 
 impl Checker<'_> {
+    fn is_builtin_iter(&self, call: &ast::ExprCall) -> bool {
+        matches!(&*call.func, ast::Expr::Name(name) if name.id == "iter")
+            && !self.local_iter
+            && !self.names.contains_key("iter")
+            && !self.is_class_receiver(&call.func)
+            && self.local_function_binding(&call.func).is_none()
+            && self.resolve(&call.func).is_none()
+    }
+
     /// Recognizes only sealed constructor syntax at a direct consumer boundary.
     pub(super) fn pipeline_input(
         &mut self,
@@ -180,6 +199,9 @@ impl Checker<'_> {
         let ast::Expr::Call(call) = expression else {
             return Ok(None);
         };
+        if self.is_builtin_iter(call) {
+            return Ok(Some(Iteration::Prepared(self.sentinel_input(call)?)));
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain)) {
             return Ok(Some(Iteration::Prepared(self.chain_input(call, element)?)));
         }
@@ -408,6 +430,64 @@ impl Checker<'_> {
             _ => return Ok(None),
         };
         Ok(Some(Iteration::Prepared(input)))
+    }
+
+    /// A sentinel iterator owns its stop value and latches exhaustion at first match.
+    fn sentinel_input(&mut self, call: &ast::ExprCall) -> Result<Prepared, String> {
+        self.reject_builtin_keywords(call)?;
+        let [ast::Expr::Lambda(lambda), sentinel] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "iter requires a nullary lambda and a sentinel",
+            ));
+        };
+        let sentinel = self.expr(sentinel)?;
+        let item = self.pull_lambda(lambda)?;
+        if !matches!(sentinel.ty, Type::Str | Type::Bytes) || item.ty != sentinel.ty {
+            return Err(error(
+                self.source,
+                call,
+                "iter requires a producer and sentinel of the same exact str or bytes type",
+            ));
+        }
+        let stop = self.hidden(sentinel.ty);
+        let value = self.hidden(item.ty);
+        let ready = self.hidden(Type::Bool);
+        let exhaust = vec![
+            Statement::Assign(ready, boolean(false)),
+            Statement::Clear(stop),
+            Statement::Clear(value),
+        ];
+        // Catch only exhaustion raised by the producer. Construction, the caller's
+        // loop body, and other producer exceptions keep their ordinary handlers.
+        let pull = Statement::Try {
+            body: vec![Statement::Assign(value, item)],
+            handlers: vec![ir::ExceptHandler {
+                kinds: vec![exception_kind("StopIteration").unwrap()],
+                name: None,
+                body: exhaust.clone(),
+            }],
+            orelse: vec![Statement::If(
+                compare(Compare::Equal, self.local(stop), self.local(value)),
+                exhaust,
+                Vec::new(),
+            )],
+            finalbody: Vec::new(),
+        };
+        Ok(Prepared {
+            evaluate: vec![
+                Statement::Assign(stop, sentinel),
+                Statement::Assign(ready, boolean(true)),
+            ],
+            acquire: Vec::new(),
+            next: vec![Statement::If(self.local(ready), vec![pull], Vec::new())],
+            value,
+            ready,
+            elementless: false,
+            writes: HashSet::new(),
+            clear: vec![stop, value, ready],
+        })
     }
 
     /// Evaluate chain's arguments at construction, but acquire each iterator

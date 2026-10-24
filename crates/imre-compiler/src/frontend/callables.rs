@@ -161,13 +161,29 @@ impl Checker<'_> {
         })
     }
 
-    /// The fresh checker contains only parameters: every enclosing local read,
-    /// even in an inactive branch, fails rather than silently becoming a capture.
+    /// An escaping callable has no environment to store enclosing locals.
     pub(super) fn lambda_value(
         &mut self,
         lambda: &ast::ExprLambda,
         parameters: Option<Vec<Type>>,
         returns: Option<Type>,
+    ) -> Result<Expr, String> {
+        self.lower_lambda(lambda, parameters, returns, false)
+    }
+
+    /// An immediate iterator invokes its lambda in a fresh lexical frame on every
+    /// pull. Its private arguments read enclosing slots at that point, so later
+    /// rebinding is visible without creating an escaping closure.
+    pub(super) fn pull_lambda(&mut self, lambda: &ast::ExprLambda) -> Result<Expr, String> {
+        self.lower_lambda(lambda, Some(Vec::new()), None, true)
+    }
+
+    fn lower_lambda(
+        &mut self,
+        lambda: &ast::ExprLambda,
+        parameters: Option<Vec<Type>>,
+        returns: Option<Type>,
+        pull: bool,
     ) -> Result<Expr, String> {
         let declared = lambda.parameters.as_deref();
         if declared.is_some_and(|parameters| {
@@ -206,10 +222,11 @@ impl Checker<'_> {
         }
         let mut bound = narrowing::expression_assignments(&lambda.body);
         bound.extend(names.iter().map(|parameter| parameter.name().to_string()));
-        if comprehensions::free_reads(&lambda.body, bound.clone())
-            .iter()
-            .any(|name| self.names.contains_key(name))
-        {
+        let mut captures = comprehensions::free_reads(&lambda.body, bound.clone())
+            .into_iter()
+            .filter_map(|name| self.names.get(&name).map(|&slot| (slot, name)))
+            .collect::<Vec<_>>();
+        if !pull && !captures.is_empty() {
             return Err(error(
                 self.source,
                 lambda,
@@ -227,6 +244,7 @@ impl Checker<'_> {
             self.globals,
         );
         helper.inference = self.inference;
+        helper.local_iter = bound.contains("iter");
         helper.class = self.class;
         helper.class_receiver = self
             .class_receiver
@@ -237,6 +255,23 @@ impl Checker<'_> {
             let slot = helper.declare(parameter.name().as_str(), ty, *parameter)?;
             helper.assigned.insert(slot);
             params.push(slot);
+        }
+        let mut args = Vec::with_capacity(captures.len());
+        captures.sort_unstable_by_key(|(slot, _)| *slot);
+        for (source, name) in captures {
+            if !self.assigned.contains(&source) {
+                return Err(error(
+                    self.source,
+                    lambda,
+                    "captured local may be uninitialized",
+                ));
+            }
+            // A later pull may see a different optional or union arm.
+            let value = self.local(source);
+            let slot = helper.declare(&name, value.ty, lambda)?;
+            helper.assigned.insert(slot);
+            params.push(slot);
+            args.push(value);
         }
         let body = if let Some(returns) = returns {
             helper.expr_expected(&lambda.body, returns)?
@@ -260,6 +295,13 @@ impl Checker<'_> {
                     .error(lambda, "recursive calls are unsupported in this prototype"),
             },
         );
+        if pull {
+            self.calls.insert(id);
+            return Ok(Expr {
+                ty: returns,
+                kind: ExprKind::Call(id, ir::CallArgs::positional(args)),
+            });
+        }
         Ok(Expr {
             ty: self.types.callable(parameters, returns),
             kind: ExprKind::Callable {

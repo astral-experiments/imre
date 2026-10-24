@@ -24,6 +24,7 @@ mod dispatch;
 mod documents;
 mod enums;
 mod expansions;
+mod hashlib;
 mod inference;
 mod iterables;
 mod json;
@@ -326,6 +327,9 @@ const RESERVED: &[&str] = &[
 
 /// These numbers are the sealed exception categories in the runtime ABI.
 pub(crate) fn exception_kind(name: &str) -> Option<u32> {
+    if name == "StopIteration" {
+        return Some(35);
+    }
     if name == "ExceptionGroup" {
         return Some(34);
     }
@@ -1569,6 +1573,8 @@ enum Iteration {
 }
 
 struct Checker<'a> {
+    /// A later local assignment shadows builtin iter throughout a function.
+    local_iter: bool,
     context_method: bool,
     asynchronous: bool,
     /// Capture only the outer sum of an assignment with a neighboring sum.
@@ -1625,6 +1631,7 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
+            local_iter: false,
             zip_sum_rhs: None,
             asynchronous: false,
             context_method: false,
@@ -2308,7 +2315,11 @@ impl<'a> Checker<'a> {
     }
 
     /// Loop backedges can observe stores from a previous iteration.
-    fn invalidate_loop_facts(&mut self, body: &[ast::Stmt]) {
+    fn invalidate_loop_facts(
+        &mut self,
+        body: &[ast::Stmt],
+        source: Option<(&pipelines::Prepared, &ast::Expr)>,
+    ) -> Result<(), String> {
         for name in narrowing::assigned_names(body) {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
@@ -2316,9 +2327,19 @@ impl<'a> Checker<'a> {
         }
         for name in narrowing::deleted_names(body) {
             if let Some(slot) = self.names.get(&name) {
+                if let Some((input, node)) = source
+                    && input.reads_on_pull(*slot)
+                {
+                    return Err(error(
+                        self.source,
+                        node,
+                        &format!("iterator may read '{name}' after the loop body deletes it"),
+                    ));
+                }
                 self.assigned.remove(slot);
             }
         }
+        Ok(())
     }
 
     fn assigned_value(&mut self, slot: usize, value: &Expr) {
@@ -2581,7 +2602,13 @@ impl<'a> Checker<'a> {
             input =
                 Iteration::Prepared(self.prepare_iteration(input, loop_.iter.as_ref(), false)?);
         }
-        self.invalidate_loop_facts(&loop_.body);
+        self.invalidate_loop_facts(
+            &loop_.body,
+            match &input {
+                Iteration::Prepared(input) => Some((input, &loop_.iter)),
+                _ => None,
+            },
+        )?;
         for name in narrowing::expression_assignments(&loop_.target) {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
@@ -3059,6 +3086,7 @@ impl<'a> Checker<'a> {
         }
 
         if self.block_depth == 0 && !self.module_scope {
+            self.local_iter = narrowing::assigned_names(statements).contains("iter");
             self.nullable_assignments = assignments::nullable_assignments(self, statements);
         }
         self.block_depth += 1;
@@ -3323,7 +3351,7 @@ impl<'a> Checker<'a> {
             ast::Stmt::If(branch) => return self.if_chain(branch),
             ast::Stmt::Match(branch) => return self.match_statement(branch),
             ast::Stmt::While(loop_) => {
-                self.invalidate_loop_facts(&loop_.body);
+                self.invalidate_loop_facts(&loop_.body, None)?;
                 for name in narrowing::expression_assignments(&loop_.test) {
                     if let Some(slot) = self.names.get(&name) {
                         self.narrowed.remove_mut(slot);
@@ -4760,6 +4788,9 @@ impl<'a> Checker<'a> {
                         _ => return self.class_attribute(attribute, class, Some(receiver), None),
                     }
                 }
+                if receiver.ty == Type::Sha256 {
+                    return self.sha256_attribute(receiver, attribute);
+                }
                 if receiver.ty == Type::Logger {
                     return self.logger_attribute(receiver, attribute);
                 }
@@ -5031,40 +5062,6 @@ impl<'a> Checker<'a> {
             return self.call_local_function(call, &function);
         }
         if let ast::Expr::Attribute(method) = &*call.func
-            && method.attr.as_str() == "hexdigest"
-            && let ast::Expr::Call(constructor) = &*method.value
-            && self.resolve(&constructor.func) == Some(Binding::Intrinsic(Intrinsic::Sha256))
-        {
-            self.reject_builtin_keywords(call)?;
-            self.reject_builtin_keywords(constructor)?;
-            calls::reject_unpacking(constructor, self.source)?;
-            if !call.arguments.args.is_empty() {
-                return Err(error(
-                    self.source,
-                    call,
-                    "sha256.hexdigest() takes no arguments",
-                ));
-            }
-            let data = match constructor.arguments.args.as_ref() {
-                [] => Expr {
-                    ty: Type::Bytes,
-                    kind: ExprKind::Bytes(Vec::new()),
-                },
-                [data] => self.expr_expected(data, Type::Bytes)?,
-                _ => {
-                    return Err(error(
-                        self.source,
-                        constructor,
-                        "sha256 accepts zero or one positional bytes argument",
-                    ));
-                }
-            };
-            return Ok(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::Sha256Hex, vec![data]),
-            });
-        }
-        if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "keys"
             && let ast::Expr::Call(load) = &*method.value
             && self.resolve(&load.func) == Some(Binding::Intrinsic(Intrinsic::TomllibLoad))
@@ -5118,13 +5115,7 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.async_builtin(kind, call);
             }
-            Some(Binding::Intrinsic(Intrinsic::Sha256)) => {
-                return Err(error(
-                    self.source,
-                    call,
-                    "sha256 is supported only with an immediate .hexdigest()",
-                ));
-            }
+            Some(Binding::Intrinsic(Intrinsic::Sha256)) => return self.sha256_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
                 return Err(error(
@@ -5365,6 +5356,9 @@ impl<'a> Checker<'a> {
             }
             if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch) {
                 return self.regex_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::Sha256 {
+                return self.sha256_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);

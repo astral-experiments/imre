@@ -15,6 +15,7 @@ mod deferred_diff;
 mod difflib;
 pub(crate) mod exceptions;
 mod files;
+mod hashlib;
 mod json;
 mod logging;
 mod mappings;
@@ -54,6 +55,7 @@ enum Storage {
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
+    Sha256(Box<sha2::Sha256>),
     Exception(exceptions::Exception),
     File(Box<files::FileState>),
     AsyncProcess(Box<processes::AsyncProcess>),

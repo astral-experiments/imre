@@ -226,6 +226,10 @@ impl Builtin {
             | Self::DictTryGet(_)
             | Self::Encode
             | Self::Sha256Hex
+            | Self::Sha256New
+            | Self::Sha256Update
+            | Self::Sha256Digest { .. }
+            | Self::Sha256Copy
             | Self::ExceptionCause
             | Self::ExceptionMessage
             | Self::ExceptionSuppressContext

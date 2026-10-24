@@ -16,7 +16,8 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "bytes"
 
 REJECTED = {
     "hashlib_sha256_text": 'from hashlib import sha256\nprint(sha256("text").hexdigest())\n',
-    "hashlib_sha256_escape": 'from hashlib import sha256\nhash_obj = sha256(b"data")\n',
+    "hashlib_update_text": 'from hashlib import sha256\nhash_obj = sha256()\nhash_obj.update("data")\n',
+    "hashlib_digest_args": 'from hashlib import sha256\nhash_obj = sha256()\nprint(hash_obj.digest(4))\n',
     "hashlib_hexdigest_args": 'from hashlib import sha256\nprint(sha256().hexdigest(3))\n',
     "bytes_unicode_literal": 'value = b"é"\n',
     "bytes_mixed_literal": 'value = b"a" "b"\n',
