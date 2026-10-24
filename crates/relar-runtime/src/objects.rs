@@ -54,6 +54,7 @@ enum Storage {
     Exception(exceptions::Exception),
     File(Box<files::FileState>),
     AsyncProcess(Box<processes::AsyncProcess>),
+    AsyncCoroutine(Rc<asyncio::Task>),
     AsyncTask(Rc<asyncio::Task>),
     GeneratorContext(Rc<contexts::Manager>),
     DirectoryContext(tempdirs::DirectoryContext),

@@ -337,12 +337,16 @@ impl Error {
         Self::new(Kind::IndexError, "list index out of range")
     }
 
+    pub(super) fn into_exception(self) -> Rc<Object> {
+        new_exception(self.kind, self.payload)
+    }
+
     /// Installs this error only after any runtime storage access has ended.
     /// Keep exception allocation and cleanup out of successful access paths.
     #[cold]
     #[inline(never)]
     pub(crate) fn raise(self) {
-        replace_pending(Some(new_exception(self.kind, self.payload)));
+        replace_pending(Some(self.into_exception()));
     }
 
     /// Returns a failure sentinel after installing the owned exception.

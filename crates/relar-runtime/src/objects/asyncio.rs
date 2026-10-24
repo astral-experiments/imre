@@ -20,21 +20,35 @@ type Fiber = Coroutine<(), Ready, Outcome>;
 type Callback = unsafe extern "C" fn(*const usize) -> usize;
 type Outcome = std::result::Result<OwnedWord, Rc<Object>>;
 
-struct Call {
-    callback: Callback,
-    frame: OwnedWord,
-    kind: WordKind,
+enum Call {
+    Compiled {
+        callback: Callback,
+        frame: OwnedWord,
+        kind: WordKind,
+    },
+    ReusedCoroutine,
 }
 
 impl Call {
     fn run(self) -> Outcome {
+        let Self::Compiled {
+            callback,
+            frame,
+            kind,
+        } = self
+        else {
+            return Err(
+                Error::new(Kind::RuntimeError, "cannot reuse already awaited coroutine")
+                    .into_exception(),
+            );
+        };
         // SAFETY: the compiler paired this thunk with its exact argument record;
         // the frame roots its borrowed parameters through the whole native call.
-        let word = unsafe { (self.callback)(self.frame.word as *const usize) };
+        let word = unsafe { callback(frame.word as *const usize) };
         match take_pending() {
             Some(error) => Err(error),
             // SAFETY: successful generated calls transfer an exact owned result.
-            None => Ok(unsafe { OwnedWord::from_owned(word, self.kind) }),
+            None => Ok(unsafe { OwnedWord::from_owned(word, kind) }),
         }
     }
 }
@@ -285,9 +299,21 @@ fn task_of(object: &Object) -> Rc<Task> {
     // SAFETY: cloning a language-thread owner never reenters object storage.
     unsafe {
         object.0.with(|storage| match storage {
-            Storage::AsyncTask(task) => task.clone(),
+            Storage::AsyncCoroutine(task) | Storage::AsyncTask(task) => task.clone(),
             _ => fail("SystemError", "expected typed asyncio task"),
         })
+    }
+}
+
+/// Scheduling a consumed coroutine creates a new task which fails when run.
+/// A completed task still owns its result and can be awaited again.
+fn for_scheduling(object: &Object) -> Rc<Task> {
+    let task = task_of(object);
+    // SAFETY: inspecting the rooted handle's variant runs no language code.
+    if task.done() && unsafe { object.0.with(|s| matches!(s, Storage::AsyncCoroutine(_))) } {
+        Task::new(Call::ReusedCoroutine)
+    } else {
+        task
     }
 }
 
@@ -308,7 +334,7 @@ pub unsafe extern "C" fn relar_async_coroutine(
     unsafe { relar_record_retain(frame) };
     // SAFETY: kind 6 owns the fixed record retained directly above.
     let frame = unsafe { OwnedWord::from_owned(frame as usize, WordKind::new(6)) };
-    resource(Storage::AsyncTask(Task::new(Call {
+    resource(Storage::AsyncCoroutine(Task::new(Call::Compiled {
         callback,
         frame,
         kind: WordKind::new(kind),
@@ -386,7 +412,7 @@ pub unsafe extern "C" fn relar_async_create_task(
     coroutine: *const Object,
 ) -> *const Object {
     // SAFETY: neither borrowed object is retained across a language callback.
-    let task = task_of(unsafe { object(coroutine) });
+    let task = for_scheduling(unsafe { object(coroutine) });
     if task.scheduled.get() {
         return Error::new(Kind::RuntimeError, "cannot reuse already awaited coroutine")
             .returning(std::ptr::null());
@@ -597,11 +623,20 @@ pub unsafe extern "C" fn relar_async_gather(
     // SAFETY: acquire independent task owners before running other language code.
     let tasks: Vec<_> = unsafe {
         object(input).0.with(|storage| {
+            // gather schedules each distinct input once, including a repeated
+            // consumed coroutine whose exception appears in multiple slots.
+            let mut unique = std::collections::HashMap::new();
             storage
                 .sequence()
                 .values
                 .iter()
-                .map(|handle| task_of(object(*handle as *const Object)))
+                .map(|&handle| {
+                    Rc::clone(
+                        unique
+                            .entry(handle)
+                            .or_insert_with(|| for_scheduling(object(handle as *const Object))),
+                    )
+                })
                 .collect()
         })
     };

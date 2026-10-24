@@ -22,12 +22,41 @@ async def main() -> None:
         await future
     except RuntimeError as error:
         print(str(error))
+    try:
+        await asyncio.gather(future)
+    except RuntimeError as error:
+        print(str(error))
+    retry = asyncio.ensure_future(future)
+    print("scheduled")
+    try:
+        await retry
+    except RuntimeError as error:
+        print(str(error))
+    try:
+        async with asyncio.TaskGroup() as group:
+            group.create_task(future)
+            print("added")
+    except ExceptionGroup as error:
+        print(str(error.exceptions[0]))
     async with asyncio.TaskGroup() as group:
         task = group.create_task(callback(items, 4))
     print(await task)
     print(await task)
+    print(repr(await asyncio.gather(task, task)))
+    fresh = callback(items, 5)
+    print(repr(await asyncio.gather(fresh, fresh)))
+    print(repr(items))
     results = await asyncio.gather(*list(map(double, [1, 2, 3])))
     print(sum(results))
 
 
 asyncio.run(main())
+
+loop = asyncio.new_event_loop()
+future = double(6)
+print(loop.run_until_complete(future))
+try:
+    loop.run_until_complete(future)
+except RuntimeError as error:
+    print(str(error))
+loop.close()
