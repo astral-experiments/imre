@@ -28,6 +28,12 @@ Four complete JSON error methods use a CPython 3.14.5 test interpreter for their
 
 Use `--cpython-source /path/to/cpython-3.14.5` if the interpreter needs a source checkout for `test.support`. The original assertions run under unittest. Each input to `loads` is passed to a compiled Relar executable. The bridge forwards the native error category and its unmodified message. Methods which inspect structured error fields need additional native support before the adapter can credit them. Two successful array controls check the driver separately. The four methods run through both upstream backend fixture IDs, giving eight executions of four distinct methods.
 
+Run `native_json_values.py` with the same arguments for the standard JSON value
+and stream methods. The typed native driver receives primitive inputs as bytes
+and returns loaded values using Python literal representations. The host runs
+the verified assertions and reads the representation with `ast.literal_eval`.
+Stream assertions receive the bytes that the native program wrote to its file.
+
 ## Native os calls with upstream unittest assertions
 
 `native_os.py` runs CPython's `MiscTests.test_getcwd`, `test_getcwd_long_path`, and the PEP 519 string and bytes return tests. Each `getcwd` and `fspath` executes in the compiled driver. CPython owns the directory setup, cleanup, assertions and process transport. The runner also compares the error from a deleted working directory. Use the same compiler, runtime, clang and optional CPython source arguments as for `native_json.py`.
