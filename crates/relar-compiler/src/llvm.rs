@@ -3312,7 +3312,7 @@ impl Emitter<'_, '_> {
             Builtin::TupleCacheNew => return self.record(returns),
             Builtin::TupleCacheResult => Value {
                 ty: returns,
-                operand: self.checked_record(format!(
+                operand: self.checked_pointer(format!(
                     "call ptr @relar_record_try_cached_result(ptr {})",
                     args[0].value.operand
                 )),
@@ -3794,22 +3794,22 @@ impl Emitter<'_, '_> {
                         self.instruction(format!("getelementptr ptr, ptr {handles}, i64 {i}"));
                     self.line(format!("store ptr {}, ptr {slot}", source.value.operand));
                 }
-                let instruction = if let Builtin::SortedRecordRows { class, columns } = builtin {
+                let operand = if let Builtin::SortedRecordRows { class, columns } = builtin {
                     let name = self.byte_array(columns.clone());
                     let layout = self.output.global_ref(format!("layout_class_{class}"));
-                    format!(
+                    self.checked_pointer(format!(
                         "call ptr @relar_sorted_record_rows(ptr {handles}, i64 {}, ptr @{layout}, ptr @{name})",
                         args.len()
-                    )
+                    ))
                 } else {
-                    format!(
+                    self.instruction(format!(
                         "call ptr @relar_sorted_string_keys(ptr {handles}, i64 {})",
                         args.len()
-                    )
+                    ))
                 };
                 Value {
                     ty: returns,
-                    operand: self.instruction(instruction),
+                    operand,
                     small_integer: false,
                 }
             }
@@ -4254,17 +4254,17 @@ impl Emitter<'_, '_> {
         let layout = self.output.global_ref(format!("layout_{name}"));
         let value = Value {
             ty,
-            operand: self.checked_record(format!("call ptr @relar_record_try_new(ptr @{layout})")),
+            operand: self.checked_pointer(format!("call ptr @relar_record_try_new(ptr @{layout})")),
             small_integer: false,
         };
         self.owned(value)
     }
 
-    fn checked_record(&mut self, instruction: impl AsRef<str>) -> String {
-        let record = self.instruction(instruction);
-        let failed = self.instruction(format!("icmp eq ptr {record}, null"));
+    fn checked_pointer(&mut self, instruction: impl AsRef<str>) -> String {
+        let pointer = self.instruction(instruction);
+        let failed = self.instruction(format!("icmp eq ptr {pointer}, null"));
         self.check_failed(&failed);
-        record
+        pointer
     }
 
     /// An unaliased record local can reuse its allocation on the next iteration.
@@ -4282,11 +4282,11 @@ impl Emitter<'_, '_> {
         let layout = self
             .output
             .global_ref(format!("layout_{}", record_name(previous.ty)));
-        let fresh = self.checked_record(format!("call ptr @relar_record_try_new(ptr @{layout})"));
+        let fresh = self.checked_pointer(format!("call ptr @relar_record_try_new(ptr @{layout})"));
         let allocated = self.current.clone();
         self.jump(&write);
         self.start(&cached);
-        let replacement = self.checked_record(format!(
+        let replacement = self.checked_pointer(format!(
             "call ptr @relar_record_try_cached_result(ptr {})",
             previous.operand
         ));
@@ -5731,10 +5731,18 @@ mod tests {
     fn sorted_rows_require_only_generated_field_assignments() {
         let source = include_str!("../../../tests/fixtures/containers/sorted_rows.py");
         let llvm = compile(source, &CompileOptions::default()).unwrap();
-        assert_eq!(
-            llvm.matches("call ptr @relar_sorted_record_rows(").count(),
-            1
+        let mut lines = llvm.lines();
+        let call = lines
+            .find(|line| line.contains(" = call ptr @relar_sorted_record_rows("))
+            .unwrap();
+        let result = call.trim().split_once(" = ").unwrap().0;
+        assert!(
+            lines
+                .next()
+                .unwrap()
+                .contains(&format!("icmp eq ptr {result}, null"))
         );
+        assert!(!lines.any(|line| line.contains(" = call ptr @relar_sorted_record_rows(")));
         assert_eq!(
             llvm.matches("call ptr @relar_sorted_string_keys(").count(),
             1
