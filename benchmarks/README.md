@@ -1,6 +1,6 @@
 # Benchmarks
 
-The [Rust, CPython and Imre comparison](runtime-suite.md) covers six workloads with checked outputs, raw samples and a command to reproduce the tables and figures.
+The [Rust, CPython and Imre comparison](runtime-suite.md) covers six workloads with checked outputs, raw samples and a command to reproduce the tables and chart.
 
 ## Route planner
 

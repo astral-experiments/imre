@@ -100,12 +100,12 @@ Each result is the median of 12 fresh processes pinned to one AMD EPYC Milan CPU
 
 | Workload | Input per process | Rust (ms) | CPython (ms) | Imre (ms) | CPython / Imre |
 | --- | --- | ---: | ---: | ---: | ---: |
-| Inventory (repeated) | 16,384 requests, 64 SKUs | 25.30 | 77.11 | 30.04 | 2.57× |
-| Inventory (distinct) | 16,384 requests, 16,384 SKUs | 45.69 | 112.32 | 53.05 | 2.12× |
-| Base45 decode | 64 × 16 KiB decoded | 9.24 | 183.81 | 15.54 | 11.83× |
-| Luhn checksum | 65,536 × 16 digits | 5.28 | 149.53 | 13.08 | 11.43× |
-| Telemetry report | 81 × 4,096 aligned pairs | 9.34 | 120.19 | 13.31 | 9.03× |
-| Conformance report | 146 files, two captured ty runs | 23.59 | 247.01 | 33.04 | 7.48× |
+| Inventory (repeated) | 16,384 requests, 64 SKUs | 25.84 | 80.00 | 33.18 | 2.41× |
+| Inventory (distinct) | 16,384 requests, 16,384 SKUs | 48.02 | 117.84 | 60.54 | 1.95× |
+| Base45 decode | 64 × 16 KiB decoded | 9.17 | 190.52 | 14.51 | 13.13× |
+| Luhn checksum | 65,536 × 16 digits | 5.03 | 152.09 | 13.39 | 11.36× |
+| Telemetry report | 81 × 4,096 aligned pairs | 9.60 | 125.00 | 13.30 | 9.40× |
+| Conformance report | 146 files, two captured ty runs | 25.26 | 258.75 | 34.95 | 7.40× |
 
 [Workloads, timing ranges and reproduction](benchmarks/runtime-suite.md) · [Raw samples](benchmarks/results/runtime-suite.json)
 

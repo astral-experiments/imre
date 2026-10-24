@@ -2,7 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["matplotlib==3.10.8"]
 # ///
-"""Render the README and benchmark-guide figures and print their Markdown tables."""
+"""Render the workload panels and print the README and benchmark-guide tables."""
 
 import argparse
 import json
@@ -103,15 +103,15 @@ def save(fig, path, title):
     path.write_text(svg.replace("<defs>", f"<defs>\n  {style}", 1))
 
 
-def bars(ax, medians, x, y, width, *, compact=False):
-    label_width, value_width = (68, 60) if compact else (112, 80)
-    row_step, bar_height = (40, 14) if compact else (46, 18)
-    font_size = 13 if compact else 16
+def bars(ax, medians, x, y, width):
+    label_width, value_width = 68, 60
+    row_step, bar_height = 40, 14
+    font_size = 13
     plot_x = x + label_width
     plot_width = width - label_width - value_width
-    ticks = MaxNLocator(
-        nbins=3 if compact else 5, steps=(1, 2, 2.5, 5, 10), integer=True
-    ).tick_values(0, max(medians.values()))
+    ticks = MaxNLocator(nbins=3, steps=(1, 2, 2.5, 5, 10), integer=True).tick_values(
+        0, max(medians.values())
+    )
     last_y = y + row_step * (len(ENGINES) - 1)
     for tick in ticks:
         tick_x = plot_x + plot_width * tick / ticks[-1]
@@ -154,26 +154,6 @@ def bars(ax, medians, x, y, width, *, compact=False):
         )
 
 
-def conformance_chart(case, medians, path):
-    fig, ax = canvas(800, 356)
-    surface(ax, 800, 356)
-    label(ax, 32, 30, "IMRE / RUNTIME BENCHMARKS", 11, color=MUTED, mono=True)
-    label(ax, 32, 68, "OFFLINE CONFORMANCE REPORT", 26)
-    label(ax, 32, 98, case["input"], 14, color=MUTED)
-    rule(ax, 32, 122, 768, 122)
-    bars(ax, medians, 32, 164, 736)
-    runs = len(case["samples_ns"])
-    label(
-        ax,
-        32,
-        330,
-        f"Median elapsed time (ms) · {runs} runs · Lower is faster",
-        12,
-        color=MUTED,
-    )
-    save(fig, path, "Median time to render the offline conformance report")
-
-
 def workload_panels(rows, path):
     row_count = (len(rows) + 1) // 2
     height = 148 + 252 * row_count + 36
@@ -187,7 +167,7 @@ def workload_panels(rows, path):
         x, y = 32 + i % 2 * 384, 158 + i // 2 * 252
         label(ax, x, y, PANEL_TITLES.get(case["name"], case["name"]), 20)
         label(ax, x, y + 28, case["input"], 12, color=MUTED)
-        bars(ax, medians, x, y + 75, 352, compact=True)
+        bars(ax, medians, x, y + 75, 352)
         if i % 2 == 0 and i // 2 < row_count - 1:
             rule(ax, 32, y + 216, 768, y + 216)
     runs = len(rows[0][0]["samples_ns"])
@@ -241,10 +221,6 @@ def main():
         )
         rows.append((case, medians))
 
-    case, medians = next(
-        row for row in rows if row[0]["package"] == "conformance_report"
-    )
-    conformance_chart(case, medians, args.output_dir / "runtime-conformance.svg")
     workload_panels(rows, args.output_dir / "runtime-suite.svg")
     print("\n".join(times), "\n\n", "\n".join(spreads), sep="")
 

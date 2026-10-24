@@ -1,7 +1,7 @@
 {
-  "revision": "fb74f367acca0130b44c1b7ec1301ccb8a61e279",
+  "revision": "ae741a30f326d73b5827e70c619d64c16d395e5b",
   "dirty": false,
-  "date_utc": "2026-10-23",
+  "date_utc": "2026-10-24",
   "os": "Linux 6.8.0-147-generic x86_64",
   "cpu": {
     "model": "AMD EPYC-Milan Processor",
@@ -40,7 +40,7 @@
       31
     ],
     "affinity": [
-      12
+      30
     ]
   },
   "python": {
@@ -63,30 +63,30 @@
   },
   "rustc": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8",
   "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
-  "relar": "relar 0.1.1 (Ruff/ty 0.0.14; LLVM AOT)",
+  "imre": "imre 0.1.2 (Ruff/ty 0.0.14; LLVM AOT)",
   "binaries_sha256": {
     "cpython": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
-    "compiler": "fd53102de6b6f0a944e244f893d804697b18ea80b357832ab4f8363ac62c84a2",
-    "runtime": "ca1e4ea7c9e11795efb6ff2969d9e1585b1986aa318b0e0979627a11a10c8c79",
+    "compiler": "8eb6cb90772a6534c040ac7db7c0c213701f146a015881df74c75fba60868647",
+    "runtime": "53494d7f8c500e3a557774a48e9036a2419269b81709f39b5ccaf66ff5a1b438",
     "inventory_reconciliation": {
-      "rust": "43feeda80c5bb63eb2c791ac54bce69de9f8c08cc04eb83de9f439c865139840",
-      "relar": "0e8d4262c59afaf4c4b75db467aafa03dcfe868e2202924d34ceb0d4c8d42fc8"
+      "rust": "8d9e14e87b2267b52cc8f9ab462dbded7f9b3aa3f5e9fed4e8375ac3c9c2d10c",
+      "imre": "54714cbc549c2a41b9d398243265bbec217732f8bee27e74e0b44f1b1fca92c3"
     },
     "base45_codec": {
-      "rust": "666696aadb0e7e88bed08151e380fa8455b6884efd460db64c40fc0facdd485b",
-      "relar": "a823f4cae5961dbf85cedb79c3c8849f88ca3972a4b7c2e9aa4849ce1146a51c"
+      "rust": "170f0c75525577ad611563108c3c76d2f56779dab5544a985a63e9efea4c0816",
+      "imre": "8df9b86cf766d40218212baf7f1feeaa31a6c42a2992a24b9f70daf1169151bb"
     },
     "luhn_checksum": {
-      "rust": "793774e0d9ad6cfa6bce3725fbaa7af24a71924e6a4a698e75adcfc67c6354d5",
-      "relar": "b175b890c165ac03ef3ef9026ffded03bacd4e5ec3a34ebe6b8af10a0e3aa613"
+      "rust": "eb4732e1e555c27c57dbf669ca15be140a503a5ddbffe31dd8444551997a9689",
+      "imre": "8bc140dce8bff1dcea690750ed3d37a831876773f278338c1ef52e73b3e34d23"
     },
     "telemetry_comparison": {
-      "rust": "7327d90f35fbd45542e27b0fc5b074e8cfc416da1a5a454c2cf0023452bf55c3",
-      "relar": "8d8d0b5ec80e9ccf1eb25cd71f69beb65ec8ae0d1db6681755cee3910c1b006a"
+      "rust": "f3c95257b1a18346b300b17453e6817530ab0165e964dee400a4e1e197655ab0",
+      "imre": "658ccccfd26fd88b36842b622b1d846f24475c5783f72687e9bee707e263a07d"
     },
     "conformance_report": {
-      "rust": "f8ce1dad54c972c784bfaaf4e6d399eba6880e344874171eb4bff541f600bb39",
-      "relar": "68e357115f5b8e2833570877610260c2fde486c567c9fb70e7360a9c0b34527c"
+      "rust": "cad70e06166801f7fcd5e75e31483596e31b26b1ff05dc757eb2a74e150124af",
+      "imre": "9a91d41310cc65e7eb51cf796fe7ff4d930a10b26d5bf65fd71b79854948df45"
     }
   },
   "cases": [
@@ -99,76 +99,76 @@
       "report_sha256": "774a72dd3b72c2292a8b9c409dc8a79ffdd4c683de7f2ffcab1155757c41ae5d",
       "warmups_ns": [
         {
-          "relar": 31641207,
-          "rust": 25920561,
-          "cpython": 78894224
+          "imre": 33480888,
+          "rust": 25947529,
+          "cpython": 87513393
         },
         {
-          "relar": 29731290,
-          "cpython": 75847568,
-          "rust": 25455235
+          "imre": 34877773,
+          "cpython": 79665227,
+          "rust": 26172658
         }
       ],
       "samples_ns": [
         {
-          "rust": 25483437,
-          "cpython": 77615421,
-          "relar": 29578665
+          "rust": 26530857,
+          "cpython": 78948250,
+          "imre": 33509793
         },
         {
-          "rust": 24598850,
-          "relar": 29372231,
-          "cpython": 75636766
+          "rust": 25426768,
+          "imre": 32463741,
+          "cpython": 79388681
         },
         {
-          "cpython": 76006815,
-          "rust": 25025245,
-          "relar": 29250192
+          "cpython": 81600346,
+          "rust": 27837663,
+          "imre": 33432107
         },
         {
-          "cpython": 74649536,
-          "relar": 29085957,
-          "rust": 24628776
+          "cpython": 85872483,
+          "imre": 33982624,
+          "rust": 25851781
         },
         {
-          "relar": 29385646,
-          "rust": 24550529,
-          "cpython": 74958432
+          "imre": 32792715,
+          "rust": 25440003,
+          "cpython": 81150698
         },
         {
-          "relar": 29393971,
-          "cpython": 75598164,
-          "rust": 26101358
+          "imre": 34037856,
+          "cpython": 81466776,
+          "rust": 25829649
         },
         {
-          "rust": 25137673,
-          "cpython": 77337604,
-          "relar": 147004079
+          "rust": 25559575,
+          "cpython": 79864919,
+          "imre": 33183734
         },
         {
-          "rust": 42817825,
-          "relar": 30518786,
-          "cpython": 126785609
+          "rust": 26137123,
+          "imre": 32720291,
+          "cpython": 80297225
         },
         {
-          "cpython": 79246259,
-          "rust": 25532128,
-          "relar": 31171993
+          "cpython": 79067723,
+          "rust": 25743609,
+          "imre": 32450216
         },
         {
-          "cpython": 79157714,
-          "relar": 32032075,
-          "rust": 27831531
+          "cpython": 79795520,
+          "imre": 33560567,
+          "rust": 28138765
         },
         {
-          "relar": 30506793,
-          "rust": 25465473,
-          "cpython": 76887887
+          "imre": 32666891,
+          "rust": 25296655,
+          "cpython": 80141164
         },
         {
-          "relar": 31964489,
-          "cpython": 79961010,
-          "rust": 25129478
+          "imre": 33166972,
+          "cpython": 79393521,
+          "rust": 26376338
         }
       ]
     },
@@ -181,76 +181,76 @@
       "report_sha256": "d1f666f0a0deab8399509219a027001e23f6614b90c6b46dae0987de65a51d7a",
       "warmups_ns": [
         {
-          "relar": 54296075,
-          "rust": 54793311,
-          "cpython": 118569004
+          "imre": 115100600,
+          "rust": 60343604,
+          "cpython": 157808176
         },
         {
-          "relar": 54391704,
-          "cpython": 114381585,
-          "rust": 46924574
+          "imre": 60284313,
+          "cpython": 133645693,
+          "rust": 47519318
         }
       ],
       "samples_ns": [
         {
-          "rust": 46391021,
-          "cpython": 113176060,
-          "relar": 53521443
+          "rust": 47831881,
+          "cpython": 121405829,
+          "imre": 59886462
         },
         {
-          "rust": 45725121,
-          "relar": 52213878,
-          "cpython": 118574073
+          "rust": 78972825,
+          "imre": 60481331,
+          "cpython": 117373368
         },
         {
-          "cpython": 115804735,
-          "rust": 45791243,
-          "relar": 53139220
+          "cpython": 117566768,
+          "rust": 47645253,
+          "imre": 62196098
         },
         {
-          "cpython": 110533266,
-          "relar": 198433114,
-          "rust": 77322976
+          "cpython": 115556048,
+          "imre": 60602857,
+          "rust": 46676276
         },
         {
-          "relar": 54678106,
-          "rust": 46612943,
-          "cpython": 148772663
+          "imre": 59151271,
+          "rust": 46462217,
+          "cpython": 115919377
         },
         {
-          "relar": 54324158,
-          "cpython": 116043349,
-          "rust": 47164892
+          "imre": 63737944,
+          "cpython": 118106215,
+          "rust": 47973334
         },
         {
-          "rust": 45506594,
-          "cpython": 110844034,
-          "relar": 52964085
+          "rust": 47762422,
+          "cpython": 124913230,
+          "imre": 59949980
         },
         {
-          "rust": 45104646,
-          "relar": 52870991,
-          "cpython": 111470863
+          "rust": 48271751,
+          "imre": 59874930,
+          "cpython": 115045246
         },
         {
-          "cpython": 110119104,
-          "rust": 45636787,
-          "relar": 53156302
+          "cpython": 116133516,
+          "rust": 48062561,
+          "imre": 60274014
         },
         {
-          "cpython": 109461100,
-          "relar": 52595999,
-          "rust": 45337708
+          "cpython": 157110513,
+          "imre": 68875646,
+          "rust": 51442194
         },
         {
-          "relar": 52038652,
-          "rust": 45289470,
-          "cpython": 116558278
+          "imre": 63374747,
+          "rust": 99724631,
+          "cpython": 124554281
         },
         {
-          "relar": 52389063,
-          "cpython": 109288789,
-          "rust": 45659920
+          "imre": 84784233,
+          "cpython": 119134112,
+          "rust": 48783075
         }
       ]
     },
@@ -263,76 +263,76 @@
       "report_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
       "warmups_ns": [
         {
-          "relar": 15825577,
-          "rust": 9235463,
-          "cpython": 305207548
+          "imre": 15371917,
+          "rust": 9521095,
+          "cpython": 192054159
         },
         {
-          "relar": 19486358,
-          "cpython": 220102425,
-          "rust": 9325741
+          "imre": 14660009,
+          "cpython": 193716990,
+          "rust": 18304877
         }
       ],
       "samples_ns": [
         {
-          "rust": 9609770,
-          "cpython": 189300231,
-          "relar": 15544335
+          "rust": 17602517,
+          "cpython": 196943227,
+          "imre": 14322179
         },
         {
-          "rust": 9069603,
-          "relar": 14974603,
-          "cpython": 183520407
+          "rust": 8820178,
+          "imre": 17071326,
+          "cpython": 194387190
         },
         {
-          "cpython": 185561148,
-          "rust": 10274687,
-          "relar": 16872096
+          "cpython": 193910249,
+          "rust": 9234842,
+          "imre": 14370109
         },
         {
-          "cpython": 183156278,
-          "relar": 15543232,
-          "rust": 10276292
+          "cpython": 190784291,
+          "imre": 26375678,
+          "rust": 15031562
         },
         {
-          "relar": 14941050,
-          "rust": 8567629,
-          "cpython": 181290734
+          "imre": 14570292,
+          "rust": 9012989,
+          "cpython": 187516999
         },
         {
-          "relar": 15045124,
-          "cpython": 184090859,
-          "rust": 8698713
+          "imre": 23416279,
+          "cpython": 187308410,
+          "rust": 9098698
         },
         {
-          "rust": 8989864,
-          "cpython": 182652750,
-          "relar": 15228434
+          "rust": 8764265,
+          "cpython": 187685272,
+          "imre": 14484351
         },
         {
-          "rust": 8573749,
-          "relar": 15030748,
-          "cpython": 357599442
+          "rust": 8990597,
+          "imre": 13984730,
+          "cpython": 190261117
         },
         {
-          "cpython": 219356307,
-          "rust": 11822632,
-          "relar": 18698089
+          "cpython": 196905466,
+          "rust": 9440124,
+          "imre": 14666693
         },
         {
-          "cpython": 187211622,
-          "relar": 15614205,
-          "rust": 9215867
+          "cpython": 206624503,
+          "imre": 14535837,
+          "rust": 9471543
         },
         {
-          "relar": 15573188,
-          "rust": 9255912,
-          "cpython": 182732269
+          "imre": 14239394,
+          "rust": 9048274,
+          "cpython": 190016870
         },
         {
-          "relar": 15989162,
-          "cpython": 182577911,
-          "rust": 9264737
+          "imre": 14428087,
+          "cpython": 189435046,
+          "rust": 9269908
         }
       ]
     },
@@ -345,76 +345,76 @@
       "report_sha256": "19581e27de7ced00ff1ce50b2047e7a567c76b1cbaebabe5ef03f7c3017bb5b7",
       "warmups_ns": [
         {
-          "relar": 13814522,
-          "rust": 5143177,
-          "cpython": 150565904
+          "imre": 13085172,
+          "rust": 3762446,
+          "cpython": 150955245
         },
         {
-          "relar": 13200959,
-          "cpython": 151140211,
-          "rust": 5608857
+          "imre": 12747574,
+          "cpython": 149126014,
+          "rust": 5339087
         }
       ],
       "samples_ns": [
         {
-          "rust": 3720560,
-          "cpython": 149458300,
-          "relar": 13144444
+          "rust": 4914957,
+          "cpython": 164641217,
+          "imre": 21900079
         },
         {
-          "rust": 5054194,
-          "relar": 12780967,
-          "cpython": 150540516
+          "rust": 7698287,
+          "imre": 19897747,
+          "cpython": 154573783
         },
         {
-          "cpython": 148561881,
-          "rust": 4906108,
-          "relar": 12727346
+          "cpython": 148580686,
+          "rust": 5139373,
+          "imre": 13046621
         },
         {
-          "cpython": 147607693,
-          "relar": 86310137,
-          "rust": 20658219
+          "cpython": 150476502,
+          "imre": 13279865,
+          "rust": 4890580
         },
         {
-          "relar": 14197997,
-          "rust": 4988723,
-          "cpython": 204252103
+          "imre": 13185940,
+          "rust": 4822183,
+          "cpython": 151351373
         },
         {
-          "relar": 13681333,
-          "cpython": 151412321,
-          "rust": 6079134
+          "imre": 13267653,
+          "cpython": 149872816,
+          "rust": 4896171
         },
         {
-          "rust": 5803480,
-          "cpython": 155131639,
-          "relar": 14126003
+          "rust": 4676421,
+          "cpython": 158042572,
+          "imre": 16826398
         },
         {
-          "rust": 5376634,
-          "relar": 13024410,
-          "cpython": 149598641
+          "rust": 3700722,
+          "imre": 12570162,
+          "cpython": 153075949
         },
         {
-          "cpython": 148598148,
-          "rust": 5357108,
-          "relar": 13454942
+          "cpython": 152837204,
+          "rust": 5232307,
+          "imre": 13227257
         },
         {
-          "cpython": 148372598,
-          "relar": 12761751,
-          "rust": 5195667
+          "cpython": 149547861,
+          "imre": 13706911,
+          "rust": 6954379
         },
         {
-          "relar": 12952896,
-          "rust": 5046720,
-          "cpython": 150522723
+          "imre": 21880435,
+          "rust": 7364945,
+          "cpython": 154783594
         },
         {
-          "relar": 12837141,
-          "cpython": 148063712,
-          "rust": 5451462
+          "imre": 13505446,
+          "cpython": 150852473,
+          "rust": 5321875
         }
       ]
     },
@@ -427,76 +427,76 @@
       "report_sha256": "f890328da9d59387ab85e47a841425449c07c60f3f09774d431b45d140ddab00",
       "warmups_ns": [
         {
-          "relar": 13490658,
-          "rust": 9323266,
-          "cpython": 122795888
+          "imre": 12954279,
+          "rust": 9539029,
+          "cpython": 128128975
         },
         {
-          "relar": 12724563,
-          "cpython": 117732456,
-          "rust": 9138884
+          "imre": 14277432,
+          "cpython": 129334243,
+          "rust": 9655186
         }
       ],
       "samples_ns": [
         {
-          "rust": 9367429,
-          "cpython": 119153974,
-          "relar": 13829340
+          "rust": 9620982,
+          "cpython": 127440723,
+          "imre": 13521685
         },
         {
-          "rust": 9425177,
-          "relar": 13336942,
-          "cpython": 125446392
+          "rust": 9460183,
+          "imre": 13787213,
+          "cpython": 125939904
         },
         {
-          "cpython": 118918474,
-          "rust": 9289994,
-          "relar": 13005656
+          "cpython": 124535113,
+          "rust": 12266826,
+          "imre": 16456160
         },
         {
-          "cpython": 124048050,
-          "relar": 13271561,
-          "rust": 9634426
+          "cpython": 124887893,
+          "imre": 13306435,
+          "rust": 9702164
         },
         {
-          "relar": 13435937,
-          "rust": 9138301,
-          "cpython": 200367397
+          "imre": 13318197,
+          "rust": 9665975,
+          "cpython": 124147160
         },
         {
-          "relar": 23869470,
-          "cpython": 150688963,
-          "rust": 10725168
+          "imre": 13249629,
+          "cpython": 124977929,
+          "rust": 9587209
         },
         {
-          "rust": 9314360,
-          "cpython": 120317301,
-          "relar": 14440457
+          "rust": 9445314,
+          "cpython": 124211730,
+          "imre": 13043695
         },
         {
-          "rust": 10219325,
-          "relar": 14285678,
-          "cpython": 120198719
+          "rust": 15982175,
+          "imre": 13310693,
+          "cpython": 123589851
         },
         {
-          "cpython": 119096508,
-          "rust": 8774093,
-          "relar": 12909055
+          "cpython": 125867148,
+          "rust": 9826986,
+          "imre": 12845956
         },
         {
-          "cpython": 120182960,
-          "relar": 13106883,
-          "rust": 8744197
+          "cpython": 126064375,
+          "imre": 13050949,
+          "rust": 9309773
         },
         {
-          "relar": 13291097,
-          "rust": 9170482,
-          "cpython": 117984065
+          "imre": 12543312,
+          "rust": 9219504,
+          "cpython": 125690479
         },
         {
-          "relar": 13064495,
-          "cpython": 118452828,
-          "rust": 10292541
+          "imre": 13299862,
+          "cpython": 125027402,
+          "rust": 9382097
         }
       ]
     },
@@ -509,76 +509,76 @@
       "report_sha256": "73cbc74bf3f97bfdbbb8933a749156213074ac57ba010d06b75ae48b45a946b2",
       "warmups_ns": [
         {
-          "relar": 37019275,
-          "rust": 24981862,
-          "cpython": 282750470
+          "imre": 33927931,
+          "rust": 24869118,
+          "cpython": 256531331
         },
         {
-          "relar": 33582794,
-          "cpython": 248098575,
-          "rust": 25965525
+          "imre": 35400389,
+          "cpython": 258002325,
+          "rust": 26140209
         }
       ],
       "samples_ns": [
         {
-          "rust": 23971040,
-          "cpython": 252987159,
-          "relar": 36375806
+          "rust": 24422857,
+          "cpython": 265506308,
+          "imre": 35035768
         },
         {
-          "rust": 25212513,
-          "relar": 32255441,
-          "cpython": 257625599
+          "rust": 25025981,
+          "imre": 36095604,
+          "cpython": 254940866
         },
         {
-          "cpython": 247043018,
-          "rust": 23595502,
-          "relar": 32849217
+          "cpython": 255189539,
+          "rust": 24702387,
+          "imre": 33925597
         },
         {
-          "cpython": 246676847,
-          "relar": 32824450,
-          "rust": 23407030
+          "cpython": 253936692,
+          "imre": 34805108,
+          "rust": 25288831
         },
         {
-          "relar": 31778593,
-          "rust": 22775161,
-          "cpython": 243835194
+          "imre": 34492123,
+          "rust": 24799839,
+          "cpython": 274160267
         },
         {
-          "relar": 33221130,
-          "cpython": 244626648,
-          "rust": 23441454
+          "imre": 34064497,
+          "cpython": 258653449,
+          "rust": 53940492
         },
         {
-          "rust": 23191577,
-          "cpython": 246981102,
-          "relar": 33914130
+          "rust": 25930026,
+          "cpython": 258848433,
+          "imre": 35868831
         },
         {
-          "rust": 23104115,
-          "relar": 32173478,
-          "cpython": 416036476
+          "rust": 25911581,
+          "imre": 39209011,
+          "cpython": 260929854
         },
         {
-          "cpython": 276414377,
-          "rust": 26117799,
-          "relar": 37680987
+          "cpython": 260650012,
+          "rust": 26804487,
+          "imre": 34857185
         },
         {
-          "cpython": 250762245,
-          "relar": 33424297,
-          "rust": 23927699
+          "cpython": 261231658,
+          "imre": 37664732,
+          "rust": 25196708
         },
         {
-          "relar": 32774969,
-          "rust": 23580141,
-          "cpython": 244748363
+          "imre": 35302664,
+          "rust": 25223659,
+          "cpython": 255550862
         },
         {
-          "relar": 33316286,
-          "cpython": 245571046,
-          "rust": 24352511
+          "imre": 33402501,
+          "cpython": 253718369,
+          "rust": 25508771
         }
       ]
     }
