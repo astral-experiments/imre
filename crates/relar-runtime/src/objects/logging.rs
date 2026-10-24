@@ -71,7 +71,7 @@ pub unsafe extern "C" fn relar_logger_write(
                 unreachable!("typed logger receiver")
             };
             let label = if level == 10 { "DEBUG" } else { "INFO" };
-            let line = Str::new(format!("{label}:{name}:{}", &*message));
+            let line = Str::new(format!("{label}:{name}:{}", *message));
             crate::relar_stderr_line(&line);
         });
     }

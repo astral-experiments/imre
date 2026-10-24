@@ -44,10 +44,8 @@ fn entries(node: &Node) -> impl Iterator<Item = (&Str, usize)> {
     fields
         .iter()
         .enumerate()
-        .filter_map(move |(index, (name, _))| {
-            (!fields[..index].iter().any(|(seen, _)| seen == name))
-                .then(|| (name, node.lookup(name).unwrap()))
-        })
+        .filter(move |(index, (name, _))| !fields[..*index].iter().any(|(seen, _)| seen == name))
+        .map(move |(_, (name, _))| (name, node.lookup(name).unwrap()))
 }
 
 impl View {

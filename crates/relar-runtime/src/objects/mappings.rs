@@ -637,6 +637,7 @@ impl Mapping {
         if self.counter && other.counter && self.tables.key_kind() == other.tables.key_kind() {
             // CPython treats an absent count as zero when comparing two Counters.
             let includes = |a: &Self, b: &Self| {
+                // SAFETY: both tables root these keys and integer counts throughout comparison.
                 a.tables.all(|key, count| unsafe {
                     super::values::equal(count, b.tables.lookup(key).unwrap_or(1), a.value_kind)
                 })
@@ -669,6 +670,7 @@ impl Mapping {
                     true
                 });
                 // Stable ties follow insertion order, as in Counter.most_common().
+                // SAFETY: the mapping roots each integer count until sorting is complete.
                 entries.sort_by(|a, b| unsafe { crate::relar_int_compare(b.1, a.1) }.cmp(&0));
                 output.push('{');
                 let key_kind = WordKind::new(self.tables.key_kind());
@@ -676,6 +678,7 @@ impl Mapping {
                     if i != 0 {
                         output.push_str(", ");
                     }
+                    // SAFETY: the table roots this initialized key and integer count.
                     unsafe {
                         super::values::write_repr(output, key, key_kind);
                         output.push_str(": ");

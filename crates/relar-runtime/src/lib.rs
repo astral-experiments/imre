@@ -725,6 +725,7 @@ pub unsafe extern "C" fn relar_str_len(value: *const Str) -> usize {
 /// The caller roots a live immutable string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_stdout_write(value: *const Str) -> usize {
+    // SAFETY: the caller roots the immutable string until this write completes.
     let text = unsafe { &*value };
     let result = {
         let mut output = OUTPUT.lock().unwrap_or_else(|poison| poison.into_inner());

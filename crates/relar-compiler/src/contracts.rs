@@ -325,6 +325,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_bytes_concat"
                 | "relar_bytes_repeat"
                 | "relar_bytes_decode"
+                | "relar_bytes_decode_splitlines"
                 | "relar_toml_keys"
                 | "relar_json_add"
                 | "relar_json_get_receiver"

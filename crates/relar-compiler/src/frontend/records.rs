@@ -653,15 +653,12 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
-        if self.has_concrete_subclasses(class) && receiver.is_some() {
-            return self.dispatch_record(
-                class,
-                receiver.unwrap(),
-                attribute,
-                |checker, class, receiver| {
-                    checker.direct_class_attribute(attribute, class, Some(receiver), expected)
-                },
-            );
+        if self.has_concrete_subclasses(class)
+            && let Some(receiver) = receiver
+        {
+            return self.dispatch_record(class, receiver, attribute, |checker, class, receiver| {
+                checker.direct_class_attribute(attribute, class, Some(receiver), expected)
+            });
         }
         self.direct_class_attribute(attribute, class, receiver, expected)
     }
@@ -720,15 +717,12 @@ impl Checker<'_> {
         class: usize,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
-        if receiver.is_some() && self.has_concrete_subclasses(class) {
-            self.dispatch_record(
-                class,
-                receiver.unwrap(),
-                call,
-                |checker, class, receiver| {
-                    checker.direct_method_call(call, attribute, class, Some(receiver))
-                },
-            )
+        if self.has_concrete_subclasses(class)
+            && let Some(receiver) = receiver
+        {
+            self.dispatch_record(class, receiver, call, |checker, class, receiver| {
+                checker.direct_method_call(call, attribute, class, Some(receiver))
+            })
         } else {
             self.direct_method_call(call, attribute, class, receiver)
         }

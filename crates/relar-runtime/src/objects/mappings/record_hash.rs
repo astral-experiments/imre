@@ -38,20 +38,24 @@ unsafe fn prepare(record: *const usize) -> Result<(), Error> {
     if layout.has_toml_hash() {
         // SAFETY: exactly these layouts own one extra zero-initialized cache word.
         let cache = unsafe { record.add(layout.length).cast_mut() };
+        // SAFETY: allocation initializes the private cache word to zero.
         if unsafe { cache.read() } != 0 {
             return Ok(());
         }
         let mut text = String::new();
+        // SAFETY: projected records always carry a static dataclass descriptor.
         let semantics = unsafe { &*layout.semantics };
         for index in 0..layout.length {
             // SAFETY: the checked projection lists every exact JSON field and its UTF-8 name.
             let field = unsafe { &*semantics.fields.add(index) };
+            // SAFETY: the compiler emits UTF-8 field names with their byte lengths.
             let name = unsafe {
                 std::str::from_utf8_unchecked(std::slice::from_raw_parts(
                     field.name,
                     field.name_len,
                 ))
             };
+            // SAFETY: every projected field is an initialized immutable JSON object.
             let field = unsafe { object(*record.add(index) as *const Object) };
             if index != 0 {
                 text.push('\n');
@@ -69,6 +73,7 @@ unsafe fn prepare(record: *const usize) -> Result<(), Error> {
         // SAFETY: only this single-threaded record runtime reads or writes the private word.
         unsafe { cache.write(text_hash(&text).wrapping_add(1)) };
     } else {
+        // SAFETY: the static descriptor or null outlives the rooted record.
         let semantics = unsafe { layout.semantics.as_ref() };
         for i in 0..layout.length {
             // SAFETY: descriptors and initialized field words remain rooted during recursion.
