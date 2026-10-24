@@ -201,7 +201,7 @@ fn checked_lower_with(
     };
     cache.restore_hints(graph)?;
     let lowered = frontend::lower_with_owners(graph);
-    cache.retain_hints(graph);
+    cache.retain_hints(graph, lowered.is_ok());
     let lowered = lowered?;
     cache.check(&mut graph.session, &graph.inputs)?;
     Ok(lowered)

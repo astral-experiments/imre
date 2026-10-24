@@ -193,27 +193,33 @@ fn scalar_hints_follow_edited_asts_and_are_retained_only_on_demand() {
     let options = CompileOptions::default();
     let mut run = |source: &str, hints| {
         fs::write(&entry, source).unwrap();
-        let retained = llvm(compiler.compile_file_units(&entry, None, &options).unwrap());
+        let retained = compiler
+            .compile_file_units(&entry, None, &options)
+            .map(llvm);
         assert_eq!(
             retained,
-            llvm(compile_file_units(&entry, None, &options).unwrap())
+            compile_file_units(&entry, None, &options).map(llvm)
         );
         assert_eq!(compiler.cache.hints.is_some(), hints);
         retained
     };
-    run(simple, false);
-    let ints = run(collect, true);
-    assert_eq!(run(collect, true), ints);
+    let early_error = "from dep import number as get\nprint(get(1))\n";
+    assert!(run(early_error, false).is_err());
+    run(simple, false).unwrap();
+    let ints = run(collect, true).unwrap();
+    assert!(run(early_error, true).is_err());
+    assert_eq!(run(collect, true).unwrap(), ints);
     // Same-length replacement changes which imported return type the append sees.
     let strings = collect.replace("number", "string");
-    let words = run(&strings, true);
+    let words = run(&strings, true).unwrap();
     assert!(ints != words);
     // Move the expression and change its parser node index as well as its source range.
     run(
         &strings.replace("    items = []", "    count = 1\n    items = []"),
         true,
-    );
-    run(simple, false);
+    )
+    .unwrap();
+    run(simple, false).unwrap();
 }
 
 #[test]

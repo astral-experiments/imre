@@ -381,14 +381,23 @@ impl AnalysisCache {
             for (module, &file) in graph.modules.iter_mut().zip(&hints.session.files) {
                 module.parsed = hints.session.parsed(file);
             }
-            graph.session = hints.session;
+            graph.session = hints.session.clone();
+            self.hints = Some(hints);
         }
         Ok(())
     }
 
-    pub(crate) fn retain_hints(&mut self, graph: &crate::modules::SourceGraph) {
+    pub(crate) fn retain_hints(
+        &mut self,
+        graph: &crate::modules::SourceGraph,
+        lowering_succeeded: bool,
+    ) {
         if graph.session.used_hints.take() {
-            self.hints = Some(CachedSession::new(graph.session.clone(), &graph.inputs));
+            self.hints
+                .get_or_insert_with(|| CachedSession::new(graph.session.clone(), &graph.inputs));
+        } else if lowering_succeeded {
+            // An error can stop lowering before the program reaches its first hint.
+            self.hints = None;
         }
     }
 
