@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="600pt" height="666pt" viewBox="0 0 600 666" xmlns="http://www.w3.org/2000/svg" version="1.1">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="600pt" height="705pt" viewBox="0 0 600 705" xmlns="http://www.w3.org/2000/svg" version="1.1">
  <title>Median runtime by workload</title>
  <metadata>
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
@@ -19,724 +19,534 @@
  </metadata>
  <defs>
   <style>
-    :root {--ink: #192b28; --muted: #667772; --rule: #dee7e2; --surface: #ffffff; --bar: #b5c2be; --track: #eef2f0; --accent: #127b67}
+    :root {--ink: #261230; --muted: #6f5d6f; --rule: #e2d5e8; --surface: #fbf2fc; --bar: #c9c1f4; --accent: #6340ac}
     text {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
       font-variant-numeric: tabular-nums;
     }
-    @media (prefers-color-scheme: dark) {:root {--ink: #e5eeeb; --muted: #9eaea8; --rule: #2c3934; --surface: #111a16; --bar: #667b71; --track: #233029; --accent: #64d3b2}}
+    @media (prefers-color-scheme: dark) {:root {--ink: #f7eff8; --muted: #b8a5c3; --rule: #493554; --surface: #261230; --bar: #c9c1f4; --accent: #d7ff64}}
   </style>
   <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
  </defs>
  <g id="figure_1">
   <g id="patch_1">
-   <path d="M 0 666
-L 600 666
+   <path d="M 0 705
+L 600 705
 L 600 0
 L 0 0
-L 0 666
+L 0 705
 z
 " style="fill: none"/>
   </g>
   <g id="axes_1">
    <g id="patch_2">
-    <path d="M 9.375 0.375
-L 281.625 0.375
-Q 290.625 0.375 290.625 9.375
-L 290.625 191.625
-Q 290.625 200.625 281.625 200.625
-L 9.375 200.625
-Q 0.375 200.625 0.375 191.625
-L 0.375 9.375
-Q 0.375 0.375 9.375 0.375
+    <path d="M 9 0
+L 591 0
+Q 600 0 600 9
+L 600 696
+Q 600 705 591 705
+L 9 705
+Q 0 705 0 696
+L 0 9
+Q 0 0 9 0
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--surface)"/>
+   </g>
+   <g id="line2d_1">
+    <path d="M 24 91.5
+L 576 91.5
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_2">
+    <path d="M 75 159.75
+L 75 249.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_3">
+    <path d="M 159 159.75
+L 159 249.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_4">
+    <path d="M 243 159.75
+L 243 249.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_5">
+    <path d="M 24 280.5
+L 576 280.5
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_6">
+    <path d="M 363 159.75
+L 363 249.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_7">
+    <path d="M 419 159.75
+L 419 249.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_8">
+    <path d="M 475 159.75
+L 475 249.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_9">
+    <path d="M 531 159.75
+L 531 249.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_10">
+    <path d="M 75 348.75
+L 75 438.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_11">
+    <path d="M 159 348.75
+L 159 438.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_12">
+    <path d="M 243 348.75
+L 243 438.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_13">
+    <path d="M 24 469.5
+L 576 469.5
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_14">
+    <path d="M 363 348.75
+L 363 438.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_15">
+    <path d="M 419 348.75
+L 419 438.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_16">
+    <path d="M 475 348.75
+L 475 438.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_17">
+    <path d="M 531 348.75
+L 531 438.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_18">
+    <path d="M 75 537.75
+L 75 627.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_19">
+    <path d="M 131 537.75
+L 131 627.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_20">
+    <path d="M 187 537.75
+L 187 627.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_21">
+    <path d="M 243 537.75
+L 243 627.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_22">
+    <path d="M 363 537.75
+L 363 627.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_23">
+    <path d="M 419 537.75
+L 419 627.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_24">
+    <path d="M 475 537.75
+L 475 627.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_25">
+    <path d="M 531 537.75
+L 531 627.75
+" clip-path="url(#pfb696699d8)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
    </g>
    <g id="patch_3">
-    <path d="M 21 90
-L 270 90
-Q 273 90 273 93
-L 273 93
-Q 273 96 270 96
-L 21 96
-Q 18 96 18 93
-L 18 93
-Q 18 90 21 90
+    <path d="M 75 169.5
+L 117.506643 169.5
+L 117.506643 180
+L 75 180
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_4">
-    <path d="M 21 90
-L 98.668414 90
-Q 101.668414 90 101.668414 93
-L 101.668414 93
-Q 101.668414 96 98.668414 96
-L 21 96
-Q 18 96 18 93
-L 18 93
-Q 18 90 21 90
+    <path d="M 75 199.5
+L 125.471785 199.5
+L 125.471785 210
+L 75 210
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--accent)"/>
    </g>
    <g id="patch_5">
-    <path d="M 21 132
-L 270 132
-Q 273 132 273 135
-L 273 135
-Q 273 138 270 138
-L 21 138
-Q 18 138 18 135
-L 18 135
-Q 18 132 21 132
+    <path d="M 75 229.5
+L 204.549412 229.5
+L 204.549412 240
+L 75 240
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_6">
-    <path d="M 21 132
-L 114.346688 132
-Q 117.346688 132 117.346688 135
-L 117.346688 135
-Q 117.346688 138 114.346688 138
-L 21 138
-Q 18 138 18 135
-L 18 135
-Q 18 132 21 132
+    <path d="M 363 169.5
+L 414.175623 169.5
+L 414.175623 180
+L 363 180
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--accent)"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_7">
-    <path d="M 21 174
-L 270 174
-Q 273 174 273 177
-L 273 177
-Q 273 180 270 180
-L 21 180
-Q 18 180 18 177
-L 18 177
-Q 18 174 21 174
+    <path d="M 363 199.5
+L 422.417851 199.5
+L 422.417851 210
+L 363 210
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--accent)"/>
    </g>
    <g id="patch_8">
-    <path d="M 21 174
-L 270 174
-Q 273 174 273 177
-L 273 177
-Q 273 180 270 180
-L 21 180
-Q 18 180 18 177
-L 18 177
-Q 18 174 21 174
+    <path d="M 363 229.5
+L 488.802277 229.5
+L 488.802277 240
+L 363 240
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_9">
-    <path d="M 318.375 0.375
-L 590.625 0.375
-Q 599.625 0.375 599.625 9.375
-L 599.625 191.625
-Q 599.625 200.625 590.625 200.625
-L 318.375 200.625
-Q 309.375 200.625 309.375 191.625
-L 309.375 9.375
-Q 309.375 0.375 318.375 0.375
+    <path d="M 75 358.5
+L 82.758147 358.5
+L 82.758147 369
+L 75 369
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_10">
-    <path d="M 330 90
-L 579 90
-Q 582 90 582 93
-L 582 93
-Q 582 96 579 96
-L 330 96
-Q 327 96 327 93
-L 327 93
-Q 327 90 330 90
+    <path d="M 75 388.5
+L 88.056778 388.5
+L 88.056778 399
+L 75 399
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--accent)"/>
    </g>
    <g id="patch_11">
-    <path d="M 330 90
-L 427.732493 90
-Q 430.732493 90 430.732493 93
-L 430.732493 93
-Q 430.732493 96 427.732493 96
-L 330 96
-Q 327 96 327 93
-L 327 93
-Q 327 90 330 90
+    <path d="M 75 418.5
+L 229.396732 418.5
+L 229.396732 429
+L 75 429
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_12">
-    <path d="M 330 132
-L 579 132
-Q 582 132 582 135
-L 582 135
-Q 582 138 579 138
-L 330 138
-Q 327 138 327 135
-L 327 135
-Q 327 132 330 132
+    <path d="M 363 358.5
+L 368.909554 358.5
+L 368.909554 369
+L 363 369
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_13">
-    <path d="M 330 132
-L 444.43941 132
-Q 447.43941 132 447.43941 135
-L 447.43941 135
-Q 447.43941 138 444.43941 138
-L 330 138
-Q 327 138 327 135
-L 327 135
-Q 327 132 330 132
+    <path d="M 363 388.5
+L 377.654558 388.5
+L 377.654558 399
+L 363 399
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--accent)"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--accent)"/>
    </g>
    <g id="patch_14">
-    <path d="M 330 174
-L 579 174
-Q 582 174 582 177
-L 582 177
-Q 582 180 579 180
-L 330 180
-Q 327 180 327 177
-L 327 177
-Q 327 174 330 174
+    <path d="M 363 418.5
+L 530.471887 418.5
+L 530.471887 429
+L 363 429
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_15">
-    <path d="M 330 174
-L 579 174
-Q 582 174 582 177
-L 582 177
-Q 582 180 579 180
-L 330 180
-Q 327 180 327 177
-L 327 177
-Q 327 174 330 174
+    <path d="M 75 547.5
+L 85.461802 547.5
+L 85.461802 558
+L 75 558
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_16">
-    <path d="M 9.375 219.375
-L 281.625 219.375
-Q 290.625 219.375 290.625 228.375
-L 290.625 410.625
-Q 290.625 419.625 281.625 419.625
-L 9.375 419.625
-Q 0.375 419.625 0.375 410.625
-L 0.375 228.375
-Q 0.375 219.375 9.375 219.375
+    <path d="M 75 577.5
+L 89.911702 577.5
+L 89.911702 588
+L 75 588
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--accent)"/>
    </g>
    <g id="patch_17">
-    <path d="M 21 309
-L 270 309
-Q 273 309 273 312
-L 273 312
-Q 273 315 270 315
-L 21 315
-Q 18 315 18 312
-L 18 312
-Q 18 309 21 309
+    <path d="M 75 607.5
+L 209.61374 607.5
+L 209.61374 618
+L 75 618
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_18">
-    <path d="M 21 309
-L 27.813273 309
-Q 30.813273 309 30.813273 312
-L 30.813273 312
-Q 30.813273 315 27.813273 315
-L 21 315
-Q 18 315 18 312
-L 18 312
-Q 18 309 21 309
+    <path d="M 363 547.5
+L 376.20918 547.5
+L 376.20918 558
+L 363 558
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_19">
-    <path d="M 21 351
-L 270 351
-Q 273 351 273 354
-L 273 354
-Q 273 357 270 357
-L 21 357
-Q 18 357 18 354
-L 18 354
-Q 18 351 21 351
+    <path d="M 363 577.5
+L 381.499697 577.5
+L 381.499697 588
+L 363 588
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--accent)"/>
    </g>
    <g id="patch_20">
-    <path d="M 21 351
-L 36.564436 351
-Q 39.564436 351 39.564436 354
-L 39.564436 354
-Q 39.564436 357 36.564436 357
-L 21 357
-Q 18 357 18 354
-L 18 354
-Q 18 351 21 351
+    <path d="M 363 607.5
+L 501.326754 607.5
+L 501.326754 618
+L 363 618
 z
-" clip-path="url(#p42b040a49b)" style="fill: var(--accent)"/>
-   </g>
-   <g id="patch_21">
-    <path d="M 21 393
-L 270 393
-Q 273 393 273 396
-L 273 396
-Q 273 399 270 399
-L 21 399
-Q 18 399 18 396
-L 18 396
-Q 18 393 21 393
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
-   </g>
-   <g id="patch_22">
-    <path d="M 21 393
-L 270 393
-Q 273 393 273 396
-L 273 396
-Q 273 399 270 399
-L 21 399
-Q 18 399 18 396
-L 18 396
-Q 18 393 21 393
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
-   </g>
-   <g id="patch_23">
-    <path d="M 318.375 219.375
-L 590.625 219.375
-Q 599.625 219.375 599.625 228.375
-L 599.625 410.625
-Q 599.625 419.625 590.625 419.625
-L 318.375 419.625
-Q 309.375 419.625 309.375 410.625
-L 309.375 228.375
-Q 309.375 219.375 318.375 219.375
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
-   </g>
-   <g id="patch_24">
-    <path d="M 330 309
-L 579 309
-Q 582 309 582 312
-L 582 312
-Q 582 315 579 315
-L 330 315
-Q 327 315 327 312
-L 327 312
-Q 327 309 330 309
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
-   </g>
-   <g id="patch_25">
-    <path d="M 330 309
-L 332.998145 309
-Q 335.998145 309 335.998145 312
-L 335.998145 312
-Q 335.998145 315 332.998145 315
-L 330 315
-Q 327 315 327 312
-L 327 312
-Q 327 309 330 309
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
-   </g>
-   <g id="patch_26">
-    <path d="M 330 351
-L 579 351
-Q 582 351 582 354
-L 582 354
-Q 582 357 579 357
-L 330 357
-Q 327 357 327 354
-L 327 354
-Q 327 351 330 351
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
-   </g>
-   <g id="patch_27">
-    <path d="M 330 351
-L 346.31367 351
-Q 349.31367 351 349.31367 354
-L 349.31367 354
-Q 349.31367 357 346.31367 357
-L 330 357
-Q 327 357 327 354
-L 327 354
-Q 327 351 330 351
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--accent)"/>
-   </g>
-   <g id="patch_28">
-    <path d="M 330 393
-L 579 393
-Q 582 393 582 396
-L 582 396
-Q 582 399 579 399
-L 330 399
-Q 327 399 327 396
-L 327 396
-Q 327 393 330 393
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
-   </g>
-   <g id="patch_29">
-    <path d="M 330 393
-L 579 393
-Q 582 393 582 396
-L 582 396
-Q 582 399 579 399
-L 330 399
-Q 327 399 327 396
-L 327 396
-Q 327 393 330 393
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
-   </g>
-   <g id="patch_30">
-    <path d="M 9.375 438.375
-L 281.625 438.375
-Q 290.625 438.375 290.625 447.375
-L 290.625 629.625
-Q 290.625 638.625 281.625 638.625
-L 9.375 638.625
-Q 0.375 638.625 0.375 629.625
-L 0.375 447.375
-Q 0.375 438.375 9.375 438.375
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
-   </g>
-   <g id="patch_31">
-    <path d="M 21 528
-L 270 528
-Q 273 528 273 531
-L 273 531
-Q 273 534 270 534
-L 21 534
-Q 18 534 18 531
-L 18 531
-Q 18 528 21 528
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
-   </g>
-   <g id="patch_32">
-    <path d="M 21 528
-L 34.817884 528
-Q 37.817884 528 37.817884 531
-L 37.817884 531
-Q 37.817884 534 34.817884 534
-L 21 534
-Q 18 534 18 531
-L 18 531
-Q 18 528 21 528
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
-   </g>
-   <g id="patch_33">
-    <path d="M 21 570
-L 270 570
-Q 273 570 273 573
-L 273 573
-Q 273 576 270 576
-L 21 576
-Q 18 576 18 573
-L 18 573
-Q 18 570 21 570
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
-   </g>
-   <g id="patch_34">
-    <path d="M 21 570
-L 43.247369 570
-Q 46.247369 570 46.247369 573
-L 46.247369 573
-Q 46.247369 576 43.247369 576
-L 21 576
-Q 18 576 18 573
-L 18 573
-Q 18 570 21 570
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--accent)"/>
-   </g>
-   <g id="patch_35">
-    <path d="M 21 612
-L 270 612
-Q 273 612 273 615
-L 273 615
-Q 273 618 270 618
-L 21 618
-Q 18 618 18 615
-L 18 615
-Q 18 612 21 612
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
-   </g>
-   <g id="patch_36">
-    <path d="M 21 612
-L 270 612
-Q 273 612 273 615
-L 273 615
-Q 273 618 270 618
-L 21 618
-Q 18 618 18 615
-L 18 615
-Q 18 612 21 612
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
-   </g>
-   <g id="patch_37">
-    <path d="M 318.375 438.375
-L 590.625 438.375
-Q 599.625 438.375 599.625 447.375
-L 599.625 629.625
-Q 599.625 638.625 590.625 638.625
-L 318.375 638.625
-Q 309.375 638.625 309.375 629.625
-L 309.375 447.375
-Q 309.375 438.375 318.375 438.375
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
-   </g>
-   <g id="patch_38">
-    <path d="M 330 528
-L 579 528
-Q 582 528 582 531
-L 582 531
-Q 582 534 579 534
-L 330 534
-Q 327 534 327 531
-L 327 531
-Q 327 528 330 528
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
-   </g>
-   <g id="patch_39">
-    <path d="M 330 528
-L 348.350611 528
-Q 351.350611 528 351.350611 531
-L 351.350611 531
-Q 351.350611 534 348.350611 534
-L 330 534
-Q 327 534 327 531
-L 327 531
-Q 327 528 330 528
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
-   </g>
-   <g id="patch_40">
-    <path d="M 330 570
-L 579 570
-Q 582 570 582 573
-L 582 573
-Q 582 576 579 576
-L 330 576
-Q 327 576 327 573
-L 327 573
-Q 327 570 330 570
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
-   </g>
-   <g id="patch_41">
-    <path d="M 330 570
-L 358.103474 570
-Q 361.103474 570 361.103474 573
-L 361.103474 573
-Q 361.103474 576 358.103474 576
-L 330 576
-Q 327 576 327 573
-L 327 573
-Q 327 570 330 570
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--accent)"/>
-   </g>
-   <g id="patch_42">
-    <path d="M 330 612
-L 579 612
-Q 582 612 582 615
-L 582 615
-Q 582 618 579 618
-L 330 618
-Q 327 618 327 615
-L 327 615
-Q 327 612 330 612
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
-   </g>
-   <g id="patch_43">
-    <path d="M 330 612
-L 579 612
-Q 582 612 582 615
-L 582 615
-Q 582 618 579 618
-L 330 618
-Q 327 618 327 615
-L 327 615
-Q 327 612 330 612
-z
-" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
+" clip-path="url(#pfb696699d8)" style="fill: var(--bar)"/>
    </g>
    <g id="text_1">
-    <text style="font-weight: 600; font-size: 15px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="29.580469" transform="rotate(-0 18 29.580469)">Inventory · repeated</text>
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--muted)" x="24" y="24.798398" transform="rotate(-0 24 24.798398)">RELAR / RUNTIME BENCHMARKS</text>
    </g>
    <g id="text_2">
-    <text style="font-size: 9.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="18" y="48.440391" transform="rotate(-0 18 48.440391)">16,384 requests, 64 SKUs</text>
+    <text style="font-size: 19.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="56.380781" transform="rotate(-0 24 56.380781)">RUNTIME BY WORKLOAD</text>
    </g>
    <g id="text_3">
-    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="78.854297" transform="rotate(-0 18 78.854297)">Rust</text>
+    <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="24" y="76.397344" transform="rotate(-0 24 76.397344)">Rust, CPython and Relar on six workloads.</text>
    </g>
    <g id="text_4">
-    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="273" y="79.268203" transform="rotate(-0 273 79.268203)">25.30 ms</text>
+    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="122.639063" transform="rotate(-0 24 122.639063)">Inventory · repeated</text>
    </g>
    <g id="text_5">
-    <text style="font-weight: 600; font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--accent)" x="18" y="120.854297" transform="rotate(-0 18 120.854297)">Relar</text>
+    <text style="font-size: 9px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="24" y="141.983438" transform="rotate(-0 24 141.983438)">16,384 requests, 64 SKUs</text>
    </g>
    <g id="text_6">
-    <text style="font-weight: 600; font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--accent)" x="273" y="121.268203" transform="rotate(-0 273 121.268203)">30.04 ms</text>
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="75" y="264.048398" transform="rotate(-0 75 264.048398)">0</text>
    </g>
    <g id="text_7">
-    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="162.854297" transform="rotate(-0 18 162.854297)">CPython</text>
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="159" y="264.048398" transform="rotate(-0 159 264.048398)">50</text>
    </g>
    <g id="text_8">
-    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="273" y="163.268203" transform="rotate(-0 273 163.268203)">77.11 ms</text>
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="243" y="264.048398" transform="rotate(-0 243 264.048398)">100</text>
    </g>
    <g id="text_9">
-    <text style="font-weight: 600; font-size: 15px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="29.580469" transform="rotate(-0 327 29.580469)">Inventory · distinct</text>
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="177.440391" transform="rotate(-0 24 177.440391)">Rust</text>
    </g>
    <g id="text_10">
-    <text style="font-size: 9.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="327" y="48.440391" transform="rotate(-0 327 48.440391)">16,384 requests, 16,384 SKUs</text>
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="124.256643" y="177.466289" transform="rotate(-0 124.256643 177.466289)">25.30</text>
    </g>
    <g id="text_11">
-    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="78.854297" transform="rotate(-0 327 78.854297)">Rust</text>
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--accent)" x="24" y="207.440391" transform="rotate(-0 24 207.440391)">Relar</text>
    </g>
    <g id="text_12">
-    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="582" y="79.268203" transform="rotate(-0 582 79.268203)">45.69 ms</text>
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent)" x="132.221785" y="207.466289" transform="rotate(-0 132.221785 207.466289)">30.04</text>
    </g>
    <g id="text_13">
-    <text style="font-weight: 600; font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--accent)" x="327" y="120.854297" transform="rotate(-0 327 120.854297)">Relar</text>
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="237.440391" transform="rotate(-0 24 237.440391)">CPython</text>
    </g>
    <g id="text_14">
-    <text style="font-weight: 600; font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--accent)" x="582" y="121.268203" transform="rotate(-0 582 121.268203)">53.05 ms</text>
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="211.299412" y="237.466289" transform="rotate(-0 211.299412 237.466289)">77.11</text>
    </g>
    <g id="text_15">
-    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="162.854297" transform="rotate(-0 327 162.854297)">CPython</text>
+    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="122.639063" transform="rotate(-0 312 122.639063)">Inventory · distinct</text>
    </g>
    <g id="text_16">
-    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="582" y="163.268203" transform="rotate(-0 582 163.268203)">112.32 ms</text>
+    <text style="font-size: 9px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="312" y="141.983438" transform="rotate(-0 312 141.983438)">16,384 requests, 16,384 SKUs</text>
    </g>
    <g id="text_17">
-    <text style="font-weight: 600; font-size: 15px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="248.639063" transform="rotate(-0 18 248.639063)">Base45 decode</text>
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="363" y="264.048398" transform="rotate(-0 363 264.048398)">0</text>
    </g>
    <g id="text_18">
-    <text style="font-size: 9.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="18" y="267.440391" transform="rotate(-0 18 267.440391)">64 × 16 KiB decoded</text>
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="419" y="264.048398" transform="rotate(-0 419 264.048398)">50</text>
    </g>
    <g id="text_19">
-    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="297.854297" transform="rotate(-0 18 297.854297)">Rust</text>
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="475" y="264.048398" transform="rotate(-0 475 264.048398)">100</text>
    </g>
    <g id="text_20">
-    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="273" y="298.268203" transform="rotate(-0 273 298.268203)">9.24 ms</text>
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="531" y="264.048398" transform="rotate(-0 531 264.048398)">150</text>
    </g>
    <g id="text_21">
-    <text style="font-weight: 600; font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--accent)" x="18" y="339.854297" transform="rotate(-0 18 339.854297)">Relar</text>
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="177.440391" transform="rotate(-0 312 177.440391)">Rust</text>
    </g>
    <g id="text_22">
-    <text style="font-weight: 600; font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--accent)" x="273" y="340.268203" transform="rotate(-0 273 340.268203)">15.54 ms</text>
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="420.925623" y="177.466289" transform="rotate(-0 420.925623 177.466289)">45.69</text>
    </g>
    <g id="text_23">
-    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="381.854297" transform="rotate(-0 18 381.854297)">CPython</text>
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--accent)" x="312" y="207.440391" transform="rotate(-0 312 207.440391)">Relar</text>
    </g>
    <g id="text_24">
-    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="273" y="382.268203" transform="rotate(-0 273 382.268203)">183.81 ms</text>
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent)" x="429.167851" y="207.466289" transform="rotate(-0 429.167851 207.466289)">53.05</text>
    </g>
    <g id="text_25">
-    <text style="font-weight: 600; font-size: 15px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="248.639063" transform="rotate(-0 327 248.639063)">Luhn checksum</text>
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="237.440391" transform="rotate(-0 312 237.440391)">CPython</text>
    </g>
    <g id="text_26">
-    <text style="font-size: 9.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="327" y="267.440391" transform="rotate(-0 327 267.440391)">65,536 × 16 digits</text>
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="495.552277" y="237.466289" transform="rotate(-0 495.552277 237.466289)">112.32</text>
    </g>
    <g id="text_27">
-    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="297.854297" transform="rotate(-0 327 297.854297)">Rust</text>
+    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="311.639063" transform="rotate(-0 24 311.639063)">Base45 decode</text>
    </g>
    <g id="text_28">
-    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="582" y="298.268203" transform="rotate(-0 582 298.268203)">5.28 ms</text>
+    <text style="font-size: 9px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="24" y="330.983437" transform="rotate(-0 24 330.983437)">64 × 16 KiB decoded</text>
    </g>
    <g id="text_29">
-    <text style="font-weight: 600; font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--accent)" x="327" y="339.854297" transform="rotate(-0 327 339.854297)">Relar</text>
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="75" y="453.048398" transform="rotate(-0 75 453.048398)">0</text>
    </g>
    <g id="text_30">
-    <text style="font-weight: 600; font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--accent)" x="582" y="340.268203" transform="rotate(-0 582 340.268203)">13.08 ms</text>
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="159" y="453.048398" transform="rotate(-0 159 453.048398)">100</text>
    </g>
    <g id="text_31">
-    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="381.854297" transform="rotate(-0 327 381.854297)">CPython</text>
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="243" y="453.048398" transform="rotate(-0 243 453.048398)">200</text>
    </g>
    <g id="text_32">
-    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="582" y="382.268203" transform="rotate(-0 582 382.268203)">149.53 ms</text>
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="366.440391" transform="rotate(-0 24 366.440391)">Rust</text>
    </g>
    <g id="text_33">
-    <text style="font-weight: 600; font-size: 15px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="467.580469" transform="rotate(-0 18 467.580469)">Telemetry report</text>
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="89.508147" y="366.466289" transform="rotate(-0 89.508147 366.466289)">9.24</text>
    </g>
    <g id="text_34">
-    <text style="font-size: 9.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="18" y="486.440391" transform="rotate(-0 18 486.440391)">81 × 4,096 aligned pairs</text>
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--accent)" x="24" y="396.440391" transform="rotate(-0 24 396.440391)">Relar</text>
    </g>
    <g id="text_35">
-    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="516.854297" transform="rotate(-0 18 516.854297)">Rust</text>
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent)" x="94.806778" y="396.466289" transform="rotate(-0 94.806778 396.466289)">15.54</text>
    </g>
    <g id="text_36">
-    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="273" y="517.268203" transform="rotate(-0 273 517.268203)">9.34 ms</text>
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="426.440391" transform="rotate(-0 24 426.440391)">CPython</text>
    </g>
    <g id="text_37">
-    <text style="font-weight: 600; font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--accent)" x="18" y="558.854297" transform="rotate(-0 18 558.854297)">Relar</text>
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="236.146732" y="426.466289" transform="rotate(-0 236.146732 426.466289)">183.81</text>
    </g>
    <g id="text_38">
-    <text style="font-weight: 600; font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--accent)" x="273" y="559.268203" transform="rotate(-0 273 559.268203)">13.31 ms</text>
+    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="311.639063" transform="rotate(-0 312 311.639063)">Luhn checksum</text>
    </g>
    <g id="text_39">
-    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="600.854297" transform="rotate(-0 18 600.854297)">CPython</text>
+    <text style="font-size: 9px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="312" y="330.983437" transform="rotate(-0 312 330.983437)">65,536 × 16 digits</text>
    </g>
    <g id="text_40">
-    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="273" y="601.268203" transform="rotate(-0 273 601.268203)">120.19 ms</text>
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="363" y="453.048398" transform="rotate(-0 363 453.048398)">0</text>
    </g>
    <g id="text_41">
-    <text style="font-weight: 600; font-size: 15px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="467.639063" transform="rotate(-0 327 467.639063)">Offline conformance report</text>
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="419" y="453.048398" transform="rotate(-0 419 453.048398)">50</text>
    </g>
    <g id="text_42">
-    <text style="font-size: 9.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="327" y="486.440391" transform="rotate(-0 327 486.440391)">146 files, two captured ty runs</text>
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="475" y="453.048398" transform="rotate(-0 475 453.048398)">100</text>
    </g>
    <g id="text_43">
-    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="516.854297" transform="rotate(-0 327 516.854297)">Rust</text>
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="531" y="453.048398" transform="rotate(-0 531 453.048398)">150</text>
    </g>
    <g id="text_44">
-    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="582" y="517.268203" transform="rotate(-0 582 517.268203)">23.59 ms</text>
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="366.440391" transform="rotate(-0 312 366.440391)">Rust</text>
    </g>
    <g id="text_45">
-    <text style="font-weight: 600; font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--accent)" x="327" y="558.854297" transform="rotate(-0 327 558.854297)">Relar</text>
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="375.659554" y="366.466289" transform="rotate(-0 375.659554 366.466289)">5.28</text>
    </g>
    <g id="text_46">
-    <text style="font-weight: 600; font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--accent)" x="582" y="559.268203" transform="rotate(-0 582 559.268203)">33.04 ms</text>
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--accent)" x="312" y="396.440391" transform="rotate(-0 312 396.440391)">Relar</text>
    </g>
    <g id="text_47">
-    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="600.854297" transform="rotate(-0 327 600.854297)">CPython</text>
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent)" x="384.404558" y="396.466289" transform="rotate(-0 384.404558 396.466289)">13.08</text>
    </g>
    <g id="text_48">
-    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="582" y="601.268203" transform="rotate(-0 582 601.268203)">247.01 ms</text>
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="426.440391" transform="rotate(-0 312 426.440391)">CPython</text>
    </g>
    <g id="text_49">
-    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="3" y="660.983438" transform="rotate(-0 3 660.983438)">Median of 12 runs · Lower is faster · Each panel has its own zero-based scale</text>
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="537.221887" y="426.466289" transform="rotate(-0 537.221887 426.466289)">149.53</text>
+   </g>
+   <g id="text_50">
+    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="500.639063" transform="rotate(-0 24 500.639063)">Telemetry report</text>
+   </g>
+   <g id="text_51">
+    <text style="font-size: 9px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="24" y="519.983438" transform="rotate(-0 24 519.983438)">81 × 4,096 aligned pairs</text>
+   </g>
+   <g id="text_52">
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="75" y="642.048398" transform="rotate(-0 75 642.048398)">0</text>
+   </g>
+   <g id="text_53">
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="131" y="642.048398" transform="rotate(-0 131 642.048398)">50</text>
+   </g>
+   <g id="text_54">
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="187" y="642.048398" transform="rotate(-0 187 642.048398)">100</text>
+   </g>
+   <g id="text_55">
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="243" y="642.048398" transform="rotate(-0 243 642.048398)">150</text>
+   </g>
+   <g id="text_56">
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="555.440391" transform="rotate(-0 24 555.440391)">Rust</text>
+   </g>
+   <g id="text_57">
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="92.211802" y="555.466289" transform="rotate(-0 92.211802 555.466289)">9.34</text>
+   </g>
+   <g id="text_58">
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--accent)" x="24" y="585.440391" transform="rotate(-0 24 585.440391)">Relar</text>
+   </g>
+   <g id="text_59">
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent)" x="96.661702" y="585.466289" transform="rotate(-0 96.661702 585.466289)">13.31</text>
+   </g>
+   <g id="text_60">
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="615.440391" transform="rotate(-0 24 615.440391)">CPython</text>
+   </g>
+   <g id="text_61">
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="216.36374" y="615.466289" transform="rotate(-0 216.36374 615.466289)">120.19</text>
+   </g>
+   <g id="text_62">
+    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="500.639063" transform="rotate(-0 312 500.639063)">Offline conformance report</text>
+   </g>
+   <g id="text_63">
+    <text style="font-size: 9px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="312" y="519.983438" transform="rotate(-0 312 519.983438)">146 files, two captured ty runs</text>
+   </g>
+   <g id="text_64">
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="363" y="642.048398" transform="rotate(-0 363 642.048398)">0</text>
+   </g>
+   <g id="text_65">
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="419" y="642.048398" transform="rotate(-0 419 642.048398)">100</text>
+   </g>
+   <g id="text_66">
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="475" y="642.048398" transform="rotate(-0 475 642.048398)">200</text>
+   </g>
+   <g id="text_67">
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="531" y="642.048398" transform="rotate(-0 531 642.048398)">300</text>
+   </g>
+   <g id="text_68">
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="555.440391" transform="rotate(-0 312 555.440391)">Rust</text>
+   </g>
+   <g id="text_69">
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="382.95918" y="555.466289" transform="rotate(-0 382.95918 555.466289)">23.59</text>
+   </g>
+   <g id="text_70">
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--accent)" x="312" y="585.440391" transform="rotate(-0 312 585.440391)">Relar</text>
+   </g>
+   <g id="text_71">
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent)" x="388.249697" y="585.466289" transform="rotate(-0 388.249697 585.466289)">33.04</text>
+   </g>
+   <g id="text_72">
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="615.440391" transform="rotate(-0 312 615.440391)">CPython</text>
+   </g>
+   <g id="text_73">
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="508.076754" y="615.466289" transform="rotate(-0 508.076754 615.466289)">247.01</text>
+   </g>
+   <g id="text_74">
+    <text style="font-size: 9px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="24" y="687.983438" transform="rotate(-0 24 687.983438)">Median elapsed time (ms) · 12 runs · Lower is faster · Independent scales</text>
    </g>
   </g>
  </g>
  <defs>
-  <clipPath id="p42b040a49b">
-   <rect x="0" y="0" width="600" height="666"/>
+  <clipPath id="pfb696699d8">
+   <rect x="0" y="0" width="600" height="705"/>
   </clipPath>
  </defs>
 </svg>

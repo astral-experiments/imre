@@ -11,7 +11,8 @@ from pathlib import Path
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyBboxPatch
+from matplotlib.patches import FancyBboxPatch, Rectangle
+from matplotlib.ticker import MaxNLocator
 
 ENGINES = {"rust": "Rust", "relar": "Relar", "cpython": "CPython"}
 PANEL_TITLES = {
@@ -19,17 +20,18 @@ PANEL_TITLES = {
     "Inventory (distinct)": "Inventory · distinct",
     "Conformance report": "Offline conformance report",
 }
-INK, MUTED = "#192b28", "#667772"
-RULE, SURFACE = "#dee7e2", "#ffffff"
-BAR, TRACK, ACCENT = "#b5c2be", "#eef2f0", "#127b67"
+# Galaxy, Lunar and Radiate: https://astral.sh
+# Light-mode purple: https://github.com/astral-sh/uv/blob/main/assets/svg/Benchmark-Light.svg
+INK, MUTED = "#261230", "#6f5d6f"
+RULE, SURFACE = "#e2d5e8", "#fbf2fc"
+BAR, ACCENT = "#c9c1f4", "#6340ac"
 PALETTE = {
-    "ink": (INK, "#e5eeeb"),
-    "muted": (MUTED, "#9eaea8"),
-    "rule": (RULE, "#2c3934"),
-    "surface": (SURFACE, "#111a16"),
-    "bar": (BAR, "#667b71"),
-    "track": (TRACK, "#233029"),
-    "accent": (ACCENT, "#64d3b2"),
+    "ink": (INK, "#f7eff8"),
+    "muted": (MUTED, "#b8a5c3"),
+    "rule": (RULE, "#493554"),
+    "surface": (SURFACE, "#261230"),
+    "bar": (BAR, "#c9c1f4"),
+    "accent": (ACCENT, "#d7ff64"),
 }
 
 
@@ -40,31 +42,35 @@ def canvas(width, height):
     return fig, ax
 
 
-def label(ax, x, y, text, size, *, weight="normal", color=INK, align="left"):
+def label(ax, x, y, text, size, *, color=INK, align="left", mono=False):
     ax.text(
         x,
         y,
         text,
         fontsize=size * 72 / 96,
-        weight=weight,
+        fontfamily="DejaVu Sans Mono" if mono else "DejaVu Sans",
         color=color,
         va="center",
         ha=align,
     )
 
 
-def box(ax, x, y, width, height, color, *, radius=4, border="none"):
+def surface(ax, width, height):
     ax.add_patch(
         FancyBboxPatch(
-            (x, y),
+            (0, 0),
             width,
             height,
-            boxstyle=f"round,pad=0,rounding_size={min(radius, width / 2)}",
-            facecolor=color,
-            edgecolor=border,
-            linewidth=0.75,
+            boxstyle="round,pad=0,rounding_size=12",
+            facecolor=SURFACE,
+            edgecolor="none",
+            zorder=-1,
         )
     )
+
+
+def rule(ax, x0, y0, x1, y1):
+    ax.plot((x0, x1), (y0, y1), color=RULE, linewidth=0.6, zorder=0)
 
 
 def save(fig, path, title):
@@ -77,6 +83,12 @@ def save(fig, path, title):
     plt.close(fig)
     # Matplotlib leaves trailing spaces at line breaks inside SVG paths.
     svg = path.read_text().replace(" \n", "\n")
+    # Keep text selectable and use local font fallbacks in GitHub's SVG images.
+    svg = svg.replace(
+        "'DejaVu Sans Mono'",
+        "ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace",
+    )
+    svg = svg.replace("'DejaVu Sans'", "Arial, Helvetica, sans-serif")
     for name, (light, _) in PALETTE.items():
         svg = svg.replace(light, f"var(--{name})")
     light = "; ".join(f"--{name}: {colors[0]}" for name, colors in PALETTE.items())
@@ -84,7 +96,6 @@ def save(fig, path, title):
     style = f"""<style>
     :root {{{light}}}
     text {{
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
       font-variant-numeric: tabular-nums;
     }}
     @media (prefers-color-scheme: dark) {{:root {{{dark}}}}}
@@ -92,83 +103,99 @@ def save(fig, path, title):
     path.write_text(svg.replace("<defs>", f"<defs>\n  {style}", 1))
 
 
-def conformance_chart(case, medians, path):
-    fig, ax = canvas(800, 312)
-    box(ax, 0.5, 0.5, 799, 311, SURFACE, radius=14, border=RULE)
-    label(ax, 32, 39, "Conformance report", 23, weight="semibold")
-    label(ax, 32, 66, case["input"], 14, color=MUTED)
-    label(ax, 768, 39, "Median elapsed time", 13, color=MUTED, align="right")
-    label(ax, 768, 61, "Lower is faster", 13, color=MUTED, align="right")
-    longest = max(medians.values())
+def bars(ax, medians, x, y, width, *, compact=False):
+    label_width, value_width = (68, 60) if compact else (112, 80)
+    row_step, bar_height = (40, 14) if compact else (46, 18)
+    font_size = 13 if compact else 16
+    plot_x = x + label_width
+    plot_width = width - label_width - value_width
+    ticks = MaxNLocator(
+        nbins=3 if compact else 5, steps=(1, 2, 2.5, 5, 10), integer=True
+    ).tick_values(0, max(medians.values()))
+    last_y = y + row_step * (len(ENGINES) - 1)
+    for tick in ticks:
+        tick_x = plot_x + plot_width * tick / ticks[-1]
+        rule(ax, tick_x, y - 20, tick_x, last_y + 20)
+        label(
+            ax,
+            tick_x,
+            last_y + 36,
+            f"{tick:g}",
+            11,
+            color=MUTED,
+            align="center",
+            mono=True,
+        )
     for i, (engine, name) in enumerate(ENGINES.items()):
-        y = 112 + 66 * i
+        row_y = y + row_step * i
         ms = medians[engine]
         highlight = engine == "relar"
         color = ACCENT if highlight else INK
-        weight = "semibold" if highlight else "normal"
-        label(ax, 32, y, name, 16, weight=weight, color=color)
-        label(ax, 768, y, f"{ms:.2f} ms", 19, weight=weight, color=color, align="right")
-        box(ax, 32, y + 20, 736, 10, TRACK, radius=5)
-        box(
-            ax,
-            32,
-            y + 20,
-            736 * ms / longest,
-            10,
-            ACCENT if highlight else BAR,
-            radius=5,
+        bar_width = plot_width * ms / ticks[-1]
+        label(ax, x, row_y, name, font_size, color=color)
+        ax.add_patch(
+            Rectangle(
+                (plot_x, row_y - bar_height / 2),
+                bar_width,
+                bar_height,
+                facecolor=ACCENT if highlight else BAR,
+                edgecolor="none",
+                zorder=2,
+            )
         )
+        label(
+            ax,
+            plot_x + bar_width + 9,
+            row_y,
+            f"{ms:.2f}",
+            font_size,
+            color=color,
+            mono=True,
+        )
+
+
+def conformance_chart(case, medians, path):
+    fig, ax = canvas(800, 356)
+    surface(ax, 800, 356)
+    label(ax, 32, 30, "RELAR / RUNTIME BENCHMARKS", 11, color=MUTED, mono=True)
+    label(ax, 32, 68, "OFFLINE CONFORMANCE REPORT", 26)
+    label(ax, 32, 98, case["input"], 14, color=MUTED)
+    rule(ax, 32, 122, 768, 122)
+    bars(ax, medians, 32, 164, 736)
+    runs = len(case["samples_ns"])
+    label(
+        ax,
+        32,
+        330,
+        f"Median elapsed time (ms) · {runs} runs · Lower is faster",
+        12,
+        color=MUTED,
+    )
     save(fig, path, "Median time to render the offline conformance report")
 
 
 def workload_panels(rows, path):
-    height = 292 * ((len(rows) + 1) // 2) + 12
+    row_count = (len(rows) + 1) // 2
+    height = 148 + 252 * row_count + 36
     fig, ax = canvas(800, height)
+    surface(ax, 800, height)
+    label(ax, 32, 30, "RELAR / RUNTIME BENCHMARKS", 11, color=MUTED, mono=True)
+    label(ax, 32, 68, "RUNTIME BY WORKLOAD", 26)
+    label(ax, 32, 98, "Rust, CPython and Relar on six workloads.", 14, color=MUTED)
+    rule(ax, 32, 122, 768, 122)
     for i, (case, medians) in enumerate(rows):
-        x, y = i % 2 * 412, i // 2 * 292
-        box(ax, x + 0.5, y + 0.5, 387, 267, SURFACE, radius=12, border=RULE)
-        label(
-            ax,
-            x + 24,
-            y + 34,
-            PANEL_TITLES.get(case["name"], case["name"]),
-            20,
-            weight="semibold",
-        )
-        label(ax, x + 24, y + 61, case["input"], 13, color=MUTED)
-        longest = max(medians.values())
-        for j, (engine, name) in enumerate(ENGINES.items()):
-            row_y = y + 101 + 56 * j
-            ms = medians[engine]
-            highlight = engine == "relar"
-            ink = ACCENT if highlight else INK
-            weight = "semibold" if highlight else "normal"
-            label(ax, x + 24, row_y, name, 15, weight=weight, color=ink)
-            label(
-                ax,
-                x + 364,
-                row_y,
-                f"{ms:.2f} ms",
-                17,
-                weight=weight,
-                color=ink,
-                align="right",
-            )
-            box(ax, x + 24, row_y + 19, 340, 8, TRACK)
-            box(
-                ax,
-                x + 24,
-                row_y + 19,
-                340 * ms / longest,
-                8,
-                ACCENT if highlight else BAR,
-            )
+        x, y = 32 + i % 2 * 384, 158 + i // 2 * 252
+        label(ax, x, y, PANEL_TITLES.get(case["name"], case["name"]), 20)
+        label(ax, x, y + 28, case["input"], 12, color=MUTED)
+        bars(ax, medians, x, y + 75, 352, compact=True)
+        if i % 2 == 0 and i // 2 < row_count - 1:
+            rule(ax, 32, y + 216, 768, y + 216)
     runs = len(rows[0][0]["samples_ns"])
     label(
         ax,
-        4,
-        height - 10,
-        f"Median of {runs} runs · Lower is faster · Each panel has its own zero-based scale",
+        32,
+        height - 26,
+        f"Median elapsed time (ms) · {runs} runs · Lower is faster · Independent scales",
         12,
         color=MUTED,
     )
