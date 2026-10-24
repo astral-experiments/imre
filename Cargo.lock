@@ -514,6 +514,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glidesort"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2e102e6eb644d3e0b186fc161e4460417880a0a0b87d235f2e5b8fb30f2e9e0"
+
+[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1198,6 +1204,7 @@ dependencies = [
  "compact_str",
  "flate2",
  "getrandom 0.3.4",
+ "glidesort",
  "hashbrown 0.17.1",
  "icu_properties",
  "itoa",
