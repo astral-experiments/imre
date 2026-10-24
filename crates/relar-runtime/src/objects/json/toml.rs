@@ -158,7 +158,7 @@ fn convert(value: &DeValue<'_>, schema: &Schema) -> Result<OwnedWord, String> {
 }
 
 fn decode_toml(text: &str, schema: &Schema) -> Result<OwnedWord, String> {
-    let table = DeTable::parse(text).map_err(|error| error.to_string())?;
+    let table = DeTable::parse(text).map_err(|error| tomllib_parse_error(text, error))?;
     let value = DeValue::Table(table.into_inner());
     validate(&value, 1, text)?;
     convert(&value, schema)
@@ -211,13 +211,16 @@ fn tomllib_syntax(text: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Report an unfinished header at the first missing delimiter, after inline
-/// whitespace. An array header expects both closing brackets at once.
+/// Report the parser diagnosis and its position without rendering the input line.
 fn tomllib_parse_error(text: &str, error: ::toml::de::Error) -> String {
+    let title = error.message();
+    let end = title.floor_char_boundary(256);
+    let message = &title[..end];
+    let omitted = if end < title.len() { "…" } else { "" };
     let Some(span) = error.span() else {
-        return error.to_string();
+        return format!("{message}{omitted}");
     };
-    let (message, mut at) = match error.message() {
+    let (message, mut at) = match message {
         "unclosed table, expected `]`" => {
             ("Expected ']' at the end of a table declaration", span.start)
         }
@@ -229,13 +232,13 @@ fn tomllib_parse_error(text: &str, error: ::toml::de::Error) -> String {
             "Expected ']]' at the end of an array declaration",
             span.start.saturating_sub(1),
         ),
-        _ => return error.to_string(),
+        _ => (message, span.start),
     };
     while matches!(text.as_bytes().get(at), Some(b' ' | b'\t')) {
         at += 1;
     }
     if at == text.len() {
-        return format!("{message} (at end of document)");
+        return format!("{message}{omitted} (at end of document)");
     }
     let prefix = &text[..at];
     let line = 1 + memchr::memchr_iter(b'\n', prefix.as_bytes()).count();
@@ -245,7 +248,7 @@ fn tomllib_parse_error(text: &str, error: ::toml::de::Error) -> String {
         .unwrap_or_default()
         .chars()
         .count();
-    format!("{message} (at line {line}, column {column})")
+    format!("{message}{omitted} (at line {line}, column {column})")
 }
 
 /// Parse all values, including those under keys that callers never inspect.
@@ -297,4 +300,18 @@ pub unsafe extern "C" fn relar_toml_decode(
         .map(|value| value.into_word() as *const usize)
         .map_err(|error| Error::new(Kind::ValueError, format!("invalid typed TOML: {error}")));
     finish(result, std::ptr::null())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_errors_omit_long_source_lines() {
+        let text = format!("a ={}?", " ".repeat(8192));
+        let error = DeTable::parse(&text).unwrap_err();
+        let message = tomllib_parse_error(&text, error);
+        assert!(message.len() < 128, "{message}");
+        assert!(message.ends_with("(at line 1, column 8196)"), "{message}");
+    }
 }
