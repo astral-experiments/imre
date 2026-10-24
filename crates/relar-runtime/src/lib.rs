@@ -42,7 +42,7 @@ use objects::exceptions::{Error, Kind, Result, finish};
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
 use std::borrow::Cow;
-use std::cell::{RefCell, UnsafeCell};
+use std::cell::{Cell, RefCell, UnsafeCell};
 use std::io::{self, BufWriter, IsTerminal, Write};
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
@@ -171,7 +171,24 @@ impl<T> StorageCell<T> {
 }
 
 /// An opaque, nonmoving list allocation. Only a proven readonly loop borrows its buffer.
-pub struct List(StorageCell<Vec<Int>>);
+pub struct List(
+    StorageCell<Vec<Int>>,
+    // Capacity charged to this list in the thread's range-hint budget.
+    Cell<usize>,
+);
+
+impl List {
+    fn new(values: Vec<Int>) -> Self {
+        Self(StorageCell::new(values), Cell::new(0))
+    }
+
+    fn release_range_hint(&self) {
+        let slots = self.1.replace(0);
+        if slots != 0 {
+            let _ = RANGE_HINT_SLOTS.try_with(|used| used.set(used.get() - slots));
+        }
+    }
+}
 
 // An unallocated Vec never reads, writes, or frees this address. A real push
 // replaces it with an allocation, even if a later pop empties the list again.
@@ -188,8 +205,12 @@ fn is_sorting_empty_ints(values: &[Int]) -> bool {
 }
 
 const MAX_REUSED_LIST_CAPACITY: usize = 32_768;
+const MAX_LIVE_RANGE_HINT_SLOTS: usize = 2 * MAX_REUSED_LIST_CAPACITY;
 
 thread_local! {
+    // A loop can break or raise before filling its output. Bound speculative
+    // capacity across all live lists, including buffers obtained from the cache.
+    static RANGE_HINT_SLOTS: Cell<usize> = const { Cell::new(0) };
     // Only empty buffers enter these newest-first slots: no integer owners or
     // list identities survive here. Retention is bounded to 512 KiB per thread.
     static LIST_BUFFERS: RefCell<[Vec<Int>; 2]> = const {
@@ -222,7 +243,7 @@ fn new_list(values: Vec<Int>) -> *const List {
         *storage = values;
         owner
     } else {
-        Rc::new(List(StorageCell::new(values)))
+        Rc::new(List::new(values))
     };
     Rc::into_raw(owner)
 }
@@ -235,8 +256,9 @@ fn recycle_list_header(mut owner: Rc<List>) {
     let Some(list) = Rc::get_mut(&mut owner) else {
         return;
     };
+    list.release_range_hint();
     let values = std::mem::take(list.0.0.get_mut());
-    drop(List(StorageCell::new(values)));
+    drop(List::new(values));
     let evicted = LIST_HEADERS.try_with(|headers| {
         let Ok(mut headers) = headers.try_borrow_mut() else {
             return Some(owner);
@@ -301,6 +323,7 @@ impl Drop for List {
     /// immediate. Any BigInt leaves the ordinary Vec drop path responsible for
     /// releasing all owners, including repeated references to the same integer.
     fn drop(&mut self) {
+        self.release_range_hint();
         let values = self.0.0.get_mut();
         let common_tags = values.iter().fold(1_usize, |tags, value| tags & value.0);
         if common_tags & 1 != 0 {
@@ -1227,23 +1250,38 @@ pub unsafe extern "C" fn relar_list_reserve_range(
     let capacity = trips
         .saturating_mul(per_iteration)
         .min(MAX_REUSED_LIST_CAPACITY);
-    // SAFETY: this nonreentrant reservation changes capacity only; no buffer
-    // address or storage borrow escapes, and existing elements are untouched.
-    let displaced = unsafe {
-        (&*list).0.with_mut(|values| {
-            if !values.is_empty() || values.capacity() >= capacity || is_sorting_empty_ints(values)
-            {
-                return Vec::new();
-            }
-            let buffer = take_list_buffer(capacity);
-            if buffer.capacity() >= capacity {
+    // SAFETY: the caller roots the list for this nonreentrant reservation.
+    let list = unsafe { &*list };
+    let displaced = RANGE_HINT_SLOTS.try_with(|used| {
+        let other_slots = used.get() - list.1.get();
+        let available = MAX_LIVE_RANGE_HINT_SLOTS - other_slots;
+        if capacity > available {
+            return Vec::new();
+        }
+        // SAFETY: no buffer address or storage borrow escapes, and the
+        // reservation leaves existing elements untouched.
+        unsafe {
+            list.0.with_mut(|values| {
+                if !values.is_empty()
+                    || values.capacity() >= capacity
+                    || is_sorting_empty_ints(values)
+                {
+                    return Vec::new();
+                }
+                let mut buffer = take_list_buffer(capacity);
+                if buffer.capacity() < capacity && buffer.try_reserve_exact(capacity).is_err() {
+                    return buffer;
+                }
+                let slots = buffer.capacity();
+                if slots > available {
+                    return buffer;
+                }
+                list.1.set(slots);
+                used.set(other_slots + slots);
                 std::mem::replace(values, buffer)
-            } else {
-                let _ = values.try_reserve_exact(capacity);
-                buffer
-            }
-        })
-    };
+            })
+        }
+    });
     drop(displaced);
 }
 
@@ -1355,7 +1393,7 @@ mod tests {
         let big_word = Rc::as_ptr(&big) as usize;
         let negative = Int::small(-7).unwrap().0;
         let values = vec![Int::small(9).unwrap()];
-        let list = Rc::new(List(StorageCell::new(values)));
+        let list = Rc::new(List::new(values));
         // SAFETY: both inputs and the exact list remain rooted. The second call
         // borrows its repeated input from the list itself across buffer growth.
         unsafe {
@@ -1386,11 +1424,11 @@ mod tests {
             let expected = (0..length)
                 .map(|index| BigInt::from(pattern[index % pattern.len()]))
                 .sum::<BigInt>();
-            let list = List(StorageCell::new(
+            let list = List::new(
                 (0..length)
                     .map(|index| Int::small(i64::from(pattern[index % pattern.len()])).unwrap())
                     .collect(),
-            ));
+            );
             for start in [0, -19, MIN_SMALL, MAX_SMALL] {
                 let start = Int::small(start).unwrap();
                 // SAFETY: both exact arguments remain rooted for the sum.
@@ -1419,7 +1457,7 @@ mod tests {
             ),
         ] {
             let expected = values.iter().sum::<BigInt>() + &start;
-            let list = List(StorageCell::new(values.into_iter().map(Int::new).collect()));
+            let list = List::new(values.into_iter().map(Int::new).collect());
             let start = Int::new(start);
             // SAFETY: both exact arguments remain rooted for the sum.
             let result = Int(unsafe { relar_list_sum(&list, start.0) });
@@ -1440,11 +1478,11 @@ mod tests {
         let negative = Rc::new(-positive.as_ref());
         let positive_weak = Rc::downgrade(&positive);
         let negative_weak = Rc::downgrade(&negative);
-        let list = Rc::new(List(StorageCell::new(vec![
+        let list = Rc::new(List::new(vec![
             Int(Rc::into_raw(positive.clone()) as usize),
             Int(Rc::into_raw(negative.clone()) as usize),
             Int::small(7).unwrap(),
-        ])));
+        ]));
         let alias = list.clone();
         let start = Rc::as_ptr(&positive) as usize;
         // SAFETY: start is rooted both directly and by the list. The aliased
@@ -1621,7 +1659,7 @@ mod tests {
         let mut values = Vec::with_capacity(64);
         values.extend((0..64).map(|value| Int::small(value).unwrap()));
         let allocation = values.as_ptr();
-        let list = Rc::new(List(StorageCell::new(values)));
+        let list = Rc::new(List::new(values));
         let alias = list.clone();
         drop(list);
         assert_eq!(take_list_buffer(48).capacity(), 0);
@@ -1686,7 +1724,7 @@ mod tests {
         recycle_list_buffer(&mut values);
         assert_eq!(values.len(), 1);
         assert_eq!(weak.strong_count(), 1);
-        drop(List(StorageCell::new(values)));
+        drop(List::new(values));
         assert!(weak.upgrade().is_none());
         LIST_BUFFERS.with(|buffers| {
             assert!(buffers.borrow().iter().all(|buffer| buffer.capacity() == 0));
@@ -1698,7 +1736,7 @@ mod tests {
                 let mut values = take_list_buffer(8);
                 values.try_reserve_exact(8).unwrap();
                 values.push(Int::small(1).unwrap());
-                drop(List(StorageCell::new(values)));
+                drop(List::new(values));
                 self.0.store(true, Ordering::Relaxed);
             }
         }
@@ -1713,7 +1751,7 @@ mod tests {
             TEARDOWN.with(|probe| *probe.borrow_mut() = Some(Teardown(observed)));
             let mut values = Vec::with_capacity(8);
             values.push(Int::small(2).unwrap());
-            drop(List(StorageCell::new(values)));
+            drop(List::new(values));
         })
         .join()
         .unwrap();
@@ -1729,7 +1767,7 @@ mod tests {
                 .map(|value| Int::small(value - 16).unwrap())
                 .collect::<Vec<_>>();
             values[position] = Int(Rc::into_raw(bigint) as usize);
-            let list = Rc::new(List(StorageCell::new(values)));
+            let list = Rc::new(List::new(values));
             let alias = Rc::clone(&list);
             drop(list);
             assert_eq!(weak.strong_count(), 1);
@@ -1743,7 +1781,7 @@ mod tests {
                 .take(length)
                 .map(|value| Int::small(value).unwrap())
                 .collect();
-            drop(List(StorageCell::new(values)));
+            drop(List::new(values));
         }
     }
 
@@ -2014,6 +2052,33 @@ mod tests {
             assert_eq!(relar_error_pending(), 0);
             relar_list_release(list);
         }
+    }
+
+    #[test]
+    fn live_range_hints_share_a_budget_and_return_it_on_release() {
+        let zero = Int::small(0).unwrap();
+        let stop = Int::small(MAX_SMALL).unwrap();
+        let one = Int::small(1).unwrap();
+        let first = relar_list_new();
+        let second = relar_list_new();
+        let third = relar_list_new();
+        // SAFETY: each list has one live owner, and all range words are
+        // immediate integers. Release each list through exactly one path.
+        unsafe {
+            let reserve = |list| relar_list_reserve_range(list, zero.0, stop.0, one.0, 1);
+            for list in [first, second, third] {
+                reserve(list);
+            }
+            assert_eq!((&*first).0.with(Vec::capacity), MAX_REUSED_LIST_CAPACITY);
+            assert_eq!((&*second).0.with(Vec::capacity), MAX_REUSED_LIST_CAPACITY);
+            assert_eq!((&*third).0.with(Vec::capacity), 0);
+            relar_list_release(first);
+            reserve(third);
+            assert_eq!((&*third).0.with(Vec::capacity), MAX_REUSED_LIST_CAPACITY);
+            drop(Rc::from_raw(second));
+            relar_list_release(third);
+        }
+        assert_eq!(RANGE_HINT_SLOTS.with(Cell::get), 0);
     }
 
     #[test]

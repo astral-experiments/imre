@@ -46,19 +46,48 @@ fn scalar_annotation(expr: &Expr) -> bool {
 #[derive(Clone, Default)]
 struct Shape {
     depth: usize,
-    fields: Option<Rc<[Shape]>>,
+    contents: Contents,
+}
+
+#[derive(Clone, Default)]
+enum Contents {
+    #[default]
+    Unknown,
+    List,
+    UniformTuple(usize),
+    Tuple(Rc<[Shape]>),
 }
 
 impl Shape {
     fn plain(depth: usize) -> Self {
         Self {
             depth,
-            fields: None,
+            contents: Contents::Unknown,
         }
     }
 
+    fn list(depth: usize) -> Self {
+        Self {
+            depth,
+            contents: Contents::List,
+        }
+    }
+
+    fn captured_depth(&self, prefix: usize, suffix: usize) -> usize {
+        match &self.contents {
+            Contents::Tuple(fields) => {
+                if let Some(captured) = fields.get(prefix..fields.len().saturating_sub(suffix)) {
+                    return captured.iter().map(|field| field.depth).max().unwrap_or(0);
+                }
+            }
+            Contents::UniformTuple(length) if prefix + suffix == *length => return 0,
+            _ => {}
+        }
+        self.depth.saturating_sub(1)
+    }
+
     fn element(&self, index: Option<isize>) -> Self {
-        if let (Some(fields), Some(index)) = (&self.fields, index) {
+        if let (Contents::Tuple(fields), Some(index)) = (&self.contents, index) {
             let position = if index < 0 {
                 fields.len().checked_add_signed(index)
             } else {
@@ -96,21 +125,26 @@ fn bind_target<'a>(target: &'a Expr, shape: Shape, bind: &mut impl FnMut(&'a str
         Expr::Name(node) => return bind(node.id.as_str(), shape),
         // A starred target receives a list of the remaining elements.
         Expr::Starred(node) => {
-            return bind_target(&node.value, Shape::plain(shape.depth + 1), bind);
+            return bind_target(&node.value, Shape::list(shape.depth + 1), bind);
         }
         Expr::Tuple(node) => &node.elts,
         Expr::List(node) => &node.elts,
         _ => return,
     };
-    let fixed = !elements
+    let star = elements
         .iter()
-        .any(|element| matches!(element, Expr::Starred(_)));
+        .position(|elt| matches!(elt, Expr::Starred(_)));
     for (index, element) in elements.iter().enumerate() {
-        bind_target(
-            element,
-            shape.element(fixed.then_some(index as isize)),
-            bind,
-        );
+        let field = match star {
+            Some(star) if index == star => {
+                Shape::plain(shape.captured_depth(index, elements.len() - index - 1))
+            }
+            Some(star) if index > star => {
+                shape.element(Some(index as isize - elements.len() as isize))
+            }
+            _ => shape.element(Some(index as isize)),
+        };
+        bind_target(element, field, bind);
     }
 }
 
@@ -149,21 +183,71 @@ impl<'a> Shapes<'a> {
                     .map(|elt| self.shape(elt, locals))
                     .collect();
                 let deepest = fields.iter().map(|field| field.depth).max().unwrap_or(0);
-                // Uniform scalar ranks need no positional metadata. Aliases
-                // share the immutable snapshots for heterogeneous tuples.
-                let distinct = fields
-                    .iter()
-                    .any(|field| field.depth != deepest || field.fields.is_some());
+                // Uniform fields need only their arity to recognize an empty capture.
+                let distinct = fields.iter().any(|field| {
+                    field.depth != deepest || !matches!(field.contents, Contents::Unknown)
+                });
                 Shape {
                     depth: deepest + 1,
-                    fields: distinct.then(|| fields.into()),
+                    contents: if distinct {
+                        Contents::Tuple(fields.into())
+                    } else {
+                        Contents::UniformTuple(fields.len())
+                    },
                 }
             }
+            Expr::List(_) | Expr::ListComp(_) => Shape::list(self.depth_in(value, locals)),
             Expr::Subscript(node) if !matches!(&*node.slice, Expr::Slice(_)) => self
                 .shape(&node.value, locals)
                 .element(literal_index(&node.slice)),
             Expr::Named(node) => self.shape(&node.value, locals),
             _ => Shape::plain(self.depth_in(value, locals)),
+        }
+    }
+
+    fn iteration_bindings<'v>(
+        &self,
+        target: &'v Expr,
+        iter: &'v Expr,
+        locals: &[(&'v str, Shape)],
+    ) -> (usize, HashMap<&'v str, Shape>) {
+        let bindings = |item: Shape| {
+            let depth = item.depth;
+            let mut names = HashMap::new();
+            bind_target(target, item, &mut |name, shape| {
+                names.insert(name, shape);
+            });
+            (depth, names)
+        };
+        // For a literal iterable, bind each possible row before joining its
+        // names. A repeated name within a row takes its last assignment.
+        if let Expr::List(list) = iter
+            && matches!(target, Expr::Tuple(_) | Expr::List(_))
+            && let Some((first, rest)) = list.elts.split_first()
+            && !list.elts.iter().any(|elt| matches!(elt, Expr::Starred(_)))
+        {
+            let (mut deepest, mut names) = bindings(self.shape(first, locals));
+            for row in rest {
+                let (depth, fields) = bindings(self.shape(row, locals));
+                deepest = deepest.max(depth);
+                for (name, field) in fields {
+                    // Every row is destructured by the same target.
+                    if let Some(old) = names.get_mut(name) {
+                        let depth = old.depth.max(field.depth);
+                        *old = if matches!(
+                            (&old.contents, &field.contents),
+                            (Contents::List, Contents::List)
+                        ) {
+                            Shape::list(depth)
+                        } else {
+                            Shape::plain(depth)
+                        };
+                    }
+                }
+            }
+            (deepest, names)
+        } else {
+            bindings(self.shape(iter, locals).element(None))
         }
     }
 
@@ -175,10 +259,8 @@ impl<'a> Shapes<'a> {
     ) -> usize {
         let mut bindings = locals.to_vec();
         for gen_ in generators {
-            let element = self.shape(&gen_.iter, &bindings).element(None);
-            bind_target(&gen_.target, element, &mut |name, shape| {
-                bindings.push((name, shape));
-            });
+            let (_, names) = self.iteration_bindings(&gen_.target, &gen_.iter, &bindings);
+            bindings.extend(names);
         }
         1 + values
             .iter()
@@ -221,6 +303,14 @@ impl<'a> Shapes<'a> {
                 locals,
             ),
             Expr::Call(node) => {
+                if let Some(attr) = node.func.as_attribute_expr()
+                    && attr.attr.as_str() == "pop"
+                {
+                    let receiver = self.shape(&attr.value, locals);
+                    if matches!(receiver.contents, Contents::List) {
+                        return receiver.depth.saturating_sub(1);
+                    }
+                }
                 let name = node.func.as_name_expr().map(|name| name.id.as_str());
                 let args = &node.arguments.args;
                 match name {
@@ -258,26 +348,38 @@ impl<'a> Shapes<'a> {
     fn bind(&mut self, target: &'a Expr, shape: Shape, definite: bool) {
         self.exceeded |= shape.depth > MAX_DEPTH;
         bind_target(target, shape, &mut |name, shape| {
-            self.exceeded |= shape.depth > MAX_DEPTH;
-            let old = self.scope_binding(name).cloned().unwrap_or_default();
-            if self.conditional {
-                if definite && (old.depth != 0 || shape.depth != 0) {
-                    self.straight_line.insert(name, shape.clone());
-                } else {
-                    self.straight_line.remove(name);
-                }
-            }
-            if shape.depth != 0 || old.depth != 0 {
-                self.scopes.last_mut().unwrap().insert(
-                    name,
-                    if self.conditional {
-                        Shape::plain(old.depth.max(shape.depth))
-                    } else {
-                        shape
-                    },
-                );
-            }
+            self.bind_name(name, shape, definite)
         });
+    }
+
+    fn bind_name(&mut self, name: &'a str, shape: Shape, definite: bool) {
+        self.exceeded |= shape.depth > MAX_DEPTH;
+        let old = self.scope_binding(name).cloned().unwrap_or_default();
+        if self.conditional {
+            if definite && (old.depth != 0 || shape.depth != 0) {
+                self.straight_line.insert(name, shape.clone());
+            } else {
+                self.straight_line.remove(name);
+            }
+        }
+        if shape.depth != 0 || old.depth != 0 {
+            self.scopes.last_mut().unwrap().insert(
+                name,
+                if self.conditional {
+                    let depth = old.depth.max(shape.depth);
+                    if matches!(
+                        (&old.contents, &shape.contents),
+                        (Contents::List, Contents::List)
+                    ) {
+                        Shape::list(depth)
+                    } else {
+                        Shape::plain(depth)
+                    }
+                } else {
+                    shape
+                },
+            );
+        }
     }
 }
 
@@ -334,11 +436,11 @@ impl<'a> Visitor<'a> for Shapes<'a> {
                     Stmt::If(_) | Stmt::For(_) | Stmt::While(_) | Stmt::Match(_) | Stmt::Try(_)
                 );
                 if let Stmt::For(node) = stmt {
-                    self.bind(
-                        &node.target,
-                        self.shape(&node.iter, &[]).element(None),
-                        false,
-                    );
+                    let (depth, names) = self.iteration_bindings(&node.target, &node.iter, &[]);
+                    self.exceeded |= depth > MAX_DEPTH;
+                    for (name, shape) in names {
+                        self.bind_name(name, shape, false);
+                    }
                 }
                 walk_stmt(self, stmt);
                 self.conditional = outer;
@@ -460,6 +562,62 @@ mod tests {
             "    pair = (x, 1)\n    x = (pair[1],)\n".repeat(300)
         );
         assert!(!limited(&in_arm));
+    }
+
+    #[test]
+    fn popping_from_a_known_list_returns_an_element() {
+        for step in [
+            "x = [x.pop()]",
+            "alias = x\nx = [alias.pop()]",
+            "pair = (x, 0)\nx = [pair[0].pop()]",
+        ] {
+            let mut body = String::from("x = [1]\n");
+            for _ in 0..300 {
+                body.push_str(step);
+                body.push('\n');
+            }
+            assert!(!limited(&body), "{step}");
+        }
+        let deep = format!("x = 1\n{}", "x = [x]\n".repeat(MAX_DEPTH));
+        let in_arm = format!(
+            "x = [1]\nif flag:\n{}",
+            "    alias = x\n    x = [alias.pop()]\n".repeat(300)
+        );
+        assert!(!limited(&in_arm));
+        assert!(!limited(&format!("{deep}result = [x.pop()]\n")));
+        assert!(limited(&format!("{deep}result = [[x.pop()]]\n")));
+        assert!(limited(&format!("{deep}result = receiver.pop((x,))\n")));
+    }
+
+    #[test]
+    fn starred_targets_use_only_the_captured_tuple_fields() {
+        for step in [
+            "*x, tail = (1, x)",
+            "head, *x = (x, 1)",
+            "head, *x, tail = (x, 1, x)",
+            "*x, tail = (x,)",
+            "pair = (1, x)\nalias = pair\n*x, tail = alias",
+            "x = [rest for *rest, tail in [(1, x), (2, x)]][0]",
+            "x = [(item,) for item, *rest, item in [(x, 0, 1)]][0]",
+        ] {
+            assert!(
+                !limited(&format!("x = [1]\n{}", format!("{step}\n").repeat(300))),
+                "{step}"
+            );
+        }
+        let deep = format!("x = 1\n{}", "x = (x,)\n".repeat(MAX_DEPTH - 1));
+        assert!(!limited(&format!(
+            "{deep}*empty, tail = (x,)\nresult = (empty,)\n"
+        )));
+        assert!(limited(&format!(
+            "{deep}*captured, tail = (x, 1)\nresult = (captured,)\n"
+        )));
+        assert!(limited(&format!(
+            "{deep}head, *rest, tail = (1, 1, x)\nresult = ((tail,),)\n"
+        )));
+        assert!(limited(&format!(
+            "{deep}picked = [rest for *rest, tail in [(1, 1), (x, 1)]][0]\nresult = (picked,)\n"
+        )));
     }
 
     #[test]

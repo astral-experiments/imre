@@ -24,6 +24,11 @@ use ty_python_semantic::{
 };
 use ty_site_packages::PythonVersionWithSource;
 
+#[salsa::input(singleton)]
+struct DiagnosticRules {
+    rules: Arc<RuleSelection>,
+}
+
 #[salsa::db]
 #[derive(Clone)]
 struct Database {
@@ -32,7 +37,6 @@ struct Database {
     system: InMemorySystem,
     vendored: VendoredFileSystem,
     settings: ProgramSettings,
-    rules: Arc<RuleSelection>,
     analysis: Arc<AnalysisSettings>,
 }
 
@@ -40,6 +44,7 @@ struct Database {
 pub(crate) struct Session {
     db: Database,
     files: Vec<File>,
+    rules: Arc<RuleSelection>,
 }
 
 impl Session {
@@ -82,22 +87,41 @@ impl Session {
             ty_module_resolver::SearchPathSettings::new(vec![SystemPathBuf::from(root)])
                 .to_search_paths(&system, &vendored, &ty_module_resolver::FallibleStrategy)
                 .map_err(|error| error.to_string())?;
+        // The closed checker enforces these type contracts and fixed tuple bounds.
+        // Invalid indices and zero slice steps can also be runtime errors. Disable
+        // these ty diagnostics before it expands types to construct their messages.
+        let registry = default_lint_registry();
+        let mut rules = RuleSelection::from_registry(registry);
+        for name in [
+            "unsupported-operator",
+            "invalid-assignment",
+            "invalid-argument-type",
+            "invalid-return-type",
+            "zero-stepsize-in-slice",
+            "index-out-of-bounds",
+            "unresolved-attribute",
+        ] {
+            rules.disable(registry.get(name).expect("registered ty lint"));
+        }
         let db = Database {
             storage: salsa::Storage::default(),
             files: Files::default(),
             system,
             vendored,
             settings,
-            rules: Arc::new(RuleSelection::from_registry(default_lint_registry())),
             analysis: Arc::new(AnalysisSettings {
                 respect_type_ignore_comments: false,
                 ..AnalysisSettings::default()
             }),
         };
         db.settings.search_paths.try_register_static_roots(&db);
+        // Lowering queries types with lints disabled. Tracking the rules invalidates
+        // these cached queries when the full check enables diagnostics.
+        DiagnosticRules::new(&db, Arc::default());
         Ok(Self {
             db,
             files: Vec::new(),
+            rules: Arc::new(rules),
         })
     }
 
@@ -130,6 +154,21 @@ impl Session {
         limits.visit_body(&parsed.syntax().body);
         if let Some(error) = limits.error {
             return Err(format!("{path}: {error}"));
+        }
+        // ty materializes every field of a starred tuple display before lowering.
+        // Relar supports starred assignment targets and list displays.
+        if parsed
+            .tokens()
+            .iter()
+            .any(|token| token.kind() == TokenKind::Star)
+            && ruff_python_ast::helpers::any_over_body(&parsed.syntax().body, |expr| {
+                matches!(expr, Expr::Tuple(tuple) if tuple.ctx == ruff_python_ast::ExprContext::Load
+                    && tuple.elts.iter().any(|elt| matches!(elt, Expr::Starred(_))))
+            })
+        {
+            return Err(format!(
+                "{path}: Relar: starred elements in tuple displays are unsupported"
+            ));
         }
         inferred_shapes::check(&parsed.syntax().body, parsed.tokens().len())
             .map_err(|error| format!("{path}: {error}"))?;
@@ -189,37 +228,18 @@ impl Session {
     }
 
     /// Checks every loaded file, including unused functions and inactive main guards.
-    pub(crate) fn check(&self) -> Result<(), String> {
+    pub(crate) fn check(&mut self) -> Result<(), String> {
+        use salsa::Setter;
+        DiagnosticRules::get(&self.db)
+            .set_rules(&mut self.db)
+            .to(self.rules.clone());
         let mut errors = Vec::new();
         for &file in &self.files {
             errors.extend(
                 self.db
                     .check_file(file)
                     .iter()
-                    .filter(|diagnostic| {
-                        // The closed checker proves operand, assignment, argument,
-                        // and return compatibility for every statement, including
-                        // dead and unused code. ty can conservatively retain None
-                        // after a successful float pattern; its flow types must
-                        // not override those exact checks.
-                        // Invalid index values and zero slice steps are runtime
-                        // errors. Exact index types and fixed tuple bounds are
-                        // still enforced by the closed checker.
-                        // Attribute reads also use closed layouts. In particular,
-                        // sealed exception payload getters guard their category
-                        // at runtime rather than depending on ty's narrowing.
-                        diagnostic.severity() >= Severity::Error
-                            && !matches!(
-                                diagnostic.id().as_str(),
-                                "unsupported-operator"
-                                    | "invalid-assignment"
-                                    | "invalid-argument-type"
-                                    | "invalid-return-type"
-                                    | "zero-stepsize-in-slice"
-                                    | "index-out-of-bounds"
-                                    | "unresolved-attribute"
-                            )
-                    })
+                    .filter(|diagnostic| diagnostic.severity() >= Severity::Error)
                     .map(|diagnostic| {
                         diagnostic
                             .display(&self.db, &DisplayDiagnosticConfig::new("relar"))
@@ -512,7 +532,7 @@ impl Db for Database {
     }
 
     fn rule_selection(&self, _file: File) -> &RuleSelection {
-        &self.rules
+        DiagnosticRules::get(self).rules(self)
     }
 
     fn lint_registry(&self) -> &LintRegistry {
@@ -537,5 +557,29 @@ impl Db for Database {
 
     fn dyn_clone(&self) -> Box<dyn Db> {
         Box::new(self.clone())
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_mode_tests {
+    use super::*;
+
+    #[test]
+    fn enabling_diagnostics_invalidates_quiet_checks() {
+        let root = Path::new("/project");
+        let mut session = Session::new(root).unwrap();
+        session
+            .add(&root.join("main.py"), "def f(x: int) -> None:\n    x()\n")
+            .unwrap();
+        let file = session.files[0];
+        assert!(
+            !session
+                .db
+                .check_file(file)
+                .iter()
+                .any(|d| d.severity() >= Severity::Error)
+        );
+        let message = session.check().unwrap_err();
+        assert!(message.contains("not callable"), "{message}");
     }
 }

@@ -10,7 +10,6 @@ use serde::de::{Error as _, MapAccess, Visitor};
 use serde_json::value::RawValue;
 
 use super::{Key, check_depth};
-use crate::objects::exceptions::string_repr;
 use crate::objects::words::Words;
 use crate::objects::{Object, Storage, object};
 use crate::{Error, Int, Kind, StorageCell, Str, finish};
@@ -56,7 +55,7 @@ impl Node {
                 .rev()
                 .find(|(name, _)| name == key)
                 .map(|(_, index)| *index)
-                .ok_or_else(|| Error::new(Kind::KeyError, string_repr(key))),
+                .ok_or_else(|| Error::string_key(Str::new(key))),
             Self::Array(_) => Err(Error::new(
                 Kind::TypeError,
                 "list indices must be integers or slices, not str",

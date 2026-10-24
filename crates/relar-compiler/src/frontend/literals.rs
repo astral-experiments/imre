@@ -75,7 +75,7 @@ impl Checker<'_> {
             && matches!(self.locals[slot], Type::Str | Type::StrLiteral(_))
         {
             let ty = self.types.string_literal(vec![text.value.to_string()]);
-            self.narrowed.insert(slot, ty);
+            self.narrowed.insert_mut(slot, ty);
         }
     }
 }

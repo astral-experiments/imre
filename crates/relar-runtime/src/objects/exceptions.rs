@@ -11,6 +11,7 @@ use std::rc::Rc;
 
 use ruff_python_literal::escape::{Escape, UnicodeEscape};
 
+use super::words::{OwnedWord, WordKind};
 use super::{Object, Storage, StorageCell, Str, acquire_rc, fail, object};
 
 /// Stable ABI identifiers for the supported builtin exception hierarchy.
@@ -175,11 +176,22 @@ impl Kind {
 
 pub(super) struct Exception {
     kind: Kind,
-    message: Rc<Str>,
+    payload: Payload,
     cause: Option<Rc<Object>>,
     suppress_context: bool,
-    process: Option<Box<super::processes::ProcessError>>,
-    timeout: Option<Box<super::processes::TimeoutError>>,
+}
+
+enum Payload {
+    Message(Rc<Str>),
+    Key(OwnedWord),
+    Process(Box<super::processes::ProcessError>),
+    Timeout(Box<super::processes::TimeoutError>),
+}
+
+impl From<Rc<Str>> for Payload {
+    fn from(message: Rc<Str>) -> Self {
+        Self::Message(message)
+    }
 }
 
 impl Drop for Exception {
@@ -201,15 +213,28 @@ impl Drop for Exception {
 /// An owned error returned from a storage access before pending state is changed.
 pub(crate) struct Error {
     kind: Kind,
-    message: Str,
+    payload: Payload,
 }
 
 impl Error {
     pub(crate) fn new(kind: Kind, message: impl Into<Str>) -> Self {
         Self {
             kind,
-            message: message.into(),
+            payload: Payload::Message(Rc::new(message.into())),
         }
+    }
+
+    pub(super) fn key(key: OwnedWord) -> Self {
+        Self {
+            kind: Kind::KeyError,
+            payload: Payload::Key(key),
+        }
+    }
+
+    pub(super) fn string_key(key: Str) -> Self {
+        let word = Rc::into_raw(Rc::new(key)) as usize;
+        // SAFETY: the new string contributes one owned reference of exact kind 3.
+        Self::key(unsafe { OwnedWord::from_owned(word, WordKind::new(3)) })
     }
 
     pub(crate) fn index() -> Self {
@@ -221,7 +246,7 @@ impl Error {
     #[cold]
     #[inline(never)]
     pub(crate) fn raise(self) {
-        replace_pending(Some(new_exception(self.kind, Rc::new(self.message))));
+        replace_pending(Some(new_exception(self.kind, self.payload)));
     }
 
     /// Returns a failure sentinel after installing the owned exception.
@@ -251,45 +276,31 @@ thread_local! {
     static PENDING_PRESENT: Cell<bool> = const { Cell::new(false) };
 }
 
-fn new_exception(kind: Kind, message: Rc<Str>) -> Rc<Object> {
+fn new_exception(kind: Kind, payload: impl Into<Payload>) -> Rc<Object> {
     Rc::new(Object(StorageCell::new(Storage::Exception(Exception {
         kind,
-        message,
+        payload: payload.into(),
         cause: None,
         suppress_context: false,
-        process: None,
-        timeout: None,
     }))))
 }
 
 /// Publishes a completed child's rich failure after all input storage borrows end.
 #[cold]
 pub(super) fn raise_process(error: super::processes::ProcessError) {
-    replace_pending(Some(Rc::new(Object(StorageCell::new(Storage::Exception(
-        Exception {
-            kind: Kind::CalledProcessError,
-            message: Rc::new(Str::new("")),
-            cause: None,
-            suppress_context: false,
-            process: Some(Box::new(error)),
-            timeout: None,
-        },
-    ))))));
+    replace_pending(Some(new_exception(
+        Kind::CalledProcessError,
+        Payload::Process(Box::new(error)),
+    )));
 }
 
 /// Publishes the immutable deadline snapshot after the child has been reaped.
 #[cold]
 pub(super) fn raise_timeout(error: super::processes::TimeoutError) {
-    replace_pending(Some(Rc::new(Object(StorageCell::new(Storage::Exception(
-        Exception {
-            kind: Kind::TimeoutExpired,
-            message: Rc::new(Str::new("")),
-            cause: None,
-            suppress_context: false,
-            process: None,
-            timeout: Some(Box::new(error)),
-        },
-    ))))));
+    replace_pending(Some(new_exception(
+        Kind::TimeoutExpired,
+        Payload::Timeout(Box::new(error)),
+    )));
 }
 
 /// Replaces the pending owner without dropping it during a TLS mutable borrow.
@@ -309,15 +320,33 @@ fn take_pending() -> Option<Rc<Object>> {
 
 /// Uses Ruff's Python repr rules and its pinned Unicode printable categories.
 pub(crate) fn string_repr(value: &str) -> Str {
-    let escaped = UnicodeEscape::new_repr(value);
     let mut result = String::new();
-    let quote = escaped.layout().quote.as_char();
-    result.push(quote);
-    escaped
-        .write_body(&mut result)
-        .expect("writing to a String cannot fail");
-    result.push(quote);
+    push_string_repr(value, &mut result);
     Str::from(result)
+}
+
+pub(super) fn push_string_repr(value: &str, out: &mut String) {
+    let escaped = UnicodeEscape::new_repr(value);
+    if out.is_empty()
+        && let Some(size) = escaped.layout().len.and_then(|body| body.checked_add(2))
+    {
+        out.reserve_exact(size);
+    }
+    write_escaped_string(&escaped, out).expect("writing to a String cannot fail");
+}
+
+pub(crate) fn write_string_repr(value: &str, out: &mut impl std::fmt::Write) -> std::fmt::Result {
+    write_escaped_string(&UnicodeEscape::new_repr(value), out)
+}
+
+fn write_escaped_string(
+    escaped: &UnicodeEscape<'_>,
+    out: &mut impl std::fmt::Write,
+) -> std::fmt::Result {
+    let quote = escaped.layout().quote.as_char();
+    out.write_char(quote)?;
+    escaped.write_body(out)?;
+    out.write_char(quote)
 }
 
 /// Acquires nullable exception input without retaining a storage reference.
@@ -344,14 +373,21 @@ impl Storage {
     }
 
     fn exception_message(&self) -> Rc<Str> {
-        let exception = self.exception();
-        if let Some(timeout) = &exception.timeout {
-            return Rc::new(timeout.message());
+        match &self.exception().payload {
+            Payload::Message(message) => Rc::clone(message),
+            Payload::Process(process) => Rc::new(process.message()),
+            Payload::Timeout(timeout) => Rc::new(timeout.message()),
+            Payload::Key(key) if key.kind == WordKind::new(3) => {
+                // SAFETY: this owned kind-3 word is a live string.
+                Rc::new(string_repr(unsafe { &*(key.word as *const Str) }))
+            }
+            Payload::Key(key) => {
+                let mut message = String::new();
+                // SAFETY: the exception owns the immutable key and its exact kind.
+                unsafe { super::values::write_repr(&mut message, key.word, key.kind) };
+                Rc::new(Str::from(message))
+            }
         }
-        exception.process.as_ref().map_or_else(
-            || exception.message.clone(),
-            |process| Rc::new(process.message()),
-        )
     }
 }
 
@@ -372,13 +408,10 @@ pub unsafe extern "C" fn relar_subprocess_error_field(value: *const Object, fiel
     let result = unsafe {
         object(value).0.with(|storage| {
             let exception = storage.exception();
-            if field == 0
-                && let Some(timeout) = &exception.timeout
-            {
-                return Ok(timeout.field(0));
-            }
-            exception.process.as_ref().map_or_else(
-                || {
+            match &exception.payload {
+                Payload::Process(process) => Ok(process.field(field)),
+                Payload::Timeout(timeout) if field == 0 => Ok(timeout.field(0)),
+                _ => {
                     let name = ["cmd", "returncode", "stdout", "stderr", "output"][field as usize];
                     Err(Error::new(
                         Kind::AttributeError,
@@ -387,9 +420,8 @@ pub unsafe extern "C" fn relar_subprocess_error_field(value: *const Object, fiel
                             exception.kind.name()
                         ),
                     ))
-                },
-                |process| Ok(process.field(field)),
-            )
+                }
+            }
         })
     };
     finish(result, 0)
@@ -406,12 +438,10 @@ pub unsafe extern "C" fn relar_subprocess_timeout_field(value: *const Object, fi
     // SAFETY: the checker establishes an exact TimeoutExpired before projection.
     unsafe {
         object(value).0.with(|storage| {
-            storage
-                .exception()
-                .timeout
-                .as_ref()
-                .unwrap_or_else(|| fail("SystemError", "expected TimeoutExpired storage"))
-                .field(field)
+            let Payload::Timeout(timeout) = &storage.exception().payload else {
+                fail("SystemError", "expected TimeoutExpired storage");
+            };
+            timeout.field(field)
         })
     }
 }
@@ -444,16 +474,16 @@ pub unsafe extern "C" fn relar_error_set(value: *const Object) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_exception_new(kind: u32, message: *const Str) -> *const Object {
     let kind = Kind::from_raw(kind);
-    let message = if message.is_null() {
-        Rc::new(Str::new(""))
+    let payload = if message.is_null() {
+        Payload::Message(Rc::new(Str::new("")))
     } else if kind == Kind::KeyError {
         // SAFETY: the caller roots the immutable string argument.
-        Rc::new(string_repr(unsafe { &*message }))
+        Payload::Key(unsafe { WordKind::new(3).acquire(message as usize) })
     } else {
         // SAFETY: the non-null argument is a rooted Rc<Str>.
-        unsafe { acquire_rc(message as usize) }
+        Payload::Message(unsafe { acquire_rc(message as usize) })
     };
-    Rc::into_raw(new_exception(kind, message))
+    Rc::into_raw(new_exception(kind, payload))
 }
 
 /// # Safety
@@ -676,6 +706,21 @@ mod tests {
     fn message(value: &Rc<Object>) -> Rc<Str> {
         // SAFETY: the rooted exception accessor transfers one string reference.
         unsafe { Rc::from_raw(relar_exception_message(Rc::as_ptr(value))) }
+    }
+
+    #[test]
+    fn key_error_owns_its_key_until_the_exception_is_released() {
+        let key = Rc::new(Str::new("a quoted 'key'\n"));
+        let expected = string_repr(&key);
+        let weak = Rc::downgrade(&key);
+        // SAFETY: the key is rooted and the constructor returns one owned exception.
+        let error =
+            unsafe { Rc::from_raw(relar_exception_new(Kind::KeyError as u32, Rc::as_ptr(&key))) };
+        drop(key);
+        assert_eq!(weak.strong_count(), 1);
+        assert_eq!(*message(&error), expected);
+        drop(error);
+        assert!(weak.upgrade().is_none());
     }
 
     #[test]
@@ -982,5 +1027,15 @@ mod tests {
             drop(take_error(Kind::RuntimeError));
             assert_eq!((key, value), (17, 19));
         }
+    }
+
+    #[test]
+    fn standalone_string_repr_uses_the_escaped_size() {
+        let value = "\0".repeat(16_384);
+        let rendered = string_repr(&value);
+        assert_eq!(rendered.len(), 65_538);
+        assert!(rendered.starts_with("'\\x00"));
+        assert!(rendered.ends_with("\\x00'"));
+        assert!(rendered.capacity() < 128 * 1024);
     }
 }

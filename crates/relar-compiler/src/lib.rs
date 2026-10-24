@@ -34,13 +34,13 @@ pub struct CompileOptions {
 
 /// Checks source syntax, ty diagnostics, and Relar's exact type contract.
 pub fn check(source: &str) -> Result<(), String> {
-    let module = frontend::lower(&modules::SourceGraph::single(source)?)?;
+    let (module, _) = checked_lower(&mut modules::SourceGraph::single(source)?)?;
     verify_after(&module, "lowering")
 }
 
 /// Compiles a checked module to LLVM IR; the resulting executable uses no CPython.
 pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String> {
-    let mut module = frontend::lower(&modules::SourceGraph::single(source)?)?;
+    let (mut module, _) = checked_lower(&mut modules::SourceGraph::single(source)?)?;
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
     llvm::emit(&module, &ranges, options.address_sanitizer)
@@ -75,7 +75,7 @@ impl SourceInputs {
 
 /// Checks a closed first-party module graph, inferring its package root when omitted.
 pub fn check_file(path: &Path, module_root: Option<&Path>) -> Result<(), String> {
-    let module = frontend::lower(&modules::SourceGraph::load(path, module_root)?)?;
+    let (module, _) = checked_lower(&mut modules::SourceGraph::load(path, module_root)?)?;
     verify_after(&module, "lowering")
 }
 
@@ -85,8 +85,8 @@ pub fn compile_file(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
-    let graph = modules::SourceGraph::load(path, module_root)?;
-    let mut module = frontend::lower(&graph)?;
+    let mut graph = modules::SourceGraph::load(path, module_root)?;
+    let (mut module, _) = checked_lower(&mut graph)?;
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
     Ok(Compilation {
@@ -117,8 +117,8 @@ pub fn compile_file_units(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<UnitCompilation, String> {
-    let graph = modules::SourceGraph::load(path, module_root)?;
-    let (mut module, owners) = frontend::lower_with_owners(&graph)?;
+    let mut graph = modules::SourceGraph::load(path, module_root)?;
+    let (mut module, owners) = checked_lower(&mut graph)?;
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
     let names = graph
@@ -138,6 +138,15 @@ pub fn compile_file_units(
         input_paths: graph.modules.into_iter().map(|m| m.path).collect(),
         source_inputs: graph.inputs,
     })
+}
+
+/// Reject unsupported operations before ty renders potentially exponential types.
+fn checked_lower(
+    graph: &mut modules::SourceGraph,
+) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
+    let lowered = frontend::lower_with_owners(graph)?;
+    graph.session.check()?;
+    Ok(lowered)
 }
 
 fn specialize(module: &mut ir::Module) -> Result<(), String> {
@@ -230,6 +239,43 @@ mod tests {
     use super::{CompileOptions, compile};
 
     #[test]
+    fn unsupported_operations_on_shared_tuple_types_have_bounded_diagnostics() {
+        let mut source = String::from("def f(x0: int) -> None:\n");
+        for i in 0..14 {
+            source.push_str(&format!("    x{} = (x{i}, x{i})\n", i + 1));
+        }
+        super::check(&source).unwrap();
+        for operation in [
+            "    x14()\n",
+            "    with x14:\n        pass\n",
+            "    raise x14\n",
+        ] {
+            let error = super::check(&format!("{source}{operation}")).unwrap_err();
+            assert!(error.len() < 2048, "diagnostic had {} bytes", error.len());
+        }
+    }
+
+    #[test]
+    fn reject_starred_tuple_displays_before_expanding_their_fields() {
+        let mut source = String::from("def f(x: int) -> int:\n    a0 = (x,)\n");
+        for i in 1..=16 {
+            source.push_str(&format!("    a{i} = (*a{}, *a{})\n", i - 1, i - 1));
+        }
+        source.push_str("    return x\n");
+        for rejected in [
+            source.as_str(),
+            "def f(x: tuple[int] = (*(1,),)) -> int:\n    return 0\n",
+        ] {
+            let error = super::check(rejected).unwrap_err();
+            assert!(
+                error.contains("starred elements in tuple displays"),
+                "{error}"
+            );
+        }
+        super::check("def f(x: int) -> int:\n    a, *rest = (x, x)\n    b = [*rest]\n    return a + len(b)\n").unwrap();
+    }
+
+    #[test]
     fn deep_source_returns_a_diagnostic_but_wide_displays_compile() {
         for expression in [
             format!("{}1", "-".repeat(4096)),
@@ -260,6 +306,13 @@ mod tests {
         let source = "def f(flag: bool, value: int | None) -> int:\n    kept = 7\n    selected = (saved := kept) if flag else ((saved := value) if value is not None else (saved := 0))\n    return saved + selected + kept\n";
         super::check(source).unwrap();
         assert!(super::check(&source.replace("(saved := 0)", "0")).is_err());
+    }
+
+    #[test]
+    fn nested_boolean_exits_preserve_only_guaranteed_writes() {
+        let source = "def f(flag: bool, other: bool) -> bool:\n    result = (saved := flag) and (other or (flag and (saved := other)))\n    return saved\n";
+        super::check(source).unwrap();
+        assert!(super::check(&source.replace("(saved := flag)", "flag")).is_err());
     }
 
     #[test]

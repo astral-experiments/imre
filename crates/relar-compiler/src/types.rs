@@ -2,8 +2,11 @@
 
 use std::cell::{Ref, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::fmt::{self, Write};
 
 use crate::ir::Type;
+
+const MAX_DESCRIPTION_BYTES: usize = 1024;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum Shape {
@@ -470,67 +473,134 @@ impl Types {
     }
 
     pub(crate) fn describe(&self, ty: Type, class_name: &impl Fn(usize) -> String) -> String {
-        match ty {
-            Type::StrLiteral(_) => {
-                let values = self.literal_strings(ty).unwrap();
-                let choices = values.iter().map(|s| format!("{s:?}")).collect::<Vec<_>>();
-                format!("Literal[{}]", choices.join(", "))
-            }
-            Type::Class(id) | Type::StrEnum(id) => class_name(id),
-            Type::Callable(_) => {
-                let (params, returns) = self.signature(ty).unwrap();
-                format!(
-                    "Callable[[{}], {}]",
-                    params
-                        .iter()
-                        .map(|&ty| self.describe(ty, class_name))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    self.describe(returns, class_name)
-                )
-            }
-            Type::List(_) => format!(
-                "list[{}]",
-                self.describe(self.element(ty).unwrap(), class_name)
-            ),
-            Type::Tuple(_) => format!(
-                "tuple[{}]",
-                self.fields(ty)
-                    .unwrap()
-                    .into_iter()
-                    .map(|ty| self.describe(ty, class_name))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Type::Dict(_) => {
-                let (key, value) = self.mapping(ty).unwrap();
-                let name = if self.is_default_list_dict(ty) {
-                    "defaultdict"
-                } else {
-                    "dict"
-                };
-                format!(
-                    "{name}[{}, {}]",
-                    self.describe(key, class_name),
-                    self.describe(value, class_name)
-                )
-            }
-            Type::Set(_) => format!(
-                "set[{}]",
-                self.describe(self.set_element(ty).unwrap(), class_name)
-            ),
-            Type::Optional(_) => format!(
-                "{} | None",
-                self.describe(self.payload(ty).unwrap(), class_name)
-            ),
-            Type::Union(_) => self
-                .members(ty)
-                .unwrap()
-                .into_iter()
-                .map(|ty| self.describe(ty, class_name))
-                .collect::<Vec<_>>()
-                .join(" | "),
-            _ => ty.to_string(),
+        let storage = self.0.borrow();
+        let mut description = TypeDescription {
+            shapes: &storage.shapes,
+            class_name,
+            text: String::new(),
+            remaining_nodes: 256,
+        };
+        if description.write_type(ty).is_err() {
+            description.text.push_str("...");
         }
+        description.text
+    }
+}
+
+/// A shared type can have an exponentially larger spelling than its source.
+struct TypeDescription<'a> {
+    shapes: &'a [Shape],
+    class_name: &'a dyn Fn(usize) -> String,
+    text: String,
+    remaining_nodes: usize,
+}
+
+impl fmt::Write for TypeDescription<'_> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        let remaining = MAX_DESCRIPTION_BYTES - self.text.len();
+        if s.len() > remaining {
+            self.text.push_str(&s[..s.floor_char_boundary(remaining)]);
+            return Err(fmt::Error);
+        }
+        self.text.push_str(s);
+        Ok(())
+    }
+}
+
+impl TypeDescription<'_> {
+    fn write_types(&mut self, types: &[Type], separator: &str) -> fmt::Result {
+        for (i, &ty) in types.iter().enumerate() {
+            if i != 0 {
+                self.write_str(separator)?;
+            }
+            self.write_type(ty)?;
+        }
+        Ok(())
+    }
+
+    fn write_type(&mut self, ty: Type) -> fmt::Result {
+        self.remaining_nodes = self.remaining_nodes.checked_sub(1).ok_or(fmt::Error)?;
+        let id = match ty {
+            Type::StrLiteral(id)
+            | Type::List(id)
+            | Type::Tuple(id)
+            | Type::Callable(id)
+            | Type::Dict(id)
+            | Type::Set(id)
+            | Type::Optional(id)
+            | Type::Union(id) => id,
+            Type::Class(id) | Type::StrEnum(id) => return self.write_str(&(self.class_name)(id)),
+            _ => return write!(self, "{ty}"),
+        };
+        let shape = &self.shapes[id];
+        match shape {
+            Shape::StringLiterals(values) => {
+                self.write_str("Literal[")?;
+                for (i, value) in values.iter().enumerate() {
+                    if i != 0 {
+                        self.write_str(", ")?;
+                    }
+                    write!(self, "{value:?}")?;
+                }
+            }
+            Shape::Callable(params, returns) => {
+                self.write_str("Callable[[")?;
+                self.write_types(params, ", ")?;
+                self.write_str("], ")?;
+                self.write_type(*returns)?;
+            }
+            Shape::List(element) | Shape::Set(element) => {
+                self.write_str(if matches!(shape, Shape::List(_)) {
+                    "list["
+                } else {
+                    "set["
+                })?;
+                self.write_type(*element)?;
+            }
+            Shape::Tuple(fields) => {
+                self.write_str("tuple[")?;
+                self.write_types(fields, ", ")?;
+            }
+            Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => {
+                self.write_str(if matches!(shape, Shape::Dict(..)) {
+                    "dict["
+                } else {
+                    "defaultdict["
+                })?;
+                self.write_type(*key)?;
+                self.write_str(", ")?;
+                self.write_type(*value)?;
+            }
+            Shape::Optional(element) => {
+                self.write_type(*element)?;
+                return self.write_str(" | None");
+            }
+            Shape::Union(members) => return self.write_types(members, " | "),
+        }
+        self.write_str("]")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_tuple_descriptions_stop_expanding() {
+        let types = Types::default();
+        let pair = types.tuple(vec![Type::Int, Type::Int]);
+        let name = |_| unreachable!();
+        assert_eq!(types.describe(pair, &name), "tuple[int, int]");
+        let mut ty = pair;
+        for _ in 0..30 {
+            ty = types.tuple(vec![ty, ty]);
+        }
+        let text = types.describe(ty, &name);
+        assert!(text.starts_with("tuple[tuple[") && text.ends_with("..."));
+        assert!(text.len() <= MAX_DESCRIPTION_BYTES + 3);
+        let literal = types.string_literal(vec!["雪".repeat(400)]);
+        let text = types.describe(literal, &name);
+        assert!(text.starts_with("Literal[\"雪") && text.ends_with("..."));
+        assert!(text.len() <= MAX_DESCRIPTION_BYTES + 3);
     }
 }

@@ -725,11 +725,11 @@ mod tests {
             ([None, None, Some(-&huge)], 3),
         ]);
         for scale in [BigInt::from(1), huge] {
-            let source = List(StorageCell::new(
+            let source = List::new(
                 [1, -1, 2, -2, 3]
                     .map(|value| Int::new(&scale * value))
                     .into(),
-            ));
+            );
             for (components, expected) in &cases {
                 let components = components.clone().map(|value| value.map(Int::new));
                 let [start, stop, step] = components
@@ -757,9 +757,7 @@ mod tests {
                 if let Some(at) = heap_at {
                     numbers[at] = BigInt::from(1) << 400_u32;
                 }
-                let source = List(StorageCell::new(
-                    numbers.iter().cloned().map(Int::new).collect(),
-                ));
+                let source = List::new(numbers.iter().cloned().map(Int::new).collect());
                 for step in [-2_i64, -1, 1, 2] {
                     let parity = if step < 0 { (length - 1) % 2 } else { 0 };
                     let expected: BigInt = numbers
