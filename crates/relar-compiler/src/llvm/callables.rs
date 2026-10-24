@@ -4,16 +4,9 @@ use std::collections::BTreeSet;
 
 use super::*;
 
-fn adapter_name(function: usize, bound: bool) -> String {
-    format!(
-        "callable_{function}_{}",
-        if bound { "bound" } else { "plain" }
-    )
-}
-
 /// The callback borrows its record's receiver for the entire invocation. Plain
 /// functions use the same hidden-context ABI, ignoring the null context word.
-pub(super) fn adapters(module: &Module, sanitize: bool) -> String {
+pub(super) fn adapters(module: &Module, sanitize: bool, output: &mut Output) {
     let mut targets = BTreeSet::new();
     let mut invoked = false;
     let mut enum_receiver = false;
@@ -29,16 +22,28 @@ pub(super) fn adapters(module: &Module, sanitize: bool) -> String {
         });
     }
     if targets.is_empty() && !invoked {
-        return String::new();
+        return;
     }
-    let mut output = String::from(
-        "%callable = type { ptr, ptr }\n\
-         @kinds_callable = private unnamed_addr constant [2 x i32] [i32 0, i32 6]\n\
-         @layout_callable = private constant { i64, ptr, ptr } { i64 2, ptr @kinds_callable, ptr null }\n",
-    );
-    if enum_receiver {
-        output.push_str("@kinds_callable_enum = private unnamed_addr constant [2 x i32] [i32 0, i32 10]\n\
-             @layout_callable_enum = private constant { i64, ptr, ptr } { i64 2, ptr @kinds_callable_enum, ptr null }\n");
+    output.common().push_str("%callable = type { ptr, ptr }\n");
+    for (name, kind) in [("callable", 6)]
+        .into_iter()
+        .chain(enum_receiver.then_some(("callable_enum", 10)))
+    {
+        writeln!(
+            output.entry_buffer(),
+            "@kinds_{name} = private unnamed_addr constant [2 x i32] [i32 0, i32 {kind}]"
+        )
+        .unwrap();
+        writeln!(
+            output.global(
+                output.entry,
+                &format!("layout_{name}"),
+                "constant",
+                "{ i64, ptr, ptr }"
+            ),
+            "{{ i64 2, ptr @kinds_{name}, ptr null }}"
+        )
+        .unwrap();
     }
     for (id, bound) in targets {
         let function = &module.functions[id];
@@ -62,25 +67,27 @@ pub(super) fn adapters(module: &Module, sanitize: bool) -> String {
         } else {
             " alwaysinline"
         };
-        writeln!(
-            output,
-            "define internal {returns} @{}({}){attributes} {{",
-            adapter_name(id, bound),
-            signature.join(", ")
-        )
-        .unwrap();
+        let target = output.function_name(id);
+        let name = output.adapter_name(id, bound);
+        let body = output.function(
+            output.function_owner(id),
+            &name,
+            returns,
+            &signature.join(", "),
+            attributes,
+        );
         if scalar {
-            output.push_str("  %tag = ptrtoint ptr %context to i64\n");
+            body.push_str("  %tag = ptrtoint ptr %context to i64\n");
         }
         writeln!(
-            output,
-            "  %result = call {returns} @fn_{id}({})",
+            body,
+            "  %result = call {returns} @{target}({})",
             inputs.join(", ")
         )
         .unwrap();
-        writeln!(output, "  ret {returns} %result\n}}\n").unwrap();
+        writeln!(body, "  ret {returns} %result\n}}").unwrap();
+        output.common().push('\n');
     }
-    output
 }
 
 impl Emitter<'_, '_> {
@@ -99,7 +106,7 @@ impl Emitter<'_, '_> {
             .as_ref()
             .is_some_and(|r| matches!(r.ty, Type::StrEnum(_)));
         let result = self.record_with_layout(ty, if scalar { "callable_enum" } else { "callable" });
-        let target = adapter_name(function, receiver.is_some());
+        let target = self.output.adapter_ref(function, receiver.is_some());
         self.line(format!("store ptr @{target}, ptr {}", result.operand));
         let context = self.instruction(format!(
             "getelementptr %callable, ptr {}, i32 0, i32 1",
@@ -131,7 +138,10 @@ impl Emitter<'_, '_> {
         let callable = self.operand(callable);
         let values = self.call_operands(args);
         let target = if let [target] = targets.as_slice() {
-            format!("@{}", adapter_name(target.function, target.bound))
+            format!(
+                "@{}",
+                self.output.adapter_ref(target.function, target.bound)
+            )
         } else {
             self.instruction(format!("load ptr, ptr {}", callable.value.operand))
         };
