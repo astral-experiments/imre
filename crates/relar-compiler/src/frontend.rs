@@ -148,6 +148,9 @@ impl ClassInfo {
             })
             .collect::<Result<Vec<_>, _>>()?;
         for (id, class) in declarations.definitions.iter().enumerate() {
+            if class.abstract_methods.is_empty() && !class.bases.is_empty() {
+                types.add_concrete_subclass(id, &class.bases);
+            }
             if let Some(&base) = class.bases.first()
                 && !fields[id].starts_with(&fields[base])
             {

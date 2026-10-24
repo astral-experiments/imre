@@ -1,10 +1,15 @@
-//! An async thunk borrows exact arguments from the coroutine's captured tuple.
-//! Indirect calls also load its callable and bound receiver from that frame.
+//! One-shot coroutine and context-manager thunks pass arguments from their
+//! captured tuple using the target's native ownership convention.
 
 use super::*;
 use crate::ir::ProcessOperation;
 
-pub(super) fn adapters(module: &Module, sanitize: bool, units: &mut Output) {
+pub(super) fn adapters(
+    module: &Module,
+    sanitize: bool,
+    resource_types: &HashSet<Type>,
+    units: &mut Output,
+) {
     let mut direct = BTreeMap::new();
     let mut indirect = BTreeMap::new();
     for f in module.functions.iter().chain([&module.entry]) {
@@ -37,7 +42,10 @@ pub(super) fn adapters(module: &Module, sanitize: bool, units: &mut Output) {
             .params
             .iter()
             .enumerate()
-            .map(|(index, &slot)| load_arg(output, frame, index, function.locals[slot]))
+            .map(|(index, &slot)| {
+                let ty = function.locals[slot];
+                load_arg(output, frame, index, ty, resource_types.contains(&ty))
+            })
             .collect();
         invoke(output, format!("@{target}"), args, function.returns);
     }
@@ -49,21 +57,18 @@ pub(super) fn adapters(module: &Module, sanitize: bool, units: &mut Output) {
             "ptr %frame",
             attrs,
         );
-        let callable = load_arg(output, frame, 0, Type::Callable(id));
+        let callable = load_arg(output, frame, 0, Type::Callable(id), false);
         writeln!(output, "  %target = load ptr, {callable}\n  %slot = getelementptr %callable, {callable}, i32 0, i32 1\n  %context = load ptr, ptr %slot").unwrap();
         let mut args = vec!["ptr %context".to_owned()];
         let (params, _) = module.types.signature(Type::Callable(id)).unwrap();
-        args.extend(
-            params
-                .iter()
-                .enumerate()
-                .map(|(index, &ty)| load_arg(output, frame, index + 1, ty)),
-        );
+        args.extend(params.iter().enumerate().map(|(index, &ty)| {
+            load_arg(output, frame, index + 1, ty, resource_types.contains(&ty))
+        }));
         invoke(output, "%target".to_owned(), args, result);
     }
 }
 
-fn load_arg(output: &mut String, frame: Type, index: usize, ty: Type) -> String {
+fn load_arg(output: &mut String, frame: Type, index: usize, ty: Type, transfer: bool) -> String {
     let llvm = ty.llvm();
     let storage = storage_type(ty);
     writeln!(
@@ -73,6 +78,15 @@ fn load_arg(output: &mut String, frame: Type, index: usize, ty: Type) -> String 
     )
     .unwrap();
     writeln!(output, "  %word{index} = load {storage}, ptr %field{index}").unwrap();
+    if transfer {
+        // Move this private frame's owner into the parameter. Rebinding can
+        // now finalize it while the body is still running or suspended.
+        writeln!(
+            output,
+            "  store {storage} zeroinitializer, ptr %field{index}"
+        )
+        .unwrap();
+    }
     if storage == llvm {
         format!("{llvm} %word{index}")
     } else {

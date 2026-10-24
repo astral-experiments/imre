@@ -51,6 +51,7 @@ enum Storage {
     StringIterator(sequences::StringIterator),
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
+    ByteOutput(bytes::ByteOutput),
     Exception(exceptions::Exception),
     File(Box<files::FileState>),
     AsyncProcess(Box<processes::AsyncProcess>),

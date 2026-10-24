@@ -1,6 +1,6 @@
 //! Ownership lowering and textual LLVM emission, with no C or interpreter layer.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write;
 
 use crate::borrows::{self, FunctionBorrows};
@@ -17,6 +17,7 @@ use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
 
 mod asyncio;
+mod byte_outputs;
 mod callables;
 mod conditionals;
 mod integer_regions;
@@ -55,6 +56,7 @@ impl Type {
             | Self::Set(_)
             | Self::StringKeys
             | Self::Iterator
+            | Self::ByteOutput
             | Self::Exception
             | Self::TimeoutExpired
             | Self::Path
@@ -95,6 +97,7 @@ impl Type {
             | Self::Set(_)
             | Self::StringKeys
             | Self::Iterator
+            | Self::ByteOutput
             | Self::Exception
             | Self::TimeoutExpired
             | Self::Path
@@ -205,6 +208,25 @@ fn emit_program(
     output: &mut Output,
 ) -> Result<(), String> {
     let callable_targets = crate::callables::Targets::analyze(module);
+    let mut resource_types: HashSet<_> = module
+        .functions
+        .iter()
+        .chain([&module.entry])
+        .flat_map(|function| function.locals.iter().copied())
+        .collect();
+    resource_types.retain(|&ty| {
+        if matches!(ty, Type::Callable(_)) {
+            // A plain function has no captured receiver to finalize.
+            return callable_targets.get(ty).iter().any(|target| {
+                let f = &module.functions[target.function];
+                target.bound
+                    && module
+                        .types
+                        .may_own_file(f.locals[f.params[0]], &module.class_fields, true)
+            });
+        }
+        module.types.may_own_file(ty, &module.class_fields, true)
+    });
     let borrows = borrows::analyze(module, &callable_targets);
     let effects = effects::analyze(module, &callable_targets);
     let inline_dispatch = string_enums::inline_dispatch(module, &effects);
@@ -228,6 +250,7 @@ fn emit_program(
         loops: Vec::new(),
         locals: Vec::new(),
         borrowed_params: Vec::new(),
+        resource_types,
         borrowed_locals: Vec::new(),
         rooted_locals: Vec::new(),
         length_roots: Vec::new(),
@@ -315,8 +338,8 @@ fn emit_program(
     }
     record_layouts(module, emitter.output);
     json::schemas(module, emitter.output);
-    callables::adapters(module, sanitize, emitter.output);
-    asyncio::adapters(module, sanitize, emitter.output);
+    callables::adapters(module, sanitize, &emitter.resource_types, emitter.output);
+    asyncio::adapters(module, sanitize, &emitter.resource_types, emitter.output);
     emitter.output.common().push_str(&integer_helpers());
     emitter
         .output
@@ -401,6 +424,7 @@ struct Emitter<'a, 'module> {
     loops: Vec<LoopTarget>,
     locals: Vec<Type>,
     borrowed_params: Vec<bool>,
+    resource_types: HashSet<Type>,
     borrowed_locals: Vec<bool>,
     rooted_locals: Vec<bool>,
     length_roots: Vec<Option<usize>>,
@@ -528,6 +552,21 @@ impl Emitter<'_, '_> {
         args.values.iter().map(|arg| self.operand(arg)).collect()
     }
 
+    /// Once every argument is evaluated, the callee takes an owner of each
+    /// resource-bearing parameter. A failed earlier argument still unwinds
+    /// every completed temporary in the caller.
+    fn transfer_call_operands(&mut self, args: &mut [Operand]) {
+        for arg in args {
+            if self.resource_types.contains(&arg.value.ty) {
+                match arg.ownership {
+                    Ownership::Owned => self.forget(&arg.value),
+                    Ownership::Borrowed => self.retain(&arg.value),
+                }
+                arg.ownership = Ownership::Borrowed;
+            }
+        }
+    }
+
     fn call_with_effect(
         &mut self,
         name: &str,
@@ -607,6 +646,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
+            | Type::ByteOutput
             | Type::Exception
             | Type::TimeoutExpired
             | Type::Path
@@ -1187,11 +1227,8 @@ impl Emitter<'_, '_> {
             && expression_preserves_local(right, slot, self.locals.len())
     }
 
-    fn cleanup(&mut self) {
-        for slot in 0..self.locals.len() {
-            if self.borrowed_params[slot] || self.borrowed_locals[slot] {
-                continue;
-            }
+    fn cleanup(&mut self, slots: &[usize]) {
+        for &slot in slots {
             let value = self.take_slot(slot);
             self.release(&value);
         }
@@ -1425,8 +1462,8 @@ impl Emitter<'_, '_> {
         self.try_nesting -= 1;
     }
 
-    /// The caller roots arguments throughout a call. Parameters whose bindings
-    /// never change can share that root; rebound parameters need their own.
+    /// Resource-bearing parameters own their arguments so rebinding can close
+    /// the previous value inside the call. Other stable parameters borrow.
     fn function(
         &mut self,
         function: &Function,
@@ -1435,6 +1472,7 @@ impl Emitter<'_, '_> {
     ) -> Result<String, String> {
         self.entry_allocas.clear();
         self.locals = function.locals.clone();
+        byte_outputs::select(function, &mut self.locals);
         self.borrowed_locals = borrows.locals.clone();
         self.rooted_locals = borrows.rooted.clone();
         self.length_roots = borrows.length_roots.clone();
@@ -1444,7 +1482,19 @@ impl Emitter<'_, '_> {
         let rebound = borrows::written(function);
         self.borrowed_params = vec![false; self.locals.len()];
         for &slot in &function.params {
-            self.borrowed_params[slot] = !rebound[slot];
+            self.borrowed_params[slot] =
+                !rebound[slot] && !self.resource_types.contains(&function.locals[slot]);
+        }
+        let mut cleanup_slots: Vec<_> = (0..self.locals.len())
+            .filter(|&slot| self.owns_slot(slot))
+            .collect();
+        if !entry
+            && cleanup_slots
+                .iter()
+                .any(|&slot| self.resource_types.contains(&function.locals[slot]))
+        {
+            // CPython clears a returning frame from the last bound slot to the first.
+            cleanup_slots.reverse();
         }
         self.loops.clear();
         self.temporaries.clear();
@@ -1502,7 +1552,7 @@ impl Emitter<'_, '_> {
                 operand: format!("%arg{i}"),
                 small_integer: false,
             };
-            if !self.borrowed_params[slot] {
+            if !self.borrowed_params[slot] && !self.resource_types.contains(&value.ty) {
                 self.retain(&value);
             }
             // Retains are infallible; every parameter is initialized before
@@ -1529,7 +1579,7 @@ impl Emitter<'_, '_> {
             self.jump(&self.return_exit.clone());
         }
         self.start(&self.return_exit.clone());
-        self.cleanup();
+        self.cleanup(&cleanup_slots);
         if entry {
             self.cleanup_globals();
             self.line("call void @relar_clear_literals()");
@@ -1565,7 +1615,7 @@ impl Emitter<'_, '_> {
                 ));
             }
         }
-        self.cleanup();
+        self.cleanup(&cleanup_slots);
         if entry {
             self.cleanup_globals();
             self.line("call void @relar_clear_literals()");
@@ -1660,10 +1710,12 @@ impl Emitter<'_, '_> {
         let receiver = self.operand(receiver);
         let first = self.operand(first);
         let second = self.operand(second);
-        self.void_call(
-            "relar_list_append_pair",
-            &[&receiver.value, &first.value, &second.value],
-        );
+        let name = if receiver.value.ty == Type::ByteOutput {
+            "relar_byte_output_append_pair"
+        } else {
+            "relar_list_append_pair"
+        };
+        self.void_call(name, &[&receiver.value, &first.value, &second.value]);
         for operand in [&receiver, &first, &second] {
             self.release_operand(operand);
         }
@@ -1673,6 +1725,13 @@ impl Emitter<'_, '_> {
     fn statement(&mut self, statement: &Statement) {
         match statement {
             Statement::Assign(slot, expression) => {
+                if self.locals[*slot] == Type::ByteOutput
+                    && matches!(&expression.kind, ExprKind::List(values) if values.is_empty())
+                {
+                    let value = self.call("relar_byte_output_new", Type::ByteOutput, &[]);
+                    self.store(*slot, &value);
+                    return;
+                }
                 if self.borrowed_locals[*slot] {
                     let value = self.borrow_projection(expression);
                     self.store_borrowed(*slot, &value);
@@ -1754,9 +1813,23 @@ impl Emitter<'_, '_> {
                 let list = self.operand(list);
                 let index = self.operand(index);
                 self.set_item(&list.value, &index.value, &value.value, nonnegative);
-                self.release_operand(&value);
-                self.release_operand(&index);
-                self.release_operand(&list);
+                if self.module.types.mapping(list.value.ty).is_some()
+                    && self.module.types.may_own_file(
+                        value.value.ty,
+                        &self.module.class_fields,
+                        true,
+                    )
+                {
+                    // The assignment's stack keeps the RHS alive while the
+                    // temporary dictionary releases its remaining entries.
+                    self.release_operand(&list);
+                    self.release_operand(&index);
+                    self.release_operand(&value);
+                } else {
+                    self.release_operand(&value);
+                    self.release_operand(&index);
+                    self.release_operand(&list);
+                }
             }
             Statement::AugmentItem(list, index, op, expression) => {
                 // Augmented assignment instead roots the target and old item first.
@@ -2280,7 +2353,8 @@ impl Emitter<'_, '_> {
             ExprKind::Conditional(test, yes, no) => self.conditional(test, yes, no),
             ExprKind::Compare(values, ops) => self.comparisons(values, ops),
             ExprKind::Call(id, args) => {
-                let values = self.call_operands(args);
+                let mut values = self.call_operands(args);
+                self.transfer_call_operands(&mut values);
                 let result = self.user_call(
                     *id,
                     expression.ty,
@@ -2303,12 +2377,24 @@ impl Emitter<'_, '_> {
                 self.invoke_callable(callable, args, expression.ty)
             }
             ExprKind::Construct { initializer, args } => {
-                // Arguments are evaluated and rooted before __init__ starts.
-                let values = self.call_operands(args);
+                // A type call keeps its own arguments while __init__ runs.
+                // Its stack releases them in reverse source order on return.
+                let mut values = self.call_operands(args);
                 let object = self.record(expression.ty);
                 let mut inputs = vec![&object];
                 inputs.extend(args.order.iter().map(|&index| &values[index].value));
+                for input in &inputs {
+                    if self.resource_types.contains(&input.ty) {
+                        self.retain(input);
+                    }
+                }
                 self.user_call(*initializer, Type::None, &inputs, false);
+                if values
+                    .iter()
+                    .any(|arg| self.resource_types.contains(&arg.value.ty))
+                {
+                    values.reverse();
+                }
                 for arg in &values {
                     self.release_operand(arg);
                 }
@@ -3074,6 +3160,7 @@ impl Emitter<'_, '_> {
                 | Type::Set(_)
                 | Type::StringKeys
                 | Type::Iterator
+                | Type::ByteOutput
                 | Type::Callable(_)
                 | Type::EventLoop
                 | Type::Coroutine(_)
@@ -3300,7 +3387,7 @@ impl Emitter<'_, '_> {
                 })
         });
         let mut probe_fields = Vec::new();
-        let args = expressions
+        let mut args = expressions
             .iter()
             .enumerate()
             .map(|(index, arg)| {
@@ -3699,6 +3786,9 @@ impl Emitter<'_, '_> {
                 Type::Bytes => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Int => self.call("relar_bytes_count", Type::Bytes, &[&args[0].value]),
                 Type::ListInt => self.call("relar_bytes_list", Type::Bytes, &[&args[0].value]),
+                Type::ByteOutput => {
+                    self.call("relar_byte_output_finish", Type::Bytes, &[&args[0].value])
+                }
                 _ => unreachable!("bytes conversion was checked"),
             },
             Builtin::Encode => self.call("relar_str_encode", Type::Bytes, &[&args[0].value]),
@@ -3991,8 +4081,13 @@ impl Emitter<'_, '_> {
             },
             Builtin::ListReserveRange => {
                 let count = self.index_word(&args[4].value, true);
+                let name = if args[0].value.ty == Type::ByteOutput {
+                    "relar_byte_output_reserve_range"
+                } else {
+                    "relar_list_reserve_range"
+                };
                 self.line(format!(
-                    "call void @relar_list_reserve_range(ptr {}, i64 {}, i64 {}, i64 {}, i64 {count})",
+                    "call void @{name}(ptr {}, i64 {}, i64 {}, i64 {}, i64 {count})",
                     args[0].value.operand,
                     args[1].value.operand,
                     args[2].value.operand,
@@ -4142,6 +4237,15 @@ impl Emitter<'_, '_> {
                     "call i64 @relar_dict_get_default(ptr {}, i64 {key}, i64 {default})",
                     args[0].value.operand
                 ));
+                if self
+                    .module
+                    .types
+                    .may_own_file(returns, &self.module.class_fields, true)
+                {
+                    // get() captures its result before dropping the default
+                    // argument and then the temporary receiver.
+                    args.reverse();
+                }
                 self.unpack_word(word, returns)
             }
             Builtin::DictTryGet(stored) => self.dict_try_get(*stored, &args, returns),
@@ -4322,6 +4426,7 @@ impl Emitter<'_, '_> {
                     | Type::Set(_)
                     | Type::StringKeys
                     | Type::Iterator
+                    | Type::ByteOutput
                     | Type::Exception
                     | Type::TimeoutExpired
                     | Type::Path
@@ -4536,6 +4641,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
+            | Type::ByteOutput
             | Type::Exception
             | Type::TimeoutExpired
             | Type::Path
@@ -4587,6 +4693,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
+            | Type::ByteOutput
             | Type::Exception
             | Type::TimeoutExpired
             | Type::Path
@@ -4770,7 +4877,9 @@ impl Emitter<'_, '_> {
     }
 
     fn append(&mut self, list: &Value, value: &Value) {
-        if list.ty == Type::ListInt {
+        if list.ty == Type::ByteOutput {
+            self.void_call("relar_byte_output_append", &[list, value]);
+        } else if list.ty == Type::ListInt {
             self.runtime_call(&LIST_APPEND, [list, value]);
         } else {
             let word = self.word(value);
@@ -5125,6 +5234,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Set(_)
         | Type::StringKeys
         | Type::Iterator
+        | Type::ByteOutput
         | Type::Exception
         | Type::TimeoutExpired
         | Type::Path
@@ -5351,6 +5461,11 @@ declare i64 @relar_bytes_get_index(ptr, i64)
 declare ptr @relar_bytes_slice(ptr, i64, i64, i64)
 declare ptr @relar_bytes_count(i64)
 declare ptr @relar_bytes_list(ptr)
+declare ptr @relar_byte_output_new()
+declare void @relar_byte_output_reserve_range(ptr, i64, i64, i64, i64)
+declare void @relar_byte_output_append(ptr, i64)
+declare void @relar_byte_output_append_pair(ptr, i64, i64)
+declare ptr @relar_byte_output_finish(ptr)
 declare ptr @relar_bytes_concat(ptr, ptr)
 declare ptr @relar_bytes_repeat(ptr, i64)
 declare ptr @relar_bytes_iter(ptr)
@@ -6549,6 +6664,33 @@ def total(text: str) -> int:
             "bounded arithmetic and access proofs do not guarantee backend vectorization"
         );
         assert!(!llvm.contains("llvm.loop.vectorize"));
+    }
+
+    #[test]
+    fn byte_output_requires_a_private_list_and_one_terminal_conversion() {
+        let eligible = function_body(
+            "def encode(value: int) -> bytes:\n    out: list[int] = []\n    out.extend(divmod(value, 256))\n    return bytes(out)\n",
+        );
+        assert!(eligible.contains("call void @relar_byte_output_append_pair("));
+        assert!(eligible.contains("call ptr @relar_byte_output_finish("));
+        assert!(!eligible.contains("call ptr @relar_bytes_list("));
+
+        for observer in [
+            "    alias = out\n    alias[0] = 0\n",
+            "    print(bytes(out))\n",
+            "    print(len(out))\n",
+            "    out = [0]\n",
+        ] {
+            let source = format!(
+                "def encode(value: int) -> bytes:\n    out: list[int] = []\n    out.append(value)\n{observer}    return bytes(out)\n"
+            );
+            let body = function_body(&source);
+            assert!(body.contains("call ptr @relar_bytes_list("), "{observer}");
+            assert!(
+                !body.contains("call ptr @relar_byte_output_new("),
+                "{observer}"
+            );
+        }
     }
 
     #[test]

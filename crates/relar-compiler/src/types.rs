@@ -40,6 +40,7 @@ struct Storage {
     hashable_records: HashSet<usize>,
     custom_truth: HashSet<usize>,
     fallible_keys: HashSet<usize>,
+    concrete_subclasses: HashMap<usize, Vec<Type>>,
 }
 
 /// An annotation and a matching inferred literal always receive the same identity.
@@ -83,6 +84,7 @@ impl Types {
             | Type::ListInt
             | Type::StringKeys
             | Type::Iterator
+            | Type::ByteOutput
             | Type::Exception
             | Type::TimeoutExpired
             | Type::TextIO
@@ -184,6 +186,17 @@ impl Types {
 
     pub(crate) fn set_custom_truth(&self, records: HashSet<usize>) {
         self.0.borrow_mut().custom_truth = records;
+    }
+
+    pub(crate) fn add_concrete_subclass(&self, class: usize, bases: &[usize]) {
+        let mut storage = self.0.borrow_mut();
+        for &base in bases {
+            storage
+                .concrete_subclasses
+                .entry(base)
+                .or_default()
+                .push(Type::Class(class));
+        }
     }
 
     pub(crate) fn mark_fallible_key(&self, class: usize) -> bool {
@@ -371,6 +384,7 @@ impl Types {
             | Type::Callable(_)
             | Type::Enum(_)
             | Type::Iterator
+            | Type::ByteOutput
             | Type::Exception
             | Type::TimeoutExpired
             | Type::TextIO
@@ -603,7 +617,13 @@ impl Types {
                 | Type::Task(_)
                 | Type::TaskGroup => return true,
                 Type::Callable(_) if opaque_callables => return true,
-                Type::Class(class) => pending.extend_from_slice(&class_fields[class]),
+                Type::Class(class) => {
+                    pending.extend_from_slice(&class_fields[class]);
+                    // A base-typed reference can own fields introduced by its concrete layout.
+                    if let Some(subclasses) = self.0.borrow().concrete_subclasses.get(&class) {
+                        pending.extend_from_slice(subclasses);
+                    }
+                }
                 _ => pending.extend(self.children(ty)),
             }
         }
