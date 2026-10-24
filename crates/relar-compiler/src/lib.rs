@@ -273,6 +273,14 @@ mod tests {
     }
 
     #[test]
+    fn joins_only_falling_exception_handler_exits() {
+        let source = "def choose(value: int) -> str:\n    try:\n        if value == 0:\n            raise ValueError('zero')\n        raise IndexError('one')\n    except ValueError:\n        word = 'zero'\n    except IndexError:\n        return 'one'\n    return word\n";
+        super::check(source).unwrap();
+        let missing = source.replace("return 'one'", "pass");
+        assert!(super::check(&missing).is_err());
+    }
+
+    #[test]
     fn sealed_exception_fields_keep_runtime_guards_and_reject_unknown_attributes() {
         let llvm = compile(
             "def fields(error: Exception) -> tuple[int, list[str], str, str, str]:\n    return error.returncode, error.cmd, error.stdout, error.output, error.stderr\n",
