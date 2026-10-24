@@ -7,6 +7,10 @@ def show(values: list[int]) -> None:
         print(value)
 
 
+def offset(min: int) -> int:
+    return sum(min + index for index in range(2))
+
+
 def contexts() -> None:
     rows: list[list[str]] = list([] for index in range(1))
     print(len(rows))
@@ -23,6 +27,7 @@ def contexts() -> None:
 
 
 contexts()
+print(offset(min=2))
 show(list(value * value for value in range(6) if value % 2))
 print(sum(value * value for value in range(6) if value % 2))
 print(sum((value for value in range(0)), start=9))

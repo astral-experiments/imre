@@ -1438,7 +1438,7 @@ pub unsafe extern "C" fn relar_key_union(
     // SAFETY: the exact key descriptor is copied from the rooted left operand.
     let kind = unsafe { object(left).0.with(key_kind) };
     let mut result = Tables::new(kind);
-    for source in [left, right] {
+    for source in std::iter::once(left).chain((left != right).then_some(right)) {
         // SAFETY: the destination is private and distinct from both inputs. All
         // hash operations use sealed immutable keys and cannot call user code.
         unsafe {
@@ -1455,6 +1455,49 @@ pub unsafe extern "C" fn relar_key_union(
         Set { tables: result },
     ))))))
 }
+/// Builds an intersection directly from two key views or sets. The output owns
+/// each selected key, including when the inputs alias each other.
+///
+/// # Safety
+/// Both operands must remain rooted and share the same immutable key type.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_key_intersection(
+    left: *const Object,
+    right: *const Object,
+) -> *const Object {
+    // SAFETY: the operands are immutably borrowed. All inserts target the fresh
+    // result, and exact scalar key hashing cannot reenter user code.
+    unsafe {
+        object(left).0.with(|left| {
+            let kind = match left {
+                Storage::Dictionary(dict) => dict.tables.key_kind(),
+                Storage::Set(set) => set.tables.key_kind(),
+                _ => unreachable!("expected dictionary keys or set"),
+            };
+            let result = relar_set_new(kind);
+            object(right).0.with(|right| {
+                let select = |key| {
+                    let present = match right {
+                        Storage::Dictionary(dict) => dict.tables.lookup(key).is_some(),
+                        Storage::Set(set) => set.tables.lookup(key).is_some(),
+                        _ => unreachable!("expected dictionary keys or set"),
+                    };
+                    if present {
+                        relar_set_add(result, key);
+                    }
+                    true
+                };
+                match left {
+                    Storage::Dictionary(dict) => dict.tables.all(|key, _| select(key)),
+                    Storage::Set(set) => set.tables.all(|key, ()| select(key)),
+                    _ => unreachable!(),
+                };
+            });
+            result
+        })
+    }
+}
+
 /// # Safety
 /// `value` is a rooted set.
 #[unsafe(no_mangle)]

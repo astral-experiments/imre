@@ -41,6 +41,21 @@ struct Parser {
     prog: String,
     raw: bool,
     options: Vec<OptionSpec>,
+    subcommands: Option<Subcommands>,
+}
+
+#[derive(Deserialize)]
+struct Subcommands {
+    dest: String,
+    choices: Vec<Child>,
+}
+
+#[derive(Deserialize)]
+struct Child {
+    name: String,
+    help: Option<String>,
+    #[serde(flatten)]
+    parser: Parser,
 }
 
 enum Token<'a> {
@@ -52,10 +67,20 @@ enum Token<'a> {
     Option(usize, Option<&'a str>),
 }
 
-enum Outcome<'a> {
-    Parsed(Vec<Option<Vec<&'a str>>>),
-    Help,
-    Error(String),
+enum Word<'a> {
+    Option(&'a OptionSpec, Option<Vec<&'a str>>),
+    Command(&'a str),
+}
+
+struct Parsed<'a> {
+    words: Vec<Word<'a>>,
+    extras: Vec<&'a str>,
+    child: Option<usize>,
+}
+
+enum Stop<'a> {
+    Help(&'a Parser),
+    Error(&'a Parser, String),
 }
 
 impl Parser {
@@ -128,25 +153,65 @@ impl Parser {
         }
     }
 
-    fn parse<'a>(&'a self, args: &[&'a str]) -> Outcome<'a> {
+    fn parse<'a>(&'a self, args: &[&'a str]) -> Result<Parsed<'a>, Stop<'a>> {
         let mut values = vec![None; self.options.len()];
         let mut extras = Vec::new();
         let mut index = 0;
+        let mut selected = None;
+        let mut end_options = false;
         while let Some(&arg) = args.get(index) {
             index += 1;
-            let (slot, explicit) = match self.token(arg) {
-                Token::Help(None) => return Outcome::Help,
+            let (slot, explicit) = match if end_options {
+                Token::Value
+            } else {
+                self.token(arg)
+            } {
+                Token::Help(None) => return Err(Stop::Help(self)),
                 Token::Help(Some(value)) => {
-                    return Outcome::Error(format!(
-                        "argument -h/--help: ignored explicit argument {}",
-                        string_repr(value)
+                    return Err(Stop::Error(
+                        self,
+                        format!(
+                            "argument -h/--help: ignored explicit argument {}",
+                            string_repr(value)
+                        ),
                     ));
                 }
                 Token::Ambiguous(names) => {
-                    return Outcome::Error(format!(
-                        "ambiguous option: {arg} could match {}",
-                        names.join(", ")
+                    return Err(Stop::Error(
+                        self,
+                        format!("ambiguous option: {arg} could match {}", names.join(", ")),
                     ));
+                }
+                Token::End if self.subcommands.is_some() => {
+                    end_options = true;
+                    continue;
+                }
+                Token::Value if let Some(commands) = &self.subcommands => {
+                    let Some((child, definition)) = commands
+                        .choices
+                        .iter()
+                        .enumerate()
+                        .find(|(_, child)| child.name == arg)
+                    else {
+                        let choices = commands
+                            .choices
+                            .iter()
+                            .map(|child| string_repr(&child.name))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        return Err(Stop::Error(
+                            self,
+                            format!(
+                                "argument {}: invalid choice: {} (choose from {choices})",
+                                commands.dest,
+                                string_repr(arg)
+                            ),
+                        ));
+                    };
+                    let mut parsed = definition.parser.parse(&args[index..])?;
+                    extras.append(&mut parsed.extras);
+                    selected = Some((child, arg, parsed.words));
+                    break;
                 }
                 Token::End => {
                     extras.extend_from_slice(&args[index - 1..]);
@@ -161,10 +226,13 @@ impl Parser {
             let option = &self.options[slot];
             let taken = if let Some(value) = explicit {
                 if option.kind == Kind::Bool {
-                    return Outcome::Error(format!(
-                        "argument {}: ignored explicit argument {}",
-                        option.flag,
-                        string_repr(value)
+                    return Err(Stop::Error(
+                        self,
+                        format!(
+                            "argument {}: ignored explicit argument {}",
+                            option.flag,
+                            string_repr(value)
+                        ),
                     ));
                 }
                 vec![value]
@@ -184,7 +252,10 @@ impl Parser {
                     } else {
                         "expected one argument"
                     };
-                    return Outcome::Error(format!("argument {}: {message}", option.flag));
+                    return Err(Stop::Error(
+                        self,
+                        format!("argument {}: {message}", option.flag),
+                    ));
                 }
                 args[start..index].to_vec()
             };
@@ -199,31 +270,54 @@ impl Parser {
                     .map(|choice| string_repr(choice))
                     .collect::<Vec<_>>()
                     .join(", ");
-                return Outcome::Error(format!(
-                    "argument {}: invalid choice: {} (choose from {choices})",
-                    option.flag,
-                    string_repr(value)
+                return Err(Stop::Error(
+                    self,
+                    format!(
+                        "argument {}: invalid choice: {} (choose from {choices})",
+                        option.flag,
+                        string_repr(value)
+                    ),
                 ));
             }
             values[slot] = Some(taken);
         }
-        let missing = self
+        let mut missing = self
             .options
             .iter()
             .zip(&values)
             .filter(|(option, value)| option.required && value.is_none())
             .map(|(option, _)| option.flag.as_str())
             .collect::<Vec<_>>();
+        if let Some(commands) = &self.subcommands
+            && selected.is_none()
+        {
+            missing.push(&commands.dest);
+        }
         if !missing.is_empty() {
-            return Outcome::Error(format!(
-                "the following arguments are required: {}",
-                missing.join(", ")
+            return Err(Stop::Error(
+                self,
+                format!(
+                    "the following arguments are required: {}",
+                    missing.join(", ")
+                ),
             ));
         }
-        if !extras.is_empty() {
-            return Outcome::Error(format!("unrecognized arguments: {}", extras.join(" ")));
-        }
-        Outcome::Parsed(values)
+        let mut words: Vec<_> = self
+            .options
+            .iter()
+            .zip(values)
+            .map(|(option, value)| Word::Option(option, value))
+            .collect();
+        let child = selected.map(|(child, name, mut rest)| {
+            words.push(Word::Command(name));
+            words.append(&mut rest);
+            child
+        });
+        Ok(Parsed {
+            words,
+            extras,
+            child,
+        })
     }
 }
 
@@ -264,11 +358,13 @@ impl OptionSpec {
 /// Parses the current contents of sys.argv[1..] into the fixed namespace layout.
 ///
 /// # Safety
-/// The compiler roots all three arguments. `layout` is static and its fields
-/// have exactly the representations inferred from this literal parser schema.
+/// The compiler roots the inputs. `layout` and each descriptor in `children`
+/// match the inferred fields for that parser. The child table contains one
+/// descriptor per declared subcommand in order, or is null for a flat parser.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_argparse_parse(
     layout: *const RecordDescriptor,
+    children: *const *const RecordDescriptor,
     schema: *const Str,
     description: *const Str,
     argv: *const Object,
@@ -295,10 +391,23 @@ pub unsafe extern "C" fn relar_argparse_parse(
         .iter()
         .map(|value| value.as_str())
         .collect::<Vec<_>>();
-    let values = match parser.parse(&args) {
-        Outcome::Parsed(values) => values,
-        Outcome::Help => {
-            let help = parser.help(description);
+    let parsed = match parser.parse(&args).and_then(|parsed| {
+        if parsed.extras.is_empty() {
+            Ok(parsed)
+        } else {
+            Err(Stop::Error(
+                &parser,
+                format!("unrecognized arguments: {}", parsed.extras.join(" ")),
+            ))
+        }
+    }) {
+        Ok(values) => values,
+        Err(Stop::Help(active)) => {
+            let help = active.help(if std::ptr::eq(active, &parser) {
+                description
+            } else {
+                ""
+            });
             if crate::write_output(|writer| {
                 writer.write_all(help.trim_end_matches('\n').as_bytes())
             })
@@ -309,14 +418,14 @@ pub unsafe extern "C" fn relar_argparse_parse(
             }
             return Error::exit_status(0).returning(std::ptr::null_mut());
         }
-        Outcome::Error(error) => {
+        Err(Stop::Error(active, error)) => {
             let _ = crate::flush_stdout();
             let _ = crate::sys::flush_stderr();
             if writeln!(
                 io::stderr().lock(),
                 "{}{}: error: {}",
-                parser.usage(help::width()),
-                parser.prog,
+                active.usage(help::width()),
+                active.prog,
                 error
             )
             .is_err()
@@ -330,13 +439,17 @@ pub unsafe extern "C" fn relar_argparse_parse(
     // SAFETY: every slot receives exactly one owner of its declared kind. All
     // input validation is complete, and option conversion invokes no user code.
     unsafe {
+        let layout = parsed.child.map_or(layout, |index| *children.add(index));
         let layout_ref = &*layout;
-        if layout_ref.length != values.len() {
+        if layout_ref.length != parsed.words.len() {
             fail("SystemError", "argparse namespace layout mismatch");
         }
         let result = relar_record_new(layout);
-        for (index, (option, values)) in parser.options.iter().zip(values).enumerate() {
-            let word = option.word(values);
+        for (index, field) in parsed.words.into_iter().enumerate() {
+            let word = match field {
+                Word::Option(option, values) => option.word(values),
+                Word::Command(value) => scalar(Kind::Str, value),
+            };
             let dest = result.add(index);
             match *layout_ref.kinds.add(index) {
                 3 | 5 => dest.cast::<*const ()>().write(word as *const ()),

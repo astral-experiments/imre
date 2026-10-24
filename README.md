@@ -33,6 +33,10 @@ For a complete example, Relar can build Ruff’s conformance reporter directly
 from its original Python file. The executable runs two versions of ty against
 a typing checkout and renders their differences. [Run the reporter](examples/conformance_report/README.md#run-directly-from-a-checkout).
 
+Relar also runs Ruff’s original memory reporter. It compares saved JSON captures
+or runs two versions of ty on flake8, Sphinx, Prefect, and Trio.
+[Run the memory reporter](examples/memory_report/README.md#run-ruffs-original-script).
+
 Relar supports:
 
 - Statically resolved imports

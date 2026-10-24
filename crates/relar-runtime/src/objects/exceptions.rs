@@ -863,7 +863,11 @@ pub extern "C" fn relar_error_unhandled() -> i32 {
                 "\nThe above exception was the direct cause of the following exception:\n"
             );
         }
-        let _ = writeln!(stderr, "{}: {message}", kind.name());
+        if message.is_empty() {
+            let _ = writeln!(stderr, "{}", kind.name());
+        } else {
+            let _ = writeln!(stderr, "{}: {message}", kind.name());
+        }
     }
     1
 }

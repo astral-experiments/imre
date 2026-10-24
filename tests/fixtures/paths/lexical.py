@@ -62,3 +62,9 @@ except ValueError:
 print(Path("a/./b") == Path("a/b"))
 print(Path("a/../b") != Path("b"))
 print(Path("//a") != Path("/a"))
+for original in [".", "/", "//", "a", "//root/a", "x/../a"]:
+    for name in ["", ".", "..", "n", "a/b", "n/", "é"]:
+        try:
+            print(str(Path(original).with_name(name)))
+        except ValueError as error:
+            print(str(error))
