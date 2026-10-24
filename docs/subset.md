@@ -71,6 +71,11 @@ It evaluates source expressions left to right, then acquires each iterator on
 reaching its source. A second `Path.glob` sees directory changes made while
 consuming the first glob.
 
+`list(difflib.ndiff(before, after))` compares two string lists, including supported
+read-only `Sequence[str]` parameters. Line alignment, intraline Unicode hints,
+and popular-line handling follow CPython 3.12 with its default junk filters.
+The compiler can also pass the result to a parameter consumed immediately by `list`.
+
 `itertools.groupby(source, key=...)` groups consecutive items with equal keys. In a
 `for key, group` loop, the first statement must assign `list(group)` to a separate
 local. That list can be stored or mutated. The grouper name must be fresh and its
@@ -142,7 +147,9 @@ A generator expression evaluates its leftmost iterable and acquires that iterato
 
 `reversed` accepts concrete lists, Unicode strings, bytes, ranges, and homogeneous fixed tuples. A reversed list captures its starting index at construction, then reads live elements at descending indexes. Appended tail elements are not visited; an index outside the current list bounds exhausts the iterator when the next item is requested. String traversal yields Unicode scalar strings, and reversed ranges preserve arbitrary-precision bounds. Dictionaries, sets, generator expressions, and other iterator pipelines cannot be passed to `reversed`.
 
-`min(expr for item in source)` and `max(expr for item in source)` consume a single generator of exact integers. They evaluate each yielded value once and keep the first minimum or maximum. An empty generator raises `ValueError`.
+`min(expr for item in source)` and `max(expr for item in source)` consume a single generator of exact integers. They evaluate each yielded value once and keep the first minimum or maximum. An empty generator raises `ValueError`. With two or more positional integer
+arguments, both builtins evaluate the operands from left to right and keep
+the first minimum or maximum.
 
 `any` and `all` truth-test yielded values and return a boolean. `any` stops at the first true value and returns false for an empty input; `all` stops at the first false value and returns true for an empty input. Skipped elements, conversions, filters, and strict-zip probes do not execute. All source expressions still must type-check.
 
@@ -253,7 +260,8 @@ The CPython module is `stdlib/relar/toml.py`. Add `stdlib` to the import path as
 
 `re.compile` accepts a literal string and an optional flag of `0` or `re.VERBOSE`.
 `re.search(pattern, text)` accepts a literal or a compiled `re.Pattern[str]`.
-A compiled pattern also has a `search(text)` method. The compiler checks each
+A compiled pattern has `search(text)` and `match(text)` methods. The latter
+starts at offset zero. The compiler checks each
 literal, then the executable initializes each distinct translated pattern once.
 A module-level declaration before executable statements can be shared by
 functions and imported by other modules. Rust’s `regex` and `regex-automata`
@@ -273,25 +281,32 @@ def marker(line: str) -> str | None:
 Search returns the leftmost match as `re.Match[str] | None`. Every match is
 truthy, including an empty match. `group()`, `start()` and `end()` inspect
 the whole match and also accept a literal group number or name. `group(0)`
-returns a string. Other groups return `str | None`, preserving the difference
-between an empty capture and an optional group that did not participate.
+returns a string. A fixed pattern’s required captures return `str`, and its
+optional captures return `str | None`. An empty capture returns `""`.
+`groups()` returns the capture tuple in declaration order. `groupdict()` returns
+a fresh mutable dictionary of named captures. Reading a required literal key
+from a local dictionary whose uses preserve its entries also yields `str`.
 Offsets count Unicode code points. An unmatched group's offsets are `-1`,
 and an unknown group raises `IndexError`. The match retains its original text.
 
 The supported dialect includes literals, dot, simple character classes and
 ranges, alternation, named and numbered captures, noncapturing groups, and
 greedy or lazy repetition. `\s` and `\S` use Python's Unicode whitespace.
+`\d` and `\D` match decimal digits and their complement.
 Verbose patterns ignore ASCII layout and comments outside character classes.
 Use `\A` or `^` for the start and `\Z` or `\z` for the strict end of the
-string. The checker rejects dynamic patterns, bytes, additional flags,
-backreferences, lookaround, `$`, word and digit shorthands, and repetitions
+string. A terminal `$` also matches just before a final newline.
+The checker rejects dynamic patterns, bytes, additional flags,
+backreferences, lookaround, interior `$`, word shorthands, and repetitions
 whose capture or empty-match behavior falls outside this dialect.
 
 ## Bounded unions and codec primitives
 
-`str | bytes` and `typing.Union[str, bytes]` denote the same sealed two-member type; either can additionally include `None`. Function, return, local, field, tuple, and container storage enforce those exact members. Concrete strings and bytes promote into union storage without copying or allocating a wrapper. This does not allow arbitrary unions or heterogeneous untyped containers.
+`str | bytes` and `str | list[str]` are sealed two-member types. Both support
+`typing.Union` syntax and optional `None`. A string list retains its identity and
+observes mutations through aliases. Function, return, local, field, tuple, and container storage enforce those exact members. Concrete members promote into union storage without copying or allocating a wrapper. This does not allow arbitrary unions or heterogeneous untyped containers.
 
-`isinstance(value, type)` accepts supported concrete type categories and the sealed builtin exception hierarchy. Tests against `str` or `bytes` narrow a local union in the matching branch and exclude that member in the other branch. Reassignments invalidate those facts; mutable field or container reads do not become stable local facts. Custom metaclass tests and runtime type objects remain unsupported.
+`isinstance(value, type)` accepts supported concrete type categories and the sealed builtin exception hierarchy. Tests against `str`, `bytes`, or `list` narrow a local union in the matching branch and exclude that member in the other branch. Reassignments invalidate those facts; mutable field or container reads do not become stable local facts. Custom metaclass tests and runtime type objects remain unsupported.
 
 Integer bit operations preserve Python's arbitrary-precision signed semantics. Negative shifts raise `ValueError`; large right shifts saturate to zero or minus one. A nonzero left shift too large to represent raises `OverflowError`, while zero shifted by an arbitrarily large nonnegative count stays zero. Resource exhaustion may still terminate the process. `divmod(a, b)` evaluates each integer argument once and returns the fixed tuple `(a // b, a % b)`, including Python's signed quotient/remainder rules and zero-division category. Runtime diagnostic wording can differ across CPython releases.
 

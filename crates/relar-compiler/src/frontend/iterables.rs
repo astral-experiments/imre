@@ -22,6 +22,12 @@ impl Checker<'_> {
                 "list accepts zero or one positional iterable",
             ));
         };
+        if let Some(diff) = self.materialize_ndiff(source)? {
+            if let Some(element) = element {
+                self.expect(element, Type::Str, source)?;
+            }
+            return Ok(diff);
+        }
         let (input, convert) = self.consumer_input(source, element)?;
         if convert
             && element.is_none_or(|ty| ty == Type::Int)
@@ -66,6 +72,31 @@ impl Checker<'_> {
         })
     }
 
+    /// Materializes the default line differ where the caller immediately exhausts it.
+    pub(super) fn materialize_ndiff(&mut self, source: &ast::Expr) -> Result<Option<Expr>, String> {
+        let ast::Expr::Call(call) = source else {
+            return Ok(None);
+        };
+        if self.resolve(&call.func) != Some(Binding::Intrinsic(Intrinsic::Ndiff)) {
+            return Ok(None);
+        }
+        self.reject_builtin_keywords(call)?;
+        let [before, after] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "ndiff requires two string sequences",
+            ));
+        };
+        let ty = self.types.list(Type::Str);
+        let before = self.expr_expected(before, ty)?;
+        let after = self.expr_expected(after, ty)?;
+        Ok(Some(Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::Ndiff, vec![before, after]),
+        }))
+    }
+
     /// `map` acquires its source iterator before `start` is evaluated, but
     /// conversion is lazy. Ordinary `sum` acquires its iterator afterward.
     pub(super) fn sum_call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -85,6 +116,25 @@ impl Checker<'_> {
             ));
         }
         let source = &call.arguments.args[0];
+        if let ast::Expr::Call(view) = source
+            && view.arguments.args.is_empty()
+            && view.arguments.keywords.is_empty()
+            && let ast::Expr::Attribute(method) = &*view.func
+            && method.attr.as_str() == "values"
+        {
+            let mapping = self.expr(&method.value)?;
+            if self
+                .types
+                .mapping(mapping.ty)
+                .is_some_and(|(_, value)| value == Type::Int)
+            {
+                let start = self.sum_start(call)?;
+                return Ok(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(Builtin::DictSumValues, vec![mapping, start]),
+                });
+            }
+        }
         if matches!(source, ast::Expr::ListComp(_)) {
             let subtotal = self.sum_comprehension(source)?;
             let start = self.sum_start(call)?;

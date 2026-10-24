@@ -24,7 +24,7 @@ impl Checker<'_> {
         {
             return Expr {
                 ty,
-                kind: ExprKind::Builtin(Builtin::NamespaceView, vec![value]),
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
             };
         }
         if matches!(ty, Type::StrLiteral(_)) && matches!(value.ty, Type::Str | Type::StrLiteral(_))
@@ -96,9 +96,14 @@ impl Checker<'_> {
         if let Some(Binding::Definition(definition)) = self.resolve(expression)
             && let Some(&class) = self.classes.declarations.ids.get(&definition)
         {
-            return Ok(vec![InstanceType::Exact(
-                self.classes.declarations.instance(class),
-            )]);
+            let records = &self.classes.declarations;
+            return Ok(records
+                .definitions
+                .iter()
+                .enumerate()
+                .filter(|(id, record)| *id == class || record.bases.contains(&class))
+                .map(|(id, _)| InstanceType::Exact(records.instance(id)))
+                .collect());
         }
         if let ast::Expr::Name(name) = expression {
             let ty = match name.id.as_str() {

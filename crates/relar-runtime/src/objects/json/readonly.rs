@@ -16,6 +16,7 @@ use crate::objects::{Object, Storage, object};
 use crate::{Error, Int, Kind, StorageCell, Str, finish};
 
 mod values;
+mod writer;
 
 #[derive(Clone)]
 enum Node {
@@ -577,6 +578,12 @@ pub unsafe extern "C" fn relar_json_is_int(value: *const Object) -> u32 {
 pub unsafe extern "C" fn relar_json_loads(text: *const Str) -> *const Object {
     // SAFETY: text is a live immutable string for the entire parse.
     finish(loads(unsafe { &*text }), std::ptr::null())
+}
+
+/// Creates one separate read-only dictionary for a dataclass default factory.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_json_empty_object() -> *const Object {
+    View::single(Node::Object(Vec::new())).into_handle()
 }
 
 /// # Safety

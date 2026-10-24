@@ -573,10 +573,10 @@ impl Checker<'_> {
         if field.conversion != ast::ConversionFlag::Repr
             && matches!(value.ty, Type::Class(_) | Type::CompletedProcess)
         {
-            return Ok(self.record_text(value));
+            return self.record_text(value, field);
         }
         if field.conversion == ast::ConversionFlag::Repr || self.types.element(value.ty).is_some() {
-            if !dataclass_values::repr_supported(value.ty, self.types) {
+            if !dataclass_values::can_format(value.ty, self.types, self.classes) {
                 return Err(error(
                     self.source,
                     field,

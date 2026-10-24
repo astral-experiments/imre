@@ -77,7 +77,11 @@ impl BuildOptions {
                 self.help = true;
                 break;
             }
-            if command == "check" && flag != "--module-root" && flag != "--extension-path" {
+            if command == "check"
+                && flag != "--module-root"
+                && flag != "--extension-path"
+                && flag != "--reachable-only"
+            {
                 return Err(USAGE.to_owned());
             }
             let mut value = || {
@@ -90,6 +94,7 @@ impl BuildOptions {
                 Some("-v" | "--verbose") => self.verbosity = Verbosity::Verbose,
                 Some("--no-cache") => self.no_cache = true,
                 Some("--whole-program") => self.whole_program = true,
+                Some("--reachable-only") => self.compile.reachable_only = true,
                 Some("--module-root") => self.module_root = Some(value()?.into()),
                 Some("--extension-path") => self.compile.extension_paths.push(value()?.into()),
                 Some("-o") if command == "build" => self.output = Some(value()?.into()),

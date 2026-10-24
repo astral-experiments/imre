@@ -7,6 +7,7 @@
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 use std::sync::LazyLock;
 
+mod record_hash;
 mod sorted_rows;
 
 use hashbrown::HashTable;
@@ -61,8 +62,8 @@ impl Hash for PathKey {
     }
 }
 
-/// An immutable tuple owns its concrete record without copying its fields into
-/// a second allocation. Lookup borrows that owner; hashing cannot call user code.
+/// An immutable tuple or dataclass key roots its concrete record without
+/// copying its fields into a second allocation.
 struct TupleKey(*const usize);
 
 impl Clone for TupleKey {
@@ -97,12 +98,23 @@ impl Hash for TupleKey {
 unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) {
     // SAFETY: the owner roots its immutable descriptor and every field.
     let layout = unsafe { super::records::descriptor(value) };
-    // Tuple equality requires the same descriptor, which identifies the length
-    // and every field kind. Hash the shared shape once for the entire tuple.
+    if layout.has_toml_hash() {
+        // SAFETY: the key-preparation boundary computed this frozen record's hash.
+        let cached = unsafe { *value.add(layout.length) };
+        debug_assert_ne!(cached, 0);
+        cached.hash(state);
+        return;
+    }
+    // Equality requires the same descriptor, even for structurally identical classes.
     std::ptr::from_ref(layout).hash(state);
+    // SAFETY: a rooted record's semantic metadata is static when present.
+    let semantics = unsafe { layout.semantics.as_ref() };
     for index in 0..layout.length {
         // SAFETY: the static layout covers each initialized concrete field.
         unsafe {
+            if semantics.is_some_and(|s| s.kind == 0 && (*s.fields.add(index)).flags & 1 == 0) {
+                continue;
+            }
             let kind = WordKind::new(*layout.kinds.add(index));
             let word = kind.read_record_field(value.add(index));
             let raw = kind.raw();
@@ -562,6 +574,7 @@ pub(super) struct Mapping {
     value_kind: WordKind,
     /// A sealed list factory is invoked only by a missing subscription.
     default_list_element: Option<WordKind>,
+    counter: bool,
     /// Present only after a string-to-integer gather. Words borrow current table
     /// values; ASCII mutation updates the corresponding slot before old owners drop.
     ascii_int: Option<Box<AsciiIntCache>>,
@@ -621,6 +634,15 @@ impl Mapping {
     /// # Safety
     /// Both tables and all values are rooted and immutable for this traversal.
     pub(super) unsafe fn equal(&self, other: &Self) -> bool {
+        if self.counter && other.counter && self.tables.key_kind() == other.tables.key_kind() {
+            // CPython treats an absent count as zero when comparing two Counters.
+            let includes = |a: &Self, b: &Self| {
+                a.tables.all(|key, count| unsafe {
+                    super::values::equal(count, b.tables.lookup(key).unwrap_or(1), a.value_kind)
+                })
+            };
+            return includes(self, other) && includes(other, self);
+        }
         self.tables.key_kind() == other.tables.key_kind()
             && self.value_kind == other.value_kind
             && self.tables.len() == other.tables.len()
@@ -638,6 +660,33 @@ impl Mapping {
     /// # Safety
     /// The table and every descendant remain rooted and immutable until return.
     pub(super) unsafe fn write_repr(&self, output: &mut String) {
+        if self.counter {
+            output.push_str("Counter(");
+            if self.tables.len() != 0 {
+                let mut entries = Vec::with_capacity(self.tables.len());
+                self.tables.all(|key, count| {
+                    entries.push((key, count));
+                    true
+                });
+                // Stable ties follow insertion order, as in Counter.most_common().
+                entries.sort_by(|a, b| unsafe { crate::relar_int_compare(b.1, a.1) }.cmp(&0));
+                output.push('{');
+                let key_kind = WordKind::new(self.tables.key_kind());
+                for (i, (key, count)) in entries.into_iter().enumerate() {
+                    if i != 0 {
+                        output.push_str(", ");
+                    }
+                    unsafe {
+                        super::values::write_repr(output, key, key_kind);
+                        output.push_str(": ");
+                        super::values::write_repr(output, count, self.value_kind);
+                    }
+                }
+                output.push('}');
+            }
+            output.push(')');
+            return;
+        }
         if self.default_list_element.is_some() {
             output.push_str("defaultdict(<class 'list'>, ");
         }
@@ -668,6 +717,7 @@ impl Mapping {
             tables: Tables::new(key_kind),
             value_kind: WordKind::new(value_kind),
             default_list_element: None,
+            counter: false,
             ascii_int: None,
         }
     }
@@ -884,6 +934,58 @@ pub extern "C" fn relar_dict_new(key_kind: u32, value_kind: u32) -> *const Objec
         Box::new(Mapping::new(key_kind, value_kind)),
     )))))
 }
+
+/// Creates an insertion-ordered integer counter whose missing subscription returns zero.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_counter_new(key_kind: u32) -> *const Object {
+    let mut mapping = Mapping::new(key_kind, 2);
+    mapping.counter = true;
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
+        Box::new(mapping),
+    )))))
+}
+
+/// Add the source counts in insertion order. Updating a counter from itself doubles each count.
+///
+/// # Safety
+/// Both arguments root dictionaries with the same immutable key type and integer values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_counter_update(target: *const Object, source: *const Object) {
+    // SAFETY: the iterator acquires the source and each pair before mutating the target.
+    // When the handles alias, replacing a count leaves the source's keys intact.
+    unsafe {
+        let iter = Rc::from_raw(relar_dict_iter(source, 1));
+        while let Some((key, Some(count))) = iter
+            .0
+            .with_mut(|s| s.mapping_iterator_mut().next())
+            .expect("only counter values change during update")
+        {
+            let current = Int(relar_dict_get_default(target, key.word, 1));
+            let total = Int(crate::relar_int_binary(current.0, count.word, 0));
+            relar_dict_set(target, key.word, total.0);
+        }
+    }
+}
+/// Sums exact integers after evaluating the dictionary and the start value.
+///
+/// # Safety
+/// The caller roots a dictionary of integers and a tagged integer start.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_dict_sum_values(mapping: *const Object, start: usize) -> usize {
+    // SAFETY: no callbacks occur while reading these immutable integer values.
+    unsafe {
+        crate::relar_int_retain(start);
+        let mut total = Int(start);
+        object(mapping).0.with(|s| {
+            s.dictionary().tables.all(|_, word| {
+                total = Int(crate::relar_int_binary(total.0, word, 0));
+                true
+            })
+        });
+        total.into_raw()
+    }
+}
+
 /// Attaches the exact element descriptor to a native `defaultdict(list)`.
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_default_list_dict_new(key_kind: u32, element_kind: u32) -> *const Object {
@@ -943,6 +1045,7 @@ pub unsafe extern "C" fn relar_dict_get(value: *const Object, key: usize) -> usi
         object(value).0.with_mut(|storage| {
         let mapping = storage.dictionary_mut();
         table!(&mut mapping.tables, table => table.subscript(key, mapping.value_kind, mapping.default_list_element))
+            .or_else(|| mapping.counter.then(|| OwnedWord::from_owned(1, WordKind::new(2))))
     })
     };
     if let Some(owned) = owned {

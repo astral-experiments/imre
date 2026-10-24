@@ -23,7 +23,7 @@ enum Allocator {
 
 const JEMALLOC_RUNTIME: &str = "librelar_runtime_jemalloc.a";
 
-const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY]
+const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only]
        relar extension-header
        relar build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]
        relar run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]
@@ -31,6 +31,7 @@ const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY] [--e
 Build options:
   --module-root DIRECTORY  --runtime LIBRARY.a  --emit-llvm FILE.ll
   --extension-path DIRECTORY  Search an installed Relar wheel directory (repeatable)
+  --reachable-only         Compile definitions reachable from program entry and module initialization
   --clang CLANG  --opt-level 0|1|2|3  --sanitize  --no-cache  --whole-program
   -q, --quiet              Suppress build status
   -v, --verbose            Show individual module decisions
@@ -114,11 +115,7 @@ fn run() -> Result<ExitCode, String> {
     }
     let source_path = source_path.ok_or(USAGE)?;
     if command == "check" {
-        relar_compiler::check_file_with_extensions(
-            &source_path,
-            module_root.as_deref(),
-            &options.extension_paths,
-        )?;
+        relar_compiler::check_file_with_options(&source_path, module_root.as_deref(), &options)?;
         return Ok(ExitCode::SUCCESS);
     }
     if !cfg!(any(
@@ -201,7 +198,7 @@ fn run() -> Result<ExitCode, String> {
     };
     let cache = native
         .as_ref()
-        .filter(|_| !no_cache && options.extension_paths.is_empty())
+        .filter(|_| !no_cache && options.extension_paths.is_empty() && !options.reachable_only)
         .and_then(|native| {
             build_cache::Cache::open(
                 &source_path,

@@ -221,6 +221,13 @@ impl Checker<'_> {
                     )
                 })?;
                 order[index + offset] = values.len();
+                let value = match &default.kind {
+                    ExprKind::Present(value) => &**value,
+                    _ => default,
+                };
+                if let ExprKind::Call(id, _) = &value.kind {
+                    self.calls.insert(*id);
+                }
                 values.push(default.clone());
             }
         }

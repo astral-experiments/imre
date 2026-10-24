@@ -127,6 +127,7 @@ impl Emitter<'_, '_> {
                     PathOperation::Suffix => "relar_path_suffix",
                     PathOperation::Parent => "relar_path_parent",
                     PathOperation::ReadText => "relar_path_read_text",
+                    PathOperation::ReadBytes => "relar_path_read_bytes",
                     PathOperation::WriteText => "relar_path_write_text",
                     PathOperation::Replace => "relar_path_replace",
                     _ => unreachable!("special path ABIs were handled above"),

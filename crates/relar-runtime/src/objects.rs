@@ -9,9 +9,11 @@
 mod argparse;
 mod args;
 mod bytes;
+mod difflib;
 pub(crate) mod exceptions;
 mod files;
 mod json;
+mod logging;
 mod mappings;
 mod paths;
 mod processes;
@@ -53,6 +55,7 @@ enum Storage {
     },
     PathIterator(Box<paths::PathIterator>),
     RegexPattern(Box<regexes::Pattern>),
+    Logger(Rc<Str>),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
 }
@@ -412,6 +415,32 @@ pub unsafe extern "C" fn relar_str_concat(a: *const Str, b: *const Str) -> *cons
     result.push_str(a);
     result.push_str(b);
     Rc::into_raw(Rc::new(result))
+}
+
+/// # Safety
+/// The caller roots the string and tagged integer until the call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_repeat(value: *const Str, count: usize) -> *const Str {
+    // SAFETY: both arguments remain rooted for this non-reentrant operation.
+    let (text, count) = unsafe { (&*value, Int::borrow(count)) };
+    let result = (|| {
+        let count = bytes::native_size(&count)?.max(0) as usize;
+        if text.is_empty() || count == 0 {
+            return Ok(Rc::into_raw(Rc::new(Str::default())));
+        }
+        let length = text
+            .len()
+            .checked_mul(count)
+            .filter(|length| *length <= isize::MAX as usize)
+            .ok_or_else(|| Error::new(Kind::OverflowError, "repeated string is too long"))?;
+        let mut result =
+            Str::try_with_capacity(length).map_err(|_| Error::new(Kind::MemoryError, ""))?;
+        for _ in 0..count {
+            result.push_str(text);
+        }
+        Ok(Rc::into_raw(Rc::new(result)))
+    })();
+    finish(result, std::ptr::null())
 }
 
 /// One borrowed concatenation fragment. `usize::MAX` identifies a rooted Str
@@ -847,7 +876,10 @@ fn plain_ascii_line(bytes: &[u8]) -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
-    let value = unsafe { &*value };
+    split_lines(unsafe { &*value })
+}
+
+fn split_lines(value: &str) -> *const Object {
     let mut result = Words::new(3);
     let mut push = |part: &str| {
         result
@@ -868,11 +900,17 @@ pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Objec
     }
     let mut start = 0;
     let bytes = value.as_bytes();
-    // These vectorized guards exclude every additional Python boundary. The
-    // UTF-8 lead bytes may also select the fallback for ordinary Unicode text.
+    // The three Unicode separators share lead bytes with ordinary punctuation.
+    // Check their full encodings so a smart quote cannot force a whole-file
+    // character scan.
     let ordinary = memchr::memchr3(0x0b, 0x0c, 0x1c, bytes).is_none()
-        && memchr::memchr3(0x1d, 0x1e, 0xc2, bytes).is_none()
-        && memchr::memchr(0xe2, bytes).is_none();
+        && memchr::memchr2(0x1d, 0x1e, bytes).is_none()
+        && !memchr::memchr2_iter(0xc2, 0xe2, bytes).any(|at| {
+            matches!(
+                &bytes[at..],
+                [0xc2, 0x85, ..] | [0xe2, 0x80, 0xa8 | 0xa9, ..]
+            )
+        });
     if ordinary {
         while let Some(offset) = memchr::memchr2(b'\r', b'\n', &bytes[start..]) {
             let at = start + offset;

@@ -52,6 +52,7 @@ impl Type {
             | Self::Path
             | Self::CompletedProcess
             | Self::TextIO
+            | Self::Logger
             | Self::RegexPattern
             | Self::JsonValue
             | Self::JsonObject
@@ -82,6 +83,7 @@ impl Type {
             | Self::Path
             | Self::CompletedProcess
             | Self::TextIO
+            | Self::Logger
             | Self::RegexPattern
             | Self::JsonValue
             | Self::JsonObject
@@ -503,6 +505,7 @@ impl Emitter<'_, '_> {
             | Type::TimeoutExpired
             | Type::Path
             | Type::TextIO
+            | Type::Logger
             | Type::RegexPattern
             | Type::JsonValue
             | Type::JsonObject
@@ -2510,13 +2513,17 @@ impl Emitter<'_, '_> {
         }
         match op {
             Binary::Repeat => {
-                let (list, count) =
-                    if matches!(left.ty, Type::ListInt | Type::List(_) | Type::Bytes) {
-                        (left, right)
-                    } else {
-                        (right, left)
-                    };
-                let name = if list.ty == Type::Bytes {
+                let (list, count) = if matches!(
+                    left.ty,
+                    Type::ListInt | Type::List(_) | Type::Bytes | Type::Str
+                ) {
+                    (left, right)
+                } else {
+                    (right, left)
+                };
+                let name = if list.ty == Type::Str {
+                    "relar_str_repeat"
+                } else if list.ty == Type::Bytes {
                     "relar_bytes_repeat"
                 } else if list.ty == Type::ListInt {
                     "relar_list_repeat"
@@ -2784,11 +2791,21 @@ impl Emitter<'_, '_> {
                 "icmp {predicate} i64 {}, {}",
                 left.operand, right.operand
             )),
-            Type::Str | Type::StrLiteral(_) => {
-                let equal = self.instruction(format!(
-                    "call i32 @relar_str_equal(ptr {}, ptr {})",
-                    left.operand, right.operand
-                ));
+            Type::Str | Type::StrLiteral(_) | Type::Optional(_) => {
+                let equal = if matches!(left.ty, Type::Optional(_))
+                    || matches!(right.ty, Type::Optional(_))
+                {
+                    let a = self.word(left);
+                    let b = self.word(right);
+                    self.instruction(format!(
+                        "call i32 @relar_optional_str_equal(i64 {a}, i64 {b})"
+                    ))
+                } else {
+                    self.instruction(format!(
+                        "call i32 @relar_str_equal(ptr {}, ptr {})",
+                        left.operand, right.operand
+                    ))
+                };
                 let predicate = if matches!(op, Compare::Equal) {
                     "ne"
                 } else {
@@ -2796,7 +2813,7 @@ impl Emitter<'_, '_> {
                 };
                 self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
             }
-            Type::Path | Type::List(_) => {
+            Type::Path | Type::List(_) | Type::Dict(_) => {
                 let operation = if left.ty == Type::Path {
                     "path"
                 } else {
@@ -2872,12 +2889,11 @@ impl Emitter<'_, '_> {
                 right.operand
             )),
             Type::ListInt
-            | Type::Dict(_)
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
-            | Type::Optional(_)
             | Type::Callable(_)
+            | Type::Logger
             | Type::RegexPattern
             | Type::JsonValue
             | Type::JsonObject
@@ -3040,7 +3056,7 @@ impl Emitter<'_, '_> {
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
         if matches!(
             builtin,
-            Builtin::LiteralStringView | Builtin::DictAsBase | Builtin::NamespaceView
+            Builtin::LiteralStringView | Builtin::DictAsBase | Builtin::RecordView
         ) {
             let value = self.expr(&expressions[0]);
             return Value {
@@ -3138,7 +3154,7 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::LiteralStringView | Builtin::DictAsBase | Builtin::NamespaceView => {
+            Builtin::LiteralStringView | Builtin::DictAsBase | Builtin::RecordView => {
                 unreachable!("representation-preserving views transfer the operand owner directly")
             }
             Builtin::StringListContains => {
@@ -3154,9 +3170,26 @@ impl Emitter<'_, '_> {
             }
             Builtin::Text(operation) => self.text_builtin(*operation, &args, returns),
             Builtin::RegexCompile(pattern) => self.pooled_literal(pattern.as_bytes(), returns),
-            Builtin::RegexSearch => {
+            Builtin::GetLogger => self.call("relar_logger_get", returns, &[&args[0].value]),
+            Builtin::LogLevel => {
+                self.void_call("relar_logger_configure", &[&args[0].value]);
+                none()
+            }
+            Builtin::LogWrite(level) => {
+                self.line(format!(
+                    "call void @relar_logger_write(ptr {}, i32 {level}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                none()
+            }
+            Builtin::RegexSearch | Builtin::RegexMatchStart => {
+                let operation = if matches!(builtin, Builtin::RegexMatchStart) {
+                    "match"
+                } else {
+                    "search"
+                };
                 let pointer = self.instruction(format!(
-                    "call ptr @relar_regex_search(ptr {}, ptr {})",
+                    "call ptr @relar_regex_{operation}(ptr {}, ptr {})",
                     args[0].value.operand, args[1].value.operand
                 ));
                 Value {
@@ -3164,6 +3197,9 @@ impl Emitter<'_, '_> {
                     operand: self.instruction(format!("ptrtoint ptr {pointer} to i64")),
                     small_integer: false,
                 }
+            }
+            Builtin::RegexGroupDict => {
+                self.call("relar_regex_groupdict", returns, &[&args[0].value])
             }
             Builtin::RegexCapture { operation, known } => {
                 let selector = &args[1].value;
@@ -3202,6 +3238,16 @@ impl Emitter<'_, '_> {
             }
             Builtin::Path(operation) => self.path_builtin(*operation, &args, returns),
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
+            Builtin::JsonEmptyObject => self.call("relar_json_empty_object", returns, &[]),
+            Builtin::HashStr => self.call("relar_string_hash", returns, &[&args[0].value]),
+            Builtin::HashRecord => Value {
+                ty: Type::Int,
+                operand: self.checked_instruction(format!(
+                    "call i64 @relar_projected_hash(ptr {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
             Builtin::JsonLoad | Builtin::JsonLoads => Value {
                 ty: returns,
                 operand: self.checked_instruction(format!(
@@ -3300,6 +3346,17 @@ impl Emitter<'_, '_> {
             Builtin::UnionProject => {
                 let value = self.own_operand(args.into_iter().next().unwrap());
                 return self.union_project(value, returns);
+            }
+            Builtin::ExactRecord(class) => {
+                let matched = self.instruction(format!(
+                    "call i32 @relar_record_has_type(ptr {}, ptr @layout_class_{class})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {matched}, 0")),
+                    small_integer: false,
+                }
             }
             Builtin::IsInstance(classes) => Value {
                 ty: Type::Bool,
@@ -3751,6 +3808,26 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::Counter => {
+                let (key, _) = self.module.types.mapping(returns).unwrap();
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_counter_new(i32 {})",
+                        representation_kind(key, &self.module.types)
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::DictSumValues => self.call(
+                "relar_dict_sum_values",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::CounterUpdate => {
+                self.void_call("relar_counter_update", &[&args[0].value, &args[1].value]);
+                none()
+            }
             Builtin::KeyUnion | Builtin::KeySet | Builtin::KeyIntersection => {
                 let function = if matches!(builtin, Builtin::KeyIntersection) {
                     "relar_key_intersection"
@@ -3800,7 +3877,7 @@ impl Emitter<'_, '_> {
                 &[&args[0].value, &args[1].value],
             ),
             Builtin::DictGetDefault => {
-                let key = self.word(&args[1].value);
+                let key = self.key_word(&args[1].value);
                 let default = self.word(&args[2].value);
                 let word = self.instruction(format!(
                     "call i64 @relar_dict_get_default(ptr {}, i64 {key}, i64 {default})",
@@ -3810,7 +3887,7 @@ impl Emitter<'_, '_> {
             }
             Builtin::DictTryGet(stored) => self.dict_try_get(*stored, &args, returns),
             Builtin::DictContains | Builtin::SetContains => {
-                let key = self.word(&args[0].value);
+                let key = self.key_word(&args[0].value);
                 let family = if matches!(builtin, Builtin::SetContains) {
                     "set"
                 } else {
@@ -3827,7 +3904,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::DictDelete => {
-                let key = self.word(&args[1].value);
+                let key = self.key_word(&args[1].value);
                 self.checked_line(format!(
                     "call void @relar_dict_delete(ptr {}, i64 {key})",
                     args[0].value.operand
@@ -3872,7 +3949,11 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::Split => self.call("relar_str_split_whitespace", returns, &[&args[0].value]),
+            Builtin::DecodeSplitLines => {
+                self.call("relar_bytes_decode_splitlines", returns, &[&args[0].value])
+            }
             Builtin::SplitLines => self.call("relar_str_splitlines", returns, &[&args[0].value]),
+            Builtin::Ndiff => self.call("relar_ndiff", returns, &[&args[0].value, &args[1].value]),
             Builtin::RStrip => {
                 let chars = if let Some(arg) = args.get(1) {
                     let word = self.word(&arg.value);
@@ -3907,6 +3988,7 @@ impl Emitter<'_, '_> {
                 },
                 small_integer: false,
             },
+            Builtin::StdoutWrite => self.call("relar_stdout_write", returns, &[&args[0].value]),
             Builtin::StderrLine => {
                 self.void_call("relar_stderr_line", &[&args[0].value]);
                 none()
@@ -3942,6 +4024,7 @@ impl Emitter<'_, '_> {
                     | Type::TimeoutExpired
                     | Type::Path
                     | Type::TextIO
+                    | Type::Logger
                     | Type::RegexPattern
                     | Type::JsonValue
                     | Type::JsonObject
@@ -3999,7 +4082,7 @@ impl Emitter<'_, '_> {
     /// eagerly, and the missing edge acquires its own owner before argument
     /// cleanup can release the supplied fallback.
     fn dict_try_get(&mut self, stored: Type, args: &[Operand], returns: Type) -> Value {
-        let key = self.word(&args[1].value);
+        let key = self.key_word(&args[1].value);
         let byte = self.instruction(format!(
             "call i32 @relar_dict_try_get(ptr {}, i64 {key}, ptr %mapping_key_word)",
             args[0].value.operand
@@ -4114,6 +4197,7 @@ impl Emitter<'_, '_> {
             | Type::Path
             | Type::TextIO
             | Type::BinaryIO
+            | Type::Logger
             | Type::RegexPattern
             | Type::JsonValue
             | Type::JsonObject
@@ -4153,6 +4237,7 @@ impl Emitter<'_, '_> {
             | Type::Path
             | Type::TextIO
             | Type::BinaryIO
+            | Type::Logger
             | Type::RegexPattern
             | Type::JsonValue
             | Type::JsonObject
@@ -4329,12 +4414,24 @@ impl Emitter<'_, '_> {
     fn set_member(&mut self, set: &Value, value: &Value, insert: bool) {
         debug_assert!(matches!(set.ty, Type::Set(_)));
         debug_assert!(self.module.types.hashable_key(value.ty));
-        let word = self.word(value);
+        let word = self.key_word(value);
         let operation = if insert { "add" } else { "discard" };
         self.line(format!(
             "call void @relar_set_{operation}(ptr {}, i64 {word})",
             set.operand
         ));
+    }
+
+    /// Evaluate a pure fallible hash only once all operands are rooted and
+    /// before the container is borrowed or modified.
+    fn key_word(&mut self, value: &Value) -> String {
+        if self.module.types.fallible_key(value.ty) {
+            self.checked_line(format!(
+                "call void @relar_prepare_record_key(ptr {})",
+                value.operand
+            ));
+        }
+        self.word(value)
     }
 
     fn nonnegative_index(&self, expression: &Expr) -> bool {
@@ -4405,7 +4502,7 @@ impl Emitter<'_, '_> {
 
     fn get_item(&mut self, list: &Value, index: &Value, returns: Type, nonnegative: bool) -> Value {
         if matches!(list.ty, Type::Dict(_)) {
-            let key = self.word(index);
+            let key = self.key_word(index);
             let lookup = format!("call i64 @relar_dict_get(ptr {}, i64 {key})", list.operand);
             // A sealed list factory supplies every missing subscription. The
             // receiver and key have already completed their own error checks.
@@ -4437,7 +4534,7 @@ impl Emitter<'_, '_> {
 
     fn set_item(&mut self, list: &Value, index: &Value, value: &Value, nonnegative: bool) {
         if matches!(list.ty, Type::Dict(_)) {
-            let key = self.word(index);
+            let key = self.key_word(index);
             let word = self.word(value);
             self.line(format!(
                 "call void @relar_dict_set(ptr {}, i64 {key}, i64 {word})",
@@ -4656,6 +4753,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::TimeoutExpired
         | Type::Path
         | Type::TextIO
+        | Type::Logger
         | Type::RegexPattern
         | Type::JsonValue
         | Type::JsonObject
@@ -4780,6 +4878,7 @@ declare i32 @relar_path_is_file(ptr)
 declare i32 @relar_path_is_dir(ptr)
 declare i32 @relar_path_equal(ptr, ptr)
 declare ptr @relar_path_read_text(ptr)
+declare ptr @relar_path_read_bytes(ptr)
 declare i64 @relar_path_write_text(ptr, ptr)
 declare void @relar_path_mkdir(ptr, i64, i32, i32)
 declare void @relar_path_unlink(ptr, i32)
@@ -4819,6 +4918,7 @@ declare ptr @relar_bytes_repeat(ptr, i64)
 declare ptr @relar_bytes_iter(ptr)
 declare ptr @relar_str_encode(ptr)
 declare ptr @relar_bytes_decode(ptr)
+declare ptr @relar_bytes_decode_splitlines(ptr)
 declare ptr @relar_bytes_validate_utf8(ptr)
 declare ptr @relar_binary_open(ptr, i32)
 declare ptr @relar_binary_read(ptr)
@@ -4849,6 +4949,10 @@ declare ptr @relar_record_new(ptr)
 declare ptr @relar_tuple_probe(ptr, ptr)
 declare ptr @relar_json_decode(ptr, ptr)
 declare ptr @relar_json_loads(ptr)
+declare ptr @relar_json_empty_object()
+declare i64 @relar_string_hash(ptr)
+declare i64 @relar_projected_hash(ptr)
+declare void @relar_prepare_record_key(ptr)
 declare ptr @relar_json_load(ptr)
 declare i64 @relar_json_get(ptr, ptr, i64, i32, i64)
 declare ptr @relar_json_add(ptr, ptr)
@@ -4865,6 +4969,7 @@ declare ptr @relar_record_cached_result(ptr)
 declare void @relar_record_retain(ptr)
 declare void @relar_record_release(ptr)
 declare i32 @relar_record_equal(ptr, ptr) nounwind memory(read)
+declare i32 @relar_record_has_type(ptr, ptr) nounwind memory(read)
 declare i32 @relar_sequence_equal(ptr, ptr) nounwind memory(read)
 declare i32 @relar_tuple_compare(ptr, ptr) nounwind memory(read)
 declare ptr @relar_value_repr(i64, i32)
@@ -4921,6 +5026,9 @@ define internal i64 @relar_seq_borrow_index_proven_fast(ptr %sequence, i64 %inde
 declare ptr @relar_seq_repeat(ptr, i64)
 declare ptr @relar_dict_new(i32, i32)
 declare ptr @relar_default_list_dict_new(i32, i32)
+declare ptr @relar_counter_new(i32)
+declare void @relar_counter_update(ptr, ptr)
+declare i64 @relar_dict_sum_values(ptr, i64)
 declare ptr @relar_key_union(ptr, ptr)
 declare ptr @relar_key_intersection(ptr, ptr)
 declare ptr @relar_sorted_string_keys(ptr, i64)
@@ -4943,6 +5051,7 @@ declare void @relar_set_discard(ptr, i64)
 declare ptr @relar_set_iter(ptr)
 declare i32 @relar_mapping_iter_next(ptr, ptr, ptr)
 declare ptr @relar_str_concat(ptr, ptr)
+declare ptr @relar_str_repeat(ptr, i64)
 declare ptr @relar_str_concat_parts(ptr, i64)
 declare ptr @relar_str_concat_parts_owned(ptr, ptr, i64)
 declare ptr @relar_str_append_utf8_owned(ptr, ptr, i64)
@@ -4958,6 +5067,7 @@ declare i64 @relar_str_find(ptr, ptr, i64)
 declare void @relar_str_partition(ptr, ptr, ptr)
 declare ptr @relar_str_unquote(ptr)
 declare ptr @relar_str_splitlines(ptr)
+declare ptr @relar_ndiff(ptr, ptr)
 declare ptr @relar_str_rstrip(ptr, ptr)
 declare void @relar_list_extend_unhinted(ptr, i32)
 declare ptr @relar_sort_detach(ptr, i32)
@@ -5001,7 +5111,12 @@ declare void @relar_print_none()
 declare ptr @relar_str_literal(ptr, i64)
 declare ptr @relar_regex_compile(ptr, i64)
 declare ptr @relar_regex_search(ptr, ptr)
+declare ptr @relar_regex_match(ptr, ptr)
+declare ptr @relar_logger_get(ptr)
+declare void @relar_logger_configure(i64)
+declare void @relar_logger_write(ptr, i32, ptr)
 declare ptr @relar_regex_group(ptr, i64, i32)
+declare ptr @relar_regex_groupdict(ptr)
 declare i32 @relar_regex_present(ptr, i64, i32)
 declare i64 @relar_regex_bound(ptr, i64, i32, i32)
 declare ptr @relar_str_get(ptr, i64)
@@ -5013,12 +5128,14 @@ declare void @relar_str_retain(ptr)
 declare void @relar_str_release(ptr)
 declare void @relar_print_str(ptr)
 declare void @relar_stderr_line(ptr)
+declare i64 @relar_stdout_write(ptr)
 declare i64 @relar_str_len(ptr)
 declare i32 @relar_str_truthy(ptr)
 declare i32 @relar_bytes_truthy(ptr)
 declare i32 @relar_str_list_contains(ptr, ptr)
 declare void @relar_str_enum_table(ptr, i64)
 declare i32 @relar_str_equal(ptr, ptr)
+declare i32 @relar_optional_str_equal(i64, i64)
 declare i64 @relar_int_parse(ptr)
 declare ptr @relar_input()
 declare ptr @relar_list_new()

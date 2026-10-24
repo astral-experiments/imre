@@ -50,6 +50,21 @@ impl Session {
         // Give ty its exact public signature without loading the dynamic CPython
         // compatibility implementation or weakening unresolved-import checks.
         let intrinsic = SystemPathBuf::from(root).join("relar");
+        for (name, stub) in [
+            (
+                "tomli",
+                "from tomllib import load as load, loads as loads\n",
+            ),
+            (
+                "tomli_w",
+                "from typing import Any, BinaryIO\ndef dumps(obj: dict[str, Any]) -> str: ...\ndef dump(obj: dict[str, Any], fp: BinaryIO) -> None: ...\n",
+            ),
+        ] {
+            system
+                .fs()
+                .write_file_all(SystemPathBuf::from(root).join(format!("{name}.pyi")), stub)
+                .map_err(|error| error.to_string())?;
+        }
         system
             .fs()
             .write_file_all(
@@ -128,6 +143,16 @@ impl Session {
         Ok(parsed)
     }
 
+    /// Distinguish a typed data attribute from a bound method when finding native roots.
+    pub(crate) fn data_attribute(&self, module: usize, expression: &ruff_python_ast::Expr) -> bool {
+        use ty_python_semantic::types::Type as Ty;
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        matches!(
+            expression.inferred_type(&model),
+            Some(Ty::NominalInstance(_) | Ty::LiteralValue(_))
+        )
+    }
+
     /// Get a scalar layout hint for an append operand in its own lexical scope.
     pub(crate) fn scalar_type(
         &self,
@@ -180,9 +205,12 @@ impl Session {
     }
 
     /// Checks every loaded file, including unused functions and inactive main guards.
-    pub(crate) fn check(&self) -> Result<(), String> {
+    pub(crate) fn check(
+        &self,
+        skipped: Option<&[Vec<ruff_text_size::TextRange>]>,
+    ) -> Result<(), String> {
         let mut errors = Vec::new();
-        for &file in &self.files {
+        for (index, &file) in self.files.iter().enumerate() {
             errors.extend(
                 self.db
                     .check_file(file)
@@ -200,6 +228,16 @@ impl Session {
                         // sealed exception payload getters guard their category
                         // at runtime rather than depending on ty's narrowing.
                         diagnostic.severity() >= Severity::Error
+                            && !skipped.is_some_and(|scopes| {
+                                diagnostic
+                                    .primary_span()
+                                    .and_then(|span| span.range())
+                                    .is_some_and(|range| {
+                                        scopes[index]
+                                            .iter()
+                                            .any(|scope| scope.contains_range(range))
+                                    })
+                            })
                             && !matches!(
                                 diagnostic.id().as_str(),
                                 "unsupported-operator"

@@ -25,6 +25,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         Type::Exception
         | Type::StringKeys
         | Type::TimeoutExpired
+        | Type::Logger
         | Type::RegexPattern
         | Type::RegexMatch
         | Type::TextIO
@@ -39,6 +40,31 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
     }
 }
 
+/// An unused generated repr does not constrain a closed entry. Check its full
+/// field tree on each operation that can actually format the value.
+pub(super) fn can_format(ty: Type, types: &Types, classes: &ClassInfo) -> bool {
+    fn check(ty: Type, types: &Types, classes: &ClassInfo, seen: &mut HashSet<usize>) -> bool {
+        if let Type::Class(id) = ty {
+            if !seen.insert(id) {
+                return true;
+            }
+            let class = &classes.declarations.definitions[id];
+            return class.dataclass.is_none_or(|d| !d.repr)
+                || class
+                    .fields
+                    .iter()
+                    .zip(&classes.fields[id])
+                    .all(|(field, &ty)| !field.repr || check(ty, types, classes, seen));
+        }
+        repr_supported(ty, types)
+            && types
+                .children(ty)
+                .into_iter()
+                .all(|ty| check(ty, types, classes, seen))
+    }
+    check(ty, types, classes, &mut HashSet::new())
+}
+
 /// Rejects only generated operations whose supported field representations cannot
 /// retain Python semantics; ignored fields and disabled operations remain valid.
 pub(super) fn validate(
@@ -50,8 +76,8 @@ pub(super) fn validate(
         let Some(options) = &declaration.dataclass else {
             continue;
         };
-        let module = &graph.modules[declaration.definition.module];
         for (field, &ty) in declaration.fields.iter().zip(&classes.fields[class]) {
+            let module = &graph.modules[field.module];
             if options.eq && field.compare && has_container_float(ty, false, types) {
                 return Err(module.error(
                     &field.annotation,
@@ -64,7 +90,7 @@ pub(super) fn validate(
                     "generated dataclass equality cannot compare regex or TOML key views; use field(compare=False) or dataclass(eq=False)",
                 ));
             }
-            if options.repr && field.repr && !repr_supported(ty, types) {
+            if !graph.reachable_only() && options.repr && field.repr && !repr_supported(ty, types) {
                 return Err(module.error(
                     &field.annotation,
                     "generated dataclass repr does not support resource or callable fields; use field(repr=False) or dataclass(repr=False)",
@@ -108,6 +134,7 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
             ),
             dataclass_eq: class.dataclass.as_ref().is_some_and(|options| options.eq),
             dataclass_repr: class.dataclass.as_ref().is_some_and(|options| options.repr),
+            toml_hash: class.toml_hash,
             fields: class
                 .fields
                 .iter()

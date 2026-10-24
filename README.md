@@ -37,6 +37,9 @@ Relar also runs Ruff’s original memory reporter. It compares saved JSON captur
 or runs two versions of ty on flake8, Sphinx, Prefect, and Trio.
 [Run the memory reporter](examples/memory_report/README.md#run-ruffs-original-script).
 
+Ruff’s ecosystem checker compares diagnostics from two Ruff releases across projects.
+[Replay its original diff and Markdown code on Sphinx and Prefect](examples/ruff_ecosystem/README.md).
+
 Relar supports:
 
 - Statically resolved imports, including [rebuilt native extension wheels](docs/extensions.md)

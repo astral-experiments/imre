@@ -23,7 +23,7 @@ pub(crate) enum Type {
     /// An exact positional signature carried by an owned callable record.
     Callable(usize),
     Optional(usize),
-    /// A closed str/bytes union with one owned tagged-pointer word.
+    /// A closed text union with one owned tagged-pointer word.
     Union(usize),
     /// An internal container or string cursor, never available in user annotations.
     Iterator,
@@ -41,6 +41,7 @@ pub(crate) enum Type {
     CompletedProcess,
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
+    Logger,
     RegexMatch,
     /// Immutable selections from decoded JSON. Only the object form has a source annotation.
     JsonValue,
@@ -82,6 +83,7 @@ impl std::fmt::Display for Type {
             Self::Path => "pathlib.Path",
             Self::CompletedProcess => "subprocess.CompletedProcess[str]",
             Self::RegexPattern => "re.Pattern[str]",
+            Self::Logger => "logging.Logger",
             Self::RegexMatch => "re.Match[str]",
             Self::JsonValue => "JSON value",
             Self::JsonObject => "dict[str, Any]",
@@ -124,6 +126,7 @@ pub(crate) struct ClassMetadata {
     pub enum_members: Vec<(String, String)>,
     pub dataclass_eq: bool,
     pub dataclass_repr: bool,
+    pub toml_hash: bool,
     pub fields: Vec<ClassFieldMetadata>,
 }
 
@@ -355,6 +358,10 @@ pub(crate) enum Builtin {
     GlobalSet(usize),
     Print,
     StderrLine,
+    StdoutWrite,
+    GetLogger,
+    LogLevel,
+    LogWrite(u8),
     Input,
     Int,
     Float,
@@ -444,23 +451,29 @@ pub(crate) enum Builtin {
     Append,
     Pop,
     IsNone,
-    /// Promotes an exact str/bytes owner without allocating or changing identity.
+    /// Promotes an exact text union member without allocating or changing identity.
     UnionInject,
     /// Projects a member proved by local control flow, acquiring its own owner.
     UnionProject,
     IsInstance(Vec<InstanceType>),
     Split,
     SplitLines,
+    DecodeSplitLines,
+    Ndiff,
     RStrip,
     SysArgv,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs(Vec<usize>),
     /// Retags a namespace after its immutable command field selects a child layout.
-    NamespaceView,
+    RecordView,
+    ExactRecord(usize),
     /// Decodes one string into a checked record, list, or string-key dictionary.
     JsonDecode(Type),
     JsonLoad,
     JsonLoads,
+    JsonEmptyObject,
+    HashStr,
+    HashRecord,
     /// A dictionary with a read-only JSON receiver and a literal string key.
     JsonGet {
         key: String,
@@ -489,6 +502,8 @@ pub(crate) enum Builtin {
     /// The compile-time validated pattern is independent of the source spelling.
     RegexCompile(String),
     RegexSearch,
+    RegexGroupDict,
+    RegexMatchStart,
     /// A proved selector is a valid numeric index for every possible receiver.
     RegexCapture {
         operation: RegexCapture,
@@ -507,6 +522,9 @@ pub(crate) enum Builtin {
     DictGet,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
+    Counter,
+    CounterUpdate,
+    DictSumValues,
     /// Widens a defaultdict owner to its ordinary dictionary interface.
     DictAsBase,
     /// Combines the current keys of rooted mappings/sets after both operands run.
@@ -588,6 +606,7 @@ pub(crate) enum PathOperation {
     IsFile,
     IsDir,
     ReadText,
+    ReadBytes,
     WriteText,
     Mkdir,
     Unlink,

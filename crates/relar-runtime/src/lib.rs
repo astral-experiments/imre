@@ -719,6 +719,28 @@ pub unsafe extern "C" fn relar_str_len(value: *const Str) -> usize {
     Int::from_usize(unsafe { &*value }.chars().count()).into_raw()
 }
 
+/// Writes text without adding a newline and returns its Unicode code point count.
+///
+/// # Safety
+/// The caller roots a live immutable string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_stdout_write(value: *const Str) -> usize {
+    let text = unsafe { &*value };
+    let result = {
+        let mut output = OUTPUT.lock().unwrap_or_else(|poison| poison.into_inner());
+        let flush =
+            output.line_buffered && text.as_bytes().iter().any(|&b| b == b'\n' || b == b'\r');
+        output
+            .writer
+            .write_all(text.as_bytes())
+            .and_then(|()| if flush { output.writer.flush() } else { Ok(()) })
+    };
+    if result.is_err() {
+        Error::new(Kind::OSError, "could not write standard output").raise();
+    }
+    Int::from_usize(text.chars().count()).into_raw()
+}
+
 /// Tests emptiness without counting Unicode code points.
 ///
 /// # Safety
@@ -735,6 +757,18 @@ pub unsafe extern "C" fn relar_str_truthy(value: *const Str) -> u32 {
 pub unsafe extern "C" fn relar_str_equal(a: *const Str, b: *const Str) -> u32 {
     // SAFETY: both immutable strings are rooted by the caller.
     u32::from(unsafe { *a == *b })
+}
+
+/// # Safety
+/// Each argument must be null (Python `None`) or a live string handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_optional_str_equal(a: usize, b: usize) -> u32 {
+    if a == 0 || b == 0 {
+        u32::from(a == b)
+    } else {
+        // SAFETY: both handles are non-null, rooted strings.
+        unsafe { relar_str_equal(a as *const Str, b as *const Str) }
+    }
 }
 
 /// Parses Python's base-ten text grammar with Unicode 16.0 decimal digits.

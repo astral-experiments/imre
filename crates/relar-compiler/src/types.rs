@@ -1,7 +1,7 @@
 //! Interns concrete container types while keeping IR type identities small and exact.
 
 use std::cell::{Ref, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ir::Type;
 
@@ -11,6 +11,7 @@ enum Shape {
     List(Type),
     Dict(Type, Type),
     DefaultListDict(Type, Type),
+    Counter(Type),
     Set(Type),
     Tuple(Vec<Type>),
     Callable(Vec<Type>, Type),
@@ -22,6 +23,9 @@ enum Shape {
 struct Storage {
     shapes: Vec<Shape>,
     ids: HashMap<Shape, usize>,
+    hashable_records: HashSet<usize>,
+    custom_truth: HashSet<usize>,
+    fallible_keys: HashSet<usize>,
 }
 
 /// An annotation and a matching inferred literal always receive the same identity.
@@ -49,9 +53,31 @@ impl Types {
         }))
     }
 
-    /// Hash keys have immutable value semantics without user-defined protocols.
-    /// Tuple fields may be nullable; mutable records and containers never enter
-    /// a key, even when the surrounding tuple itself is immutable.
+    pub(crate) fn set_hashable_records(&self, records: HashSet<usize>) {
+        self.0.borrow_mut().hashable_records = records;
+    }
+
+    pub(crate) fn set_custom_truth(&self, records: HashSet<usize>) {
+        self.0.borrow_mut().custom_truth = records;
+    }
+
+    pub(crate) fn mark_fallible_key(&self, class: usize) -> bool {
+        self.0.borrow_mut().fallible_keys.insert(class)
+    }
+
+    pub(crate) fn fallible_key(&self, ty: Type) -> bool {
+        match ty {
+            Type::Class(id) => self.0.borrow().fallible_keys.contains(&id),
+            Type::Tuple(_) | Type::Optional(_) => self
+                .children(ty)
+                .into_iter()
+                .any(|child| self.fallible_key(child)),
+            _ => false,
+        }
+    }
+
+    /// Hash keys have immutable value semantics. Tuple and frozen record fields
+    /// may be nullable, including nested immutable records.
     pub(crate) fn hashable_key(&self, ty: Type) -> bool {
         matches!(
             ty,
@@ -61,10 +87,10 @@ impl Types {
                 | Type::StrEnum(_)
                 | Type::Bytes
                 | Type::Path
-        ) || matches!(ty, Type::Tuple(_)) && self.immutable_key_field(ty)
+        ) || matches!(ty, Type::Tuple(_) | Type::Class(_)) && self.immutable_key_field(ty)
     }
 
-    fn immutable_key_field(&self, ty: Type) -> bool {
+    pub(crate) fn immutable_key_field(&self, ty: Type) -> bool {
         if let Some(payload) = self.payload(ty) {
             return self.immutable_key_field(payload);
         }
@@ -77,6 +103,7 @@ impl Types {
             | Type::Bytes
             | Type::Path
             | Type::None => true,
+            Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
             Type::Tuple(_) => self
                 .fields(ty)
                 .unwrap()
@@ -122,7 +149,7 @@ impl Types {
     }
 
     /// Canonicalizes a deliberately bounded union. Mutable container layouts
-    /// remain invariant; only str and bytes may form a nonnullable sum today.
+    /// remain invariant, including the string-list member of a text union.
     pub(crate) fn union(&self, values: &[Type]) -> Option<Type> {
         let mut members = Vec::new();
         let mut nullable = false;
@@ -161,8 +188,10 @@ impl Types {
                     self.string_literal(strings)
                 }
             }
-            [a, b] if matches!((a, b), (Type::Str, Type::Bytes) | (Type::Bytes, Type::Str)) => {
-                Type::Union(self.intern(Shape::Union(vec![Type::Str, Type::Bytes])))
+            [Type::Str, other] | [other, Type::Str]
+                if *other == Type::Bytes || self.element(*other) == Some(Type::Str) =>
+            {
+                Type::Union(self.intern(Shape::Union(vec![Type::Str, *other])))
             }
             _ => return None,
         };
@@ -183,6 +212,7 @@ impl Types {
         match ty {
             Type::None => Some(false),
             Type::Tuple(_) => Some(!self.fields(ty).unwrap().is_empty()),
+            Type::Class(id) if self.0.borrow().custom_truth.contains(&id) => None,
             Type::Class(_)
             | Type::Callable(_)
             | Type::Iterator
@@ -191,6 +221,7 @@ impl Types {
             | Type::TextIO
             | Type::Path
             | Type::CompletedProcess
+            | Type::Logger
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::BinaryIO => Some(true),
@@ -256,6 +287,14 @@ impl Types {
 
     pub(crate) fn dict(&self, key: Type, value: Type) -> Type {
         Type::Dict(self.intern(Shape::Dict(key, value)))
+    }
+
+    pub(crate) fn counter(&self, key: Type) -> Type {
+        Type::Dict(self.intern(Shape::Counter(key)))
+    }
+
+    pub(crate) fn is_counter(&self, ty: Type) -> bool {
+        matches!(ty, Type::Dict(id) if matches!(self.0.borrow().shapes[id], Shape::Counter(_)))
     }
 
     /// The factory is part of the source contract; storage is still a dictionary.
@@ -342,6 +381,7 @@ impl Types {
         };
         match self.0.borrow().shapes[id] {
             Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => Some((key, value)),
+            Shape::Counter(key) => Some((key, Type::Int)),
             _ => unreachable!("dictionary type identity has a dictionary shape"),
         }
     }
@@ -398,6 +438,9 @@ impl Types {
             ),
             Type::Dict(_) => {
                 let (key, value) = self.mapping(ty).unwrap();
+                if self.is_counter(ty) {
+                    return format!("Counter[{}]", self.describe(key, class_name));
+                }
                 let name = if self.is_default_list_dict(ty) {
                     "defaultdict"
                 } else {

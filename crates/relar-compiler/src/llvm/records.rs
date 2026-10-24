@@ -33,6 +33,7 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
                     qualified_name: "subprocess.CompletedProcess".to_owned(),
                     dataclass_eq: false,
                     dataclass_repr: true,
+                    toml_hash: false,
                     fields: ["args", "returncode", "stdout", "stderr"]
                         .into_iter()
                         .map(|name| crate::ir::ClassFieldMetadata {
@@ -69,7 +70,9 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
             .unwrap();
             (
                 0,
-                u32::from(metadata.dataclass_eq) | (u32::from(metadata.dataclass_repr) << 1),
+                u32::from(metadata.dataclass_eq)
+                    | (u32::from(metadata.dataclass_repr) << 1)
+                    | (u32::from(metadata.toml_hash) << 2),
                 format!("ptr @repr_name_{name}, i64 {}", metadata.name.len()),
                 format!(
                     "ptr @repr_qualified_{name}, i64 {}",

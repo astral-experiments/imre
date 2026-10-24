@@ -283,6 +283,7 @@ fn namespace_class(
         fields: fields
             .iter()
             .map(|field| Field {
+                module: definition.module,
                 name: field.name.clone(),
                 annotation: field.annotation.clone(),
                 default: None,
@@ -293,6 +294,11 @@ fn namespace_class(
             .collect(),
         methods: Vec::new(),
         method_kinds: Vec::new(),
+        method_origins: Vec::new(),
+        bases: Vec::new(),
+        abstract_methods: Default::default(),
+        toml_hash: false,
+        abc: false,
         dataclass: Some(DataclassOptions {
             init: false,
             eq: true,

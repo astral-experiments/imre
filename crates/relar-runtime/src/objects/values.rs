@@ -160,19 +160,21 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
             7 if raw & NULLABLE != 0 => *(left as *const f64) == *(right as *const f64),
             7 => f64::from_bits(left as u64) == f64::from_bits(right as u64),
             8 => *(left as *const Bytes) == *(right as *const Bytes),
-            9 if left & 1 != right & 1 => false,
-            9 if left & 1 == 0 => *(left as *const Str) == *(right as *const Str),
-            9 => *((left & !1) as *const Bytes) == *((right & !1) as *const Bytes),
+            9 => {
+                let (left, left_kind) = super::unions::member(left);
+                let (right, right_kind) = super::unions::member(right);
+                left_kind == right_kind && equal(left, right, left_kind)
+            }
             _ => unreachable!("WordKind validates concrete representations"),
         }
     }
 }
 
-/// Compares lists of the same checked immutable tuple type in element order.
+/// Compares checked containers, including ordered sequences and integer counters.
 ///
 /// # Safety
-/// Both inputs are rooted sequence objects of the same concrete type. Element
-/// comparisons have no user callbacks and neither list changes during this call.
+/// Both inputs are rooted objects of the same checked container type. Element
+/// comparisons have no user callbacks and neither container changes during this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_sequence_equal(left: *const Object, right: *const Object) -> u32 {
     // SAFETY: the compiler verified both sequence layouts before calling.
@@ -294,10 +296,10 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 output.push_str(&crate::floats::render(value));
             }
             8 => output.push_str(&super::bytes::repr(&*(word as *const Bytes))),
-            9 if word & 1 == 0 => {
-                write_repr(output, word, WordKind::new(3));
+            9 => {
+                let (member, kind) = super::unions::member(word);
+                write_repr(output, member, kind);
             }
-            9 => write_repr(output, word & !1, WordKind::new(8)),
             _ => unreachable!("WordKind validates concrete representations"),
         }
     }

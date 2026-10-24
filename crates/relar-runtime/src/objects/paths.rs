@@ -482,6 +482,24 @@ pub unsafe extern "C" fn relar_path_read_text(path: *const Object) -> *const Str
 }
 
 /// # Safety
+/// Root an exact Path during the raw read. The result owns the bytes through EOF.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_path_read_bytes(path: *const Object) -> *const super::Bytes {
+    // SAFETY: the rooted pathname remains borrowed during synchronous I/O.
+    let result = unsafe {
+        object(path).0.with(|storage| {
+            let name = storage.path();
+            check_nul(name)?;
+            fs::read(name).map_err(files::os_error)
+        })
+    };
+    finish(
+        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        std::ptr::null(),
+    )
+}
+
+/// # Safety
 /// Root an exact Path and string with clear pending error state. Success returns
 /// the canonical integer character count after flushing and closing the file.
 #[unsafe(no_mangle)]

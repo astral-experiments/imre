@@ -74,6 +74,7 @@ impl Builtin {
             Self::Path(operation) => Contract::new(
                 match operation {
                     PathOperation::ReadText
+                    | PathOperation::ReadBytes
                     | PathOperation::Absolute
                     | PathOperation::WithName
                     | PathOperation::Resolve
@@ -131,11 +132,13 @@ impl Builtin {
             ),
             Self::BytesGet
             | Self::Decode
+            | Self::DecodeSplitLines
             | Self::DictGet
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
             | Self::JsonLoad
             | Self::JsonLoads
+            | Self::HashRecord
             | Self::JsonGet { .. }
             | Self::JsonGetReceiver
             | Self::JsonAdd
@@ -154,6 +157,9 @@ impl Builtin {
             | Self::Bool
             | Self::DictContains
             | Self::DictGetDefault
+            | Self::Counter
+            | Self::CounterUpdate
+            | Self::DictSumValues
             | Self::DictTryGet(_)
             | Self::Encode
             | Self::ExceptionCause
@@ -167,16 +173,24 @@ impl Builtin {
             | Self::IsNone
             | Self::JsonIsInt
             | Self::Len
+            | Self::JsonEmptyObject
+            | Self::HashStr
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum
             | Self::LiteralStringView
             | Self::RStrip
             | Self::RegexCompile(_)
+            | Self::GetLogger
+            | Self::LogLevel
+            | Self::LogWrite(_)
             | Self::RegexSearch
+            | Self::RegexGroupDict
+            | Self::RegexMatchStart
             | Self::SequenceGetInBounds
             | Self::SetContains
             | Self::Split
             | Self::SplitLines
+            | Self::Ndiff
             | Self::Str
             | Self::StrEnumIdentity
             | Self::StrEnumMember { .. }
@@ -206,6 +220,7 @@ impl Builtin {
             | Self::Print
             | Self::SortRestore
             | Self::StderrLine
+            | Self::StdoutWrite
             | Self::SysArgv
             | Self::TextClose
             | Self::TextEnter
@@ -223,7 +238,8 @@ impl Builtin {
             | Self::KeyUnion
             | Self::KeySet
             | Self::KeyIntersection
-            | Self::NamespaceView
+            | Self::RecordView
+            | Self::ExactRecord(_)
             | Self::ListAllI32
             | Self::ListDistinct
             | Self::ListExtendUnhinted
@@ -298,6 +314,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_print_int"
                 | "relar_print_float"
                 | "relar_stderr_line"
+                | "relar_stdout_write"
                 | "relar_print_str"
                 | "relar_print_bytes"
                 | "relar_bytes_count"
@@ -323,6 +340,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_input"
                 | "relar_sys_argv"
                 | "relar_path_read_text"
+                | "relar_path_read_bytes"
                 | "relar_path_write_text"
                 | "relar_path_mkdir"
                 | "relar_path_unlink"
@@ -368,6 +386,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_seq_set_index"
                 | "relar_seq_pop"
                 | "relar_seq_repeat"
+                | "relar_str_repeat"
                 | "relar_seq_slice"
                 | "relar_dict_get"
                 | "relar_dict_gather_str_int"

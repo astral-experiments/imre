@@ -17,6 +17,7 @@ mod callables;
 mod calls;
 mod comprehensions;
 mod dataclass_values;
+mod dispatch;
 mod enums;
 mod expansions;
 mod inference;
@@ -24,6 +25,7 @@ mod iterables;
 mod json;
 mod literals;
 mod local_functions;
+mod logging;
 mod matching;
 mod module_values;
 mod paths;
@@ -59,12 +61,41 @@ struct ClassInfo {
     declarations: Classes,
     fields: Vec<Vec<Type>>,
     methods: Vec<HashMap<String, Signature>>,
+    generators: HashSet<usize>,
 }
 
 impl ClassInfo {
     /// Resolves all nominal field types before checking constructors and methods.
     fn new(graph: &SourceGraph, types: &Types) -> Result<Self, String> {
         let mut declarations = Classes::collect(graph)?;
+        types.set_custom_truth(
+            declarations
+                .definitions
+                .iter()
+                .enumerate()
+                .filter_map(|(id, class)| {
+                    class
+                        .methods
+                        .iter()
+                        .any(|method| method.name.as_str() == "__bool__")
+                        .then_some(id)
+                })
+                .collect(),
+        );
+        // Permit forward references while reading field annotations. Refine
+        // these candidates once every record's concrete field types are known.
+        let mut hashable = declarations
+            .definitions
+            .iter()
+            .enumerate()
+            .filter_map(|(id, class)| {
+                class
+                    .dataclass
+                    .is_some_and(|options| options.frozen && options.eq)
+                    .then_some(id)
+            })
+            .collect::<HashSet<_>>();
+        types.set_hashable_records(hashable.clone());
         let mut fields = declarations
             .definitions
             .iter()
@@ -77,7 +108,7 @@ impl ClassInfo {
                         annotation_in_class(
                             &field.annotation,
                             graph,
-                            class.definition.module,
+                            field.module,
                             &declarations,
                             types,
                             Some(class_id),
@@ -87,11 +118,11 @@ impl ClassInfo {
                                 field,
                                 ty,
                                 types,
-                                &graph.modules[class.definition.module].source,
+                                &graph.modules[field.module].source,
                             )?;
                             if callables::contains_callable(ty, types) {
                                 Err(error(
-                                    &graph.modules[class.definition.module].source,
+                                    &graph.modules[field.module].source,
                                     &field.annotation,
                                     "class fields cannot contain callable values",
                                 ))
@@ -100,15 +131,22 @@ impl ClassInfo {
                             }
                         })
                         .map_err(|error| {
-                            format!(
-                                "{}:{error}",
-                                graph.modules[class.definition.module].path.display()
-                            )
+                            format!("{}:{error}", graph.modules[field.module].path.display())
                         })
                     })
                     .collect::<Result<Vec<_>, _>>()
             })
             .collect::<Result<Vec<_>, _>>()?;
+        for (id, class) in declarations.definitions.iter().enumerate() {
+            if let Some(&base) = class.bases.first()
+                && !fields[id].starts_with(&fields[base])
+            {
+                return Err(graph.modules[class.definition.module].error(
+                    &class.node,
+                    "inherited fields must keep their exact types and offsets",
+                ));
+            }
+        }
         // Reference counting is sufficient only while no accepted field graph can
         // close a cycle. This concerns storage types, not method signatures.
         fn visit_type(ty: Type, fields: &[Vec<Type>], types: &Types, states: &mut [u8]) -> bool {
@@ -142,10 +180,84 @@ impl ClassInfo {
                     "cyclic heap types are unsupported; class fields must form an acyclic ownership graph"));
             }
         }
+        loop {
+            let before = hashable.len();
+            hashable.retain(|&id| {
+                declarations.definitions[id].toml_hash
+                    || declarations.definitions[id]
+                        .fields
+                        .iter()
+                        .zip(&fields[id])
+                        .all(|(field, &ty)| !field.compare || types.immutable_key_field(ty))
+            });
+            if hashable.len() == before {
+                break;
+            }
+            types.set_hashable_records(hashable.clone());
+        }
+        fn valid_keys(ty: Type, types: &Types) -> bool {
+            types
+                .mapping(ty)
+                .map(|(key, _)| key)
+                .or_else(|| types.set_element(ty))
+                .is_none_or(|key| types.hashable_key(key))
+                && types
+                    .children(ty)
+                    .into_iter()
+                    .all(|child| valid_keys(child, types))
+        }
+        for (id, class) in declarations.definitions.iter().enumerate() {
+            if class.toml_hash {
+                if !fields[id].iter().all(|&ty| ty == Type::JsonObject) {
+                    return Err(graph.modules[class.definition.module].error(
+                        &class.node,
+                        "a TOML hash projection requires read-only JSON object fields",
+                    ));
+                }
+                types.mark_fallible_key(id);
+            }
+        }
+        loop {
+            let mut changed = false;
+            for &id in &hashable {
+                if declarations.definitions[id]
+                    .fields
+                    .iter()
+                    .zip(&fields[id])
+                    .any(|(field, &ty)| field.compare && types.fallible_key(ty))
+                {
+                    changed |= types.mark_fallible_key(id);
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        for (class, field_types) in declarations.definitions.iter().zip(&fields) {
+            if class
+                .bases
+                .iter()
+                .any(|&base| !field_types.starts_with(&fields[base]))
+            {
+                return Err(graph.modules[class.definition.module].error(
+                    &class.node,
+                    "an inherited field must keep its exact native type",
+                ));
+            }
+            for (field, &ty) in class.fields.iter().zip(field_types) {
+                if !valid_keys(ty, types) {
+                    return Err(graph.modules[field.module].error(
+                        &field.annotation,
+                        "record keys require a frozen dataclass with immutable comparison fields",
+                    ));
+                }
+            }
+        }
         let parsers = argparse::Parsers::collect(graph, types, &mut declarations, &mut fields)?;
         Ok(Self {
             parsers,
             methods: vec![HashMap::new(); fields.len()],
+            generators: HashSet::new(),
             declarations,
             fields,
         })
@@ -158,6 +270,7 @@ const RESERVED: &[&str] = &[
     "bool",
     "str",
     "repr",
+    "hash",
     "property",
     "classmethod",
     "staticmethod",
@@ -272,6 +385,12 @@ pub(crate) fn lower_with_owners(
         for (statement_id, statement) in module.parsed.syntax().body.iter().enumerate() {
             match statement {
                 ast::Stmt::FunctionDef(function) => {
+                    if !graph.includes(DefinitionId {
+                        module: module_id,
+                        statement: statement_id,
+                    }) {
+                        continue;
+                    }
                     let signature = signature(
                         function,
                         graph,
@@ -317,6 +436,8 @@ pub(crate) fn lower_with_owners(
             }
         }
         for (index, method) in class.methods.iter().enumerate() {
+            let module_id = class.method_origins[index].module;
+            let module = &graph.modules[module_id];
             let context = records::MethodContext {
                 class: class_id,
                 index,
@@ -347,10 +468,21 @@ pub(crate) fn lower_with_owners(
                 return Err(module.error(&method, "__str__ must return str"));
             }
             classes.methods[class_id].insert(method.name.to_string(), signature.clone());
+            if records::iterator_result(&method, graph, module_id) {
+                classes.generators.insert(signature.id);
+            }
             definitions.push((module_id, method, signature));
             callable_definitions.push(class.definition);
         }
     }
+    records::record_factories(
+        &mut classes,
+        &mut definitions,
+        &mut callable_definitions,
+        &inference,
+        graph,
+        &types,
+    )?;
     for (module, function, _) in &mut definitions {
         assignments::alias_builtin_parameters(function, &graph.modules[*module].bindings);
     }
@@ -361,6 +493,15 @@ pub(crate) fn lower_with_owners(
         &mut classes,
         &types,
     )?;
+    for (id, methods) in classes.methods.iter().enumerate() {
+        if let Some(method) = methods.get("__bool__")
+            && method.returns != Type::Bool
+        {
+            let class = &classes.declarations.definitions[id];
+            return Err(graph.modules[class.definition.module]
+                .error(&class.node, "__bool__ must return bool"));
+        }
+    }
     for (module, function, signature) in &definitions {
         let annotated = function
             .parameters
@@ -707,6 +848,20 @@ fn signature(
     let mut params = Vec::new();
     let mut parameter_types = Vec::new();
     for (index, parameter) in function.parameters.iter_non_variadic_params().enumerate() {
+        let module = owner
+            .and_then(|id| {
+                let record = &classes.definitions[id];
+                (record.generated_initializer && function.name.as_str() == "__init__")
+                    .then(|| {
+                        record
+                            .fields
+                            .iter()
+                            .find(|field| field.name == parameter.name().as_str())
+                    })
+                    .flatten()
+                    .map(|field| field.module)
+            })
+            .unwrap_or(module);
         let sequence = parameter.annotation().is_some_and(|value|
             matches!(value, ast::Expr::Subscript(subscript) if graph.resolve(module, &subscript.value) == Some(Binding::Intrinsic(Intrinsic::Sequence))));
         let empty_sequence = sequence
@@ -740,6 +895,8 @@ fn signature(
                             function,
                             parameter.name().as_str(),
                             empty_sequence,
+                            graph,
+                            module,
                             source,
                         )?;
                         let element = annotation_in_class(
@@ -901,7 +1058,7 @@ fn annotation_at(
             )
         });
     }
-    match graph.resolve(module, expression) {
+    match graph.resolve_type(module, expression) {
         Some(Binding::Definition(definition)) => {
             if let Some(&id) = classes.ids.get(&definition) {
                 return Ok(classes.instance(id));
@@ -916,6 +1073,7 @@ fn annotation_at(
                 )
             });
         }
+        Some(Binding::Intrinsic(Intrinsic::Counter)) => return Ok(types.counter(Type::Str)),
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
@@ -934,7 +1092,7 @@ fn annotation_at(
             "bool" => Ok(Type::Bool),
             "str" => Ok(Type::Str),
             "bytes" => Ok(Type::Bytes),
-            "Exception" => Ok(Type::Exception),
+            "BaseException" | "Exception" => Ok(Type::Exception),
             _ => Err(error(
                 source,
                 expression,
@@ -943,13 +1101,13 @@ fn annotation_at(
         },
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
         ast::Expr::Subscript(subscript)
-            if graph.resolve(module, &subscript.value)
+            if graph.resolve_type(module, &subscript.value)
                 == Some(Binding::Intrinsic(Intrinsic::Literal)) =>
         {
             literals::annotation(&subscript.slice, types, source)
         }
         ast::Expr::Subscript(value)
-            if graph.resolve(module, &value.value)
+            if graph.resolve_type(module, &value.value)
                 == Some(Binding::Intrinsic(Intrinsic::AbstractSet))
                 && nested(&value.slice)? == Type::Str =>
         {
@@ -958,7 +1116,7 @@ fn annotation_at(
         ast::Expr::Subscript(value)
             if let Some(Binding::Intrinsic(
                 kind @ (Intrinsic::RegexPattern | Intrinsic::RegexMatch),
-            )) = graph.resolve(module, &value.value) =>
+            )) = graph.resolve_type(module, &value.value) =>
         {
             if nested(&value.slice)? != Type::Str {
                 return Err(error(source, expression, "regex annotations require str"));
@@ -971,7 +1129,7 @@ fn annotation_at(
         }
         ast::Expr::Subscript(value)
             if matches!(
-                graph.resolve(module, &value.value),
+                graph.resolve_type(module, &value.value),
                 Some(Binding::Intrinsic(Intrinsic::CompletedProcess))
             ) =>
         {
@@ -986,7 +1144,7 @@ fn annotation_at(
         }
         ast::Expr::Subscript(value)
             if matches!(
-                graph.resolve(module, &value.value),
+                graph.resolve_type(module, &value.value),
                 Some(Binding::Intrinsic(Intrinsic::Callable))
             ) =>
         {
@@ -1013,7 +1171,7 @@ fn annotation_at(
         }
         ast::Expr::Subscript(value)
             if matches!(
-                graph.resolve(module, &value.value),
+                graph.resolve_type(module, &value.value),
                 Some(Binding::Intrinsic(Intrinsic::Union))
             ) =>
         {
@@ -1030,12 +1188,36 @@ fn annotation_at(
                 error(
                     source,
                     expression,
-                    "finite unions support str | bytes and nullable exact types",
+                    "finite unions support str | bytes, str | list[str], and nullable exact types",
                 )
             })
         }
         ast::Expr::Subscript(value) => match &*value.value {
-            item if graph.resolve(module, item) == Some(Binding::Intrinsic(Intrinsic::Final)) => {
+            item if matches!(
+                graph.resolve(module, item),
+                Some(Binding::Intrinsic(
+                    Intrinsic::Iterable | Intrinsic::Iterator
+                ))
+            ) =>
+            {
+                Ok(types.list(nested(&value.slice)?))
+            }
+            item if graph.resolve_type(module, item)
+                == Some(Binding::Intrinsic(Intrinsic::Counter)) =>
+            {
+                let key = nested(&value.slice)?;
+                if !types.hashable_key(key) {
+                    return Err(error(
+                        source,
+                        &*value.slice,
+                        "Counter requires an immutable key type",
+                    ));
+                }
+                Ok(types.counter(key))
+            }
+            item if graph.resolve_type(module, item)
+                == Some(Binding::Intrinsic(Intrinsic::Final)) =>
+            {
                 nested(&value.slice)
             }
             ast::Expr::Name(name) if name.id == "list" => Ok(types.list(nested(&value.slice)?)),
@@ -1052,7 +1234,7 @@ fn annotation_at(
             }
             receiver
                 if matches!(receiver, ast::Expr::Name(name) if name.id == "dict")
-                    || graph.resolve(module, receiver)
+                    || graph.resolve_type(module, receiver)
                         == Some(Binding::Intrinsic(Intrinsic::DefaultDict)) =>
             {
                 let ast::Expr::Tuple(arguments) = &*value.slice else {
@@ -1072,7 +1254,7 @@ fn annotation_at(
                 let key_type = nested(key)?;
                 if matches!(receiver, ast::Expr::Name(name) if name.id == "dict")
                     && key_type == Type::Str
-                    && graph.resolve(module, value) == Some(Binding::Intrinsic(Intrinsic::Any))
+                    && graph.resolve_type(module, value) == Some(Binding::Intrinsic(Intrinsic::Any))
                 {
                     return Ok(Type::JsonObject);
                 }
@@ -1084,7 +1266,7 @@ fn annotation_at(
                     ));
                 }
                 let value_type = nested(value)?;
-                if graph.resolve(module, receiver)
+                if graph.resolve_type(module, receiver)
                     == Some(Binding::Intrinsic(Intrinsic::DefaultDict))
                 {
                     if types.element(value_type).is_none() {
@@ -1124,7 +1306,7 @@ fn annotation_at(
                 error(
                     source,
                     expression,
-                    "finite unions support str | bytes and nullable exact types",
+                    "finite unions support str | bytes, str | list[str], and nullable exact types",
                 )
             })
         }
@@ -1214,7 +1396,8 @@ struct Checker<'a> {
     comprehension_depth: usize,
     comprehension_exports: HashMap<String, usize>,
     narrowed: HashMap<usize, Type>,
-    regex_guards: Vec<(usize, regex::CaptureNames)>,
+    regex_guards: Vec<(usize, regex::CaptureLayout)>,
+    regex_locals: HashMap<usize, regex::CaptureLayout>,
     namespace_guards: Vec<(usize, usize)>,
     captured_process_errors: Vec<usize>,
     returns: Type,
@@ -1231,6 +1414,8 @@ struct Checker<'a> {
     module_scope: bool,
     class: Option<usize>,
     class_receiver: Option<String>,
+    iterator_source: Option<TextRange>,
+    super_initializer: Option<usize>,
     initializing: bool,
 }
 
@@ -1262,6 +1447,7 @@ impl<'a> Checker<'a> {
             comprehension_exports: HashMap::new(),
             narrowed: HashMap::new(),
             regex_guards: Vec::new(),
+            regex_locals: HashMap::new(),
             namespace_guards: Vec::new(),
             captured_process_errors: Vec::new(),
             returns: Type::None,
@@ -1278,6 +1464,8 @@ impl<'a> Checker<'a> {
             module_scope: false,
             class: None,
             class_receiver: None,
+            iterator_source: None,
+            super_initializer: None,
             initializing: false,
         }
     }
@@ -1412,11 +1600,12 @@ impl<'a> Checker<'a> {
         if value.ty == expected {
             return Ok(value);
         }
-        if matches!((value.ty, expected), (Type::Class(child), Type::Class(parent)) if self.classes.parsers.child_of(child, parent))
+        if matches!((value.ty, expected), (Type::Class(child), Type::Class(parent)) if self.classes.parsers.child_of(child, parent)
+            || self.classes.declarations.definitions[child].bases.contains(&parent))
         {
             return Ok(Expr {
                 ty: expected,
-                kind: ExprKind::Builtin(Builtin::NamespaceView, vec![value]),
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
             });
         }
         let concrete = self.types.payload(expected).unwrap_or(expected);
@@ -1510,6 +1699,16 @@ impl<'a> Checker<'a> {
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
         self.reject_class_receiver_value(expression)?;
         let concrete = self.types.payload(expected).unwrap_or(expected);
+        if matches!(expression, ast::Expr::List(_) | ast::Expr::ListComp(_))
+            && let Some(list) = self.types.members(concrete).and_then(|members| {
+                members
+                    .into_iter()
+                    .find(|ty| self.types.element(*ty).is_some())
+            })
+        {
+            let value = self.expr_expected(expression, list)?;
+            return self.coerce(value, expected, expression);
+        }
         if matches!(concrete, Type::Callable(_)) {
             if let Some(Binding::Definition(definition)) = self.resolve(expression)
                 && let Some(signature) = self.functions.get(&definition).cloned()
@@ -1538,6 +1737,16 @@ impl<'a> Checker<'a> {
             }
         }
         let value = match expression {
+            ast::Expr::Call(call)
+                if self.types.is_counter(concrete)
+                    && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Counter))
+                    && call.arguments.is_empty() =>
+            {
+                Expr {
+                    ty: concrete,
+                    kind: ExprKind::Builtin(Builtin::Counter, Vec::new()),
+                }
+            }
             ast::Expr::Lambda(lambda) => {
                 let (params, returns) = self.types.signature(concrete).ok_or_else(|| {
                     error(
@@ -1836,6 +2045,7 @@ impl<'a> Checker<'a> {
     }
 
     fn assigned_value(&mut self, slot: usize, value: &Expr) {
+        self.regex_locals.remove(&slot);
         self.assigned.insert(slot);
         self.narrowed.remove(&slot);
         if let Some(payload) = self.types.payload(self.locals[slot]) {
@@ -1976,7 +2186,7 @@ impl<'a> Checker<'a> {
                 return Ok((receiver, true));
             }
         }
-        Ok((self.expr(expression)?, false))
+        Ok((self.iteration_expression(expression, None)?, false))
     }
 
     /// Checks an iterable in its current lexical scope, before target binding.
@@ -2004,6 +2214,9 @@ impl<'a> Checker<'a> {
             return Ok(Iteration::Range(args));
         }
         let (iterable, items) = self.iteration_source(expression)?;
+        if let Some(prepared) = self.record_iteration(&iterable, expression)? {
+            return Ok(Iteration::Prepared(prepared));
+        }
         Ok(Iteration::Container {
             iterable,
             items,
@@ -2551,6 +2764,7 @@ impl<'a> Checker<'a> {
             });
             previous_sum = sum.is_some();
             let (lowered, continues) = self.statement(statement)?;
+            self.remember_regex_assignment(statement, &lowered, &statements[index + 1..]);
             body.extend(lowered);
             falls_through &= continues;
         }
@@ -3213,7 +3427,14 @@ impl<'a> Checker<'a> {
         }
         let namespace_depth = self.namespace_guards.len();
         self.enter_namespace_guards(test, body);
-        let (yes, yes_falls) = self.block(body)?;
+        // An exact isinstance test can exclude a compatibility guard under the
+        // reachable-only policy. With expression-only statements there are no
+        // local declarations to preserve from its suite.
+        let (yes, yes_falls) = if self.graph.reachable_only() && known == Some(false)
+            && body.iter().all(|stmt| matches!(stmt, ast::Stmt::Expr(s) if narrowing::expression_assignments(&s.value).is_empty()))
+        {
+            (Vec::new(), false)
+        } else { self.block(body)? };
         self.namespace_guards.truncate(namespace_depth);
         self.regex_guards.truncate(guard_depth);
         let yes_falls = yes_falls && known != Some(false);
@@ -3313,10 +3534,14 @@ impl<'a> Checker<'a> {
             return Ok((op, Type::Int));
         }
         if op == ast::Operator::Mult {
-            if (self.types.element(left).is_some() || left == Type::Bytes) && right == Type::Int {
+            if (self.types.element(left).is_some() || matches!(left, Type::Bytes | Type::Str))
+                && right == Type::Int
+            {
                 return Ok((Binary::Repeat, left));
             }
-            if left == Type::Int && (self.types.element(right).is_some() || right == Type::Bytes) {
+            if left == Type::Int
+                && (self.types.element(right).is_some() || matches!(right, Type::Bytes | Type::Str))
+            {
                 return Ok((Binary::Repeat, right));
             }
         }
@@ -3348,6 +3573,12 @@ impl<'a> Checker<'a> {
     }
 
     fn expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let Some(Binding::Intrinsic(Intrinsic::LogLevel(level))) = self.resolve(expression) {
+            return Ok(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Int(level.to_string()),
+            });
+        }
         let value = self.typed_expr(expression)?;
         Ok(if matches!(value.ty, Type::StrLiteral(_)) {
             literals::view(value, Type::Str)
@@ -3697,6 +3928,24 @@ impl<'a> Checker<'a> {
                 {
                     return json::compare(values, &compare.ops, self.source, expression);
                 }
+                if let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
+                    && values
+                        .iter()
+                        .any(|value| self.types.payload(value.ty) == Some(Type::Str))
+                    && values
+                        .iter()
+                        .all(|value| self.types.payload(value.ty).unwrap_or(value.ty) == Type::Str)
+                {
+                    let operation = if *op == ast::CmpOp::Eq {
+                        Compare::Equal
+                    } else {
+                        Compare::NotEqual
+                    };
+                    return Ok(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Compare(values, vec![operation]),
+                    });
+                }
                 if let [left, right] = values.as_slice()
                     && matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
                     && (self.types.payload(left.ty).is_some()
@@ -3761,12 +4010,9 @@ impl<'a> Checker<'a> {
                     if matches!(ty, Type::ListInt | Type::List(_)) && !tuple_list
                         || matches!(
                             ty,
-                            Type::Dict(_)
-                                | Type::Set(_)
-                                | Type::StringKeys
-                                | Type::Optional(_)
-                                | Type::Union(_)
+                            Type::Set(_) | Type::StringKeys | Type::Optional(_) | Type::Union(_)
                         )
+                        || matches!(ty, Type::Dict(_)) && !self.types.is_counter(ty)
                         || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
                     {
                         return Err(error(
@@ -3814,9 +4060,18 @@ impl<'a> Checker<'a> {
                 }
                 if let Some((key, value)) = self.types.mapping(list.ty) {
                     let key = self.expr_expected(&subscript.slice, key)?;
-                    return Ok(Expr {
+                    let required = self.required_group_key(&list, &key);
+                    let expression = Expr {
                         ty: value,
                         kind: ExprKind::Builtin(Builtin::DictGet, vec![list, key]),
+                    };
+                    return Ok(if required {
+                        Expr {
+                            ty: Type::Str,
+                            kind: ExprKind::Unwrap(Box::new(expression)),
+                        }
+                    } else {
+                        expression
                     });
                 }
                 if let Some(fields) = self.types.fields(list.ty) {
@@ -4058,7 +4313,32 @@ impl<'a> Checker<'a> {
         call: &ast::ExprCall,
         key_view: Option<&mut bool>,
     ) -> Result<Expr, String> {
+        if crate::classes::super_init(call) {
+            return self.call_super_initializer(call);
+        }
+        if let Some(copy) = self.dataclass_copy(call)? {
+            return Ok(copy);
+        }
         calls::reject_unpacking(call, self.source)?;
+        if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "write"
+            && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Stdout))
+        {
+            self.reject_builtin_keywords(call)?;
+            let [text] = call.arguments.args.as_ref() else {
+                return Err(error(self.source, call, "stdout.write requires one string"));
+            };
+            return Ok(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(
+                    Builtin::StdoutWrite,
+                    vec![self.expr_expected(text, Type::Str)?],
+                ),
+            });
+        }
+        if let Some(value) = self.construct_receiver_type(call)? {
+            return Ok(value);
+        }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "set")
             && let [input] = call.arguments.args.as_ref()
             && call.arguments.keywords.is_empty()
@@ -4120,6 +4400,44 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::GetLogger))
+                if let [name] = call.arguments.args.as_ref() =>
+            {
+                self.reject_builtin_keywords(call)?;
+                return Ok(Expr {
+                    ty: Type::Logger,
+                    kind: ExprKind::Builtin(
+                        Builtin::GetLogger,
+                        vec![self.expr_expected(name, Type::Str)?],
+                    ),
+                });
+            }
+            Some(Binding::Intrinsic(Intrinsic::BasicConfig))
+                if call.arguments.args.is_empty()
+                    && let [kw] = call.arguments.keywords.as_ref()
+                    && kw.arg.as_deref() == Some("level") =>
+            {
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(
+                        Builtin::LogLevel,
+                        vec![self.expr_expected(&kw.value, Type::Int)?],
+                    ),
+                });
+            }
+            Some(Binding::Intrinsic(Intrinsic::Counter)) if call.arguments.is_empty() => {
+                return Ok(Expr {
+                    ty: self.types.counter(Type::Str),
+                    kind: ExprKind::Builtin(Builtin::Counter, Vec::new()),
+                });
+            }
+            Some(Binding::Intrinsic(Intrinsic::Ndiff)) => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "ndiff requires immediate materialization",
+                ));
+            }
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
             Some(Binding::Intrinsic(Intrinsic::Dedent)) => {
                 return self.text_function(call, "text", ir::TextOperation::Dedent);
@@ -4307,6 +4625,9 @@ impl<'a> Checker<'a> {
             if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch) {
                 return self.regex_method(receiver, attribute, call);
             }
+            if receiver.ty == Type::Logger {
+                return self.logging_method(receiver, attribute, call);
+            }
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
@@ -4326,6 +4647,30 @@ impl<'a> Checker<'a> {
             if attribute.attr.as_str() == "sort" && self.types.element(receiver.ty).is_some() {
                 self.check_mutable_json_rows(receiver.ty, call)?;
                 return self.list_sort(receiver, call);
+            }
+            if attribute.attr.as_str() == "union"
+                && let Some(key) = self.types.set_element(receiver.ty)
+            {
+                self.reject_builtin_keywords(call)?;
+                let [arg] = call.arguments.args.as_ref() else {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "set.union requires one set or mapping key view",
+                    ));
+                };
+                let (other, other_key) = self.union_operand(arg)?;
+                if other_key != Some(key) {
+                    return Err(error(
+                        self.source,
+                        arg,
+                        "set.union requires matching sets or mapping keys",
+                    ));
+                }
+                return Ok(Expr {
+                    ty: receiver.ty,
+                    kind: ExprKind::Builtin(Builtin::KeyUnion, vec![receiver, other]),
+                });
             }
             self.reject_builtin_keywords(call)?;
             if matches!(receiver.ty, Type::TextIO | Type::BinaryIO) {
@@ -4374,7 +4719,9 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(builtin, args),
                 });
             }
-            if call.arguments.args.is_empty() {
+            if call.arguments.args.is_empty()
+                || matches!(call.arguments.args.as_ref(), [ast::Expr::StringLiteral(s)] if matches!(s.value.to_str(), "utf-8" | "utf8" | "UTF-8" | "UTF8"))
+            {
                 let conversion = match (receiver.ty, attribute.attr.as_str()) {
                     (Type::Str, "encode") => Some((Builtin::Encode, Type::Bytes)),
                     (Type::Bytes, "decode") => Some((Builtin::Decode, Type::Str)),
@@ -4393,10 +4740,32 @@ impl<'a> Checker<'a> {
             {
                 return Ok(Expr {
                     ty: self.types.list(Type::Str),
-                    kind: ExprKind::Builtin(Builtin::SplitLines, vec![receiver]),
+                    kind: match receiver.kind {
+                        ExprKind::Builtin(Builtin::Decode, bytes) => {
+                            ExprKind::Builtin(Builtin::DecodeSplitLines, bytes)
+                        }
+                        _ => ExprKind::Builtin(Builtin::SplitLines, vec![receiver]),
+                    },
                 });
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
+                if self.types.is_counter(receiver.ty)
+                    && attribute.attr.as_str() == "update"
+                    && let [source] = call.arguments.args.as_ref()
+                {
+                    let source = self.expr(source)?;
+                    if self.types.mapping(source.ty) != Some((key_type, Type::Int)) {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "Counter.update requires a mapping of matching keys to int",
+                        ));
+                    }
+                    return Ok(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::CounterUpdate, vec![receiver, source]),
+                    });
+                }
                 if attribute.attr.as_str() == "keys"
                     && call.arguments.args.is_empty()
                     && let Some(view) = key_view
@@ -4580,6 +4949,28 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if name.id == "hash" {
+            let [value] = args.as_slice() else {
+                return Err(error(self.source, call, "hash requires one argument"));
+            };
+            let builtin = match value.ty {
+                Type::Str | Type::StrLiteral(_) => Builtin::HashStr,
+                Type::Class(id) if self.classes.declarations.definitions[id].toml_hash => {
+                    Builtin::HashRecord
+                }
+                _ => {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "hash requires a string or a known frozen hash projection",
+                    ));
+                }
+            };
+            return Ok(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(builtin, args),
+            });
+        }
         if args.len() == 1
             && args[0].ty == Type::Path
             && matches!(name.id.as_str(), "str" | "print")
@@ -4661,6 +5052,13 @@ impl<'a> Checker<'a> {
         }
         if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
             if name.id == "repr" {
+                if !dataclass_values::can_format(args[0].ty, self.types, self.classes) {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "generated repr cannot format resource or callable fields",
+                    ));
+                }
                 return Ok(Expr {
                     ty: Type::Str,
                     kind: ExprKind::Builtin(Builtin::Repr, args),
@@ -4669,7 +5067,7 @@ impl<'a> Checker<'a> {
             if matches!(name.id.as_str(), "str" | "print")
                 && matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess)
             {
-                let text = self.record_text(args.into_iter().next().unwrap());
+                let text = self.record_text(args.into_iter().next().unwrap(), call)?;
                 return Ok(if name.id == "str" {
                     text
                 } else {

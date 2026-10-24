@@ -137,6 +137,7 @@ impl Checker<'_> {
             "is_dir" => (PathOperation::IsDir, Type::Bool, 0),
             "is_absolute" => (PathOperation::IsAbsolute, Type::Bool, 0),
             "read_text" => (PathOperation::ReadText, Type::Str, 0),
+            "read_bytes" => (PathOperation::ReadBytes, Type::Bytes, 0),
             "write_text" => (PathOperation::WriteText, Type::Int, 1),
             "rmdir" => (PathOperation::Rmdir, Type::None, 0),
             _ => return Err(error(self.source, call, "unsupported native Path method")),

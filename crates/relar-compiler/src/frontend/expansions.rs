@@ -250,7 +250,10 @@ impl Checker<'_> {
             }
         }
         let hint = element.and_then(|element| self.expansion_hint(expression, element));
-        let iterable = self.boolean_operand(expression, hint)?;
+        let iterable = self.iteration_expression(expression, hint)?;
+        if let Some(prepared) = self.record_iteration(&iterable, expression)? {
+            return Ok(Iteration::Prepared(prepared));
+        }
         Ok(Iteration::Container {
             iterable,
             items: false,
