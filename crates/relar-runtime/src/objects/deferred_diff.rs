@@ -4,33 +4,55 @@
 
 use super::difflib::{Output, materialize_words};
 use super::{Object, Str, Words, object};
-use std::cell::OnceCell;
+use std::cell::{OnceCell, Ref, RefCell};
 use std::rc::{Rc, Weak};
+
+mod packed;
 
 #[cfg(test)]
 mod tests;
 
 struct Snapshots {
-    left: Words,
-    right: Words,
+    inputs: RefCell<Inputs>,
+    nonempty: bool,
     full: OnceCell<Words>,
     signed: OnceCell<Words>,
     projected: OnceCell<Words>,
 }
 
+enum Inputs {
+    Original(Words, Words),
+    Packed(packed::Packed),
+    Materialized,
+}
+
 impl Snapshots {
-    fn side(&self, prefix: &str) -> &Words {
-        if prefix.starts_with('+') {
-            &self.right
-        } else {
-            &self.left
-        }
+    fn side(&self, prefix: &str) -> Option<Ref<'_, Words>> {
+        Ref::filter_map(self.inputs.borrow(), |inputs| match inputs {
+            Inputs::Original(left, right) => {
+                Some(if prefix.starts_with('+') { right } else { left })
+            }
+            Inputs::Packed(_) | Inputs::Materialized => None,
+        })
+        .ok()
     }
 
     fn full(&self) -> &Words {
         self.full.get_or_init(|| {
-            // SAFETY: both snapshots own exact immutable string handles.
-            unsafe { materialize_words(&self.left, &self.right, Output::Full) }
+            let mut inputs = self.inputs.borrow_mut();
+            match &*inputs {
+                Inputs::Original(left, right) => {
+                    // SAFETY: both snapshots own exact immutable strings.
+                    unsafe { materialize_words(left, right, Output::Full) }
+                }
+                Inputs::Packed(snapshot) => {
+                    let (left, right) = snapshot.unpack();
+                    *inputs = Inputs::Materialized;
+                    // SAFETY: restoring the archive recovers the original sequences.
+                    unsafe { materialize_words(&left, &right, Output::Full) }
+                }
+                Inputs::Materialized => unreachable!("the full result is already cached"),
+            }
         })
     }
 
@@ -44,8 +66,23 @@ impl Snapshots {
             return self.signed();
         }
         self.projected.get_or_init(|| {
+            let mut inputs = self.inputs.borrow_mut();
+            let Inputs::Original(left, right) = &*inputs else {
+                unreachable!("compaction follows the first projection")
+            };
             // SAFETY: the snapshots own every string until the result is complete.
-            unsafe { materialize_words(&self.left, &self.right, Output::ProjectedChanges) }
+            let rows = unsafe { materialize_words(left, right, Output::ProjectedChanges) };
+            let len = left.values.len().max(right.values.len());
+            // Sparse projections can outlive millions of unchanged strings. Sorted
+            // inputs keep equal rows adjacent, including repeated shared handles.
+            if len >= 1024
+                && rows.values.len() <= len / 4
+                && left.strings_ascending()
+                && right.strings_ascending()
+            {
+                *inputs = Inputs::Packed(packed::Packed::new(left, right));
+            }
+            rows
         })
     }
 }
@@ -76,7 +113,7 @@ impl Deferred {
 
     fn nonempty(&self) -> bool {
         match &self.0 {
-            View::Full(source) => !source.left.values.is_empty() || !source.right.values.is_empty(),
+            View::Full(source) => source.nonempty,
             View::Signed(source) => !source.projected().values.is_empty(),
             View::Sorted { rows, .. } => !rows.values.is_empty(),
         }
@@ -188,8 +225,8 @@ pub unsafe extern "C" fn relar_ndiff_deferred(
             .with(|storage| snapshot_right(&left, storage.sequence()))
     };
     let source = Rc::new(Snapshots {
-        left,
-        right,
+        nonempty: !left.values.is_empty() || !right.values.is_empty(),
+        inputs: RefCell::new(Inputs::Original(left, right)),
         full: OnceCell::new(),
         signed: OnceCell::new(),
         projected: OnceCell::new(),
@@ -255,21 +292,29 @@ pub unsafe extern "C" fn relar_str_list_filter(
                 if same_sign(first, second) {
                     let origin;
                     let (rows, originals) = match &plan.0 {
-                        View::Full(source) | View::Signed(source) => {
-                            (source.projected(), (strip == 2).then(|| source.side(first)))
-                        }
+                        View::Full(source) | View::Signed(source) => (
+                            source.projected(),
+                            (strip == 2).then(|| source.side(first)).flatten(),
+                        ),
                         View::Sorted { rows, origin: weak } => {
                             origin = (strip == 2).then(|| weak.upgrade()).flatten();
                             // Cutting off the tag recovers a source subsequence in
                             // this sorted order only when that input side is sorted.
                             let originals = origin
                                 .as_ref()
-                                .map(|s| s.side(first))
+                                .and_then(|s| s.side(first))
                                 .filter(|s| s.strings_ascending());
                             (&**rows, originals)
                         }
                     };
-                    return filter(rows, first, second, exclude, strip as usize, originals);
+                    return filter(
+                        rows,
+                        first,
+                        second,
+                        exclude,
+                        strip as usize,
+                        originals.as_deref(),
+                    );
                 }
             }
             filter(

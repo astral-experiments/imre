@@ -91,6 +91,30 @@ def indexed() -> None:
     print(repr(Lines(signed(list(ndiff(["a"], ["b"]))))))
 
 
+def sparse_snapshots() -> None:
+    left = ["", "", "café", "cafê"]
+    right = list(left)
+    for i in range(10000, 11100):
+        text = f"row {i} 雪\x00"
+        left.append(text)
+        right.append(text)
+    left.extend(["tail abcdefgh", "tail duplicate", "tail duplicate"])
+    right.extend(["tail abcdEfgh", "tail duplicate"])
+    rows = list(ndiff(left, right))
+    copy = list(rows)
+    changes = signed(rows)
+    print(repr(sorted(changes, key=lambda line: line[2:])))
+    left[-1] = "edited source"
+    right.pop()
+    print(repr(added(copy, 1)))
+    print(repr(copy))
+    alias = rows
+    alias[0] = "edited alias"
+    print(Lines(copy) == Lines(rows))
+    print(repr(copy[:4]))
+    print(repr(rows[:4]))
+
+
 def select_prefix(rows: list[str], start: str, width: int) -> list[str]:
     return [row[1:] for row in rows if row.startswith(start + "x" * (width + 1))]
 
@@ -104,6 +128,7 @@ show(["abcdefg", "common"], ["abcXefg", "common"])
 show([], [])
 snapshots()
 indexed()
+sparse_snapshots()
 
 # These strings are ordinary list elements. Prefixes alone do not imply
 # that the rows came from ndiff.
