@@ -31,7 +31,8 @@ pub unsafe extern "C" fn relar_str_dedent(text: *const Str) -> *const Str {
             .count();
         margin = &margin[..common];
     }
-    let mut result = Str::with_capacity(text.len());
+    // Indentation and blank lines can account for nearly the entire input.
+    let mut result = Str::default();
     for (index, line) in text.split('\n').enumerate() {
         if index != 0 {
             result.push('\n');
@@ -515,6 +516,20 @@ mod tests {
             // SAFETY: the input lives through the call and the result transfers one owner.
             let result = unsafe { Rc::from_raw(relar_str_dedent(&source)) };
             assert_eq!(result.as_str(), expected);
+        }
+    }
+
+    #[test]
+    fn dedent_keeps_small_results_inline_after_removing_large_prefixes() {
+        for (text, expected) in [
+            (format!("{}x", " ".repeat(65_536)), "x"),
+            (format!("{}\n", "\u{2003}".repeat(21_000)), "\n"),
+        ] {
+            let source = Str::from(text);
+            // SAFETY: the source lives through the call and the result transfers one owner.
+            let result = unsafe { Rc::from_raw(relar_str_dedent(&source)) };
+            assert_eq!(result.as_str(), expected);
+            assert!(!result.is_heap_allocated());
         }
     }
 
