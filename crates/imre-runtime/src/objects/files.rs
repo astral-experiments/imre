@@ -226,6 +226,10 @@ fn os_error_kind(kind: io::ErrorKind) -> Kind {
 
 /// Format a POSIX errno without a filename, as in OSError(errno, strerror).
 pub(super) fn errno_error(error: io::Error) -> Error {
+    errno_with_filename(error, None)
+}
+
+fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
     let Some(errno) = error.raw_os_error() else {
         return os_error(error);
     };
@@ -236,10 +240,12 @@ pub(super) fn errno_error(error: io::Error) -> Error {
     }
     // SAFETY: the successful call initialized a terminated string.
     let description = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
-    Error::new(
-        os_error_kind(error.kind()),
-        format!("[Errno {errno}] {description}"),
-    )
+    let mut message = format!("[Errno {errno}] {description}");
+    if let Some(path) = path {
+        message.push_str(": ");
+        super::exceptions::push_string_repr(path, &mut message);
+    }
+    Error::new(os_error_kind(error.kind()), message)
 }
 
 /// Opens a UTF-8 text stream in read, write, append, or exclusive-create mode.
@@ -307,10 +313,13 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
         3 => OpenOptions::new().write(true).create_new(true).open(path),
         _ => fail("SystemError", "invalid file mode"),
     }
-    .map_err(os_error)?;
-    let metadata = file.metadata().map_err(os_error)?;
+    .map_err(|error| errno_with_filename(error, Some(path)))?;
+    let metadata = file.metadata().map_err(errno_error)?;
     if metadata.is_dir() {
-        return Err(Error::new(Kind::IsADirectoryError, "is a directory"));
+        return Err(errno_with_filename(
+            io::Error::from_raw_os_error(libc::EISDIR),
+            Some(path),
+        ));
     }
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
     let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;

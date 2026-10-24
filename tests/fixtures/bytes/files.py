@@ -61,8 +61,8 @@ output.close()
 try:
     with open("payload.bin", "xb"):
         print("unreachable")
-except FileExistsError:
-    print("exclusive exists")
+except FileExistsError as error:
+    print(error)
 try:
     with open("payload.bin", "xb"):
         print("unreachable")
@@ -110,10 +110,10 @@ try:
 except ValueError as error:
     print(error)
 try:
-    with open("missing.bin", "rb"):
+    with open("./missing'\nλ.bin", "rb"):
         print("unreachable")
-except FileNotFoundError:
-    print("missing")
+except FileNotFoundError as error:
+    print(error)
 try:
     with open("bad\0path", "wb"):
         print("unreachable")
@@ -122,10 +122,10 @@ except ValueError as error:
 try:
     with open(".", "rb"):
         print("unreachable")
-except IsADirectoryError:
-    print("directory")
+except IsADirectoryError as error:
+    print(error)
 try:
     with open("payload.bin/child", "wb"):
         print("unreachable")
-except NotADirectoryError:
-    print("not directory")
+except NotADirectoryError as error:
+    print(error)
