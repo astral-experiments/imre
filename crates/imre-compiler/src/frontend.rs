@@ -5638,14 +5638,15 @@ impl<'a> Checker<'a> {
                 .as_ref()
                 .is_some_and(|name| name.as_str() == "file")
             && self.resolve(&field.value) == Some(Binding::Intrinsic(Intrinsic::Stderr))
-            && let [text] = call.arguments.args.as_slice()
+            && call.arguments.args.len() <= 1
         {
+            let text = match call.arguments.args.first() {
+                Some(text) => self.expr_expected(text, Type::Str)?,
+                None => unpacking::string(""),
+            };
             return Ok(Expr {
                 ty: Type::None,
-                kind: ExprKind::Builtin(
-                    Builtin::StderrLine,
-                    vec![self.expr_expected(text, Type::Str)?],
-                ),
+                kind: ExprKind::Builtin(Builtin::StderrLine, vec![text]),
             });
         }
         match name.id.as_str() {
