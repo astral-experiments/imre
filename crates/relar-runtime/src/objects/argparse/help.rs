@@ -6,11 +6,40 @@ use std::io::IsTerminal;
 
 use super::{Kind, OptionSpec, Parser};
 
+/// Parse the positive decimal width accepted by shutil.get_terminal_size().
+fn positive_columns(value: &str) -> Option<usize> {
+    let value = value.trim();
+    let digits = value.strip_prefix('+').unwrap_or(value);
+    let mut width = 0usize;
+    let mut count = 0;
+    for group in digits.split('_') {
+        if group.is_empty() {
+            return None;
+        }
+        for ch in group.chars() {
+            let digit = crate::integer_text::decimal_digit(ch)?;
+            width = width.saturating_mul(10).saturating_add(usize::from(digit));
+            count += 1;
+        }
+    }
+    // Beyond the minimum threshold, CPython's decimal conversion guard can
+    // reject a width even when it consists almost entirely of leading zeroes.
+    if count > 640 {
+        let limit = std::env::var("PYTHONINTMAXSTRDIGITS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(4300);
+        if limit != 0 && count > limit {
+            return None;
+        }
+    }
+    (width > 0).then_some(width)
+}
+
 pub(super) fn width() -> usize {
     let columns = std::env::var("COLUMNS")
         .ok()
-        .and_then(|value| value.parse().ok())
-        .filter(|&value| value > 0)
+        .and_then(|value| positive_columns(&value))
         .or_else(|| {
             let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
             // SAFETY: ioctl writes a winsize to this buffer only on success.
