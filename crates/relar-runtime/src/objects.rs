@@ -15,6 +15,7 @@ mod deferred_diff;
 mod difflib;
 pub(crate) mod exceptions;
 mod files;
+pub(crate) use files::errno_error;
 mod json;
 mod logging;
 mod mappings;
