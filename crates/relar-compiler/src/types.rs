@@ -63,6 +63,7 @@ impl Types {
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
+            | Type::ExitCode
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::BinaryIO

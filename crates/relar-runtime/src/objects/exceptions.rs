@@ -9,6 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
 use std::rc::Rc;
 
+use num_traits::ToPrimitive;
 use ruff_python_literal::escape::{Escape, UnicodeEscape};
 
 use super::words::{OwnedWord, WordKind};
@@ -184,6 +185,7 @@ pub(super) struct Exception {
 enum Payload {
     Message(Rc<Str>),
     Key(OwnedWord),
+    Exit(Option<OwnedWord>),
     Process(Box<super::processes::ProcessError>),
     Timeout(Box<super::processes::TimeoutError>),
 }
@@ -217,6 +219,16 @@ pub(crate) struct Error {
 }
 
 impl Error {
+    pub(super) fn exit_status(status: i32) -> Self {
+        let word = crate::Int::small(i64::from(status)).unwrap().into_raw();
+        // SAFETY: the tagged integer transfers its owned word to the exception.
+        let code = unsafe { OwnedWord::from_owned(word, WordKind::new(2)) };
+        Self {
+            kind: Kind::SystemExit,
+            payload: Payload::Exit(Some(code)),
+        }
+    }
+
     pub(crate) fn new(kind: Kind, message: impl Into<Str>) -> Self {
         Self {
             kind,
@@ -399,6 +411,7 @@ impl Storage {
 
     fn exception_message(&self) -> Rc<Str> {
         match &self.exception().payload {
+            Payload::Exit(code) => exit_text(code.as_ref(), ""),
             Payload::Message(message) => Rc::clone(message),
             Payload::Process(process) => Rc::new(process.message()),
             Payload::Timeout(timeout) => Rc::new(timeout.message()),
@@ -414,6 +427,139 @@ impl Storage {
             }
         }
     }
+}
+
+fn exit_text(code: Option<&OwnedWord>, missing: &str) -> Rc<Str> {
+    let Some(code) = code else {
+        return Rc::new(Str::new(missing));
+    };
+    if code.kind == WordKind::new(3) {
+        // SAFETY: the exit payload roots this string.
+        return unsafe { acquire_rc(code.word) };
+    }
+    let mut text = String::new();
+    // SAFETY: the payload owns a scalar with this exact word kind.
+    unsafe { super::values::write_repr(&mut text, code.word, code.kind) };
+    Rc::new(Str::from(text))
+}
+
+/// Construct SystemExit with its original code. Kind 4 denotes an omitted
+/// argument; 0, 1, 2 and 3 represent None, bool, int and str respectively.
+///
+/// # Safety
+/// The caller roots the scalar or immutable string described by `kind`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_system_exit_new(kind: u32, word: usize) -> *const Object {
+    let code = (kind != 4).then(|| {
+        // SAFETY: the caller roots the argument through this acquisition.
+        unsafe { WordKind::new(kind).acquire(word) }
+    });
+    Rc::into_raw(new_exception(Kind::SystemExit, Payload::Exit(code)))
+}
+
+/// Acquire an immutable view of the heterogeneous `SystemExit.code` scalar.
+///
+/// # Safety
+/// `value` is a rooted builtin exception.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_system_exit_code(value: *const Object) -> *const Object {
+    // SAFETY: the caller roots the immutable exception.
+    let kind = unsafe { (*value).0.with(|s| s.exception().kind) };
+    if kind != Kind::SystemExit {
+        return Error::new(
+            Kind::AttributeError,
+            format!("'{}' object has no attribute 'code'", kind.name()),
+        )
+        .returning(std::ptr::null());
+    }
+    // SAFETY: the returned owner keeps the original exception and code alive.
+    Rc::into_raw(unsafe { acquire_rc(value as usize) })
+}
+
+unsafe fn exit_word(value: *const Object) -> (WordKind, usize) {
+    // SAFETY: a code view keeps its immutable typed exit payload alive.
+    unsafe {
+        (*value).0.with(|s| match &s.exception().payload {
+            Payload::Exit(Some(code)) => (code.kind, code.word),
+            Payload::Exit(None) => (WordKind::new(0), 0),
+            _ => unreachable!("checked SystemExit code view"),
+        })
+    }
+}
+
+/// Identify the scalar type for an isinstance check on the original code.
+///
+/// # Safety
+/// The caller roots a code view from `relar_system_exit_code`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_system_exit_code_kind(value: *const Object) -> u32 {
+    // SAFETY: the code view roots its typed payload.
+    unsafe { exit_word(value).0.raw() }
+}
+
+/// Render an exit code as a Python value, including None for a missing argument.
+///
+/// # Safety
+/// `value` is a rooted code view returned by `relar_system_exit_code`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_system_exit_code_text(value: *const Object) -> *const Str {
+    // SAFETY: the caller roots the immutable exit payload.
+    unsafe {
+        (*value).0.with(|s| {
+            let Payload::Exit(code) = &s.exception().payload else {
+                unreachable!()
+            };
+            Rc::into_raw(exit_text(code.as_ref(), "None"))
+        })
+    }
+}
+
+/// Compare the original exit code against a scalar or a second code view.
+///
+/// # Safety
+/// `value` is a rooted code view. `word` is rooted with kind 0 (None), 1
+/// (bool), 2 (int), 3 (str), or 5 (another code view).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_system_exit_code_equal(
+    value: *const Object,
+    kind: u32,
+    word: usize,
+) -> u32 {
+    fn numeric(kind: WordKind, word: usize) -> (WordKind, usize) {
+        if kind == WordKind::new(1) {
+            (WordKind::new(2), (word << 1) | 1)
+        } else {
+            (kind, word)
+        }
+    }
+    // SAFETY: both code views and all inferred scalar arguments remain rooted.
+    let ((left_kind, left), (right_kind, right)) = unsafe {
+        let (k, w) = exit_word(value);
+        let (j, v) = if kind == 5 {
+            exit_word(word as *const Object)
+        } else {
+            (WordKind::new(kind), word)
+        };
+        (numeric(k, w), numeric(j, v))
+    };
+    // SAFETY: matching immutable scalar kinds describe both words.
+    u32::from(left_kind == right_kind && unsafe { super::values::equal(left, right, left_kind) })
+}
+
+/// # Safety
+/// `value` is a rooted immutable exit code.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_system_exit_code_truth(value: *const Object) -> u32 {
+    // SAFETY: the code view roots the scalar described by the stored word kind.
+    let (kind, word) = unsafe { exit_word(value) };
+    u32::from(match kind.raw() {
+        0 => false,
+        1 => word != 0,
+        2 => word != 1, // tagged zero
+        // SAFETY: the immutable exit code owns this string.
+        3 => !unsafe { &*(word as *const Str) }.is_empty(),
+        _ => unreachable!(),
+    })
 }
 
 /// Acquires one sealed process-error field: cmd, returncode, stdout, or stderr;
@@ -661,6 +807,34 @@ pub extern "C" fn relar_error_unhandled() -> i32 {
     let Some(pending) = pending else {
         return 0;
     };
+    // SAFETY: pending roots its immutable exception payload through this visit.
+    let exit = unsafe {
+        pending.0.with(|storage| {
+            let Payload::Exit(code) = &storage.exception().payload else {
+                return None;
+            };
+            let (status, message) = match code {
+                None => (0, None),
+                Some(code) if code.kind == WordKind::new(0) => (0, None),
+                Some(code) if code.kind == WordKind::new(1) => (code.word as i32, None),
+                Some(code) if code.kind == WordKind::new(2) => {
+                    // CPython converts through signed long long, using -1 on overflow.
+                    let integer = crate::Int::borrow(code.word);
+                    (integer.big().to_i64().unwrap_or(-1) as i32, None)
+                }
+                Some(code) => (1, Some(exit_text(Some(code), ""))),
+            };
+            Some((status, message))
+        })
+    };
+    if let Some((status, message)) = exit {
+        let _ = crate::flush_stdout();
+        let _ = crate::sys::flush_stderr();
+        if let Some(text) = message {
+            let _ = writeln!(io::stderr().lock(), "{text}");
+        }
+        return status;
+    }
     let mut chain = Vec::new();
     let mut current = Some(pending.clone());
     while let Some(exception) = current {
@@ -675,17 +849,12 @@ pub extern "C" fn relar_error_unhandled() -> i32 {
                 )
             })
         };
-        if chain.is_empty() && kind == Kind::SystemExit {
-            // The sealed argparse exit action supplies its scalar status. The
-            // generated error edge has already run finally, with, and cleanup.
-            let _ = crate::flush_stdout();
-            return message.parse().expect("argparse exit status");
-        }
         chain.push((kind, message));
         current = cause;
     }
     drop(pending);
     let _ = crate::flush_stdout();
+    let _ = crate::sys::flush_stderr();
     let mut stderr = io::stderr().lock();
     for (index, (kind, message)) in chain.into_iter().rev().enumerate() {
         if index != 0 {

@@ -37,6 +37,7 @@ mod sequences;
 mod sign_parameters;
 mod sorted_rows;
 mod stdlib;
+mod sys;
 mod text;
 mod truthiness;
 mod unions;
@@ -2575,6 +2576,11 @@ impl<'a> Checker<'a> {
             }
             ast::Stmt::Expr(expression) => {
                 if let ast::Expr::Call(call) = &*expression.value
+                    && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::SysExit))
+                {
+                    return Ok((vec![Statement::Expr(self.call(call)?)], false));
+                }
+                if let ast::Expr::Call(call) = &*expression.value
                     && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::AssertNever))
                 {
                     return Ok((vec![self.assert_never(call, false)?], false));
@@ -2819,6 +2825,15 @@ impl<'a> Checker<'a> {
     /// Class-form raises construct a new instance, just like an explicit call.
     fn raised_exception(&mut self, value: &ast::Expr) -> Result<Expr, String> {
         if let Some(kind) = self.exception_category(value) {
+            if kind == 32 {
+                return Ok(Expr {
+                    ty: Type::Exception,
+                    kind: ExprKind::Builtin(
+                        Builtin::SystemExitNew { omit_none: false },
+                        Vec::new(),
+                    ),
+                });
+            }
             if matches!(kind, 0 | 18 | 25..=32) {
                 return Err(error(
                     self.source,
@@ -3257,6 +3272,12 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
             });
         }
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::SysPlatform)) {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::SysPlatform, Vec::new()),
+            });
+        }
         let (ty, kind) = match expression {
             ast::Expr::NumberLiteral(value) => match &value.value {
                 ast::Number::Int(value) => (Type::Int, ExprKind::Int(value.to_string())),
@@ -3545,6 +3566,40 @@ impl<'a> Checker<'a> {
                         compare.ops[0] == ast::CmpOp::NotEq,
                     ));
                 }
+                if values.iter().any(|value| value.ty == Type::ExitCode) {
+                    if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
+                        || !values.iter().all(|v| {
+                            matches!(
+                                v.ty,
+                                Type::None
+                                    | Type::Bool
+                                    | Type::Int
+                                    | Type::Str
+                                    | Type::StrLiteral(_)
+                                    | Type::ExitCode
+                            )
+                        })
+                    {
+                        return Err(error(
+                            self.source,
+                            expression,
+                            "exit codes support equality with None, bool, int, or str",
+                        ));
+                    }
+                    let reversed = values[0].ty != Type::ExitCode;
+                    let eq = Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Builtin(Builtin::SystemExitCodeEqual { reversed }, values),
+                    };
+                    return Ok(if compare.ops[0] == ast::CmpOp::NotEq {
+                        Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Not(Box::new(eq)),
+                        }
+                    } else {
+                        eq
+                    });
+                }
                 // Python StrEnum compares by its underlying str value, even
                 // against raw str or a member of another enum. A same-class
                 // equality chain can keep canonical native tags throughout.
@@ -3749,6 +3804,7 @@ impl<'a> Checker<'a> {
                         return Ok(value);
                     }
                     let (ty, builtin) = match attribute.attr.as_str() {
+                        "code" => (Type::ExitCode, Builtin::SystemExitCode),
                         "__cause__" => (
                             self.types.optional(Type::Exception),
                             Builtin::ExceptionCause,
@@ -3864,6 +3920,9 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        if let Some(value) = self.sys_call(call)? {
+            return Ok(value);
+        }
         if let Some(expression) = self.parse_args(call)? {
             return Ok(expression);
         }
@@ -4073,6 +4132,9 @@ impl<'a> Checker<'a> {
         }
         if let Some(kind) = self.exception_category(&call.func) {
             self.reject_builtin_keywords(call)?;
+            if kind == 32 {
+                return self.system_exit(call, false);
+            }
             if matches!(kind, 0 | 18 | 25..=32) {
                 return Err(error(
                     self.source,
@@ -4480,6 +4542,23 @@ impl<'a> Checker<'a> {
                     }),
                     clear: slots,
                 },
+            });
+        }
+        if matches!(name.id.as_str(), "str" | "print")
+            && args.len() == 1
+            && args[0].ty == Type::ExitCode
+        {
+            let text = Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::Str, args),
+            };
+            return Ok(if name.id == "str" {
+                text
+            } else {
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::Print, vec![text]),
+                }
             });
         }
         if name.id == "print"

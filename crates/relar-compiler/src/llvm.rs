@@ -56,6 +56,7 @@ impl Type {
             | Self::Iterator
             | Self::ByteOutput
             | Self::Exception
+            | Self::ExitCode
             | Self::TimeoutExpired
             | Self::Path
             | Self::CompletedProcess
@@ -87,6 +88,7 @@ impl Type {
             | Self::Iterator
             | Self::ByteOutput
             | Self::Exception
+            | Self::ExitCode
             | Self::TimeoutExpired
             | Self::Path
             | Self::CompletedProcess
@@ -578,6 +580,7 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
+            | Type::ExitCode
             | Type::TimeoutExpired
             | Type::Path
             | Type::TextIO
@@ -3016,6 +3019,7 @@ impl Emitter<'_, '_> {
             | Type::None
             | Type::Class(_)
             | Type::Exception
+            | Type::ExitCode
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::CompletedProcess
@@ -3439,6 +3443,66 @@ impl Emitter<'_, '_> {
             Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("relar_input", Type::Str, &[]),
             Builtin::SysArgv => self.call("relar_sys_argv", returns, &[]),
+            Builtin::SysPlatform => self.call("relar_sys_platform", returns, &[]),
+            Builtin::SysStreamWrite { stderr } => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call i64 @relar_sys_stream_write(i32 {}, ptr {})",
+                    u32::from(*stderr),
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::SysStreamFlush { stderr } => {
+                self.checked_line(format!(
+                    "call void @relar_sys_stream_flush(i32 {})",
+                    u32::from(*stderr)
+                ));
+                none()
+            }
+            Builtin::SystemExitNew { omit_none } => {
+                let (kind, word) = args
+                    .first()
+                    .filter(|arg| !omit_none || arg.value.ty != Type::None)
+                    .map_or((4, "0".to_owned()), |arg| {
+                        (
+                            representation_kind(arg.value.ty, &self.module.types),
+                            self.word(&arg.value),
+                        )
+                    });
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_system_exit_new(i32 {kind}, i64 {word})"
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::SystemExitCode => {
+                self.call("relar_system_exit_code", returns, &[&args[0].value])
+            }
+            Builtin::SystemExitCodeEqual { reversed } => {
+                let i = usize::from(*reversed);
+                let other = &args[1 - i].value;
+                let kind = representation_kind(other.ty, &self.module.types);
+                let word = self.word(other);
+                let bit = self.instruction(format!(
+                    "call i32 @relar_system_exit_code_equal(ptr {}, i32 {kind}, i64 {word})",
+                    args[i].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::SysExit => {
+                self.checked_line(format!(
+                    "call void @relar_error_set(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
             Builtin::ParseArgs => {
                 let Type::Class(class) = returns else {
                     unreachable!()
@@ -3604,6 +3668,9 @@ impl Emitter<'_, '_> {
                     }
                 }
                 Type::None => self.call("relar_none_str", Type::Str, &[]),
+                Type::ExitCode => {
+                    self.call("relar_system_exit_code_text", Type::Str, &[&args[0].value])
+                }
                 Type::Exception | Type::TimeoutExpired => {
                     self.call("relar_exception_message", Type::Str, &[&args[0].value])
                 }
@@ -4035,6 +4102,13 @@ impl Emitter<'_, '_> {
                         self.instruction(format!("icmp eq i64 {}, 0", args[0].value.operand))
                     }
                     Type::None => "true".to_owned(),
+                    Type::ExitCode => {
+                        let bit = self.instruction(format!(
+                            "call i32 @relar_system_exit_code_equal(ptr {}, i32 0, i64 0)",
+                            args[0].value.operand
+                        ));
+                        self.instruction(format!("icmp ne i32 {bit}, 0"))
+                    }
                     _ => "false".to_owned(),
                 },
                 small_integer: false,
@@ -4072,6 +4146,7 @@ impl Emitter<'_, '_> {
                     | Type::Iterator
                     | Type::ByteOutput
                     | Type::Exception
+                    | Type::ExitCode
                     | Type::TimeoutExpired
                     | Type::Path
                     | Type::TextIO
@@ -4267,6 +4342,7 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
+            | Type::ExitCode
             | Type::TimeoutExpired
             | Type::Path
             | Type::TextIO
@@ -4307,6 +4383,7 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
+            | Type::ExitCode
             | Type::TimeoutExpired
             | Type::Path
             | Type::TextIO
@@ -4838,6 +4915,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Iterator
         | Type::ByteOutput
         | Type::Exception
+        | Type::ExitCode
         | Type::TimeoutExpired
         | Type::Path
         | Type::TextIO
@@ -5189,6 +5267,15 @@ declare i32 @relar_text_closed(ptr)
 declare void @relar_args_init(i32, ptr)
 declare ptr @relar_argparse_parse(ptr, ptr, ptr, ptr)
 declare ptr @relar_sys_argv()
+declare ptr @relar_sys_platform()
+declare i64 @relar_sys_stream_write(i32, ptr)
+declare void @relar_sys_stream_flush(i32)
+declare ptr @relar_system_exit_new(i32, i64)
+declare ptr @relar_system_exit_code(ptr)
+declare i32 @relar_system_exit_code_kind(ptr)
+declare ptr @relar_system_exit_code_text(ptr)
+declare i32 @relar_system_exit_code_equal(ptr, i32, i64)
+declare i32 @relar_system_exit_code_truth(ptr)
 declare void @relar_args_clear()
 declare void @relar_int_retain(i64)
 declare void @relar_int_release(i64)

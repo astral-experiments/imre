@@ -204,6 +204,13 @@ impl Builtin {
             | Self::Print
             | Self::SortRestore
             | Self::StderrLine
+            | Self::SysStreamWrite { .. }
+            | Self::SysStreamFlush { .. }
+            | Self::SysExit
+            | Self::SystemExitNew { .. }
+            | Self::SystemExitCode
+            | Self::SystemExitCodeEqual { .. }
+            | Self::SysPlatform
             | Self::SysArgv
             | Self::TextClose
             | Self::TextEnter
