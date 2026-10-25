@@ -7,3 +7,5 @@ Compared with the [prior canonical report](../03c8d84fa4c1/), only [deque’s co
 Run [measure.py](../../measure.py) with CPython 3.14.5, `--compiler-revision e328ca39a14d8f0243f0b50b106a17d32b1e0a2f`, explicit `--imre`, `--runtime`, and a fresh `--output` directory. To compare the seven older cases, also pass `--compare benchmarks/cpython_stdlib/full/collections/runs/519c9003a144/verified-defaults.json`. All eight suites and both optimization levels are included once. The [separate dict.fromkeys method](../../fromkeys/runs/e328ca39a14d/) remains blocked.
 
 The [sealed doctest rerun](sealed-doctests.json) matches all 65 examples during discovery; executing the actual cases remains blocked. The [integer math.prod fixture](math-product.json) matches CPython in all four modes.
+
+The [published table receipt](verified-support-table.json) identifies the resolved binary and page digest. All [eight controls and 32 native executions](../d72d067c6ebc/verified-defaults.json) passed again after integrating the intervening canonical compiler changes.
