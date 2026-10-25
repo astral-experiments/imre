@@ -18,12 +18,16 @@ from suite_evidence import ROLES, roles
 from suite_native import Toolchain, method_bytes, native_method, run_in_fixtures, testcase_fixture
 
 
-# These four bodies each make one unconditional call with an explicit list or
-# tuple. Recheck any further successful body before assigning its operation.
-PARSE_METHODS = {
-    f"test.test_argparse.TestParseKnownArgs.test_arguments_{sequence}{suffix}"
+# Only assign a native operation after inspecting the complete, unchanged body.
+# The four parse calls have no explicit assertion. The registration test checks
+# both the exception type and its complete message.
+OPERATIONS = {
+    f"test.test_argparse.TestParseKnownArgs.test_arguments_{sequence}{suffix}":
+        ("argparse.ArgumentParser.parse_args", "none")
     for sequence in ("list", "tuple") for suffix in ("", "_positional")
 }
+OPERATIONS["test.test_argparse.TestBooleanOptionalAction.test_invalid_name"] = (
+    "argparse.ArgumentParser.add_argument", "imre")
 
 
 class Fixtures:
@@ -113,11 +117,11 @@ def measure(level, toolchain, manifest, reference, source, observations=None):
                     continue
                 folder = work / case._testMethodName
                 folder.mkdir()
+                operation, assertions = OPERATIONS.get(name, (None, "imre"))
                 try:
                     executions[name] = native_method(
                         toolchain, folder, source, owner, name, fixture,
-                        operation=("imre", "argparse.ArgumentParser.parse_args") if name in PARSE_METHODS else None,
-                        assertions="none" if name in PARSE_METHODS else "imre")
+                        operation=("imre", operation) if operation else None, assertions=assertions)
                 except RuntimeError as exc:
                     diagnostic = str(exc).replace(str(folder), "<work>").strip()
                     status = "blocked" if "<work>/case.py:" in diagnostic and "Imre:" in diagnostic else "failed"
@@ -129,11 +133,11 @@ def measure(level, toolchain, manifest, reference, source, observations=None):
             for name, entries in evidence.items():
                 if entries:
                     entry, = entries
-                    if name in PARSE_METHODS:
+                    if name in OPERATIONS:
                         if observations is not None:
                             observations[name] = {"outcome": "pass", **entry["observation"]}
                         results[name] = ["native-body-host-fixture", entry["method_sha256"],
-                                         "argparse.ArgumentParser.parse_args"]
+                                         OPERATIONS[name][0]]
                     else:
                         results[name] = ["blocked", "native body completed; tested argparse operation needs verification"]
             for name, reason in skips:

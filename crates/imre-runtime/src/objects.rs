@@ -11,6 +11,7 @@ mod argparse;
 mod args;
 mod asyncio;
 mod boxed_values;
+mod builtins;
 mod bytes;
 mod calendar;
 mod contexts;

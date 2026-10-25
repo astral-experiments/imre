@@ -356,6 +356,20 @@ pub(crate) enum JsonDefault {
 }
 
 impl Module {
+    /// Only programs that can own a display value need to clear the namespace at shutdown.
+    pub(crate) fn uses_builtins_last(&self) -> bool {
+        let mut used = false;
+        for function in self.functions.iter().chain([&self.entry]) {
+            walk_expressions(&function.body, &mut |value| {
+                used |= matches!(
+                    value.kind,
+                    ExprKind::Builtin(Builtin::BuiltinsSetLast | Builtin::SysDisplayHook, _)
+                );
+            });
+        }
+        used
+    }
+
     /// Capture arguments, the original invocation, and source search paths only
     /// for modules that use them; a bare import needs no runtime state.
     pub(crate) fn startup_usage(&self) -> (bool, bool, bool) {
@@ -622,6 +636,11 @@ pub(crate) enum Builtin {
     Islice,
     Tee,
     Cycle,
+    SysDisplayHook,
+    BuiltinsLast,
+    BuiltinsHasLast,
+    BuiltinsSetLast,
+    BuiltinsDeleteLast,
     DirectoryContextView,
     TextStreamView,
     Document(DocumentOp),
