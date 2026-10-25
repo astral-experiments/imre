@@ -50,6 +50,19 @@ use num_traits::ToPrimitive;
 use std::rc::Rc;
 use words::{OwnedWord, Words};
 
+// All C ints fit in the immediate representation. Heap integers cannot fit.
+fn c_int(word: usize) -> exceptions::Result<libc::c_int> {
+    (word & 1 != 0)
+        .then_some((word as i64) >> 1)
+        .and_then(|n| libc::c_int::try_from(n).ok())
+        .ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "Python int too large to convert to C int",
+            )
+        })
+}
+
 /// An opaque allocation for runtime-managed containers and resource state.
 #[repr(transparent)]
 pub struct Object(StorageCell<Storage>);
