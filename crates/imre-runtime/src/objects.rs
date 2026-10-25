@@ -1118,16 +1118,12 @@ pub unsafe extern "C" fn imre_str_splitlines_iter(value: *const Str) -> *const O
 /// `value` must be rooted. Returns an owned string sequence or null on error.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_splitlines(value: *const Str) -> *const Object {
-    // SAFETY: the caller roots the immutable string throughout the split.
-    let value = unsafe { std::mem::ManuallyDrop::new(Rc::from_raw(value)) };
-    finish(
-        split_lines(&value, |range| owned_line(&value, range)),
-        std::ptr::null(),
-    )
+    // SAFETY: the receiver stays rooted through the default collector.
+    unsafe { split_string_lines::<false>(value) }
 }
 
-/// Valid UTF-8 lines use the same offsets as the no-argument and fused paths.
-/// Evaluate the source-language flag before entering either collector.
+/// Splits at the same boundaries as the no-argument and fused paths. The
+/// caller truth-tests the flag before entering the collector.
 ///
 /// # Safety
 /// The immutable receiver stays rooted throughout the call.
@@ -1136,30 +1132,48 @@ pub unsafe extern "C" fn imre_str_splitlines_options(
     value: *const Str,
     keep: u32,
 ) -> *const Object {
-    if keep == 0 {
-        // SAFETY: this is the existing splitter on the same rooted handle.
-        return unsafe { imre_str_splitlines(value) };
+    // SAFETY: both paths use the same rooted source and return a fresh list.
+    unsafe {
+        if keep == 0 {
+            imre_str_splitlines(value)
+        } else {
+            split_string_lines::<true>(value)
+        }
     }
-    // SAFETY: temporarily view the caller’s rooted owner without taking it.
+}
+
+unsafe fn split_string_lines<const KEEP: bool>(value: *const Str) -> *const Object {
+    // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { std::mem::ManuallyDrop::new(Rc::from_raw(value)) };
     finish(
-        collect_lines(&value, true, |range| owned_line(&value, range)),
+        split_lines(
+            LineRanges {
+                text: &value,
+                keep: KEEP,
+            },
+            |range| owned_line(&value, range),
+        ),
         std::ptr::null(),
     )
 }
 
-fn split_lines(
-    value: &str,
-    own: impl Fn(std::ops::Range<usize>) -> Rc<Str>,
-) -> Result<*const Object, Error> {
-    collect_lines(value, false, own)
+/// A plain string (including a bytes.decode() view) uses the default boundaries.
+struct LineRanges<'a> {
+    text: &'a str,
+    keep: bool,
 }
 
-fn collect_lines(
-    value: &str,
-    keep: bool,
+impl<'a> From<&'a str> for LineRanges<'a> {
+    fn from(text: &'a str) -> Self {
+        Self { text, keep: false }
+    }
+}
+
+fn split_lines<'a>(
+    source: impl Into<LineRanges<'a>>,
     own: impl Fn(std::ops::Range<usize>) -> Rc<Str>,
 ) -> Result<*const Object, Error> {
+    let LineRanges { text: value, keep } = source.into();
     let mut offsets = LineOffsets::new(value);
     let mut result = Words::new(3);
     while let Some(mut range) = offsets.next(value) {
