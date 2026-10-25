@@ -1,0 +1,41 @@
+name: 'Compare #869 with original StringIO consumers'
+on:
+  push:
+    branches: [codex/stringio-869-fixture-test]
+permissions:
+  contents: read
+jobs:
+  fixture-audit:
+    runs-on: github-ubuntu-24.04-x86_64-4
+    timeout-minutes: 30
+    env:
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: 'Verify that the tested compiler and runtime are exactly the published #869 head'
+        run: |
+          test "$(git rev-parse HEAD^)" = 9ebd30160ad9c29cb9873ad932bccb1706badb3f
+          git diff --exit-code HEAD^ HEAD -- crates Cargo.toml Cargo.lock
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.14.5'
+      - name: Install Clang 18
+        run: sudo apt-get update && sudo apt-get install -y clang-18
+      - name: Build the existing logging PR compiler and runtime
+        run: cargo build --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: python/cpython
+          ref: 5607950ef232dad16d75c0cf53101d9649d89115
+          path: .cpython-stdlib-reference
+          sparse-checkout: Lib
+          persist-credentials: false
+      - name: Record each untouched method, native operation, and ordinary failure separately at both optimization levels
+        run: |
+          python3 -B benchmarks/cpython_stdlib/full/doctest/stringio/compare_feature.py --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/stringio-869.json"
+      - name: Compare startup for the original CSV, JSON, and itertools files from both fixture sources
+        run: python3 -B benchmarks/cpython_stdlib/full/doctest/stringio/consumer_startup.py --imre target/debug/imre --cpython-git .cpython-stdlib-reference --result "$RUNNER_TEMP/stringio-869-startup.json"
