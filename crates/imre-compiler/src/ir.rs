@@ -25,6 +25,8 @@ pub(crate) enum Type {
     Class(usize),
     List(usize),
     Dict(usize),
+    /// A ChainMap owner, parameterized by the exact dictionary shape of its maps.
+    ChainMap(usize),
     Set(usize),
     Deque(usize),
     /// The immutable top-level string keys of a private TOML document.
@@ -178,6 +180,7 @@ impl std::fmt::Display for Type {
             Self::Cursor(id) => return write!(f, "iterator#{id}"),
             Self::List(id) => return write!(f, "list#{id}"),
             Self::Dict(id) => return write!(f, "dict#{id}"),
+            Self::ChainMap(id) => return write!(f, "ChainMap#{id}"),
             Self::Set(id) => return write!(f, "set#{id}"),
             Self::Deque(id) => return write!(f, "deque#{id}"),
             Self::Tuple(id) => return write!(f, "tuple#{id}"),
@@ -256,6 +259,7 @@ impl std::fmt::Display for Type {
             | Self::Cursor(_)
             | Self::List(_)
             | Self::Dict(_)
+            | Self::ChainMap(_)
             | Self::Set(_)
             | Self::Deque(_)
             | Self::Tuple(_)
@@ -291,6 +295,7 @@ pub(crate) struct ClassMetadata {
     pub enum_members: Vec<(String, String)>,
     /// A closed frozen layout whose generated constructor only stores its fields.
     pub frozen_initializer: Option<usize>,
+    pub value_struct: bool,
     pub dataclass_eq: bool,
     pub dataclass_repr: bool,
     pub toml_hash: bool,
@@ -325,6 +330,20 @@ pub(crate) enum JsonDefault {
 }
 
 impl Module {
+    /// Only programs that can own a display value need to clear the namespace at shutdown.
+    pub(crate) fn uses_builtins_last(&self) -> bool {
+        let mut used = false;
+        for function in self.functions.iter().chain([&self.entry]) {
+            walk_expressions(&function.body, &mut |value| {
+                used |= matches!(
+                    value.kind,
+                    ExprKind::Builtin(Builtin::BuiltinsSetLast | Builtin::SysDisplayHook, _)
+                );
+            });
+        }
+        used
+    }
+
     /// Capture arguments, the original invocation, and source search paths only
     /// for modules that use them; a bare import needs no runtime state.
     pub(crate) fn startup_usage(&self) -> (bool, bool, bool) {
@@ -591,6 +610,11 @@ pub(crate) enum Builtin {
     Islice,
     Tee,
     Cycle,
+    SysDisplayHook,
+    BuiltinsLast,
+    BuiltinsHasLast,
+    BuiltinsSetLast,
+    BuiltinsDeleteLast,
     DirectoryContextView,
     TextStreamView,
     Document(DocumentOp),
@@ -619,6 +643,7 @@ pub(crate) enum Builtin {
     ExceptionMatchesAny,
     LiteralStringView,
     StringListContains,
+    StructListContains,
     StringContains,
     /// Immutable byte subsequence; operands are evaluated needle first.
     BytesContains,
@@ -654,6 +679,9 @@ pub(crate) enum Builtin {
     SystemExitCodeEqual {
         reversed: bool,
     },
+    ExceptionFieldIdentity {
+        reversed: bool,
+    },
     /// Evaluates and roots all arguments, then raises the last (an exception).
     RaiseException,
     WallTime,
@@ -663,7 +691,7 @@ pub(crate) enum Builtin {
         invalid: u32,
     },
     WarningReset,
-    PercentScalar,
+    PercentFormat,
     Logging(LogOperation),
     Timed(TimedOperation),
     LogRecord(LogRecordOperation),
@@ -701,8 +729,18 @@ pub(crate) enum Builtin {
     ImportErrorReset,
     ImportErrorRejectReset,
     BoxValue,
+    ObjectRecordProject(usize),
+    ObjectRecordIdentity {
+        class: usize,
+        reversed: bool,
+    },
     MappingObjectGet,
     ExceptionTupleView,
+    ExceptionKeywordSuggestion,
+    /// A new, completely initialized record for a proven forwarding constructor.
+    ExceptionRecordFields,
+    /// Check the return type of __str__ or __repr__ before crossing the formatter ABI.
+    ExceptionFormatterResult(bool),
     ExceptionFieldRepr,
     ExceptionFieldLen,
     ExceptionFieldIndex,
@@ -710,6 +748,7 @@ pub(crate) enum Builtin {
     /// Python representation of a value with a fully known storage shape.
     Repr,
     Len,
+    LengthResult,
     Abs,
     /// Stable permutation of a fully typed list by precomputed scalar keys.
     SortByKeys,
@@ -730,6 +769,7 @@ pub(crate) enum Builtin {
         percent: bool,
         positive_sign: u8,
     },
+    TupleGet,
     ListGet,
     /// A live-length guard proves a private cursor or constant index is in
     /// bounds, with no intervening mutation or user code. Returns an owned
@@ -863,6 +903,9 @@ pub(crate) enum Builtin {
     },
     /// Retags a namespace after its immutable command field selects a child layout.
     RecordView,
+    FormatCursor {
+        split: bool,
+    },
     ExactRecord(usize),
     CsvReader {
         delimiter: char,
@@ -984,6 +1027,9 @@ pub(crate) enum Builtin {
         reverse: bool,
     },
     CounterNew,
+    ChainMapNew,
+    ChainMapMaps,
+    ChainMapSetMaps,
     CounterTotal,
     CounterMostCommon,
     CounterUpdate,
@@ -1125,6 +1171,7 @@ pub(crate) enum StrDescriptor {
     Strip,
     LStrip,
     RStrip,
+    IsAlnum,
 }
 impl StrDescriptor {
     pub(crate) fn named(name: &str) -> Option<Self> {
@@ -1133,6 +1180,7 @@ impl StrDescriptor {
             "strip" => Self::Strip,
             "lstrip" => Self::LStrip,
             "rstrip" => Self::RStrip,
+            "isalnum" => Self::IsAlnum,
             _ => return None,
         })
     }
@@ -1142,6 +1190,7 @@ impl StrDescriptor {
             Self::Strip => "strip",
             Self::LStrip => "lstrip",
             Self::RStrip => "rstrip",
+            Self::IsAlnum => "isalnum",
         }
     }
 }
@@ -1149,8 +1198,7 @@ impl StrDescriptor {
 /// Closed string operations preserve exact argument and storage types.
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
-    IsSpace,
-    IsUpper,
+    Predicate(TextPredicate),
     SplitLineEnds,
     ExpandTabs,
     Lower,
@@ -1168,6 +1216,13 @@ pub(crate) enum TextOperation {
     Dedent,
     ShlexSplit,
     ShlexQuote,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum TextPredicate {
+    Alnum,
+    Space,
+    Upper,
 }
 
 /// Numeric selectors for the runtime's imre_path_query ABI.
@@ -1348,6 +1403,7 @@ pub(crate) enum LogOperation {
     Get,
     HandlerRename,
     HandlerLookup,
+    PrintActiveException,
     AddLevel,
     LevelName,
     LevelForName,
@@ -1510,6 +1566,10 @@ pub(crate) enum ProcessOperation {
     EnvironGet,
     GetCwd,
     Fd(FdOperation),
+    Credential(&'static str),
+    CredentialId {
+        group: bool,
+    },
     OsErrorField(u32),
     Strerror,
     DescriptorConstant(&'static str),

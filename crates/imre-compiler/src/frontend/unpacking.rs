@@ -243,6 +243,19 @@ impl Checker<'_> {
                         vec![logging::number(mask), value],
                     )));
                 }
+                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
+                    if !sys::displayable(value.ty) {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "builtins._ requires a supported display value",
+                        ));
+                    }
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::BuiltinsSetLast, vec![value]),
+                    }));
+                }
                 let receiver = self.expr(&attribute.value)?;
                 if receiver.ty == Type::Logger && attribute.attr.as_str() == "propagate" {
                     let value = self.coerce(value, Type::Bool, target)?;
@@ -283,6 +296,15 @@ impl Checker<'_> {
                     return Ok(Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::ZipMinReadSize, vec![value, receiver]),
+                    }));
+                }
+                if let Type::ChainMap(id) = receiver.ty
+                    && attribute.attr.as_str() == "maps"
+                {
+                    let maps = self.coerce(value, self.types.list(Type::Dict(id)), target)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::ChainMapSetMaps, vec![maps, receiver]),
                     }));
                 }
                 if let Some(class) = self.writable_property(receiver.ty, attribute) {

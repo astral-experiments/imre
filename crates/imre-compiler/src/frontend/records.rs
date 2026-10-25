@@ -26,6 +26,17 @@ pub(super) fn executable_method(
 ) -> Result<ast::StmtFunctionDef, String> {
     let mut method = method.clone();
     method.decorator_list.clear();
+    if classes.definitions[context.class].forwarder.is_some()
+        && matches!(method.name.as_str(), "__str__" | "__repr__")
+        && method.returns.is_none()
+    {
+        method.returns = Some(Box::new(
+            ruff_python_parser::parse_expression("str")
+                .expect("static annotation")
+                .expr()
+                .clone(),
+        ));
+    }
     let origin = classes.definitions[context.class].method_origins[context.index].module;
     if iterator_result(&method, graph, origin) {
         let Some(ast::Stmt::Expr(stmt)) = method.body.last() else {
@@ -577,6 +588,20 @@ impl Checker<'_> {
         })
     }
 
+    /// Check a method at an immediate consumer after its receiver has been evaluated.
+    pub(super) fn iteration_method_call(
+        &mut self,
+        call: &ast::ExprCall,
+        method: &ast::ExprAttribute,
+        class: usize,
+        receiver: Expr,
+    ) -> Result<Expr, String> {
+        let previous = self.iterator_source.replace(call.range());
+        let result = self.class_method_call(call, method, class, Some(receiver));
+        self.iterator_source = previous;
+        result
+    }
+
     pub(super) fn record_generator(&self, context: MethodContext) -> bool {
         let record = &self.classes.declarations.definitions[context.class];
         iterator_result(
@@ -614,6 +639,15 @@ impl Checker<'_> {
                 ) && classes.definitions[context.class].initializer != Some(context.index)
             })
             .and(lexical_base);
+        self.exception_formatter = context.and_then(|ctx| {
+            let class = &self.classes.declarations.definitions[ctx.class];
+            class.forwarder.as_ref()?;
+            match class.methods[ctx.index].name.as_str() {
+                "__str__" => Some(false),
+                "__repr__" => Some(true),
+                _ => None,
+            }
+        });
         self.super_initializer = context.and_then(|context| {
             let record = &self.classes.declarations.definitions[context.class];
             if record.methods[context.index].name.as_str() != "__init__" {
@@ -877,7 +911,7 @@ impl Checker<'_> {
         self.direct_class_attribute(attribute, class, receiver, expected)
     }
 
-    fn direct_class_attribute(
+    pub(super) fn direct_class_attribute(
         &mut self,
         attribute: &ast::ExprAttribute,
         class: usize,
@@ -894,7 +928,7 @@ impl Checker<'_> {
         if attribute.attr.starts_with("__")
             && !matches!(
                 attribute.attr.as_str(),
-                "__str__" | "__post_init__" | "__copy__"
+                "__str__" | "__post_init__" | "__copy__" | "__fspath__"
             )
         {
             return Err(error(
@@ -974,6 +1008,13 @@ impl Checker<'_> {
                 "private native mock operations cannot be accessed directly",
             ));
         }
+        if attribute.attr.as_str() == "get"
+            && self.classes.declarations.definitions[class].mapping
+            && !self.classes.methods[class].contains_key("get")
+            && let Some(value) = &receiver
+        {
+            return self.mapping_get(call, value.clone());
+        }
         if call
             .arguments
             .keywords
@@ -989,8 +1030,13 @@ impl Checker<'_> {
         if attribute.attr.starts_with("__")
             && !matches!(
                 attribute.attr.as_str(),
-                "__str__" | "__post_init__" | "__copy__"
+                "__str__" | "__post_init__" | "__copy__" | "__fspath__"
             )
+            && !(self.classes.declarations.definitions[class].mapping
+                && matches!(
+                    attribute.attr.as_str(),
+                    "__getitem__" | "__len__" | "__contains__"
+                ))
         {
             return Err(error(
                 self.source,
@@ -1083,6 +1129,12 @@ impl Checker<'_> {
 
     pub(super) fn construct(&mut self, call: &ast::ExprCall, class: usize) -> Result<Expr, String> {
         if self.classes.declarations.definitions[class]
+            .forwarder
+            .is_some()
+        {
+            return self.forwarding_exception(call, class);
+        }
+        if self.classes.declarations.definitions[class]
             .enum_members
             .as_ref()
             .is_some_and(|members| members.plain)
@@ -1147,6 +1199,9 @@ impl Checker<'_> {
             .abstract_methods
             .is_empty()
         {
+            if self.classes.declarations.definitions[class].mapping {
+                return self.abstract_mapping_call(class, call);
+            }
             return Err(error(
                 self.source,
                 call,
@@ -1194,18 +1249,23 @@ impl Checker<'_> {
                 args,
             },
         });
+        Ok(self.wrap_exception_record(class, record))
+    }
+
+    /// Attach the concrete class and display methods after the complete constructor succeeds.
+    pub(super) fn wrap_exception_record(&mut self, class: usize, record: Expr) -> Expr {
         let decl = &self.classes.declarations.definitions[class];
         if let Some(&kind) = self.classes.declarations.exceptions.get(&decl.definition) {
             let text = self.classes.methods[class].get("__str__").map(|m| m.id);
             let repr = self.classes.methods[class].get("__repr__").map(|m| m.id);
             self.calls.extend(text);
             self.calls.extend(repr);
-            return Ok(Expr {
+            return Expr {
                 ty: Type::NamedException(class),
                 kind: ExprKind::Builtin(
                     Builtin::NamedException {
                         kind,
-                        message_field: decl.fields.len() - 1,
+                        message_field: decl.exception_argument_slot(),
                         tuple_args: self.exception_tuple_slot(class),
                         text,
                         repr,
@@ -1213,9 +1273,9 @@ impl Checker<'_> {
                     },
                     vec![record],
                 ),
-            });
+            };
         }
-        Ok(record)
+        record
     }
 
     /// Install the native message slot used by the exception's args and formatting.
@@ -1256,7 +1316,7 @@ impl Checker<'_> {
     }
 
     fn store_exception_arguments(&self, class: usize, value: Expr) -> Expr {
-        let field = self.classes.fields[class].len() - 1;
+        let field = self.classes.declarations.definitions[class].exception_argument_slot();
         Expr {
             ty: Type::None,
             kind: ExprKind::Scope {
@@ -1324,6 +1384,7 @@ impl Checker<'_> {
 
     pub(super) fn call_super_initializer(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         if let Some(class) = self.class
+            && !matches!(self.super_initializer, Some(BaseInitializer::Record(_)))
             && self
                 .classes
                 .declarations
