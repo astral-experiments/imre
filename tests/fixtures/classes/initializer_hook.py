@@ -29,6 +29,7 @@ class Derived(Owner):
 class Inherited(Owner):
     def initialize(self) -> None:
         self.items = value("inherited", 3)
+        print(self.items)
 
 
 def show(owner: Owner) -> None:

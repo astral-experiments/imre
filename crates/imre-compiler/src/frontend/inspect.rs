@@ -213,25 +213,77 @@ impl Checker<'_> {
         callable: Expr,
         method: ir::StrDescriptor,
     ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
         let Some((instance, tail)) = call.arguments.args.split_first() else {
-            return Err(error(
-                self.source,
-                call,
-                "the unbound str descriptor needs an explicit instance",
-            ));
+            self.graph
+                .checked_missing_argument(self.module, call.range());
+            let message = format!("unbound method str.{}() needs an argument", method.name());
+            return self.descriptor_call_error(call, method, vec![callable], &[], message);
         };
         let receiver = self.expr(instance)?;
         if !matches!(receiver.ty, Type::Str | Type::StrLiteral(_)) {
-            return Err(error(
-                self.source,
-                instance,
-                "the unbound str descriptor requires a string",
-            ));
+            let name = self.exact_argument_type_name(receiver.ty).ok_or_else(|| {
+                error(
+                    self.source,
+                    instance,
+                    "the unbound str descriptor needs an exact receiver type",
+                )
+            })?;
+            let name = &name[..name.floor_char_boundary(100)];
+            let message = format!(
+                "descriptor '{}' for 'str' objects doesn't apply to a '{name}' object",
+                method.name()
+            );
+            return self.descriptor_call_error(
+                call,
+                method,
+                vec![callable, receiver],
+                tail,
+                message,
+            );
         }
         let mut bound = call.clone();
         bound.arguments.args = tail.iter().cloned().collect();
-        let result = self.text_method(Self::string_value(receiver), method.name(), &bound)?;
+        let receiver = Self::string_value(receiver);
+        let result = match method {
+            ir::StrDescriptor::IsAlnum => {
+                self.splitlines_or_predicate(receiver, method.name(), &bound)?
+            }
+            _ => self.text_method(receiver, method.name(), &bound)?,
+        };
         Ok(evaluated(callable, result))
+    }
+
+    fn descriptor_call_error(
+        &mut self,
+        call: &ast::ExprCall,
+        method: ir::StrDescriptor,
+        mut values: Vec<Expr>,
+        tail: &[ast::Expr],
+        message: String,
+    ) -> Result<Expr, String> {
+        self.graph.checked_overload(self.module, call.range());
+        for arg in tail {
+            self.graph.checked_excess_argument(self.module, arg.range());
+            values.push(self.expr(arg)?);
+        }
+        for kw in &call.arguments.keywords {
+            if kw.arg.as_deref() == Some("self") {
+                self.graph
+                    .checked_positional_keyword(self.module, kw.range());
+            }
+            values.push(self.expr(&kw.value)?);
+        }
+        self.graph.checked_keywords(
+            self.module,
+            call.arguments.keywords.iter().map(Ranged::range),
+        );
+        let ty = if method == ir::StrDescriptor::IsAlnum {
+            Type::Bool
+        } else {
+            Type::Str
+        };
+        Ok(calls::type_error(ty, values, message))
     }
 
     pub(super) fn static_attribute(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
