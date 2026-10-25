@@ -1107,21 +1107,25 @@ fn resolve_binding(
 }
 
 const LOGGING_CLASSES: &str = "__imre_logging_classes__";
+const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
 
-/// Public logging classes can be compiled from Python alongside the module's
-/// native operations. Only local class definitions are exported from the bundle.
+/// Resolve the public definitions compiled from Python alongside sealed native operations.
 fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) -> Option<Binding> {
     module.symbol(name).or_else(|| {
-        if module != IntrinsicModule::Logging || name.starts_with('_') {
-            return None;
-        }
+        let implementation = match module {
+            IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
+            IntrinsicModule::Textwrap if name == "indent" => TEXTWRAP_FUNCTIONS,
+            _ => return None,
+        };
         let (id, source) = modules
             .iter()
             .enumerate()
-            .find(|(_, m)| m.bundled && m.name == LOGGING_CLASSES)?;
+            .find(|(_, m)| m.bundled && m.name == implementation)?;
         source.export(name).filter(|b| {
             matches!(b, Binding::Definition(d) if d.module == id &&
-                matches!(&source.parsed.syntax().body[d.statement], ast::Stmt::ClassDef(_)))
+                matches!((module, &source.parsed.syntax().body[d.statement]),
+                    (IntrinsicModule::Logging, ast::Stmt::ClassDef(_))
+                    | (IntrinsicModule::Textwrap, ast::Stmt::FunctionDef(_))))
         })
     })
 }
@@ -1671,23 +1675,32 @@ impl<'a> Loader<'a> {
         if module.is_some() {
             self.reject_stdlib_shadow(name)?;
         }
-        if name.split('.').next() == Some("logging")
-            && module.is_some()
-            && !self.by_name.contains_key(LOGGING_CLASSES)
+        let bundle = match (name.split('.').next(), module) {
+            (Some("logging"), Some(_)) => {
+                Some((LOGGING_CLASSES, include_str!("../stdlib/logging/classes.py")))
+            }
+            (_, Some(IntrinsicModule::Textwrap)) => Some((
+                TEXTWRAP_FUNCTIONS,
+                include_str!("../stdlib/textwrap/functions.py"),
+            )),
+            _ => None,
+        };
+        if let Some((implementation, source)) = bundle
+            && !self.by_name.contains_key(implementation)
         {
-            let path = self.root.join(format!("{LOGGING_CLASSES}.py"));
+            let path = self.root.join(format!("{implementation}.py"));
             if self.fs.exists(&path) {
                 return Err(format!(
-                    "standard-library shadowing is unsupported: {LOGGING_CLASSES:?}"
+                    "standard-library shadowing is unsupported: {implementation:?}"
                 ));
             }
             self.inputs.missing.push(path.clone());
             let id = self.add(
                 path.clone(),
                 path,
-                LOGGING_CLASSES.into(),
+                implementation.into(),
                 false,
-                include_str!("../stdlib/logging/classes.py"),
+                source,
             )?;
             self.modules[id].bundled = true;
             self.scan(id)?;
@@ -1742,6 +1755,9 @@ impl<'a> Loader<'a> {
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
         if name == LOGGING_CLASSES {
             return Err("the private logging implementation is not an importable module".into());
+        }
+        if name == TEXTWRAP_FUNCTIONS {
+            return Err("the private textwrap implementation is not an importable module".into());
         }
         if let Some(&id) = self.by_name.get(name) {
             if self.loading.contains(&id) {
