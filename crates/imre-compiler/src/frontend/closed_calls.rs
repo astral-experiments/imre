@@ -123,7 +123,7 @@ impl Checker<'_> {
                     ast::Expr::Name(name)
                         if let Some(&slot) = self.names.get(name.id.as_str())
                             && self.assigned.contains(&slot)
-                            && let Some(fields) = self.types.fields(self.locals[slot]) =>
+                            && let Some(fields) = self.types.fields(self.read_local(slot).ty) =>
                     {
                         args.extend((0..fields.len()).map(|i| project((*star.value).clone(), i)));
                         changed = true;

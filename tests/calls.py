@@ -27,6 +27,9 @@ POSITIONAL_ONLY = (
 CLASS = "class Item:\n    value: int\n    def __init__(self, value: int = 1) -> None:\n        self.value = value\n    def add(self, *, amount: int) -> int:\n        return self.value + amount\n"
 
 REJECTED = {
+    "unguarded_optional_unpack": FUNCTION + "def unchecked(row: tuple[int, int] | None) -> int:\n    return add(*row)\nprint(unchecked(None))\n",
+    "invalidated_optional_unpack": FUNCTION + "def overwritten(row: tuple[int, int] | None) -> int:\n    if row is None:\n        return 0\n    row = None\n    return add(*row)\nprint(overwritten((1, 2)))\n",
+
     "unexpected_keyword": FUNCTION + "print(add(first=1, unknown=2))\n",
     "duplicate_positional_keyword": FUNCTION + "print(add(1, first=2))\n",
     "duplicate_keyword": FUNCTION + "print(add(first=1, first=2))\n",
