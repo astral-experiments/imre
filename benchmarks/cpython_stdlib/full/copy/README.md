@@ -20,7 +20,11 @@ a test-enabled build of the pinned release:
 Six complete upstream methods execute at both O0 and O3: shallow copy of an
 integer, list, dict and set; deep copy of an integer and the empty tuple.
 Their 15 original assertions run in native executables. The [native report](native-linux.json)
-retains all 81 IDs. The other 75 have reference evidence only.
+retains all 81 IDs. Three additional methods copy an instance natively and run their original
+assertions on CPython. Two supply their byte-identical `__copy__` method;
+`test_copy_inst_vanilla` exercises the native default. These mixed fixtures
+transfer one typed integer field and check the native result class and distinct
+identity. The remaining 72 have reference evidence only.
 
 Separate differential fixtures exercise shared children, independent outer
 containers, Counter/defaultdict missing keys, a tuple pointing into the same
@@ -29,4 +33,4 @@ cycle and a tuple/list cycle directly, check that their back edges point to
 the copies, and explicitly break the cycles. The compiler still rejects cyclic
 heap types in Python source, so these runtime checks do not count the upstream
 reflexive-container tests as native. Caller-supplied memo dictionaries and
-custom copy/pickle protocols require separate support.
+custom deepcopy or pickle protocols require separate support.
