@@ -44,15 +44,48 @@ impl Checker<'_> {
             if !class.bases.contains(&case_base) {
                 continue;
             }
-            if class
+            let mut names: Vec<_> = class
                 .methods
                 .iter()
-                .any(|m| matches!(m.name.as_str(), "setUpClass" | "tearDownClass"))
+                .filter(|m| m.name.starts_with("test"))
+                .map(|m| m.name.to_string())
+                .collect();
+            if names.is_empty() && class.methods.iter().any(|m| m.name.as_str() == "runTest") {
+                names.push("runTest".into());
+            }
+            if names.is_empty() {
+                continue;
+            }
+            // These hooks change which callbacks run or how their results are
+            // reported. Reject them until the runner implements their contracts.
+            if class.methods.iter().any(|m| {
+                matches!(
+                    m.name.as_str(),
+                    "setUpClass"
+                        | "tearDownClass"
+                        | "run"
+                        | "__call__"
+                        | "doCleanups"
+                        | "doClassCleanups"
+                        | "shortDescription"
+                        | "defaultTestResult"
+                )
+            }) || !class.node.decorator_list.is_empty()
+                || class
+                    .methods
+                    .iter()
+                    .any(|m| m.name.starts_with("test") && !m.decorator_list.is_empty())
+                || class.static_bindings.keys().any(|k| {
+                    matches!(
+                        k.as_str(),
+                        "__unittest_skip__" | "__unittest_expecting_failure__" | "failureException"
+                    )
+                })
             {
                 return Err(error(
                     self.source,
                     call,
-                    "native unittest.main does not yet support class hooks",
+                    "native unittest.main does not yet support custom result hooks or decorated tests",
                 ));
             }
             if let Some(init) = class.initializer
@@ -64,15 +97,6 @@ impl Checker<'_> {
                     call,
                     "native unittest.main requires the inherited TestCase initializer",
                 ));
-            }
-            let mut names: Vec<_> = class
-                .methods
-                .iter()
-                .filter(|m| m.name.starts_with("test"))
-                .map(|m| m.name.to_string())
-                .collect();
-            if names.is_empty() && class.methods.iter().any(|m| m.name.as_str() == "runTest") {
-                names.push("runTest".into());
             }
             names.sort();
             for method in names {
@@ -121,10 +145,33 @@ impl Checker<'_> {
                 ty: Type::Str,
                 kind: ExprKind::Str(s),
             };
+            let method = class
+                .methods
+                .iter()
+                .find(|m| m.name.as_str() == name)
+                .unwrap();
+            let description = match method.body.first() {
+                Some(ast::Stmt::Expr(stmt)) => match stmt.value.as_ref() {
+                    ast::Expr::StringLiteral(doc) => doc
+                        .value
+                        .to_str()
+                        .trim()
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .trim(),
+                    _ => "",
+                },
+                _ => "",
+            };
+            let display = format!("{name} ({origin}.{}.{name})", class.name);
             let mut args = vec![
                 self.local(runner),
-                str_lit(format!("{origin}.{}", class.name)),
-                str_lit(name.clone()),
+                str_lit(if description.is_empty() {
+                    display
+                } else {
+                    format!("{display}\n{description}")
+                }),
             ];
             for method in ["setUp", name.as_str(), "tearDown"] {
                 let signature = self.classes.methods[id]

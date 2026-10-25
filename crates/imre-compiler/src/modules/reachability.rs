@@ -46,10 +46,11 @@ impl<'a> Visitor<'a> for References<'_> {
         {
             self.found.value_reads.insert(id);
         }
-        if let Some(Binding::Definition(id)) = self.graph.resolve_type(self.module, expr) {
-            if self.found.definitions.insert(id) && self.graph.is_unittest_main(id) {
-                self.found.root_unittest(self.graph, id.module);
-            }
+        if let Some(Binding::Definition(id)) = self.graph.resolve_type(self.module, expr)
+            && self.found.definitions.insert(id)
+            && self.graph.is_unittest_main(id)
+        {
+            self.found.root_unittest(self.graph, id.module);
         }
         if let ast::Expr::Attribute(attr) = expr {
             let name = attr.attr.to_string();
@@ -199,6 +200,12 @@ impl Reachable {
                                             | "setUpClass"
                                             | "tearDownClass"
                                             | "runTest"
+                                            | "run"
+                                            | "__call__"
+                                            | "doCleanups"
+                                            | "doClassCleanups"
+                                            | "shortDescription"
+                                            | "defaultTestResult"
                                     )
                                     || (source.bundled
                                         && class.name.as_str() == "_MainRunner"

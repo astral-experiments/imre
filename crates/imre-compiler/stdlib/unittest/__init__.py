@@ -159,22 +159,24 @@ def main() -> None:
 
 class _MainRunner:
     total: int
-    failures: int
-    errors: int
+    failures: list[str]
+    errors: list[str]
     skips: int
     failfast: bool
     verbose: int
     started: float
-    details: list[str]
+    current_name: str
+    name_pending: bool
 
     def __init__(self) -> None:
         self.total = 0
-        self.failures = 0
-        self.errors = 0
+        self.failures = []
+        self.errors = []
         self.skips = 0
         self.failfast = False
         self.verbose = 1
-        self.details = []
+        self.current_name = ""
+        self.name_pending = False
         self.started = time.time()
 
     def _start(self) -> None:
@@ -193,7 +195,10 @@ class _MainRunner:
         if self.verbose == 1:
             sys.stderr.write(short)
         elif self.verbose == 2:
+            if not self.name_pending:
+                sys.stderr.write(self.current_name + " ... ")
             print(long, file=sys.stderr)
+            self.name_pending = False
 
     def _phase(self, action: Callable[[], None], name: str) -> bool:
         try:
@@ -203,24 +208,27 @@ class _MainRunner:
             self._mark("s", "skipped " + repr(str(exc)))
             return False
         except AssertionError as exc:
-            self.failures += 1
-            self.details.append("FAIL: " + name + "\nAssertionError: " + str(exc))
+            self.failures.append("FAIL: " + name + "\nAssertionError: " + str(exc))
             self._mark("F", "FAIL")
             return False
+        except SystemExit as exc:
+            self.errors.append("ERROR: " + name + "\nSystemExit: " + str(exc))
+            self._mark("E", "ERROR")
+            return False
         except Exception as exc:
-            self.errors += 1
-            self.details.append("ERROR: " + name + "\n" + str(exc))
+            self.errors.append("ERROR: " + name + "\n" + str(exc))
             self._mark("E", "ERROR")
             return False
         return True
 
-    def _run(self, cls: str, method: str, setup: Callable[[], None],
+    def _run(self, name: str, setup: Callable[[], None],
              body: Callable[[], None], teardown: Callable[[], None]) -> None:
         if self.failfast and (self.errors or self.failures):
             return
         self.total += 1
-        name = method + " (" + cls + "." + method + ")"
         if self.verbose == 2:
+            self.current_name = name
+            self.name_pending = True
             sys.stderr.write(name + " ... ")
         if self._phase(setup, name):
             passed = self._phase(body, name)
@@ -231,7 +239,7 @@ class _MainRunner:
     def _finish(self) -> None:
         if self.verbose:
             print("", file=sys.stderr)
-        for detail in self.details:
+        for detail in self.errors + self.failures:
             print("======================================================================", file=sys.stderr)
             print(detail, file=sys.stderr)
         elapsed = time.time() - self.started
@@ -240,9 +248,9 @@ class _MainRunner:
         print(f"Ran {self.total} test{plural} in {elapsed:.3f}s\n", file=sys.stderr)
         parts: list[str] = []
         if self.failures:
-            parts.append("failures=" + str(self.failures))
+            parts.append("failures=" + str(len(self.failures)))
         if self.errors:
-            parts.append("errors=" + str(self.errors))
+            parts.append("errors=" + str(len(self.errors)))
         if self.skips:
             parts.append("skipped=" + str(self.skips))
         message = "FAILED" if self.failures or self.errors else "OK"
