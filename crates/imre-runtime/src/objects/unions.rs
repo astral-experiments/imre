@@ -1,5 +1,6 @@
 //! Closed unions use three alignment bits of their exact Rc payload.
 //! Zero is reserved for absent optionals and partially initialized storage.
+//! Words one and two represent the bool singletons; other nonzero words carry a member tag.
 
 use super::words::WordKind;
 use super::{Bytes, Int, Object, Str, object};
