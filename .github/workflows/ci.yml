@@ -275,6 +275,18 @@ jobs:
               done
               PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/evidence.py "${tools[@]}" --result "$results/evidence-linux.json"
               python3 -B benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/logging/reference-linux.json "$results/evidence-linux.json"
+              if [[ -f benchmarks/cpython_stdlib/full/logging/cache_values.py ]]; then
+                sample=benchmarks/cpython_stdlib/full/logging/cache_values.py
+                python3 -I -B "$sample" > "$results/cache-reference"
+                for opt in 0 3; do
+                  "$imre" build "$sample" --no-cache --opt-level "$opt" --runtime "$runtime" --clang /usr/bin/clang-18 -o "$RUNNER_TEMP/drain-cache"
+                  "$RUNNER_TEMP/drain-cache" > "$results/cache-O$opt"
+                  cmp "$results/cache-reference" "$results/cache-O$opt"
+                done
+                cp "$results/evidence-linux.json" benchmarks/cpython_stdlib/full/logging/evidence-linux.json
+                python3 -B benchmarks/cpython_stdlib/full/support_table.py --imre "$imre"
+                cp docs/stdlib.md "$results/stdlib.md"
+              fi
               ;;
             properties)
               python3 -B tests/classes.py "${ordinary[@]}"
@@ -302,7 +314,11 @@ jobs:
           python3 - <<'PYTHON'
           import base64, gzip, hashlib, os, textwrap
           from pathlib import Path
-          data = (Path(os.environ['RUNNER_TEMP']) / 'logging-results/evidence-linux.json').read_bytes()
+          path = Path(os.environ['RUNNER_TEMP']) / 'logging-results/evidence-linux.json'
+          if not path.is_file():
+              print('No ledger was generated before the earlier failure.')
+              raise SystemExit(0)
+          data = path.read_bytes()
           print('LOGGING-JSON-SHA256:', hashlib.sha256(data).hexdigest())
           encoded = base64.b64encode(gzip.compress(data, mtime=0)).decode('ascii')
           for part in textwrap.wrap(encoded, 2000):
