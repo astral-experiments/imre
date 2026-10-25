@@ -9,6 +9,8 @@ pub(crate) enum Type {
     Bool,
     /// A builtin class object. Its name is interned; the handle is never a Python string.
     BuiltinClass,
+    /// An immutable annotation reference with a known layout for its owner.
+    ForwardRef(usize),
     Str,
     /// A closed domain of strings with ordinary string storage and ownership.
     StrLiteral(usize),
@@ -24,6 +26,7 @@ pub(crate) enum Type {
     List(usize),
     Dict(usize),
     Set(usize),
+    Deque(usize),
     /// The immutable top-level string keys of a private TOML document.
     StringKeys,
     Tuple(usize),
@@ -88,6 +91,7 @@ pub(crate) enum Type {
     /// A live namespace wrapper; the interned shape describes its string-keyed backing dict.
     SimpleNamespace(usize),
     Sha256,
+    JsonDecoder,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
     ZipInfo,
@@ -172,6 +176,7 @@ impl std::fmt::Display for Type {
             Self::List(id) => return write!(f, "list#{id}"),
             Self::Dict(id) => return write!(f, "dict#{id}"),
             Self::Set(id) => return write!(f, "set#{id}"),
+            Self::Deque(id) => return write!(f, "deque#{id}"),
             Self::Tuple(id) => return write!(f, "tuple#{id}"),
             Self::Callable(id) => return write!(f, "callable#{id}"),
             Self::Optional(id) => return write!(f, "optional#{id}"),
@@ -183,6 +188,7 @@ impl std::fmt::Display for Type {
             Self::Float => "float",
             Self::Bool => "bool",
             Self::BuiltinClass => "type",
+            Self::ForwardRef(_) => "annotationlib.ForwardRef",
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
@@ -226,6 +232,7 @@ impl std::fmt::Display for Type {
             Self::StrDescriptor(_) => "method_descriptor",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::Sha256 => "SHA-256 hash",
+            Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
             Self::CsvReader => "CSV reader",
@@ -244,6 +251,7 @@ impl std::fmt::Display for Type {
             | Self::List(_)
             | Self::Dict(_)
             | Self::Set(_)
+            | Self::Deque(_)
             | Self::Tuple(_)
             | Self::Callable(_)
             | Self::Optional(_)
@@ -595,6 +603,8 @@ pub(crate) enum Builtin {
     },
     StrEnumName,
     ClassNameView,
+    NewForwardRef,
+    ForwardRefField(usize),
     StrEnumValue,
     EnumLookup(usize),
     EnumString,
@@ -636,7 +646,11 @@ pub(crate) enum Builtin {
     RaiseException,
     WallTime,
     TimeSleep,
-    WarningFilter(u32),
+    WarningFilter {
+        category: u32,
+        invalid: u32,
+    },
+    WarningReset,
     PercentScalar,
     Logging(LogOperation),
     Timed(TimedOperation),
@@ -805,6 +819,7 @@ pub(crate) enum Builtin {
     /// Projects a member proved by local control flow, acquiring its own owner.
     UnionProject,
     IsInstance(Vec<InstanceType>),
+    IsBuiltinSubclass,
     Split,
     SplitLines,
     DecodeSplitLines,
@@ -847,6 +862,9 @@ pub(crate) enum Builtin {
     /// Decodes one string into a checked record, list, or string-key dictionary.
     JsonDecode(Type),
     JsonLoads,
+    JsonDecoderNew,
+    JsonDecoderMemo,
+    JsonDecoderDecode,
     JsonEmptyObject,
     ModuleCache(usize),
     /// Capture and access an individual wrapper's independently owned cache.
@@ -928,6 +946,21 @@ pub(crate) enum Builtin {
     RecordCopy,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
+    DequeNew,
+    DequeAppend {
+        left: bool,
+        extending: bool,
+    },
+    DequeExtendSource,
+    DequeCopy,
+    DequePop {
+        left: bool,
+    },
+    DequeClear,
+    DequeMaxlen,
+    DequeIter {
+        reverse: bool,
+    },
     CounterNew,
     CounterTotal,
     CounterMostCommon,
@@ -1001,6 +1034,9 @@ pub(crate) const TUPLE_PROBE_ARITY: std::ops::RangeInclusive<usize> = 1..=16;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StringIoOperation {
     New,
+    Newlines,
+    Capability,
+    Readlines,
     Value,
     Read,
     Seek,
@@ -1103,6 +1139,7 @@ pub(crate) enum TextOperation {
     EndsWith,
     Find,
     Partition,
+    Translate,
     Unquote,
     Dedent,
     ShlexSplit,
@@ -1121,6 +1158,15 @@ pub(crate) enum PathQuery {
     Socket = 5,
     BlockDevice = 6,
     CharDevice = 7,
+}
+
+/// Operations on a link's stored target name and its destination (POSIX link ABI).
+#[derive(Clone, Copy)]
+#[repr(u32)]
+pub(crate) enum PathLink {
+    Symlink = 0,
+    CheckSymlink = 1,
+    Hardlink = 2,
 }
 
 /// Native path operations keep their exact result types in the checked IR.
@@ -1159,6 +1205,8 @@ pub(crate) enum PathOperation {
     Query(PathQuery),
     ReadText,
     ReadBytes,
+    Readlink,
+    Link(PathLink),
     WriteText,
     WriteBytes,
     WriteTypeError,
@@ -1438,6 +1486,7 @@ pub(crate) enum ProcessOperation {
 #[derive(Clone, Copy)]
 pub(crate) enum InstanceType {
     Exact(Type),
+    ForwardRef,
     SimpleNamespace,
     StrEnum,
     List,
@@ -1456,6 +1505,7 @@ impl InstanceType {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
             }
             Self::Exact(expected) => expected == ty,
+            Self::ForwardRef => matches!(ty, Type::ForwardRef(_)),
             Self::StrEnum => matches!(ty, Type::StrEnum(_)),
             Self::List => matches!(ty, Type::ListInt | Type::List(_)),
             Self::Dict => matches!(ty, Type::Dict(_)),

@@ -2,6 +2,7 @@
 
 mod expandtabs;
 mod lowercase;
+mod translate;
 pub(super) use lowercase::{lowercase, lowercase_chars};
 
 use num_traits::{Signed, ToPrimitive};
