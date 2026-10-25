@@ -20,11 +20,6 @@ def path(value: str | None, fail: bool) -> None:
     print(len(log))
 
 
-path("head", False)
-path(None, False)
-path(None, True)
-
-
 def pure(parts: str | None) -> None:
     try:
         print(str(PurePosixPath("one", parts)))  # ty: ignore[invalid-argument-type]
@@ -33,5 +28,8 @@ def pure(parts: str | None) -> None:
         print(str(error))
 
 
+path("head", False)
+path(None, False)
+path(None, True)
 pure("two")
 pure(None)
