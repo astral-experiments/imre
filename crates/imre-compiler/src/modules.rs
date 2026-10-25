@@ -83,6 +83,7 @@ pub(crate) enum IntrinsicModule {
     Functools,
     Fnmatch,
     Time,
+    Warnings,
     Tomli,
     TomliW,
     Shutil,
@@ -188,6 +189,7 @@ pub(crate) enum Intrinsic {
     IntConstant(i64),
     WallTime,
     TimeSleep,
+    WarningFilter,
     PatchSet,
     Awaitable,
     TypeVar,
@@ -241,6 +243,7 @@ pub(crate) enum Intrinsic {
     ZipFile,
     ZipInfo,
     BytesIo,
+    StringIo,
     BadZipFile,
     BadGzipFile,
     CsvReader,
@@ -345,6 +348,7 @@ impl IntrinsicModule {
             "functools" => Some(Self::Functools),
             "fnmatch" => Some(Self::Fnmatch),
             "time" => Some(Self::Time),
+            "warnings" => Some(Self::Warnings),
             "tomli" => Some(Self::Tomli),
             "tomli_w" => Some(Self::TomliW),
             "shutil" => Some(Self::Shutil),
@@ -490,6 +494,7 @@ impl IntrinsicModule {
             (Self::Inspect, "_sentinel") => Intrinsic::InspectSentinel,
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
+            (Self::Warnings, "simplefilter") => Intrinsic::WarningFilter,
             (Self::Time, "sleep") => Intrinsic::TimeSleep,
             (Self::Time, "time") => Intrinsic::WallTime,
             (Self::Signal, "SIGINT") => Intrinsic::IntConstant(2),
@@ -606,6 +611,7 @@ impl IntrinsicModule {
             (Self::Zipfile, "ZipFile") => Intrinsic::ZipFile,
             (Self::Zipfile, "ZipInfo") => Intrinsic::ZipInfo,
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
+            (Self::Io, "StringIO") => Intrinsic::StringIo,
             (Self::Zipfile, "BadZipFile") => Intrinsic::BadZipFile,
             (Self::Csv, "reader") => Intrinsic::CsvReader,
             (Self::Csv, "Error") => Intrinsic::CsvError,
@@ -967,11 +973,16 @@ impl SourceGraph {
         )
     }
 
-    /// The entry needs its own initializer when it declares globals for later definitions.
-    pub(crate) fn initializers(&self) -> impl Iterator<Item = (ModuleId, Range<usize>)> + '_ {
+    /// The entry only needs an initializer if its class bodies or ordinary bindings own globals.
+    pub(crate) fn initializers(
+        &self,
+        class_globals: bool,
+    ) -> impl Iterator<Item = (ModuleId, Range<usize>)> + '_ {
         self.initialization
             .iter()
-            .filter(|(id, _)| *id != self.entry || !self.modules[*id].entry_globals.is_empty())
+            .filter(move |(id, _)| {
+                *id != self.entry || class_globals || !self.modules[*id].entry_globals.is_empty()
+            })
             .cloned()
     }
 

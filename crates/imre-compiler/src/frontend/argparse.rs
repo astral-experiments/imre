@@ -192,6 +192,19 @@ impl<'a> Flags<'a> {
     }
 }
 
+/// A class constant must resolve to the builtin in the builder's lexical scope.
+fn builtin_constant<'a>(
+    value: &'a ast::Expr,
+    module: &SourceModule,
+    locals: &HashSet<String>,
+) -> Option<&'a str> {
+    let name = value.as_name_expr()?.id.as_str();
+    (annotations::is_builtin_type(name)
+        && !module.bindings.contains_key(name)
+        && !locals.contains(name))
+    .then_some(name)
+}
+
 fn option(
     call: &ast::ExprCall,
     graph: &SourceGraph,
@@ -199,6 +212,7 @@ fn option(
     types: &Types,
     classes: &Classes,
     flags: &Flags,
+    locals: &HashSet<String>,
 ) -> Result<OptionField, String> {
     let module = &graph.modules[id];
     let Some((flag, rest)) = call.arguments.args.split_first() else {
@@ -355,6 +369,9 @@ fn option(
                     None | Some(ast::Expr::NoneLiteral(_)) => None,
                     Some(ast::Expr::StringLiteral(_)) => Some(Type::Str),
                     Some(ast::Expr::BooleanLiteral(_)) => Some(Type::Bool),
+                    Some(v) if builtin_constant(v, module, locals).is_some() => {
+                        Some(Type::BuiltinClass)
+                    }
                     Some(v) if numeric_literal(v, Type::Int).is_some() => Some(Type::Int),
                     Some(v) if numeric_literal(v, Type::Float).is_some() => Some(Type::Float),
                     _ => return Err(invalid()),
@@ -395,6 +412,7 @@ fn option(
         None if action == "store_true" => Some("True"),
         None if action == "store_false" => Some("False"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
+        Some(value) if element == Type::BuiltinClass => builtin_constant(value, module, locals),
         Some(ast::Expr::BooleanLiteral(value)) if action == "store_const" => {
             Some(if value.value { "True" } else { "False" })
         }
@@ -485,6 +503,7 @@ fn option(
         None if action == "store_true" => Some("False"),
         None if action == "store_false" => Some("True"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
+        Some(value) if element == Type::BuiltinClass => builtin_constant(value, module, locals),
         Some(expr @ ast::Expr::StringLiteral(_))
             if element == Type::Str
                 || !many && matches!(element, Type::Path | Type::Int | Type::Float) =>
@@ -566,6 +585,7 @@ fn option(
         Type::Float => "float",
         Type::Path => "path",
         Type::Bool => "bool",
+        Type::BuiltinClass => "class",
         _ => unreachable!(),
     };
     let converter = kw
@@ -983,6 +1003,13 @@ impl Parsers {
                         };
                     register(name, &builders)?;
                     builders.push(builder.to_owned());
+                    let mut locals = crate::narrowing::assigned_names(&function.body);
+                    locals.extend(
+                        function
+                            .parameters
+                            .iter_non_variadic_params()
+                            .map(|p| p.name().to_string()),
+                    );
                     let read_options =
                         |builder: &str,
                          flags: &Flags,
@@ -1016,7 +1043,7 @@ impl Parsers {
                                     break;
                                 }
                                 let mut field =
-                                    option(add, graph, module_id, types, classes, flags)?;
+                                    option(add, graph, module_id, types, classes, flags, &locals)?;
                                 if let Some(group) = group {
                                     field.option["group"] = json!(group);
                                 }
@@ -1433,21 +1460,26 @@ impl Checker<'_> {
         }
     }
 
-    pub(super) fn enter_namespace_guards(&mut self, test: &ast::Expr, body: &[ast::Stmt]) {
+    pub(super) fn enter_namespace_guards(
+        &mut self,
+        test: &ast::Expr,
+        truth: bool,
+        body: &[ast::Stmt],
+    ) {
         if let ast::Expr::BoolOp(value) = test
-            && value.op == ast::BoolOp::And
+            && (value.op == ast::BoolOp::And && truth || value.op == ast::BoolOp::Or && !truth)
         {
             // A later operand may rebind the receiver even if the body does not.
             let mut reassigned = false;
             for operand in value.values.iter().rev() {
-                if !reassigned && let Some(guard) = self.namespace_guard(operand, body) {
+                if !reassigned && let Some(guard) = self.namespace_guard(operand, truth, body) {
                     self.namespace_guards.push(guard);
                 }
                 if !matches!(operand, ast::Expr::Attribute(attr) if attr.value.is_name_expr()) {
                     reassigned = true
                 }
             }
-        } else if let Some(guard) = self.namespace_guard(test, body) {
+        } else if let Some(guard) = self.namespace_guard(test, truth, body) {
             self.namespace_guards.push(guard);
         }
     }
@@ -1456,11 +1488,26 @@ impl Checker<'_> {
     /// receiver keeps the same binding, even when another alias survives calls.
     pub(super) fn namespace_guard(
         &self,
-        test: &ast::Expr,
+        mut test: &ast::Expr,
+        mut truth: bool,
         body: &[ast::Stmt],
     ) -> Option<(usize, usize)> {
-        let ast::Expr::Attribute(attr) = test else {
-            return None;
+        while let ast::Expr::UnaryOp(unary) = test
+            && unary.op == ast::UnaryOp::Not
+        {
+            truth = !truth;
+            test = &unary.operand;
+        }
+        let attr = match test {
+            ast::Expr::Attribute(attr) if truth => attr,
+            ast::Expr::Compare(compare) => {
+                let (operand, present) = narrowing::none_identity(compare, truth)?;
+                if !present {
+                    return None;
+                }
+                operand.as_attribute_expr()?
+            }
+            _ => return None,
         };
         let name = attr.value.as_name_expr()?.id.as_str();
         let slot = *self.names.get(name)?;

@@ -376,11 +376,13 @@ def main() -> None:
             )
             passed += 1
 
-            # CPython may report status 120 during shutdown. Imre's contract is OSError/1.
-            for name, category in [
-                ("small", b"OSError"),
-                ("large", b"OSError"),
-                ("division_error", b"ZeroDivisionError"),
+            # The large print writes immediately. The smaller buffered writes fail
+            # during shutdown, including after an unhandled division error.
+            shutdown = b"Exception ignored while flushing sys.stdout:\nBrokenPipeError:"
+            for name, status, prefix, lines in [
+                ("small", 120, shutdown, 2),
+                ("large", 1, b"OSError:", 1),
+                ("division_error", 120, b"ZeroDivisionError:", 3),
             ]:
                 reader, writer = os.pipe()
                 os.close(reader)
@@ -389,10 +391,12 @@ def main() -> None:
                         [binaries[name]], stdin=subprocess.DEVNULL, stdout=sink,
                         stderr=subprocess.PIPE, timeout=60, check=False, env=environment(),
                     )
-                assert result.returncode == 1 and result.stderr.startswith(category + b":"), (
+                assert result.returncode == status and result.stderr.startswith(prefix), (
                     "broken pipe", name, level, result.returncode, result.stderr[:2000],
                 )
-                assert result.stderr.count(b"\n") == 1 and result.stderr.endswith(b"\n"), (
+                if status == 120:
+                    assert shutdown in result.stderr, (name, level, result.stderr[:2000])
+                assert result.stderr.count(b"\n") == lines and result.stderr.endswith(b"\n"), (
                     "broken pipe", name, level, result.stderr[:2000],
                 )
                 passed += 1
