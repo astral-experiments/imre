@@ -40,6 +40,11 @@ JSONEncoder`), and the batched case on its module export. Direct suite
 controls do not exercise the original package or unittest fixtures.
 The [whole-suite probe](../check_suite_startup.py) checks those separately.
 
+With the native `ImportError` implementation on main `ec80860`, all eight
+[untouched import and runner probes](startup-linux.json) reach
+`Lib/test/support/__init__.py:6` and stop on its `annotationlib` import.
+Those probes execute zero test cases.
+
 ```sh
 dir=benchmarks/cpython_stdlib/full/doctest
 "$CPYTHON" -B "$dir/audit.py" --cpython-source "$CPYTHON_SOURCE"
