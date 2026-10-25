@@ -300,6 +300,8 @@ impl Builtin {
             | Self::KeyDifference
             | Self::RegexGroupDict
             | Self::DictGet
+            | Self::ModuleParentPrefix
+            | Self::ModuleCacheFromOrigin
             | Self::NamespaceWrap
             | Self::NamespaceDict
             | Self::NamespaceGet

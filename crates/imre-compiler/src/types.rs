@@ -20,6 +20,7 @@ enum Shape {
     Counter(Type),
     Set(Type),
     Tuple(Vec<Type>),
+    ModuleSpec(Vec<Type>),
     NamedTuple(DefinitionId, Vec<Type>),
     PartialFrame(Vec<Type>),
     Callable(Vec<Type>, Type),
@@ -89,6 +90,9 @@ impl Types {
         let valid = match ty {
             Type::StrLiteral(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::StringLiterals(_)))
+            }
+            Type::ModuleSpec(id) => {
+                matches!(storage.shapes.get(id), Some(Shape::ModuleSpec(fields)) if fields.len() == 8)
             }
             Type::SimpleNamespace(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::Dict(Type::Str, _)))
@@ -190,6 +194,7 @@ impl Types {
                 | Shape::Optional(ty) => vec![*ty],
                 Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => vec![*key, *value],
                 Shape::Tuple(fields)
+                | Shape::ModuleSpec(fields)
                 | Shape::NamedTuple(_, fields)
                 | Shape::PartialFrame(fields)
                 | Shape::Union(fields) => fields.clone(),
@@ -207,6 +212,7 @@ impl Types {
                 | Type::CacheState(child_id)
                 | Type::Dict(child_id)
                 | Type::Set(child_id)
+                | Type::ModuleSpec(child_id)
                 | Type::Tuple(child_id)
                 | Type::Callable(child_id)
                 | Type::Optional(child_id)
@@ -503,7 +509,7 @@ impl Types {
             Type::None => Some(false),
             Type::Tuple(_) => Some(!self.fields(ty).unwrap().is_empty()),
             Type::Class(id) if self.0.borrow().custom_truth.contains(&id) => None,
-            Type::SimpleNamespace(_) => Some(true),
+            Type::SimpleNamespace(_) | Type::ModuleSpec(_) => Some(true),
             Type::Class(_)
             | Type::Callable(_)
             | Type::Enum(_)
@@ -600,6 +606,57 @@ impl Types {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
     }
 
+    pub(crate) fn module_spec(&self, fields: Vec<Type>) -> Type {
+        Type::ModuleSpec(self.intern(Shape::ModuleSpec(fields)))
+    }
+    pub(crate) fn module_spec_fields(&self, id: usize) -> Vec<Type> {
+        let storage = self.0.borrow();
+        let Shape::ModuleSpec(fields) = &storage.shapes[id] else {
+            unreachable!("invalid ModuleSpec layout")
+        };
+        fields.clone()
+    }
+    pub(crate) fn module_spec_layouts(&self) -> Vec<(Type, Vec<Type>)> {
+        self.0
+            .borrow()
+            .shapes
+            .iter()
+            .enumerate()
+            .filter_map(|(id, shape)| {
+                if let Shape::ModuleSpec(fields) = shape {
+                    Some((Type::ModuleSpec(id), fields.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+    /// The type can also appear inside a tuple or optional without an annotation.
+    pub(crate) fn contains_module_spec(&self, ty: Type) -> bool {
+        if !matches!(
+            ty,
+            Type::ModuleSpec(_)
+                | Type::Tuple(_)
+                | Type::List(_)
+                | Type::Dict(_)
+                | Type::Set(_)
+                | Type::Optional(_)
+                | Type::Union(_)
+        ) {
+            return false;
+        }
+        let mut seen = HashSet::new();
+        let mut pending = vec![ty];
+        while let Some(ty) = pending.pop() {
+            if matches!(ty, Type::ModuleSpec(_)) {
+                return true;
+            }
+            if seen.insert(ty) {
+                pending.extend(self.children(ty));
+            }
+        }
+        false
+    }
     pub(crate) fn declare_namedtuple(&self, definition: DefinitionId, declaration: NamedTuple) {
         self.0
             .borrow_mut()
@@ -898,6 +955,9 @@ impl Types {
 
     /// Enumerates stored types for the class-field acyclicity check.
     pub(crate) fn children(&self, ty: Type) -> Vec<Type> {
+        if let Type::ModuleSpec(id) = ty {
+            return self.module_spec_fields(id);
+        }
         if let Type::SimpleNamespace(id) = ty {
             return vec![Type::Dict(id)];
         }
@@ -991,6 +1051,7 @@ impl TypeDescription<'_> {
                     write!(self, "{value:?}")?;
                 }
             }
+            Shape::ModuleSpec(_) => return self.write_str("importlib.machinery.ModuleSpec"),
             Shape::DeclaredCache(callable, _) => return self.write_type(*callable),
             Shape::CachedCallable(c) => return self.write_type(c.callable),
             Shape::Callable(params, returns) => {

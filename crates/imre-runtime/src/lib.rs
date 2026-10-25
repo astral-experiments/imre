@@ -807,7 +807,68 @@ pub unsafe extern "C" fn imre_str_literal(data: *const u8, length: usize) -> *co
 pub unsafe extern "C" fn imre_str_static_literal(data: *const u8, length: usize) -> *const Str {
     // SAFETY: the compiler's string globals have static storage duration.
     let literal: &'static str = unsafe { text(data, length) };
-    Rc::into_raw(Rc::new(Str::const_new(literal)))
+    Rc::into_raw(short_unicode(literal).unwrap_or_else(|| Rc::new(Str::const_new(literal))))
+}
+
+/// Empty and one-character Latin-1 results share their canonical immutable
+/// objects with the literal pool, just as Python Unicode indexing/partition do.
+fn short_unicode(value: &str) -> Option<Rc<Str>> {
+    if value.len() > 2 {
+        return None;
+    }
+    let mut chars = value.chars();
+    let index = match (chars.next(), chars.next()) {
+        (None, _) => 256,
+        (Some(c), None) if u32::from(c) < 256 => c as usize,
+        _ => return None,
+    };
+    thread_local! {
+        static SHORT: RefCell<[Option<Rc<Str>>; 257]> = const { RefCell::new([const { None }; 257]) };
+    }
+    SHORT.with(|short| {
+        Some(Rc::clone(
+            short.borrow_mut()[index].get_or_insert_with(|| Rc::new(Str::new(value))),
+        ))
+    })
+}
+
+/// Return the prefix before the last ASCII dot, or Python's empty string.
+///
+/// # Safety
+/// The exact Unicode input is rooted for this call; one string owner is returned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_module_parent_prefix(name: *const Str) -> *const Str {
+    // SAFETY: the compiler roots the name during the property read.
+    let parent = unsafe { &*name }.rsplit_once('.').map_or("", |(p, _)| p);
+    Rc::into_raw(short_unicode(parent).unwrap_or_else(|| Rc::new(Str::new(parent))))
+}
+
+/// Resolve the directly usable bytecode path. A native interpreter which has
+/// not exposed cache tags must not invent an ABI tag for source bytecode.
+///
+/// # Safety
+/// Zero denotes None. Other words borrow a rooted string. The returned word
+/// owns a new reference when nonzero, including when it preserves the origin.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_module_cache_from_origin(origin: usize) -> usize {
+    if origin == 0 {
+        return 0;
+    }
+    // SAFETY: a non-null optional str stores its rooted pointer as a word.
+    let path = unsafe { &*(origin as *const Str) };
+    if path.ends_with(".pyc") {
+        // SAFETY: the result transfers a new owner of the same immutable origin.
+        unsafe { imre_str_retain(origin as *const Str) };
+        origin
+    } else if path.ends_with(".py") || cfg!(windows) && path.ends_with(".pyw") {
+        objects::exceptions::Error::new(
+            objects::exceptions::Kind::NotImplementedError,
+            "source cache paths require a bytecode cache tag",
+        )
+        .returning(0)
+    } else {
+        0
+    }
 }
 
 /// # Safety
