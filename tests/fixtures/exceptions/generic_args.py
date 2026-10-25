@@ -1,6 +1,7 @@
 import json
 import sys
 import unittest
+from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -32,6 +33,12 @@ class Reordered(ValueError):
     def __init__(self, code: int, text: str) -> None:
         self.code = code
         super().__init__(text, code)
+
+
+@dataclass
+class Hidden:
+    shown: int
+    hidden: int = field(repr=False)
 
 
 def escape(items: list[str]) -> object:
@@ -179,6 +186,18 @@ try:
     held[0]
 except TypeError as error:
     print(str(error))
+
+limit = 10 ** 4300
+for nested in [
+    ValueError({1: limit}), ValueError({limit: "key"}), ValueError({-limit}),
+    ValueError([("n", limit)]), ValueError((limit,)),
+]:
+    try:
+        repr(nested.args)
+    except ValueError as error:
+        print(str(error))
+print(len(repr(ValueError({1: limit - 1}).args)))
+print(repr(ValueError((Hidden(4, limit),)).args))
 
 imp = ImportError("old")
 prior = arguments(imp)

@@ -20,6 +20,12 @@ class TracedDisplay(Exception):
         return "TracedDisplay()"
 
 
+class Envelope(Exception):
+    def __init__(self, first, *rest):
+        self.first = first
+        super().__init__(first, *rest)
+
+
 async def fail() -> None:
     raise ValueError("child")
 
@@ -95,6 +101,15 @@ async def mutations() -> None:
         print(len(events))
         print(repr(failures.args))
         print(events)
+        member = failures.args[1][0]
+        limit = 10 ** 4300
+        # Python invokes an earlier formatter before detecting a later 4,301-digit integer.
+        for wrapped in [Envelope(member, limit), Envelope(limit, member)]:
+            try:
+                repr(wrapped.args)
+            except ValueError as error:
+                print(str(error))
+            print(len(events))
 
 
 asyncio.run(ordinary())

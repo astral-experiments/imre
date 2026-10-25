@@ -192,26 +192,32 @@ pub unsafe extern "C" fn imre_exception_args(value: *const Object) -> *const Obj
     // SAFETY: projection retains only sealed fields and cannot call user code.
     let result = unsafe {
         owner.0.with_mut(|s| {
-        let Storage::Exception(e) = s else {
-            unreachable!("exception operand")
-        };
-        if let Some(v) = e
-            .details
-            .as_deref()
-            .and_then(|d| d.args.as_ref())
-            .and_then(Cached::get)
-        {
-            return Ok(v);
-        }
-        let v = project(e, &owner)?;
-        let cached = if matches!(&e.payload, Payload::Group(members) if members.iter().any(|m| matches!(m, GroupMember::Caused(_)))) {
-            Cached::caused_group(&v)
-        } else {
-            Cached::Owned(v.clone())
-        };
-        e.details_mut().args = Some(cached);
-        Ok(v)
-    })
+            let Storage::Exception(e) = s else {
+                unreachable!("exception operand")
+            };
+            if let Some(v) = e
+                .details
+                .as_deref()
+                .and_then(|d| d.args.as_ref())
+                .and_then(Cached::get)
+            {
+                return Ok(v);
+            }
+            let v = project(e, &owner)?;
+            let caused = match &e.payload {
+                Payload::Group(members) => {
+                    members.iter().any(|m| matches!(m, GroupMember::Caused(_)))
+                }
+                _ => false,
+            };
+            let cached = if caused {
+                Cached::caused_group(&v)
+            } else {
+                Cached::Owned(v.clone())
+            };
+            e.details_mut().args = Some(cached);
+            Ok(v)
+        })
     };
     finish(result.map(Rc::into_raw), std::ptr::null())
 }

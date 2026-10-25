@@ -1,5 +1,4 @@
 //! Owning, type-erased views of native Python scalars, tuples and typed lists.
-use super::exceptions::{Error, Kind};
 use super::words::WordKind;
 use super::{Bytes, Object, Storage, StorageCell, Str, acquire_rc, object, records, values};
 use crate::Int;
@@ -54,17 +53,13 @@ pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rc<Str> {
     let mut result = String::new();
     // SAFETY: only concrete, representable field types reach this routine.
     unsafe {
-        values::write_repr(&mut result, word, kind);
+        values::write_checked_repr(&mut result, word, kind);
     }
     Rc::new(result.into())
 }
 
-/// The default CPython decimal conversion limit is tested only when a selected
-/// scalar or tuple is actually formatted. Compare magnitudes before converting,
-/// so a huge input cannot allocate an unbounded decimal scratch string.
+/// Transfer the formatted string only after all visited fields and callbacks succeed.
 pub(super) unsafe fn checked_text(kind: WordKind, word: usize, repr: bool) -> *const Str {
-    static LIMIT: std::sync::LazyLock<num_bigint::BigUint> =
-        std::sync::LazyLock::new(|| num_bigint::BigUint::from(10u8).pow(4300));
     // SAFETY: all descendants stay rooted in the original immutable boxed value.
     unsafe {
         if !repr
@@ -75,35 +70,6 @@ pub(super) unsafe fn checked_text(kind: WordKind, word: usize, repr: bool) -> *c
         {
             // The storage borrow ends before a user-defined __str__ can be called.
             return super::exceptions::imre_exception_message(word as *const Object);
-        }
-        // A sibling cursor per ancestor keeps scratch space proportional to depth.
-        let mut pending = smallvec::SmallVec::<[(WordKind, usize, usize, usize); 4]>::new();
-        let mut next = (kind, word);
-        loop {
-            let (k, w) = next;
-            if k.raw() == 2 {
-                let n = Int::borrow(w);
-                if n.as_small().is_none() && n.big().magnitude() >= &*LIMIT {
-                    return Error::new(Kind::ValueError, "Exceeds the limit (4300 digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit")
-                        .returning(std::ptr::null());
-                }
-            } else if matches!(k.raw(), 4..=6)
-                && let Some(n) = length(k, w)
-                && n != 0
-            {
-                if n > 1 {
-                    pending.push((k, w, 1, n));
-                }
-                next = sequence_item(k, w, 0);
-                continue;
-            }
-            let Some((k, w, i, n)) = pending.pop() else {
-                break;
-            };
-            if i + 1 < n {
-                pending.push((k, w, i + 1, n));
-            }
-            next = sequence_item(k, w, i);
         }
         let text = word_text(kind, word, repr);
         if super::exceptions::imre_error_pending() == 0 {

@@ -75,7 +75,10 @@ impl Positional {
             let (kind, word) = self.item(i);
             // SAFETY: each argument stays rooted by the immutable tuple.
             unsafe {
-                values::write_repr(&mut result, word, kind);
+                values::write_checked_repr(&mut result, word, kind);
+                if imre_error_pending() != 0 {
+                    break;
+                }
             }
         }
         result.into()

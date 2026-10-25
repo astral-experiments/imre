@@ -1186,7 +1186,7 @@ impl Storage {
             Payload::Key(key) => {
                 let mut message = String::new();
                 // SAFETY: the exception owns the immutable key and its exact kind.
-                unsafe { super::values::write_repr(&mut message, key.word, key.kind) };
+                unsafe { super::values::write_checked_repr(&mut message, key.word, key.kind) };
                 Rc::new(Str::from(message))
             }
             Payload::Group(members) => {
@@ -1239,7 +1239,7 @@ fn exit_text(code: Option<&OwnedWord>, missing: &str) -> Rc<Str> {
     }
     let mut text = String::new();
     // SAFETY: the payload owns a scalar with this exact word kind.
-    unsafe { super::values::write_repr(&mut text, code.word, code.kind) };
+    unsafe { super::values::write_checked_repr(&mut text, code.word, code.kind) };
     Rc::new(Str::from(text))
 }
 
@@ -1688,7 +1688,9 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
         }
         if repr && layout.dataclass_repr {
             // SAFETY: the record is owned and its descriptor contains the dataclass repr schema.
-            return unsafe { super::values::imre_value_repr(layout.record.word, 6) };
+            return unsafe {
+                super::boxed_values::checked_text(layout.record.kind, layout.record.word, true)
+            };
         }
     }
     // SAFETY: snapshot the argument owners before formatting. Nested exception
@@ -1717,19 +1719,22 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
                         if index != 0 {
                             result.push_str(", ");
                         }
-                        super::values::write_repr(&mut result, arg.word, arg.kind);
+                        super::values::write_checked_repr(&mut result, arg.word, arg.kind);
+                        if imre_error_pending() != 0 {
+                            return None;
+                        }
                     }
                     result.into()
                 }
                 Payload::Key(k) => {
                     let mut s = String::new();
-                    super::values::write_repr(&mut s, k.word, k.kind);
+                    super::values::write_checked_repr(&mut s, k.word, k.kind);
                     s.into()
                 }
                 Payload::Exit(None) => Str::new(""),
                 Payload::Exit(Some(k)) => {
                     let mut s = String::new();
-                    super::values::write_repr(&mut s, k.word, k.kind);
+                    super::values::write_checked_repr(&mut s, k.word, k.kind);
                     s.into()
                 }
                 Payload::Process(_) | Payload::Timeout(_) | Payload::Group(_) => {
