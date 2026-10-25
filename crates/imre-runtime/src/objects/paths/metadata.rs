@@ -15,34 +15,18 @@ pub(in crate::objects) struct Info {
     nofollow: OnceCell<Option<Box<Metadata>>>,
 }
 
-/// A scan seeds a Path without allocating a view that might never be requested.
-pub(in crate::objects) enum InfoCache {
-    Path,
-    Entry(FileType),
-    Saved(Rc<Object>),
-}
-
-impl InfoCache {
-    fn get(&mut self, name: &Rc<Str>) -> Rc<Object> {
-        let entry = match self {
-            Self::Path => None,
-            Self::Entry(kind) => Some(*kind),
-            Self::Saved(info) => return Rc::clone(info),
-        };
-        let view = Rc::new(Object(StorageCell::new(Storage::PathInfo(Box::new(
-            Info {
-                name: Rc::clone(name),
+impl Info {
+    pub(super) fn object(name: Rc<Str>, entry: Option<FileType>) -> Rc<Object> {
+        Rc::new(Object(StorageCell::new(Storage::PathInfo(Box::new(
+            Self {
+                name,
                 entry,
                 follow: OnceCell::new(),
                 nofollow: OnceCell::new(),
             },
-        )))));
-        *self = Self::Saved(Rc::clone(&view));
-        view
+        )))))
     }
-}
 
-impl Info {
     fn lookup(&self, follow: bool) -> Option<&Metadata> {
         let cell = if follow { &self.follow } else { &self.nofollow };
         if let Some(previous) = cell.get() {
@@ -108,10 +92,10 @@ pub unsafe extern "C" fn imre_path_info(path: *const Object) -> *const Object {
     // SAFETY: only the owned cached view is transferred; no storage borrow escapes.
     unsafe {
         object(path).0.with_mut(|s| {
-            let Storage::Path { text, info, .. } = s else {
+            let Storage::Path { text, .. } = s else {
                 unreachable!()
             };
-            Rc::into_raw(info.get(text.spelling()))
+            Rc::into_raw(text.info())
         })
     }
 }

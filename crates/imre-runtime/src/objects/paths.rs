@@ -19,7 +19,7 @@ mod metadata;
 mod pure;
 mod traversal;
 mod walking;
-pub(super) use metadata::{Info, InfoCache};
+pub(super) use metadata::Info;
 pub(super) use pure::PurePath;
 pub(super) use walking::Walker;
 
@@ -35,6 +35,18 @@ pub(super) enum PathText {
     WithParent {
         text: Rc<Str>,
         parent: Weak<Str>,
+    },
+    /// Keep readdir's type alongside the spelling until someone asks for info.
+    Scanned {
+        spelling: Rc<Str>,
+        components: Option<Rc<Str>>,
+        parent: Weak<Str>,
+        kind: rustix::fs::FileType,
+    },
+    /// Only paths whose info was requested pay for the persistent view.
+    WithInfo {
+        lexical: Box<PathText>,
+        view: Rc<Object>,
     },
     Joined {
         parts: JoinedParts,
@@ -57,6 +69,42 @@ enum Prefix {
 }
 
 impl PathText {
+    fn from_entry(spelling: Str, kind: rustix::fs::FileType) -> Self {
+        let (spelling, components) = match Self::from_parsed_string(spelling) {
+            Self::Flat(s) => (s, None),
+            Self::Parsed {
+                spelling,
+                components,
+            } => (spelling, Some(components)),
+            _ => unreachable!(),
+        };
+        Self::Scanned {
+            spelling,
+            components,
+            parent: Weak::new(),
+            kind,
+        }
+    }
+
+    fn info(&mut self) -> Rc<Object> {
+        if let Self::WithInfo { view, .. } = self {
+            return Rc::clone(view);
+        }
+        let entry = if let Self::Scanned { kind, .. } = self {
+            Some(*kind)
+        } else {
+            None
+        };
+        let spelling = Rc::clone(self.spelling());
+        let view = Info::object(Rc::clone(&spelling), entry);
+        let lexical = std::mem::replace(self, Self::Flat(spelling));
+        *self = Self::WithInfo {
+            lexical: Box::new(lexical),
+            view: Rc::clone(&view),
+        };
+        view
+    }
+
     fn from_parsed_string(spelling: Str) -> Self {
         if spelling.is_empty() {
             Self::Flat(Rc::new(Str::from(".")))
@@ -73,11 +121,36 @@ impl PathText {
     fn components(&self) -> &Rc<Str> {
         match self {
             Self::Parsed { components, .. } => components,
+            Self::Scanned {
+                spelling,
+                components,
+                ..
+            } => components.as_ref().unwrap_or(spelling),
+            Self::WithInfo { lexical, .. } => lexical.components(),
             _ => self.spelling(),
         }
     }
 
     fn parent(&mut self) -> Rc<Str> {
+        if let Self::WithInfo { lexical, .. } = self {
+            return lexical.parent();
+        }
+        if let Self::Scanned {
+            spelling,
+            components,
+            parent: cached,
+            ..
+        } = self
+        {
+            if let Some(p) = cached.upgrade() {
+                return p;
+            }
+            let p = Rc::new(Str::from(parent(components.as_ref().unwrap_or(spelling))));
+            if p.len() > size_of::<Str>() {
+                *cached = Rc::downgrade(&p);
+            }
+            return p;
+        }
         if let Self::Parsed { components, .. } = self {
             return Rc::new(Str::from(parent(components)));
         }
@@ -103,6 +176,8 @@ impl PathText {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => Some(text),
             Self::Parsed { components, .. } => Some(components),
+            Self::Scanned { .. } => Some(self.components()),
+            Self::WithInfo { lexical, .. } => lexical.cached(),
             Self::Joined { spelling, .. } => spelling.get(),
         }
     }
@@ -111,6 +186,8 @@ impl PathText {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => Prefix::Flat(Rc::clone(text)),
             Self::Parsed { components, .. } => Prefix::Flat(Rc::clone(components)),
+            Self::Scanned { .. } => Prefix::Flat(Rc::clone(self.components())),
+            Self::WithInfo { lexical, .. } => lexical.prefix(),
             Self::Joined { parts, spelling } => match spelling.get() {
                 Some(text) => Prefix::Flat(Rc::clone(text)),
                 None => Prefix::Joined(Rc::new(parts.clone())),
@@ -122,6 +199,8 @@ impl PathText {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => text.starts_with('/'),
             Self::Parsed { components, .. } => components.starts_with('/'),
+            Self::Scanned { .. } => self.components().starts_with('/'),
+            Self::WithInfo { lexical, .. } => lexical.is_absolute(),
             Self::Joined { parts, .. } => parts.absolute,
         }
     }
@@ -130,6 +209,8 @@ impl PathText {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => text,
             Self::Parsed { spelling, .. } => spelling,
+            Self::Scanned { spelling, .. } => spelling,
+            Self::WithInfo { lexical, .. } => lexical.spelling(),
             Self::Joined { parts, spelling } => spelling.get_or_init(|| parts.render()),
         }
     }
@@ -307,14 +388,9 @@ fn new_path(path: impl Into<Rc<Str>>) -> *const Object {
 }
 
 fn path_with_text(text: PathText) -> *const Object {
-    path_with_info(text, InfoCache::Path)
-}
-
-fn path_with_info(text: PathText, info: InfoCache) -> *const Object {
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Path {
         text,
         name: std::cell::OnceCell::new(),
-        info,
     }))))
 }
 
@@ -1025,8 +1101,7 @@ impl PathIterator {
                 .map(|(name, kind)| {
                     name.into_string()
                         .map(|name| {
-                            let text = PathText::from_parsed_string(join(&self.root, &name));
-                            path_with_info(text, InfoCache::Entry(kind))
+                            path_with_text(PathText::from_entry(join(&self.root, &name), kind))
                         })
                         .map_err(|_| {
                             Error::new(
@@ -1379,10 +1454,9 @@ mod tests {
         // Filesystems that report DT_UNKNOWN defer both type and link detection.
         // Exercise this independently of whether the machine's temp fs supplies it.
         let unknown = || {
-            let text = PathText::Flat(Rc::new(Str::from(entry_name)));
-            let cache = InfoCache::Entry(rustix::fs::FileType::Unknown);
+            let text = PathText::from_entry(Str::from(entry_name), rustix::fs::FileType::Unknown);
             // SAFETY: recover the sole path owner, then take its independently owned view.
-            view(&unsafe { Rc::from_raw(path_with_info(text, cache)) })
+            view(&unsafe { Rc::from_raw(path_with_text(text)) })
         };
         let remembered = unknown();
         let unqueried = unknown();
