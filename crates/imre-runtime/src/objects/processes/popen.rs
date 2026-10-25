@@ -258,22 +258,24 @@ unsafe fn spawn(config: &LaunchConfig, words: [usize; 3]) -> Result<Popen> {
             "STDOUT can only be used for stderr",
         ));
     }
-    let c_int = |word| {
-        // SAFETY: the caller roots both integer descriptors and the buffer size.
-        unsafe { Int::borrow(word) }
-            .as_small()
-            .and_then(|n| i32::try_from(n).ok())
-            .ok_or_else(|| {
-                Error::new(
-                    Kind::OverflowError,
-                    "Python int too large to convert to C int",
-                )
-            })
-    };
+    let c_int = |n: &Int| n.as_small().and_then(|n| i32::try_from(n).ok());
     let mut descriptors = [-1; 3];
+    let mut oversized = false;
     for (i, mode) in modes.into_iter().enumerate() {
         descriptors[i] = match mode {
-            6 => c_int(words[i])?,
+            6 => {
+                // SAFETY: mode 6 denotes the caller's rooted integer descriptor.
+                let fd = unsafe { Int::borrow(words[i]) };
+                c_int(&fd).unwrap_or_else(|| {
+                    oversized = true;
+                    // Preserve the launch-mode comparison to fd 2 without truncation.
+                    if fd.big().sign() == num_bigint::Sign::Minus {
+                        i32::MIN
+                    } else {
+                        i32::MAX
+                    }
+                })
+            }
             // SAFETY: mode 7 denotes a rooted native file; only its fd escapes the borrow.
             7 => unsafe {
                 object(words[i] as *const Object)
@@ -285,17 +287,22 @@ unsafe fn spawn(config: &LaunchConfig, words: [usize; 3]) -> Result<Popen> {
     }
     // Python opens the parent-side pipe wrappers after it collects the file handles.
     let bufsize = if modes.contains(&1) {
-        c_int(config.bufsize).or_else(|overflow| {
-            // Command normally sets up the pipes during spawn. On a buffer error
-            // no child is launched, but a prior handle error still takes precedence.
-            check_buffer_error_handles(modes).map_err(errno_error)?;
-            Err(overflow)
-        })?
+        // SAFETY: the caller roots the buffer-size integer.
+        let size = unsafe { Int::borrow(config.bufsize) };
+        match c_int(&size) {
+            Some(size) => size,
+            None => {
+                // Before reporting bufsize, preserve any error acquiring the pipe handles.
+                check_buffer_error_handles(modes).map_err(errno_error)?;
+                return Err(c_int_overflow());
+            }
+        }
     } else {
         -1
     };
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
-    unsafe { launch_error::spawn(&args, config, streams, descriptors) }.map(|mut child| {
+    let child = unsafe { launch_error::spawn(&args, config, streams, descriptors, oversized) };
+    child.map(|mut child| {
         let text = streams & (1 << 16) != 0;
         let pipe = |fd: OwnedFd, read| FileState::pipe(fd.into(), read, text, bufsize);
         let pipes = [
