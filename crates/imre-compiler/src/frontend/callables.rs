@@ -22,6 +22,7 @@ fn invalid_aggregate(ty: Type, types: &Types) -> bool {
         ty,
         Type::Callable(_) | Type::ForwardRef(_) | Type::AnnotationValue(_)
     ) || types.is_partial_frame(ty)
+        || types.is_dispatch_registry(ty)
     {
         false
     } else if matches!(ty, Type::VarTuple(_)) {

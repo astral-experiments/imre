@@ -473,14 +473,17 @@ fn collect_class(
                 }
                 let unary_protocol = matches!(
                     name,
-                    "__str__" | "__bool__" | "__index__" | "__iter__" | "__copy__"
+                    "__str__" | "__repr__" | "__bool__" | "__index__" | "__iter__" | "__copy__"
                 ) || (mapping && name == "__len__");
+                let selector_context = module.is_bundled("selectors")
+                    && node.name.as_str() == "PollSelector"
+                    && matches!(name, "__enter__" | "__exit__");
                 if name.starts_with("__")
                     && !matches!(name, "__init__" | "__fspath__")
                     && !unary_protocol
+                    && !selector_context
                     && !(mapping && matches!(name, "__getitem__" | "__contains__"))
                     && !(name == "__post_init__" && dataclass.is_some())
-                    && !(name == "__repr__" && exception_layout)
                 {
                     return Err(
                         module.error(method, "unsupported special method on a fixed-layout class")
@@ -547,7 +550,7 @@ fn collect_class(
                         module.error(method, "a property setter must take self and a value")
                     );
                 }
-                if (unary_protocol || matches!(name, "__repr__" | "__post_init__"))
+                if (unary_protocol || name == "__post_init__")
                     && (kind != MethodKind::Instance
                         || method.parameters.len() != 1
                         || first.is_none_or(|parameter| parameter.default.is_some()))

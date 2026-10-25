@@ -132,17 +132,24 @@ pub(super) fn int_to_float(value: &Int) -> Result<f64> {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_float_int(value: f64) -> usize {
+    finish(float_to_integer(value).map(|n| Int::new(n).into_raw()), 1)
+}
+
+/// Truncate a finite float and preserve Python's distinct NaN and infinity errors.
+pub(super) fn float_to_integer(value: f64) -> Result<BigInt> {
     if value.is_nan() {
-        return Error::new(Kind::ValueError, "cannot convert float NaN to integer").returning(1);
+        return Err(Error::new(
+            Kind::ValueError,
+            "cannot convert float NaN to integer",
+        ));
     }
     if value.is_infinite() {
-        return Error::new(
+        return Err(Error::new(
             Kind::OverflowError,
             "cannot convert float infinity to integer",
-        )
-        .returning(1);
+        ));
     }
-    Int::new(BigInt::from_f64(value).unwrap()).into_raw()
+    Ok(BigInt::from_f64(value).unwrap())
 }
 
 /// Validates Python's decimal grammar before Rust performs correctly rounded

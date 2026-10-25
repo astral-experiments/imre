@@ -434,7 +434,7 @@ impl Checker<'_> {
             || (types.iter().all(|ty| matches!(ty, Type::Tuple(_)))
                 && types
                     .iter()
-                    .any(|ty| self.types.library_tuple_fields(*ty).is_some()))
+                    .any(|ty| self.types.tuple_metadata(*ty).is_some()))
             || types == [Type::Logger; 2]
             || types
                 .iter()
