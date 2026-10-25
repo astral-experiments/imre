@@ -20,6 +20,7 @@ mod callables;
 mod calls;
 mod comprehensions;
 mod contexts;
+mod copying;
 mod counter;
 mod csv;
 mod dataclass_values;
@@ -45,9 +46,11 @@ mod matching;
 mod module_values;
 mod native_generators;
 mod os;
+mod partials;
 mod paths;
 mod pipelines;
 mod posixpath;
+mod powers;
 mod processes;
 mod projected_equality;
 mod record_inputs;
@@ -321,6 +324,7 @@ const RESERVED: &[&str] = &[
     "set",
     "len",
     "abs",
+    "pow",
     "chr",
     "sorted",
     "divmod",
@@ -3470,7 +3474,11 @@ impl<'a> Checker<'a> {
                 } else if let ast::Expr::Name(_) = &*assign.target {
                     let left = self.expr(&assign.target)?;
                     let right = self.expr(&assign.value)?;
-                    let value = self.binary_expr(assign.op, left, right, statement)?;
+                    let value = if self.types.is_counter(left.ty) {
+                        self.counter_math(assign.op, left, right, true, statement)?
+                    } else {
+                        self.binary_expr(assign.op, left, right, statement)?
+                    };
                     if self.types.element(value.ty).is_some() {
                         return Err(error(
                             self.source,
@@ -4332,6 +4340,16 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::PercentInteger, vec![left, right]),
             });
         }
+        if op == ast::Operator::Pow {
+            let (operation, ty) = self.integer_power(&left, &right, false, node)?;
+            return Ok(Expr {
+                ty,
+                kind: ExprKind::Builtin(
+                    operation,
+                    vec![powers::integer(left), powers::integer(right)],
+                ),
+            });
+        }
         let left = Self::integer_addend(op, left, right.ty);
         let right = Self::integer_addend(op, right, left.ty);
         let (op, ty) = self.binary_op(op, left.ty, right.ty, node)?;
@@ -4410,12 +4428,71 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        // A chained method checks its receiver before its arguments. Keep the
-        // large general expression frame off that recursive path in debug builds.
+        // Chained methods and binary operands recurse through expr(). Keep the
+        // large general expression frame off those paths in debug builds.
         match expression {
             ast::Expr::Call(call) => self.call(call),
+            ast::Expr::BinOp(binary) => self.binary_expression(binary),
             _ => self.non_call_expr(expression),
         }
+    }
+
+    fn binary_expression(&mut self, binary: &ast::ExprBinOp) -> Result<Expr, String> {
+        let (mut left, mut right) = if matches!(
+            binary.op,
+            ast::Operator::BitOr | ast::Operator::BitAnd | ast::Operator::Sub
+        ) {
+            let (left, left_key) = self.union_operand(&binary.left)?;
+            let (right, right_key) = self.union_operand(&binary.right)?;
+            if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
+                self.expect(left_key, right_key, binary)?;
+                return Ok(Expr {
+                    ty: self.types.set(left_key),
+                    kind: ExprKind::Builtin(
+                        match binary.op {
+                            ast::Operator::Sub => Builtin::KeyDifference,
+                            ast::Operator::BitAnd => Builtin::KeyIntersection,
+                            _ => Builtin::KeyUnion,
+                        },
+                        vec![left, right],
+                    ),
+                });
+            }
+            (left, right)
+        } else {
+            (self.expr(&binary.left)?, self.expr(&binary.right)?)
+        };
+        if binary.op == ast::Operator::Add
+            && left.ty == Type::JsonValue
+            && right.ty == Type::JsonValue
+        {
+            return Ok(json::add(left, right));
+        }
+        if binary.op == ast::Operator::Add
+            && matches!(left.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
+            && matches!(right.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
+        {
+            left = Self::string_value(left);
+            right = Self::string_value(right);
+        }
+        if binary.op == ast::Operator::Div && (left.ty.is_path() || right.ty.is_path()) {
+            return self.path_join(left, right, binary);
+        }
+        if binary.op == ast::Operator::Add && self.types.element(left.ty).is_some() {
+            if matches!(&left.kind, ExprKind::List(items) if items.is_empty())
+                && self.types.element(right.ty).is_some()
+            {
+                left.ty = right.ty;
+            } else if matches!(&right.kind, ExprKind::List(items) if items.is_empty()) {
+                right.ty = left.ty;
+            }
+            self.expect(left.ty, right.ty, binary)?;
+            return self.concat_lists(left, right, binary);
+        }
+        if self.types.is_counter(left.ty) && self.types.is_counter(right.ty) {
+            return self.counter_math(binary.op, left, right, false, binary);
+        }
+        self.binary_expr(binary.op, left, right, binary)
     }
 
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
@@ -4690,60 +4767,6 @@ impl<'a> Checker<'a> {
                     .tuple(values.iter().map(|value| value.ty).collect());
                 (ty, ExprKind::Tuple(values))
             }
-            ast::Expr::BinOp(binary) => {
-                let (mut left, mut right) = if matches!(
-                    binary.op,
-                    ast::Operator::BitOr | ast::Operator::BitAnd | ast::Operator::Sub
-                ) {
-                    let (left, left_key) = self.union_operand(&binary.left)?;
-                    let (right, right_key) = self.union_operand(&binary.right)?;
-                    if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
-                        self.expect(left_key, right_key, binary)?;
-                        return Ok(Expr {
-                            ty: self.types.set(left_key),
-                            kind: ExprKind::Builtin(
-                                match binary.op {
-                                    ast::Operator::Sub => Builtin::KeyDifference,
-                                    ast::Operator::BitAnd => Builtin::KeyIntersection,
-                                    _ => Builtin::KeyUnion,
-                                },
-                                vec![left, right],
-                            ),
-                        });
-                    }
-                    (left, right)
-                } else {
-                    (self.expr(&binary.left)?, self.expr(&binary.right)?)
-                };
-                if binary.op == ast::Operator::Add
-                    && left.ty == Type::JsonValue
-                    && right.ty == Type::JsonValue
-                {
-                    return Ok(json::add(left, right));
-                }
-                if binary.op == ast::Operator::Add
-                    && matches!(left.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
-                    && matches!(right.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
-                {
-                    left = Self::string_value(left);
-                    right = Self::string_value(right);
-                }
-                if binary.op == ast::Operator::Div && (left.ty.is_path() || right.ty.is_path()) {
-                    return self.path_join(left, right, binary);
-                }
-                if binary.op == ast::Operator::Add && self.types.element(left.ty).is_some() {
-                    if matches!(&left.kind, ExprKind::List(items) if items.is_empty())
-                        && self.types.element(right.ty).is_some()
-                    {
-                        left.ty = right.ty;
-                    } else if matches!(&right.kind, ExprKind::List(items) if items.is_empty()) {
-                        right.ty = left.ty;
-                    }
-                    self.expect(left.ty, right.ty, binary)?;
-                    return self.concat_lists(left, right, binary);
-                }
-                return self.binary_expr(binary.op, left, right, expression);
-            }
             ast::Expr::UnaryOp(unary) => {
                 let value = if unary.op == ast::UnaryOp::Not {
                     self.condition(&unary.operand)?
@@ -4767,6 +4790,20 @@ impl<'a> Checker<'a> {
                         )
                     }
                     ast::UnaryOp::USub | ast::UnaryOp::UAdd => {
+                        if self.types.is_counter(value.ty) {
+                            let op = if unary.op == ast::UnaryOp::UAdd {
+                                ir::CounterOp::Positive
+                            } else {
+                                ir::CounterOp::Negative
+                            };
+                            return Ok(Expr {
+                                ty: value.ty,
+                                kind: ExprKind::Builtin(
+                                    Builtin::CounterMath { op, inplace: false },
+                                    vec![value],
+                                ),
+                            });
+                        }
                         if !matches!(value.ty, Type::Int | Type::Float) {
                             return Err(error(
                                 self.source,
@@ -5232,6 +5269,13 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if attribute.attr.as_str() == "join"
+                    && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
+                    && !self.names.contains_key("str")
+                    && self.resolve(&attribute.value).is_none()
+                {
+                    return Ok(self.string_join_value(None, attribute));
+                }
                 if attribute.attr.as_str() == "encoding"
                     && matches!(
                         self.resolve(&attribute.value),
@@ -5270,6 +5314,9 @@ impl<'a> Checker<'a> {
                         }
                         _ => {}
                     }
+                }
+                if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
+                    return Ok(self.string_join_value(Some(receiver), attribute));
                 }
                 if let Type::NamedException(class) = receiver.ty
                     && attribute.attr.as_str() == "args"
@@ -5432,7 +5479,7 @@ impl<'a> Checker<'a> {
                 }
                 (ty, ExprKind::Field(Box::new(receiver), field))
             }
-            ast::Expr::Call(_) => unreachable!("call dispatched by typed_expr"),
+            ast::Expr::Call(_) | ast::Expr::BinOp(_) => unreachable!("dispatched by typed_expr"),
             ast::Expr::Generator(_) => {
                 return Err(error(
                     self.source,
@@ -5761,6 +5808,7 @@ impl<'a> Checker<'a> {
                 };
                 return self.typed_expr(value);
             }
+            Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
             Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
@@ -5801,6 +5849,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
                 return self.cursor_length_hint(call);
             }
+            Some(Binding::Intrinsic(Intrinsic::ShallowCopy)) => return self.shallow_copy(call),
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Tee)) => return self.tee_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Count)) => return self.count_cursor(call),
@@ -6492,6 +6541,7 @@ impl<'a> Checker<'a> {
             "list" => return self.list_call(call, None),
             "sorted" => return self.sorted_call(call, None),
             "abs" => return self.abs_call(call),
+            "pow" => return self.pow_call(call),
             "next" => return self.next_cursor(call),
             "iter" if call.arguments.args.len() == 1 => return self.iter_cursor(call),
             "sum" => return self.sum_call(call),

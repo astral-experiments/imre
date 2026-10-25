@@ -14,6 +14,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 from suite_inventory import load_suite, verify_files
 from suite_native import Toolchain, method_bytes, run_in_fixtures
+from suite_evidence import roles
 
 
 class Native:
@@ -99,6 +100,7 @@ def main():
     for name in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--opt-level", choices=(0, 3), type=int, required=True)
+    parser.add_argument("--compiler-revision")
     args = parser.parse_args()
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5):
         parser.error("use a test-enabled CPython 3.14.5")
@@ -116,12 +118,19 @@ def main():
             with patch.object(test_collections, "Counter", native):
                 original()
             body = method_bytes(source, "TestCounter", case._testMethodName)
+            digest = hashlib.sha256(body).hexdigest()
+            detail = {"operation": "All Counter construction, subtraction, equality, items, and argument errors execute in native programs.",
+                      "fixture": "The original CPython unittest module, class, and instance hooks and test body run on the host.",
+                      "method_sha256": digest, "native_calls": dict(native.calls)}
             return {"execution": "host-driven-native", "body": "CPython", "assertions": "CPython",
                     "fixture_execution": "CPython module/class/instance hooks",
                     "operation": "Imre for all Counter operations, including raised TypeErrors",
-                    "native_calls": dict(native.calls), "method_sha256": hashlib.sha256(body).hexdigest()}
+                    "native_calls": dict(native.calls), "method_sha256": digest,
+                    "observation": {"roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
+                                    "evidence": detail}}
         evidence, failures, skips = run_in_fixtures(load_suite("test.test_collections"), {case_id: execute})
     args.result.write_text(json.dumps({"cpython_commit": manifest["commit"], "opt_level": args.opt_level,
+                                      "compiler_revision": args.compiler_revision,
                                       "tests": evidence, "failures": failures, "skips": skips}, indent=2) + "\n")
     return int(bool(failures or skips) or case_id not in evidence)
 

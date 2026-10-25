@@ -21,7 +21,8 @@ fn invalid_aggregate(ty: Type, types: &Types) -> bool {
     if matches!(
         ty,
         Type::Callable(_) | Type::ForwardRef(_) | Type::AnnotationValue(_)
-    ) {
+    ) || types.is_partial_frame(ty)
+    {
         false
     } else if let Some(payload) = types.payload(ty) {
         invalid_aggregate(payload, types)
@@ -109,6 +110,65 @@ pub(super) fn targets(
 }
 
 impl Checker<'_> {
+    /// Expose str.join or a bound string's join as an exact native callback.
+    pub(super) fn string_join_value(&mut self, receiver: Option<Expr>, site: &impl Ranged) -> Expr {
+        let list = self.types.list(Type::Str);
+        let context = receiver.map(|value| Expr {
+            ty: self.types.tuple(vec![Type::Str]),
+            kind: ExprKind::Tuple(vec![value]),
+        });
+        let first = context.as_ref().map_or(Type::Str, |c| c.ty);
+        let local = |slot, ty| Expr {
+            ty,
+            kind: ExprKind::Local(slot),
+        };
+        let separator = if context.is_some() {
+            Expr {
+                ty: Type::Str,
+                kind: ExprKind::Field(Box::new(local(0, first)), 0),
+            }
+        } else {
+            local(0, Type::Str)
+        };
+        let id = self.helpers.reserve();
+        self.helpers.finish(
+            id,
+            comprehensions::Helper {
+                module: self.module,
+                calls: HashSet::new(),
+                class_reads: HashSet::new(),
+                recursion_error: self.graph.modules[self.module]
+                    .error(site, "recursive calls through str.join are unsupported"),
+                function: ir::Function {
+                    params: vec![0, 1],
+                    locals: vec![first, list],
+                    returns: Type::Str,
+                    body: vec![Statement::Return(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::StringJoin,
+                            vec![separator, local(1, list)],
+                        ),
+                    })],
+                },
+            },
+        );
+        Expr {
+            ty: self.types.callable(
+                if context.is_some() {
+                    vec![list]
+                } else {
+                    vec![Type::Str, list]
+                },
+                Type::Str,
+            ),
+            kind: ExprKind::Callable {
+                function: id,
+                receiver: context.map(Box::new),
+            },
+        }
+    }
+
     /// Converts a fixed definition or bound method into its exact positional ABI.
     pub(super) fn callable_value(
         &mut self,

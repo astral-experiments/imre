@@ -461,6 +461,18 @@ pub(crate) enum Compare {
     GreaterEqual,
 }
 
+/// Native multiset arithmetic over integer counts. Values match the runtime ABI.
+#[repr(u32)]
+#[derive(Clone, Copy)]
+pub(crate) enum CounterOp {
+    Add,
+    Subtract,
+    Union,
+    Intersection,
+    Positive,
+    Negative,
+}
+
 /// Public ZIP entry metadata read from the central directory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ZipField {
@@ -546,6 +558,9 @@ pub(crate) enum Builtin {
     Formatter(FormatterOperation),
     Input,
     Chr,
+    IntegerPower,
+    ModularPower,
+    NegativeIntegerPower,
     Int,
     Float,
     /// Represents an exact integer by its sign for a proved zero-comparison parameter.
@@ -795,11 +810,16 @@ pub(crate) enum Builtin {
     TextClosed,
     FileFileno,
     DictGet,
+    DictCopy,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
     CounterNew,
     CounterTotal,
     CounterUpdate,
+    CounterMath {
+        op: CounterOp,
+        inplace: bool,
+    },
     DictSumValues,
     /// Widens a defaultdict owner to its ordinary dictionary interface.
     DictAsBase,
