@@ -11,6 +11,9 @@ import sys
 import tempfile
 import tokenize
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from class_data_sources import write_class_data_sources
+
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "classes"
 PROJECT = FIXTURES.parents[2]
@@ -27,7 +30,43 @@ CELL = """class Cell:
 """
 
 
+HOOK = """class Build:
+    value: int
+    def __init__(self) -> None:
+        self.prepare()
+    def prepare(self) -> None:
+        self.value = 1
+"""
+
+
+SUBCLASS_LAYOUT = """class Base: pass
+class A(Base):
+    label: str
+    def __init__(self) -> None: self.label = "only A"
+class B(Base): pass
+"""
+
+
 REJECTED = {
+    "partially_initialized_self_in_class_data_store": 'class C:\n    shared = [1]\n    n: int\n    def __init__(self):\n        self.shared = expose(self)\n        self.n = 0\ndef expose(v: C) -> list[int]: return [v.n]\nC()\n',
+    "class_local_shadows_module_callable": 'def make() -> int: return 1\nclass C:\n    make = [1]\n    wrong = make()\n',
+    "read_computed_class_data_before_definition": 'def get() -> list[int]: return Later.items\nvalue = get()\nclass Later:\n    items = [1]\n',
+    "class_data_rebinding_changes_type": 'class C:\n    items = [1]\nC.items = "wrong"\n',
+    "frozen_inherited_class_data": 'from dataclasses import dataclass\nclass Base:\n    items = [1]\n@dataclass(frozen=True)\nclass Child(Base):\n    n: int\nChild(1).items = [2]\n',
+    "sibling_guard_field": SUBCLASS_LAYOUT + "def f(x: Base) -> str:\n    if isinstance(x, (A, B)): return x.label\n    return 'other'\n",
+    "reassigned_subclass_field": SUBCLASS_LAYOUT + "def f(x: Base, replacement: Base) -> str:\n    if isinstance(x, A):\n        x = replacement\n        return x.label\n    return 'other'\n",
+    "init_hook_skips_field": HOOK + "class Child(Build):\n    def prepare(self) -> None: pass\n",
+    "init_hook_reads_before_write": HOOK + "class Child(Build):\n    def prepare(self) -> None: self.value = self.value + 1\n",
+    "init_hook_leaks_receiver": HOOK + "def observe(value: Build) -> int: return value.value\nclass Child(Build):\n    def prepare(self) -> None: self.value = observe(self)\n",
+    "init_hook_observes_pending_field": HOOK + "class Child(Build):\n    def prepare(self) -> None:\n        print(self.value)\n        super().prepare()\n",
+    "init_hook_super_reads_pending_field": HOOK + "    def read(self) -> int: return self.value\nclass Child(Build):\n    def prepare(self) -> None: self.value = super().read()\n",
+    "init_hook_duplicates_field": HOOK.replace("self.prepare()", "self.value = 2\n        self.prepare()"),
+    "read_class_tuple_before_definition": 'def get() -> tuple[str]:\n    return Later.words\nvalue = get()\nclass Later:\n    words = ("late",)\n',
+    "assign_to_class_string": 'class C:\n    label = "fixed"\nC.label = "new"\n',
+    "instance_shadows_class_string": 'class C:\n    label = "fixed"\n    def __init__(self, value: str) -> None:\n        self.label = value\nC("instance")\n',
+    "subclass_rebinds_fixed_string": 'class C:\n    label = "first"\nclass D(C):\n    label = "second"\n',
+    "inherited_name_in_class_expression": 'class C:\n    words = ("a",)\nclass D(C):\n    longer = words + ("b",)\n',
+    "mutable_class_tuple": 'class C:\n    items = (["not fixed"],)\n',
     "copy_hook_wrong_arity": 'import copy\nclass C:\n    def __copy__(self, extra: int) -> int: return extra\ncopy.copy(C())\n',
     "inherited_copy_reduction": 'import copy\nclass Base:\n    def __reduce_ex__(self, protocol: int) -> int: return 0\nclass Child(Base): pass\ncopy.copy(Child())\n',
     "copy_custom_getstate": 'import copy\nclass C:\n    def __getstate__(self) -> int: return 0\ncopy.copy(C())\n',
@@ -95,6 +134,9 @@ REJECTED = {
     "staticmethod": CELL.replace("    def add(", "    @staticmethod\n    def add("),
     "classmethod": CELL.replace("    def add(", "    @classmethod\n    def add("),
     "property": CELL.replace("    def add(", "    @property\n    def add("),
+    "read_only_assignment": "class C:\n    @property\n    def value(self) -> int: return 1\nC().value = 2\n",
+    "orphan_setter": "class C:\n    @value.setter\n    def value(self, n: int) -> None: pass\n",
+    "property_setter_arity": "class C:\n    def get(self) -> int: return 1\n    def put(self) -> None: pass\n    value = property(get, put)\n",
     "unused_dynamic_method": CELL.replace("return self.value", 'if False:\n            eval("1")\n        return self.value'),
     "same_shape_different_nominal_type": CELL
         + CELL.replace("Cell", "Other")
@@ -217,7 +259,8 @@ def main() -> None:
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "instance_layout.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py"]:
+        class_sources = write_class_data_sources(project, PROJECT / "benchmarks/cpython_stdlib/full")
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "mapping_abc.py", "mapping_alias.py", *class_sources]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)

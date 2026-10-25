@@ -72,6 +72,14 @@ impl Session {
         let intrinsic = SystemPathBuf::from(root).join("imre");
         for (name, stub) in [
             (
+                "_imre_mock",
+                "def mark_call_list(values: list, /) -> bool: ...\ndef is_call_list(values: list, /) -> bool: ...\n",
+            ),
+            (
+                "_imre_doctest",
+                "def capture_start() -> None: ...\ndef capture_take() -> str: ...\ndef display(value: object, /) -> None: ...\ndef ascii_output(text: str, /) -> str: ...\ndef execute(test: object, debug: bool, /) -> None: ...\n",
+            ),
+            (
                 "hashlib",
                 // The bundled OpenSSL stub still names the input `string`. CPython
                 // 3.14 calls it `data`; the native constructor takes exact bytes.
@@ -81,6 +89,7 @@ impl Session {
                 "tomli",
                 "from tomllib import load as load, loads as loads\n",
             ),
+            ("unittest/mock", include_str!("../stdlib/unittest/mock.pyi")),
             (
                 "unidiff",
                 "class PatchSet:\n    def __init__(self, patch: str) -> None: ...\n",
@@ -99,7 +108,14 @@ impl Session {
             .fs()
             .write_file_all(
                 intrinsic.join("__init__.pyi"),
-                "from . import json as json, toml as toml\n",
+                "from . import json as json, toml as toml\nfrom typing import TypeVar, dataclass_transform\n_T = TypeVar('_T')\n@dataclass_transform(frozen_default=True)\ndef struct(cls: type[_T], /) -> type[_T]: ...\n",
+            )
+            .map_err(|error| error.to_string())?;
+        system
+            .fs()
+            .write_file_all(
+                intrinsic.join("_logging.pyi"),
+                include_str!("../stdlib/logging/runtime.pyi"),
             )
             .map_err(|error| error.to_string())?;
         system
@@ -117,6 +133,31 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
+        // CPython truth-tests any non-None debug_override and raises for conflicting
+        // optimization arguments. Preserve these catchable routes and the original
+        // unrelated frozen-importlib declarations, including their version guards.
+        let bootstrap = vendored
+            .read_to_string("stdlib/_frozen_importlib_external.pyi")
+            .map_err(|e| e.to_string())?
+            .replace(
+                "def cache_from_source(path: StrPath,",
+                "def cache_from_source(path: object,",
+            )
+            .replace(
+                "debug_override: bool, *, optimization: None = None",
+                "debug_override: object, *, optimization: object = None",
+            )
+            .replace(
+                "def source_from_cache(path: StrPath)",
+                "def source_from_cache(path: object)",
+            );
+        system
+            .fs()
+            .write_file_all(
+                SystemPathBuf::from(root).join("_frozen_importlib_external.pyi"),
+                bootstrap,
+            )
+            .map_err(|e| e.to_string())?;
         // typeshed omits inspect's private default; preserve all its public signatures.
         let inspect = vendored
             .read_to_string("stdlib/inspect.pyi")
@@ -166,7 +207,7 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let mut settings = ProgramSettings::empty(&vendored);
-        settings.python_version.version = ruff_python_ast::PythonVersion::PY314;
+        settings.python_version.version = crate::version::LANGUAGE;
         let mut roots = vec![SystemPathBuf::from(root)];
         for path in extension_roots {
             let path = path.to_str().ok_or("extension paths must be valid UTF-8")?;
@@ -508,37 +549,66 @@ struct CheckedFile<'db> {
 /// Only exclude the exact ty diagnostic already checked by native lowering.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum CheckedDiagnostic {
+    AbstractClassCall(TextRange),
     Decorator(TextRange),
+    OptionalLockContext(TextRange),
     Call(TextRange),
+    DictDeletion(TextRange),
+    DeferredName(TextRange),
     Keyword(TextRange),
-    TupleListRead(TextRange),
+    CheckedIndexRead(TextRange),
     MissingArgument(TextRange),
     BuiltinImport(TextRange),
+    ExcessArgument(TextRange),
+    PositionalKeyword(TextRange),
+    RepeatedKeyword(TextRange),
 }
 
 impl CheckedDiagnostic {
     pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
         let (range, kind) = match self {
+            Self::AbstractClassCall(range) => (range, 9),
             Self::Decorator(range) => (range, 0),
+            Self::OptionalLockContext(range) => (range, 7),
             Self::Call(range) => (range, 1),
             Self::Keyword(range) => (range, 2),
-            Self::TupleListRead(range) => (range, 3),
+            Self::CheckedIndexRead(range) => (range, 3),
+            Self::RepeatedKeyword(range) => (range, 11),
+            Self::DictDeletion(range) => (range, 8),
             Self::MissingArgument(range) => (range, 4),
             Self::BuiltinImport(range) => (range, 5),
+            Self::ExcessArgument(range) => (range, 6),
+            Self::PositionalKeyword(range) => (range, 7),
+            Self::DeferredName(range) => (range, 9),
         };
         (range.start(), range.end(), kind)
     }
 
     fn covers(self, diagnostic: &str, range: TextRange) -> bool {
         match self {
+            Self::AbstractClassCall(call) => diagnostic == "call-non-callable" && call == range,
             Self::Decorator(decorator) => {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
+            Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
+            Self::DeferredName(name) => diagnostic == "unresolved-reference" && name == range,
+            Self::OptionalLockContext(expr) => {
+                diagnostic == "invalid-context-manager" && expr == range
+            }
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
-            Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
+            Self::RepeatedKeyword(keyword) => {
+                diagnostic == "parameter-already-assigned" && keyword == range
+            }
+            Self::PositionalKeyword(keyword) => {
+                diagnostic == "positional-only-parameter-as-kwarg" && keyword == range
+            }
+            Self::CheckedIndexRead(read) => diagnostic == "not-subscriptable" && read == range,
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
             Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
+            Self::ExcessArgument(arg) => {
+                diagnostic == "too-many-positional-arguments" && arg == range
+            }
         }
     }
 }
@@ -1086,6 +1156,41 @@ impl Db for Database {
 #[cfg(test)]
 mod diagnostic_mode_tests {
     use super::*;
+
+    #[test]
+    fn a_proved_builtin_import_keeps_the_adjacent_ty_error() {
+        let root = Path::new("/project");
+        let mut session = Session::new(root, &[]).unwrap();
+        session
+            .add(
+                &root.join("main.py"),
+                "import _opcode, missing_peer\n",
+                crate::SourceKind::File,
+            )
+            .unwrap();
+        let builtin = TextRange::new(7.into(), 14.into());
+        let peer = TextRange::new(16.into(), 28.into());
+        let proof = CheckedDiagnostic::BuiltinImport;
+        let without_proofs = session.check_scopes(None, &[]).unwrap_err();
+        let adjacent = session
+            .check_scopes(None, &[vec![proof(builtin)]])
+            .unwrap_err();
+        let builtin_only = session
+            .check_scopes(None, &[vec![proof(peer)]])
+            .unwrap_err();
+        assert_ne!(adjacent, builtin_only);
+        assert_ne!(without_proofs, adjacent);
+        session
+            .check_scopes(None, &[vec![proof(builtin), proof(peer)]])
+            .unwrap();
+        // Even a range enclosing both aliases cannot justify either import.
+        assert_eq!(
+            session
+                .check_scopes(None, &[vec![proof(builtin.cover(peer))]])
+                .unwrap_err(),
+            without_proofs,
+        );
+    }
 
     #[test]
     fn enabling_diagnostics_invalidates_quiet_checks() {

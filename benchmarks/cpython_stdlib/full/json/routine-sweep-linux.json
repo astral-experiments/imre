@@ -4,8 +4,8 @@
   "unittest_occurrences": 212,
   "doctest_occurrences": 4,
   "sha256": {
-    "imre": "5f7513e68e11eca8b742a762c394754b6f5a366921ea381f79c7a6161dfac691",
-    "runtime": "0ab3a27da2720fae4070ec1f31cf64545f07eeeda16cec38b74d4382b9874227"
+    "imre": "0005ed5c1f92ac02ba02f4c481350254768967e199a2911c0ea217993643316f",
+    "runtime": "10010dd9a245fa01e8df6fefe315c46da24139823fdf2dec80a43d218ff7aff6"
   },
   "levels": {
     "0": {
@@ -61,8 +61,27 @@
           "test.test_json.test_decode.TestPyDecode.test_constant_invalid_case"
         ],
         "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:12:18: Imre: unknown class method"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_decode.TestCDecode.test_constant_invalid_case": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "228b8b7d49ecda8289eeb4f54f12184989bdbc6a73d73921fceaee12ed329ca1"
+            }
+          ],
+          "test.test_json.test_decode.TestPyDecode.test_constant_invalid_case": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "228b8b7d49ecda8289eeb4f54f12184989bdbc6a73d73921fceaee12ed329ca1"
+            }
+          ]
+        }
       },
       "test.test_json.test_decode.TestDecode.test_decimal": {
         "fixture_ids": [
@@ -160,8 +179,27 @@
           "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected"
         ],
         "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:11:18: Imre: unknown class method"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_decode.TestCDecode.test_nonascii_digits_rejected": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "384cbc84d65b5abb5677e6d03c872203c3cf4a050af101c522988f9ba779fdd1"
+            }
+          ],
+          "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "384cbc84d65b5abb5677e6d03c872203c3cf4a050af101c522988f9ba779fdd1"
+            }
+          ]
+        }
       },
       "test.test_json.test_decode.TestDecode.test_object_pairs_hook": {
         "fixture_ids": [
@@ -250,8 +288,27 @@
           "test.test_json.test_dump.TestPyDump.test_dumps"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:8:26: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_dump.TestCDump.test_dumps": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "a216aa875b97021b67945207e0f40e1cad8aa3c05523cd5b852874f541a884ad"
+            }
+          ],
+          "test.test_json.test_dump.TestPyDump.test_dumps": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "a216aa875b97021b67945207e0f40e1cad8aa3c05523cd5b852874f541a884ad"
+            }
+          ]
+        }
       },
       "test.test_json.test_dump.TestDump.test_encode_evil_dict": {
         "fixture_ids": [
@@ -278,7 +335,7 @@
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
         "outcome": "blocked",
-        "reason": "<case>/case.py:9:46: Imre: unsupported or repeated JSON encoding option"
+        "reason": "<case>/case.py:9:19: Imre: dictionary keys must be int, str, bytes, Path, or immutable scalar tuples"
       },
       "test.test_json.test_dump.TestCDump.test_large_list": {
         "fixture_ids": [
@@ -329,7 +386,7 @@
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
         "outcome": "blocked",
-        "reason": "<case>/case.py:9:37: Imre: unsupported or repeated JSON encoding option"
+        "reason": "<case>/case.py:9:24: Imre: unknown function or unsupported builtin arguments"
       },
       "test.test_json.test_enum.TestEnum.test_dict_keys": {
         "fixture_ids": [
@@ -429,7 +486,7 @@
         ],
         "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
         "outcome": "blocked",
-        "reason": "<case>/case.py:16:18: Imre: unknown class method"
+        "reason": "<case>/case.py:24:30: Imre: arithmetic requires int or float operands"
       },
       "test.test_json.test_fail.TestFail.test_non_string_keys_dict": {
         "fixture_ids": [
@@ -465,7 +522,7 @@
         ],
         "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
         "outcome": "blocked",
-        "reason": "<case>/case.py:35:18: Imre: unknown class method"
+        "reason": "<case>/case.py:43:30: Imre: arithmetic requires int or float operands"
       },
       "test.test_json.test_float.TestFloat.test_allow_nan": {
         "fixture_ids": [
@@ -491,8 +548,27 @@
           "test.test_json.test_float.TestPyFloat.test_ints"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:9:30: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_float.TestCFloat.test_ints": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "29f2628109437b4ab355006bc432b60e63d401f3a3fda7e3df4599951a08edc9"
+            }
+          ],
+          "test.test_json.test_float.TestPyFloat.test_ints": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "29f2628109437b4ab355006bc432b60e63d401f3a3fda7e3df4599951a08edc9"
+            }
+          ]
+        }
       },
       "test.test_json.test_float.TestFloat.test_out_of_range": {
         "fixture_ids": [
@@ -660,7 +736,7 @@
         ],
         "fixture_sha256": "621c342090301ff7171c1046d4117d96c241bf23113273e72fc6c32133020cd1",
         "outcome": "blocked",
-        "reason": "<case>/case.py:10:14: Imre: unknown class method"
+        "reason": "<case>/case.py:11:13: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
       },
       "test.test_json.test_scanstring.TestScanstring.test_scanstring": {
         "fixture_ids": [
@@ -760,7 +836,7 @@
         ],
         "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
         "outcome": "blocked",
-        "reason": "<case>/case.py:8:14: Imre: unknown class method"
+        "reason": "<case>/case.py:9:13: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
       },
       "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii": {
         "fixture_ids": [
@@ -946,8 +1022,27 @@
           "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:9:26: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "a4ff14d220a222271bc45a147e425b7ab469963871ef68c53df2ae0d6a5e2334"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "a4ff14d220a222271bc45a147e425b7ab469963871ef68c53df2ae0d6a5e2334"
+            }
+          ]
+        }
       },
       "test.test_json.test_unicode.TestUnicode.test_big_unicode_decode": {
         "fixture_ids": [
@@ -964,8 +1059,27 @@
           "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:9:26: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "312d22753592d963049f9f5923aefba7962e689ac391c5a5403a542b33704beb"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "312d22753592d963049f9f5923aefba7962e689ac391c5a5403a542b33704beb"
+            }
+          ]
+        }
       },
       "test.test_json.test_unicode.TestUnicode.test_bytes_decode": {
         "fixture_ids": [
@@ -991,8 +1105,27 @@
           "test.test_json.test_unicode.TestPyUnicode.test_encoding3"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding3": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "5b2ffef4ab26a3d32a23e1bd494cb6916df6c19ea05d548b897bf45eb3be70d8"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding3": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "5b2ffef4ab26a3d32a23e1bd494cb6916df6c19ea05d548b897bf45eb3be70d8"
+            }
+          ]
+        }
       },
       "test.test_json.test_unicode.TestUnicode.test_encoding4": {
         "fixture_ids": [
@@ -1000,8 +1133,27 @@
           "test.test_json.test_unicode.TestPyUnicode.test_encoding4"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding4": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "ec6540364cc3b15307be8adcd74d31e39180e86d479f2f05c9fd4f5b78d797b8"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding4": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "ec6540364cc3b15307be8adcd74d31e39180e86d479f2f05c9fd4f5b78d797b8"
+            }
+          ]
+        }
       },
       "test.test_json.test_unicode.TestUnicode.test_encoding5": {
         "fixture_ids": [
@@ -1009,8 +1161,27 @@
           "test.test_json.test_unicode.TestPyUnicode.test_encoding5"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding5": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "0e4cad4c2c0915e6981b5986be8cce712930fcbfcb6dae1858b362951cf8ed28"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding5": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "0e4cad4c2c0915e6981b5986be8cce712930fcbfcb6dae1858b362951cf8ed28"
+            }
+          ]
+        }
       },
       "test.test_json.test_unicode.TestUnicode.test_encoding6": {
         "fixture_ids": [
@@ -1018,8 +1189,27 @@
           "test.test_json.test_unicode.TestPyUnicode.test_encoding6"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding6": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "df8c1f4528fa857ee4364fc3d2906f592e5b993d7be4d7aae83d66c58340037a"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding6": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "df8c1f4528fa857ee4364fc3d2906f592e5b993d7be4d7aae83d66c58340037a"
+            }
+          ]
+        }
       },
       "test.test_json.test_unicode.TestUnicode.test_encoding7": {
         "fixture_ids": [
@@ -1027,8 +1217,27 @@
           "test.test_json.test_unicode.TestPyUnicode.test_encoding7"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding7": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "9226827c666dcca00a5d47cbf68ff5fb0170a530a4c187815af81e5f3c54b4e4"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding7": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "9226827c666dcca00a5d47cbf68ff5fb0170a530a4c187815af81e5f3c54b4e4"
+            }
+          ]
+        }
       },
       "test.test_json.test_unicode.TestUnicode.test_escaped_decode": {
         "fixture_ids": [
@@ -1138,8 +1347,27 @@
           "test.test_json.test_decode.TestPyDecode.test_constant_invalid_case"
         ],
         "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:12:18: Imre: unknown class method"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_decode.TestCDecode.test_constant_invalid_case": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "228b8b7d49ecda8289eeb4f54f12184989bdbc6a73d73921fceaee12ed329ca1"
+            }
+          ],
+          "test.test_json.test_decode.TestPyDecode.test_constant_invalid_case": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "228b8b7d49ecda8289eeb4f54f12184989bdbc6a73d73921fceaee12ed329ca1"
+            }
+          ]
+        }
       },
       "test.test_json.test_decode.TestDecode.test_decimal": {
         "fixture_ids": [
@@ -1237,8 +1465,27 @@
           "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected"
         ],
         "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:11:18: Imre: unknown class method"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_decode.TestCDecode.test_nonascii_digits_rejected": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "384cbc84d65b5abb5677e6d03c872203c3cf4a050af101c522988f9ba779fdd1"
+            }
+          ],
+          "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "384cbc84d65b5abb5677e6d03c872203c3cf4a050af101c522988f9ba779fdd1"
+            }
+          ]
+        }
       },
       "test.test_json.test_decode.TestDecode.test_object_pairs_hook": {
         "fixture_ids": [
@@ -1327,8 +1574,27 @@
           "test.test_json.test_dump.TestPyDump.test_dumps"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:8:26: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_dump.TestCDump.test_dumps": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "a216aa875b97021b67945207e0f40e1cad8aa3c05523cd5b852874f541a884ad"
+            }
+          ],
+          "test.test_json.test_dump.TestPyDump.test_dumps": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "a216aa875b97021b67945207e0f40e1cad8aa3c05523cd5b852874f541a884ad"
+            }
+          ]
+        }
       },
       "test.test_json.test_dump.TestDump.test_encode_evil_dict": {
         "fixture_ids": [
@@ -1355,7 +1621,7 @@
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
         "outcome": "blocked",
-        "reason": "<case>/case.py:9:46: Imre: unsupported or repeated JSON encoding option"
+        "reason": "<case>/case.py:9:19: Imre: dictionary keys must be int, str, bytes, Path, or immutable scalar tuples"
       },
       "test.test_json.test_dump.TestCDump.test_large_list": {
         "fixture_ids": [
@@ -1406,7 +1672,7 @@
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
         "outcome": "blocked",
-        "reason": "<case>/case.py:9:37: Imre: unsupported or repeated JSON encoding option"
+        "reason": "<case>/case.py:9:24: Imre: unknown function or unsupported builtin arguments"
       },
       "test.test_json.test_enum.TestEnum.test_dict_keys": {
         "fixture_ids": [
@@ -1506,7 +1772,7 @@
         ],
         "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
         "outcome": "blocked",
-        "reason": "<case>/case.py:16:18: Imre: unknown class method"
+        "reason": "<case>/case.py:24:30: Imre: arithmetic requires int or float operands"
       },
       "test.test_json.test_fail.TestFail.test_non_string_keys_dict": {
         "fixture_ids": [
@@ -1542,7 +1808,7 @@
         ],
         "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
         "outcome": "blocked",
-        "reason": "<case>/case.py:35:18: Imre: unknown class method"
+        "reason": "<case>/case.py:43:30: Imre: arithmetic requires int or float operands"
       },
       "test.test_json.test_float.TestFloat.test_allow_nan": {
         "fixture_ids": [
@@ -1568,8 +1834,27 @@
           "test.test_json.test_float.TestPyFloat.test_ints"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:9:30: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_float.TestCFloat.test_ints": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "29f2628109437b4ab355006bc432b60e63d401f3a3fda7e3df4599951a08edc9"
+            }
+          ],
+          "test.test_json.test_float.TestPyFloat.test_ints": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "29f2628109437b4ab355006bc432b60e63d401f3a3fda7e3df4599951a08edc9"
+            }
+          ]
+        }
       },
       "test.test_json.test_float.TestFloat.test_out_of_range": {
         "fixture_ids": [
@@ -1737,7 +2022,7 @@
         ],
         "fixture_sha256": "621c342090301ff7171c1046d4117d96c241bf23113273e72fc6c32133020cd1",
         "outcome": "blocked",
-        "reason": "<case>/case.py:10:14: Imre: unknown class method"
+        "reason": "<case>/case.py:11:13: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
       },
       "test.test_json.test_scanstring.TestScanstring.test_scanstring": {
         "fixture_ids": [
@@ -1837,7 +2122,7 @@
         ],
         "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
         "outcome": "blocked",
-        "reason": "<case>/case.py:8:14: Imre: unknown class method"
+        "reason": "<case>/case.py:9:13: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
       },
       "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii": {
         "fixture_ids": [
@@ -2023,8 +2308,27 @@
           "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:9:26: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "a4ff14d220a222271bc45a147e425b7ab469963871ef68c53df2ae0d6a5e2334"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "a4ff14d220a222271bc45a147e425b7ab469963871ef68c53df2ae0d6a5e2334"
+            }
+          ]
+        }
       },
       "test.test_json.test_unicode.TestUnicode.test_big_unicode_decode": {
         "fixture_ids": [
@@ -2041,8 +2345,27 @@
           "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:9:26: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "312d22753592d963049f9f5923aefba7962e689ac391c5a5403a542b33704beb"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "312d22753592d963049f9f5923aefba7962e689ac391c5a5403a542b33704beb"
+            }
+          ]
+        }
       },
       "test.test_json.test_unicode.TestUnicode.test_bytes_decode": {
         "fixture_ids": [
@@ -2068,8 +2391,27 @@
           "test.test_json.test_unicode.TestPyUnicode.test_encoding3"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding3": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "5b2ffef4ab26a3d32a23e1bd494cb6916df6c19ea05d548b897bf45eb3be70d8"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding3": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "5b2ffef4ab26a3d32a23e1bd494cb6916df6c19ea05d548b897bf45eb3be70d8"
+            }
+          ]
+        }
       },
       "test.test_json.test_unicode.TestUnicode.test_encoding4": {
         "fixture_ids": [
@@ -2077,8 +2419,27 @@
           "test.test_json.test_unicode.TestPyUnicode.test_encoding4"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding4": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "ec6540364cc3b15307be8adcd74d31e39180e86d479f2f05c9fd4f5b78d797b8"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding4": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "ec6540364cc3b15307be8adcd74d31e39180e86d479f2f05c9fd4f5b78d797b8"
+            }
+          ]
+        }
       },
       "test.test_json.test_unicode.TestUnicode.test_encoding5": {
         "fixture_ids": [
@@ -2086,8 +2447,27 @@
           "test.test_json.test_unicode.TestPyUnicode.test_encoding5"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding5": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "0e4cad4c2c0915e6981b5986be8cce712930fcbfcb6dae1858b362951cf8ed28"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding5": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "0e4cad4c2c0915e6981b5986be8cce712930fcbfcb6dae1858b362951cf8ed28"
+            }
+          ]
+        }
       },
       "test.test_json.test_unicode.TestUnicode.test_encoding6": {
         "fixture_ids": [
@@ -2095,8 +2475,27 @@
           "test.test_json.test_unicode.TestPyUnicode.test_encoding6"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding6": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "df8c1f4528fa857ee4364fc3d2906f592e5b993d7be4d7aae83d66c58340037a"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding6": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "df8c1f4528fa857ee4364fc3d2906f592e5b993d7be4d7aae83d66c58340037a"
+            }
+          ]
+        }
       },
       "test.test_json.test_unicode.TestUnicode.test_encoding7": {
         "fixture_ids": [
@@ -2104,8 +2503,27 @@
           "test.test_json.test_unicode.TestPyUnicode.test_encoding7"
         ],
         "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
-        "outcome": "blocked",
-        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding7": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "9226827c666dcca00a5d47cbf68ff5fb0170a530a4c187815af81e5f3c54b4e4"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding7": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "9226827c666dcca00a5d47cbf68ff5fb0170a530a4c187815af81e5f3c54b4e4"
+            }
+          ]
+        }
       },
       "test.test_json.test_unicode.TestUnicode.test_escaped_decode": {
         "fixture_ids": [

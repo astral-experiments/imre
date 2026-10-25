@@ -1,5 +1,6 @@
 //! Copy file contents without copying permissions or truncating an alias of the source.
 
+use crate::StrOwner;
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io;
@@ -15,9 +16,9 @@ use super::super::{Bytes, Object, Str, acquire_rc, bytes, paths};
 type Result<T> = std::result::Result<T, Error>;
 
 enum Name {
-    Text(Rc<Str>),
+    Text(StrOwner),
     Bytes(Rc<Bytes>),
-    Path(Rc<Str>),
+    Path(StrOwner),
 }
 
 impl Name {
@@ -26,9 +27,9 @@ impl Name {
         // SAFETY: the compiler supplies the tag for the exact live allocation.
         unsafe {
             match tag {
-                0 => Self::Text(acquire_rc(value as usize)),
+                0 => Self::Text(crate::StrOwner::acquire_word(value as usize)),
                 1 => Self::Bytes(acquire_rc(value as usize)),
-                2 => Self::Path(Rc::from_raw(paths::imre_path_text(value.cast()))),
+                2 => Self::Path(StrOwner::from_raw(paths::imre_path_text(value.cast()))),
                 _ => unreachable!(),
             }
         }
@@ -73,7 +74,7 @@ impl Name {
 
     fn filename(&self) -> Filename {
         match self {
-            Self::Text(s) | Self::Path(s) => Filename::Str(Rc::clone(s)),
+            Self::Text(s) | Self::Path(s) => Filename::Str(StrOwner::clone(s)),
             Self::Bytes(b) => Filename::Bytes(Rc::clone(b)),
         }
     }
@@ -136,17 +137,21 @@ fn copyfile(src: &Name, dst: &Name, follow: bool) -> Result<()> {
         }
     }
     if !follow && src.path().is_symlink() {
-        let target = fs::read_link(src.path()).map_err(|e| src.error(e))?;
-        return symlink(&target, dst.path()).map_err(|e| {
-            let target = if matches!(src, Name::Bytes(_)) {
-                Filename::Bytes(Rc::new(target.into_os_string().into_vec()))
-            } else {
-                Filename::from_fs_text(target.into_os_string())
-            };
-            errno_with_filenames(e, Some(target), Some(dst.filename()))
-        });
+        return copy_link(src, dst);
     }
     copy_data(src, dst)
+}
+
+fn copy_link(src: &Name, dst: &Name) -> Result<()> {
+    let target = fs::read_link(src.path()).map_err(|e| src.error(e))?;
+    symlink(&target, dst.path()).map_err(|e| {
+        let target = if matches!(src, Name::Bytes(_)) {
+            Filename::Bytes(Rc::new(target.into_os_string().into_vec()))
+        } else {
+            Filename::from_fs_text(target.into_os_string())
+        };
+        errno_with_filenames(e, Some(target), Some(dst.filename()))
+    })
 }
 
 /// Keep os.path.basename's empty final component for sources ending in a slash.
@@ -173,7 +178,7 @@ impl Name {
             Ok(Name::Bytes(Rc::new(path.as_os_str().as_bytes().to_vec())))
         } else {
             path.to_str()
-                .map(|s| Name::Text(Rc::new(Str::from(s))))
+                .map(|s| Name::Text(StrOwner::new(Str::from(s))))
                 .ok_or_else(|| {
                     Error::new(
                         Kind::UnicodeDecodeError,
@@ -218,6 +223,24 @@ fn run(op: u32, src: &Name, dst: &Name, follow: bool) -> Result<Option<std::path
 
 #[path = "metadata.rs"]
 mod metadata;
+#[path = "move.rs"]
+mod moving;
+#[path = "tree.rs"]
+mod tree;
+
+/// Transfer one reference of the original path's concrete type to the caller.
+unsafe fn retain_handle(value: *const (), tag: u32) -> usize {
+    // SAFETY: the compiler roots the live str, bytes, or Path with this tag.
+    unsafe {
+        match tag {
+            0 => StrOwner::increment_strong_count(value.cast::<Str>()),
+            1 => Rc::increment_strong_count(value.cast::<Bytes>()),
+            2 => Rc::increment_strong_count(value.cast::<Object>()),
+            _ => unreachable!(),
+        }
+    }
+    value as usize
+}
 
 /// # Safety
 /// The two handles are rooted and tagged as str, bytes, or Path. For a Path
@@ -251,19 +274,12 @@ pub unsafe extern "C" fn imre_shutil_copy(
                 return Ok(if dst_tag == 1 {
                     Rc::into_raw(Rc::new(value.into_vec())) as usize
                 } else {
-                    Rc::into_raw(Rc::new(super::super::paths::path_utf8(value)?)) as usize
+                    StrOwner::into_raw(StrOwner::new(super::super::paths::path_utf8(value)?))
+                        as usize
                 });
             }
             // SAFETY: return exactly one new reference of the original destination's type.
-            unsafe {
-                match dst_tag {
-                    0 => Rc::increment_strong_count(dst.cast::<Str>()),
-                    1 => Rc::increment_strong_count(dst.cast::<Bytes>()),
-                    2 => Rc::increment_strong_count(dst.cast::<Object>()),
-                    _ => unreachable!(),
-                }
-            }
-            Ok(dst as usize
+            Ok(unsafe { retain_handle(dst, dst_tag) }
                 | if matches!(op, 4 | 5) && dst_tag == 2 {
                     6
                 } else {

@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 
@@ -17,8 +18,6 @@ from suite_native import (
     NativeCompileError,
     Toolchain,
     method_bytes,
-    native_method,
-    run_in_fixtures,
 )
 
 SOURCE = HERE / "upstream/Lib/test/test_fnmatch.py"
@@ -30,8 +29,8 @@ def source(node):
     return b"".join(LINES[node.lineno - 1 : node.end_lineno])
 
 
-def fixture(owner, method):
-    """Include the original helper methods, imports and global assignments that this body reads."""
+def test_entry(owner, method):
+    """Keep the original class, dependencies, method and unittest.main entry point."""
     (cls,) = [n for n in TOP if isinstance(n, ast.ClassDef) and n.name == owner]
     methods = {n.name: n for n in cls.body if isinstance(n, ast.FunctionDef)}
     nodes = [methods[method]]
@@ -62,9 +61,23 @@ def fixture(owner, method):
     ]
     return (
         b"".join(source(n) for n in imports + assignments)
-        + b"\nclass NativeCase(unittest.TestCase):\n"
+        + b"\n" + LINES[cls.lineno - 1]
         + b"".join(helpers)
-    ).decode()
+        + method_bytes(SOURCE, owner, method)
+        + b"\n" + source(TOP[-1])
+    )
+
+
+def check_result(command, owner, method, *, wrong=False):
+    run = subprocess.run([*command, "-v"], text=True, capture_output=True, timeout=60)
+    status = "FAIL" if wrong else "ok"
+    rows = [s for s in run.stderr.splitlines() if " ... " in s]
+    summary = "FAILED (failures=1)" if wrong else "OK"
+    if (run.returncode != int(wrong) or run.stdout
+            or rows != [f"{method} (__main__.{owner}.{method}) ... {status}"]
+            or "Ran 1 test in " not in run.stderr
+            or run.stderr.splitlines()[-1:] != [summary]):
+        raise AssertionError((command, run.returncode, run.stdout, run.stderr))
 
 
 def main():
@@ -98,6 +111,9 @@ def main():
     ]
     keys = list(occurrence_keys(n for n, _ in discovered))
     reports = []
+    baseline = {r["opt_level"]: {row["id"] for row in r["records"]
+                                if row["classification"] == "fully-native"}
+                for r in json.loads((HERE / "evidence-linux.json").read_bytes())}
     for level in (0, 3):
         calls = operations["levels"][str(level)]
         if set(calls) != reference["reference"].keys() or any(i != 1 for _, i in keys):
@@ -119,34 +135,39 @@ def main():
                     ).hexdigest(),
                     "native_operation_calls": calls[name],
                 }
+                entry = test_entry(owner, fn)
                 try:
-                    execute = native_method(
-                        tool, path, SOURCE, owner, name, fixture(owner, fn)
-                    )
+                    binary = tool.build(entry, path)
                 except NativeCompileError as exc:
                     reason = str(exc).replace(str(path) + "/", "")
                     proof["complete_method_diagnostic"] = reason.strip()
-                    return name, None, proof
-                return name, execute, proof
+                    return name, False, proof
+                check_result([sys.executable, "-I", "-B", path / "case.py"], owner, fn)
+                check_result([binary], owner, fn)
+                if fn == "test_mix_bytes_str":
+                    # Make the first call accept its pattern: the original assertRaises must fail.
+                    wrong = entry.replace(b", b'*')", b", '*')", 1)
+                    assert wrong != entry
+                    check_result([tool.build(wrong, path)], owner, fn, wrong=True)
+                elif owner in ("FilterTestCase", "FilterFalseTestCase"):
+                    # Swap the public operations while leaving the original assertions intact.
+                    wrong = entry.replace(b"translate, filter, filterfalse\n",
+                                          b"translate, filterfalse as filter, filter as filterfalse\n", 1)
+                    assert wrong != entry
+                    check_result([tool.build(wrong, path)], owner, fn, wrong=True)
+                return name, True, proof
 
             with ThreadPoolExecutor(max_workers=2) as pool:
                 built = list(pool.map(compile_method, discovered))
-            execs = {n: fn for n, fn, _ in built if fn}
-            records, failures, skips = run_in_fixtures(
-                load_suite(manifest["module"]), execs
-            )
-            if failures or skips:
-                raise ValueError((failures, skips))
-            for name, fn, proof in built:
-                if fn:
-                    (row,) = records[name]
+            for name, ran, proof in built:
+                if ran:
                     loc = roles(
                         body="imre",
                         assertions="imre",
                         operation="imre",
-                        fixture="mixed",
+                        fixture="imre",
                     )
-                    proof["fixture"] = row["fixture_execution"]
+                    proof["fixture"] = "Original class and dependencies with native unittest.TestCase/main."
                     proof["operation"] = (
                         "The original method invokes native fnmatch and assertions in an Imre child."
                     )
@@ -165,6 +186,9 @@ def main():
                     )
                 obs[name, 1] = {"outcome": "pass", "roles": loc, "evidence": proof}
         report = build_report(reference, level, discovered, obs)
+        ran = {row["id"] for row in report["records"] if row["classification"] == "fully-native"}
+        if lost := baseline[level] - ran:
+            raise AssertionError(f"O{level} lost native fnmatch methods: {sorted(lost)}")
         print(f"O{level}: {report['counts']}", flush=True)
         reports.append(report)
     write_reports(args.result, reports, reference)

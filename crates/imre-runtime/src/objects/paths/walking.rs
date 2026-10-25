@@ -1,6 +1,7 @@
 //! A walk suspends with no open directories. Top-down callers retain the live
 //! list that decides which directories the next pull visits.
 
+use crate::StrOwner;
 use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
@@ -98,7 +99,7 @@ impl Walker {
                             .map_err(|_| Error::allocation())?;
                         names
                             .values
-                            .push(Rc::into_raw(Rc::new(Str::from(name))) as usize);
+                            .push(StrOwner::into_raw(StrOwner::new(Str::from(name))) as usize);
                     }
                     let dirs = dirs.into_object();
                     let visit = Work::Descend(path.clone(), dirs.clone());
