@@ -141,6 +141,8 @@ impl Builtin {
                 | ProcessOperation::Await
                 | ProcessOperation::RunLoop
                 | ProcessOperation::JoinGroup
+                | ProcessOperation::GeneratorNext
+                | ProcessOperation::GeneratorYield
                 | ProcessOperation::Acquire => Contract::new(true, Unknown),
                 ProcessOperation::Executable
                 | ProcessOperation::CheckOutput
@@ -155,6 +157,7 @@ impl Builtin {
                 | ProcessOperation::ContextEnter
                 | ProcessOperation::ContextExit
                 | ProcessOperation::ContextThrow
+                | ProcessOperation::GeneratorTake
                 | ProcessOperation::ContextYield
                 | ProcessOperation::CreateTask
                 | ProcessOperation::NewLoop

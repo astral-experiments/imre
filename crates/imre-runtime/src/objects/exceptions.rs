@@ -588,6 +588,25 @@ pub(super) fn kind_of(error: &Object) -> Kind {
     unsafe { error.0.with(Storage::exception_kind) }
 }
 
+/// PEP 479 converts a StopIteration escaping the generator into RuntimeError.
+pub(super) fn generator_stop(cause: Rc<Object>) -> Rc<Object> {
+    let error = new_exception(
+        Kind::RuntimeError,
+        Payload::Message(Rc::new("generator raised StopIteration".into())),
+    );
+    // SAFETY: the fresh wrapper has not escaped and cannot occur in its cause.
+    unsafe {
+        error.0.with_mut(|storage| {
+            let Storage::Exception(value) = storage else {
+                unreachable!()
+            };
+            value.details_mut().cause = Some(cause);
+            value.suppress_context = true;
+        });
+    }
+    error
+}
+
 pub(super) fn task_group_errors(errors: Vec<Rc<Object>>) -> Rc<Object> {
     new_exception(
         Kind::ExceptionGroup,

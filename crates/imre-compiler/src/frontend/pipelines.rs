@@ -105,7 +105,8 @@ impl Checker<'_> {
 pub(super) fn is_pipeline_expression(checker: &Checker<'_>, expression: &ast::Expr) -> bool {
     matches!(expression, ast::Expr::Generator(_))
         || matches!(expression, ast::Expr::Call(call)
-            if checker.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain))
+            if checker.generator_signature(call).is_some()
+            || checker.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain))
             || checker.is_builtin_iter(call)
             || matches!(&*call.func, ast::Expr::Name(name)
                 if matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
@@ -199,6 +200,50 @@ impl Checker<'_> {
         let ast::Expr::Call(call) = expression else {
             return Ok(None);
         };
+        if let Some((signature, element)) = self.generator_signature(call) {
+            if call.arguments.args.iter().any(ast::Expr::is_starred_expr)
+                || call.arguments.keywords.iter().any(|kw| kw.arg.is_none())
+            {
+                return Err(error(
+                    self.source,
+                    call,
+                    "generator calls do not support argument unpacking",
+                ));
+            }
+            let args = if self.inference.is_some() {
+                self.infer_call(call, &signature, None, 0)?.1
+            } else {
+                self.arguments(call, &signature.params, None)?
+            };
+            self.calls.insert(signature.id);
+            let frame = self.call_value(&signature, Type::None, args);
+            let handle = self.hidden(Type::GeneratorContext);
+            let value = self.hidden(element);
+            let ready = self.hidden(Type::Bool);
+            let op = |kind, ty| contexts::op(kind, ty, vec![self.local(handle)]);
+            let next = vec![
+                Statement::Clear(value),
+                Statement::Assign(ready, op(ir::ProcessOperation::GeneratorNext, Type::Bool)),
+                Statement::If(
+                    self.local(ready),
+                    vec![Statement::Assign(
+                        value,
+                        op(ir::ProcessOperation::GeneratorTake, element),
+                    )],
+                    Vec::new(),
+                ),
+            ];
+            return Ok(Some(Iteration::Prepared(Prepared {
+                evaluate: vec![Statement::Assign(handle, frame)],
+                acquire: Vec::new(),
+                next,
+                value,
+                ready,
+                elementless: false,
+                writes: HashSet::new(),
+                clear: vec![handle, value, ready],
+            })));
+        }
         if self.is_builtin_iter(call) {
             return Ok(Some(Iteration::Prepared(self.sentinel_input(call)?)));
         }

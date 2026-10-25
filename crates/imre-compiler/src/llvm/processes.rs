@@ -110,6 +110,32 @@ impl Emitter<'_, '_> {
                 self.checked_line("call void @imre_context_yield()");
                 none()
             }
+            ProcessOperation::GeneratorNext | ProcessOperation::GeneratorYield => {
+                let byte = if matches!(operation, ProcessOperation::GeneratorNext) {
+                    self.checked_instruction(format!(
+                        "call i32 @imre_generator_next(ptr {})",
+                        args[0].value.operand
+                    ))
+                } else {
+                    let word = self.word(&args[0].value);
+                    let kind = representation_kind(args[0].value.ty, &self.module.types);
+                    self.checked_instruction(format!(
+                        "call i32 @imre_generator_yield(i64 {word}, i32 {kind})"
+                    ))
+                };
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
+                    small_integer: false,
+                }
+            }
+            ProcessOperation::GeneratorTake => {
+                let word = self.instruction(format!(
+                    "call i64 @imre_generator_take(ptr {})",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
             ProcessOperation::ContextThrow => {
                 let byte = self.checked_instruction(format!(
                     "call i32 @imre_context_throw(ptr {}, ptr {})",
