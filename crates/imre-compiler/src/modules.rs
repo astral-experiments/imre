@@ -61,6 +61,7 @@ pub(crate) enum IntrinsicModule {
     AnnotationFormat,
     Declaration(&'static str),
     Argparse,
+    Builtins,
     Future,
     Sys,
     Typing,
@@ -120,6 +121,8 @@ pub(crate) enum Intrinsic {
     AnnotationTypeRepr,
     AnnotationFormat(i64),
     Declaration(&'static str),
+    BuiltinsLast,
+    SysDisplayHook,
     ArgumentParser,
     ArgparseNamespace,
     RawDescriptionHelpFormatter,
@@ -331,6 +334,7 @@ impl IntrinsicModule {
             "_opcode" => Some(Self::Opcode),
             "unidiff" => Some(Self::Unidiff),
             "argparse" => Some(Self::Argparse),
+            "builtins" => Some(Self::Builtins),
             "sys" => Some(Self::Sys),
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
@@ -398,6 +402,8 @@ impl IntrinsicModule {
             return Some(Binding::IntrinsicModule(Self::ImreToml));
         }
         let symbol = match (self, name) {
+            (Self::Builtins, "_") => Intrinsic::BuiltinsLast,
+            (Self::Sys, "__displayhook__") => Intrinsic::SysDisplayHook,
             (Self::AnnotationLib, "get_annotations") => Intrinsic::GetAnnotations,
             (Self::AnnotationLib, "type_repr") => Intrinsic::AnnotationTypeRepr,
             (Self::AnnotationFormat, "VALUE") => Intrinsic::AnnotationFormat(1),
@@ -1594,6 +1600,9 @@ impl<'a> Loader<'a> {
                                     alias.name
                                 )
                             })?;
+                        if binding == Binding::Intrinsic(Intrinsic::BuiltinsLast) {
+                            return Err("from builtins import _ needs an import-time snapshot; use a qualified lookup".into());
+                        }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), binding, alias)?;
                     }

@@ -45,7 +45,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::CsvReader
         | Type::RegexPattern
         | Type::RegexMatch
-        | Type::ExceptionField
+        | Type::ValueView
         | Type::TextIO
         | Type::BinaryIO
         | Type::Iterator

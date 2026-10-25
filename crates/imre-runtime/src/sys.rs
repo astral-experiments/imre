@@ -35,6 +35,16 @@ pub(super) fn flush_stderr() -> io::Result<()> {
     Ok(())
 }
 
+/// Write the default display hook's repr followed by a newline to stdout.
+pub(super) fn write_display_line(text: &str) -> bool {
+    if write_stream(&OUTPUT, text, true).is_err() {
+        write_error(false).raise();
+        false
+    } else {
+        true
+    }
+}
+
 fn write_error(stderr: bool) -> Error {
     Error::new(
         Kind::OSError,
