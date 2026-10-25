@@ -21,12 +21,14 @@ SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
 sys.path[:0] = [str(HERE), str(STDLIB)]
 import native_config
 import native_filters
+import native_files
 import native_formatters
 import native_handlers
 import native_hierarchy
 import native_levels
 import native_logging
 import native_records
+import native_rotation
 import native_timed
 from suite_evidence import roles, write_reports
 from suite_inventory import cases, load_suite, verify_files
@@ -154,6 +156,8 @@ def known_cases(toolchain, work, original):
     executions.update(native_handlers.handler_cases(toolchain, directory("handlers"), original))
     executions.update(native_filters.filter_cases(toolchain, directory("name-filter")))
     executions.update(native_hierarchy.hierarchy_cases(toolchain, directory("children")))
+    executions.update(native_files.file_cases(toolchain, directory("file-handlers")))
+    executions.update(native_rotation.rotation_cases(toolchain, directory("size-rotation")))
     formatter = toolchain.build((HERE / "formatter_driver.py").read_bytes(), directory("formatters"))
     executions.update(native_formatters.host_formatter_cases(toolchain, formatter, original))
     executions[native_formatters.PRECISION] = native_formatters.precision_case(toolchain, directory("precision"))

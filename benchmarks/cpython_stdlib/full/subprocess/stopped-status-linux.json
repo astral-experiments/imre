@@ -1,0 +1,307 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "imre_revision": "3a77252214ef56183901aefc22febc40a53083a7",
+  "tested_tree": "f1436cc00c3ac483bbac2c421dab696a0a7e5a06",
+  "baseline_revision": "a5dcb087c252d2a60194d20736eb0ed2f27e7f2d",
+  "baseline_tree": "1d351deef732d91bce96a8ac65d9bc2a4c2dbd15",
+  "reports": [
+    {
+      "opt_level": 0,
+      "original": {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "opt_level": 0,
+        "actor_sha256": "18f613a28773304dbbc0e23f05ce954c233e53558b23fe074ee647e847395258",
+        "fixture_waitpid_sha256": "1e6632fbf239f6a1bc996aa8ae22f0c227182cbfd8d62f9dbdd2c982673564bf",
+        "positive_live_child": {
+          "kernel_kill": "SIGTERM",
+          "wait_status": -15
+        },
+        "toolchain": {
+          "imre": "127e9f10467e92f1f4a9cab89c40374d39c69debade9517b8c2285696dd4e290",
+          "runtime": "adf249c78e77f74d306bdce51275164f9e54e1d620332b37edf1929aa40d22c9",
+          "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+        },
+        "rows": {
+          "test.test_subprocess.POSIXProcessTestCase.test_send_signal_race": [
+            {
+              "outcome": "pass",
+              "failure": null,
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "mixed"
+              },
+              "external_wait_in_native_parent": true,
+              "original_support_wait_process": true,
+              "public_wait_observed_ECHILD": true,
+              "native_waitpid_mock": [],
+              "native_signals_sent": 0,
+              "native_child_exit": 0
+            }
+          ],
+          "test.test_subprocess.POSIXProcessTestCase.test_stopped": [
+            {
+              "outcome": "pass",
+              "failure": null,
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "POSIXProcessTestCase.test_stopped needs its upstream method decorator"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "mixed"
+              },
+              "external_wait_in_native_parent": true,
+              "original_support_wait_process": true,
+              "public_wait_observed_ECHILD": false,
+              "native_waitpid_mock": [
+                {
+                  "options": 1,
+                  "status": 895
+                }
+              ],
+              "native_signals_sent": 0,
+              "native_child_exit": 0
+            }
+          ]
+        }
+      },
+      "before": {
+        "opt_level": 0,
+        "parent_sha256": "08d49baf3559d9aa8f0488a4f6986277ea7e48f75b23711ec0fa6695c26d5616",
+        "modes": {
+          "wait": {
+            "parent": "imre",
+            "child": "fixture C program: PTRACE_TRACEME and raise(SIGQUIT)",
+            "expected": [
+              -3,
+              -3,
+              7
+            ],
+            "observed": [
+              0,
+              0,
+              7
+            ],
+            "native_stop_signal": 3,
+            "post_resume_reap": 7
+          },
+          "poll": {
+            "parent": "imre",
+            "child": "fixture C program: PTRACE_TRACEME and raise(SIGQUIT)",
+            "expected": [
+              -3,
+              -3,
+              7
+            ],
+            "observed": [
+              0,
+              0,
+              7
+            ],
+            "native_stop_signal": 3,
+            "post_resume_reap": 7
+          }
+        }
+      },
+      "after": {
+        "opt_level": 0,
+        "parent_sha256": "4ce96e5423a4cf34498701e55fd3ff300121c2bf9ae328ece68bfe8aaccf976c",
+        "modes": {
+          "wait": {
+            "parent": "imre",
+            "child": "fixture C program: PTRACE_TRACEME and raise(SIGQUIT)",
+            "expected": [
+              -3,
+              -3,
+              7
+            ],
+            "observed": [
+              -3,
+              -3,
+              7
+            ],
+            "native_stop_signal": 3,
+            "post_resume_reap": 7
+          },
+          "poll": {
+            "parent": "imre",
+            "child": "fixture C program: PTRACE_TRACEME and raise(SIGQUIT)",
+            "expected": [
+              -3,
+              -3,
+              7
+            ],
+            "observed": [
+              -3,
+              -3,
+              7
+            ],
+            "native_stop_signal": 3,
+            "post_resume_reap": 7
+          }
+        }
+      }
+    },
+    {
+      "opt_level": 3,
+      "original": {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "opt_level": 3,
+        "actor_sha256": "7d8347ff34aace4656333aa71dd1bb815fbaa5692dc791130f1e7672ce40b974",
+        "fixture_waitpid_sha256": "1e6632fbf239f6a1bc996aa8ae22f0c227182cbfd8d62f9dbdd2c982673564bf",
+        "positive_live_child": {
+          "kernel_kill": "SIGTERM",
+          "wait_status": -15
+        },
+        "toolchain": {
+          "imre": "127e9f10467e92f1f4a9cab89c40374d39c69debade9517b8c2285696dd4e290",
+          "runtime": "adf249c78e77f74d306bdce51275164f9e54e1d620332b37edf1929aa40d22c9",
+          "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+        },
+        "rows": {
+          "test.test_subprocess.POSIXProcessTestCase.test_send_signal_race": [
+            {
+              "outcome": "pass",
+              "failure": null,
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "mixed"
+              },
+              "external_wait_in_native_parent": true,
+              "original_support_wait_process": true,
+              "public_wait_observed_ECHILD": true,
+              "native_waitpid_mock": [],
+              "native_signals_sent": 0,
+              "native_child_exit": 0
+            }
+          ],
+          "test.test_subprocess.POSIXProcessTestCase.test_stopped": [
+            {
+              "outcome": "pass",
+              "failure": null,
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "POSIXProcessTestCase.test_stopped needs its upstream method decorator"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "mixed"
+              },
+              "external_wait_in_native_parent": true,
+              "original_support_wait_process": true,
+              "public_wait_observed_ECHILD": false,
+              "native_waitpid_mock": [
+                {
+                  "options": 1,
+                  "status": 895
+                }
+              ],
+              "native_signals_sent": 0,
+              "native_child_exit": 0
+            }
+          ]
+        }
+      },
+      "before": {
+        "opt_level": 3,
+        "parent_sha256": "3cfe931fbb0d5fad0bb4388202e7e889556953ae96451033ff268ab3e5bd29f0",
+        "modes": {
+          "wait": {
+            "parent": "imre",
+            "child": "fixture C program: PTRACE_TRACEME and raise(SIGQUIT)",
+            "expected": [
+              -3,
+              -3,
+              7
+            ],
+            "observed": [
+              0,
+              0,
+              7
+            ],
+            "native_stop_signal": 3,
+            "post_resume_reap": 7
+          },
+          "poll": {
+            "parent": "imre",
+            "child": "fixture C program: PTRACE_TRACEME and raise(SIGQUIT)",
+            "expected": [
+              -3,
+              -3,
+              7
+            ],
+            "observed": [
+              0,
+              0,
+              7
+            ],
+            "native_stop_signal": 3,
+            "post_resume_reap": 7
+          }
+        }
+      },
+      "after": {
+        "opt_level": 3,
+        "parent_sha256": "54a789a18abcbc0a54d0019992d853cb473d5227d5aad98cf5a20e79b588052f",
+        "modes": {
+          "wait": {
+            "parent": "imre",
+            "child": "fixture C program: PTRACE_TRACEME and raise(SIGQUIT)",
+            "expected": [
+              -3,
+              -3,
+              7
+            ],
+            "observed": [
+              -3,
+              -3,
+              7
+            ],
+            "native_stop_signal": 3,
+            "post_resume_reap": 7
+          },
+          "poll": {
+            "parent": "imre",
+            "child": "fixture C program: PTRACE_TRACEME and raise(SIGQUIT)",
+            "expected": [
+              -3,
+              -3,
+              7
+            ],
+            "observed": [
+              -3,
+              -3,
+              7
+            ],
+            "native_stop_signal": 3,
+            "post_resume_reap": 7
+          }
+        }
+      }
+    }
+  ],
+  "hosted": {
+    "product_pr": 815,
+    "pr_head": "0df668d041f539c63e36c732fb888ef79fbea389",
+    "run": 40183529465,
+    "job": 121139401039,
+    "artifact": 12595178356,
+    "archive_sha256": "e5a7ca540ed4ebe4a2986f13592ab42bf4744d26a38bd7f6498787fc72da0301"
+  }
+}
