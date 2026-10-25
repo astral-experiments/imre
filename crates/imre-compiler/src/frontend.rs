@@ -5070,37 +5070,21 @@ impl<'a> Checker<'a> {
                     } else {
                         receiver
                     };
-                    if key.ty == Type::ObjectValue
-                        && self
-                            .types
-                            .mapping(receiver.ty)
-                            .is_some_and(|(k, _)| k == Type::Int)
-                    {
-                        let answer = errno::op(
-                            ir::ErrnoOperation::MemberContains,
-                            Type::Bool,
-                            vec![key, receiver],
-                        );
-                        return Ok(if compare.ops[0] == ast::CmpOp::NotIn {
-                            Expr {
-                                ty: Type::Bool,
-                                kind: ExprKind::Not(Box::new(answer)),
-                            }
-                        } else {
-                            answer
-                        });
+                    if let Some(fields) = self.types.fields(receiver.ty) {
+                        return self.tuple_contains(key, receiver, &fields, compare);
                     }
                     let receiver = if receiver.ty == Type::ModuleNamespace {
                         errno::op(ir::ErrnoOperation::Keys, Type::StringKeys, vec![receiver])
                     } else {
                         receiver
                     };
-                    if let Some(fields) = self.types.fields(receiver.ty) {
-                        return self.tuple_contains(key, receiver, &fields, compare);
-                    }
                     let (key_type, builtin) =
-                        if let Some((key, _)) = self.types.mapping(receiver.ty) {
-                            (key, Builtin::DictContains)
+                        if let Some((target_key, _)) = self.types.mapping(receiver.ty) {
+                            if target_key == Type::Int && key.ty == Type::ObjectValue {
+                                (key.ty, Builtin::Errno(ir::ErrnoOperation::MemberContains))
+                            } else {
+                                (target_key, Builtin::DictContains)
+                            }
                         } else if receiver.ty == Type::ReadOnlyObjectMapping {
                             (Type::Str, Builtin::DictContains)
                         } else if receiver.ty == Type::Str {
@@ -5594,9 +5578,6 @@ impl<'a> Checker<'a> {
                         _ => {}
                     }
                 }
-                if receiver.ty == Type::NativeModule {
-                    return Ok(self.errno_attribute(receiver, attribute.attr.as_str()));
-                }
                 if let Some(definition) = self.types.namedtuple_definition(receiver.ty) {
                     return self.namedtuple_instance_attribute(attribute, receiver, definition);
                 }
@@ -5647,6 +5628,9 @@ impl<'a> Checker<'a> {
                         }
                         _ => return self.class_attribute(attribute, class, Some(receiver), None),
                     }
+                }
+                if receiver.ty == Type::NativeModule {
+                    return Ok(self.errno_attribute(receiver, attribute.attr.as_str()));
                 }
                 if matches!(receiver.ty, Type::ZipFile | Type::ZipInfo) {
                     return self.zip_attribute(receiver, attribute);
