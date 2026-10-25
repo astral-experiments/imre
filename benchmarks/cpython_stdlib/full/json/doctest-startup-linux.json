@@ -1,0 +1,41 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "d43bc60e9b9e4afe6202a916688a9e8aac1c6aad4ddc7d6ca79d0f3cd4730bb3",
+  "operation": "check",
+  "tests_executed": 0,
+  "support_files": [],
+  "checks": [
+    {
+      "suite": "test.test_json",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:7:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+    },
+    {
+      "suite": "test.test_json",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:7:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+    },
+    {
+      "suite": "test.test_json",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:7:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+    },
+    {
+      "suite": "test.test_json",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:7:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+    }
+  ],
+  "sources": [
+    "vendored",
+    "git"
+  ]
+}

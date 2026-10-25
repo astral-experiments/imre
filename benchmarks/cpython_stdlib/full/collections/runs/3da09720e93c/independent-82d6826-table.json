@@ -1,0 +1,16 @@
+{
+  "compiler_source": "82d6826d1f94931480233a0211d27ac3ef549ebf",
+  "compiler_sha256": "556ad40b63e99bc9986f04371fde3af54210841f307f591e5337e86ea17ef890",
+  "docs_head": "3da09720e93c58b92dff79da31affbc402fedd6f",
+  "prospective_tree": "dc204fbadb06ea51072a76caa0ce7097350c8788",
+  "checked_in_sha256": "a0f98b3f46846fd09efbf30e20d480101a13bba28f7b8599ccd865ef5a958392",
+  "regenerated_sha256": "4c113eaa707694ee1f23da1212bc30c6b8324575f75c2d1d273324642ee6c700",
+  "matches": false,
+  "headline": "**At a glance:** 51 modules accept an ordinary import; 3 more accept it only with `--reachable-only`. Across 24 public modules with recorded suites, 79 complete test executions pass natively at both optimization levels; 8,324 of 8,324 upstream executions have a classification.",
+  "changed_rows": {
+    "collections": {
+      "published": "| `collections` | Yes | `Counter`, `deque`, `defaultdict` and selected `collections.abc.Mapping` operations. [Evidence](../benchmarks/cpython_stdlib/full/collections/README.md) | [0 / 659](../benchmarks/cpython_stdlib/full/collections/) | 7 | 4 |",
+      "regenerated": "| `collections` | Yes | `Counter`, `deque`, `defaultdict` and selected `collections.abc.Mapping` operations. [Evidence](../benchmarks/cpython_stdlib/full/collections/README.md) | [7 / 659](../benchmarks/cpython_stdlib/full/collections/) | 8 | 14 |"
+    }
+  }
+}

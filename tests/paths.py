@@ -23,14 +23,12 @@ REJECTED = {
     "tomllib_key_repr": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys()\nprint(repr(keys))",
     "tomllib_key_equality": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys()\nprint(keys == keys)",
     "tomllib_key_argument": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys('x')",
-    "integer_segment": "Path(1)",
     "missing_nested_walk_option": "def option(required: bool) -> bool:\n    return required\nPath('a').relative_to(walk_up=option())",
-    "bytes_segment": "Path(b'file')",
-    "keyword_segment": "Path(path='file')",
+    "missing_nested_constructor_value": "def required(x: int) -> int:\n    return x\nPath(wrong=required())",
+    "missing_nested_fspath_value": "import os\ndef required(x: int) -> str:\n    return 'a'\nos.fspath(required())",
     "expanded_segments": "Path(*['a', 'b'])",
     "wrong_join": "Path('a') / 1",
-    "joinpath_type": "Path('a').joinpath('b', 1)",
-    "joinpath_keyword": "Path('a').joinpath(child='b')",
+    "unknown_nested_joinpath_value": "def real(x: int) -> int:\n    return x\nPath('a').joinpath(wrong=real(unknown=1))",
     "with_name_type": "Path('a').with_name(Path('b'))",
     "open_update": "Path('a').open('r+')",
     "open_binary_encoding": "Path('a').open('rb', encoding='utf-8')",
@@ -85,7 +83,7 @@ print(Path('input.txt').is_file())
 """
 
 
-def seed(directory: Path) -> None:
+def seed(directory: Path, *, stat_clock: bool = False) -> None:
     directory.mkdir()
     for name, data in {
         "input.txt": "alpha\r\néλ🙂\rzero\0tail\n".encode(),
@@ -122,6 +120,10 @@ def seed(directory: Path) -> None:
     (directory / "trailing-link").symlink_to("input.txt/")
     (directory / "absolute-link").symlink_to("/tmp", target_is_directory=True)
     (directory / "command").touch(mode=0o755)
+    if stat_clock:
+        timestamp = directory / "stat-clock"
+        timestamp.touch()
+        os.utime(timestamp, ns=(-1, 6_100_000_000_123_456_789))
     (directory / "denied").mkdir()
     (directory / "denied" / "secret.json").write_text("secret")
     (directory / "denied").chmod(0)
@@ -146,6 +148,8 @@ def snapshot(directory: Path) -> dict:
 
 
 def main() -> None:
+    sources = [(p.stem, p) for p in sorted(FIXTURES.glob("*.py"))]
+    sources.extend((p.parent.name, p) for p in sorted(FIXTURES.glob("*/main.py")))
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
     parser.add_argument("--runtime", required=True, type=Path)
@@ -154,7 +158,7 @@ def main() -> None:
     parser.add_argument("--target")
     parser.add_argument("--lto-linker", type=Path)
     parser.add_argument("--opt-levels", nargs="+", choices=["0", "1", "2", "3"], default=["0", "3"])
-    parser.add_argument("--fixture", action="append", choices=sorted(p.stem for p in FIXTURES.glob("*.py")) + ["imported"],
+    parser.add_argument("--fixture", action="append", choices=sorted(name for name, _ in sources),
                         help="limit the positive filesystem comparisons to these fixtures")
     parser.add_argument("--sanitize", action="store_true")
     args = parser.parse_args()
@@ -187,16 +191,14 @@ def main() -> None:
         result = files.run([compiler, "check", str(shadow / "main.py")], temporary)
         assert result.returncode > 0 and b"standard-library" in result.stderr, result.stderr
         checks += 1
-        sources = [*sorted(FIXTURES.glob("*.py")), FIXTURES / "imported/main.py"]
-        for source in sources:
-            name = source.stem if source.parent == FIXTURES else "imported"
+        for name, source in sources:
             if args.fixture and name not in args.fixture:
                 continue
             runner = files.run_with_failing_output if name == "failures" else subprocess.run
             project = temporary / name
             project.mkdir()
             reference_dir = project / "cpython"
-            seed(reference_dir)
+            seed(reference_dir, stat_clock=name == "path_stat")
             reference = files.run([args.python, "-E", "-B", str(source)], reference_dir, limit_descriptors=name == "cleanup", runner=runner)
             files.check_result(reference, None, f"CPython {name}")
             stdout = reference.stdout
@@ -206,7 +208,7 @@ def main() -> None:
                 built = files.run([compiler, "build", str(source), "--module-root", str(source.parent), "-o", str(binary), "--opt-level", level, *flags], temporary)
                 assert built.returncode == 0 and not built.stderr, (name, level, built.stderr.decode())
                 native_dir = project / f"imre-O{level}"
-                seed(native_dir)
+                seed(native_dir, stat_clock=name == "path_stat")
                 actual = files.run([str(binary)], native_dir, limit_descriptors=name == "cleanup", runner=runner)
                 files.check_result(actual, None, f"Imre {name} O{level}")
                 assert actual.stdout == stdout, (name, level, actual.stdout, stdout)

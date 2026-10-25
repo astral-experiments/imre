@@ -4,6 +4,7 @@ import argparse
 import fcntl
 import os
 import re
+import resource
 import stat
 import subprocess
 import sys
@@ -148,14 +149,21 @@ def snapshot(directory: Path) -> dict:
     return result
 
 
+def pipe_memory_limit() -> None:
+    # Keep the explicit 1 GiB buffer larger than the complete process.
+    resource.setrlimit(resource.RLIMIT_AS, (128 << 20, 128 << 20))
+
+
 def run(
     command: list[str],
     directory: Path,
     *,
     descriptor: int | None = None,
     limited: bool = False,
+    memory_limited: bool = False,
     empty_name: bool = False,
     invalid: tuple[bytes, bytes] | None = None,
+    high_fds: bool = False,
 ):
     environment = files.environment()
     environment.update(IMRE_PROCESS_PARENT="inherited λ", IMRE_PROCESS_OVERRIDE="parent")
@@ -167,6 +175,21 @@ def run(
     if invalid is not None:
         environment = {os.fsencode(key): os.fsencode(value) for key, value in environment.items()}
         environment[invalid[0]] = invalid[1]
+    if high_fds:
+        # Fill the target parent's descriptor table across exec, without
+        # changing the test runner's own soft limit or open files.
+        prepare = """import os, resource, sys
+soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+if soft != resource.RLIM_INFINITY and soft < 1060:
+    resource.setrlimit(resource.RLIMIT_NOFILE, (1060, hard))
+while True:
+    fd = os.open(os.devnull, os.O_RDONLY)
+    os.set_inheritable(fd, True)
+    if fd >= 1030:
+        break
+os.execv(sys.argv[1], sys.argv[1:])
+"""
+        command = [sys.executable, "-c", prepare, *command]
     return subprocess.run(
         command,
         cwd=directory,
@@ -176,7 +199,7 @@ def run(
         check=False,
         env=environment,
         pass_fds=() if descriptor is None else (descriptor,),
-        preexec_fn=files.descriptor_limit if limited else None,
+        preexec_fn=pipe_memory_limit if memory_limited else files.descriptor_limit if limited else None,
     )
 
 
@@ -230,13 +253,18 @@ def main() -> None:
             sources.append(FIXTURES / "imported" / "main.py")
             for source in sources:
                 name = source.stem if source.parent == FIXTURES else "imported"
+                # ASan reserves more address space than this test can allow.
+                if name == "pipe_buffer_allocation" and (args.sanitize or sys.platform != "linux"):
+                    continue
                 project = temporary / name
                 reference_dir = project / "cpython" / "work"
                 seed(reference_dir, python)
                 options = {
+                    "memory_limited": name == "pipe_buffer_allocation",
                     "limited": name in {"cleanup", "stdin_fds", "timeouts"},
                     "descriptor": descriptor if name == "stdin_fds" else None,
                     "empty_name": name == "environment",
+                    "high_fds": name == "select_high_fds",
                 }
                 reference = run([python, "-E", "-B", str(source), *arguments], reference_dir, **options)
                 if name == "unobserved_child":
@@ -246,6 +274,9 @@ def main() -> None:
                 else:
                     files.check_result(reference, None, f"CPython {name}")
                 expected_files = snapshot(reference_dir)
+                if name == "pipe_buffer_allocation":
+                    assert reference.stdout == b"stdin: MemoryError()\nstdout: MemoryError()\n"
+                    assert "child-ran" not in expected_files
                 if name == "stdin_fds":
                     assert b"closed\n" in reference.stdout and reference.stdout.endswith(b"-13\n"), reference.stdout
                 for level in args.opt_levels:

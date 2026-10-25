@@ -261,7 +261,533 @@
         }
       },
       "test_bodies_executed": 0
+    },
+    {
+      "operation": "unchanged package import and runner startup on the hosted link integration",
+      "imre_base_commit": "19d5f95354128d2be22b807a571d29f0a9380999",
+      "imre_pr_head": "42f71e57205fc58b57a71c7625530f52099d01a0",
+      "imre_tree": "14ba92b150c532af8a7fc5a1c789128ef272865c",
+      "workflow_run": "https://github.com/astral-sh/imre/actions/runs/40186925884",
+      "entry_and_support_sha256": {
+        "imre_pathlib_imports.py": "f0133059535e8c74383b6695eb1877f55f81f372ed6a2a464c263a6293654db0",
+        "imre_pathlib_run.py": "9da1be0eb0bf575bc4ade1b68d478f600fc8820609d7189c4aa30c296c2470a8",
+        "test/support/__init__.py": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4"
+      },
+      "layout_checks": {
+        "test_package_only": [
+          {
+            "entry": "imre_pathlib_imports.py",
+            "mode": [
+              "whole"
+            ],
+            "check_exit": 1,
+            "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+          },
+          {
+            "entry": "imre_pathlib_imports.py",
+            "mode": [
+              "--reachable-only"
+            ],
+            "check_exit": 1,
+            "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          },
+          {
+            "entry": "imre_pathlib_run.py",
+            "mode": [
+              "whole"
+            ],
+            "check_exit": 1,
+            "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+          },
+          {
+            "entry": "imre_pathlib_run.py",
+            "mode": [
+              "--reachable-only"
+            ],
+            "check_exit": 1,
+            "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          }
+        ],
+        "full_cpython_lib": [
+          {
+            "entry": "imre_pathlib_imports.py",
+            "mode": [
+              "whole"
+            ],
+            "check_exit": 1,
+            "diagnostic": "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:1:1: Imre: standard-library shadowing is unsupported: \"os\""
+          },
+          {
+            "entry": "imre_pathlib_imports.py",
+            "mode": [
+              "--reachable-only"
+            ],
+            "check_exit": 1,
+            "diagnostic": "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:1:1: Imre: standard-library shadowing is unsupported: \"os\""
+          },
+          {
+            "entry": "imre_pathlib_run.py",
+            "mode": [
+              "whole"
+            ],
+            "check_exit": 1,
+            "diagnostic": "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:1:1: Imre: standard-library shadowing is unsupported: \"os\""
+          },
+          {
+            "entry": "imre_pathlib_run.py",
+            "mode": [
+              "--reachable-only"
+            ],
+            "check_exit": 1,
+            "diagnostic": "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:1:1: Imre: standard-library shadowing is unsupported: \"os\""
+          }
+        ]
+      },
+      "test_bodies_executed": 0
+    },
+    {
+      "operation": "unchanged package import and runner startup on the tree published by the link merge",
+      "imre_commit": "c530176cdf49da40ae2f14e91d0d9519259c5a50",
+      "imre_tree": "e3641df239ad178767c773a73541d9759c29c2e6",
+      "checked_local_merge_commit": "176dfd5b301a94ea6f72f00ace1ba00d963ef7f3",
+      "layout": "test package and entry points without a competing os.py",
+      "checks": [
+        {
+          "entry": "imre_pathlib_imports.py",
+          "mode": [
+            "whole"
+          ],
+          "check_exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+        },
+        {
+          "entry": "imre_pathlib_imports.py",
+          "mode": [
+            "--reachable-only"
+          ],
+          "check_exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        },
+        {
+          "entry": "imre_pathlib_run.py",
+          "mode": [
+            "whole"
+          ],
+          "check_exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+        },
+        {
+          "entry": "imre_pathlib_run.py",
+          "mode": [
+            "--reachable-only"
+          ],
+          "check_exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        }
+      ],
+      "test_bodies_executed": 0
+    },
+    {
+      "operation": "check unchanged test package after inherited exception layouts",
+      "pull_request": 971,
+      "head_commit": "390ca2eeb6503e24e2b45835e555f40372f58a6a",
+      "checked_merge_commit": "194a8c1f075325f761d73582670c3da1595fd274",
+      "imre_tree": "97a191b983879800788df07ba73ada31fe77f87f",
+      "workflow_run": 40191446178,
+      "compiler_artifact_id": 12597818574,
+      "compiler_sha256": "fc05821f5db33e472053869680f103d0e9c4f200ef74f17c636dc9483bb92ba4",
+      "source_receipt_artifact_id": 12597739201,
+      "test_bodies_executed": 0,
+      "coordinator_test_package_root_source_sha256": {
+        "imre_pathlib_imports.py": "f0133059535e8c74383b6695eb1877f55f81f372ed6a2a464c263a6293654db0",
+        "imre_pathlib_run.py": "9da1be0eb0bf575bc4ade1b68d478f600fc8820609d7189c4aa30c296c2470a8",
+        "test/support/__init__.py": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4",
+        "test/test_pathlib/__init__.py": "8962a375442bddd8d49865f3bf601c2c7a741fe947d8ec667358bb640cd0d19b"
+      },
+      "layouts": [
+        "coordinator test-package-only root",
+        "shared check_suite_startup.py with verified vendored test files"
+      ],
+      "checks_agree_in_both_layouts": [
+        {
+          "suite": "test.test_pathlib",
+          "entry": "import",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "import",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "runner",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "runner",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        }
+      ]
+    },
+    {
+      "operation": "Recheck unchanged package import and runner after virtual exception initialization changes",
+      "pull_request": 971,
+      "head_commit": "bd80f95e741bc889897c5b16014b9cae10711091",
+      "checked_merge_commit": "b1f7bb32a045113fdfc078563d8e5c39c28f5298",
+      "imre_tree": "d724fad03cb8e86e75af849beb16725aaa36f35a",
+      "workflow_run": 40195026473,
+      "compiler_artifact_id": 12599706058,
+      "compiler_sha256": "92739826f63ef281b7824fc104097e8389cf83ea00f12d4c97fce3ce56a3aa90",
+      "test_bodies_executed": 0,
+      "coordinator_test_package_root_source_sha256": {
+        "imre_pathlib_imports.py": "f0133059535e8c74383b6695eb1877f55f81f372ed6a2a464c263a6293654db0",
+        "imre_pathlib_run.py": "9da1be0eb0bf575bc4ade1b68d478f600fc8820609d7189c4aa30c296c2470a8",
+        "test/support/__init__.py": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4",
+        "test/test_pathlib/__init__.py": "8962a375442bddd8d49865f3bf601c2c7a741fe947d8ec667358bb640cd0d19b"
+      },
+      "layouts": [
+        "coordinator test-package-only root",
+        "shared check_suite_startup.py with verified vendored test files"
+      ],
+      "checks_agree_in_both_layouts": [
+        {
+          "suite": "test.test_pathlib",
+          "entry": "import",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "import",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "runner",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "runner",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        }
+      ]
+    },
+    {
+      "operation": "Check unchanged package import and runner on the exact PR head after integrating main",
+      "pull_request": 971,
+      "head_commit": "95595eb95473176486d8c838a0384ac47a4e05da",
+      "imre_tree": "014e6d6d2cd420f165555d37b606b7b42e161dca",
+      "compiler_source": "local build of clean head",
+      "compiler_sha256": "d0a07f968d7c56d3d18fe2b9cd7551a5825bb7b69ffa2abd4fce1408e36bc53d",
+      "test_bodies_executed": 0,
+      "coordinator_test_package_root_source_sha256": {
+        "imre_pathlib_imports.py": "f0133059535e8c74383b6695eb1877f55f81f372ed6a2a464c263a6293654db0",
+        "imre_pathlib_run.py": "9da1be0eb0bf575bc4ade1b68d478f600fc8820609d7189c4aa30c296c2470a8",
+        "test/support/__init__.py": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4",
+        "test/test_pathlib/__init__.py": "8962a375442bddd8d49865f3bf601c2c7a741fe947d8ec667358bb640cd0d19b"
+      },
+      "layouts": [
+        "coordinator test-package-only root",
+        "shared check_suite_startup.py with verified vendored test files"
+      ],
+      "checks_agree_in_both_layouts": [
+        {
+          "suite": "test.test_pathlib",
+          "entry": "import",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "import",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "runner",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "runner",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        }
+      ]
+    },
+    {
+      "operation": "Recheck the unchanged package after the runtime PR integrated Path.stat keyword validation",
+      "pull_request": 971,
+      "head_commit": "1091f9e7053d68ca56c8bc2669e345a2e7542d85",
+      "imre_tree": "502ac41cd9b61dd2aea87b78b2cdf4bcec3d83fa",
+      "compiler_source": "local build of clean head",
+      "compiler_sha256": "0b832a97c0944a3a403dfcaa21ec3d802b73e168495b2c5781dcef1ddafcc150",
+      "test_bodies_executed": 0,
+      "coordinator_test_package_root_source_sha256": {
+        "imre_pathlib_imports.py": "f0133059535e8c74383b6695eb1877f55f81f372ed6a2a464c263a6293654db0",
+        "imre_pathlib_run.py": "9da1be0eb0bf575bc4ade1b68d478f600fc8820609d7189c4aa30c296c2470a8",
+        "test/support/__init__.py": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4",
+        "test/test_pathlib/__init__.py": "8962a375442bddd8d49865f3bf601c2c7a741fe947d8ec667358bb640cd0d19b"
+      },
+      "layouts": [
+        "coordinator test-package-only root",
+        "shared check_suite_startup.py with verified vendored test files"
+      ],
+      "checks_agree_in_both_layouts": [
+        {
+          "suite": "test.test_pathlib",
+          "entry": "import",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "import",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "runner",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "runner",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        }
+      ]
+    },
+    {
+      "operation": "Recheck after integrating the warning hierarchy on the actual Linux CI compiler tree",
+      "pull_request": 971,
+      "head_commit": "80220e3b9a258d88ab9ae21da761a3d4033d5e6a",
+      "checked_merge_commit": "542680f8432a27e0b58071530b0d10c29832298a",
+      "imre_tree": "b9876cca49aab0d7b14bad88cbe6102f629c08d3",
+      "workflow_run": 40208392268,
+      "linux_build_job": 121214169999,
+      "compiler_artifact_id": 12604563451,
+      "compiler_sha256": "7ff4a847f9692072aa52154d4d032ca4a3a84702ff2285a9fdacf9e12e387832",
+      "artifact_sha256": "df3ddc591828ce218b92d43e9820697322b512838a1ba0e142043032055a992b",
+      "test_bodies_executed": 0,
+      "coordinator_test_package_root_source_sha256": {
+        "imre_pathlib_imports.py": "f0133059535e8c74383b6695eb1877f55f81f372ed6a2a464c263a6293654db0",
+        "imre_pathlib_run.py": "9da1be0eb0bf575bc4ade1b68d478f600fc8820609d7189c4aa30c296c2470a8",
+        "test/support/__init__.py": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4",
+        "test/test_pathlib/__init__.py": "8962a375442bddd8d49865f3bf601c2c7a741fe947d8ec667358bb640cd0d19b"
+      },
+      "layouts": [
+        "coordinator test-package-only root",
+        "shared check_suite_startup.py with verified vendored test files"
+      ],
+      "checks_agree_in_both_layouts": [
+        {
+          "suite": "test.test_pathlib",
+          "entry": "import",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "import",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "runner",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "runner",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        }
+      ]
+    },
+    {
+      "operation": "Check the public constructor integration before the inherited exception layout fix",
+      "pull_request": 1063,
+      "head_commit": "18f8f9c807c1adcec401c02b7969a186bbc1e45d",
+      "checked_merge_commit": "b62bc943ddf60ea601eaa054f04d28618f4f5b24",
+      "imre_tree": "4f5dacf27e3e5f46e89467ef72e50bc13038617f",
+      "workflow_run": 40212428323,
+      "linux_build_job": 121226386256,
+      "compiler_artifact_id": 12606800247,
+      "artifact_sha256": "ccfc9c14a0cf1fc049121e1a046d31e1aa8dda8ab07057a30f21a7eb9abec92e",
+      "test_bodies_executed": 0,
+      "layouts": [
+        "coordinator test-package-only root",
+        "shared check_suite_startup.py with verified vendored test files"
+      ],
+      "coordinator_test_package_root_source_sha256": {
+        "imre_pathlib_imports.py": "f0133059535e8c74383b6695eb1877f55f81f372ed6a2a464c263a6293654db0",
+        "imre_pathlib_run.py": "9da1be0eb0bf575bc4ade1b68d478f600fc8820609d7189c4aa30c296c2470a8",
+        "test/support/__init__.py": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4",
+        "test/test_pathlib/__init__.py": "8962a375442bddd8d49865f3bf601c2c7a741fe947d8ec667358bb640cd0d19b"
+      },
+      "compiler_sha256": "a47da02f26e88d966c828fa157a229fbffa99909bfdbdac4c04b60dc33acf3cb",
+      "checks_agree_in_both_layouts": [
+        {
+          "suite": "test.test_pathlib",
+          "entry": "import",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "import",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "runner",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "runner",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        }
+      ]
+    },
+    {
+      "operation": "Build the exact runtime pull-request head independently of its hosted integration tree",
+      "pull_request": 971,
+      "head_commit": "80220e3b9a258d88ab9ae21da761a3d4033d5e6a",
+      "imre_tree": "07548b4734af51701acb48d556d61b34cbe5bc89",
+      "test_bodies_executed": 0,
+      "layouts": [
+        "coordinator test-package-only root",
+        "shared check_suite_startup.py with verified vendored test files"
+      ],
+      "coordinator_test_package_root_source_sha256": {
+        "imre_pathlib_imports.py": "f0133059535e8c74383b6695eb1877f55f81f372ed6a2a464c263a6293654db0",
+        "imre_pathlib_run.py": "9da1be0eb0bf575bc4ade1b68d478f600fc8820609d7189c4aa30c296c2470a8",
+        "test/support/__init__.py": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4",
+        "test/test_pathlib/__init__.py": "8962a375442bddd8d49865f3bf601c2c7a741fe947d8ec667358bb640cd0d19b"
+      },
+      "compiler_sha256": "9fbc6ff4c1448d54d9708117ce73ba9e08bcff5ed3364a666065eb6c5b4bc924",
+      "checks_agree_in_both_layouts": [
+        {
+          "suite": "test.test_pathlib",
+          "entry": "import",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "import",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "runner",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "runner",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        }
+      ]
+    },
+    {
+      "operation": "Recheck the exact runtime head after its ChainMap integration",
+      "pull_request": 971,
+      "head_commit": "37bba4822c55514de4f0057727b6c5ba655c1f42",
+      "imre_tree": "3ed2a199859cffbec01749c4f4a32b81a5dea9fd",
+      "test_bodies_executed": 0,
+      "layouts": [
+        "coordinator test-package-only root",
+        "shared check_suite_startup.py with verified vendored test files"
+      ],
+      "coordinator_test_package_root_source_sha256": {
+        "imre_pathlib_imports.py": "f0133059535e8c74383b6695eb1877f55f81f372ed6a2a464c263a6293654db0",
+        "imre_pathlib_run.py": "9da1be0eb0bf575bc4ade1b68d478f600fc8820609d7189c4aa30c296c2470a8"
+      },
+      "compiler_sha256": "f425eb728c23695930c4111481e5961098b038a877ad170b5504ff366dba8eae",
+      "checks_agree_in_both_layouts": [
+        {
+          "suite": "test.test_pathlib",
+          "entry": "import",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "import",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "runner",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+        },
+        {
+          "suite": "test.test_pathlib",
+          "entry": "runner",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        }
+      ]
     }
   ],
-  "next_shared_blocker": "native import of _opcode at Lib/test/support/__init__.py:11; all four unchanged entry-point/mode checks, zero upstream methods reached"
+  "next_shared_blocker": "On PR #971’s tested tree, both normal entry points pass TestFailedWithDetails and first stop at _MemoryWatchdog.__init__ assigning self.procfile (test/support/__init__.py:1155). Both reachable-only entry points still stop at PythonSymlink’s class conditional on line 1613. Neither layout executed any upstream test body."
 }

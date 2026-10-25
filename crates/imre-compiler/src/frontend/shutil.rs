@@ -23,6 +23,7 @@ impl Checker<'_> {
                 module: self.module,
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
+                source_frame: false,
                 recursion_error: self.graph.modules[self.module].error(
                     site,
                     "recursive calls through this shutil operation are unsupported",
@@ -59,7 +60,7 @@ impl Checker<'_> {
         }
     }
 
-    /// Pass a copying or removal routine as a value, specializing its path types from a Callable annotation.
+    /// Pass a filesystem operation as a value, specializing paths from a Callable annotation.
     pub(super) fn shutil_function_value(
         &mut self,
         op: Intrinsic,
@@ -90,6 +91,16 @@ impl Checker<'_> {
             kind: ExprKind::None,
         };
         let (op, result, args) = match (op, params.as_slice()) {
+            (Intrinsic::Move, [src, dst]) if path(*src) && path(*dst) => (
+                ir::ProcessOperation::Move(self.shutil_tree_issue()),
+                self.move_result(*dst),
+                vec![local(0), local(1), flag(true)],
+            ),
+            (Intrinsic::DestInSrc, [src, dst]) if path(*src) && path(*dst) => (
+                ir::ProcessOperation::DestInSrc,
+                Type::Bool,
+                vec![local(0), local(1)],
+            ),
             (Intrinsic::Copy(op), [src, dst]) if path(*src) && path(*dst) => (
                 ir::ProcessOperation::Copy(op),
                 self.copy_result(op, *dst),
@@ -170,6 +181,147 @@ impl Checker<'_> {
         ))
     }
 
+    fn shutil_path_arg(&mut self, expr: &ast::Expr) -> Result<Expr, String> {
+        let value = self.expr(expr)?;
+        if matches!(value.ty, Type::Str | Type::Bytes | Type::Path) {
+            Ok(value)
+        } else {
+            Err(error(
+                self.source,
+                expr,
+                "expected str, bytes or pathlib.Path",
+            ))
+        }
+    }
+
+    /// A builtin copier needs only the metadata flag; a custom copier keeps its callable owner.
+    fn shutil_copy_function(&mut self, expr: &ast::Expr) -> Result<Expr, String> {
+        let stat = match self.resolve(expr) {
+            Some(Binding::Intrinsic(Intrinsic::Copy(ir::CopyOperation::Copy))) => false,
+            Some(Binding::Intrinsic(Intrinsic::Copy(ir::CopyOperation::Copy2))) => true,
+            _ => {
+                let value = self.expr(expr)?;
+                let name = match value.ty {
+                    Type::None => Some("NoneType"),
+                    Type::Bool => Some("bool"),
+                    Type::Int => Some("int"),
+                    Type::Float => Some("float"),
+                    Type::Str | Type::StrLiteral(_) => Some("str"),
+                    Type::Bytes => Some("bytes"),
+                    _ => None,
+                };
+                if let Some(name) = name {
+                    // A successful rename, an empty directory, or a symlink need
+                    // never invoke the copier. Evaluate the supplied object now.
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Scope {
+                            body: vec![Statement::Expr(value)],
+                            clear: vec![],
+                            value: Box::new(unpacking::string(format!(
+                                "'{name}' object is not callable"
+                            ))),
+                        },
+                    });
+                }
+                if self.types.signature(value.ty).is_none() {
+                    return Err(error(
+                        self.source,
+                        expr,
+                        "copy_function must accept source and destination paths",
+                    ));
+                }
+                return Ok(value);
+            }
+        };
+        Ok(Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Bool(stat),
+        })
+    }
+
+    fn shutil_tree_issue(&self) -> Type {
+        let path = self.types.union(&[Type::Str, Type::Bytes]).unwrap();
+        self.types.tuple(vec![path, path, Type::Str])
+    }
+
+    /// A rename to the same directory returns None; a joined destination is text.
+    fn move_result(&self, dst: Type) -> Type {
+        if dst == Type::Path {
+            self.types
+                .union(&[Type::Str, Type::Path, Type::None])
+                .unwrap()
+        } else {
+            self.types.optional(dst)
+        }
+    }
+
+    pub(super) fn shutil_move(
+        &mut self,
+        call: &ast::ExprCall,
+        inside: bool,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let params = [
+            ("src", Type::Str, None),
+            ("dst", Type::Str, None),
+            (
+                "copy_function",
+                Type::Bool,
+                Some(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(true),
+                }),
+            ),
+        ]
+        .map(|(name, ty, default)| Parameter {
+            name: name.into(),
+            ty,
+            kind: ParameterKind::PositionalOrKeyword,
+            default,
+            sign_only: false,
+        });
+        let args = self.arguments_with(
+            call,
+            &params[..if inside { 2 } else { 3 }],
+            None,
+            |checker, i, expr| {
+                if i < 2 {
+                    checker.shutil_path_arg(expr)
+                } else {
+                    checker.shutil_copy_function(expr)
+                }
+            },
+        )?;
+        let dst = args.values[args.order[1]].ty;
+        let (op, result) = if inside {
+            (ir::ProcessOperation::DestInSrc, Type::Bool)
+        } else {
+            if let Some((params, _)) = self.types.signature(args.values[args.order[2]].ty) {
+                let accepts = |param: Type, actual: Type| {
+                    let accepts = |ty| {
+                        param == ty || self.types.members(param).is_some_and(|v| v.contains(&ty))
+                    };
+                    // File fallback passes the original Path; recursion and joining yield str.
+                    accepts(actual) && (actual != Type::Path || accepts(Type::Str))
+                };
+                if params.len() != 2
+                    || !accepts(params[0], args.values[args.order[0]].ty)
+                    || !accepts(params[1], dst)
+                {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "move copy_function must accept both original and joined paths",
+                    ));
+                }
+            }
+            let result = self.move_result(dst);
+            (ir::ProcessOperation::Move(self.shutil_tree_issue()), result)
+        };
+        Ok(self.ordered_builtin(Builtin::Process(op), result, args))
+    }
+
     pub(super) fn shutil_copytree(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let boolean = |v| Expr {
@@ -197,39 +349,10 @@ impl Checker<'_> {
             sign_only: false,
         });
         let args = self.arguments_with(call, &params, None, |checker, i, expr| match i {
-            0 | 1 => {
-                let value = checker.expr(expr)?;
-                if matches!(value.ty, Type::Str | Type::Bytes | Type::Path) {
-                    Ok(value)
-                } else {
-                    Err(error(
-                        checker.source,
-                        expr,
-                        "expected str, bytes or pathlib.Path",
-                    ))
-                }
-            }
+            0 | 1 => checker.shutil_path_arg(expr),
             2 | 5 | 6 => checker.expr_expected(expr, Type::Bool),
             3 => checker.expr(expr),
-            4 => match checker.resolve(expr) {
-                Some(Binding::Intrinsic(Intrinsic::Copy(ir::CopyOperation::Copy))) => {
-                    Ok(boolean(false))
-                }
-                Some(Binding::Intrinsic(Intrinsic::Copy(ir::CopyOperation::Copy2))) => {
-                    Ok(boolean(true))
-                }
-                _ => {
-                    let value = checker.expr(expr)?;
-                    if checker.types.signature(value.ty).is_none() {
-                        return Err(error(
-                            checker.source,
-                            expr,
-                            "copy_function must accept source and destination paths",
-                        ));
-                    }
-                    Ok(value)
-                }
-            },
+            4 => checker.shutil_copy_function(expr),
             _ => unreachable!(),
         })?;
         let path_type = |arg: usize| match args.values[args.order[arg]].ty {
@@ -270,8 +393,7 @@ impl Checker<'_> {
                 "copy_function parameters must match the two filesystem path types",
             ));
         }
-        let path = self.types.union(&[Type::Str, Type::Bytes]).unwrap();
-        let issue = self.types.tuple(vec![path, path, Type::Str]);
+        let issue = self.shutil_tree_issue();
         let result = args.values[args.order[1]].ty;
         Ok(self.ordered_builtin(
             Builtin::Process(ir::ProcessOperation::CopyTree(issue)),

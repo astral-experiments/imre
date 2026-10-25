@@ -1,7 +1,7 @@
 //! Text results use existing string, sequence, and fixed tuple ownership.
 
 use super::*;
-use crate::ir::TextOperation;
+use crate::ir::{TextOperation, TextPredicate};
 
 impl Emitter<'_, '_> {
     /// Elides a temporary split sequence only when its selected field is known.
@@ -47,8 +47,13 @@ impl Emitter<'_, '_> {
     ) -> Value {
         let source = &args[0].value.operand;
         let operand = match operation {
-            TextOperation::IsSpace => {
-                let bit = self.instruction(format!("call i32 @imre_str_isspace(ptr {source})"));
+            TextOperation::Predicate(predicate) => {
+                let symbol = match predicate {
+                    TextPredicate::Alnum => "imre_str_isalnum",
+                    TextPredicate::Space => "imre_str_isspace",
+                    TextPredicate::Upper => "imre_str_is_upper",
+                };
+                let bit = self.instruction(format!("call i32 @{symbol}(ptr {source})"));
                 self.instruction(format!("icmp ne i32 {bit}, 0"))
             }
             TextOperation::SplitLineEnds => {
@@ -63,6 +68,9 @@ impl Emitter<'_, '_> {
             )),
             TextOperation::Lower => {
                 self.checked_instruction(format!("call ptr @imre_str_lower(ptr {source})"))
+            }
+            TextOperation::Upper => {
+                self.checked_instruction(format!("call ptr @imre_str_upper(ptr {source})"))
             }
             TextOperation::Capitalize => {
                 self.checked_instruction(format!("call ptr @imre_str_capitalize(ptr {source})"))
@@ -105,6 +113,10 @@ impl Emitter<'_, '_> {
                 ));
                 return result;
             }
+            TextOperation::Translate => self.checked_instruction(format!(
+                "call ptr @imre_str_translate(ptr {source}, ptr {})",
+                args[1].value.operand
+            )),
             TextOperation::Dedent => {
                 self.instruction(format!("call ptr @imre_str_dedent(ptr {source})"))
             }

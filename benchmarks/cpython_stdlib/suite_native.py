@@ -1,13 +1,18 @@
 """Build native programs and run complete pinned test methods under their fixtures."""
 
 import ast
+import builtins
 from collections import defaultdict
 import dataclasses
+import dis
 from functools import wraps
 import hashlib
+import importlib
 from pathlib import Path
+import re
 import subprocess
 import sys
+from types import CodeType
 import unittest
 
 from suite_evidence import build_report, occurrence_keys, reference_cases, roles
@@ -30,14 +35,21 @@ class Toolchain:
     runtime: Path
     clang: Path
     level: int
+    reachable_only: bool = False
+    module_root: Path | None = None
 
     def build(self, source, directory):
+        directory = directory.resolve()
         entry = directory / "case.py"
         entry.write_bytes(source)
         binary = directory / "case"
         command = [self.imre.resolve(), "build", entry, "-o", binary, "--no-cache",
                    "--opt-level", str(self.level), "--runtime", self.runtime.resolve(),
                    "--clang", self.clang.resolve()]
+        if self.module_root is not None:
+            command.extend(["--module-root", self.module_root.resolve()])
+        if self.reachable_only:
+            command.append("--reachable-only")
         try:
             result = subprocess.run(command, cwd=directory, capture_output=True, text=True, timeout=180)
         except subprocess.TimeoutExpired as exc:
@@ -70,6 +82,167 @@ def _host_hooks(case):
     if getattr(case, "_cleanups", None) or getattr(cls, "_class_cleanups", None):
         hooks.append("registered cleanup")
     return hooks
+
+
+class NativeFixtureError(ValueError):
+    """The original method needs fixture or module behavior the default entry cannot provide."""
+
+
+def _code_globals(code):
+    names = {op.argval for op in dis.get_instructions(code) if op.opname == "LOAD_GLOBAL"}
+    for constant in code.co_consts:
+        if isinstance(constant, CodeType):
+            names.update(_code_globals(constant))
+    return names
+
+
+def _pinned_imports(tree, module, names):
+    """Recreate only original, unconditional imports whose live binding still matches."""
+    imports = {}
+    for stmt in tree.body:
+        if not isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            continue
+        for alias in stmt.names:
+            binding = alias.asname or alias.name.split(".")[0]
+            if binding not in names:
+                continue
+            if binding in imports or isinstance(stmt, ast.ImportFrom) and stmt.level:
+                raise NativeFixtureError(f"ambiguous or relative global import: {binding}")
+            if isinstance(stmt, ast.Import):
+                expected = importlib.import_module(alias.name if alias.asname else binding)
+            else:
+                expected = getattr(importlib.import_module(stmt.module), alias.name)
+            if binding not in vars(module) or vars(module)[binding] is not expected:
+                raise ValueError(f"upstream import was rebound: {binding}")
+            single = type(stmt)(**{field: [alias] if field == "names" else getattr(stmt, field)
+                                   for field in stmt._fields})
+            imports[binding] = ast.unparse(single)
+    # Keep missing fixture globals reproducible across Python processes.
+    for name in sorted(names - imports.keys()):
+        if name in vars(module) or not hasattr(builtins, name):
+            raise NativeFixtureError(f"upstream module global needs its original definition: {name}")
+    return list(imports.values())
+
+
+def _default_source(case, path, blob):
+    """Verify the source, the discovered method and the default fixtures before staging it."""
+    data = path.read_bytes()
+    if hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest() != blob:
+        raise ValueError(f"upstream source blob mismatch: {path}")
+    cls = type(case)
+    module = sys.modules[cls.__module__]
+    name = case._testMethodName
+    if Path(module.__file__).read_bytes() != data:
+        raise ValueError(f"discovery imported different source for {case.id()}")
+    if (type(cls) is not type or cls.__bases__ != (unittest.TestCase,) or cls.__qualname__ != cls.__name__
+            or vars(module).get(cls.__name__) is not cls
+            or case.id() != f"{cls.__module__}.{cls.__name__}.{name}"):
+        raise NativeFixtureError(f"{case.id()}: requires a direct, named unittest.TestCase")
+    hooks = _host_hooks(case)
+    if hooks or unittest.case._module_cleanups:
+        raise NativeFixtureError(f"{case.id()}: original fixture needs execution: {hooks or ['module cleanup']}")
+    # Subclasses receive the two class cleanup fields from TestCase.__init_subclass__.
+    metadata = {"__module__", "__doc__", "__qualname__", "__firstlineno__", "__static_attributes__",
+                "__dict__", "__weakref__", "_classSetupFailed", "_class_cleanups"}
+    shadow = (vars(cls).keys() - metadata) & set(dir(unittest.TestCase))
+    if (shadow or getattr(cls, "__unittest_skip__", False)
+            or getattr(cls, "__unittest_expecting_failure__", False) or cls._classSetupFailed):
+        raise NativeFixtureError(f"{case.id()}: custom TestCase state or lifecycle: {sorted(shadow)}")
+    if vars(case) != vars(cls(name)):
+        raise NativeFixtureError(f"{case.id()}: discovered instance was configured by its fixture")
+    tree = ast.parse(data)
+    owner, = [node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == cls.__name__]
+    method, = [node for node in owner.body if isinstance(node, ast.FunctionDef) and node.name == name]
+    func = vars(cls).get(name)
+    if (owner.decorator_list or len(owner.bases) != 1 or owner.keywords or method.decorator_list
+            or not hasattr(func, "__code__") or func.__closure__ or func.__dict__
+            or func.__globals__ is not vars(module) or func.__defaults__ or func.__kwdefaults__):
+        raise NativeFixtureError(f"{case.id()}: decorated or configured class/method needs its original fixture")
+    compiled = compile(data, module.__file__, "exec", dont_inherit=True)
+    original_class, = [c for c in compiled.co_consts if isinstance(c, CodeType) and c.co_name == cls.__name__]
+    original_method, = [c for c in original_class.co_consts if isinstance(c, CodeType) and c.co_name == name]
+    if original_method != func.__code__:
+        raise ValueError(f"{case.id()}: discovered method differs from the pinned definition")
+    args = method.args
+    if (len(args.args) != 1 or args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg
+            or args.args[0].annotation or method.returns):
+        raise NativeFixtureError(f"{case.id()}: needs its original signature and annotation scope")
+    receiver = args.args[0].arg
+    parents = {child: parent for parent in ast.walk(method) for child in ast.iter_child_nodes(parent)}
+    for node, parent in parents.items():
+        if isinstance(node, ast.Name) and node.id == receiver:
+            if (not isinstance(parent, ast.Attribute) or parent.value is not node or not isinstance(parent.ctx, ast.Load)
+                    or not (parent.attr.startswith("assert") or parent.attr in {"fail", "skipTest"})
+                    or not hasattr(unittest.TestCase, parent.attr)):
+                raise NativeFixtureError(f"{case.id()}: depends on instance/class state outside the staged method")
+        if (isinstance(node, ast.ImportFrom) and node.level) or isinstance(node, (ast.Global, ast.Nonlocal)):
+            raise NativeFixtureError(f"{case.id()}: needs the original module or closure scope")
+    names = _code_globals(original_method)
+    if names & {"globals", "locals", "vars", "eval", "exec", "__import__", "__name__", "__file__", "super"}:
+        raise NativeFixtureError(f"{case.id()}: depends on the original execution namespace")
+    base = owner.bases[0]
+    names.update(node.id for node in ast.walk(base) if isinstance(node, ast.Name))
+    imports = _pinned_imports(tree, module, names)
+    header = data.splitlines(keepends=True)[owner.lineno - 1]
+    if header.decode().strip() != f"class {cls.__name__}({ast.unparse(base)}):":
+        raise NativeFixtureError(f"{case.id()}: cannot preserve the original class header")
+    body = method_bytes(path, cls.__name__, name)
+    entry = ("\n".join(dict.fromkeys(["import unittest", *imports])) + "\n\n").encode()
+    entry += header + body + b"\nif __name__ == '__main__':\n    unittest.main()\n"
+    return entry, body
+
+
+@dataclasses.dataclass(frozen=True)
+class NativeDefaultMethod:
+    """Run an unchanged discovered method with default fixtures inside native unittest.main()."""
+
+    toolchain: Toolchain
+    directory: Path
+    source: Path
+    blob: str
+    operation: tuple[str, str]
+    assertions: str = "imre"
+
+    def run(self, case):
+        location, description = self.operation
+        execution_roles = roles(body="imre", assertions=self.assertions, operation=location, fixture="imre")
+        try:
+            entry, body = _default_source(case, self.source, self.blob)
+        except NativeFixtureError as exc:
+            return {"outcome": "blocked", "reason": str(exc), "roles": roles(
+                    body="unobserved", assertions="unobserved", operation="unobserved", fixture="unobserved"),
+                    "evidence": {"stage": "original fixture", "source_blob": self.blob}}
+        try:
+            binary = self.toolchain.build(entry, self.directory)
+        except NativeCompileError as exc:
+            observation = compile_blocker(exc)
+            observation["reason"] = observation["reason"].replace(str(self.directory) + "/", "<case>/")
+            observation["evidence"].update(source_blob=self.blob, method_sha256=hashlib.sha256(body).hexdigest())
+            return observation
+        try:
+            result = subprocess.run([binary, "-v"], cwd=self.directory, capture_output=True, text=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            return {"outcome": "error", "reason": f"native runner timed out after 60 seconds for {case.id()}",
+                    "roles": roles(body="unobserved", assertions="unobserved", operation="unobserved", fixture="unobserved"),
+                    "evidence": {"stage": "native runner", "source_blob": self.blob}}
+        name = case._testMethodName
+        staged_id = f"__main__.{type(case).__name__}.{name}"
+        stderr = re.sub(r"(?m)^(Ran 1 test in )\d+\.\d+s$", r"\1<elapsed>s", result.stderr)
+        label = f"{name} ({staged_id})"
+        if short := case.shortDescription():
+            label += "\n" + short
+        expected = f"{label} ... ok\n\n{'-' * 70}\nRan 1 test in <elapsed>s\n\nOK\n"
+        evidence = {"operation": description, "fixture": "default TestCase lifecycle in native unittest.main",
+                    "source_blob": self.blob, "method_sha256": hashlib.sha256(body).hexdigest(),
+                    "entry_sha256": hashlib.sha256(entry).hexdigest(), "staged_id": staged_id,
+                    "stdout": result.stdout, "stderr": stderr, "status": result.returncode,
+                    "reachable_only": self.toolchain.reachable_only}
+        if (result.returncode, result.stdout, stderr) != (0, "", expected):
+            return {"outcome": "error", "reason": f"native runner did not report one passing {staged_id} (exit {result.returncode}); see stderr/stdout",
+                    "roles": roles(body="unobserved", assertions="unobserved", operation="unobserved",
+                                   fixture="imre" if f"{name} ({staged_id}) ..." in stderr else "unobserved"),
+                    "evidence": evidence}
+        return {"outcome": "pass", "roles": execution_roles, "evidence": evidence}
 
 
 class _FixtureResult(unittest.TestResult):
@@ -233,17 +406,31 @@ def run_in_fixtures(suite, executions):
     return evidence, failures, [(case.id(), reason) for case, reason in result.skipped]
 
 
-def run_evidence(suite, executions, reference, level, *, preflight=None, exceptions=None, fixture_variant=None):
+def run_evidence(suite, executions, reference, level, *, preflight=None, exceptions=None,
+                 fixture_variant=None, native_defaults=None):
     """Collect v1 evidence for the full denominator, preserving fixture and subtest outcomes.
 
     IDs select all occurrences; (ID, 1-based occurrence) selects a single one.
     Preflight observations record compile blockers or reviewed exclusions before
-    launching a case. Exceptions must use the exact (ID, occurrence, level) key.
+    launching a case. native_defaults maps exact (ID, occurrence) keys to native
+    default-fixture entries; their lifecycle runs solely in the native child.
+    Exceptions must use the exact (ID, occurrence, level) key.
     """
     if reference["platform"] != sys.platform or type(level) is not int or level not in (0, 3):
         raise ValueError("fixture platform and O0/O3 must match the native evidence run")
-    discovered, result = _run_selected(suite, executions, fixture_variant, reference)
     observations = dict(preflight or {})
+    if native_defaults:
+        leaves = list(_fixture_cases(suite))
+        discovered_cases = dict(zip(occurrence_keys(case.id() for case in leaves), leaves, strict=True))
+        if discovered_cases.keys() != reference_cases(reference).keys():
+            raise ValueError("discovery and reference occurrences differ")
+        for key, entry in native_defaults.items():
+            if key not in discovered_cases or key in observations or key in executions or key[0] in executions:
+                raise ValueError(f"unknown or duplicate native default-fixture occurrence: {key}")
+            if entry.toolchain.level != level:
+                raise ValueError(f"{key}: native toolchain opt level does not match the report")
+            observations[key] = entry.run(discovered_cases[key])
+    discovered, result = _run_selected(suite, executions, fixture_variant, reference)
     for key, _, _ in result.selected:
         if key in observations:
             raise ValueError(f"both a preflight decision and an execution for {key}")
@@ -281,19 +468,10 @@ def run_evidence(suite, executions, reference, level, *, preflight=None, excepti
 
 
 def testcase_fixture(equality=None):
-    """Use the native TestCase. Supply bool for a test whose equality operands are booleans."""
-    if equality is None:
-        return "import unittest\n\nclass NativeCase(unittest.TestCase):\n"
-    if equality != "bool":
+    """Use the native TestCase, including for the former bool-specific fixture."""
+    if equality not in (None, "bool"):
         raise ValueError(f"unsupported equality fixture: {equality}")
-    return """import unittest
-
-class NativeCase:
-    def assertEqual(self, first: bool, second: bool, msg: str | None = None) -> None:
-        if first != second:
-            case = unittest.TestCase()
-            raise AssertionError(case._formatMessage(msg, f"{first!r} != {second!r}"))
-"""
+    return "import unittest\n\nclass NativeCase(unittest.TestCase):\n"
 
 
 def native_method(toolchain, directory, path, owner, case_id, fixture=None, *, operation=None, assertions="imre"):
