@@ -2081,6 +2081,14 @@ impl<'a> Checker<'a> {
         if value.ty == expected {
             return Ok(value);
         }
+        if expected == Type::ValueView
+            && dataclass_values::can_format(value.ty, self.types, self.classes)
+        {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::RetainValue, vec![value]),
+            });
+        }
         if self.types.cache_signature(value.ty) == Some(expected) {
             return Ok(Expr {
                 ty: expected,
@@ -5382,9 +5390,10 @@ impl<'a> Checker<'a> {
                 }
                 if values.iter().any(|value| value.ty == Type::ValueView) {
                     if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
-                        || !values
-                            .iter()
-                            .all(|v| sys::displayable(v.ty) || self.import_argument_supported(v.ty))
+                        || !values.iter().all(|v| {
+                            sys::displayable(v.ty)
+                                || dataclass_values::can_format(v.ty, self.types, self.classes)
+                        })
                     {
                         return Err(error(
                             self.source,

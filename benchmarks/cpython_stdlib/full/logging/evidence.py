@@ -29,6 +29,7 @@ import native_handlers
 import native_hierarchy
 import native_levels
 import native_logging
+import native_make_record
 import native_records
 import native_timed
 from suite_evidence import roles, write_reports
@@ -155,6 +156,7 @@ def known_cases(toolchain, work, original):
     executions[daily] = native_daily
     executions.update(native_config.config_cases(toolchain, directory("config"), original))
     executions.update(native_handlers.handler_cases(toolchain, directory("handlers"), original))
+    executions.update(native_make_record.record_cases(toolchain, directory("make-record")))
     executions[native_encoding.CASE] = native_encoding.encoding_case(toolchain, directory("encoding"))
     executions[native_encoding.SETTING] = native_encoding.stream_setting_case(toolchain, directory("stream-setting"))
     executions.update(native_basic_config.config_cases(toolchain, directory("root-config")))

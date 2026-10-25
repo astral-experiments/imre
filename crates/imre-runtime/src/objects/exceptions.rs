@@ -1224,11 +1224,29 @@ pub unsafe extern "C" fn imre_system_exit_code(value: *const Object) -> *const O
     Rc::into_raw(unsafe { acquire_rc(value as usize) })
 }
 
+/// Format the Python value, independently of its container or nullable representation.
+pub(super) fn retained_text(value: &OwnedWord, repr: bool) -> Rc<Str> {
+    let (kind, word) = imports::concrete(value.kind, value.word);
+    imports::word_text(kind, word, repr)
+}
+
+/// Compare the original values when both dictionary entries are retained views.
+pub(super) fn retained_equal(left: &OwnedWord, right: &OwnedWord) -> bool {
+    // SAFETY: both owners root the values throughout comparison.
+    unsafe { imports::equal((left.kind, left.word), (right.kind, right.word)) }
+}
+
+/// Read the concrete Python truth value without changing ownership of the stored word.
+pub(super) fn retained_truth(value: &OwnedWord) -> bool {
+    let (kind, word) = imports::concrete(value.kind, value.word);
+    imports::truth(kind, word)
+}
+
 pub(super) unsafe fn value_word(value: *const Object) -> (WordKind, usize) {
     // SAFETY: a code view keeps its immutable typed exit payload alive.
     unsafe {
         (*value).0.with(|s| match s {
-            Storage::ValueView(v) => (v.kind, v.word),
+            Storage::ValueView(v) => imports::concrete(v.kind, v.word),
             Storage::Exception(e) => match &e.payload {
                 Payload::Exit(Some(code)) => (code.kind, code.word),
                 Payload::Exit(None) => (WordKind::new(0), 0),
@@ -1262,11 +1280,11 @@ pub unsafe extern "C" fn imre_system_exit_code_text(value: *const Object) -> *co
     }
 }
 
-/// Compare the original exit code against a scalar, tuple or a second code view.
+/// Compare retained Python values without converting them to text.
 ///
 /// # Safety
-/// `value` is a rooted code view. `word` is rooted with kind 0 (None), 1
-/// (bool), 2 (int), 3 (str), 5 (another code view) or 6 (tuple).
+/// Both operands stay rooted. Kind five denotes another view; u32::MAX denotes
+/// a concrete object. Other kinds describe the original value.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code_equal(
     value: *const Object,
@@ -1279,7 +1297,7 @@ pub unsafe extern "C" fn imre_system_exit_code_equal(
         let (j, v) = if kind == 5 {
             value_word(word as *const Object)
         } else {
-            (WordKind::new(kind), word)
+            (WordKind::new(if kind == u32::MAX { 5 } else { kind }), word)
         };
         ((k, w), (j, v))
     };
@@ -1293,20 +1311,7 @@ pub unsafe extern "C" fn imre_system_exit_code_equal(
 pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u32 {
     // SAFETY: the code view roots the scalar described by the stored word kind.
     let (kind, word) = unsafe { value_word(value) };
-    u32::from(match kind.raw() {
-        0 => false,
-        1 => word != 0,
-        2 => word != 1, // tagged zero
-        // SAFETY: the immutable exit code owns this string.
-        3 => !unsafe { &*(word as *const Str) }.is_empty(),
-        // SAFETY: the view owns this integer list through the length read.
-        4 => unsafe { (&*(word as *const super::List)).0.with(|v| !v.is_empty()) },
-        // SAFETY: the view owns this exact byte buffer.
-        8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),
-        // SAFETY: the tuple remains rooted while its immutable length is read.
-        6 => unsafe { super::records::descriptor(word as *const usize) }.length != 0,
-        _ => unreachable!(),
-    })
+    u32::from(imports::truth(kind, word))
 }
 
 /// Acquires one sealed process-error field: cmd, returncode, stdout, or stderr;

@@ -504,6 +504,9 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        if attribute.attr.as_str() == "makeRecord" {
+            return self.logger_make_record(logger, call);
+        }
         if matches!(attribute.attr.as_str(), "addHandler" | "removeHandler") {
             let handler = self.handler_type().ok_or_else(|| {
                 error(self.source, attribute, "missing logging.Handler definition")

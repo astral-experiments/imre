@@ -478,6 +478,7 @@ impl Builtin {
             | Self::BuiltinsLast
             | Self::BuiltinsHasLast
             | Self::BuiltinsSetLast
+            | Self::RetainValue
             | Self::BuiltinsDeleteLast
             | Self::SysDisplayHook
             | Self::SysStreamWrite { .. }

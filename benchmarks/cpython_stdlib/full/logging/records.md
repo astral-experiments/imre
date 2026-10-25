@@ -32,3 +32,19 @@ mapping survive delivery, that formatting errors wait for `getMessage()`, and th
 caller, paths and both enum display styles use their original Python values. A disabled
 logger still evaluates its arguments; the last-resort handler only renders eligible events.
 The [full replay](evidence-linux.json) at `93a8abf` reproduced all 272 individual records at each level, including the CP1251 bytes. The direct comparisons add no occurrences.
+
+## Logger.makeRecord and extra
+
+The [focused replay](make-record-extra-linux.json) runs the two unchanged
+`LoggerTest` methods under their original CPython setup and cleanup at O0 and O3.
+
+| Original method | Execution |
+| --- | --- |
+| `test_make_record_with_extra_no_overwrite` | Imre runs the entire method and checks native dictionary membership on the two original operands. The stock TestCase cannot yet compile `assertIn` for this mapping. |
+| `test_make_record_with_extra_overwrite` | CPython runs the original loop and `assertRaises`. One native child constructs the default record, enumerates its 21 original fields, and rejects all 23 attempts: those fields plus `message` and `asctime`. The full native body stops at `tuple(rv.__dict__.keys())`. |
+
+The [differential](make_record_values.py) checks argument evaluation order,
+protected names, mutation through a live dictionary alias, copies from that
+dictionary, original field values, and their catchable errors. Its controls add
+no suite occurrences. The default record factory is covered; replacing it with
+a Python callable is separate. No host logging operation is credited as native.

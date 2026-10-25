@@ -50,6 +50,20 @@ pub(super) fn display(tag: usize) -> String {
     })
 }
 
+pub(super) fn class_name(tag: usize) -> String {
+    with_member(tag, |[class, _, _]| class.to_string())
+}
+
+/// A StrEnum has string indexing and length; an ordinary Enum has neither.
+pub(super) fn string_value(tag: usize) -> Option<std::rc::Rc<Str>> {
+    with_member(tag, |[_, _, value]| {
+        let plain = PLAIN.get();
+        // SAFETY: with_member proved this index and roots the registered enum value.
+        (plain.is_null() || unsafe { *plain.add(tag - 1) } == 0)
+            .then(|| unsafe { super::acquire_rc(std::ptr::from_ref(value) as usize) })
+    })
+}
+
 fn with_member<R>(tag: usize, f: impl FnOnce([&Str; 3]) -> R) -> R {
     let (members, length) = MEMBERS.get();
     assert!((1..=length).contains(&tag), "invalid string enum tag");

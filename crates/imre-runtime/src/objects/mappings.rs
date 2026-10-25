@@ -810,6 +810,18 @@ impl Mapping {
             .collect()
     }
 
+    /// Look up a retained Python integer without reinterpreting it as a different key type.
+    ///
+    /// # Safety
+    /// The caller roots an exact integer word through the lookup.
+    pub(super) unsafe fn integer_key(&self, key: usize) -> Option<OwnedWord> {
+        let Tables::Int(table) = &self.tables else {
+            return None;
+        };
+        // SAFETY: callers root the native integer and this table owns its value.
+        unsafe { table.lookup(key).map(|e| self.value_kind.acquire(e.value)) }
+    }
+
     /// A numeric-key dictionary cannot match a string placeholder.
     pub(super) fn logging_key(&self, key: &Str) -> Option<OwnedWord> {
         let Tables::Str(table) = &self.tables else {
@@ -1353,6 +1365,14 @@ impl Storage {
         match self {
             Self::Set(value) => value,
             _ => fail("SystemError", "expected a set object"),
+        }
+    }
+    /// Return the current length of a concrete set or dictionary.
+    pub(super) fn table_length(&self) -> Option<usize> {
+        match self {
+            Self::Dictionary(d) => Some(d.tables.len()),
+            Self::Set(s) => Some(s.tables.len()),
+            _ => None,
         }
     }
     fn iteration_len(&self, kind: IteratorKind) -> usize {

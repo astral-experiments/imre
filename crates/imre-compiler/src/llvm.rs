@@ -3906,6 +3906,17 @@ impl Emitter<'_, '_> {
                         );
                         none()
                     }
+                    Dictionary => {
+                        self.call("imre_logrecord_dictionary", returns, &[&args[0].value])
+                    }
+                    AddExtra => {
+                        let mapping = self.word(&args[1].value);
+                        self.checked_line(format!(
+                            "call void @imre_logrecord_extra(ptr {}, i64 {mapping})",
+                            args[0].value.operand
+                        ));
+                        none()
+                    }
                     New | Put => {
                         let mut operands = Vec::new();
                         for (i, arg) in args.iter().enumerate() {
@@ -4518,6 +4529,18 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_builtins_del_last", &[]);
                 none()
             }
+            Builtin::RetainValue => {
+                let value = &args[0].value;
+                let kind = representation_kind(value.ty, &self.module.types);
+                let word = self.word(value);
+                Value {
+                    ty: Type::ValueView,
+                    operand: self.instruction(format!(
+                        "call ptr @imre_value_snapshot(i32 {kind}, i64 {word})"
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::BuiltinsSetLast | Builtin::SysDisplayHook => {
                 let value = &args[0].value;
                 let kind = if value.ty == Type::ValueView {
@@ -4601,6 +4624,12 @@ impl Emitter<'_, '_> {
                 let i = usize::from(*reversed);
                 let other = &args[1 - i].value;
                 let kind = representation_kind(other.ty, &self.module.types);
+                // Five denotes another retained view in the existing ABI.
+                let kind = if kind == 5 && other.ty != Type::ValueView {
+                    u32::MAX
+                } else {
+                    kind
+                };
                 let word = self.word(other);
                 let bit = self.instruction(format!(
                     "call i32 @imre_system_exit_code_equal(ptr {}, i32 {kind}, i64 {word})",
@@ -7663,6 +7692,7 @@ declare void @imre_sys_stdout_clear()
 declare ptr @imre_text_optional_receiver(i64, ptr)
 declare ptr @imre_builtins_last()
 declare i32 @imre_builtins_has_last()
+declare ptr @imre_value_snapshot(i32, i64)
 declare void @imre_builtins_set_last(i32, i64)
 declare void @imre_builtins_del_last()
 declare void @imre_builtins_clear()
@@ -7736,6 +7766,8 @@ declare i1 @imre_logrecord_flag(i64)
 declare void @imre_logrecord_set_flag(i64,i1)
 declare ptr @imre_logrecord_new(i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32)
 declare void @imre_logrecord_put(ptr,ptr,i64,i32)
+declare ptr @imre_logrecord_dictionary(ptr)
+declare void @imre_logrecord_extra(ptr, i64)
 declare void @imre_logrecord_update(ptr,ptr)
 declare i64 @imre_logrecord_read(ptr,ptr,i32)
 declare ptr @imre_logrecord_message(ptr)

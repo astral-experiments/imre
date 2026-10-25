@@ -1,6 +1,6 @@
 //! A log record owns one native Python value per attribute, including user-supplied extras.
+use super::fields::Fields;
 use std::cell::Cell;
-use std::collections::HashMap;
 thread_local! {static FLAGS:Cell<u8> = const {Cell::new(15)};}
 use num_traits::ToPrimitive;
 use std::rc::Rc;
@@ -9,12 +9,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::super::exceptions::Result;
 use super::super::words::{NULLABLE, OwnedWord, WordKind};
-use super::super::{
-    Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object, records, values,
-};
+use super::super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object, records};
 
 pub(in crate::objects) struct Record {
-    pub(super) fields: HashMap<String, OwnedWord>,
+    pub(super) fields: Fields,
 }
 
 fn owned(word: usize, kind: u32) -> OwnedWord {
@@ -33,29 +31,7 @@ pub(super) fn float(n: f64) -> OwnedWord {
 }
 
 pub(super) fn display(v: &OwnedWord, repr: bool) -> String {
-    if !repr && v.kind.raw() & !NULLABLE == 3 && v.word != 0 {
-        // SAFETY: v owns this exact string.
-        return unsafe { &*(v.word as *const Str) }.to_string();
-    }
-    if !repr && v.kind.raw() & !NULLABLE == 10 && v.word != 0 {
-        return super::super::string_enums::display(v.word);
-    }
-    if !repr && v.kind.raw() & !NULLABLE == 5 && v.word != 0 {
-        // SAFETY: kind five owns a live object; copy its spelling within the borrow.
-        let path = unsafe {
-            object(v.word as *const Object).0.with(|s| {
-                matches!(s, Storage::Path { .. } | Storage::PurePath(_))
-                    .then(|| s.path().to_owned())
-            })
-        };
-        if let Some(path) = path {
-            return path;
-        }
-    }
-    let mut out = String::new();
-    // SAFETY: v keeps the full value graph alive until formatting returns.
-    unsafe { values::write_repr(&mut out, v.word, v.kind) };
-    out
+    super::super::exceptions::retained_text(v, repr).to_string()
 }
 
 pub(super) fn tuple_len(v: &OwnedWord) -> Option<usize> {
@@ -106,21 +82,7 @@ pub(super) fn dict_item(v: &OwnedWord, key: &str) -> Result<OwnedWord> {
 }
 
 pub(super) fn truth(v: &OwnedWord) -> bool {
-    match v.kind.raw() {
-        0 => false,
-        1 => v.word != 0,
-        // SAFETY: the discriminant establishes a rooted native integer.
-        2 => unsafe { Int::borrow(v.word) }.as_small() != Some(0),
-        3 => !display(v, false).is_empty(),
-        7 => f64::from_bits(v.word as u64) != 0.0,
-        _ if tuple_len(v).is_some() => tuple_len(v) != Some(0),
-        _ if is_dict(v) => {
-            // SAFETY: the kind and variant were checked, and v roots the dictionary.
-            let n = unsafe { super::super::mappings::imre_dict_len(v.word as *const Object) };
-            Int(n).as_small() != Some(0)
-        }
-        _ => v.word != 0,
-    }
+    super::super::exceptions::retained_truth(v)
 }
 
 fn nanos() -> i128 {
@@ -188,18 +150,18 @@ impl Record {
         let flags = FLAGS.get();
         let fields = [
             ("name", name),
+            ("msg", msg),
+            ("args", args),
             ("levelname", levelname),
             ("levelno", level),
             ("pathname", path),
-            ("lineno", line),
-            ("msg", msg),
-            ("args", args),
-            ("exc_info", exc),
-            ("funcName", func),
-            ("stack_info", stack),
             ("filename", filename),
             ("module", module),
+            ("exc_info", exc),
             ("exc_text", owned(0, 0)),
+            ("stack_info", stack),
+            ("lineno", line),
+            ("funcName", func),
             ("created", float(created)),
             ("msecs", float(msecs)),
             ("relativeCreated", float((ct - start) as f64 / 1e6)),
@@ -220,14 +182,6 @@ impl Record {
                 },
             ),
             (
-                "process",
-                if flags & 2 != 0 {
-                    integer(std::process::id() as usize)
-                } else {
-                    owned(0, 0)
-                },
-            ),
-            (
                 "processName",
                 if flags & 4 != 0 {
                     string("MainProcess")
@@ -235,28 +189,36 @@ impl Record {
                     owned(0, 0)
                 },
             ),
+            (
+                "process",
+                if flags & 2 != 0 {
+                    integer(std::process::id() as usize)
+                } else {
+                    owned(0, 0)
+                },
+            ),
             ("taskName", owned(0, 0)),
         ];
         Self {
-            fields: fields.into_iter().map(|(k, v)| (k.to_owned(), v)).collect(),
+            fields: Fields::new(fields),
         }
     }
 
-    fn repr(&self) -> String {
-        let get = |k: &str| display(&self.fields[k], false);
-        format!(
+    fn repr(&self) -> Result<String> {
+        let get = |k: &str| self.fields.field(k).map(|v| display(&v, false));
+        Ok(format!(
             "<LogRecord: {}, {}, {}, {}, \"{}\">",
-            get("name"),
-            get("levelno"),
-            get("pathname"),
-            get("lineno"),
-            get("msg")
-        )
+            get("name")?,
+            get("levelno")?,
+            get("pathname")?,
+            get("lineno")?,
+            get("msg")?
+        ))
     }
 
     pub(super) fn message(&self) -> Result<String> {
-        let msg = display(&self.fields["msg"], false);
-        let args = &self.fields["args"];
+        let msg = display(&self.fields.field("msg")?, false);
+        let args = &self.fields.field("args")?;
         if !truth(args) {
             return Ok(msg);
         }
@@ -665,11 +627,13 @@ pub unsafe extern "C" fn imre_logrecord_put(
     // SAFETY: acquire before mutation; release the displaced owner outside the storage borrow.
     unsafe {
         let value = WordKind::new(kind).acquire(word);
-        let old = object(record).0.with_mut(|s| match s {
-            Storage::LogRecord(r) => r.fields.insert((&*key).to_string(), value),
-            _ => unreachable!(),
-        });
-        drop(old);
+        finish(
+            object(record).0.with_mut(|s| match s {
+                Storage::LogRecord(r) => r.fields.insert((&*key).to_string(), value),
+                _ => unreachable!(),
+            }),
+            (),
+        );
     }
 }
 
@@ -682,12 +646,76 @@ pub unsafe extern "C" fn imre_logrecord_update(record: *const Object, mapping: *
         let fields = object(mapping)
             .0
             .with(|s| s.dictionary().owned_string_entries());
-        object(record).0.with_mut(|s| {
-            if let Storage::LogRecord(r) = s {
-                r.fields.extend(fields)
-            }
-        });
+        finish(
+            object(record).0.with_mut(|s| {
+                let Storage::LogRecord(r) = s else {
+                    unreachable!()
+                };
+                for (key, value) in fields {
+                    r.fields.insert(key, value)?;
+                }
+                Ok(())
+            }),
+            (),
+        );
     }
+}
+
+/// Expose the record's live, insertion-ordered attribute dictionary.
+///
+/// # Safety
+/// The caller holds a native record until the mapping takes its own strong owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_logrecord_dictionary(record: *const Object) -> *const Object {
+    // SAFETY: no user code runs while the record switches to its dictionary representation.
+    let result = unsafe {
+        object(record).0.with_mut(|s| {
+            let Storage::LogRecord(r) = s else {
+                unreachable!()
+            };
+            r.fields.dictionary()
+        })
+    };
+    finish(result.map(Rc::into_raw), std::ptr::null())
+}
+
+/// Add Logger.makeRecord's fields without replacing existing or formatter-reserved names.
+///
+/// # Safety
+/// The caller holds the record and a string-key dictionary, or zero for None.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_logrecord_extra(record: *const Object, mapping: usize) {
+    if mapping == 0 {
+        return;
+    }
+    // SAFETY: acquiring the mapping values ends its borrow before any record is changed.
+    let fields = unsafe {
+        object(mapping as *const Object)
+            .0
+            .with(|s| s.dictionary().owned_string_entries())
+    };
+    // SAFETY: the record, original keys and all values remain rooted through mutation.
+    finish(
+        unsafe {
+            object(record).0.with_mut(|s| {
+                let Storage::LogRecord(r) = s else {
+                    unreachable!()
+                };
+                for (key, value) in fields {
+                    if matches!(key.as_str(), "message" | "asctime") || r.fields.get(&key).is_some()
+                    {
+                        return Err(Error::key(string(&format!(
+                            "Attempt to overwrite {} in LogRecord",
+                            super::super::exceptions::string_repr(&key)
+                        ))));
+                    }
+                    r.fields.insert(key, value)?;
+                }
+                Ok(())
+            })
+        },
+        (),
+    );
 }
 
 fn read(value: &OwnedWord, want: u32) -> Result<usize> {
@@ -741,7 +769,7 @@ pub unsafe extern "C" fn imre_logrecord_read(
                         format!("'LogRecord' object has no attribute '{key}'"),
                     )
                 })
-                .and_then(|v| read(v, kind))
+                .and_then(|v| read(&v, kind))
         })
     };
     finish(result, 0)
@@ -765,7 +793,10 @@ pub unsafe extern "C" fn imre_logrecord_message(record: *const Object) -> *const
 pub unsafe extern "C" fn imre_logrecord_repr(record: *const Object) -> *const Str {
     // SAFETY: display only reads the live record and its rooted fields.
     let text = unsafe { with_record(record, Record::repr) };
-    Rc::into_raw(Rc::new(Str::from(text.as_str())))
+    finish(
+        text.map(|s| Rc::into_raw(Rc::new(Str::new(s)))),
+        std::ptr::null(),
+    )
 }
 
 /// Reads the current module flag selected by a compiler-emitted mask.

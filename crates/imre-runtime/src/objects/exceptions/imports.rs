@@ -73,9 +73,25 @@ unsafe fn tuple_item(tuple: usize, index: usize) -> (WordKind, usize) {
 }
 
 pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rc<Str> {
-    if kind.raw() == 3 && !repr {
-        // SAFETY: the owning field roots the exact string.
-        return unsafe { acquire_rc(word) };
+    if !repr {
+        match kind.raw() {
+            // SAFETY: the owning field roots the exact string.
+            3 => return unsafe { acquire_rc(word) },
+            5 => {
+                // SAFETY: kind five roots a concrete object through this borrow.
+                let path = unsafe {
+                    object(word as *const Object).0.with(|s| {
+                        matches!(s, Storage::Path { .. } | Storage::PurePath(_))
+                            .then(|| Rc::new(Str::from(s.path())))
+                    })
+                };
+                if let Some(path) = path {
+                    return path;
+                }
+            }
+            10 => return Rc::new(super::super::string_enums::display(word).into()),
+            _ => {}
+        }
     }
     let mut result = String::new();
     // SAFETY: only concrete, representable field types reach this routine.
@@ -87,14 +103,36 @@ pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rc<Str> {
 
 // A tuple may store an optional scalar in its nullable representation. Views
 // expose the contained Python value, not the slot's storage tag.
-fn concrete(kind: WordKind, word: usize) -> (WordKind, usize) {
-    if kind.raw() & crate::objects::words::NULLABLE == 0 {
-        (kind, word)
+pub(super) fn concrete(kind: WordKind, word: usize) -> (WordKind, usize) {
+    let base = kind.base();
+    let word = if kind.raw() == base {
+        word
     } else if word == 0 {
-        (WordKind::new(0), 0)
+        return (WordKind::new(0), 0);
     } else {
-        let base = kind.raw() & !crate::objects::words::NULLABLE;
-        (WordKind::new(base), if base == 1 { word - 1 } else { word })
+        match base {
+            1 => word - 1,
+            // SAFETY: a present optional float owns an Rc<f64> through this read.
+            7 => unsafe { (*(word as *const f64)).to_bits() as usize },
+            _ => word,
+        }
+    };
+    if base == 9 {
+        let (word, kind) = super::super::unions::member(word);
+        // A union boxes small integers to reserve its tag bits. Views use canonical integers.
+        let word = if kind.raw() == 2 {
+            // SAFETY: the original union roots the untagged BigInt until this read finishes.
+            unsafe { Int::borrow(word) }
+                .big()
+                .to_i64()
+                .and_then(Int::small)
+                .map_or(word, Int::into_raw)
+        } else {
+            word
+        };
+        (kind, word)
+    } else {
+        (WordKind::new(base), word)
     }
 }
 
@@ -107,6 +145,17 @@ pub unsafe extern "C" fn imre_exception_tuple_view(tuple: *const usize) -> *cons
 
 fn view(kind: WordKind, word: usize) -> *const Object {
     let (kind, word) = concrete(kind, word);
+    if kind.raw() == 5 {
+        // SAFETY: a value-view dictionary can supply an already retained Python value.
+        if unsafe {
+            object(word as *const Object)
+                .0
+                .with(|s| matches!(s, Storage::ValueView(_)))
+        } {
+            // SAFETY: the dictionary roots this retained view.
+            return Rc::into_raw(unsafe { acquire_rc(word) });
+        }
+    }
     // SAFETY: the borrowed source field is rooted when the view acquires its own value.
     let field = unsafe { kind.acquire(word) };
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ValueView(field)))))
@@ -233,29 +282,87 @@ pub unsafe extern "C" fn imre_exception_field_repr(value: *const Object) -> *con
     Rc::into_raw(word_text(kind, word, true))
 }
 
-fn type_name(kind: WordKind) -> &'static str {
+/// Read static record metadata only; ordinary class fields do not give a Python length.
+fn tuple_length(word: usize) -> Option<usize> {
+    // SAFETY: callers have a rooted kind-six record with a static descriptor.
+    let d = unsafe { records::descriptor(word as *const usize) };
+    // SAFETY: semantic metadata is either static or absent.
+    unsafe { d.semantics.as_ref() }
+        .filter(|s| s.kind == 1)
+        .map(|_| d.length)
+}
+
+fn type_name(kind: WordKind, word: usize) -> String {
     match kind.raw() {
         0 => "NoneType",
         1 => "bool",
         2 => "int",
         3 => "str",
         4 => "list",
-        6 => "tuple",
+        5 => {
+            // SAFETY: this field roots its concrete object.
+            return unsafe {
+                object(word as *const Object).0.with(|s| {
+                    match s {
+                        Storage::Sequence(_) => "list",
+                        Storage::Dictionary(_) => "dict",
+                        Storage::Set(_) => "set",
+                        Storage::Path { .. } => "PosixPath",
+                        Storage::PurePath(p) => p.class(),
+                        _ => "object",
+                    }
+                    .to_owned()
+                })
+            };
+        }
+        6 => {
+            // SAFETY: descriptor and UTF-8 class name are compiler-issued static data.
+            if let Some(s) = unsafe { records::descriptor(word as *const usize).semantics.as_ref() }
+            {
+                // SAFETY: compiler class names are static UTF-8.
+                return unsafe {
+                    std::str::from_utf8_unchecked(std::slice::from_raw_parts(s.name, s.name_len))
+                }
+                .to_owned();
+            }
+            "object"
+        }
+        7 => "float",
         8 => "bytes",
-        _ => unreachable!("checked exception field"),
+        10 => return super::super::string_enums::class_name(word),
+        11 | 12 => "type",
+        _ => unreachable!("concrete field kind"),
     }
+    .to_owned()
 }
 
 fn length(kind: WordKind, word: usize) -> Option<usize> {
-    // SAFETY: each admitted exact type is read through its own representation.
+    // SAFETY: each admitted exact type is read through its own rooted representation.
     unsafe {
         match kind.raw() {
             3 => Some((&*(word as *const Str)).chars().count()),
             4 => Some((&*(word as *const crate::List)).0.with(|v| v.len())),
-            6 => Some(records::descriptor(word as *const usize).length),
+            5 => object(word as *const Object).0.with(|s| match s {
+                Storage::Sequence(v) => Some(v.resolved().values.len()),
+                Storage::Dictionary(_) | Storage::Set(_) => s.table_length(),
+                _ => None,
+            }),
+            6 => tuple_length(word),
             8 => Some((&*(word as *const Bytes)).len()),
+            10 => super::super::string_enums::string_value(word).map(|s| s.chars().count()),
             _ => None,
         }
+    }
+}
+
+/// Compute truth from the concrete retained Python value, including empty containers.
+pub(super) fn truth(kind: WordKind, word: usize) -> bool {
+    match kind.raw() {
+        0 => false,
+        1 => word != 0,
+        2 => word != 1, // canonical tagged zero
+        7 => f64::from_bits(word as u64) != 0.0,
+        _ => length(kind, word) != Some(0),
     }
 }
 
@@ -269,7 +376,7 @@ pub unsafe extern "C" fn imre_exception_field_len(value: *const Object) -> usize
         Some(n) => Int::from_usize(n).into_raw(),
         None => Error::new(
             Kind::TypeError,
-            format!("object of type '{}' has no len()", type_name(kind)),
+            format!("object of type '{}' has no len()", type_name(kind, word)),
         )
         .returning(0),
     }
@@ -285,10 +392,30 @@ pub unsafe extern "C" fn imre_exception_field_index(
     // SAFETY: the field and integer stay live throughout indexing.
     unsafe {
         let (kind, word) = value_word(value);
+        // Integer subscription of a mapping uses the original key, including negatives.
+        if kind.raw() == 5 {
+            let item = object(word as *const Object).0.with(|s| match s {
+                Storage::Dictionary(m) => Some(
+                    m.integer_key(index)
+                        .ok_or_else(|| Error::key(WordKind::new(2).acquire(index))),
+                ),
+                Storage::Set(_) => Some(Err(Error::new(
+                    Kind::TypeError,
+                    "'set' object is not subscriptable",
+                ))),
+                _ => None,
+            });
+            if let Some(item) = item {
+                return match item {
+                    Ok(v) => view(v.kind, v.word),
+                    Err(e) => e.returning(std::ptr::null()),
+                };
+            }
+        }
         let Some(len) = length(kind, word) else {
             return Error::new(
                 Kind::TypeError,
-                format!("'{}' object is not subscriptable", type_name(kind)),
+                format!("'{}' object is not subscriptable", type_name(kind, word)),
             )
             .returning(std::ptr::null());
         };
@@ -306,8 +433,8 @@ pub unsafe extern "C" fn imre_exception_field_index(
             return Error::new(
                 Kind::IndexError,
                 match kind.raw() {
-                    3 => "string index out of range",
-                    4 => "list index out of range",
+                    3 | 10 => "string index out of range",
+                    4 | 5 => "list index out of range",
                     6 => "tuple index out of range",
                     8 => "index out of range",
                     _ => unreachable!(),
@@ -324,6 +451,16 @@ pub unsafe extern "C" fn imre_exception_field_index(
             4 => (&*(word as *const crate::List))
                 .0
                 .with(|v| view(WordKind::new(2), v[i].0)),
+            5 => object(word as *const Object).0.with(|s| {
+                let v = s.sequence();
+                view(v.kind, v.values[i])
+            }),
+            10 => {
+                let text =
+                    super::super::string_enums::string_value(word).expect("sized string enum");
+                let ch = Rc::new(Str::from(text.chars().nth(i).unwrap().to_string()));
+                view(WordKind::new(3), Rc::as_ptr(&ch) as usize)
+            }
             6 => {
                 let (k, w) = tuple_item(word, i);
                 view(k, w)
@@ -357,9 +494,41 @@ pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) ->
             numeric(concrete(next.1.0, next.1.1)),
         );
         if ka != kb {
-            return false;
-        }
-        if ka.raw() == 6 && wa != wb {
+            let matches = match (ka.raw(), kb.raw()) {
+                // SAFETY: both rooted operands have the selected numeric kinds.
+                (2, 7) => unsafe {
+                    crate::floats::imre_int_float_compare(wa, f64::from_bits(wb as u64)) == 0
+                },
+                // SAFETY: both rooted operands have the converse numeric kinds.
+                (7, 2) => unsafe {
+                    crate::floats::imre_int_float_compare(wb, f64::from_bits(wa as u64)) == 0
+                },
+                (3, 10) | (10, 3) => {
+                    let (text, tag) = if ka.raw() == 3 { (wa, wb) } else { (wb, wa) };
+                    // SAFETY: the string remains rooted during comparison.
+                    let text = unsafe { &*(text as *const Str) };
+                    super::super::string_enums::string_value(tag).is_some_and(|s| *s == *text)
+                }
+                _ => false,
+            };
+            if !matches {
+                return false;
+            }
+        } else if ka.raw() == 10 && wa != wb {
+            let (Some(a), Some(b)) = (
+                super::super::string_enums::string_value(wa),
+                super::super::string_enums::string_value(wb),
+            ) else {
+                return false;
+            };
+            if a != b {
+                return false;
+            }
+        } else if ka.raw() == 6
+            && wa != wb
+            && tuple_length(wa).is_some()
+            && tuple_length(wb).is_some()
+        {
             // SAFETY: both words are rooted tuple payloads with static descriptors.
             unsafe {
                 let n = records::descriptor(wa as *const usize).length;

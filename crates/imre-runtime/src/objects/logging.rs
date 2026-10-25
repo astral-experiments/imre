@@ -1,6 +1,7 @@
 //! Process-local logging state for the native single-threaded runtime.
 mod config;
 mod delivery;
+mod fields;
 mod handler;
 mod hierarchy;
 mod levels;

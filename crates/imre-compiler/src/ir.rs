@@ -629,6 +629,7 @@ pub(crate) enum Builtin {
     BuiltinsLast,
     BuiltinsHasLast,
     BuiltinsSetLast,
+    RetainValue,
     BuiltinsDeleteLast,
     DirectoryContextView,
     TextStreamView,
@@ -1323,6 +1324,8 @@ pub(crate) enum FormatterOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LogRecordOperation {
     New,
+    AddExtra,
+    Dictionary,
     Put,
     Update,
     Read,

@@ -56,6 +56,16 @@ unsafe fn snapshot(kind: u32, word: usize) -> Rc<Object> {
     }
 }
 
+/// Retain the original Python value when assigning into a heterogeneous native dictionary.
+///
+/// # Safety
+/// The caller roots a value of the concrete compiler-supplied kind.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_value_snapshot(kind: u32, word: usize) -> *const Object {
+    // SAFETY: snapshot acquires the incoming owner before its source can be replaced.
+    Rc::into_raw(unsafe { snapshot(kind, word) })
+}
+
 /// # Safety
 /// The compiler roots the borrowed word with the stated concrete kind or VIEW.
 #[unsafe(no_mangle)]
