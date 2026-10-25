@@ -64,6 +64,11 @@ impl Checker<'_> {
             }
             args.push(self.expr(&keyword.value)?);
         }
+        Ok(Self::type_error_after(args, ty, message))
+    }
+
+    /// Evaluate the supplied operands before raising a native argument error.
+    pub(super) fn type_error_after(mut args: Vec<Expr>, ty: Type, message: String) -> Expr {
         args.push(Expr {
             ty: Type::Exception,
             kind: ExprKind::Exception {
@@ -71,13 +76,120 @@ impl Checker<'_> {
                 message: Some(Box::new(unpacking::string(message))),
             },
         });
-        Ok(Expr {
+        Expr {
             ty,
             kind: ExprKind::Builtin(Builtin::RaiseException, args),
-        })
+        }
+    }
+
+    fn intern_call(&mut self, call: &ast::ExprCall, query: bool) -> Result<Expr, String> {
+        let (name, result, op) = if query {
+            ("_is_interned", Type::Bool, Builtin::SysIsInterned)
+        } else {
+            ("intern", Type::Str, Builtin::SysIntern)
+        };
+        let count = call.arguments.args.len();
+        if count == 0 {
+            self.graph
+                .checked_missing_argument(self.module, call.range());
+        } else if let Some(extra) = call.arguments.args.get(1) {
+            self.graph
+                .checked_excess_argument(self.module, extra.range());
+        }
+        if !call.arguments.keywords.is_empty() {
+            self.graph.checked_keywords(
+                self.module,
+                call.arguments.keywords.iter().map(Ranged::range),
+            );
+            return self.sys_type_error(
+                call,
+                result,
+                format!("sys.{name}() takes no keyword arguments"),
+            );
+        }
+        let [argument] = call.arguments.args.as_slice() else {
+            return self.sys_type_error(
+                call,
+                result,
+                format!("sys.{name}() takes exactly one argument ({count} given)"),
+            );
+        };
+        let value = self.expr(argument)?;
+        if value.ty == Type::Str {
+            return Ok(Expr {
+                ty: result,
+                kind: ExprKind::Builtin(op, vec![value]),
+            });
+        }
+        if let Type::StrEnum(class) = value.ty {
+            if query {
+                return Ok(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Scope {
+                        body: vec![Statement::Expr(value)],
+                        value: Box::new(Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Bool(false),
+                        }),
+                        clear: vec![],
+                    },
+                });
+            }
+            let class = &self.classes.declarations.definitions[class].name;
+            return Ok(Self::type_error_after(
+                vec![value],
+                result,
+                format!("can't intern {class}"),
+            ));
+        }
+        let ty = match value.ty {
+            Type::None => "None",
+            Type::Int => "int",
+            Type::Bool => "bool",
+            Type::Float => "float",
+            Type::Bytes => "bytes",
+            Type::ListInt | Type::List(_) => "list",
+            Type::Tuple(_) => "tuple",
+            Type::Dict(_) => "dict",
+            Type::Set(_) => "set",
+            Type::Class(class) => &self.classes.declarations.definitions[class].name,
+            _ => {
+                return Err(error(
+                    self.source,
+                    argument,
+                    "interning requires a concrete native argument type",
+                ));
+            }
+        };
+        Ok(Self::type_error_after(
+            vec![value],
+            result,
+            format!("{name}() argument must be str, not {ty}"),
+        ))
     }
 
     pub(super) fn sys_call(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "hasattr" && !self.names.contains_key("hasattr"))
+            && self.resolve(&call.func).is_none()
+            && call.arguments.keywords.is_empty()
+            && let [module, ast::Expr::StringLiteral(attr)] = call.arguments.args.as_slice()
+            && let Some(Binding::IntrinsicModule(namespace @ crate::modules::IntrinsicModule::Sys)) =
+                self.resolve(module)
+            && matches!(
+                namespace.symbol(attr.value.to_str()),
+                Some(Binding::Intrinsic(
+                    Intrinsic::SysIntern { .. }
+                        | Intrinsic::SysEncoding(_)
+                        | Intrinsic::SysException
+                        | Intrinsic::SysExit
+                ))
+            )
+        {
+            return Ok(Some(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Bool(true),
+            }));
+        }
         match self.resolve(&call.func) {
             Some(Binding::Intrinsic(Intrinsic::SysExit)) => {
                 return self.system_exit(call, true).map(Some);
@@ -86,6 +198,9 @@ impl Checker<'_> {
                 return self
                     .sys_no_args(call, name, unpacking::string("utf-8"))
                     .map(Some);
+            }
+            Some(Binding::Intrinsic(Intrinsic::SysIntern { query })) => {
+                return self.intern_call(call, query).map(Some);
             }
             Some(Binding::Intrinsic(Intrinsic::SysException)) => {
                 let result = Expr {

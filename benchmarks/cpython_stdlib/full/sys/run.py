@@ -80,6 +80,12 @@ def select(toolchain, work, source, module):
     if output(binary) != (ref.stdout, ref.stderr):
         raise AssertionError("native exception identity differs from CPython")
 
+    exercise = HERE / "intern_values.py"
+    ref = subprocess.run([sys.executable, "-B", exercise], capture_output=True, check=True, timeout=15)
+    binary = toolchain.build(exercise.read_bytes(), directory(work, "intern-values"))
+    if output(binary) != (ref.stdout, ref.stderr):
+        raise AssertionError("native string interning differs from CPython")
+
     encoding = toolchain.build((HERE / "encoding_driver.py").read_bytes(), directory(work, "encoding"))
 
     def encoding_case(case, original):

@@ -292,6 +292,7 @@ fn emit_program(
         entry_allocas: String::new(),
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
+        uses_string_interning: false,
         tuple_literals: BTreeMap::new(),
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
@@ -477,6 +478,7 @@ struct Emitter<'a, 'module> {
     entry_allocas: String,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
+    uses_string_interning: bool,
     tuple_literals: BTreeMap<usize, Vec<String>>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
     bytes_literals: BTreeMap<Vec<u8>, usize>,
@@ -4326,6 +4328,22 @@ impl Emitter<'_, '_> {
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
+            Builtin::SysIntern => {
+                self.uses_string_interning = true;
+                self.call("imre_sys_intern", Type::Str, &[&args[0].value])
+            }
+            Builtin::SysIsInterned => {
+                self.uses_string_interning = true;
+                let found = self.instruction(format!(
+                    "call i32 @imre_sys_is_interned(ptr {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {found}, 0")),
+                    small_integer: false,
+                }
+            }
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::SysStreamWrite { stderr } => Value {
                 ty: returns,
@@ -7203,6 +7221,9 @@ declare void @imre_print_int(i64)
 declare void @imre_print_bool(i32)
 declare void @imre_print_none()
 declare ptr @imre_str_static_literal(ptr, i64)
+declare ptr @imre_str_interned_literal(ptr, i64)
+declare ptr @imre_sys_intern(ptr)
+declare i32 @imre_sys_is_interned(ptr)
 declare ptr @imre_regex_compile(ptr, i64)
 declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)

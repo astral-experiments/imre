@@ -118,16 +118,21 @@ thread_local! {
 
 /// Reuses immutable owners for empty and single Latin-1 strings.
 pub(super) fn owned_string(value: &str) -> Rc<Str> {
+    short_string(value).unwrap_or_else(|| Rc::new(Str::new(value)))
+}
+
+/// Return the shared native owner for empty and single Latin-1 strings.
+pub(crate) fn short_string(value: &str) -> Option<Rc<Str>> {
     let index = match value.as_bytes() {
         [] => 256,
         [byte] => usize::from(*byte),
         // These UTF-8 lead bytes encode U+0080 through U+00FF.
         [0xc2 | 0xc3, _] => value.chars().next().unwrap() as usize,
-        _ => return Rc::new(Str::new(value)),
+        _ => return None,
     };
-    SHORT_STRINGS.with_borrow_mut(|strings| {
+    Some(SHORT_STRINGS.with_borrow_mut(|strings| {
         Rc::clone(strings[index].get_or_insert_with(|| Rc::new(Str::new(value))))
-    })
+    }))
 }
 
 /// Appends an owned slice of source, retaining its allocation for a full slice.

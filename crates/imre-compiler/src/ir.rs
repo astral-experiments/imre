@@ -570,6 +570,8 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    SysIntern,
+    SysIsInterned,
     OsName,
     SystemExitNew {
         omit_none: bool,
