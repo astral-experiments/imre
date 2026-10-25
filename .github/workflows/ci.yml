@@ -222,6 +222,57 @@ jobs:
           cp "$JSON_RESULTS/doctest-startup-linux.json" "$JSON_DIR/doctest-startup-linux.json"
           python3 -B "$JSON_DIR/evidence.py" --imre "$JSON_IMRE" --runtime "$JSON_RUNTIME" --clang /usr/bin/clang-18 --result "$JSON_RESULTS/evidence-linux.json"
           python3 -B benchmarks/cpython_stdlib/suite_evidence.py "$JSON_DIR/reference-linux.json" "$JSON_RESULTS/evidence-linux.json"
+      - name: Refresh main after the full suite
+        if: ${{ success() && inputs.audit == 'decoder-current-main' }}
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          path: .json-latest-main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Recheck the final prospective tree if main changed
+        if: ${{ success() && inputs.audit == 'decoder-current-main' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=$(git -C .json-latest-main rev-parse HEAD)
+          read -r before head tree < "$JSON_RESULTS/merge-inputs.txt"
+          test "$head" = "$EXPECTED_SOURCE"
+          if [[ "$before" == "$base" ]]; then
+            echo "$base" > "$JSON_RESULTS/final-main-unchanged.txt"
+            exit 0
+          fi
+          git fetch --quiet --no-tags "$PWD/.json-latest-main" "$base"
+          tree=$(git merge-tree --write-tree "$base" "$head")
+          export GIT_AUTHOR_DATE GIT_COMMITTER_DATE
+          GIT_AUTHOR_DATE=$(git show -s --format=%cI "$base")
+          GIT_COMMITTER_DATE=$GIT_AUTHOR_DATE
+          merge=$(git -c user.name='Imre verification' -c user.email='github-actions[bot]@users.noreply.github.com' commit-tree "$tree" -p "$base" -p "$head" -m 'Verify the final prospective JSON decoder merge')
+          git restore -- benchmarks/cpython_stdlib/full/json/doctest-startup-linux.json
+          git checkout --detach "$merge"
+          mkdir "$JSON_RESULTS/latest"
+          cp "$JSON_RESULTS/reference-linux.json" "$JSON_RESULTS/latest/reference-linux.json"
+          export JSON_RESULTS="$JSON_RESULTS/latest" JSON_TEST_REVISION="$merge"
+          printf '%s %s %s\n' "$base" "$head" "$tree" > "$JSON_RESULTS/merge-inputs.txt"
+          git show -s --format='%H %T' | tee "$JSON_RESULTS/source.txt"
+          git cat-file -p HEAD | sed -n '/^$/q; /^tree /p; /^parent /p' > "$JSON_RESULTS/commit-objects.txt"
+          git show "$GITHUB_SHA":.github/workflows/ci.yml > "$RUNNER_TEMP/json-verification.yml"
+          python3 -B - "$RUNNER_TEMP/json-verification.yml" <<'PY'
+          import re, subprocess, sys, textwrap
+          from pathlib import Path
+          workflow = Path(sys.argv[1]).read_text()
+          steps = re.split(r'(?m)^      - ', workflow)[1:]
+          for name in ('Build the prospective compiler and runtime',
+                       'Test native runtime and intact entry points',
+                       'Compare decoder behavior and type checks at O0 and O3',
+                       'Observe original key identity and nested decoding fixtures',
+                       'Compare the overlapping native shutil callable path',
+                       'Validate both full per-occurrence reports'):
+              step, = [part for part in steps if part.startswith('name: ' + name + '\n')]
+              command = textwrap.dedent(step.split('        run: |\n', 1)[1])
+              print(name, flush=True)
+              subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', command], check=True)
+          PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
