@@ -137,6 +137,18 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
         | ExprKind::Bytes(_)
         | ExprKind::None
         | ExprKind::Local(_) => false,
+        // Fixed-offset datetime ordering raises on a mix of naive and aware operands.
+        // Preserve this effect across a direct call even when both operands are simple locals.
+        ExprKind::Compare(values, ops)
+            if ops.iter().zip(values).any(|(op, value)| {
+                matches!(
+                    value.ty,
+                    crate::ir::Type::Calendar(crate::ir::CalendarType::DateTime)
+                ) && !matches!(op, crate::ir::Compare::Equal | crate::ir::Compare::NotEqual)
+            }) =>
+        {
+            true
+        }
         // Even an existing point needs space when appended to a packed list literal.
         ExprKind::List(values)
             if !values.is_empty()
