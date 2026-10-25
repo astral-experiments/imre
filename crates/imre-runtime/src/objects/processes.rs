@@ -26,6 +26,7 @@ mod argv;
 mod asynchronous;
 mod launch_error;
 mod pass_fds;
+mod pipe_size;
 mod popen;
 mod shell_output;
 pub(super) use asynchronous::AsyncProcess;

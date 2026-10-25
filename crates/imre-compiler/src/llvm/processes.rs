@@ -416,7 +416,12 @@ impl Emitter<'_, '_> {
                 }
                 if child_options {
                     let pass_fds = streams & (1 << 19) != 0;
-                    let start = args.len() - 3 - usize::from(pass_fds) - usize::from(signal_arg);
+                    let pipe_size = streams & (1 << 21) != 0;
+                    let start = args.len()
+                        - 3
+                        - usize::from(pass_fds)
+                        - usize::from(pipe_size)
+                        - usize::from(signal_arg);
                     fields.extend([
                         ("i64", args[start].value.operand.clone()),
                         ("i64", args[start + 1].value.operand.clone()),
@@ -426,6 +431,19 @@ impl Emitter<'_, '_> {
                         fields.extend([
                             ("i64", self.word(&args[start + 3].value)),
                             ("i32", kind(start + 3).to_string()),
+                        ]);
+                    } else if pipe_size {
+                        // SizedPipeConfig embeds the complete pass_fds layout.
+                        fields.extend([("i64", "0".into()), ("i32", "0".into())]);
+                    }
+                    if pipe_size {
+                        let value = &args[start + 3 + usize::from(pass_fds)].value;
+                        fields.extend([
+                            ("i64", self.word(value)),
+                            (
+                                "i32",
+                                representation_kind(value.ty, &self.module.types).to_string(),
+                            ),
                         ]);
                     }
                 }
