@@ -503,6 +503,7 @@ impl Error {
                 lineno,
                 colno,
             }))),
+            cause: None,
         }
     }
 
