@@ -5190,18 +5190,7 @@ impl<'a> Checker<'a> {
                 if let Some(Binding::Definition(definition)) = self.resolve(&attribute.value)
                     && let Some(declaration) = self.types.namedtuple(definition)
                 {
-                    return match attribute.attr.as_str() {
-                        "_fields" | "__match_args__" => Ok(self.namedtuple_fields(&declaration)),
-                        "__name__" => Ok(Expr {
-                            ty: Type::Str,
-                            kind: ExprKind::Str(declaration.name.clone()),
-                        }),
-                        _ => Err(error(
-                            self.source,
-                            attribute,
-                            "unsupported namedtuple class attribute",
-                        )),
-                    };
+                    return self.namedtuple_class_attribute(attribute, &declaration);
                 }
                 if attribute.attr.as_str() == "encoding"
                     && matches!(
@@ -5221,27 +5210,7 @@ impl<'a> Checker<'a> {
                 }
                 let receiver = self.expr(&attribute.value)?;
                 if let Some(definition) = self.types.namedtuple_definition(receiver.ty) {
-                    let declaration = self.types.namedtuple(definition).unwrap();
-                    if matches!(attribute.attr.as_str(), "_fields" | "__match_args__") {
-                        let fields = self.namedtuple_fields(&declaration);
-                        return Ok(Expr {
-                            ty: fields.ty,
-                            kind: ExprKind::Scope {
-                                body: vec![Statement::Expr(receiver)],
-                                clear: vec![],
-                                value: Box::new(fields),
-                            },
-                        });
-                    }
-                    let index = declaration
-                        .fields
-                        .iter()
-                        .position(|name| name == attribute.attr.as_str())
-                        .ok_or_else(|| error(self.source, attribute, "unknown namedtuple field"))?;
-                    return Ok(Expr {
-                        ty: self.types.fields(receiver.ty).unwrap()[index],
-                        kind: ExprKind::Field(Box::new(receiver), index),
-                    });
+                    return self.namedtuple_instance_attribute(attribute, receiver, definition);
                 }
                 if let Type::NamedException(class) = receiver.ty
                     && attribute.attr.as_str() == "args"

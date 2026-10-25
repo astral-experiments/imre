@@ -84,7 +84,57 @@ pub(super) fn annotation(
 }
 
 impl Checker<'_> {
-    pub(super) fn namedtuple_fields(&self, declaration: &NamedTuple) -> Expr {
+    /// Read immutable attributes from a static namedtuple factory.
+    pub(super) fn namedtuple_class_attribute(
+        &self,
+        attribute: &ast::ExprAttribute,
+        declaration: &NamedTuple,
+    ) -> Result<Expr, String> {
+        match attribute.attr.as_str() {
+            "_fields" | "__match_args__" => Ok(self.namedtuple_fields(declaration)),
+            "__name__" => Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Str(declaration.name.clone()),
+            }),
+            _ => Err(error(
+                self.source,
+                attribute,
+                "unsupported namedtuple class attribute",
+            )),
+        }
+    }
+
+    /// Evaluate an instance once before projecting a field or reading its metadata.
+    pub(super) fn namedtuple_instance_attribute(
+        &self,
+        attribute: &ast::ExprAttribute,
+        receiver: Expr,
+        definition: DefinitionId,
+    ) -> Result<Expr, String> {
+        let declaration = self.types.namedtuple(definition).unwrap();
+        if matches!(attribute.attr.as_str(), "_fields" | "__match_args__") {
+            let fields = self.namedtuple_fields(&declaration);
+            return Ok(Expr {
+                ty: fields.ty,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Expr(receiver)],
+                    clear: Vec::new(),
+                    value: Box::new(fields),
+                },
+            });
+        }
+        let index = declaration
+            .fields
+            .iter()
+            .position(|name| name == attribute.attr.as_str())
+            .ok_or_else(|| error(self.source, attribute, "unknown namedtuple field"))?;
+        Ok(Expr {
+            ty: self.types.fields(receiver.ty).unwrap()[index],
+            kind: ExprKind::Field(Box::new(receiver), index),
+        })
+    }
+
+    fn namedtuple_fields(&self, declaration: &NamedTuple) -> Expr {
         let fields: Vec<_> = declaration
             .fields
             .iter()
