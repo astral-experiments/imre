@@ -3,41 +3,40 @@ use super::*;
 use crate::objects::records::{self, RecordDescriptor, RecordSemantics};
 use crate::objects::words::Words;
 use smallvec::{SmallVec, smallvec};
-use std::rc::Weak;
 
 /// A task group can be a member's cause. Its projected tuple must not retain that cycle.
 #[derive(Clone)]
 pub(super) enum Cached {
-    Owned(Rc<Object>),
+    Owned(crate::ObjectOwner),
     Group {
-        tuple: Weak<Object>,
-        items: Weak<Object>,
+        tuple: crate::WeakObject,
+        items: crate::WeakObject,
     },
 }
 
 impl Cached {
-    fn get(&self) -> Option<Rc<Object>> {
+    fn get(&self) -> Option<crate::ObjectOwner> {
         match self {
             Self::Owned(view) => Some(view.clone()),
             Self::Group { tuple, .. } => tuple.upgrade(),
         }
     }
 
-    fn caused_group(view: &Rc<Object>) -> Self {
+    fn caused_group(view: &crate::ObjectOwner) -> Self {
         // SAFETY: group projections have the exact shape (str, list[exception]).
-        let items: Rc<Object> = unsafe {
+        let items: crate::ObjectOwner = unsafe {
             view.0.with(|s| {
                 let Storage::ObjectValue(tuple) = s else {
                     unreachable!()
                 };
                 let (kind, word) = super::super::boxed_values::tuple_item(tuple.word, 1);
                 debug_assert_eq!(kind.raw(), 5);
-                acquire_rc(word)
+                crate::ObjectOwner::acquire_word(word)
             })
         };
         Self::Group {
-            tuple: Rc::downgrade(view),
-            items: Rc::downgrade(&items),
+            tuple: crate::ObjectOwner::downgrade(view),
+            items: crate::ObjectOwner::downgrade(&items),
         }
     }
 }
@@ -83,8 +82,8 @@ fn layout<const N: usize>() -> &'static RecordDescriptor {
     }
 }
 
-fn view(field: OwnedWord) -> Rc<Object> {
-    Rc::new(Object(StorageCell::new(Storage::ObjectValue(field))))
+fn view(field: OwnedWord) -> crate::ObjectOwner {
+    crate::ObjectOwner::new(Object(StorageCell::new(Storage::ObjectValue(field))))
 }
 
 fn string(text: crate::StrOwner) -> OwnedWord {
@@ -109,14 +108,15 @@ fn tuple(fields: Fields) -> Result<OwnedWord> {
             return Err(Error::allocation());
         }
         for (i, field) in fields.into_iter().enumerate() {
-            raw.add(i).write(Rc::into_raw(view(field)) as usize);
+            raw.add(i)
+                .write(crate::ObjectOwner::into_raw(view(field)) as usize);
         }
         Ok(OwnedWord::from_owned(raw as usize, WordKind::new(6)))
     }
 }
 
-fn empty() -> Result<Rc<Object>> {
-    thread_local! { static EMPTY: std::cell::OnceCell<Rc<Object>> = const { std::cell::OnceCell::new() }; }
+fn empty() -> Result<crate::ObjectOwner> {
+    thread_local! { static EMPTY: std::cell::OnceCell<crate::ObjectOwner> = const { std::cell::OnceCell::new() }; }
     EMPTY.with(|entry| {
         if let Some(empty) = entry.get() {
             return Ok(empty.clone());
@@ -128,7 +128,7 @@ fn empty() -> Result<Rc<Object>> {
 }
 
 /// The exception owns every source value, including mutable command lists and undecoded bytes.
-fn project(exception: &Exception, owner: &Rc<Object>) -> Result<Rc<Object>> {
+fn project(exception: &Exception, owner: &crate::ObjectOwner) -> Result<crate::ObjectOwner> {
     let fields = match &exception.payload {
         Payload::Empty | Payload::Exit(None) => return empty(),
         Payload::Message(text) => smallvec![string(text.clone())],
@@ -164,16 +164,18 @@ fn project(exception: &Exception, owner: &Rc<Object>) -> Result<Rc<Object>> {
                     .try_reserve(members.len())
                     .map_err(|_| Error::allocation())?;
                 for member in members {
-                    values.values.push(Rc::into_raw(member.get(owner)) as usize);
+                    values
+                        .values
+                        .push(crate::ObjectOwner::into_raw(member.get(owner)) as usize);
                 }
                 values.update_header();
-                Rc::new(Object(StorageCell::new(Storage::Sequence(values))))
+                crate::ObjectOwner::new(Object(StorageCell::new(Storage::Sequence(values))))
             };
             smallvec![
                 Error::string_arg("unhandled errors in a TaskGroup"),
                 OwnedWord {
                     kind: WordKind::new(5),
-                    word: Rc::into_raw(list) as usize
+                    word: crate::ObjectOwner::into_raw(list) as usize
                 }
             ]
         }
@@ -188,7 +190,7 @@ fn project(exception: &Exception, owner: &Rc<Object>) -> Result<Rc<Object>> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_exception_args(value: *const Object) -> *const Object {
     // SAFETY: the input is a rooted exception object throughout the operation.
-    let owner: Rc<Object> = unsafe { acquire_rc(value as usize) };
+    let owner: crate::ObjectOwner = unsafe { crate::ObjectOwner::acquire_word(value as usize) };
     // SAFETY: projection retains only sealed fields and cannot call user code.
     let result = unsafe {
         owner.0.with_mut(|s| {
@@ -219,7 +221,7 @@ pub unsafe extern "C" fn imre_exception_args(value: *const Object) -> *const Obj
             Ok(v)
         })
     };
-    finish(result.map(Rc::into_raw), std::ptr::null())
+    finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
 }
 
 /// Format a structured error using the same arguments returned by its public getter.
@@ -230,7 +232,7 @@ pub(super) unsafe fn projected_repr(owner: *const Object) -> Option<Str> {
         if view.is_null() {
             return None;
         }
-        let view = Rc::from_raw(view);
+        let view = crate::ObjectOwner::from_raw(view);
         // End the storage borrow before a member's repr can run.
         let tuple = view.0.with(|s| match s {
             Storage::ObjectValue(tuple) => imports::Positional(tuple.clone()),
@@ -281,7 +283,7 @@ pub unsafe extern "C" fn imre_exception_tuple_identity(
 pub unsafe extern "C" fn imre_system_exit_from_tuple(args: *const usize) -> *const Object {
     // SAFETY: the exception owns its original argument vector as its exit code.
     let tuple = unsafe { WordKind::new(6).acquire(args as usize) };
-    Rc::into_raw(new_exception(
+    crate::ObjectOwner::into_raw(new_exception(
         Kind::SystemExit,
         Payload::ExitArguments(imports::Positional(tuple)),
     ))
@@ -291,21 +293,23 @@ pub unsafe extern "C" fn imre_system_exit_from_tuple(args: *const usize) -> *con
 mod tests {
     use super::*;
 
-    fn args(exception: &Rc<Object>) -> Rc<Object> {
+    fn args(exception: &crate::ObjectOwner) -> crate::ObjectOwner {
         // SAFETY: the exception is rooted; the accessor transfers one view.
-        unsafe { Rc::from_raw(imre_exception_args(Rc::as_ptr(exception))) }
+        unsafe {
+            crate::ObjectOwner::from_raw(imre_exception_args(crate::ObjectOwner::as_ptr(exception)))
+        }
     }
 
     #[test]
     fn repeated_arguments_keep_identity_and_the_empty_tuple_is_shared() {
         let first = new_exception(Kind::ValueError, Payload::Empty);
         let second = new_exception(Kind::TypeError, Payload::Empty);
-        assert!(Rc::ptr_eq(&args(&first), &args(&second)));
+        assert!(crate::ObjectOwner::ptr_eq(&args(&first), &args(&second)));
         let text = StrOwner::new(Str::from("keep me"));
         let weak = StrOwner::downgrade(&text);
         let error = new_exception(Kind::ValueError, Payload::Message(text));
         let saved = args(&error);
-        assert!(Rc::ptr_eq(&saved, &args(&error)));
+        assert!(crate::ObjectOwner::ptr_eq(&saved, &args(&error)));
         drop(error);
         assert!(weak.upgrade().is_some());
         drop(saved);
@@ -316,8 +320,8 @@ mod tests {
     fn retained_group_items_survive_the_tuple_without_a_parent_child_cycle() {
         let child = new_exception(Kind::ValueError, Payload::Empty);
         let group = task_group_errors(vec![child.clone()]);
-        let weak_child = Rc::downgrade(&child);
-        let weak_group = Rc::downgrade(&group);
+        let weak_child = crate::ObjectOwner::downgrade(&child);
+        let weak_group = crate::ObjectOwner::downgrade(&group);
         let saved = args(&group);
         let Cached::Group { items, .. } = Cached::caused_group(&saved) else {
             unreachable!()
@@ -325,18 +329,18 @@ mod tests {
         let list = items.upgrade().unwrap();
         // SAFETY: this is the actual child of the still-rooted parent.
         let raised = unsafe {
-            Rc::from_raw(imre_async_member_cause(
-                Rc::as_ptr(&child),
-                Rc::as_ptr(&group),
+            crate::ObjectOwner::from_raw(imre_async_member_cause(
+                crate::ObjectOwner::as_ptr(&child),
+                crate::ObjectOwner::as_ptr(&group),
             ))
         };
-        assert!(Rc::ptr_eq(&saved, &args(&group)));
+        assert!(crate::ObjectOwner::ptr_eq(&saved, &args(&group)));
         drop(saved);
         let again = args(&group);
         let Cached::Group { items, .. } = Cached::caused_group(&again) else {
             unreachable!()
         };
-        assert!(Rc::ptr_eq(&list, &items.upgrade().unwrap()));
+        assert!(crate::ObjectOwner::ptr_eq(&list, &items.upgrade().unwrap()));
         drop((again, group, raised, child));
         assert!(weak_group.upgrade().is_some());
         drop(list);

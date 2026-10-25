@@ -43,6 +43,19 @@ def main() -> None:
     print(repr(warnings.formatwarning("missing", ResourceWarning, source + ".missing", 2)))
     print(repr(warnings.formatwarning("huge", Warning, source, 1 << 100)))
     print(repr(warnings.formatwarning("bool", DeprecationWarning, source, True)))
+    for value in [10**4300 - 1, 10**4300, -(10**4300)]:
+        try:
+            print(len(warnings.formatwarning(value, Warning, source, 1, "")))
+        except ValueError as exc:
+            print(str(exc))
+        try:
+            print(len(warnings.formatwarning("m", Warning, source, value, "")))
+        except ValueError as exc:
+            print(str(exc))
+    try:
+        warnings.showwarning(Message("broken"), Warning, source, 10**4300, line="")
+    except ValueError as exc:
+        print(str(exc))
     warnings.formatwarning(line=mark("line"), filename=mark(source), lineno=2,
                            message=mark("message"), category=category)
     lines = linecache.getlines(source)

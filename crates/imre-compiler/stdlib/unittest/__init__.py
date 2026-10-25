@@ -167,6 +167,14 @@ class TestCase:
     def skipTest(self, reason: str) -> None:
         raise SkipTest(reason)
 
+    def assertIsNone(self, obj: object, msg: str | None = None) -> None:
+        if obj is not None:
+            self.fail(self._formatMessage(msg, repr(obj) + " is not None"))
+
+    def assertIsNotNone(self, obj: object, msg: str | None = None) -> None:
+        if obj is None:
+            self.fail(self._formatMessage(msg, "unexpectedly None"))
+
     def _raise_missing_callable(self, kind: str, name: str) -> None:
         raise self.failureException(self._formatMessage(None, kind + " not raised by " + name))
 

@@ -39,6 +39,7 @@ enum Shape {
     DispatchCallable(DispatchFunction),
     DispatchRegistry(Type),
     Awaitable(Type),
+    ContextValue(Type),
     DirectoryContext(Type),
     ProcessArgs(Type),
     Optional(Type),
@@ -52,6 +53,7 @@ pub(crate) struct CachedFunction {
     pub frame: Type,
     pub table: Type,
     pub capacity: i64,
+    pub annotations: Option<AnnotationOrigin>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -67,6 +69,13 @@ pub(crate) struct DispatchFunction {
     pub callable: Type,
     pub frame: Type,
     pub registry: Type,
+}
+
+/// A cache delegates annotation evaluation to the captured declaration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(crate) enum AnnotationOrigin {
+    Module(crate::modules::DefinitionId),
+    Local(usize),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -92,12 +101,20 @@ pub(crate) struct NamedTuple {
     pub(crate) fields: Vec<String>,
 }
 
+pub(crate) struct FunctionSite {
+    pub module: String,
+    pub qualname: String,
+    pub line: u32,
+}
 #[derive(Default)]
 struct Storage {
     shapes: Vec<Shape>,
     has_module_spec: bool,
     named_tuples: HashMap<DefinitionId, Rc<NamedTuple>>,
     cache_adapters: HashMap<usize, CachePolicy>,
+    source_sites: HashMap<(usize, u32), Rc<FunctionSite>>,
+    function_sites: HashMap<usize, Rc<FunctionSite>>,
+    plain_callbacks: HashSet<Type>,
     exceptions: Vec<NamedException>,
     ids: HashMap<Shape, usize>,
     hashable_records: HashSet<usize>,
@@ -113,6 +130,26 @@ struct Storage {
 /// type universe without retaining references into its growable storage.
 #[derive(Default)]
 pub(crate) struct Types(RefCell<Storage>);
+
+#[derive(Default)]
+pub(crate) struct ShapePrefix(Vec<Shape>);
+
+impl Types {
+    pub(crate) fn shape_count(&self) -> usize {
+        self.0.borrow().shapes.len()
+    }
+
+    pub(crate) fn save_prefix(&self, previous: &mut ShapePrefix) {
+        let storage = self.0.borrow();
+        if previous.0 != storage.shapes {
+            previous.0.clone_from(&storage.shapes);
+        }
+    }
+
+    pub(crate) fn matches_prefix(&self, previous: &ShapePrefix) -> bool {
+        previous.0.starts_with(&self.0.borrow().shapes)
+    }
+}
 
 #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
 impl Types {
@@ -179,6 +216,9 @@ impl Types {
             Type::DirectoryContext(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::DirectoryContext(_)))
             }
+            Type::ContextVar(id) | Type::ContextToken(id) => {
+                matches!(storage.shapes.get(id), Some(Shape::ContextValue(_)))
+            }
             Type::AsyncProcess(bits) => bits <= 3,
             Type::Popen(_, _, id) | Type::CompletedProcess(_, Some(id)) => {
                 matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_)))
@@ -212,6 +252,8 @@ impl Types {
             | Type::EventLoop
             | Type::TaskGroup
             | Type::GeneratorContext
+            | Type::Context
+            | Type::ContextMissing
             | Type::Semaphore
             | Type::Document(_)
             | Type::NativeModule
@@ -224,6 +266,8 @@ impl Types {
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::FunctionRef
+            | Type::OverloadStub
             | Type::PlainObject
             | Type::PathInfo
             | Type::Poll
@@ -262,6 +306,7 @@ impl Types {
                 | Shape::Counter(ty)
                 | Shape::DispatchRegistry(ty)
                 | Shape::Awaitable(ty)
+                | Shape::ContextValue(ty)
                 | Shape::DirectoryContext(ty)
                 | Shape::ProcessArgs(ty)
                 | Shape::Optional(ty) => vec![*ty],
@@ -297,6 +342,8 @@ impl Types {
                 | Type::Task(child_id)
                 | Type::SimpleNamespace(child_id)
                 | Type::DirectoryContext(child_id)
+                | Type::ContextVar(child_id)
+                | Type::ContextToken(child_id)
                 | Type::Popen(_, _, child_id)
                 | Type::Union(child_id) = child
                     && child_id >= id
@@ -312,6 +359,30 @@ impl Types {
 }
 
 impl Types {
+    pub(crate) fn allow_plain_callbacks(&self, safe: HashSet<Type>) {
+        self.0.borrow_mut().plain_callbacks = safe;
+    }
+    pub(crate) fn is_plain_callback(&self, ty: Type) -> bool {
+        self.0.borrow().plain_callbacks.contains(&ty)
+    }
+    pub(crate) fn has_reflected_functions(&self) -> bool {
+        !self.0.borrow().function_sites.is_empty()
+    }
+    pub(crate) fn add_function_site(&self, module: usize, offset: u32, site: FunctionSite) {
+        self.0
+            .borrow_mut()
+            .source_sites
+            .insert((module, offset), Rc::new(site));
+    }
+    pub(crate) fn bind_function_site(&self, module: usize, offset: u32, id: usize) {
+        let mut storage = self.0.borrow_mut();
+        if let Some(site) = storage.source_sites.get(&(module, offset)).cloned() {
+            storage.function_sites.insert(id, site);
+        }
+    }
+    pub(crate) fn function_site(&self, id: usize) -> Option<Rc<FunctionSite>> {
+        self.0.borrow().function_sites.get(&id).cloned()
+    }
     pub(crate) fn set_exception_declarations(&self, declarations: Vec<NamedException>) {
         self.0.borrow_mut().exceptions = declarations;
     }
@@ -648,6 +719,8 @@ impl Types {
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::FunctionRef
+            | Type::OverloadStub
             | Type::PlainObject
             | Type::PathInfo
             | Type::Poll
@@ -659,6 +732,9 @@ impl Types {
             | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
+            | Type::ContextVar(_)
+            | Type::ContextToken(_)
+            | Type::ContextMissing
             | Type::SourceModule
             | Type::BinaryIO => Some(true),
             Type::Optional(_) if self.truthiness(self.payload(ty).unwrap()) == Some(false) => {
@@ -960,6 +1036,20 @@ impl Types {
 
     pub(crate) fn directory_context(&self, result: Type) -> Type {
         Type::DirectoryContext(self.intern(Shape::DirectoryContext(result)))
+    }
+
+    pub(crate) fn context_var(&self, value: Type) -> Type {
+        Type::ContextVar(self.intern(Shape::ContextValue(value)))
+    }
+
+    pub(crate) fn context_value(&self, ty: Type) -> Option<Type> {
+        let (Type::ContextVar(id) | Type::ContextToken(id)) = ty else {
+            return None;
+        };
+        match self.0.borrow().shapes[id] {
+            Shape::ContextValue(value) => Some(value),
+            _ => unreachable!("context value shape"),
+        }
     }
 
     pub(crate) fn directory_value(&self, ty: Type) -> Option<Type> {
@@ -1267,6 +1357,8 @@ impl Types {
                 | Type::ActivePopen
                 | Type::AsyncProcess(_)
                 | Type::DirectoryContext(_)
+                | Type::Context
+                | Type::ContextToken(_)
                 | Type::GeneratorContext
                 | Type::EventLoop
                 | Type::Coroutine(_)
@@ -1306,6 +1398,7 @@ impl Types {
             .or_else(|| self.set_element(ty))
             .or_else(|| self.deque_element(ty))
             .or_else(|| self.cursor_element(ty))
+            .or_else(|| self.context_value(ty))
             .or_else(|| self.var_tuple_element(ty))
         {
             vec![element]
@@ -1373,6 +1466,8 @@ impl TypeDescription<'_> {
             | Type::VarTuple(id)
             | Type::Tuple(id)
             | Type::Callable(id)
+            | Type::ContextVar(id)
+            | Type::ContextToken(id)
             | Type::Dict(id)
             | Type::ChainMap(id)
             | Type::Deque(id)
@@ -1397,6 +1492,14 @@ impl TypeDescription<'_> {
             }
             Shape::ModuleSpec(_) => return self.write_str("importlib.machinery.ModuleSpec"),
             Shape::DeclaredCache(callable, _) => return self.write_type(*callable),
+            Shape::ContextValue(value) => {
+                self.write_str(if matches!(ty, Type::ContextVar(_)) {
+                    "ContextVar["
+                } else {
+                    "Token["
+                })?;
+                self.write_type(*value)?;
+            }
             Shape::CachedCallable(c) => return self.write_type(c.callable),
             Shape::DispatchCallable(d) => return self.write_type(d.callable),
             Shape::Callable(params, returns) => {

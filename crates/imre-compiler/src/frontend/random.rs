@@ -54,6 +54,7 @@ impl Checker<'_> {
             &params,
             None,
             Some(&mut scope),
+            None,
             |checker, i, argument| {
                 let node = argument.site();
                 let value = Self::string_value(argument.value(checker)?);

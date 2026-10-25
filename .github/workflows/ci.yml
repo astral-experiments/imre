@@ -43,6 +43,7 @@ jobs:
     outputs:
       release_artifacts: ${{ steps.scope.outputs.release_artifacts }}
       full_asan: ${{ steps.scope.outputs.full_asan }}
+      thinlto: ${{ steps.scope.outputs.thinlto }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -266,6 +267,11 @@ jobs:
       - name: Compare static inspect lookups with the pinned CPython suite
         run: |
           python3 benchmarks/cpython_stdlib/full/inspect/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-inspect.json"
+      - name: Check typing overloads against the original CPython typing and warnings fixtures
+        run: |
+          python3 benchmarks/cpython_stdlib/full/typing/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-typing-overloads.json"
+          cmp benchmarks/cpython_stdlib/full/typing/native-linux.json "$RUNNER_TEMP/cpython-typing-overloads.json"
+          cmp benchmarks/cpython_stdlib/full/typing/warnings-client-linux.json "$RUNNER_TEMP/typing-warnings-client.json"
       - name: Verify the complete OS, POSIX and genericpath evidence
         run: |
           for level in 0 3; do
@@ -419,6 +425,12 @@ jobs:
           for suite in build_cache module_objects link_cache build_output; do
             env -i HOME="$RUNNER_TEMP" PATH=/usr/bin:/bin python3 "tests/$suite.py" --compiler target/release/imre
           done
+      - name: Check native task context and original CPython contextvars cases
+        run: |
+          suite=benchmarks/cpython_stdlib/full/contextvars
+          python3 "$suite/focused.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+          python3 "$suite/run.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/contextvars-native.json"
+          cmp "$suite/native-linux.json" "$RUNNER_TEMP/contextvars-native.json"
       - name: Check original CPython textwrap cases against native indentation
         run: |
           suite=benchmarks/cpython_stdlib/full/textwrap
@@ -596,7 +608,8 @@ jobs:
           python3 benchmarks/memory_validate.py --python python3 --binary /tmp/memory-report --compute-binary /tmp/memory-report-compute --rust /tmp/imre-memory-reference/memory-report-reference
 
   thinlto:
-    if: ${{ !inputs.sys_source && !inputs.unittest_source }}
+    needs: scope
+    if: needs.scope.outputs.thinlto == 'true'
     runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     timeout-minutes: 120
     steps:

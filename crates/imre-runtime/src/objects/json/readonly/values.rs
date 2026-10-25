@@ -24,8 +24,8 @@ impl View {
             // SAFETY: both objects are rooted lists with JsonValue element storage.
             return unsafe {
                 crate::objects::values::imre_sequence_equal(
-                    std::rc::Rc::as_ptr(left),
-                    std::rc::Rc::as_ptr(right),
+                    crate::ObjectOwner::as_ptr(left),
+                    crate::ObjectOwner::as_ptr(right),
                 ) != 0
             };
         }
@@ -91,7 +91,7 @@ impl View {
             unsafe {
                 crate::objects::values::write_repr(
                     output,
-                    std::rc::Rc::as_ptr(items) as usize,
+                    crate::ObjectOwner::as_ptr(items) as usize,
                     crate::objects::words::WordKind::new(5),
                 )
             };

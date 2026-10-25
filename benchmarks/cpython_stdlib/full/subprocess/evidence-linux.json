@@ -8,9 +8,9 @@
     "denominator": 353,
     "distinct_ids": 353,
     "counts": {
-      "blocked": 150,
-      "failed": 11,
-      "host-driven-native-operation": 82,
+      "blocked": 148,
+      "failed": 6,
+      "host-driven-native-operation": 89,
       "host-operation": 6,
       "mixed": 9,
       "native-body-host-fixture": 54,
@@ -562,24 +562,23 @@
         "opt_level": 0,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "13 : Some fds were closed",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
-          "native_actor_calls": {
-            "Popen": 1,
-            "communicate": 1,
-            "streams": 1
-          }
+          "opt_level": 0,
+          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
+          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
+          "source": "fd-table-current-linux.json",
+          "operation": "three native launches inherit all 11 original fds, close them all, then keep the original set of eight; the native parent reaps each child and keeps every original descriptor and flag",
+          "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_close_fds_0_1",
@@ -1244,19 +1243,23 @@
         "opt_level": 0,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "Unsupported: Popen options: pass_fds",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+          "opt_level": 0,
+          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
+          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
+          "source": "fd-table-current-linux.json",
+          "operation": "the native child inherits both original pipe fds; the original non-inheritable fd remains non-inheritable in the parent; the native parent reaps each child and keeps every original descriptor and flag",
+          "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_redirected",
@@ -1264,19 +1267,23 @@
         "opt_level": 0,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "Unsupported: Popen options: pass_fds",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+          "opt_level": 0,
+          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
+          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
+          "source": "fd-table-current-linux.json",
+          "operation": "three borrowed stdio fds survive exec both at 0/1/2 and at the original explicitly kept numbers; the native parent reaps each child and keeps every original descriptor and flag",
+          "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_pipe_cloexec",
@@ -3724,27 +3731,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
           "fixture": "cpython"
         },
-        "reason": "AssertionError: <__main__.Stream object at <address>> is not an instance of <class 'io.BufferedIOBase'>",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:14:13: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen": 1,
-            "stderr.close": 1,
-            "stdin.close": 1,
-            "stdout.close": 1,
-            "streams": 1,
-            "wait": 1
-          }
+          "opt_level": 0,
+          "imre_revision": "025f9a5c73ff61263c02473bc19a6cd832cc611a",
+          "tested_tree": "b3bf29d14d2c37861a04d00552b1488f907c20bf",
+          "source": "pipe-classes-linux.json",
+          "operation": "compiled isinstance on stdin/stdout/stderr reported BufferedIOBase and IOBase before and after close; native parent closed three distinct descriptors and reaped the fixture child once",
+          "fixture": "unchanged method, assertions and hooks on CPython; host PollSelector, no native selector syscall",
+          "native_body_diagnostic": "<case>/case.py:14:13: Imre: unknown class method"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_io_unbuffered_works",
@@ -3752,27 +3755,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
           "fixture": "cpython"
         },
-        "reason": "AssertionError: <__main__.Stream object at <address>> is not an instance of <class 'io.RawIOBase'>",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:14:13: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen": 1,
-            "stderr.close": 1,
-            "stdin.close": 1,
-            "stdout.close": 1,
-            "streams": 1,
-            "wait": 1
-          }
+          "opt_level": 0,
+          "imre_revision": "025f9a5c73ff61263c02473bc19a6cd832cc611a",
+          "tested_tree": "b3bf29d14d2c37861a04d00552b1488f907c20bf",
+          "source": "pipe-classes-linux.json",
+          "operation": "compiled isinstance on stdin/stdout/stderr reported RawIOBase and IOBase before and after close; native parent closed three distinct descriptors and reaped the fixture child once",
+          "fixture": "unchanged method, assertions and hooks on CPython; host PollSelector, no native selector syscall",
+          "native_body_diagnostic": "<case>/case.py:14:13: Imre: unknown class method"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_issue8780",
@@ -6492,27 +6491,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
           "fixture": "cpython"
         },
-        "reason": "AssertionError: <__main__.Stream object at <address>> is not an instance of <class 'io.BufferedIOBase'>",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:14:13: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen": 1,
-            "stderr.close": 1,
-            "stdin.close": 1,
-            "stdout.close": 1,
-            "streams": 1,
-            "wait": 1
-          }
+          "opt_level": 0,
+          "imre_revision": "025f9a5c73ff61263c02473bc19a6cd832cc611a",
+          "tested_tree": "b3bf29d14d2c37861a04d00552b1488f907c20bf",
+          "source": "pipe-classes-linux.json",
+          "operation": "compiled isinstance on stdin/stdout/stderr reported BufferedIOBase and IOBase before and after close; native parent closed three distinct descriptors and reaped the fixture child once",
+          "fixture": "unchanged method, assertions and hooks on CPython; host SelectSelector, no native selector syscall",
+          "native_body_diagnostic": "<case>/case.py:14:13: Imre: unknown class method"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_io_unbuffered_works",
@@ -6520,27 +6515,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
           "fixture": "cpython"
         },
-        "reason": "AssertionError: <__main__.Stream object at <address>> is not an instance of <class 'io.RawIOBase'>",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:14:13: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen": 1,
-            "stderr.close": 1,
-            "stdin.close": 1,
-            "stdout.close": 1,
-            "streams": 1,
-            "wait": 1
-          }
+          "opt_level": 0,
+          "imre_revision": "025f9a5c73ff61263c02473bc19a6cd832cc611a",
+          "tested_tree": "b3bf29d14d2c37861a04d00552b1488f907c20bf",
+          "source": "pipe-classes-linux.json",
+          "operation": "compiled isinstance on stdin/stdout/stderr reported RawIOBase and IOBase before and after close; native parent closed three distinct descriptors and reaped the fixture child once",
+          "fixture": "unchanged method, assertions and hooks on CPython; host SelectSelector, no native selector syscall",
+          "native_body_diagnostic": "<case>/case.py:14:13: Imre: unknown class method"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_issue8780",
@@ -8682,9 +8673,9 @@
     "denominator": 353,
     "distinct_ids": 353,
     "counts": {
-      "blocked": 150,
-      "failed": 11,
-      "host-driven-native-operation": 82,
+      "blocked": 148,
+      "failed": 6,
+      "host-driven-native-operation": 89,
       "host-operation": 6,
       "mixed": 9,
       "native-body-host-fixture": 54,
@@ -9236,24 +9227,23 @@
         "opt_level": 3,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "13 : Some fds were closed",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
-          "native_actor_calls": {
-            "Popen": 1,
-            "communicate": 1,
-            "streams": 1
-          }
+          "opt_level": 3,
+          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
+          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
+          "source": "fd-table-current-linux.json",
+          "operation": "three native launches inherit all 11 original fds, close them all, then keep the original set of eight; the native parent reaps each child and keeps every original descriptor and flag",
+          "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_close_fds_0_1",
@@ -9918,19 +9908,23 @@
         "opt_level": 3,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "Unsupported: Popen options: pass_fds",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+          "opt_level": 3,
+          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
+          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
+          "source": "fd-table-current-linux.json",
+          "operation": "the native child inherits both original pipe fds; the original non-inheritable fd remains non-inheritable in the parent; the native parent reaps each child and keeps every original descriptor and flag",
+          "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_redirected",
@@ -9938,19 +9932,23 @@
         "opt_level": 3,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "Unsupported: Popen options: pass_fds",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+          "opt_level": 3,
+          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
+          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
+          "source": "fd-table-current-linux.json",
+          "operation": "three borrowed stdio fds survive exec both at 0/1/2 and at the original explicitly kept numbers; the native parent reaps each child and keeps every original descriptor and flag",
+          "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_pipe_cloexec",
@@ -12398,27 +12396,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
           "fixture": "cpython"
         },
-        "reason": "AssertionError: <__main__.Stream object at <address>> is not an instance of <class 'io.BufferedIOBase'>",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:14:13: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen": 1,
-            "stderr.close": 1,
-            "stdin.close": 1,
-            "stdout.close": 1,
-            "streams": 1,
-            "wait": 1
-          }
+          "opt_level": 3,
+          "imre_revision": "025f9a5c73ff61263c02473bc19a6cd832cc611a",
+          "tested_tree": "b3bf29d14d2c37861a04d00552b1488f907c20bf",
+          "source": "pipe-classes-linux.json",
+          "operation": "compiled isinstance on stdin/stdout/stderr reported BufferedIOBase and IOBase before and after close; native parent closed three distinct descriptors and reaped the fixture child once",
+          "fixture": "unchanged method, assertions and hooks on CPython; host PollSelector, no native selector syscall",
+          "native_body_diagnostic": "<case>/case.py:14:13: Imre: unknown class method"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_io_unbuffered_works",
@@ -12426,27 +12420,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
           "fixture": "cpython"
         },
-        "reason": "AssertionError: <__main__.Stream object at <address>> is not an instance of <class 'io.RawIOBase'>",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:14:13: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen": 1,
-            "stderr.close": 1,
-            "stdin.close": 1,
-            "stdout.close": 1,
-            "streams": 1,
-            "wait": 1
-          }
+          "opt_level": 3,
+          "imre_revision": "025f9a5c73ff61263c02473bc19a6cd832cc611a",
+          "tested_tree": "b3bf29d14d2c37861a04d00552b1488f907c20bf",
+          "source": "pipe-classes-linux.json",
+          "operation": "compiled isinstance on stdin/stdout/stderr reported RawIOBase and IOBase before and after close; native parent closed three distinct descriptors and reaped the fixture child once",
+          "fixture": "unchanged method, assertions and hooks on CPython; host PollSelector, no native selector syscall",
+          "native_body_diagnostic": "<case>/case.py:14:13: Imre: unknown class method"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_issue8780",
@@ -15166,27 +15156,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
           "fixture": "cpython"
         },
-        "reason": "AssertionError: <__main__.Stream object at <address>> is not an instance of <class 'io.BufferedIOBase'>",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:14:13: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen": 1,
-            "stderr.close": 1,
-            "stdin.close": 1,
-            "stdout.close": 1,
-            "streams": 1,
-            "wait": 1
-          }
+          "opt_level": 3,
+          "imre_revision": "025f9a5c73ff61263c02473bc19a6cd832cc611a",
+          "tested_tree": "b3bf29d14d2c37861a04d00552b1488f907c20bf",
+          "source": "pipe-classes-linux.json",
+          "operation": "compiled isinstance on stdin/stdout/stderr reported BufferedIOBase and IOBase before and after close; native parent closed three distinct descriptors and reaped the fixture child once",
+          "fixture": "unchanged method, assertions and hooks on CPython; host SelectSelector, no native selector syscall",
+          "native_body_diagnostic": "<case>/case.py:14:13: Imre: unknown class method"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_io_unbuffered_works",
@@ -15194,27 +15180,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
           "fixture": "cpython"
         },
-        "reason": "AssertionError: <__main__.Stream object at <address>> is not an instance of <class 'io.RawIOBase'>",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:14:13: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen": 1,
-            "stderr.close": 1,
-            "stdin.close": 1,
-            "stdout.close": 1,
-            "streams": 1,
-            "wait": 1
-          }
+          "opt_level": 3,
+          "imre_revision": "025f9a5c73ff61263c02473bc19a6cd832cc611a",
+          "tested_tree": "b3bf29d14d2c37861a04d00552b1488f907c20bf",
+          "source": "pipe-classes-linux.json",
+          "operation": "compiled isinstance on stdin/stdout/stderr reported RawIOBase and IOBase before and after close; native parent closed three distinct descriptors and reaped the fixture child once",
+          "fixture": "unchanged method, assertions and hooks on CPython; host SelectSelector, no native selector syscall",
+          "native_body_diagnostic": "<case>/case.py:14:13: Imre: unknown class method"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_issue8780",
