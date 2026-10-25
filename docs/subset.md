@@ -623,8 +623,9 @@ Variadic parameters and `*`/`**` argument expansion remain unsupported. Builtins
 ## String percent formatting
 
 String `%` formatting accepts an exact integer, a string, or a fixed tuple of
-integers and strings as positional operands. The entire tuple is evaluated before
-formatting begins. Width and precision arguments (`*`) consume tuple items in order.
+positional operands. Tuple items may be `None`, `bool`, `int`, `float`, `str`,
+or `bytes`. The entire tuple is evaluated before formatting begins. Width and
+precision arguments (`*`) consume tuple items in order.
 
 ## F-strings and repr
 

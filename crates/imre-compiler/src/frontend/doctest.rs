@@ -43,7 +43,7 @@ impl Checker<'_> {
                 (Intrinsic::DocAscii, [value]) => (
                     Type::Str,
                     ExprKind::Builtin(
-                        Builtin::DocAscii,
+                        Builtin::AsciiEscape,
                         vec![self.expr_expected(value, Type::Str)?],
                     ),
                 ),

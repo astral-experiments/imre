@@ -800,7 +800,7 @@ pub(crate) enum Builtin {
     OsName,
     DocCaptureStart,
     DocCaptureTake,
-    DocAscii,
+    AsciiEscape,
     MockCallList {
         mark: bool,
     },

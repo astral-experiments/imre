@@ -66,6 +66,9 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::Str if args.first().is_some_and(|e| e.ty == Type::Int) => {
+                Contract::new(true, PreservesOwners)
+            }
             Self::Linecache(..) | Self::CachePath(_) => Contract::new(true, Unknown),
             Self::Calendar(op) => Contract::new(
                 matches!(
@@ -569,7 +572,7 @@ impl Builtin {
             | Self::SysOrigArgv
             | Self::DocCaptureStart
             | Self::DocCaptureTake
-            | Self::DocAscii
+            | Self::AsciiEscape
             | Self::SysArgv
             | Self::FileFileno
             | Self::TextClose
@@ -1044,6 +1047,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_zip_open"
                 | "imre_zip_namelist"
                 | "imre_zip_close"
+                | "imre_int_str"
                 | "imre_int_parse"
                 | "imre_int_float"
                 | "imre_float_int"

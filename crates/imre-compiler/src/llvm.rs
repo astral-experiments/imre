@@ -1844,6 +1844,10 @@ impl Emitter<'_, '_> {
             self.line(format!(
                 "store {{ i64, i64 }} {layout}, ptr @sequence_layout"
             ));
+            self.line(format!(
+                "call void @imre_integer_digits_init(i32 {})",
+                u32::from(self.module.ignore_python_environment)
+            ));
             self.line("call void @imre_record_error_init()");
             self.line("call void @imre_stdio_init()");
             self.line("call void @imre_init_literals()");
@@ -2942,13 +2946,16 @@ impl Emitter<'_, '_> {
                     )),
                     small_integer: false,
                 };
-                // Null denotes inline bytes, not failure; release is null-safe.
+                // Null denotes inline bytes or an error. Root earlier parts before checking.
                 let value = self.owned(value);
                 owners.push(Operand {
                     value,
                     ownership: Ownership::Owned,
                 });
                 self.release_operand(&integer);
+                if !integer.value.small_integer {
+                    self.check_error();
+                }
                 continue;
             }
             let (data, length) = if let ExprKind::Str(value) = &expression.kind {
@@ -4927,7 +4934,7 @@ impl Emitter<'_, '_> {
                 none()
             }
             Builtin::DocCaptureTake => self.call("imre_doctest_capture_take", returns, &[]),
-            Builtin::DocAscii => self.call("imre_doctest_ascii", returns, &[&args[0].value]),
+            Builtin::AsciiEscape => self.call("imre_ascii_escape", returns, &[&args[0].value]),
             Builtin::MockCallList { mark } => Value {
                 ty: Type::Bool,
                 operand: self.instruction(format!(
@@ -8344,6 +8351,7 @@ declare ptr @imre_exception_swap_active(ptr)
 declare void @imre_exception_raise(ptr)
 declare void @imre_exception_reraise()
 declare i32 @imre_finish_stdio()
+declare void @imre_integer_digits_init(i32)
 declare void @imre_record_error_init()
 declare void @imre_stdio_init()
 declare i64 @imre_tuple_index(i64, i64)
@@ -8590,6 +8598,7 @@ declare void @imre_sort_restore(ptr, i32, ptr, i32)
 declare void @imre_sort_by_keys(ptr, i32, ptr, i32, i32)
 declare ptr @imre_str_join(ptr, ptr)
 declare ptr @imre_str_format(ptr, ptr, i64)
+declare ptr @imre_str_format_fields(ptr, ptr, i64)
 declare ptr @imre_str_replace(ptr, ptr, ptr)
 declare ptr @imre_str_dedent(ptr)
 declare ptr @imre_shlex_split_options(ptr, i32, i32)
@@ -8643,7 +8652,7 @@ declare ptr @imre_sys_thread_text(i32)
 declare ptr @imre_os_name()
 declare void @imre_doctest_capture_start()
 declare ptr @imre_doctest_capture_take()
-declare ptr @imre_doctest_ascii(ptr)
+declare ptr @imre_ascii_escape(ptr)
 declare i64 @imre_sys_stream_write(i32, ptr)
 declare void @imre_sys_stream_flush(i32)
 declare ptr @imre_system_exit_new(i32, i64)
