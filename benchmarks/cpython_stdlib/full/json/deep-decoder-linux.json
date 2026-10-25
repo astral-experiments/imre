@@ -1,0 +1,355 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "method": "test.test_json.test_recursion.TestRecursion.test_highly_nested_objects_decoding",
+  "method_sha256": "3e9f3210c325e2c9a6b7ea8d876452a5c4301cc54069585a73dd9424e0c44ad1",
+  "fixture": "CPython lifecycle, decorators, recursion context, method and assertions",
+  "operation": "each json.loads in the native run executes in Imre",
+  "reference_only": {
+    "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_decoding": [
+      {
+        "input_sha256": "b844fdbcd4a0de755ef3870a9fcaa394473b96533c7f7ddc2ab13a0af644ac82",
+        "characters": 3000001,
+        "exception": "RecursionError",
+        "message": "Stack overflow (used 8152 kB) while decoding a JSON object from a unicode string"
+      },
+      {
+        "input_sha256": "a68775e5651e88195e7b8e55f21c50706f13a7fbd54f4c783642a7b25525c7fc",
+        "characters": 3000003,
+        "exception": "RecursionError",
+        "message": "Stack overflow (used 8152 kB) while decoding a JSON object from a unicode string"
+      },
+      {
+        "input_sha256": "a6674377370d5e021f7a8eb2d8db0311e573bc6a6e26920803ce5c831b2e9e7d",
+        "characters": 1000001,
+        "exception": "RecursionError",
+        "message": "Stack overflow (used 8152 kB) while decoding a JSON array from a unicode string"
+      }
+    ],
+    "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_decoding": [
+      {
+        "input_sha256": "b844fdbcd4a0de755ef3870a9fcaa394473b96533c7f7ddc2ab13a0af644ac82",
+        "characters": 3000001,
+        "exception": "RecursionError",
+        "message": "maximum recursion depth exceeded"
+      },
+      {
+        "input_sha256": "a68775e5651e88195e7b8e55f21c50706f13a7fbd54f4c783642a7b25525c7fc",
+        "characters": 3000003,
+        "exception": "RecursionError",
+        "message": "maximum recursion depth exceeded"
+      },
+      {
+        "input_sha256": "a6674377370d5e021f7a8eb2d8db0311e573bc6a6e26920803ce5c831b2e9e7d",
+        "characters": 1000001,
+        "exception": "RecursionError",
+        "message": "maximum recursion depth exceeded"
+      }
+    ]
+  },
+  "levels": {
+    "0": {
+      "fixtures": {
+        "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_decoding": [
+          {
+            "input_sha256": "b844fdbcd4a0de755ef3870a9fcaa394473b96533c7f7ddc2ab13a0af644ac82",
+            "characters": 3000001,
+            "exception": "RecursionError",
+            "message": "maximum recursion depth exceeded"
+          },
+          {
+            "input_sha256": "a68775e5651e88195e7b8e55f21c50706f13a7fbd54f4c783642a7b25525c7fc",
+            "characters": 3000003,
+            "exception": "RecursionError",
+            "message": "maximum recursion depth exceeded"
+          },
+          {
+            "input_sha256": "a6674377370d5e021f7a8eb2d8db0311e573bc6a6e26920803ce5c831b2e9e7d",
+            "characters": 1000001,
+            "exception": "RecursionError",
+            "message": "maximum recursion depth exceeded"
+          }
+        ],
+        "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_decoding": [
+          {
+            "input_sha256": "b844fdbcd4a0de755ef3870a9fcaa394473b96533c7f7ddc2ab13a0af644ac82",
+            "characters": 3000001,
+            "exception": "RecursionError",
+            "message": "maximum recursion depth exceeded"
+          },
+          {
+            "input_sha256": "a68775e5651e88195e7b8e55f21c50706f13a7fbd54f4c783642a7b25525c7fc",
+            "characters": 3000003,
+            "exception": "RecursionError",
+            "message": "maximum recursion depth exceeded"
+          },
+          {
+            "input_sha256": "a6674377370d5e021f7a8eb2d8db0311e573bc6a6e26920803ce5c831b2e9e7d",
+            "characters": 1000001,
+            "exception": "RecursionError",
+            "message": "maximum recursion depth exceeded"
+          }
+        ]
+      },
+      "controls": [
+        {
+          "depth": 129,
+          "path": "a",
+          "leaf": 315
+        },
+        {
+          "depth": 257,
+          "path": "o",
+          "leaf": 315
+        },
+        {
+          "depth": 4096,
+          "path": "ao",
+          "leaf": 315
+        },
+        {
+          "depth": 8192,
+          "path": "oa",
+          "leaf": 315
+        },
+        {
+          "depth": 50000,
+          "path": "a",
+          "repr_sha256": "50dd629d3f9f26ce7e76441f55e29a95a753c8b4c3fb2cf5fe283aefc10ade02",
+          "equal_and_unequal": true,
+          "list_add": true
+        },
+        {
+          "depth": 30000,
+          "path": "oa",
+          "repr_sha256": "a4b240a32c966a7010b4e43d9f99c123b22fe55503c2454bc2f4b91a393d60ea",
+          "equal_and_unequal": true,
+          "list_add": false
+        },
+        {
+          "input_sha256": "0b19990273d6ee7240fb223fbcb03c2efb9a7099e8cae50e1fd547aa3a23d3fd",
+          "exception": [
+            "JSONDecodeError",
+            "Illegal trailing comma before end of array",
+            "137",
+            "1",
+            "138",
+            "True",
+            "Illegal trailing comma before end of array: line 1 column 138 (char 137)"
+          ]
+        },
+        {
+          "input_sha256": "1f5e9f6fb22ec7f43ee5f8872975ef88f736be86c3ea01065c8b8be1161d4f48",
+          "exception": [
+            "JSONDecodeError",
+            "Illegal trailing comma before end of object",
+            "953",
+            "1",
+            "954",
+            "True",
+            "Illegal trailing comma before end of object: line 1 column 954 (char 953)"
+          ]
+        },
+        {
+          "input_sha256": "f398f948f28e9c33792ee5a8d1276c62168ee0f6677bc81a0ef483f3dd02885a",
+          "exception": [
+            "JSONDecodeError",
+            "Expecting ':' delimiter",
+            "1062",
+            "2",
+            "2",
+            "True",
+            "Expecting ':' delimiter: line 2 column 2 (char 1062)"
+          ]
+        },
+        {
+          "input_sha256": "04bd010c51161cee7854fca36a5a6d92646b904489d8672fb2e719190b68f011",
+          "exception": [
+            "JSONDecodeError",
+            "Invalid \\escape",
+            "1060",
+            "1",
+            "1061",
+            "True",
+            "Invalid \\escape: line 1 column 1061 (char 1060)"
+          ]
+        },
+        {
+          "input_sha256": "873d15570fb01269108115442720071697c6cdfe9dc6ebb56270b6475a34270d",
+          "exception": [
+            "JSONDecodeError",
+            "Expecting ',' delimiter",
+            "801",
+            "1",
+            "802",
+            "True",
+            "Expecting ',' delimiter: line 1 column 802 (char 801)"
+          ]
+        },
+        {
+          "input_sha256": "f13efdf3526d587d4bc24a64c3cd44bab4a81627eeec27b0cfb623dfdb23cc05",
+          "exception": [
+            "JSONDecodeError",
+            "Extra data",
+            "1805",
+            "1",
+            "1806",
+            "True",
+            "Extra data: line 1 column 1806 (char 1805)"
+          ]
+        }
+      ]
+    },
+    "3": {
+      "fixtures": {
+        "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_decoding": [
+          {
+            "input_sha256": "b844fdbcd4a0de755ef3870a9fcaa394473b96533c7f7ddc2ab13a0af644ac82",
+            "characters": 3000001,
+            "exception": "RecursionError",
+            "message": "maximum recursion depth exceeded"
+          },
+          {
+            "input_sha256": "a68775e5651e88195e7b8e55f21c50706f13a7fbd54f4c783642a7b25525c7fc",
+            "characters": 3000003,
+            "exception": "RecursionError",
+            "message": "maximum recursion depth exceeded"
+          },
+          {
+            "input_sha256": "a6674377370d5e021f7a8eb2d8db0311e573bc6a6e26920803ce5c831b2e9e7d",
+            "characters": 1000001,
+            "exception": "RecursionError",
+            "message": "maximum recursion depth exceeded"
+          }
+        ],
+        "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_decoding": [
+          {
+            "input_sha256": "b844fdbcd4a0de755ef3870a9fcaa394473b96533c7f7ddc2ab13a0af644ac82",
+            "characters": 3000001,
+            "exception": "RecursionError",
+            "message": "maximum recursion depth exceeded"
+          },
+          {
+            "input_sha256": "a68775e5651e88195e7b8e55f21c50706f13a7fbd54f4c783642a7b25525c7fc",
+            "characters": 3000003,
+            "exception": "RecursionError",
+            "message": "maximum recursion depth exceeded"
+          },
+          {
+            "input_sha256": "a6674377370d5e021f7a8eb2d8db0311e573bc6a6e26920803ce5c831b2e9e7d",
+            "characters": 1000001,
+            "exception": "RecursionError",
+            "message": "maximum recursion depth exceeded"
+          }
+        ]
+      },
+      "controls": [
+        {
+          "depth": 129,
+          "path": "a",
+          "leaf": 315
+        },
+        {
+          "depth": 257,
+          "path": "o",
+          "leaf": 315
+        },
+        {
+          "depth": 4096,
+          "path": "ao",
+          "leaf": 315
+        },
+        {
+          "depth": 8192,
+          "path": "oa",
+          "leaf": 315
+        },
+        {
+          "depth": 50000,
+          "path": "a",
+          "repr_sha256": "50dd629d3f9f26ce7e76441f55e29a95a753c8b4c3fb2cf5fe283aefc10ade02",
+          "equal_and_unequal": true,
+          "list_add": true
+        },
+        {
+          "depth": 30000,
+          "path": "oa",
+          "repr_sha256": "a4b240a32c966a7010b4e43d9f99c123b22fe55503c2454bc2f4b91a393d60ea",
+          "equal_and_unequal": true,
+          "list_add": false
+        },
+        {
+          "input_sha256": "0b19990273d6ee7240fb223fbcb03c2efb9a7099e8cae50e1fd547aa3a23d3fd",
+          "exception": [
+            "JSONDecodeError",
+            "Illegal trailing comma before end of array",
+            "137",
+            "1",
+            "138",
+            "True",
+            "Illegal trailing comma before end of array: line 1 column 138 (char 137)"
+          ]
+        },
+        {
+          "input_sha256": "1f5e9f6fb22ec7f43ee5f8872975ef88f736be86c3ea01065c8b8be1161d4f48",
+          "exception": [
+            "JSONDecodeError",
+            "Illegal trailing comma before end of object",
+            "953",
+            "1",
+            "954",
+            "True",
+            "Illegal trailing comma before end of object: line 1 column 954 (char 953)"
+          ]
+        },
+        {
+          "input_sha256": "f398f948f28e9c33792ee5a8d1276c62168ee0f6677bc81a0ef483f3dd02885a",
+          "exception": [
+            "JSONDecodeError",
+            "Expecting ':' delimiter",
+            "1062",
+            "2",
+            "2",
+            "True",
+            "Expecting ':' delimiter: line 2 column 2 (char 1062)"
+          ]
+        },
+        {
+          "input_sha256": "04bd010c51161cee7854fca36a5a6d92646b904489d8672fb2e719190b68f011",
+          "exception": [
+            "JSONDecodeError",
+            "Invalid \\escape",
+            "1060",
+            "1",
+            "1061",
+            "True",
+            "Invalid \\escape: line 1 column 1061 (char 1060)"
+          ]
+        },
+        {
+          "input_sha256": "873d15570fb01269108115442720071697c6cdfe9dc6ebb56270b6475a34270d",
+          "exception": [
+            "JSONDecodeError",
+            "Expecting ',' delimiter",
+            "801",
+            "1",
+            "802",
+            "True",
+            "Expecting ',' delimiter: line 1 column 802 (char 801)"
+          ]
+        },
+        {
+          "input_sha256": "f13efdf3526d587d4bc24a64c3cd44bab4a81627eeec27b0cfb623dfdb23cc05",
+          "exception": [
+            "JSONDecodeError",
+            "Extra data",
+            "1805",
+            "1",
+            "1806",
+            "True",
+            "Extra data: line 1 column 1806 (char 1805)"
+          ]
+        }
+      ]
+    }
+  }
+}

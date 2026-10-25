@@ -87,7 +87,8 @@ impl Builtin {
                     | TextOperation::Split(_)
                     | TextOperation::Partition
                     | TextOperation::Unquote
-                    | TextOperation::ShlexSplit => true,
+                    | TextOperation::ShlexSplit
+                    | TextOperation::ShlexQuote => true,
                     TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
@@ -191,7 +192,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::Process(operation) => match operation {
-                ProcessOperation::OpenFlag(_) => Contract::new(false, PreservesLists),
+                ProcessOperation::DescriptorConstant(_) => Contract::new(false, PreservesLists),
                 ProcessOperation::RunUntilComplete
                 | ProcessOperation::CloseLoop
                 | ProcessOperation::Gather { .. }
@@ -454,6 +455,7 @@ impl Builtin {
             | Self::CounterNew
             | Self::CounterTotal
             | Self::DictAsBase
+            | Self::DictClear
             | Self::DictIter(_)
             | Self::ExceptionWithCause
             | Self::GlobalSet(_)
