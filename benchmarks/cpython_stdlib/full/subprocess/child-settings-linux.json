@@ -1,0 +1,363 @@
+{
+  "schema": "imre.subprocess.child-settings/v1",
+  "platform": "linux",
+  "imre_revision": "73aa81754dfbb26b0d2707deabc4a539ef9f19ba",
+  "tested_tree": "2ff7df30eea8f6fa8d26aa203a33fca24a77ac24",
+  "landed_merge": "c51e9e9976da79e9b159200fbf691169f3b6d363",
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_process_group_0": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "POSIXProcessTestCase.test_process_group_0 needs its upstream method decorator"
+            },
+            "observed": {
+              "api": "check_output",
+              "option": "process_group",
+              "value": 0,
+              "pre_exec_syscall": "setpgid",
+              "child_observation": "getpgid",
+              "child_id_equals_pid": true,
+              "output_file_mode": null,
+              "successful_parent_reaps": 1,
+              "data_child": "pinned CPython"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            }
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_start_new_session": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:22:26: Imre: name is not a local value; globals and first-class functions are unsupported"
+            },
+            "observed": {
+              "api": "check_output",
+              "option": "start_new_session",
+              "value": true,
+              "pre_exec_syscall": "setsid",
+              "child_observation": "getsid",
+              "child_id_equals_pid": true,
+              "output_file_mode": null,
+              "successful_parent_reaps": 1,
+              "data_child": "pinned CPython"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            }
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_umask": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "POSIXProcessTestCase.test_umask needs its upstream method decorator"
+            },
+            "observed": {
+              "api": "check_call",
+              "option": "umask",
+              "value": 43,
+              "pre_exec_syscall": "umask",
+              "child_observation": "openat",
+              "child_id_equals_pid": false,
+              "output_file_mode": 404,
+              "successful_parent_reaps": 1,
+              "data_child": "pinned CPython"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            }
+          }
+        ]
+      },
+      "actor_sha256": "50507f629942edbd88e81a9d40a179318c4e213b08f336d39bf1a0c83a09b484",
+      "toolchain": {
+        "imre": "4e48bb3420b0a0f69af3bfb41cb58a3581ac0b9f9aebd3eb780fbc164675224c",
+        "runtime": "0abb4abb4cd032145f3ed62632cd243ef0e34e5028faa51d7f85525268c4ba30",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_process_group_0": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "POSIXProcessTestCase.test_process_group_0 needs its upstream method decorator"
+            },
+            "observed": {
+              "api": "check_output",
+              "option": "process_group",
+              "value": 0,
+              "pre_exec_syscall": "setpgid",
+              "child_observation": "getpgid",
+              "child_id_equals_pid": true,
+              "output_file_mode": null,
+              "successful_parent_reaps": 1,
+              "data_child": "pinned CPython"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            }
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_start_new_session": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:22:26: Imre: name is not a local value; globals and first-class functions are unsupported"
+            },
+            "observed": {
+              "api": "check_output",
+              "option": "start_new_session",
+              "value": true,
+              "pre_exec_syscall": "setsid",
+              "child_observation": "getsid",
+              "child_id_equals_pid": true,
+              "output_file_mode": null,
+              "successful_parent_reaps": 1,
+              "data_child": "pinned CPython"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            }
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_umask": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "POSIXProcessTestCase.test_umask needs its upstream method decorator"
+            },
+            "observed": {
+              "api": "check_call",
+              "option": "umask",
+              "value": 43,
+              "pre_exec_syscall": "umask",
+              "child_observation": "openat",
+              "child_id_equals_pid": false,
+              "output_file_mode": 404,
+              "successful_parent_reaps": 1,
+              "data_child": "pinned CPython"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            }
+          }
+        ]
+      },
+      "actor_sha256": "ca07bf0b07f915d57b9dad3984c4e99f9924315e7a50b3b0d779c4601a41ab7c",
+      "toolchain": {
+        "imre": "4e48bb3420b0a0f69af3bfb41cb58a3581ac0b9f9aebd3eb780fbc164675224c",
+        "runtime": "0abb4abb4cd032145f3ed62632cd243ef0e34e5028faa51d7f85525268c4ba30",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      }
+    }
+  ],
+  "published_head_replay": {
+    "imre_revision": "dee3402ab32d25f315f398d2363142dac9643936",
+    "tested_tree": "7e00952b6872d9a9938eee4a5fc94a00bf6e3422",
+    "reports": [
+      {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "opt_level": 0,
+        "rows": {
+          "test.test_subprocess.POSIXProcessTestCase.test_process_group_0": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "POSIXProcessTestCase.test_process_group_0 needs its upstream method decorator"
+              },
+              "observed": {
+                "api": "check_output",
+                "option": "process_group",
+                "value": 0,
+                "pre_exec_syscall": "setpgid",
+                "child_observation": "getpgid",
+                "child_id_equals_pid": true,
+                "output_file_mode": null,
+                "successful_parent_reaps": 1,
+                "data_child": "pinned CPython"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "cpython"
+              }
+            }
+          ],
+          "test.test_subprocess.POSIXProcessTestCase.test_start_new_session": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:22:26: Imre: name is not a local value; globals and first-class functions are unsupported"
+              },
+              "observed": {
+                "api": "check_output",
+                "option": "start_new_session",
+                "value": true,
+                "pre_exec_syscall": "setsid",
+                "child_observation": "getsid",
+                "child_id_equals_pid": true,
+                "output_file_mode": null,
+                "successful_parent_reaps": 1,
+                "data_child": "pinned CPython"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "cpython"
+              }
+            }
+          ],
+          "test.test_subprocess.POSIXProcessTestCase.test_umask": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "POSIXProcessTestCase.test_umask needs its upstream method decorator"
+              },
+              "observed": {
+                "api": "check_call",
+                "option": "umask",
+                "value": 43,
+                "pre_exec_syscall": "umask",
+                "child_observation": "openat",
+                "child_id_equals_pid": false,
+                "output_file_mode": 404,
+                "successful_parent_reaps": 1,
+                "data_child": "pinned CPython"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "cpython"
+              }
+            }
+          ]
+        },
+        "actor_sha256": "eeb8733518fe362a866652cc51dc743b9e4a9f99b1af1445801073dff458780a",
+        "toolchain": {
+          "imre": "814305adefbb6f24c1420cf5c042bc064283dfa731e907dce591f7f9bcdcdf63",
+          "runtime": "a1b571e87dfe2d35b96797582a155d4b127f9cdcaf1c687278660f83b235c11a",
+          "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+        }
+      },
+      {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "opt_level": 3,
+        "rows": {
+          "test.test_subprocess.POSIXProcessTestCase.test_process_group_0": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "POSIXProcessTestCase.test_process_group_0 needs its upstream method decorator"
+              },
+              "observed": {
+                "api": "check_output",
+                "option": "process_group",
+                "value": 0,
+                "pre_exec_syscall": "setpgid",
+                "child_observation": "getpgid",
+                "child_id_equals_pid": true,
+                "output_file_mode": null,
+                "successful_parent_reaps": 1,
+                "data_child": "pinned CPython"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "cpython"
+              }
+            }
+          ],
+          "test.test_subprocess.POSIXProcessTestCase.test_start_new_session": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:22:26: Imre: name is not a local value; globals and first-class functions are unsupported"
+              },
+              "observed": {
+                "api": "check_output",
+                "option": "start_new_session",
+                "value": true,
+                "pre_exec_syscall": "setsid",
+                "child_observation": "getsid",
+                "child_id_equals_pid": true,
+                "output_file_mode": null,
+                "successful_parent_reaps": 1,
+                "data_child": "pinned CPython"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "cpython"
+              }
+            }
+          ],
+          "test.test_subprocess.POSIXProcessTestCase.test_umask": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "POSIXProcessTestCase.test_umask needs its upstream method decorator"
+              },
+              "observed": {
+                "api": "check_call",
+                "option": "umask",
+                "value": 43,
+                "pre_exec_syscall": "umask",
+                "child_observation": "openat",
+                "child_id_equals_pid": false,
+                "output_file_mode": 404,
+                "successful_parent_reaps": 1,
+                "data_child": "pinned CPython"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "cpython"
+              }
+            }
+          ]
+        },
+        "actor_sha256": "5f5a4123867b25c322c71f35d16084cb001413d7eeaeecfb7c0fc1882308769b",
+        "toolchain": {
+          "imre": "814305adefbb6f24c1420cf5c042bc064283dfa731e907dce591f7f9bcdcdf63",
+          "runtime": "a1b571e87dfe2d35b96797582a155d4b127f9cdcaf1c687278660f83b235c11a",
+          "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+        }
+      }
+    ]
+  }
+}
