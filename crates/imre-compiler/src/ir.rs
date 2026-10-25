@@ -101,6 +101,7 @@ pub(crate) enum Type {
     PlainObject,
     /// An exact immutable method descriptor on the builtin str class.
     StrDescriptor(StrDescriptor),
+    ProcessSelectorClass,
     /// A live namespace wrapper; the interned shape describes its string-keyed backing dict.
     SimpleNamespace(usize),
     /// Nominal ModuleSpec backed by a record whose loader and state keep their exact types.
@@ -305,6 +306,7 @@ impl std::fmt::Display for Type {
             Self::Calendar(CalendarType::Zone) => "datetime.timezone",
             Self::PlainObject => "object",
             Self::StrDescriptor(_) => "method_descriptor",
+            Self::ProcessSelectorClass => "subprocess selector class",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::ModuleSpec(_) => "importlib.machinery.ModuleSpec",
             Self::Poll => "select.poll",
@@ -1642,6 +1644,8 @@ pub(crate) enum ErrnoOperation {
 
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
+    SelectorClass(Option<bool>),
+    SetSelector,
     Executable,
     RunToStderr,
     CheckOutput {

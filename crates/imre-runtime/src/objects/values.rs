@@ -488,6 +488,14 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                             .unwrap();
                             None
                         }
+                        Storage::ProcessSelectorClass(select) => {
+                            output.push_str(if *select {
+                                "<class 'selectors.SelectSelector'>"
+                            } else {
+                                "<class 'selectors.PollSelector'>"
+                            });
+                            None
+                        }
                         Storage::IteratorAdapter(adapter) => {
                             adapter.write_repr(output, owner);
                             None

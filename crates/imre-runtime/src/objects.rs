@@ -129,6 +129,7 @@ enum Storage {
     ZipFile(Box<zipfile::Archive>),
     ZipInfo(Rc<zipfile::Info>),
     Popen(Box<processes::Popen>),
+    ProcessSelectorClass(bool),
     AsyncProcess(Box<processes::AsyncProcess>),
     AsyncCoroutine(Rc<asyncio::Task>),
     AsyncTask(Rc<asyncio::Task>),
