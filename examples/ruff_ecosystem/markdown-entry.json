@@ -1,0 +1,11 @@
+{
+  "ruff_ecosystem.cli.entrypoint": {
+    "args.pdb": "False"
+  },
+  "ruff_ecosystem.main.main": {
+    "format": "OutputFormat.markdown"
+  },
+  "ruff_ecosystem.format.compare_format": {
+    "format_comparison": "FormatComparison.ruff_and_ruff"
+  }
+}
