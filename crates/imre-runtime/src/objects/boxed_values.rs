@@ -1,4 +1,5 @@
 //! Owning, type-erased views of native Python scalars, tuples and typed lists.
+use super::exceptions::Error;
 use super::words::WordKind;
 use super::{Bytes, Object, Storage, StorageCell, Str, acquire_rc, object, records, values};
 use crate::Int;
