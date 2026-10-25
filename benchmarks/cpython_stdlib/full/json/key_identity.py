@@ -25,6 +25,40 @@ METHOD = "test.test_json.test_decode.TestDecode.test_keys_reuse"
 SOURCE = BENCH / "upstream/Lib/test/test_json/test_decode.py"
 
 
+def typed_body_fixture(*, string_identity=False):
+    """Bind both public entry points without copying any decoded value."""
+    prefix = """import json
+import unittest
+from typing import Any
+
+class DecoderModule:
+    def JSONDecoder(self):
+        return json.decoder.JSONDecoder()
+
+class JsonModule:
+    decoder: DecoderModule
+    def __init__(self):
+        self.decoder = DecoderModule()
+
+class NativeCase(unittest.TestCase):
+    json: JsonModule
+    def __init__(self):
+        super().__init__()
+        self.json = JsonModule()
+
+    def loads(self, source: str) -> list[dict[str, Any]]:
+        return json.loads(source)
+
+"""
+    if string_identity:
+        prefix += """    def assertIs(self, first: str, second: str) -> None:
+        if first is not second:
+            raise AssertionError("expected identical native key owners")
+
+"""
+    return prefix + method_bytes(SOURCE, "TestDecode", "check_keys_reuse").decode()
+
+
 def component_checks(compiler):
     """Isolate operations used by the unchanged helper; a check executes no method."""
     annotation = "from typing import Any, Callable\n"
@@ -230,7 +264,9 @@ def run(tools, work):
     unshadowed = unshadowed.replace("    json = json\n", "    json = native_json\n")
     unshadowed = unshadowed.replace("staticmethod(json.loads)", "staticmethod(native_json.loads)")
     attempts = results["native-body-attempts"] = {}
-    for name, fixture in (("general", general), ("unshadowed-module", unshadowed)):
+    for name, fixture in (("general", general), ("unshadowed-module", unshadowed),
+                          ("typed-module-bindings", typed_body_fixture()),
+                          ("typed-string-identity", typed_body_fixture(string_identity=True))):
         directory = work / name
         directory.mkdir()
         try:
