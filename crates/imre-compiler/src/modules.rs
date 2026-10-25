@@ -1604,6 +1604,7 @@ impl<'a> Loader<'a> {
         });
         let mut executable = false;
         let mut segment = 0;
+        let mut class_data_prefix = false;
         let mut field_separators = Vec::new();
         for (index, statement) in parsed.syntax().body.iter().enumerate() {
             if self.modules[id].archive.is_some() && !native_declaration(statement) {
@@ -1648,6 +1649,10 @@ impl<'a> Loader<'a> {
                     )?;
                 }
                 ast::Stmt::ClassDef(class) => {
+                    class_data_prefix |= class
+                        .body
+                        .iter()
+                        .any(|stmt| matches!(stmt, ast::Stmt::Assign(_)));
                     if executable && id == 0 {
                         return Err(self.modules[id].error(
                             statement,
@@ -1690,7 +1695,12 @@ impl<'a> Loader<'a> {
                         self.initialization.push((id, segment..index));
                         segment = index;
                         executable = false;
+                    } else if class_data_prefix {
+                        // A class body can call arbitrary helpers before the imported module starts.
+                        self.initialization.push((id, segment..index));
+                        segment = index;
                     }
+                    class_data_prefix = false;
                     self.import(id, statement)
                         .map_err(|error| self.modules[id].error(statement, &error))?;
                     if errno_import(statement).is_some() {

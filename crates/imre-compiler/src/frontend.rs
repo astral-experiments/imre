@@ -21,6 +21,7 @@ mod call_binding_errors;
 mod callables;
 mod calls;
 mod chainmap;
+mod class_data;
 mod comprehensions;
 mod contexts;
 mod copying;
@@ -823,7 +824,7 @@ pub(crate) fn lower_with_owners(
         }
     }
     let initializer_start = definitions.len();
-    let class_globals = classes.declarations.owns_class_tuples(graph.entry);
+    let class_globals = classes.declarations.has_class_values(graph.entry);
     let helpers = Helpers::new(definitions.len() + graph.initializers(class_globals).count());
     let globals = ModuleValues::default();
     let mut initializations = Vec::new();
@@ -1131,6 +1132,10 @@ pub(crate) fn lower_with_owners(
     for (id, sums) in zip_sums {
         zip_sums::fuse(&mut functions, id, &sums);
     }
+    globals
+        .class_data
+        .borrow_mut()
+        .extend_layouts(&mut classes.fields);
     Ok((
         ir::Module {
             types,
@@ -2011,6 +2016,8 @@ struct Checker<'a> {
     module_scope: bool,
     class: Option<usize>,
     class_receiver: Option<String>,
+    /// Earlier assignments in the executing class body shadow module definitions.
+    class_lexical: HashSet<String>,
     super_method_base: Option<usize>,
     iterator_source: Option<TextRange>,
     super_initializer: Option<records::BaseInitializer>,
@@ -2073,6 +2080,7 @@ impl<'a> Checker<'a> {
             module_scope: false,
             class: None,
             class_receiver: None,
+            class_lexical: HashSet::new(),
             super_method_base: None,
             iterator_source: None,
             super_initializer: None,
@@ -4071,6 +4079,12 @@ impl<'a> Checker<'a> {
                     }
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
+                        if let Some(class) =
+                            self.mutable_instance_data(receiver.ty, attr.attr.as_str())
+                        {
+                            statements.push(self.delete_instance_data(class, attr, receiver)?);
+                            continue;
+                        }
                         if matches!(receiver.ty, Type::SimpleNamespace(_)) {
                             let name = self.namespace_attr_name(attr)?;
                             statements.push(Statement::Expr(Expr {
@@ -5048,6 +5062,9 @@ impl<'a> Checker<'a> {
         // Calls and binary operators recursively check their operands. Keep
         // the large general expression frame off both paths in debug builds.
         match expression {
+            ast::Expr::Name(name) if self.class_lexical.contains(name.id.as_str()) => {
+                Ok(self.local(self.names[name.id.as_str()]))
+            }
             ast::Expr::Call(call) => self.call(call),
             ast::Expr::BinOp(binary) => self.binary_operation(binary),
             _ => self.non_call_expr(expression),
@@ -6305,7 +6322,8 @@ impl<'a> Checker<'a> {
                                 .static_bindings
                                 .get(attribute.attr.as_str()),
                             Some(
-                                crate::classes::ClassValue::String(_)
+                                crate::classes::ClassValue::Runtime { .. }
+                                    | crate::classes::ClassValue::String(_)
                                     | crate::classes::ClassValue::Strings { .. }
                             )
                         ))
