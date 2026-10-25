@@ -4,7 +4,7 @@ use super::*;
 use ruff_python_codegen::{Generator, Mode};
 
 /// Builtin classes form a closed nominal domain, independent of the values they construct.
-pub(super) fn builtin_type(name: &str) -> Option<Expr> {
+pub(super) fn is_builtin_type(name: &str) -> bool {
     matches!(
         name,
         "bool"
@@ -25,7 +25,10 @@ pub(super) fn builtin_type(name: &str) -> Option<Expr> {
             | "tuple"
             | "type"
     )
-    .then(|| class_value(name))
+}
+
+pub(super) fn builtin_type(name: &str) -> Option<Expr> {
+    is_builtin_type(name).then(|| class_value(name))
 }
 
 /// Class objects use the pooled name for identity, including its module for

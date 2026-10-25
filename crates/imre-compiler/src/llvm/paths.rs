@@ -45,6 +45,7 @@ impl Emitter<'_, '_> {
                     "call i32 @imre_path_is_relative_to(ptr {}, ptr {})",
                     args[0].value.operand, args[1].value.operand
                 ));
+                self.check_error();
                 Value {
                     ty: Type::Bool,
                     operand: self.instruction(format!("icmp ne i32 {answer}, 0")),
@@ -189,16 +190,21 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
-            PathOperation::OsExists
-            | PathOperation::Exists
-            | PathOperation::IsFile
-            | PathOperation::IsDir
-            | PathOperation::IsAbsolute => {
+            PathOperation::Query(query) => {
+                let follow = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                let byte = self.instruction(format!(
+                    "call i32 @imre_path_query(ptr {}, i32 {}, i32 {follow})",
+                    args[0].value.operand, query as u32
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
+                    small_integer: false,
+                }
+            }
+            PathOperation::OsExists | PathOperation::IsAbsolute => {
                 let name = match operation {
                     PathOperation::OsExists => "text_exists",
-                    PathOperation::Exists => "exists",
-                    PathOperation::IsFile => "is_file",
-                    PathOperation::IsDir => "is_dir",
                     PathOperation::IsAbsolute => "is_absolute",
                     _ => unreachable!(),
                 };
@@ -260,6 +266,8 @@ impl Emitter<'_, '_> {
                     PathOperation::JoinObject => "imre_path_join_object",
                     PathOperation::AsPosix => "imre_path_as_posix",
                     PathOperation::Text => "imre_path_text",
+                    PathOperation::Info => "imre_path_info",
+                    PathOperation::InfoRepr => "imre_path_info_repr",
                     PathOperation::Name => "imre_path_name",
                     PathOperation::CountPart => "imre_path_count_part",
                     PathOperation::Stem => "imre_path_stem",

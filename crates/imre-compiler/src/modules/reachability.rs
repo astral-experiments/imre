@@ -48,6 +48,22 @@ impl<'a> Visitor<'a> for References<'_> {
             self.found.attributes.insert("__copy__".to_owned());
             self.found.instance_attributes.insert("__copy__".to_owned());
         }
+        // Only a supplied, successfully bound width can invoke __index__.
+        if let ast::Expr::Call(call) = expr
+            && let ast::Expr::Attribute(attr) = call.func.as_ref()
+            && attr.attr.as_str() == "expandtabs"
+            && call.arguments.args.len() + call.arguments.keywords.len() == 1
+            && call
+                .arguments
+                .keywords
+                .first()
+                .is_none_or(|kw| kw.arg.as_deref() == Some("tabsize"))
+        {
+            self.found.attributes.insert("__index__".to_owned());
+            self.found
+                .instance_attributes
+                .insert("__index__".to_owned());
+        }
         if !matches!(expr, ast::Expr::Name(n) if n.ctx == ast::ExprContext::Store)
             && let Some(Binding::Value(id)) = self.graph.resolve(self.module, expr)
         {
@@ -95,6 +111,25 @@ impl<'a> Visitor<'a> for References<'_> {
                 self.found.instance_attributes.insert(name.clone());
                 self.found.attributes.insert(name);
             }
+        }
+        match self.graph.resolve(self.module, expr) {
+            Some(Binding::Intrinsic(Intrinsic::DocExecute)) => {
+                if let Some(runner) = self.graph.doctest_runner() {
+                    self.found.definitions.insert(runner);
+                }
+            }
+            Some(Binding::Module(_) | Binding::IntrinsicModule(_)) => {
+                if let Some(Binding::Definition(docs)) = self
+                    .graph
+                    .modules
+                    .iter()
+                    .find(|module| module.bundled && module.name == "doctest")
+                    .and_then(|module| module.bindings.get("_module_docs"))
+                {
+                    self.found.definitions.insert(*docs);
+                }
+            }
+            _ => {}
         }
         walk_expr(self, expr);
     }
@@ -202,12 +237,29 @@ impl Reachable {
                             }
                         }
                     }
+                    // A property(get, set) declaration reads its local methods while
+                    // constructing the descriptor, even when no method is explicitly called.
+                    let mut accessors = HashSet::new();
+                    for item in &class.body {
+                        if let ast::Stmt::Assign(assign) = item
+                            && let Some((get, set)) =
+                                crate::classes::property_accessors(graph, id.module, &assign.value)
+                        {
+                            accessors.insert(get);
+                            accessors.extend(set);
+                        }
+                    }
                     for item in &class.body {
                         if let ast::Stmt::FunctionDef(method) = item {
                             let name = method.name.as_str();
                             // These protocols have implicit call sites in the supported language.
                             // An unsupported operator still fails when checking its expression.
-                            let property = refs.found.properties.contains(name) && method.decorator_list.iter().any(|d| matches!(&d.expression, ast::Expr::Name(n) if n.id == "property") || graph.resolve(id.module, &d.expression) == Some(Binding::Intrinsic(Intrinsic::CachedProperty)));
+                            let property = accessors.contains(name) || (refs.found.properties.contains(name)
+                                && method.decorator_list.iter().any(|d|
+                                    matches!(&d.expression, ast::Expr::Name(n) if n.id == "property")
+                                    || matches!(&d.expression, ast::Expr::Attribute(a) if a.attr.as_str() == "setter"
+                                        && matches!(&*a.value, ast::Expr::Name(n) if n.id.as_str() == name))
+                                    || graph.resolve(id.module, &d.expression) == Some(Binding::Intrinsic(Intrinsic::CachedProperty))));
                             let assertion_exit = source.bundled
                                 && source.name == "unittest"
                                 && class.name.as_str() == "_AssertRaisesContext"
