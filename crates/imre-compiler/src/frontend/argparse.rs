@@ -320,8 +320,7 @@ fn option(
         .map(|expr| literal(expr, module))
         .transpose()?
         .unwrap_or("store");
-    let zero = action != "store";
-    if zero
+    if action != "store"
         && (positional
             || kw.contains_key("type")
             || kw.contains_key("nargs")
@@ -345,38 +344,32 @@ fn option(
             element = Type::Int;
         }
         "store_const" => {
-            let values = ["const", "default"]
-                .into_iter()
-                .filter_map(|key| kw.get(key).copied())
-                .filter(|v| !matches!(v, ast::Expr::NoneLiteral(_)))
-                .collect::<Vec<_>>();
-            if !values.is_empty()
-                && values
-                    .iter()
-                    .all(|v| matches!(v, ast::Expr::BooleanLiteral(_)))
-            {
-                element = Type::Bool;
-            } else if !values.is_empty()
-                && values
-                    .iter()
-                    .all(|v| numeric_literal(v, Type::Int).is_some())
-            {
-                element = Type::Int;
-            } else if !values.is_empty()
-                && values
-                    .iter()
-                    .all(|v| numeric_literal(v, Type::Float).is_some())
-            {
-                element = Type::Float;
-            } else if !values
-                .iter()
-                .all(|v| v.is_string_literal_expr() || numeric_literal(v, Type::Int).is_some())
-            {
-                return Err(module.error(
+            let invalid = || {
+                module.error(
                     call,
                     "argparse store_const requires representable literal values",
-                ));
-            }
+                )
+            };
+            let kind = |key| {
+                Ok(match kw.get(key).copied() {
+                    None | Some(ast::Expr::NoneLiteral(_)) => None,
+                    Some(ast::Expr::StringLiteral(_)) => Some(Type::Str),
+                    Some(ast::Expr::BooleanLiteral(_)) => Some(Type::Bool),
+                    Some(v) if numeric_literal(v, Type::Int).is_some() => Some(Type::Int),
+                    Some(v) if numeric_literal(v, Type::Float).is_some() => Some(Type::Float),
+                    _ => return Err(invalid()),
+                })
+            };
+            element = match (kind("const")?, kind("default")?) {
+                (None, None) => Type::Str,
+                (Some(ty), None) | (None, Some(ty)) => ty,
+                (Some(left), Some(right)) if left == right => left,
+                // The string field below also supports integer constants and defaults.
+                (Some(Type::Int), Some(Type::Str)) | (Some(Type::Str), Some(Type::Int)) => {
+                    Type::Str
+                }
+                _ => return Err(invalid()),
+            };
         }
         _ => return Err(module.error(call, "unsupported argparse action")),
     }
