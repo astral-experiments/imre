@@ -299,6 +299,28 @@ impl Member {
         result
     }
 
+    /// ZipExtFile reads compressed input before zlib checks the output limit.
+    /// Discard those new bytes in bounded blocks, keeping the inflater's existing tail.
+    #[cold]
+    fn oversized_deflate_read(&mut self) -> Result<Bytes> {
+        self.buffer.clear();
+        self.pos = 0;
+        let pending = self.packed.len() - self.packed_pos;
+        while self.packed_left != 0 {
+            let before = self.packed_left;
+            let read = self.input(usize::MAX);
+            self.packed.truncate(pending);
+            read?;
+            if before - self.packed_left < before.min(BLOCK as u64) {
+                break;
+            }
+        }
+        Err(Error::new(
+            Kind::OverflowError,
+            "Python int too large to convert to C ssize_t",
+        ))
+    }
+
     pub(in crate::objects) fn read(&mut self, size: Option<usize>) -> Result<Bytes> {
         let mut out = Vec::new();
         let limit = size.unwrap_or(usize::MAX);
@@ -307,7 +329,11 @@ impl Member {
                 if self.eof {
                     break;
                 }
-                self.refill(limit - out.len())?;
+                let remaining = limit - out.len();
+                if size.is_some() && remaining > isize::MAX as usize && self.inflater.is_some() {
+                    return self.oversized_deflate_read();
+                }
+                self.refill(remaining)?;
                 if self.buffer.is_empty() {
                     break;
                 }
