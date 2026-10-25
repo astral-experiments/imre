@@ -2073,13 +2073,20 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
                 Ok(None)
             }
             Storage::Repeat(iterator) => Ok(iterator.next().map(|value| (value, None))),
+            Storage::PathIterator(iterator) => iterator.next().map(|path| {
+                // A non-null path transfers its owner to the caller of pull().
+                (!path.is_null())
+                    .then(|| (OwnedWord::from_owned(path as usize, WordKind::new(5)), None))
+            }),
             Storage::StringIterator(iterator) => Ok(iterator.next()),
             Storage::LineIterator(iterator) => Ok(iterator.next()),
             Storage::BytesIterator(iterator) => Ok(iterator.next()),
-            _ => storage.mapping_iterator_mut().next(),
+            _ => storage
+                .mapping_iterator_mut()
+                .next()
+                .map_err(|error| Error::new(Kind::RuntimeError, error.message())),
         })
-    }
-    .map_err(|error| Error::new(Kind::RuntimeError, error.message()))?;
+    }?;
     match adapter {
         Some(adapter) => adapter.next().map(|item| item.map(|item| (item, None))),
         None => Ok(next),
