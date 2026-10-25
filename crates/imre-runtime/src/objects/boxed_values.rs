@@ -1,4 +1,4 @@
-//! Owning, type-erased views of native Python scalars, tuples and typed lists.
+//! Owning, type-erased views of native Python scalars, sequences, and eligible dataclasses.
 use super::exceptions::Error;
 use super::words::WordKind;
 use super::{Bytes, Object, Storage, StorageCell, Str, acquire_rc, object, records, values};
@@ -96,6 +96,32 @@ pub unsafe extern "C" fn imre_box_value(kind: u32, word: usize) -> *const Object
     )))))
 }
 
+/// Borrow the payload of an erased instance with the requested exact class.
+///
+/// # Safety
+/// The caller roots the erased value for the lifetime of the returned borrow.
+/// The requested descriptor is immutable compiler-emitted class metadata.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_object_record_payload(
+    value: *const Object,
+    expected: *const records::RecordDescriptor,
+) -> *const usize {
+    // SAFETY: the rooted object keeps the candidate payload alive.
+    unsafe {
+        (*value).0.with(|s| {
+            if let Storage::ObjectValue(v) = s
+                && v.kind.raw() == 6
+            {
+                let ptr = v.word as *const usize;
+                if records::descriptor(ptr).same_class(&*expected) {
+                    return ptr;
+                }
+            }
+            std::ptr::null()
+        })
+    }
+}
+
 pub(super) fn length(kind: WordKind, word: usize) -> Option<usize> {
     // SAFETY: each admitted exact type is read through its own representation.
     unsafe {
@@ -106,7 +132,10 @@ pub(super) fn length(kind: WordKind, word: usize) -> Option<usize> {
                 Storage::Sequence(v) => Some(v.resolved().values.len()),
                 _ => None,
             }),
-            6 => Some(records::descriptor(word as *const usize).length),
+            6 => {
+                let layout = records::descriptor(word as *const usize);
+                layout.class_semantics().is_none().then_some(layout.length)
+            }
             8 => Some((&*(word as *const Bytes)).len()),
             _ => None,
         }
@@ -175,7 +204,7 @@ pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) ->
         let sequence = |kind: WordKind, word| match kind.raw() {
             4 => 1,
             5 if length(kind, word).is_some() => 1,
-            6 => 2,
+            6 if length(kind, word).is_some() => 2,
             _ => 0,
         };
         let (a, b) = ((ka, wa), (kb, wb));

@@ -80,6 +80,8 @@ impl Builtin {
             Self::MappingObjectGet => Contract::new(true, PreservesOwners),
             Self::BoxValue
             | Self::ExceptionTupleView
+            | Self::ObjectRecordProject(_)
+            | Self::ObjectRecordIdentity { .. }
             | Self::ExceptionTupleIdentity
             | Self::ExceptionKeywordSuggestion
             | Self::ExceptionRecordFields => Contract::new(false, PreservesOwners),

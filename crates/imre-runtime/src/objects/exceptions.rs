@@ -1326,6 +1326,13 @@ pub unsafe extern "C" fn imre_system_exit_code_kind(value: *const Object) -> u32
                 _ => 15,
             });
         }
+        if kind.raw() == 6
+            && super::records::descriptor(word as *const usize)
+                .class_semantics()
+                .is_some()
+        {
+            return 15; // a nominal record does not implement the tuple protocol
+        }
         kind.raw()
     }
 }
@@ -1448,8 +1455,11 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
         7 => f64::from_bits(word as u64) != 0.0,
         // SAFETY: the view owns this exact byte buffer.
         8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),
-        // SAFETY: the tuple remains rooted while its immutable length is read.
-        6 => unsafe { super::records::descriptor(word as *const usize) }.length != 0,
+        6 => {
+            // SAFETY: the view roots the record and its immutable descriptor.
+            let layout = unsafe { super::records::descriptor(word as *const usize) };
+            layout.class_semantics().is_some() || layout.length != 0
+        }
         _ => unreachable!(),
     })
 }

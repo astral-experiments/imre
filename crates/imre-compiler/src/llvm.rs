@@ -5246,6 +5246,28 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::ObjectRecordProject(class) => {
+                let operand = self.boxed_record(&args[0].value, *class);
+                let record = Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                };
+                self.retain(&record);
+                record
+            }
+            Builtin::ObjectRecordIdentity { class, reversed } => {
+                let i = usize::from(*reversed);
+                let record = self.boxed_record(&args[i].value, *class);
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!(
+                        "icmp eq ptr {record}, {}",
+                        args[1 - i].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::BoxValue => {
                 let value = &args[0].value;
                 let kind = representation_kind(value.ty, &self.module.types);
@@ -7804,6 +7826,7 @@ declare ptr @imre_import_error_field(ptr, i32)
 declare void @imre_import_error_reset(ptr, ptr)
 declare void @imre_import_error_reject_reset(ptr, ptr, ptr)
 declare ptr @imre_box_value(i32, i64)
+declare ptr @imre_object_record_payload(ptr, ptr)
 declare ptr @imre_mapping_object_get(ptr, ptr)
 declare ptr @imre_exception_tuple_view(ptr)
 declare ptr @imre_exception_formatter_result(ptr, i32)
