@@ -275,6 +275,8 @@ impl Checker<'_> {
                         | Type::None
                 )
             })
+            || types == [Type::NativeModule; 2]
+            || types == [Type::ModuleNamespace; 2]
             || types
                 .iter()
                 .all(|ty| matches!(ty, Type::ForwardRef(_) | Type::Callable(_)))
@@ -297,6 +299,7 @@ impl Checker<'_> {
             || types.iter().all(|ty| matches!(ty, Type::Cursor(_)))
             || types == [Type::Path; 2]
             || types == [Type::Logger; 2]
+            || types == [Type::StringIO; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
             || types == [Type::PathInfo; 2]

@@ -26,6 +26,7 @@ pub(crate) enum Type {
     List(usize),
     Dict(usize),
     Set(usize),
+    Deque(usize),
     /// The immutable top-level string keys of a private TOML document.
     StringKeys,
     Tuple(usize),
@@ -78,6 +79,9 @@ pub(crate) enum Type {
     Semaphore,
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
+    NativeModule,
+    ModuleNamespace,
+    ModuleMember,
     LogRecord,
     LogFormatter,
     Logger,
@@ -176,6 +180,7 @@ impl std::fmt::Display for Type {
             Self::List(id) => return write!(f, "list#{id}"),
             Self::Dict(id) => return write!(f, "dict#{id}"),
             Self::Set(id) => return write!(f, "set#{id}"),
+            Self::Deque(id) => return write!(f, "deque#{id}"),
             Self::Tuple(id) => return write!(f, "tuple#{id}"),
             Self::Callable(id) => return write!(f, "callable#{id}"),
             Self::Optional(id) => return write!(f, "optional#{id}"),
@@ -222,6 +227,9 @@ impl std::fmt::Display for Type {
             Self::DirectoryContext(_) => "directory context",
             Self::Semaphore => "asyncio.Semaphore",
             Self::RegexPattern => "re.Pattern[str]",
+            Self::NativeModule => "builtin module",
+            Self::ModuleNamespace => "module namespace",
+            Self::ModuleMember => "module attribute",
             Self::LogFormatter => "logging.Formatter",
             Self::LogRecord => "logging.LogRecord",
             Self::Logger => "logging.Logger",
@@ -251,6 +259,7 @@ impl std::fmt::Display for Type {
             | Self::List(_)
             | Self::Dict(_)
             | Self::Set(_)
+            | Self::Deque(_)
             | Self::Tuple(_)
             | Self::Callable(_)
             | Self::Optional(_)
@@ -657,6 +666,7 @@ pub(crate) enum Builtin {
     Formatter(FormatterOperation),
     Input,
     Chr,
+    Ord,
     IntegerPower,
     ModularPower,
     NegativeIntegerPower,
@@ -906,6 +916,7 @@ pub(crate) enum Builtin {
     JsonDump(Type),
     Path(PathOperation),
     PosixPath(PosixPathOperation),
+    Errno(ErrnoOperation),
     Fnmatch(FnmatchOperation),
     Process(ProcessOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
@@ -945,6 +956,21 @@ pub(crate) enum Builtin {
     RecordCopy,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
+    DequeNew,
+    DequeAppend {
+        left: bool,
+        extending: bool,
+    },
+    DequeExtendSource,
+    DequeCopy,
+    DequePop {
+        left: bool,
+    },
+    DequeClear,
+    DequeMaxlen,
+    DequeIter {
+        reverse: bool,
+    },
     CounterNew,
     CounterTotal,
     CounterMostCommon,
@@ -992,6 +1018,7 @@ pub(crate) enum Builtin {
     SetAdd,
     SetDiscard,
     SetIter,
+    FreezeStrings,
     ExceptionMessage,
     JsonErrorField(u32),
     /// Attaches an explicit cause to a fresh, unescaped builtin exception.
@@ -1018,6 +1045,9 @@ pub(crate) const TUPLE_PROBE_ARITY: std::ops::RangeInclusive<usize> = 1..=16;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StringIoOperation {
     New,
+    Newlines,
+    Capability,
+    Readlines,
     Value,
     Read,
     Seek,
@@ -1108,6 +1138,7 @@ impl StrDescriptor {
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
     IsSpace,
+    IsUpper,
     SplitLineEnds,
     ExpandTabs,
     Lower,
@@ -1355,6 +1386,25 @@ pub(crate) enum CopyOperation {
 }
 
 /// Synchronous process operations cannot invoke language callbacks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ErrnoOperation {
+    BoxValue,
+    DefaultLookup,
+    Module,
+    Namespace,
+    Keys,
+    Errorcode,
+    Number,
+    Text,
+    Lookup,
+    Has,
+    Items,
+    ItemRepr,
+    ItemText,
+    ItemEq,
+    MemberContains,
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
     SelectorClass(Option<bool>),

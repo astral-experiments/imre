@@ -2138,6 +2138,29 @@ pub extern "C" fn imre_set_new(kind: u32) -> *const Object {
     )))))
 }
 
+/// Materialize an immutable string set from an exact list of strings.
+///
+/// # Safety
+/// The caller roots the list and checks pending state before using the result.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_frozenset_strings(source: *const Object) -> *const Object {
+    // SAFETY: a fresh set cannot alias the list or reenter it during hashing.
+    unsafe {
+        let set = Rc::from_raw(imre_set_new(3));
+        let ok = object(source).0.with(|s| {
+            s.sequence().strings().all(|(word, _)| {
+                imre_set_add(Rc::as_ptr(&set), word);
+                super::exceptions::imre_error_pending() == 0
+            })
+        });
+        if ok {
+            Rc::into_raw(set)
+        } else {
+            std::ptr::null()
+        }
+    }
+}
+
 /// Reads distinct string keys directly from their source indexes and sorts the
 /// resulting list. Each dictionary already supplies unique keys and their hashes.
 ///
@@ -2387,6 +2410,7 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
             Storage::StringIterator(iterator) => Ok(iterator.next()),
             Storage::LineIterator(iterator) => Ok(iterator.next()),
             Storage::BytesIterator(iterator) => Ok(iterator.next()),
+            Storage::DequeIterator(iterator) => iterator.next(),
             _ => storage
                 .mapping_iterator_mut()
                 .next()
