@@ -457,7 +457,7 @@ pub(super) fn record_factories(
                     .into_iter()
                     .collect(),
                 };
-                let function = inference.register(Vec::new(), Some(concrete));
+                let function = inference.register(Vec::new(), Some(concrete), Vec::new());
                 let signature = Signature {
                     id: function,
                     asynchronous: false,
