@@ -2,6 +2,7 @@
 use super::records::{self, RecordDescriptor};
 use super::words::{OwnedWord, WordKind, Words};
 use super::{Int, Object, Str};
+use crate::StrOwner;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -60,7 +61,7 @@ pub unsafe extern "C" fn imre_typing_declare(
             unsafe {
                 let attrs = records::imre_record_new(&ATTRIBUTES.0);
                 for (i, value) in [module, qualname, name].into_iter().enumerate() {
-                    Rc::increment_strong_count(value);
+                    StrOwner::increment_strong_count(value);
                     attrs.add(i).cast::<*const Str>().write(value);
                 }
                 attrs.add(LINE).write(line as usize);
@@ -210,7 +211,7 @@ pub unsafe extern "C" fn imre_typing_function_attr(
     } else {
         // SAFETY: transfer one additional retained reference to the caller.
         unsafe {
-            Rc::increment_strong_count(value);
+            StrOwner::increment_strong_count(value);
         }
     }
     value
@@ -241,13 +242,13 @@ pub unsafe extern "C" fn imre_typing_set_function_attr(
             *attrs.add(SHARED) = 0;
             *context = attrs;
         }
-        Rc::increment_strong_count(value);
+        StrOwner::increment_strong_count(value);
         let previous = attrs
             .add(index as usize)
             .cast::<*const Str>()
             .replace(value);
         if !previous.is_null() {
-            drop(Rc::from_raw(previous));
+            StrOwner::decrement_strong_count(previous);
         }
     }
     0
