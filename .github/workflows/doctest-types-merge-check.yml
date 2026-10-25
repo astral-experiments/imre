@@ -16,9 +16,9 @@ jobs:
       - name: Check out the exact prospective merge, without this validation workflow
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: e696f836d1c390b461cf0261198d61188cb7de14
+          ref: a3bd1bd73f71e52ebcce6f1f4648229cf302abf5
           persist-credentials: true
-      - run: test "$(git rev-parse 'HEAD^{tree}')" = 3016f37d1fe69600e3ee3b05051712dfd8fdc701
+      - run: test "$(git rev-parse 'HEAD^{tree}')" = 2461613929f1bd4781cbb7d97a2acaf39962f7e5
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
@@ -130,7 +130,7 @@ jobs:
           # The merge has the exact published PR head as its second parent.
           git -c protocol.version=2 fetch --no-tags --unshallow origin main "$feature"
           latest() { git ls-remote origin refs/heads/main | cut -f1; }
-          base=
+          base=$(git rev-parse HEAD^2)
           tested=$(git rev-parse 'HEAD^{tree}')
           while true; do
             new=$(latest)
