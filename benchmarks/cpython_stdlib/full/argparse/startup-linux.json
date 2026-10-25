@@ -1,0 +1,41 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "imre_revision": "f5807a7d6d6edcc55cd01e061b73d097820c614d",
+  "compiler_sha256": "e5da413b961462b974d8adc31c89675d113a1c596d806684288c0ef34234e55a",
+  "operation": "check",
+  "tests_executed": 0,
+  "support_files": {
+    "Lib/_colorize.py": "d6673f6692f76151b3b226ebe4d7976456a257e5",
+    "Lib/test/test_argparse.py": "627e395c49b194f67566bbaa7bba9a567b71edd9"
+  },
+  "checks": [
+    {
+      "entry": "imports",
+      "reachable_only": false,
+      "exit": 1,
+      "stdout": "",
+      "stderr": "Lib/imre_argparse_imports.py:1:1: Imre: Lib/test/test_argparse.py:3:1: Imre: Lib/_colorize.py:4:1: Imre: unsupported sealed standard-library export collections.abc.Mapping\n"
+    },
+    {
+      "entry": "imports",
+      "reachable_only": true,
+      "exit": 1,
+      "stdout": "",
+      "stderr": "Lib/imre_argparse_imports.py:1:1: Imre: Lib/test/test_argparse.py:3:1: Imre: Lib/_colorize.py:4:1: Imre: unsupported sealed standard-library export collections.abc.Mapping\n"
+    },
+    {
+      "entry": "run",
+      "reachable_only": false,
+      "exit": 1,
+      "stdout": "",
+      "stderr": "Lib/imre_argparse_run.py:1:1: Imre: Lib/test/test_argparse.py:3:1: Imre: Lib/_colorize.py:4:1: Imre: unsupported sealed standard-library export collections.abc.Mapping\n"
+    },
+    {
+      "entry": "run",
+      "reachable_only": true,
+      "exit": 1,
+      "stdout": "",
+      "stderr": "Lib/imre_argparse_run.py:1:1: Imre: Lib/test/test_argparse.py:3:1: Imre: Lib/_colorize.py:4:1: Imre: unsupported sealed standard-library export collections.abc.Mapping\n"
+    }
+  ]
+}

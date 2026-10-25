@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_selectors",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Modules/selectmodule.c": "d234d504cb516741c8c565817907d4f23746217e",
+    "Lib/selectors.py": "b8e5f6a4f77d8941c0782f6b5d2332d3766ebf70",
+    "Lib/test/test_poll.py": "5675db8d1cab6e91d489b8d10cafdefe3f255ac5",
+    "Lib/test/test_select.py": "a82584d690492042ad48df79aec190880480832d",
+    "Lib/test/test_selectors.py": "643775597c56c672afaf4939dfa29d21e3c5b306"
+  }
+}

@@ -201,6 +201,28 @@ fn ordinary_filters_and_sort_slice_by_unicode_code_points() {
 }
 
 #[test]
+fn suffix_sort_is_stable_beyond_the_stack_scratch_size() {
+    let values = (0..1025)
+        .map(|index| format!("{index:04}:{}", index % 7))
+        .collect::<Vec<_>>();
+    let borrowed = values
+        .iter()
+        .map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    let plain = list(&borrowed);
+    // SAFETY: the ordinary string list roots all elements through the sort.
+    let sorted = unsafe { Rc::from_raw(imre_str_list_sorted_suffix(Rc::as_ptr(&plain), 5)) };
+    let expected = (0..7)
+        .flat_map(|remainder| {
+            (remainder..1025)
+                .step_by(7)
+                .map(move |index| format!("{index:04}:{remainder}"))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(rows(&sorted), expected);
+}
+
+#[test]
 fn shared_strings_preserve_duplicate_counts_order_and_slice_ownership() {
     let left = list(&["b", "b", "common", "z"]);
     let right = list(&["a", "a", "common", "z"]);

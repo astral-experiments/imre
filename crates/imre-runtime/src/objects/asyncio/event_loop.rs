@@ -143,7 +143,7 @@ pub unsafe extern "C" fn imre_async_loop_set(handle: *const Object) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_async_ensure(handle: *const Object) -> *const Object {
     // SAFETY: the caller roots a typed coroutine or task.
-    let task = task_of(unsafe { object(handle) });
+    let task = for_scheduling(unsafe { object(handle) });
     if selected().closed.get() {
         return Error::new(Kind::RuntimeError, "Event loop is closed").returning(std::ptr::null());
     }
@@ -159,7 +159,7 @@ pub unsafe extern "C" fn imre_async_loop_run(
     future: *const Object,
 ) -> usize {
     // SAFETY: extract owned handles before suspending any generated code.
-    let (loop_, task) = unsafe { (loop_of(object(handle)), task_of(object(future))) };
+    let (loop_, task) = unsafe { (loop_of(object(handle)), for_scheduling(object(future))) };
     if loop_.closed.get() {
         return Error::new(Kind::RuntimeError, "Event loop is closed").returning(0);
     }
