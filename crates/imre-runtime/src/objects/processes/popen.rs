@@ -7,6 +7,7 @@ use crate::objects::files::{FileState, errno_error};
 use std::cell::RefCell;
 
 mod communicate;
+mod selector;
 
 type Pipes = [Option<Rc<Object>>; 3];
 

@@ -5,10 +5,10 @@ use crate::objects::exceptions::string_repr;
 use crate::objects::words::Words;
 
 impl Storage {
-    fn parsed<T>(&self, f: impl FnOnce(&PurePath) -> T) -> T {
+    fn parsed<T>(&self, f: impl FnOnce(&PurePath) -> Result<T>) -> Result<T> {
         match self {
             Self::PurePath(path) => f(path),
-            _ => f(&PurePath::new(false, vec![Rc::clone(self.path_text())])),
+            _ => f(&PurePath::new(false, vec![Rc::clone(self.path_text())])?),
         }
     }
 
@@ -37,7 +37,7 @@ impl Storage {
                 format!("{} has an empty name", self.path_repr()),
             ));
         }
-        Ok(new_path(join(parent(self.path()), replacement)))
+        Ok(new_path(join(parent(self.component_text()), replacement)))
     }
 }
 
@@ -49,11 +49,16 @@ pub unsafe extern "C" fn imre_path_is_relative_to(
     other: *const Object,
 ) -> u32 {
     // SAFETY: no callback, mutation or borrowed component escapes the comparison.
-    u32::from(unsafe {
-        object(path)
-            .0
-            .with(|s| s.parsed(|p| object(other).0.with(|o| o.parsed(|o| p.is_relative_to(o)))))
-    })
+    let result = unsafe {
+        object(path).0.with(|s| {
+            s.parsed(|p| {
+                object(other)
+                    .0
+                    .with(|o| o.parsed(|o| Ok(p.is_relative_to(o))))
+            })
+        })
+    };
+    finish(result.map(u32::from), 0)
 }
 
 /// # Safety

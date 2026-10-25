@@ -29,18 +29,20 @@ The first command writes all outcomes and exits unsuccessfully when an assertion
 
 The [complete TestCopy run](copy-linux.json) also checks the real 1 KiB user extended attribute outside the upstream trusted-attribute skip. The return-value test exercises four native calls; its complete-method compile stops on the tuple of shutil function values. It remains host-driven.
 
+Copy and metadata errors retain the original text or bytes filename. A failed symlink copy stores the link target in `filename` and the destination in `filename2`, including when their types differ. The [POSIX filename controls](copy_error_controls.py) compare eight real failures with CPython at both levels. For a text path that CPython decodes using surrogateescape, Imre preserves the OS exception, its printed name, and its other fields; materializing that particular `filename` or delivering it as a text callback argument remains blocked by the runtime's Unicode-scalar string representation. Bytes fields preserve arbitrary filename bytes.
+
 The [complete TestRmTree run](rmtree-linux.json) records each handler invocation. The native walker chooses onexc over onerror, reports the failing operation and exception, and resumes after the original handler returns. The Linux test transport supplies the host OS function object and reconstructs the deprecated onerror traceback in CPython. These eight methods are mixed; passing them does not demonstrate that the compiler accepts arbitrary Python callback arguments.
 
 ## Complete-method attempts
 
-[method-attempts-linux.json](method-attempts-linux.json) records the compiler and runtime hashes, original method and decorator hashes, and the first diagnostic for each blocked build. All 173 reference passes were attempted under their original CPython fixtures at both levels. Seven native bodies completed; 166 could not compile. Of those 166, 90 reached the stock support module's `annotationlib` import and 40 reached the unsupported `unittest` import used by the original mocks. The first diagnostic for each other method is in its record. Separate host-driven and mixed results retain their actual execution roles.
+[method-attempts-linux.json](method-attempts-linux.json) records the compiler and runtime hashes, original method and decorator hashes, and the first diagnostic for each blocked build. All 173 reference passes were attempted under their original CPython fixtures at both levels. Seven native bodies completed; 166 could not compile. With [native annotationlib (#586)](https://github.com/astral-sh/imre/pull/586), 90 now reach the stock support module's `inspect` import; 40 reach the unsupported `unittest` import used by the original mocks. The first diagnostic for each other method is in its record. Separate host-driven and mixed results retain their actual execution roles.
 
 Reproduce the method attempts with the pinned interpreter and [vendored shared fixtures](../shared/UPSTREAM.json):
 
 ```sh
 /path/to/cpython-3.14.5/python -B benchmarks/cpython_stdlib/full/shutil/attempt_methods.py \
     --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
-    --compiler-tree c5bbd358d5a85df154c128131af824551bfa805a --result /tmp/method-attempts-linux.json
+    --compiler-tree 75a94cd5e1d52363378ec0f9823b58fbe6c3262f --result /tmp/method-attempts-linux.json
 ```
 
 Pass `--method-attempts /tmp/method-attempts-linux.json` to the evidence runner to use this result.

@@ -26,11 +26,13 @@ pub(super) fn parse(
                 'c' => break 'options operand(flags.as_str(), args, "-c")?,
                 'X' => {
                     let option = operand(flags.as_str(), args, "-X")?;
-                    utf8 = Some(match option.as_str() {
+                    let value = match option.as_str() {
                         "utf8" | "utf8=1" => true,
                         "utf8=0" => false,
                         _ => return Err(format!("unsupported -X option: {option}")),
-                    });
+                    };
+                    // CPython's preconfiguration uses the first matching -X option.
+                    utf8.get_or_insert(value);
                     break;
                 }
                 _ => return Err(format!("unknown interpreter option: -{flag}")),
@@ -55,10 +57,12 @@ pub(super) fn parse(
         !isolated
             && env::var_os(key).is_some_and(|value| {
                 !value.is_empty()
-                    && value
-                        .to_str()
-                        .and_then(|s| s.trim_start().parse::<i32>().ok())
-                        != Some(0)
+                    && value.to_str().and_then(|s| {
+                        // The C integer parser skips only ASCII whitespace.
+                        s.trim_start_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r'])
+                            .parse::<i32>()
+                            .ok()
+                    }) != Some(0)
             })
     };
     let flags = CommandFlags {

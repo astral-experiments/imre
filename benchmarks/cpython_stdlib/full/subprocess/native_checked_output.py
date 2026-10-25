@@ -9,7 +9,8 @@ import tempfile
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parents[1]))
+sys.path[:0] = [str(HERE), str(HERE.parents[1])]
+from selector_fixture import ParentTrace, selected_entry, verify_binding
 from suite_inventory import load_suite, verify_files, verify_interpreter_tests
 from suite_native import Toolchain, native_method, run_in_fixtures
 
@@ -69,39 +70,62 @@ def main():
     verify_files(HERE / "upstream", manifest["files"])
     verify_interpreter_tests(manifest)
     tools = Toolchain(args.imre, args.runtime, args.clang, args.opt_level)
-    cls = "ProcessTestCase"
+    from test import test_subprocess as upstream
+
     source = HERE / "upstream/Lib/test/test_subprocess.py"
     with tempfile.TemporaryDirectory() as scratch:
         selected = {}
-        for method, (scalar, operation) in METHODS.items():
-            key = f"{manifest['module']}.{cls}.{method}"
-            directory = Path(scratch, method)
-            directory.mkdir()
-            execute = native_method(
-                tools,
-                directory,
-                source,
-                cls,
-                key,
-                PREAMBLE.replace("TYPE", scalar),
-                operation=("imre", operation),
-            )
+        for cls in ("ProcessTestCase", "ProcessTestCaseNoPoll"):
+            for method, (scalar, operation) in METHODS.items():
+                key = f"{manifest['module']}.{cls}.{method}"
+                directory = Path(scratch, key)
+                directory.mkdir()
+                trace = ParentTrace(directory)
+                no_poll = cls == "ProcessTestCaseNoPoll"
 
-            def run(case, original, execute=execute):
-                # If check_output silently inherits stdin for input=None, the
-                # original child prints XX and the native assertion must fail.
-                with tempfile.TemporaryFile() as inherited:
-                    inherited.write(b"sentinel inherited input")
-                    inherited.seek(0)
-                    saved = os.dup(0)
-                    try:
-                        os.dup2(inherited.fileno(), 0)
-                        return execute(case, original)
-                    finally:
-                        os.dup2(saved, 0)
-                        os.close(saved)
+                class ParentToolchain:
+                    level = tools.level
 
-            selected[key] = run
+                    def build(self, entry, directory):
+                        if no_poll:
+                            entry = selected_entry(entry)
+                        return trace.wrap(tools.build(entry, directory))
+
+                execute = native_method(
+                    ParentToolchain(),
+                    directory,
+                    source,
+                    "ProcessTestCase",
+                    key,
+                    PREAMBLE.replace("TYPE", scalar),
+                    operation=("imre", operation),
+                )
+
+                def run(case, original, execute=execute, trace=trace, no_poll=no_poll):
+                    verify_binding(upstream.subprocess, no_poll)
+                    # If check_output silently inherits stdin for input=None, the
+                    # original child prints XX and the native assertion must fail.
+                    with tempfile.TemporaryFile() as inherited:
+                        inherited.write(b"sentinel inherited input")
+                        inherited.seek(0)
+                        saved = os.dup(0)
+                        try:
+                            os.dup2(inherited.fileno(), 0)
+                            row = execute(case, original)
+                            parents = trace.observations()
+                            expected = (
+                                {"select", "pselect6"} if no_poll else {"poll", "ppoll"}
+                            )
+                            for parent in parents:
+                                if set(parent["native_parent_syscalls"]) - expected:
+                                    raise AssertionError((case.id(), parents))
+                            row["selector_parents"] = parents
+                            return row
+                        finally:
+                            os.dup2(saved, 0)
+                            os.close(saved)
+
+                selected[key] = run
         with patch.dict(os.environ, IMRE_PYTHON=sys.executable):
             rows, failures, skips = run_in_fixtures(
                 load_suite(manifest["module"]), selected

@@ -82,6 +82,9 @@ impl Types {
             Type::StrLiteral(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::StringLiterals(_)))
             }
+            Type::SimpleNamespace(id) => {
+                matches!(storage.shapes.get(id), Some(Shape::Dict(Type::Str, _)))
+            }
             Type::Cursor(id) => matches!(storage.shapes.get(id), Some(Shape::Cursor(_))),
             Type::List(id) => matches!(storage.shapes.get(id), Some(Shape::List(_))),
             Type::CacheState(id) => matches!(storage.shapes.get(id), Some(Shape::Dict(..))),
@@ -142,6 +145,7 @@ impl Types {
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
+            | Type::ProcessSelectorClass
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
@@ -200,6 +204,7 @@ impl Types {
                 | Type::Optional(child_id)
                 | Type::Coroutine(child_id)
                 | Type::Task(child_id)
+                | Type::SimpleNamespace(child_id)
                 | Type::DirectoryContext(child_id)
                 | Type::Popen(_, _, child_id)
                 | Type::Union(child_id) = child
@@ -252,6 +257,15 @@ impl Types {
 
     pub(crate) fn set_custom_truth(&self, records: HashSet<usize>) {
         self.0.borrow_mut().custom_truth = records;
+    }
+
+    pub(crate) fn concrete_subclasses(&self, class: usize) -> Ref<'_, [Type]> {
+        Ref::map(self.0.borrow(), |storage| {
+            storage
+                .concrete_subclasses
+                .get(&class)
+                .map_or(&[][..], Vec::as_slice)
+        })
     }
 
     pub(crate) fn add_concrete_subclass(&self, class: usize, bases: &[usize]) {
@@ -473,6 +487,7 @@ impl Types {
             Type::None => Some(false),
             Type::Tuple(_) => Some(!self.fields(ty).unwrap().is_empty()),
             Type::Class(id) if self.0.borrow().custom_truth.contains(&id) => None,
+            Type::SimpleNamespace(_) => Some(true),
             Type::Class(_)
             | Type::Callable(_)
             | Type::Enum(_)
@@ -501,6 +516,7 @@ impl Types {
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
+            | Type::ProcessSelectorClass
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
@@ -816,9 +832,7 @@ impl Types {
                 Type::Class(class) => {
                     pending.extend_from_slice(&class_fields[class]);
                     // A base-typed reference can own fields introduced by its concrete layout.
-                    if let Some(subclasses) = self.0.borrow().concrete_subclasses.get(&class) {
-                        pending.extend_from_slice(subclasses);
-                    }
+                    pending.extend(self.concrete_subclasses(class).iter().copied());
                 }
                 _ => pending.extend(self.children(ty)),
             }
@@ -828,6 +842,9 @@ impl Types {
 
     /// Enumerates stored types for the class-field acyclicity check.
     pub(crate) fn children(&self, ty: Type) -> Vec<Type> {
+        if let Type::SimpleNamespace(id) = ty {
+            return vec![Type::Dict(id)];
+        }
         if let Some(element) = self
             .element(ty)
             .or_else(|| self.payload(ty))

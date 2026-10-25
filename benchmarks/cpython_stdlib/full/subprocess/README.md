@@ -218,3 +218,7 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py \
     benchmarks/cpython_stdlib/full/subprocess/reference-linux.json \
     benchmarks/cpython_stdlib/full/subprocess/evidence-linux.json
 ```
+
+The [paired checked-command and pipe runs](CHECKED_AND_PIPES.md) include a
+complete attempt for every occurrence, both selector fixtures, and a separate
+trace for operations whose completion alone would not establish compatibility.
