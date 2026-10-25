@@ -267,11 +267,25 @@ impl Emitter<'_, '_> {
             }
             ProcessOperation::Popen { streams } => {
                 let cwd =
-                    self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
-                let env =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
+                let env =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[3].value.operand));
                 let operand = self.checked_instruction(format!(
-                    "call ptr @imre_popen(ptr {}, ptr {cwd}, ptr {env}, i32 {streams})",
+                    "call ptr @imre_popen_pipes(ptr {}, ptr {cwd}, ptr {env}, i32 {streams}, i64 {}, i1 {})",
+                    args[0].value.operand, args[1].value.operand, args[9].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::PopenPipe(index) => {
+                if returns == Type::None {
+                    return none();
+                }
+                let operand = self.instruction(format!(
+                    "call ptr @imre_popen_pipe(ptr {}, i32 {index})",
                     args[0].value.operand
                 ));
                 self.owned(Value {
@@ -289,6 +303,20 @@ impl Emitter<'_, '_> {
                     u8::from(poll)
                 ));
                 self.unpack_word(word, returns)
+            }
+            ProcessOperation::PopenCommunicate { text } => {
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(returns)));
+                let input =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
+                let kind = if args[2].value.ty == Type::Int { 2 } else { 7 };
+                let operand = self.checked_instruction(format!("call ptr @imre_popen_communicate(ptr {}, ptr {input}, i1 {}, i32 {kind}, i64 {}, ptr @{layout})", args[0].value.operand, u8::from(text), args[2].value.operand));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
             }
             ProcessOperation::PopenWait => {
                 let kind = if args[1].value.ty == Type::Int { 2 } else { 7 };
