@@ -1,0 +1,47 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_revision": "5c068b90d978f4b57fe145984fa0459180a755ed",
+  "opt_level": 3,
+  "tests": {
+    "test.test_deque.TestBasic.test_reverse": [
+      {
+        "execution": "host-driven-native",
+        "body": "CPython",
+        "assertions": "CPython",
+        "fixture_execution": "CPython module/class/instance hooks",
+        "method_sha256": "a72d5d99a0be431a73e227363eb2cd8505a4d372ab3dffd3198b75a320a04c6f",
+        "observation": {
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "imre",
+            "fixture": "cpython"
+          },
+          "evidence": {
+            "operation": "Native deque construction, reversal, iteration, length, and arity errors.",
+            "fixture": "CPython runs the original body, random source, expected lists, assertions and fixture hooks.",
+            "native_calls": {
+              "new": 500,
+              "reverse": 1000,
+              "snapshot": 1000,
+              "length": 1000,
+              "bad-arity": 1
+            },
+            "method_sha256": "a72d5d99a0be431a73e227363eb2cd8505a4d372ab3dffd3198b75a320a04c6f",
+            "random_seed": 314005,
+            "opt_level": 3,
+            "longest_input_count": 499,
+            "longest_input_sha256": "8ea02848758fbb385e1a53d8260a18317ea844ff69d8e1081a3b078909fe1cb8"
+          }
+        }
+      }
+    ]
+  },
+  "failures": [],
+  "skips": [],
+  "negative_control": {
+    "result": "failed-as-expected",
+    "upstream_line": 417,
+    "wrapped": "imre_deque_reverse"
+  }
+}

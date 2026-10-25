@@ -1,12 +1,12 @@
 //! Checked Unicode sequence access and shallow slices of concrete list storage.
 
+use crate::StrOwner;
 use num_traits::{Signed, ToPrimitive};
-use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::text::owned_string;
 use super::words::{OwnedWord, WordKind, Words};
-use super::{Int, List, Object, Storage, StorageCell, Str, acquire_rc, fail, object};
+use super::{Int, List, Object, Storage, StorageCell, Str, fail, object};
 
 /// Returns a native bound large enough to preserve every possible sequence
 /// position. Unlike indexing, slicing clamps arbitrary-precision integers.
@@ -46,6 +46,17 @@ pub(super) struct SliceIndices {
 impl SliceIndices {
     pub(super) fn is_full_forward(&self, length: usize) -> bool {
         !self.reverse && self.remaining == length
+    }
+
+    /// Maps an original slot to its position in this slice without walking skipped slots.
+    pub(super) fn position_of(&self, source: usize) -> Option<usize> {
+        let delta = if self.reverse {
+            self.at.checked_sub(source)?
+        } else {
+            source.checked_sub(self.at)?
+        };
+        let pos = delta / self.stride;
+        (pos < self.remaining && delta.is_multiple_of(self.stride)).then_some(pos)
     }
 
     /// Normalizes against the length at the time of access. Omitted negative
@@ -147,7 +158,7 @@ pub unsafe extern "C" fn imre_str_get(value: *const Str, at: usize) -> *const St
         Ok(character) => character,
         Err(error) => return error.returning(std::ptr::null()),
     };
-    Rc::into_raw(owned_string(character.encode_utf8(&mut [0; 4])))
+    StrOwner::into_raw(owned_string(character.encode_utf8(&mut [0; 4])))
 }
 
 /// Shares Unicode indexing and exact failure messages between owned strings and
@@ -209,7 +220,7 @@ pub unsafe extern "C" fn imre_str_slice(
     };
     if !slice.reverse && slice.stride == 1 && slice.len() == length {
         // SAFETY: a full slice may share immutable storage; acquire its new owner.
-        return Rc::into_raw(unsafe { acquire_rc::<Str>(value as usize) });
+        return StrOwner::into_raw(unsafe { crate::StrOwner::acquire_word(value as usize) });
     }
     let result = if !slice.reverse && slice.stride == 1 {
         let selected = if slice.len() == 0 {
@@ -241,7 +252,7 @@ pub unsafe extern "C" fn imre_str_slice(
     } else {
         copy_string_slice(text.chars(), slice.at, &slice, text.len())
     };
-    Rc::into_raw(Rc::new(result))
+    StrOwner::into_raw(StrOwner::new(result))
 }
 
 /// Copies integer owners into a distinct list, including for a full slice.
@@ -358,6 +369,9 @@ pub unsafe extern "C" fn imre_seq_slice(
     // leave storage. A normalization failure is raised after the borrow ends.
     let result = unsafe {
         object(value).0.with(|storage| {
+            if let Some(rows) = storage.sequence_storage().rows() {
+                return rows.slice(SliceIndices::new(rows.len(), start, stop, step)?);
+            }
             let values = storage.sequence();
             let slice = SliceIndices::new(values.values.len(), start, stop, step)?;
             let mut result = Words::new(values.kind.raw());
@@ -374,7 +388,7 @@ pub unsafe extern "C" fn imre_seq_slice(
         })
     };
     finish(
-        result.map(|values| Rc::into_raw(values.into_object())),
+        result.map(|values| crate::ObjectOwner::into_raw(values.into_object())),
         std::ptr::null(),
     )
 }
@@ -382,7 +396,7 @@ pub unsafe extern "C" fn imre_seq_slice(
 /// Roots the immutable source and advances a UTF-8 byte boundary once per code
 /// point. No character-index lookup or iterator borrow survives a loop body.
 pub(super) struct StringIterator {
-    owner: Rc<Str>,
+    owner: StrOwner,
     position: usize,
     reverse: bool,
 }
@@ -399,7 +413,7 @@ impl StringIterator {
             character
         };
         let value = owned_string(character.encode_utf8(&mut [0; 4]));
-        let word = Rc::into_raw(value) as usize;
+        let word = StrOwner::into_raw(value) as usize;
         // SAFETY: the string transfers one owner of the exact string kind.
         let value = unsafe { OwnedWord::from_owned(word, WordKind::new(3)) };
         Some((value, None))
@@ -414,14 +428,14 @@ impl StringIterator {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_iter(value: *const Str) -> *const Object {
     // SAFETY: the rooted source acquires an independent owner for the cursor.
-    let owner = unsafe { acquire_rc(value as usize) };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::StringIterator(
-        StringIterator {
+    let owner = unsafe { crate::StrOwner::acquire_word(value as usize) };
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::StringIterator(StringIterator {
             owner,
             position: 0,
             reverse: false,
-        },
-    )))))
+        }),
+    ))))
 }
 
 /// Creates a reverse Unicode cursor without copying or rescanning the prefix.
@@ -431,15 +445,15 @@ pub unsafe extern "C" fn imre_str_iter(value: *const Str) -> *const Object {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_reverse_iter(value: *const Str) -> *const Object {
     // SAFETY: the rooted source acquires an independent owner for this cursor.
-    let owner: Rc<Str> = unsafe { acquire_rc(value as usize) };
+    let owner: StrOwner = unsafe { crate::StrOwner::acquire_word(value as usize) };
     let position = owner.len();
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::StringIterator(
-        StringIterator {
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::StringIterator(StringIterator {
             owner,
             position,
             reverse: true,
-        },
-    )))))
+        }),
+    ))))
 }
 
 /// Builds the eager integer list without allocating one-character strings.
@@ -520,6 +534,7 @@ mod tests {
         imre_list_append, imre_list_get_index, imre_list_len, imre_list_new, imre_list_set_index,
     };
     use num_bigint::BigInt;
+    use std::rc::Rc;
 
     fn integer(value: i64) -> usize {
         Int::small(value).unwrap().into_raw()
@@ -539,11 +554,15 @@ mod tests {
     fn clear_error(kind: Kind, expected: &str) {
         assert_eq!(imre_error_pending(), 1);
         // SAFETY: taking pending transfers one exception owner; reading its
-        // message acquires a separate string owner. Both are consumed by Rc.
+        // message acquires a separate string owner. Each is released by its matching owner.
         unsafe {
-            let error = Rc::from_raw(imre_error_take());
-            assert_eq!(imre_exception_matches(Rc::as_ptr(&error), kind as u32), 1);
-            let message = Rc::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+            let error = crate::ObjectOwner::from_raw(imre_error_take());
+            assert_eq!(
+                imre_exception_matches(crate::ObjectOwner::as_ptr(&error), kind as u32),
+                1
+            );
+            let message =
+                StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)));
             assert_eq!(message.as_str(), expected);
         }
         assert_eq!(imre_error_pending(), 0);
@@ -557,19 +576,19 @@ mod tests {
             ("1٢३４𝟝", vec![1, 2, 3, 4, 5]),
             ("\u{10d40}\u{116da}\u{1ccf7}\u{1e5f9}", vec![0, 0, 7, 8]),
         ] {
-            let source = Rc::new(Str::new(text));
-            let weak = Rc::downgrade(&source);
+            let source = StrOwner::new(Str::new(text));
+            let weak = StrOwner::downgrade(&source);
             // SAFETY: source stays rooted during conversion. Each checked,
             // nonnull result transfers one independent list owner to Rc.
             unsafe {
-                let result = imre_str_int_list(Rc::as_ptr(&source));
+                let result = imre_str_int_list(StrOwner::as_ptr(&source));
                 assert!(!result.is_null());
                 let result = Rc::from_raw(result);
-                let other = imre_str_int_list(Rc::as_ptr(&source));
+                let other = imre_str_int_list(StrOwner::as_ptr(&source));
                 assert!(!other.is_null());
                 let other = Rc::from_raw(other);
                 assert!(!Rc::ptr_eq(&result, &other));
-                assert_eq!(Rc::strong_count(&source), 1);
+                assert_eq!(StrOwner::strong_count(&source), 1);
                 drop(source);
                 assert!(weak.upgrade().is_none());
                 result.0.with(|values| {
@@ -610,18 +629,18 @@ mod tests {
             ("１２\u{11de0}x", "'\\U00011de0'"),
             ("\u{88f}1", "'\\u088f'"),
         ] {
-            let source = Rc::new(Str::new(text));
+            let source = StrOwner::new(Str::new(text));
             // SAFETY: the immutable source remains rooted, and each pending
             // exception is consumed before another recoverable call.
             unsafe {
-                assert!(imre_str_int_list(Rc::as_ptr(&source)).is_null());
+                assert!(imre_str_int_list(StrOwner::as_ptr(&source)).is_null());
             }
             clear_error(
                 Kind::ValueError,
                 &format!("invalid literal for int() with base 10: {literal}"),
             );
             assert_eq!(source.as_str(), text);
-            assert_eq!(Rc::strong_count(&source), 1);
+            assert_eq!(StrOwner::strong_count(&source), 1);
         }
     }
 
@@ -779,25 +798,26 @@ mod tests {
 
     #[test]
     fn unicode_indexing_and_slicing_use_code_points_and_preserve_error_messages() {
-        let source = Rc::new(Str::new("aé\0e\u{301}🦀"));
+        let source = StrOwner::new(Str::new("aé\0e\u{301}🦀"));
         // SAFETY: every argument stays rooted; each nonnull result transfers one
-        // string owner to Rc and each failing call clears pending before reuse.
+        // string reference to StrOwner and each failing call clears pending before reuse.
         unsafe {
             for (position, expected) in ["a", "é", "\0", "e", "\u{301}", "🦀"]
                 .into_iter()
                 .enumerate()
             {
                 for index in [position as i64, position as i64 - 6] {
-                    let result = Rc::from_raw(imre_str_get(Rc::as_ptr(&source), integer(index)));
+                    let result =
+                        StrOwner::from_raw(imre_str_get(StrOwner::as_ptr(&source), integer(index)));
                     assert_eq!(result.as_str(), expected);
                 }
             }
             for at in [6, -7] {
-                assert!(imre_str_get(Rc::as_ptr(&source), integer(at)).is_null());
+                assert!(imre_str_get(StrOwner::as_ptr(&source), integer(at)).is_null());
                 clear_error(Kind::IndexError, "string index out of range");
             }
             let huge = Int::new(BigInt::from(1_u8) << 400_u32);
-            assert!(imre_str_get(Rc::as_ptr(&source), huge.0).is_null());
+            assert!(imre_str_get(StrOwner::as_ptr(&source), huge.0).is_null());
             clear_error(
                 Kind::IndexError,
                 "cannot fit 'int' into an index-sized integer",
@@ -813,7 +833,12 @@ mod tests {
                 ([None, Some(-1), Some(-1)], ""),
             ] {
                 let [start, stop, step] = components.map(|value| value.map_or(0, integer));
-                let result = Rc::from_raw(imre_str_slice(Rc::as_ptr(&source), start, stop, step));
+                let result = StrOwner::from_raw(imre_str_slice(
+                    StrOwner::as_ptr(&source),
+                    start,
+                    stop,
+                    step,
+                ));
                 assert_eq!(result.as_str(), expected);
             }
         }
@@ -822,13 +847,13 @@ mod tests {
 
     #[test]
     fn zero_slice_step_raises_even_for_empty_sequences_and_recovers() {
-        let text = Rc::new(Str::new(""));
+        let text = StrOwner::new(Str::new(""));
         // SAFETY: constructors transfer one owner to Rc. All calls borrow these
         // live exact handles, and error pointers are checked before adoption.
         unsafe {
             let list = Rc::from_raw(imre_list_new());
-            let sequence = Rc::from_raw(imre_seq_new(3));
-            assert!(imre_str_slice(Rc::as_ptr(&text), 0, 0, integer(0)).is_null());
+            let sequence = crate::ObjectOwner::from_raw(imre_seq_new(3));
+            assert!(imre_str_slice(StrOwner::as_ptr(&text), 0, 0, integer(0)).is_null());
             clear_error(Kind::ValueError, "slice step cannot be zero");
             assert!(imre_list_slice(Rc::as_ptr(&list), 0, 0, integer(0)).is_null());
             clear_error(Kind::ValueError, "slice step cannot be zero");
@@ -836,9 +861,12 @@ mod tests {
             clear_error(Kind::ValueError, "slice step cannot be zero");
             assert_eq!(imre_list_slice_sum(Rc::as_ptr(&list), 0, 0, integer(-1)), 1);
             assert_eq!(imre_error_pending(), 0);
-            assert!(imre_seq_slice(Rc::as_ptr(&sequence), 0, 0, integer(0)).is_null());
+            assert!(
+                imre_seq_slice(crate::ObjectOwner::as_ptr(&sequence), 0, 0, integer(0)).is_null()
+            );
             clear_error(Kind::ValueError, "slice step cannot be zero");
-            let empty = Rc::from_raw(imre_str_slice(Rc::as_ptr(&text), 0, 0, integer(-1)));
+            let empty =
+                StrOwner::from_raw(imre_str_slice(StrOwner::as_ptr(&text), 0, 0, integer(-1)));
             assert_eq!(empty.as_str(), "");
         }
         assert_eq!(imre_error_pending(), 0);
@@ -883,14 +911,25 @@ mod tests {
         unsafe {
             let child = Rc::from_raw(imre_list_new());
             let weak = Rc::downgrade(&child);
-            let source = Rc::from_raw(imre_seq_new(4));
-            imre_seq_append(Rc::as_ptr(&source), Rc::as_ptr(&child) as usize, 4);
-            let slice = Rc::from_raw(imre_seq_slice(Rc::as_ptr(&source), 0, 0, 0));
-            assert!(!Rc::ptr_eq(&source, &slice));
+            let source = crate::ObjectOwner::from_raw(imre_seq_new(4));
+            imre_seq_append(
+                crate::ObjectOwner::as_ptr(&source),
+                Rc::as_ptr(&child) as usize,
+                4,
+            );
+            let slice = crate::ObjectOwner::from_raw(imre_seq_slice(
+                crate::ObjectOwner::as_ptr(&source),
+                0,
+                0,
+                0,
+            ));
+            assert!(!crate::ObjectOwner::ptr_eq(&source, &slice));
             drop(source);
             imre_list_append(Rc::as_ptr(&child), integer(17));
             drop(child);
-            let saved = Rc::from_raw(imre_seq_get_index(Rc::as_ptr(&slice), 0) as *const List);
+            let saved = Rc::from_raw(
+                imre_seq_get_index(crate::ObjectOwner::as_ptr(&slice), 0) as *const List
+            );
             drop(slice);
             assert_eq!(Int(imre_list_len(Rc::as_ptr(&saved))).as_small(), Some(1));
             assert_eq!(
@@ -906,15 +945,23 @@ mod tests {
                 (257, vec![0, 1, 2]),
                 (258, vec![0, integer(9)]),
             ] {
-                let source = Rc::from_raw(imre_seq_new(kind));
+                let source = crate::ObjectOwner::from_raw(imre_seq_new(kind));
                 for &value in &values {
-                    imre_seq_append(Rc::as_ptr(&source), value, kind);
+                    imre_seq_append(crate::ObjectOwner::as_ptr(&source), value, kind);
                 }
-                let slice = Rc::from_raw(imre_seq_slice(Rc::as_ptr(&source), 0, 0, integer(-1)));
+                let slice = crate::ObjectOwner::from_raw(imre_seq_slice(
+                    crate::ObjectOwner::as_ptr(&source),
+                    0,
+                    0,
+                    integer(-1),
+                ));
                 drop(source);
                 assert_eq!(slice.0.with(|storage| storage.sequence().kind.raw()), kind);
                 for (at, &expected) in values.iter().rev().enumerate() {
-                    assert_eq!(imre_seq_get_index(Rc::as_ptr(&slice), at), expected);
+                    assert_eq!(
+                        imre_seq_get_index(crate::ObjectOwner::as_ptr(&slice), at),
+                        expected
+                    );
                 }
             }
         }
@@ -923,31 +970,40 @@ mod tests {
 
     #[test]
     fn string_iterator_roots_its_source_and_yields_independent_owned_code_points() {
-        let source = Rc::new(Str::new("aé\0e\u{301}🦀"));
-        let weak = Rc::downgrade(&source);
+        let source = StrOwner::new(Str::new("aé\0e\u{301}🦀"));
+        let weak = StrOwner::downgrade(&source);
         // SAFETY: iterator creation acquires the source; every output is adopted
         // once before reusing its slot. Exhausted calls must not touch outputs.
         unsafe {
-            let iterator = Rc::from_raw(imre_str_iter(Rc::as_ptr(&source)));
-            let indexed = Rc::from_raw(imre_str_get(Rc::as_ptr(&source), integer(1)));
+            let iterator = crate::ObjectOwner::from_raw(imre_str_iter(StrOwner::as_ptr(&source)));
+            let indexed = StrOwner::from_raw(imre_str_get(StrOwner::as_ptr(&source), integer(1)));
             drop(source);
             assert_eq!(weak.strong_count(), 1);
             let mut output = 73;
             let mut unused = 91;
             let mut values = Vec::new();
-            while imre_mapping_iter_next(Rc::as_ptr(&iterator), &mut output, &mut unused) != 0 {
-                values.push(Rc::from_raw(output as *const Str));
+            while imre_mapping_iter_next(
+                crate::ObjectOwner::as_ptr(&iterator),
+                &mut output,
+                &mut unused,
+            ) != 0
+            {
+                values.push(StrOwner::from_raw(output as *const Str));
                 assert_eq!(unused, 91);
             }
             output = 73;
             assert_eq!(
-                imre_mapping_iter_next(Rc::as_ptr(&iterator), &mut output, std::ptr::null_mut()),
+                imre_mapping_iter_next(
+                    crate::ObjectOwner::as_ptr(&iterator),
+                    &mut output,
+                    std::ptr::null_mut()
+                ),
                 0
             );
             assert_eq!(output, 73);
             drop(iterator);
             assert!(weak.upgrade().is_none());
-            assert!(Rc::ptr_eq(&indexed, &values[1]));
+            assert!(StrOwner::ptr_eq(&indexed, &values[1]));
             assert_eq!(
                 values
                     .iter()

@@ -1,6 +1,6 @@
 //! Closed target sets for exact callable signatures in the final typed program.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ir::{self, ExprKind, Module, Type};
 
@@ -16,13 +16,18 @@ pub(crate) struct Target {
 pub(crate) struct Targets(HashMap<Type, Vec<Target>>);
 
 impl Targets {
-    /// Every callable originates at an explicit construction in this closed IR.
-    /// Joining all constructions of a signature deliberately ignores value flow,
-    /// so returning, forwarding, or conditionally selecting one cannot hide a target.
+    /// Join constructions of each signature across returns, forwarding and selection.
+    /// A signature originating in the runtime has an open set of targets.
     pub(crate) fn analyze(module: &Module) -> Self {
         let mut targets = Self::default();
+        let mut open = HashSet::new();
         for function in module.functions.iter().chain([&module.entry]) {
             ir::walk_expressions(&function.body, &mut |value| {
+                if matches!(value.kind, ExprKind::Builtin(ir::Builtin::BuiltinsLen, _)) {
+                    // The original builtin has a runtime entry point. A singleton Python
+                    // function of this signature cannot prove the target of a live lookup.
+                    open.insert(value.ty);
+                }
                 if let ExprKind::Callable { function, receiver } = &value.kind {
                     let target = Target {
                         function: *function,
@@ -37,6 +42,7 @@ impl Targets {
                 }
             });
         }
+        targets.0.retain(|ty, _| !open.contains(ty));
         for values in targets.0.values_mut() {
             values.sort_unstable();
             values.dedup();
@@ -73,11 +79,14 @@ mod tests {
         let first = Type::Callable(0);
         let second = Type::Callable(1);
         let module = Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
+            list_builds: Default::default(),
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
+            source_frames: Vec::new(),
             functions: vec![function(vec![Statement::Expr(Expr {
                 ty: first,
                 kind: ExprKind::Scope {

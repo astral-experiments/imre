@@ -1,23 +1,21 @@
 //! Lazy, string-valued CSV rows. A pull retains only the current field and row.
 
+use crate::StrOwner;
 use std::ptr;
-use std::rc::Rc;
 
-use super::{
-    Error, Int, Kind, Object, Storage, StorageCell, Str, Words, acquire_rc, finish, object,
-};
+use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, Words, finish, object};
 
 type Result<T> = std::result::Result<T, Error>;
 
 enum Lines {
-    List(Rc<Object>, usize),
-    File(Rc<Object>),
-    Text(Rc<Str>, usize),
+    List(crate::ObjectOwner, usize),
+    File(crate::ObjectOwner),
+    Text(StrOwner, usize),
     End,
 }
 
 impl Lines {
-    fn next(&mut self) -> Result<Option<Rc<Str>>> {
+    fn next(&mut self) -> Result<Option<StrOwner>> {
         match self {
             Self::List(lines, index) => {
                 // SAFETY: the concrete list and its string stay rooted during this nonreentrant read.
@@ -26,7 +24,7 @@ impl Lines {
                         s.sequence()
                             .values
                             .get(*index)
-                            .map(|&word| acquire_rc(word))
+                            .map(|&word| crate::StrOwner::acquire_word(word))
                     })
                 };
                 if value.is_some() {
@@ -39,7 +37,7 @@ impl Lines {
             Self::File(file) => {
                 // SAFETY: this rooted file is distinct from its CSV reader; reading cannot reenter.
                 let line = unsafe { file.0.with_mut(|s| s.file_mut().readline()) }?;
-                Ok((!line.is_empty()).then(|| Rc::new(line)))
+                Ok((!line.is_empty()).then(|| StrOwner::new(line)))
             }
             Self::Text(text, byte) => {
                 let Some(ch) = text[*byte..].chars().next() else {
@@ -47,7 +45,7 @@ impl Lines {
                     return Ok(None);
                 };
                 let end = *byte + ch.len_utf8();
-                let line = Rc::new(Str::new(&text[*byte..end]));
+                let line = StrOwner::new(Str::new(&text[*byte..end]));
                 *byte = end;
                 Ok(Some(line))
             }
@@ -160,7 +158,7 @@ impl Row {
         let value = Str::from(std::mem::take(&mut self.field));
         self.fields
             .values
-            .push(Rc::into_raw(Rc::new(value)) as usize);
+            .push(StrOwner::into_raw(StrOwner::new(value)) as usize);
         self.chars = 0;
         Ok(())
     }
@@ -261,7 +259,7 @@ impl Row {
 }
 
 impl Reader {
-    fn next(&mut self) -> Result<Option<Rc<Object>>> {
+    fn next(&mut self) -> Result<Option<crate::ObjectOwner>> {
         let mut row = Row {
             fields: Words::new(3),
             field: String::new(),
@@ -356,14 +354,14 @@ unsafe fn create(
     // SAFETY: the checked owner and kind agree; entering checks file closure as iter(file) does.
     let lines = unsafe {
         match kind {
-            0 => Lines::List(acquire_rc(source as usize), 0),
+            0 => Lines::List(crate::ObjectOwner::acquire_word(source as usize), 0),
             1 => {
                 if super::files::imre_text_enter(source) == 0 {
                     return ptr::null();
                 }
-                Lines::File(acquire_rc(source as usize))
+                Lines::File(crate::ObjectOwner::acquire_word(source as usize))
             }
-            2 => Lines::Text(acquire_rc(source as usize), 0),
+            2 => Lines::Text(crate::StrOwner::acquire_word(source as usize), 0),
             _ => unreachable!(),
         }
     };
@@ -377,13 +375,13 @@ unsafe fn create(
             })
             .and_then(|terminator| dialect.validate(terminator))
             .map(|()| {
-                Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::CsvReader(
-                    Box::new(Reader {
+                crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+                    Storage::CsvReader(Box::new(Reader {
                         lines,
                         dialect,
                         line_num: 0,
-                    }),
-                )))))
+                    })),
+                ))))
             }),
         ptr::null(),
     )
@@ -406,7 +404,7 @@ pub unsafe extern "C" fn imre_csv_next(reader: *const Object, required: u32) -> 
     };
     finish(
         row.and_then(|row| match row {
-            Some(row) => Ok(Rc::into_raw(row)),
+            Some(row) => Ok(crate::ObjectOwner::into_raw(row)),
             None if required == 0 => Ok(ptr::null()),
             None => Err(Error::new(Kind::StopIteration, "")),
         }),

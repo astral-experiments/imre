@@ -21,25 +21,28 @@
     },
     "test.test_sys.SysModuleTest.test_getdefaultencoding": {
       "status": "pass",
-      "execution": "host-driven-native",
-      "body": "CPython",
-      "assertions": "CPython",
-      "fixture_execution": "CPython module/class/instance hooks",
-      "calls": [
-        "default-argument",
-        "default"
-      ]
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "b41ff7224ca4fe5cf266aa3439044a27a07e0c7a03680061baf2c50a7557e80b"
     },
     "test.test_sys.SysModuleTest.test_getfilesystemencoding": {
       "status": "pass",
-      "execution": "host-driven-native",
-      "body": "CPython",
-      "assertions": "CPython",
-      "fixture_execution": "CPython module/class/instance hooks",
-      "calls": [
-        "filesystem",
-        "platform"
-      ]
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "43b2b8ce0a812ea74e8efaf4b3ff2d51a127ae1970df98129709ba749f41ba7b",
+      "helper_sha256": "0236da157e45125162e664212c10446c30716b272ff48cee63a6a790ec2391a3"
+    },
+    "test.test_sys.SysModuleTest.test_getrecursionlimit": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "3d8664bb71e753cdf68f9889cd02173e0f710634dce4965a6a2c5cf5101d6cad"
     },
     "test.test_sys.SysModuleTest.test_ioencoding_nonascii": {
       "status": "upstream-skip",
@@ -54,6 +57,29 @@
       "calls": [
         "sys.argv",
         "sys.orig_argv"
+      ]
+    },
+    "test.test_sys.SysModuleTest.test_setrecursionlimit": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "0dc1bfce12f3ad7c3edbd4ba833ea5b01757e67dacead767693c1cccad33ee6a"
+    },
+    "test.test_sys.SysModuleTest.test_thread_info": {
+      "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "original CPython module/class/instance hooks",
+      "calls": [
+        "thread_info",
+        "length",
+        "name",
+        "lock",
+        "platform",
+        "name"
       ]
     },
     "test.test_sys.TestSysJIT.test_jit_is_available": {

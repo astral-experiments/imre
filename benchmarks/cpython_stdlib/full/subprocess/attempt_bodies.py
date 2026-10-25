@@ -6,7 +6,6 @@ from functools import cache
 import json
 import os
 from pathlib import Path
-import re
 import sys
 import tempfile
 from unittest.mock import patch
@@ -123,6 +122,11 @@ def main():
         parser.add_argument("--" + n, type=Path, required=True)
     parser.add_argument("--opt-level", type=int, choices=(0, 3), required=True)
     parser.add_argument(
+        "--trace-nopoll",
+        action="store_true",
+        help="install the original selector in native NoPoll parents and trace their system calls",
+    )
+    parser.add_argument(
         "--only",
         action="append",
         default=[],
@@ -135,7 +139,7 @@ def main():
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
     verify_files(HERE / "upstream", manifest["files"])
     verify_interpreter_tests(manifest)
-    from test import support
+    from test import support, test_subprocess as upstream
 
     support.use_resources = ["cpu"]
     refs = json.loads((HERE / "reference-linux.json").read_text())["reference"]
@@ -151,16 +155,33 @@ def main():
         name = case.id()
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
+            tc = toolchain
+            trace = None
+            if args.trace_nopoll and type(case).__name__ == "ProcessTestCaseNoPoll":
+                from selector_fixture import ParentTrace, selected_entry, verify_binding
+
+                verify_binding(upstream.subprocess, True)
+                trace = ParentTrace(directory)
+
+                class SelectedToolchain:
+                    level = toolchain.level
+
+                    def build(self, source, build_dir):
+                        return trace.wrap(
+                            toolchain.build(selected_entry(source), build_dir)
+                        )
+
+                tc = SelectedToolchain()
             try:
                 owner, preamble = fixture(case, directory)
-                execute = native_method(
-                    toolchain, directory, SOURCE, owner, name, preamble
-                )
+                execute = native_method(tc, directory, SOURCE, owner, name, preamble)
             except (ValueError, RuntimeError) as exc:
                 last = str(exc).strip().splitlines()[-1]
                 rows[name] = {
                     "status": "compile-blocked",
-                    "reason": re.sub(r"/tmp/[^/ :]+/", "", last),
+                    "reason": last.replace(str(directory) + "/", "").replace(
+                        str(directory), "<case>"
+                    ),
                 }
             else:
                 try:
@@ -173,6 +194,17 @@ def main():
                         "status": "body-completed-needs-operation-review",
                         **result,
                     }
+                    if trace is not None:
+                        parents = trace.observations()
+                        if any(
+                            {"poll", "ppoll"} & p["native_parent_syscalls"].keys()
+                            for p in parents
+                        ):
+                            rows[name] = {
+                                "status": "failed",
+                                "reason": "selected native parent used poll",
+                            }
+                        rows[name]["selector_parents"] = parents
         if len(rows) % 25 == 0:
             print(len(rows), "/", len(refs), flush=True)
         return rows[name]
