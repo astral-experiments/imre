@@ -1,6 +1,7 @@
 """Constructor, source acquisition, and error timing; compare stdout with CPython."""
 
 import csv
+from io import StringIO
 from itertools import batched, chain, islice
 
 items = [1, 2]
@@ -107,3 +108,29 @@ except csv.Error as error:
     print(str(error))
 print(list(fields))
 print(list(outer_rows))
+
+# Positional chain acquires each stream on demand; from_iterable acquires its
+# outer stream immediately. Direct reads and seeks use the same cursor.
+text = StringIO('a\r\nb\nc', newline='')
+lines = chain(['first'], text, ['last'])
+print(next(lines))
+print(repr(text.readline()))
+print(repr(next(lines)))
+text.seek(0)
+print(repr(next(lines)))
+text.close()
+try:
+    next(lines)
+except ValueError as error:
+    print(str(error))
+closed_later = chain(['prefix'], text, ['unreachable'])
+print(next(closed_later))
+try:
+    next(closed_later)
+except ValueError as error:
+    print(str(error))
+print(next(closed_later, 'ended'))
+try:
+    chain.from_iterable(text)
+except ValueError as error:
+    print(str(error))
