@@ -87,8 +87,8 @@ pub(super) unsafe fn release_unowned_cycle(first: *const usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Str, StrOwner};
     use crate::objects::records::{RecordSemantics, imre_record_new};
+    use crate::{Str, StrOwner};
 
     #[test]
     fn a_live_alias_keeps_the_entire_ring_until_its_last_release() {
