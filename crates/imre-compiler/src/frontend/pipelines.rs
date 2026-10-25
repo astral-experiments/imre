@@ -760,24 +760,23 @@ impl Checker<'_> {
         }
     }
 
-    /// Consume the cursor from its current position. Acquire the operand before
-    /// allocating the result, and release both owners if a later pull fails.
-    pub(super) fn collect_cursor_set(
+    /// Consume one prepared iterator into a fresh set and release the partial
+    /// result if evaluating the source or pulling an element raises.
+    pub(super) fn collect_set(
         &mut self,
-        cursor: Expr,
-        element: Type,
+        source: Prepared,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        let element = self.locals[source.value];
         if !self.types.hashable_key(element) {
             return Err(error(
                 self.source,
                 node,
-                "set() requires hashable cursor elements",
+                "set() requires hashable iterator elements",
             ));
         }
         let ty = self.types.set(element);
         let result = self.hidden(ty);
-        let input = Iteration::Prepared(self.prepare_cursor(cursor, element));
         let empty = Expr {
             ty,
             kind: ExprKind::Set {
@@ -786,7 +785,7 @@ impl Checker<'_> {
             },
         };
         let body = self.expand_items_after(
-            input,
+            Iteration::Prepared(source),
             node,
             vec![Statement::Assign(result, empty)],
             |checker, value| {
@@ -1044,7 +1043,7 @@ impl Checker<'_> {
         if !reverse && iterable.ty == Type::CsvReader {
             return Ok(self.prepare_csv_reader(iterable));
         }
-        if !reverse && matches!(iterable.ty, Type::TextIO | Type::BinaryIO) {
+        if !reverse && matches!(iterable.ty, Type::TextIO | Type::StringIO | Type::BinaryIO) {
             return Ok(self.prepare_file_lines(iterable));
         }
         let mapping = self.types.mapping(iterable.ty);
@@ -1088,6 +1087,11 @@ impl Checker<'_> {
                 node,
                 "reversed requires a list, tuple, string, bytes, or range",
             ));
+        }
+        if matches!(element, Type::Callable(_))
+            && let ExprKind::Tuple(values) = iterable.kind
+        {
+            return Ok(self.prepare_callable_tuple(values, element, reverse));
         }
         let ty = iterable.ty;
         let source = self.hidden(ty);
@@ -1285,6 +1289,84 @@ impl Checker<'_> {
             writes: HashSet::new(),
             clear,
         })
+    }
+
+    /// The iterator cannot expose its tuple literal. Keep each callable (including its
+    /// bound receiver) in its own local until exhaustion, with ordinary loop exits.
+    fn prepare_callable_tuple(
+        &mut self,
+        items: Vec<Expr>,
+        element: Type,
+        reverse: bool,
+    ) -> Prepared {
+        let mut slots = Vec::new();
+        let evaluate = items
+            .into_iter()
+            .map(|item| {
+                let slot = self.hidden(element);
+                slots.push(slot);
+                Statement::Assign(slot, item)
+            })
+            .collect();
+        let cursor = self.hidden(Type::Int);
+        let value = self.hidden(element);
+        let ready = self.hidden(Type::Bool);
+        let release = slots.iter().rev().copied().map(Statement::Clear).collect();
+        let mut clear = slots.clone();
+        clear.extend([cursor, value, ready]);
+        if reverse {
+            slots.reverse();
+        }
+        let (last, prefix) = slots
+            .split_last()
+            .expect("a homogeneous callable tuple is nonempty");
+        let item = prefix
+            .iter()
+            .enumerate()
+            .rev()
+            .fold(self.local(*last), |next, (i, &slot)| Expr {
+                ty: element,
+                kind: ExprKind::Conditional(
+                    Box::new(compare(
+                        Compare::Equal,
+                        self.local(cursor),
+                        integer(i as i64),
+                    )),
+                    Box::new(self.local(slot)),
+                    Box::new(next),
+                ),
+            });
+        Prepared {
+            evaluate,
+            acquire: vec![Statement::Assign(cursor, integer(0))],
+            next: vec![
+                Statement::Clear(value),
+                Statement::Assign(
+                    ready,
+                    compare(
+                        Compare::Less,
+                        self.local(cursor),
+                        integer(slots.len() as i64),
+                    ),
+                ),
+                Statement::If(
+                    self.local(ready),
+                    vec![
+                        Statement::Assign(value, item),
+                        Statement::Assign(
+                            cursor,
+                            binary(Binary::Add, self.local(cursor), integer(1)),
+                        ),
+                    ],
+                    release,
+                ),
+            ],
+            value,
+            ready,
+            elementless: false,
+            writes: HashSet::new(),
+            clear,
+        }
     }
 
     /// Obtains one element from each source in order. Strict mismatch checking
