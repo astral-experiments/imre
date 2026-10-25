@@ -526,6 +526,7 @@ struct CheckedFile<'db> {
 pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
     Call(TextRange),
+    NonCallable(TextRange),
     DictDeletion(TextRange),
     Keyword(TextRange),
     TupleListRead(TextRange),
@@ -541,6 +542,7 @@ impl CheckedDiagnostic {
         let (range, kind) = match self {
             Self::Decorator(range) => (range, 0),
             Self::Call(range) => (range, 1),
+            Self::NonCallable(range) => (range, 12),
             Self::Keyword(range) => (range, 2),
             Self::TupleListRead(range) => (range, 3),
             Self::DictDeletion(range) => (range, 8),
@@ -559,6 +561,7 @@ impl CheckedDiagnostic {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
+            Self::NonCallable(call) => diagnostic == "call-non-callable" && call == range,
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
             Self::RepeatedKeyword(keyword) => {

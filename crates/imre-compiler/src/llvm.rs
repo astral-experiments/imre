@@ -97,6 +97,7 @@ impl Type {
             | Self::ClockTime
             | Self::PlainObject
             | Self::StrDescriptor(_)
+            | Self::Placeholder(_)
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::Sha256
@@ -166,6 +167,7 @@ impl Type {
             | Self::ClockTime
             | Self::PlainObject
             | Self::StrDescriptor(_)
+            | Self::Placeholder(_)
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::Sha256
@@ -767,6 +769,7 @@ impl Emitter<'_, '_> {
             | Type::CacheState(_)
             | Type::ClockTime
             | Type::StrDescriptor(_)
+            | Type::Placeholder(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
@@ -3384,6 +3387,7 @@ impl Emitter<'_, '_> {
                 | Type::Class(_)
                 | Type::TimedFileHandler
                 | Type::StrDescriptor(_)
+                | Type::Placeholder(_)
                 | Type::PlainObject
                 | Type::PathInfo
                 | Type::Sha256
@@ -4774,6 +4778,14 @@ impl Emitter<'_, '_> {
                 Type::Sha256,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::Placeholder(kind) => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @imre_functools_placeholder(i32 {})",
+                    *kind as u32
+                )),
+                small_integer: false,
+            },
             Builtin::StrDescriptor(method) => Value {
                 ty: returns,
                 operand: self.checked_instruction(format!(
@@ -6132,6 +6144,7 @@ impl Emitter<'_, '_> {
                     | Type::CacheState(_)
                     | Type::ClockTime
                     | Type::StrDescriptor(_)
+                    | Type::Placeholder(_)
                     | Type::PlainObject
                     | Type::SimpleNamespace(_)
                     | Type::PathInfo
@@ -6389,6 +6402,7 @@ impl Emitter<'_, '_> {
             | Type::CacheState(_)
             | Type::ClockTime
             | Type::StrDescriptor(_)
+            | Type::Placeholder(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
@@ -6472,6 +6486,7 @@ impl Emitter<'_, '_> {
             | Type::CacheState(_)
             | Type::ClockTime
             | Type::StrDescriptor(_)
+            | Type::Placeholder(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
@@ -7068,6 +7083,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::CacheState(_)
         | Type::ClockTime
         | Type::StrDescriptor(_)
+        | Type::Placeholder(_)
         | Type::PlainObject
         | Type::SimpleNamespace(_)
         | Type::PathInfo
@@ -7440,6 +7456,7 @@ declare ptr @imre_linecache_line_int(ptr, i64, ptr)
 declare ptr @imre_linecache_line_float(ptr, double, ptr)
 declare ptr @imre_inspect_sentinel()
 declare ptr @imre_inspect_str_descriptor(i32)
+declare ptr @imre_functools_placeholder(i32)
 declare ptr @imre_sha256_new(ptr)
 declare ptr @imre_hash_new(ptr, ptr)
 declare ptr @imre_hash_algorithms_available()

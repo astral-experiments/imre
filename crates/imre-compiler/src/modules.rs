@@ -926,6 +926,11 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
     }
 
+    /// Native evaluation of this exact call raises for a known noncallable object.
+    pub(crate) fn checked_noncallable(&self, module: ModuleId, call: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::NonCallable(call));
+    }
+
     /// Mark the precise call where lowering raises Python's missing-argument TypeError.
     pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]

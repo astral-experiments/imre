@@ -89,6 +89,8 @@ pub(crate) enum Type {
     ClockTime,
     /// An exact instance of Python's plain, identity-only object.
     PlainObject,
+    /// The functools singleton and its publicly observable constructor are distinct objects.
+    Placeholder(PlaceholderKind),
     /// An exact immutable method descriptor on the builtin str class.
     StrDescriptor(StrDescriptor),
     /// A live namespace wrapper; the interned shape describes its string-keyed backing dict.
@@ -236,6 +238,8 @@ impl std::fmt::Display for Type {
             Self::ClockTime => "datetime.time",
             Self::PlainObject => "object",
             Self::StrDescriptor(_) => "method_descriptor",
+            Self::Placeholder(PlaceholderKind::Value) => "functools._PlaceholderType",
+            Self::Placeholder(PlaceholderKind::Class) => "type",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
@@ -795,6 +799,7 @@ pub(crate) enum Builtin {
     HashNew,
     NewPlainObject,
     StrDescriptor(StrDescriptor),
+    Placeholder(PlaceholderKind),
     InspectSentinel,
     HashAvailable,
     Sha256Update,
@@ -1115,6 +1120,13 @@ pub(crate) enum RegexCapture {
     Absent,
     Start,
     End,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[repr(u32)]
+pub(crate) enum PlaceholderKind {
+    Value,
+    Class,
 }
 
 /// These descriptor values call the same native operation as their bound string methods.
