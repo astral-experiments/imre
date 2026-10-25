@@ -6041,35 +6041,6 @@ impl<'a> Checker<'a> {
             });
         }
         match name.id.as_str() {
-            "next" | "iter"
-                if !self.names.contains_key(name.id.as_str())
-                    && (name.id != "iter" || !self.local_iter)
-                    && self.resolve(&call.func).is_none() =>
-            {
-                if let ([input], []) = (
-                    call.arguments.args.as_ref(),
-                    call.arguments.keywords.as_ref(),
-                ) {
-                    let receiver = self.expr(input)?;
-                    if receiver.ty == Type::CsvReader {
-                        if name.id == "iter" {
-                            return Ok(receiver);
-                        }
-                        return Ok(Expr {
-                            ty: self.types.list(Type::Str),
-                            kind: ExprKind::Builtin(
-                                Builtin::CsvNext { required: true },
-                                vec![receiver],
-                            ),
-                        });
-                    }
-                }
-                return Err(error(
-                    self.source,
-                    call,
-                    "expected a CSV reader at this iterator call",
-                ));
-            }
             "list" => return self.list_call(call, None),
             "sorted" => return self.sorted_call(call, None),
             "abs" => return self.abs_call(call),

@@ -11,10 +11,10 @@ mod groupby;
 /// successful `next` owns `value`, and its consumer clears that transient owner.
 pub(super) struct Prepared {
     pub evaluate: Vec<Statement>,
-    acquire: Vec<Statement>,
-    next: Vec<Statement>,
+    pub(super) acquire: Vec<Statement>,
+    pub(super) next: Vec<Statement>,
     pub(super) value: usize,
-    ready: usize,
+    pub(super) ready: usize,
     /// An empty tuple has no element type or executable item assignment.
     elementless: bool,
     /// Enclosing slots a later pull may replace, after constructor arguments.
@@ -628,7 +628,7 @@ impl Checker<'_> {
         })
     }
 
-    fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {
+    pub(super) fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {
         let iterator = self.hidden(cursor.ty);
         let value = self.hidden(element);
         let ready = self.hidden(Type::Bool);

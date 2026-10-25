@@ -1,7 +1,16 @@
 import csv
 
 
+def fallback(log: list[str]) -> list[str]:
+    log.append("default")
+    return log
+
+
 def main() -> None:
+    events: list[str] = []
+    probe = csv.reader(["first"])
+    print(repr(next(iter(probe), fallback(events))))
+    print(repr(next(probe, fallback(events))))
     lines = ['a,"1,2"', '"hello\r\n', 'world",z', "x"]
     reader = csv.reader(lines)
     print(reader.line_num)

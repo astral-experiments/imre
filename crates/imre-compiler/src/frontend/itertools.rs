@@ -85,7 +85,7 @@ impl Checker<'_> {
     pub(super) fn iter_cursor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
         let cursor = self.expr(&call.arguments.args[0])?;
-        if self.types.cursor_element(cursor.ty).is_none() {
+        if cursor.ty != Type::CsvReader && self.types.cursor_element(cursor.ty).is_none() {
             return Err(error(
                 self.source,
                 call,
@@ -104,15 +104,26 @@ impl Checker<'_> {
             return Err(error(self.source, call, "next takes at most one default"));
         }
         let source = self.expr(source)?;
-        let element = self
-            .types
-            .cursor_element(source.ty)
-            .ok_or_else(|| error(self.source, call, "next requires a supported iterator"))?;
-        let iterator = self.hidden(source.ty);
-        let item = self.hidden(element);
-        let ready = self.hidden(Type::Bool);
-        let mut body = vec![Statement::Assign(iterator, source)];
-        let mut clear = vec![iterator, item, ready];
+        let prepared = if source.ty == Type::CsvReader {
+            if rest.is_empty() {
+                return Ok(Expr {
+                    ty: self.types.list(Type::Str),
+                    kind: ExprKind::Builtin(Builtin::CsvNext { required: true }, vec![source]),
+                });
+            }
+            self.prepare_csv_reader(source)
+        } else {
+            let element = self
+                .types
+                .cursor_element(source.ty)
+                .ok_or_else(|| error(self.source, call, "next requires a supported iterator"))?;
+            self.prepare_cursor(source, element)
+        };
+        let item = prepared.value;
+        let element = self.locals[item];
+        let ready = prepared.ready;
+        let mut body = prepared.evaluate;
+        let mut clear = prepared.clear;
         // The default is evaluated before pulling, including on success.
         let default = if let [default] = rest {
             let default = self.expr(default)?;
@@ -123,12 +134,8 @@ impl Checker<'_> {
         } else {
             None
         };
-        body.push(Statement::IterNext {
-            iterator,
-            key: item,
-            value: None,
-            ready,
-        });
+        body.extend(prepared.acquire);
+        body.extend(prepared.next);
         let value = if let Some(default) = default {
             let ty = self.types.join(element, default.ty).ok_or_else(|| {
                 error(
