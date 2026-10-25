@@ -10,7 +10,7 @@ on:
         description: Additional required native controls
         type: choice
         default: decoder
-        options: [decoder, decoder-merge, key-body, number-hooks]
+        options: [decoder, decoder-merge, decoder-current-main, key-body, number-hooks]
 permissions:
   contents: read
 concurrency:
@@ -22,12 +22,14 @@ jobs:
     timeout-minutes: 120
     env:
       EXPECTED_SOURCE: ${{ inputs.source }}
+      JSON_AUDIT: ${{ inputs.audit }}
       CARGO_INCREMENTAL: 0
       CARGO_PROFILE_DEV_DEBUG: 0
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ inputs.source }}
+          fetch-depth: ${{ inputs.audit == 'decoder-current-main' && '0' || '1' }}
           persist-credentials: false
       - name: Identify the exact source and tree
         shell: bash
@@ -37,6 +39,18 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
           results="$RUNNER_TEMP/json-results"
           mkdir -p "$results"
+          if [[ "$JSON_AUDIT" == decoder-current-main ]]; then
+            git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+            base=$(git rev-parse refs/remotes/origin/main)
+            tree=$(git merge-tree --write-tree "$base" "$EXPECTED_SOURCE")
+            export GIT_AUTHOR_DATE GIT_COMMITTER_DATE
+            GIT_AUTHOR_DATE=$(git show -s --format=%cI "$base")
+            GIT_COMMITTER_DATE=$GIT_AUTHOR_DATE
+            merge=$(git -c user.name='Imre verification' -c user.email='github-actions[bot]@users.noreply.github.com' commit-tree "$tree" -p "$base" -p "$EXPECTED_SOURCE" -m 'Verify the current prospective JSON decoder merge')
+            git checkout --detach "$merge"
+            echo "$base $EXPECTED_SOURCE $tree" | tee "$results/merge-inputs.txt"
+          fi
+          echo "JSON_TEST_REVISION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           git cat-file -p HEAD | sed -n '/^$/q; /^tree /p; /^parent /p' > "$results/commit-objects.txt"
           git show -s --format='%H %T' | tee "$results/source.txt"
           echo "JSON_RESULTS=$results" >> "$GITHUB_ENV"
@@ -108,6 +122,13 @@ jobs:
           tools=(--imre "$JSON_IMRE" --runtime "$JSON_RUNTIME" --clang /usr/bin/clang-18)
           python3 -B "$JSON_DIR/key_identity.py" "${tools[@]}" --result "$JSON_RESULTS/key-identity-linux.json"
           python3 -B "$JSON_DIR/deep_decode.py" "${tools[@]}" --result "$JSON_RESULTS/deep-decode-linux.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && inputs.audit == 'key-body' }}
+        with:
+          name: json-key-details-${{ inputs.source }}
+          path: ${{ runner.temp }}/json-results/key-identity-linux.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Require native identity assertions in both unchanged key fixtures
         if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.audit == 'key-body' }}
         shell: bash
@@ -137,7 +158,7 @@ jobs:
               print(f"-O{level}: both unchanged methods completed; separate owners were rejected")
           PY
       - name: Compare the overlapping native shutil callable path
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && (inputs.audit == 'key-body' || inputs.audit == 'decoder-merge') }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && (inputs.audit == 'key-body' || inputs.audit == 'decoder-merge' || inputs.audit == 'decoder-current-main') }}
         shell: bash
         run: |
           python3 -B - <<'PY'
@@ -189,7 +210,7 @@ jobs:
           export PYTHONPATH="$PWD/.cpython-stdlib-reference/Lib"
           tools=(--imre "$JSON_IMRE" --runtime "$JSON_RUNTIME" --clang /usr/bin/clang-18)
           python3 -B "$JSON_DIR/sweep.py" "${tools[@]}" --result "$JSON_RESULTS/routine-sweep-linux.json"
-          python3 -B "$JSON_DIR/roundtrips.py" "${tools[@]}" --imre-revision "$EXPECTED_SOURCE" --result "$JSON_RESULTS/roundtrips-linux.json"
+          python3 -B "$JSON_DIR/roundtrips.py" "${tools[@]}" --imre-revision "$JSON_TEST_REVISION" --result "$JSON_RESULTS/roundtrips-linux.json"
           python3 -B "$JSON_DIR/bodies.py" "${tools[@]}" --result "$JSON_RESULTS/bodies-linux.json"
       - name: Validate both full per-occurrence reports
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
