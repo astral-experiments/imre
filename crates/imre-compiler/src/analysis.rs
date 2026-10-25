@@ -647,6 +647,8 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
         operators: usize,
         child_depth: usize,
         longest_item: usize,
+        // Replacement fields are siblings in an f-string or template string.
+        interpolated_string: bool,
         // A comma in lambda parameters or a comprehension target does not
         // separate independent expressions at this delimiter level.
         keep_commas: bool,
@@ -655,6 +657,12 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
     impl Group {
         fn depth(&self) -> usize {
             self.longest_item.max(self.operators + self.child_depth)
+        }
+
+        fn next_item(&mut self) {
+            self.longest_item = self.depth();
+            self.operators = 0;
+            self.child_depth = 0;
         }
     }
 
@@ -691,8 +699,12 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
                 statement_start = token == Newline;
             }
             Lpar | Lsqb | Lbrace | FStringStart | TStringStart => {
+                if token == Lbrace && group.interpolated_string {
+                    group.next_item();
+                }
                 group.operators += 1;
                 parents.push(std::mem::take(&mut group));
+                group.interpolated_string = matches!(token, FStringStart | TStringStart);
             }
             Rpar | Rsqb | Rbrace | FStringEnd | TStringEnd => {
                 if let Some(mut parent) = parents.pop() {
@@ -700,11 +712,7 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
                     group = parent;
                 }
             }
-            Comma if !group.keep_commas => {
-                group.longest_item = group.depth();
-                group.operators = 0;
-                group.child_depth = 0;
-            }
+            Comma if !group.keep_commas => group.next_item(),
             Lambda | For => {
                 group.keep_commas = true;
                 group.operators += 1;
