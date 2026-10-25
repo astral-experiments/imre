@@ -2,6 +2,7 @@
 
 use super::*;
 
+mod accumulate;
 mod batched;
 
 impl Checker<'_> {
@@ -508,6 +509,12 @@ impl Checker<'_> {
                 .types
                 .cursor_element(source.ty)
                 .ok_or_else(|| error(self.source, call, "next requires a supported iterator"))?;
+            if rest.is_empty() {
+                return Ok(Expr {
+                    ty: element,
+                    kind: ExprKind::Builtin(Builtin::CursorNextRequired, vec![source]),
+                });
+            }
             self.prepare_cursor(source, element)
         };
         let item = prepared.value;
@@ -516,46 +523,30 @@ impl Checker<'_> {
         let mut body = prepared.evaluate;
         let mut clear = prepared.clear;
         // The default is evaluated before pulling, including on success.
-        let default = if let [default] = rest {
-            let default = self.expr(default)?;
-            let slot = self.hidden(default.ty);
-            body.push(Statement::Assign(slot, default));
-            clear.push(slot);
-            Some(self.local(slot))
-        } else {
-            None
+        let [default] = rest else {
+            unreachable!("next without a default is lowered above")
         };
+        let default = self.expr(default)?;
+        let slot = self.hidden(default.ty);
+        body.push(Statement::Assign(slot, default));
+        clear.push(slot);
         body.extend(prepared.acquire);
         body.extend(prepared.next);
-        let value = if let Some(default) = default {
-            let ty = self.types.join(element, default.ty).ok_or_else(|| {
-                error(
-                    self.source,
-                    call,
-                    "next item and default need a common type",
-                )
-            })?;
-            Expr {
-                ty,
-                kind: ExprKind::Conditional(
-                    Box::new(self.local(ready)),
-                    Box::new(self.coerce(self.local(item), ty, call)?),
-                    Box::new(self.coerce(default, ty, call)?),
-                ),
-            }
-        } else {
-            body.push(Statement::If(
-                self.local(ready),
-                Vec::new(),
-                vec![Statement::Raise(Some(Expr {
-                    ty: Type::Exception,
-                    kind: ExprKind::Exception {
-                        kind: exception_kind("StopIteration").unwrap(),
-                        message: None,
-                    },
-                }))],
-            ));
-            self.local(item)
+        let default = self.local(slot);
+        let ty = self.types.join(element, default.ty).ok_or_else(|| {
+            error(
+                self.source,
+                call,
+                "next item and default need a common type",
+            )
+        })?;
+        let value = Expr {
+            ty,
+            kind: ExprKind::Conditional(
+                Box::new(self.local(ready)),
+                Box::new(self.coerce(self.local(item), ty, call)?),
+                Box::new(self.coerce(default, ty, call)?),
+            ),
         };
         Ok(Expr {
             ty: value.ty,

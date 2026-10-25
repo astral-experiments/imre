@@ -217,6 +217,7 @@ impl Checker<'_> {
                         | Intrinsic::Islice
                         | Intrinsic::Cycle
                         | Intrinsic::Batched
+                        | Intrinsic::Accumulate
                         | Intrinsic::Compress
                 ))
             )

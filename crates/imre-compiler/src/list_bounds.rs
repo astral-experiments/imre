@@ -90,6 +90,7 @@ fn analyze(
         }
         Analysis {
             calls: &mut calls,
+            locals: &function.locals,
             rewrite,
         }
         .block(&mut function.body, &mut state);
@@ -99,6 +100,7 @@ fn analyze(
 
 struct Analysis<'a> {
     calls: &'a mut [Calls],
+    locals: &'a [Type],
     rewrite: bool,
 }
 
@@ -208,10 +210,18 @@ impl Analysis<'_> {
                     }
                 }
                 Statement::IterNext {
-                    key, value, ready, ..
+                    iterator,
+                    key,
+                    value,
+                    ready,
                 } => {
-                    for slot in [Some(*key), *value, Some(*ready)].into_iter().flatten() {
-                        state[slot] = None;
+                    if matches!(self.locals[*iterator], Type::Cursor(_)) {
+                        // The cursor can run a callback that mutates an aliased integer list.
+                        state.fill(None);
+                    } else {
+                        for slot in [Some(*key), *value, Some(*ready)].into_iter().flatten() {
+                            state[slot] = None;
+                        }
                     }
                 }
                 Statement::Break | Statement::Continue | Statement::Exhaust => {}

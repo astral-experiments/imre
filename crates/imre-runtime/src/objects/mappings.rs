@@ -2352,6 +2352,15 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
     }
 }
 
+/// Iterator consumers treat a raised StopIteration just like an empty native pull.
+/// A direct next without a default instead propagates the original exception.
+pub(super) fn iteration_end<T>(result: Result<Option<T>, Error>) -> Result<Option<T>, Error> {
+    match result {
+        Err(error) if error.is_kind(Kind::StopIteration) => Ok(None),
+        other => other,
+    }
+}
+
 /// # Safety
 /// Root the cursor; output words are aligned, independent, outside runtime storage,
 /// and contain no unconsumed owner. Only success writes them; keys/set/string mode
@@ -2363,7 +2372,7 @@ pub unsafe extern "C" fn imre_mapping_iter_next(
     value_out: *mut usize,
 ) -> u32 {
     // SAFETY: the caller roots an exact cursor.
-    let next = match pull(unsafe { object(value) }) {
+    let next = match iteration_end(pull(unsafe { object(value) })) {
         Ok(next) => next,
         Err(error) => return error.returning(0),
     };

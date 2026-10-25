@@ -428,32 +428,41 @@ impl Drop for Exception {
     }
 }
 
+enum ErrorPayload {
+    Builtin(Payload),
+    Raised(Rc<Object>),
+}
+
 /// An owned error returned from a storage access before pending state is changed.
 pub(crate) struct Error {
     kind: Kind,
     // A missing payload uses the preallocated MemoryError when raised.
-    payload: Option<Payload>,
+    payload: Option<ErrorPayload>,
     cause: Option<Rc<Object>>,
 }
 
 impl Error {
-    pub(super) fn exit_status(status: i32) -> Self {
-        let word = crate::Int::small(i64::from(status)).unwrap().into_raw();
-        // SAFETY: the tagged integer transfers its owned word to the exception.
-        let code = unsafe { OwnedWord::from_owned(word, WordKind::new(2)) };
+    fn builtin(kind: Kind, payload: Payload) -> Self {
         Self {
-            kind: Kind::SystemExit,
-            payload: Some(Payload::Exit(Some(code))),
+            kind,
+            payload: Some(ErrorPayload::Builtin(payload)),
             cause: None,
         }
     }
 
+    pub(super) fn stop_iteration() -> Self {
+        Self::builtin(Kind::StopIteration, Payload::Empty)
+    }
+
+    pub(super) fn exit_status(status: i32) -> Self {
+        let word = crate::Int::small(i64::from(status)).unwrap().into_raw();
+        // SAFETY: the tagged integer transfers its owned word to the exception.
+        let code = unsafe { OwnedWord::from_owned(word, WordKind::new(2)) };
+        Self::builtin(Kind::SystemExit, Payload::Exit(Some(code)))
+    }
+
     pub(crate) fn new(kind: Kind, message: impl Into<Str>) -> Self {
-        Self {
-            kind,
-            payload: Some(Payload::Message(Rc::new(message.into()))),
-            cause: None,
-        }
+        Self::builtin(kind, Payload::Message(Rc::new(message.into())))
     }
 
     fn string_arg(text: impl Into<Str>) -> OwnedWord {
@@ -498,15 +507,14 @@ impl Error {
             Self::int_arg(crate::Int::small(i64::from(errno)).unwrap()),
             Self::string_arg(description),
         ];
-        Self {
+        Self::builtin(
             kind,
-            payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
+            Payload::Arguments(Box::new(BuiltinArguments {
                 message: Rc::new(message.into()),
                 args: args.into_iter().collect(),
                 os_paths,
-            }))),
-            cause: None,
-        }
+            })),
+        )
     }
 
     /// UnicodeDecodeError preserves the undecoded bytes and the half-open error bounds.
@@ -527,15 +535,14 @@ impl Error {
             Self::int_arg(crate::Int::from_usize(end)),
             Self::string_arg(reason),
         ];
-        Self {
-            kind: Kind::UnicodeDecodeError,
-            payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
+        Self::builtin(
+            Kind::UnicodeDecodeError,
+            Payload::Arguments(Box::new(BuiltinArguments {
                 message: Rc::new(message.into()),
                 args: args.into_iter().collect(),
                 os_paths: None,
-            }))),
-            cause: None,
-        }
+            })),
+        )
     }
 
     pub(super) fn is_kind(&self, kind: Kind) -> bool {
@@ -549,17 +556,16 @@ impl Error {
         lineno: usize,
         colno: usize,
     ) -> Self {
-        Self {
-            kind: Kind::JsonDecodeError,
-            payload: Some(Payload::Json(Rc::new(JsonError {
+        Self::builtin(
+            Kind::JsonDecodeError,
+            Payload::Json(Rc::new(JsonError {
                 msg: Rc::new(Str::from(msg)),
                 doc,
                 pos,
                 lineno,
                 colno,
-            }))),
-            cause: None,
-        }
+            })),
+        )
     }
 
     pub(crate) fn allocation() -> Self {
@@ -571,11 +577,7 @@ impl Error {
     }
 
     pub(super) fn key(key: OwnedWord) -> Self {
-        Self {
-            kind: Kind::KeyError,
-            payload: Some(Payload::Key(key)),
-            cause: None,
-        }
+        Self::builtin(Kind::KeyError, Payload::Key(key))
     }
 
     pub(super) fn string_key(key: Str) -> Self {
@@ -594,9 +596,40 @@ impl Error {
         self
     }
 
+    /// Move a callback's pending exception across fallible native iterator frames.
+    pub(super) fn take_raised() -> Option<Self> {
+        if !PENDING_PRESENT.get() {
+            return None;
+        }
+        take_pending().map(|error| Self {
+            kind: kind_of(&error),
+            payload: Some(ErrorPayload::Raised(error)),
+            cause: None,
+        })
+    }
+
     fn into_object(self) -> Rc<Object> {
         match self.payload {
-            Some(payload) => exception_with_cause(self.kind, payload, self.cause),
+            Some(ErrorPayload::Builtin(payload)) => {
+                exception_with_cause(self.kind, payload, self.cause)
+            }
+            Some(ErrorPayload::Raised(error)) => {
+                if let Some(cause) = self.cause {
+                    // SAFETY: this owner roots the exception. Release a replaced cause only
+                    // after the storage borrow ends.
+                    let old = unsafe {
+                        error.0.with_mut(|storage| {
+                            let Storage::Exception(exception) = storage else {
+                                unreachable!()
+                            };
+                            exception.suppress_context = true;
+                            exception.details_mut().cause.replace(cause)
+                        })
+                    };
+                    drop(old);
+                }
+                error
+            }
             None => SEQUENCE_ALLOCATION_ERROR.with_borrow(Rc::clone),
         }
     }

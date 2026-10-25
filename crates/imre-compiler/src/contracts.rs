@@ -463,7 +463,8 @@ impl Builtin {
             | Self::TextOpen(_)
             | Self::TextRead
             | Self::TextWrite
-            | Self::TomlKeys => Contract::new(true, Unknown),
+            | Self::TomlKeys
+            | Self::CursorNextRequired => Contract::new(true, Unknown),
             Self::Repeat
             | Self::CursorLengthHint
             | Self::Progression { .. }
@@ -473,6 +474,7 @@ impl Builtin {
             | Self::Chain
             | Self::ChainFrom(_)
             | Self::Islice
+            | Self::Accumulate
             | Self::Compress
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter

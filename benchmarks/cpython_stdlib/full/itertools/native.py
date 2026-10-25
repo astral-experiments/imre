@@ -17,6 +17,7 @@ CASES = {
     "LengthTransparency.test_repeat_with_negative_times": ("int", 4, ("repeat",)),
     "TestBasicOps.test_repeat_with_negative_times": ("str", 4, ("repeat",)),
     "TestBasicOps.test_tee_del_backward": ("int", 0, ("repeat", "tee")),
+    "TestExamples.test_accumulate": ("list[int]", 1, ("accumulate",)),
     "TestExamples.test_count": ("list[int]", 1, ("count", "islice")),
     "TestExamples.test_compress": ("list[str]", 1, ("compress",)),
     "TestExamples.test_cycle": ("list[str]", 1, ("cycle", "islice")),

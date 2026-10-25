@@ -525,11 +525,13 @@ pub(crate) enum ArgparseOutput {
 #[derive(Clone)]
 pub(crate) enum Builtin {
     Repeat,
+    CursorNextRequired,
     CursorLengthHint,
     Progression {
         bounded: bool,
     },
     Islice,
+    Accumulate,
     Compress,
     Chain,
     ChainFrom(Type),

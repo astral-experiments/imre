@@ -30,6 +30,7 @@ REVIEWED = {
     "LengthTransparency.test_repeat_with_negative_times": ("int", ["repeat", "operator.length_hint"]),
     "TestBasicOps.test_repeat_with_negative_times": ("str", ["repeat", "repr"]),
     "TestBasicOps.test_tee_del_backward": ("int", ["repeat", "tee", "any", "del"]),
+    "TestExamples.test_accumulate": ("list[int]", ["accumulate"]),
     "TestExamples.test_chain": ("str", ["chain"]),
     "TestExamples.test_chain_from_iterable": ("str", ["chain.from_iterable"]),
     "TestExamples.test_compress": ("list[str]", ["compress"]),

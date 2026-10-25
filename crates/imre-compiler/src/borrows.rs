@@ -225,6 +225,13 @@ fn preserves_edges(
     let mut safe = true;
     statements(&function.body, &mut |statement| {
         safe &= match statement {
+            // Pulling a first-class cursor may invoke a user callback that replaces
+            // the list or record holding an otherwise borrowed operand.
+            Statement::IterNext { iterator, .. }
+                if matches!(function.locals[*iterator], Type::Cursor(_)) =>
+            {
+                false
+            }
             Statement::SetItem(..) | Statement::AugmentItem(..) => false,
             Statement::AugmentField(value, _, _, _) => {
                 matches!(value.kind, ExprKind::Local(slot) if private[slot])

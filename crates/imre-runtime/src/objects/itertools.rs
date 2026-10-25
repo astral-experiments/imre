@@ -17,6 +17,19 @@ impl Repeat {
     }
 }
 
+/// # Safety
+/// The caller roots a cursor of the declared item type. A successful pull transfers
+/// one owned word; an explicit StopIteration from a callback retains its payload.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_cursor_next_required(cursor: *const Object) -> usize {
+    // SAFETY: the registered source is rooted for this entire pull.
+    match next_item(unsafe { object(cursor) }) {
+        Ok(Some(item)) => item.into_word(),
+        Ok(None) => Error::stop_iteration().returning(0),
+        Err(error) => error.returning(0),
+    }
+}
+
 fn ssize(value: &Int) -> Result<i64, Error> {
     value
         .as_small()
@@ -82,6 +95,7 @@ pub unsafe extern "C" fn imre_repeat(kind: u32, value: usize, times: usize) -> *
     })))))
 }
 
+mod accumulate;
 mod batched;
 mod chain;
 mod compress;
@@ -98,6 +112,7 @@ pub(super) enum Adapter {
     Batched(batched::Batch),
     Chain(chain::Chain),
     Compress(compress::Compress),
+    Accumulate(accumulate::Accumulate),
     Cycle(Cycle),
     PathWalk(paths::Walker),
 }
@@ -141,6 +156,7 @@ impl Drop for Adapter {
         // A chain can retain two cursors, either of which may have other owners.
         let source = match self {
             Self::Tee(fork) => fork.take_source(),
+            Self::Accumulate(acc) => acc.source.take(),
             Self::Batched(batch) => batch.take_source(),
             Self::Compress(filter) => {
                 if let Some(data) = filter.data.take() {
@@ -193,6 +209,7 @@ impl Adapter {
             Self::Batched(_) => "itertools.batched",
             Self::Chain(_) => "itertools.chain",
             Self::Compress(_) => "itertools.compress",
+            Self::Accumulate(_) => "itertools.accumulate",
             Self::Slice(_) => "itertools.islice",
             Self::Cycle(_) => "itertools.cycle",
             Self::PathWalk(_) => {
@@ -204,6 +221,15 @@ impl Adapter {
     }
 
     fn advance(&self, frame: &mut PullFrame, item: Option<ItemResult>) -> Advance {
+        let item = if matches!(
+            self,
+            Self::Tee(_) | Self::Batched(_) | Self::Chain(_) | Self::Cycle(_)
+        ) {
+            item.map(mappings::iteration_end)
+        } else {
+            item
+        };
+
         match self {
             Self::Tee(fork) => fork.advance(item),
             Self::Slice(slice) => slice.advance(item),
@@ -211,6 +237,7 @@ impl Adapter {
             Self::Batched(batch) => batch.advance(frame, item),
             Self::Chain(chain) => chain.advance(frame, item),
             Self::Compress(filter) => filter.advance(frame, item),
+            Self::Accumulate(acc) => acc.advance(item),
             _ => unreachable!("only composed cursors request source items"),
         }
     }
@@ -240,6 +267,7 @@ impl Adapter {
                                         | Self::Batched(_)
                                         | Self::Chain(_)
                                         | Self::Compress(_)
+                                        | Self::Accumulate(_)
                                 ) =>
                             {
                                 Some(Rc::clone(state))
@@ -291,7 +319,8 @@ impl Adapter {
             | Self::Cycle(_)
             | Self::Batched(_)
             | Self::Chain(_)
-            | Self::Compress(_) => self.next_composed(),
+            | Self::Compress(_)
+            | Self::Accumulate(_) => self.next_composed(),
             Self::PathWalk(walk) => walk.next(),
         }
     }

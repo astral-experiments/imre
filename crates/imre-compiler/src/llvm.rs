@@ -5274,6 +5274,32 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::Accumulate => {
+                let (source, function, initial) = (&args[0].value, &args[1].value, &args[2].value);
+                let mode = checked_iterable_mode(source.ty);
+                let item = self.module.types.cursor_element(returns).unwrap();
+                let kind = |ty| representation_kind(ty, &self.module.types);
+                let (fk, ik, rk) = (kind(function.ty), kind(initial.ty), kind(item));
+                let abi = if matches!(function.ty, Type::Callable(_)) {
+                    match item.llvm() {
+                        "i64" => 1,
+                        "ptr" => 2,
+                        "double" => 3,
+                        "i1" => 4,
+                        _ => unreachable!("checked accumulate signature"),
+                    }
+                } else {
+                    0
+                };
+                let owned = u32::from(self.resource_types.contains(&item));
+                let (s, f, i) = (self.word(source), self.word(function), self.word(initial));
+                let operand = self.checked_pointer(format!("call ptr @imre_accumulate(i32 {mode}, i64 {s}, i32 {fk}, i64 {f}, i32 {ik}, i64 {i}, i32 {rk}, i32 {abi}, i32 {owned})"));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::Compress => {
                 let data = &args[0].value;
                 let selectors = &args[1].value;
@@ -5346,6 +5372,13 @@ impl Emitter<'_, '_> {
                     operand,
                     small_integer: false,
                 }
+            }
+            Builtin::CursorNextRequired => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_cursor_next_required(ptr {})",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
             }
             Builtin::CursorLengthHint => self.call(
                 "imre_cursor_length_hint",
@@ -7469,6 +7502,8 @@ declare i64 @imre_tuple_len(ptr)
 declare i64 @imre_tuple_get(ptr, i64)
 declare ptr @imre_batched(i32, i64, i64, i32)
 declare ptr @imre_cycle(i32, i64)
+declare i64 @imre_cursor_next_required(ptr)
+declare ptr @imre_accumulate(i32, i64, i32, i64, i32, i64, i32, i32, i32)
 declare ptr @imre_compress(i32, i64, i32, i64)
 declare ptr @imre_chain(i64, ptr, i64)
 declare ptr @imre_chain_from(i32, i64, i32)
