@@ -1,0 +1,6 @@
+from __imre_logging_classes__ import Handler
+
+type _Level = int | str
+
+def _lookup_handler(name: str) -> Handler | None: ...
+def _rename_handler(handler: Handler, old: str | None, new: str | None) -> None: ...

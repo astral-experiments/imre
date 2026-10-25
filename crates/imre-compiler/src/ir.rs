@@ -1188,6 +1188,8 @@ pub(crate) enum LogRecordOperation {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LogOperation {
     Get,
+    HandlerRename,
+    HandlerLookup,
     AddLevel,
     LevelName,
     LevelForName,
