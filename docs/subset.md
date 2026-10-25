@@ -1389,8 +1389,11 @@ can be `None`, booleans, integers, strings, bytes, or fixed tuples of these
 values. On a constructed or narrowed import exception, these fields support
 `str`, `repr`, equality, truth, and type tests. Strings, bytes, and tuples also
 support length and integer indexing. Reinitializing an instance resets omitted
-fields. Arbitrary objects, expanded keyword dictionaries, direct field writes,
-and pickling remain outside this subset.
+fields. A fresh keyword dictionary display can supply the three fields. A
+repeated key inside one display uses its last value; supplying the same key in
+two call arguments raises `TypeError` before initialization. Arbitrary objects,
+unpacking a separately stored dictionary, direct field writes, and pickling
+remain outside this subset.
 
 User exception classes keep their nominal identity in both builtin and user
 handlers. A marker class may inherit several exception bases with a consistent

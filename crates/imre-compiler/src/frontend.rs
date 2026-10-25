@@ -7495,7 +7495,11 @@ impl<'a> Checker<'a> {
         Ok(value)
     }
 
-    fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
+    fn call_on(
+        &mut self,
+        call: &ast::ExprCall,
+        mut receiver: Option<Expr>,
+    ) -> Result<Expr, String> {
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen))
             || self.graph.mutable_builtin_len && self.unshadowed_len(&call.func)
         {
@@ -7588,6 +7592,33 @@ impl<'a> Checker<'a> {
         }
         if self.unshadowed_builtin(&call.func, "dict") {
             return self.dict_constructor(call, None);
+        }
+        if call.arguments.keywords.iter().any(|kw| kw.arg.is_none())
+            && !call.arguments.args.iter().any(ast::Expr::is_starred_expr)
+        {
+            // An import exception binds each display before initializing its fields.
+            if let Some(kind) = self.exception_category(&call.func)
+                && self.is_import_error(kind)
+                && self.class_reference(&call.func).is_none()
+            {
+                return self.import_error(call, kind, None);
+            }
+            if let ast::Expr::Attribute(method) = &*call.func
+                && method.attr.as_str() == "__init__"
+                && crate::classes::super_method(call).is_none()
+                && self.class_reference(&method.value).is_none()
+                && self.exception_category(&method.value).is_none()
+                && self.resolve(&call.func).is_none()
+            {
+                let target = match receiver.take() {
+                    Some(value) => value,
+                    None => self.expr(&method.value)?,
+                };
+                if target.ty == Type::ImportException {
+                    return self.import_error(call, 41, Some(target));
+                }
+                receiver = Some(target);
+            }
         }
         if let Some(expanded) = self.expand_closed_call(call) {
             return self.call_on(&expanded, receiver);
