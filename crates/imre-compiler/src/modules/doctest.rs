@@ -68,12 +68,48 @@ struct Uses<'a> {
     origin: ModuleId,
     suite: DefinitionId,
     targets: Vec<Binding>,
-    tuple_targets: Vec<Binding>,
-    variable: bool,
+    /// Track only the variables actually passed to DocTestSuite. An unrelated
+    /// tuple of modules must never add doctests to a different suite.
+    variables: Vec<(ModuleId, String)>,
+    assignments: HashMap<(ModuleId, String), Vec<Binding>>,
     executes: bool,
 }
 
+impl Uses<'_> {
+    fn remember(&mut self, target: &ast::Expr, values: &[ast::Expr]) {
+        let Some(name) = target.as_name_expr() else {
+            return;
+        };
+        let bindings = self
+            .assignments
+            .entry((self.origin, name.id.to_string()))
+            .or_default();
+        bindings.extend(
+            values
+                .iter()
+                .filter_map(|value| resolve_binding(self.modules, self.origin, value)),
+        );
+    }
+}
+
 impl<'a> Visitor<'a> for Uses<'_> {
+    fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+        match stmt {
+            ast::Stmt::Assign(s) => {
+                for target in &s.targets {
+                    self.remember(target, std::slice::from_ref(s.value.as_ref()));
+                }
+            }
+            ast::Stmt::For(s) => match s.iter.as_ref() {
+                ast::Expr::Tuple(tuple) => self.remember(&s.target, &tuple.elts),
+                ast::Expr::List(list) => self.remember(&s.target, &list.elts),
+                _ => {}
+            },
+            _ => {}
+        }
+        walk_stmt(self, stmt);
+    }
+
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
         if let ast::Expr::Attribute(a) = expr
             && matches!(a.attr.as_str(), "runTest" | "debug" | "run")
@@ -94,20 +130,12 @@ impl<'a> Visitor<'a> for Uses<'_> {
             if let Some(arg) = arg {
                 if let Some(binding) = resolve_binding(self.modules, self.origin, arg) {
                     self.targets.push(binding);
-                } else {
-                    self.variable = true;
+                } else if let Some(name) = arg.as_name_expr() {
+                    self.variables.push((self.origin, name.id.to_string()));
                 }
             } else {
                 self.targets.push(Binding::Module(self.origin));
             }
-        }
-        if let ast::Expr::Tuple(tuple) = expr {
-            self.tuple_targets.extend(
-                tuple
-                    .elts
-                    .iter()
-                    .filter_map(|item| resolve_binding(self.modules, self.origin, item)),
-            );
         }
         walk_expr(self, expr);
     }
@@ -429,8 +457,8 @@ impl Loader<'_> {
             origin: 0,
             suite,
             targets: Vec::new(),
-            tuple_targets: Vec::new(),
-            variable: false,
+            variables: Vec::new(),
+            assignments: HashMap::new(),
             executes: false,
         };
         for (id, source) in self.modules.iter().enumerate().filter(|(_, m)| !m.bundled) {
@@ -441,8 +469,10 @@ impl Loader<'_> {
         }
         let mut cases = std::collections::BTreeMap::new();
         if uses.executes {
-            if uses.variable {
-                uses.targets.append(&mut uses.tuple_targets);
+            for variable in uses.variables {
+                if let Some(bindings) = uses.assignments.get(&variable) {
+                    uses.targets.extend(bindings);
+                }
             }
             for target in uses.targets {
                 let mut docs = Vec::new();

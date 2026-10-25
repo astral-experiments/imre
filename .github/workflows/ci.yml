@@ -187,6 +187,8 @@ jobs:
           done
       - name: Run vendored CPython Counter methods in native Imre
         run: python3 benchmarks/cpython_stdlib/native_counter.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/cpython-counter.json"
+      - name: Compare native doctest suites with the pinned interpreter
+        run: python3 benchmarks/cpython_stdlib/full/doctest/native.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/doctest-execution.json"
       - name: Compare uv's upstream wheel checker with CPython
         run: python3 tests/uv_wheel_check.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Compare Ruff’s reporters with CPython

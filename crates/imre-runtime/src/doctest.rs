@@ -18,12 +18,23 @@ pub unsafe extern "C" fn imre_doctest_ascii(value: *const Str) -> *const Str {
         return value;
     }
     let mut ascii = String::new();
+    let size = text.chars().try_fold(0usize, |len, ch| {
+        len.checked_add(match ch as u32 {
+            0..=127 => 1,
+            128..=255 => 4,
+            256..=65535 => 6,
+            _ => 10,
+        })
+    });
+    if size.is_none_or(|size| ascii.try_reserve_exact(size).is_err()) {
+        return Error::allocation().returning(std::ptr::null());
+    }
     for ch in text.chars() {
         let n = ch as u32;
         match n {
-            ..=127 => ascii.push(ch),
-            ..=255 => write!(ascii, "\\x{n:02x}").unwrap(),
-            ..=65535 => write!(ascii, "\\u{n:04x}").unwrap(),
+            0..=127 => ascii.push(ch),
+            128..=255 => write!(ascii, "\\x{n:02x}").unwrap(),
+            256..=65535 => write!(ascii, "\\u{n:04x}").unwrap(),
             _ => write!(ascii, "\\U{n:08x}").unwrap(),
         }
     }
@@ -54,7 +65,10 @@ pub extern "C" fn imre_doctest_capture_take() -> *const Str {
     };
     // All Python text output is UTF-8. Like doctest's stream, supply a final
     // newline when an example wrote a partial line.
-    let mut text = String::from_utf8(bytes).expect("standard output is Unicode");
+    let Ok(mut text) = String::from_utf8(bytes) else {
+        return Error::new(Kind::UnicodeError, "captured stdout is not UTF-8")
+            .returning(std::ptr::null());
+    };
     if !text.is_empty() && !text.ends_with('\n') {
         if text.try_reserve(1).is_err() {
             return Error::allocation().returning(std::ptr::null());

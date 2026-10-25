@@ -4166,7 +4166,7 @@ impl Emitter<'_, '_> {
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::DocCaptureStart => {
-                self.checked_line("call void @imre_doctest_capture_start()".to_owned());
+                self.checked_line("call void @imre_doctest_capture_start()");
                 none()
             }
             Builtin::DocCaptureTake => self.call("imre_doctest_capture_take", returns, &[]),

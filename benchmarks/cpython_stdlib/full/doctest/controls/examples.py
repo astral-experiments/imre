@@ -23,7 +23,7 @@
     Traceback (most recent call last):
       ...
     NameError: name 'fresh' is not defined
-    >>> print("left", "right", sep="   ")  # doctest: +NORMALIZE_WHITESPACE
+    >>> print("left   right")  # doctest: +NORMALIZE_WHITESPACE
     left right
     >>> print("prefix-middle-suffix")  # doctest: +ELLIPSIS
     prefix...suffix
