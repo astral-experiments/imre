@@ -1152,7 +1152,7 @@ unsafe fn spawn_list(
     let cmd = unsafe { WordKind::new(5).acquire(args as usize) };
     let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, streams, 0, true);
     // SAFETY: the original configuration remains rooted while spawn reports any error.
-    unsafe { launch_error::spawn(&cmd, &config, streams, [-1; 3]) }
+    unsafe { launch_error::spawn(&cmd, &config, streams, [-1; 3], false) }
 }
 
 /// # Safety
@@ -1233,7 +1233,15 @@ unsafe fn prepare_process(
     // SAFETY: existing run and asynchronous ABIs accept an exact list.
     let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, 0, 0, true);
     // SAFETY: the legacy arguments have their original word representations.
-    unsafe { prepare_command(&WordKind::new(5).acquire(args as usize), &config) }
+    unsafe { prepare_command(&WordKind::new(5).acquire(args as usize), &config, false) }
+}
+
+/// Conversion error shared by Popen's file descriptors and pipe buffer sizes.
+fn c_int_overflow() -> Error {
+    Error::new(
+        Kind::OverflowError,
+        "Python int too large to convert to C int",
+    )
 }
 
 /// # Safety
@@ -1241,6 +1249,7 @@ unsafe fn prepare_process(
 unsafe fn prepare_command(
     cmd: &OwnedWord,
     config: &popen::LaunchConfig,
+    oversized_fork_fd: bool,
 ) -> Result<(Launch, Option<CString>)> {
     // SAFETY: the caller roots the exact argv, optional directory and environment.
     unsafe {
@@ -1257,7 +1266,7 @@ unsafe fn prepare_command(
                 "path-like args is not allowed when shell is true",
             ));
         }
-        if !config.shell && config.executable.is_null() && argv::empty(cmd) {
+        if !config.shell && config.executable.is_null() && argv::first(cmd).is_none() {
             return Err(Error::new(Kind::IndexError, "list index out of range"));
         }
         let env = if config.env.is_null() {
@@ -1278,6 +1287,10 @@ unsafe fn prepare_command(
                 Kind::ValueError,
                 "illegal environment variable name",
             ));
+        }
+        // The fork/exec C argument parser converts descriptors before processing argv.
+        if oversized_fork_fd {
+            return Err(c_int_overflow());
         }
         let executable = argv::optional_path(config.executable, config.executable_kind)?;
         let mut argv = argv::copy(cmd)?;
