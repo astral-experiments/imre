@@ -261,7 +261,132 @@
         }
       },
       "test_bodies_executed": 0
+    },
+    {
+      "operation": "unchanged package import and runner startup on the hosted link integration",
+      "imre_base_commit": "19d5f95354128d2be22b807a571d29f0a9380999",
+      "imre_pr_head": "42f71e57205fc58b57a71c7625530f52099d01a0",
+      "imre_tree": "14ba92b150c532af8a7fc5a1c789128ef272865c",
+      "workflow_run": "https://github.com/astral-sh/imre/actions/runs/40186925884",
+      "entry_and_support_sha256": {
+        "imre_pathlib_imports.py": "f0133059535e8c74383b6695eb1877f55f81f372ed6a2a464c263a6293654db0",
+        "imre_pathlib_run.py": "9da1be0eb0bf575bc4ade1b68d478f600fc8820609d7189c4aa30c296c2470a8",
+        "test/support/__init__.py": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4"
+      },
+      "layout_checks": {
+        "test_package_only": [
+          {
+            "entry": "imre_pathlib_imports.py",
+            "mode": [
+              "whole"
+            ],
+            "check_exit": 1,
+            "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+          },
+          {
+            "entry": "imre_pathlib_imports.py",
+            "mode": [
+              "--reachable-only"
+            ],
+            "check_exit": 1,
+            "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          },
+          {
+            "entry": "imre_pathlib_run.py",
+            "mode": [
+              "whole"
+            ],
+            "check_exit": 1,
+            "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+          },
+          {
+            "entry": "imre_pathlib_run.py",
+            "mode": [
+              "--reachable-only"
+            ],
+            "check_exit": 1,
+            "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          }
+        ],
+        "full_cpython_lib": [
+          {
+            "entry": "imre_pathlib_imports.py",
+            "mode": [
+              "whole"
+            ],
+            "check_exit": 1,
+            "diagnostic": "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:1:1: Imre: standard-library shadowing is unsupported: \"os\""
+          },
+          {
+            "entry": "imre_pathlib_imports.py",
+            "mode": [
+              "--reachable-only"
+            ],
+            "check_exit": 1,
+            "diagnostic": "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:1:1: Imre: standard-library shadowing is unsupported: \"os\""
+          },
+          {
+            "entry": "imre_pathlib_run.py",
+            "mode": [
+              "whole"
+            ],
+            "check_exit": 1,
+            "diagnostic": "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:1:1: Imre: standard-library shadowing is unsupported: \"os\""
+          },
+          {
+            "entry": "imre_pathlib_run.py",
+            "mode": [
+              "--reachable-only"
+            ],
+            "check_exit": 1,
+            "diagnostic": "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:1:1: Imre: standard-library shadowing is unsupported: \"os\""
+          }
+        ]
+      },
+      "test_bodies_executed": 0
+    },
+    {
+      "operation": "unchanged package import and runner startup on the tree published by the link merge",
+      "imre_commit": "c530176cdf49da40ae2f14e91d0d9519259c5a50",
+      "imre_tree": "e3641df239ad178767c773a73541d9759c29c2e6",
+      "checked_local_merge_commit": "176dfd5b301a94ea6f72f00ace1ba00d963ef7f3",
+      "layout": "test package and entry points without a competing os.py",
+      "checks": [
+        {
+          "entry": "imre_pathlib_imports.py",
+          "mode": [
+            "whole"
+          ],
+          "check_exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+        },
+        {
+          "entry": "imre_pathlib_imports.py",
+          "mode": [
+            "--reachable-only"
+          ],
+          "check_exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        },
+        {
+          "entry": "imre_pathlib_run.py",
+          "mode": [
+            "whole"
+          ],
+          "check_exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+        },
+        {
+          "entry": "imre_pathlib_run.py",
+          "mode": [
+            "--reachable-only"
+          ],
+          "check_exit": 1,
+          "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        }
+      ],
+      "test_bodies_executed": 0
     }
   ],
-  "next_shared_blocker": "native import of _opcode at Lib/test/support/__init__.py:11; all four unchanged entry-point/mode checks, zero upstream methods reached"
+  "next_shared_blocker": "At c530176 on the test-package-only root, both normal entry points stop at TestFailedWithDetails(TestFailed) in test/support/__init__.py:133; both reachable-only entry points stop at the target conditional in PythonSymlink at line 1613. Zero path test bodies ran."
 }
