@@ -46,3 +46,15 @@ The [native report](native-linux.json) records both `-O0` and `-O3`. The [shared
 Run `bodies.py` with the same options as `native.py`. It uses the [shared suite runner](../../SUITE_RUNNER.md) to compile each complete verified method into a native fixture. The original CPython module, class, and instance fixtures run on the host. The child process executes the unmodified body, its assertions, and standard JSON operations in Imre. Both CPython fixture IDs call the same native executable. The [body report](bodies-linux.json) records per-ID execution evidence and source hashes at both levels. Each level passed 24 fixture executions from 12 methods. Each fixture ran all 55,295 iterations of the Unicode escape sweep, and all 34 inputs in the JSON checker failure test.
 
 Run `sweep.py` with the same flags to try every one of the 112 defining unittest methods with the native TestCase and the pinned module declarations and class helpers it references. The [sweep](routine-sweep-linux.json) records the outcome for each definition and its fixture IDs at O0 and O3. With this general fixture, two methods completed, three compiled but failed at runtime, 106 had compile or decorator blockers, and one retained its upstream resource skip. These are alternate attempts at the same occurrences, not an additional denominator. The typed fixture checks above cover another ten methods. For example, the general integer assertion projects the decoded results of the three `test_parse` round trips to int; it fails when those results are lists or dictionaries.
+
+### The three round-trip failures
+
+The [diagnostic run](roundtrips-linux.json) isolates `test_pass1`, `test_pass2` and `test_pass3`. Each defines one `test_parse` method inherited by a Python and a C fixture. At both optimization levels the native parse–serialize–parse sequence produced the same output bytes as the pinned reference for all three inputs. The final inherited `TestCase.assertEqual` raised `TypeError: expected int, got list from JSON` for the first two and `TypeError: expected int, got dict from JSON` for the third.
+
+The [reproducer](roundtrips.py) also compiles the unchanged methods with just `assertEqual` overridden to compare its operands directly. On the measured revision, the compiler rejected comparisons between two parsed JSON values. Three independent controls change a nested leaf and require the native assertion to reject the unequal documents. These controls exercise the assertion; they add no upstream occurrences. The fixture lifecycle remains on CPython in both attempts.
+
+```sh
+python -B benchmarks/cpython_stdlib/full/json/roundtrips.py \
+    --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
+    --imre-revision "$(git rev-parse HEAD)" --result /tmp/json-roundtrips.json
+```
