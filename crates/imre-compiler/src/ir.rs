@@ -450,6 +450,11 @@ pub(crate) enum ZipField {
 pub(crate) enum Builtin {
     Repeat,
     CursorLengthHint,
+    Progression {
+        bounded: bool,
+    },
+    Islice,
+    Cycle,
     DirectoryContextView,
     Document(DocumentOp),
     /// Runs the static archive's module initializer in ordinary import order.

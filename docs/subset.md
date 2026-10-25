@@ -73,6 +73,17 @@ Omitting `times` repeats forever; a nonpositive integer exhausts immediately.
 `operator.length_hint(it[, default])` returns the remaining finite count or the
 default for an unbounded repeat. A finite repeat's repr shows the current count.
 
+`itertools.islice(source, stop)` and `islice(source, start, stop[, step])`
+consume only the underlying items needed to reach each result. Exhausting a
+finite slice advances a sufficiently long source to `max(start, stop)`. The
+cursor releases its source on exhaustion or a pull error. `cycle(source)`
+retains each item from its first pass and then replays those same objects.
+Sources include supported cursors, ranges, lists, strings, bytes, dictionary
+keys, sets and homogeneous fixed tuples. A list stays live during iteration.
+`count(start=0, step=1)` supports integers of any size and floating-point starts
+with integer or floating-point steps. A floating-point step with an integer
+start requires a mixed numeric element type and is currently unsupported.
+
 `itertools.chain` accepts a fixed number of positional iterables with one exact
 element type. A loop, comprehension, or immediate consumer can use the chain.
 It evaluates source expressions left to right, then acquires each iterator on

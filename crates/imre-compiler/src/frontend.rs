@@ -5381,6 +5381,10 @@ impl<'a> Checker<'a> {
                 return self.cursor_length_hint(call);
             }
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
+            Some(Binding::Intrinsic(Intrinsic::Count)) => return self.count_cursor(call),
+            Some(Binding::Intrinsic(Intrinsic::Islice | Intrinsic::Cycle)) => {
+                return self.source_adapter(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
                 return Err(error(
                     self.source,
