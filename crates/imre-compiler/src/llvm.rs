@@ -3295,7 +3295,7 @@ impl Emitter<'_, '_> {
                             (left, right)
                         };
                     let strict = u32::from(matches!(op, Compare::Less | Compare::Greater));
-                    let result = self.instruction(format!(
+                    let result = self.checked_instruction(format!(
                         "call i32 @imre_counter_subset(ptr {}, ptr {}, i32 {strict})",
                         subset.operand, superset.operand
                     ));
@@ -3317,6 +3317,9 @@ impl Emitter<'_, '_> {
                         "call i32 @imre_{operation}_equal(ptr {}, ptr {})",
                         left.operand, right.operand
                     ));
+                    if !left.ty.is_path() {
+                        self.check_error();
+                    }
                     let predicate = if matches!(op, Compare::Equal) {
                         "ne"
                     } else {
@@ -8607,6 +8610,29 @@ mod tests {
                     .unwrap()
                     .contains("call i32 @imre_error_pending()"),
                 "{symbol}"
+            );
+        }
+    }
+
+    #[test]
+    fn structural_comparisons_raise_at_the_comparison_and_at_its_caller() {
+        let llvm = compile(
+            "from collections import Counter\ndef same(a: set[tuple[int, int]], b: set[tuple[int, int]]) -> bool:\n    return a == b\ndef subset(a: Counter[tuple[int, int]], b: Counter[tuple[int, int]]) -> bool:\n    return a <= b\ndef handle(s: set[tuple[int, int]], c: Counter[tuple[int, int]]) -> bool:\n    try:\n        return same(s, s) and subset(c, c)\n    except MemoryError:\n        return False\n",
+            &CompileOptions::default(),
+        ).unwrap();
+        for call in [
+            "i32 @imre_sequence_equal",
+            "i32 @imre_counter_subset",
+            "i1 @fn_0",
+            "i1 @fn_1",
+        ] {
+            let mut lines = llvm
+                .lines()
+                .skip_while(|line| !line.contains(&format!("call {call}(")));
+            assert!(lines.next().is_some(), "{call}");
+            assert!(
+                lines.next().unwrap().contains("@imre_error_pending()"),
+                "{call}"
             );
         }
     }
