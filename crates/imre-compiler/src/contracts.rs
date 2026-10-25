@@ -57,6 +57,17 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
+            Self::Str
+                if args
+                    .first()
+                    .is_some_and(|e| matches!(e.ty, Type::Exception | Type::NamedException(_))) =>
+            {
+                Contract::new(true, Unknown)
+            }
+            Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
+            Self::ExceptionArgument(_) | Self::NamedException { .. } => {
+                Contract::new(false, PreservesLists)
+            }
             // Even a zero-argument call may mutate a retained native list or reenter Python.
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
@@ -109,6 +120,12 @@ impl Builtin {
                     | PathOperation::Scripts
                     | PathOperation::OsExists
                     | PathOperation::New
+                    | PathOperation::PureNew(_)
+                    | PathOperation::JoinObject
+                    | PathOperation::Drive
+                    | PathOperation::Root
+                    | PathOperation::Anchor
+                    | PathOperation::AsPosix
                     | PathOperation::Join
                     | PathOperation::Text
                     | PathOperation::Name
@@ -197,6 +214,7 @@ impl Builtin {
             ),
             Self::BytesGet
             | Self::Decode
+            | Self::HashNew
             | Self::DecodeSplitLines
             | Self::SplitLines
             | Self::DictGet
@@ -237,11 +255,12 @@ impl Builtin {
             | Self::Encode
             | Self::Sha256Hex
             | Self::Sha256New
+            | Self::HashAvailable
             | Self::Sha256Update
             | Self::Sha256Digest { .. }
             | Self::Sha256Copy
+            | Self::ExceptionRecord
             | Self::ExceptionCause
-            | Self::ExceptionMessage
             | Self::ExceptionSuppressContext
             | Self::FloatFormat { .. }
             | Self::GlobalGet(_)
@@ -562,6 +581,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
             name,
             "int_floordiv"
                 | "imre_json_index"
+                | "imre_exception_message"
+                | "imre_exception_repr"
                 | "imre_json_iter"
                 | "imre_json_len"
                 | "imre_json_get_receiver"
@@ -604,6 +625,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_decode_splitlines"
                 | "imre_str_splitlines"
                 | "imre_bytes_decode"
+                | "imre_hash_new"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
                 | "imre_binary_open"

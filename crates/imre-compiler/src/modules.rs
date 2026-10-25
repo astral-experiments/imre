@@ -166,6 +166,8 @@ pub(crate) enum Intrinsic {
     UnsupportedOperation,
     GzipOpen,
     Sha256,
+    HashNew,
+    HashAvailable,
     ZipFile,
     ZipInfo,
     BytesIo,
@@ -202,9 +204,11 @@ pub(crate) enum Intrinsic {
     DataclassField,
     AsDict,
     SelfType,
+    ClassVar,
     AssertNever,
     Cast,
     Path,
+    PurePath(crate::ir::PathFlavor),
     Which,
     CopyFile,
     ShutilError,
@@ -367,6 +371,7 @@ impl IntrinsicModule {
             (Self::Typing, "Union") => Intrinsic::Union,
             (Self::Typing, "Literal") => Intrinsic::Literal,
             (Self::Typing, "Self") => Intrinsic::SelfType,
+            (Self::Typing, "ClassVar") => Intrinsic::ClassVar,
             (Self::Typing, "Any") => Intrinsic::Any,
             (Self::Typing, "assert_never") => Intrinsic::AssertNever,
             (Self::Typing, "cast") => Intrinsic::Cast,
@@ -377,6 +382,8 @@ impl IntrinsicModule {
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
+            (Self::Hashlib, "new") => Intrinsic::HashNew,
+            (Self::Hashlib, "algorithms_available") => Intrinsic::HashAvailable,
             (Self::Zipfile, "ZipFile") => Intrinsic::ZipFile,
             (Self::Zipfile, "ZipInfo") => Intrinsic::ZipInfo,
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
@@ -412,6 +419,12 @@ impl IntrinsicModule {
             (Self::Dataclasses, "field") => Intrinsic::DataclassField,
             (Self::Dataclasses, "asdict") => Intrinsic::AsDict,
             (Self::Pathlib, "Path" | "PosixPath") => Intrinsic::Path,
+            (Self::Pathlib, "PurePath" | "PurePosixPath") => {
+                Intrinsic::PurePath(crate::ir::PathFlavor::Posix)
+            }
+            (Self::Pathlib, "PureWindowsPath") => {
+                Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
+            }
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Shutil, "copyfile") => Intrinsic::CopyFile,
             (Self::Shutil, "Error") => Intrinsic::ShutilError,

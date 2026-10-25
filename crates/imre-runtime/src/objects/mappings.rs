@@ -61,7 +61,7 @@ impl Eq for PathKey {}
 impl Hash for PathKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // SAFETY: the key roots immutable path storage for this nonreentrant hash.
-        unsafe { self.0.0.with(|path| path.path().hash(state)) };
+        unsafe { self.0.0.with(|path| path.path_key().hash(state)) };
     }
 }
 

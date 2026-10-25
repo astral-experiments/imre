@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use super::super::exceptions::{Error, Kind, finish, push_string_repr};
 use super::super::files::{close_file, errno_error, errno_with_paths};
-use super::super::{Bytes, Object, Str, bytes, object};
+use super::super::{Bytes, Object, Str, bytes, paths};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -28,7 +28,7 @@ impl<'a> Name<'a> {
             match tag {
                 0 => Self::Text(&*value.cast::<Str>()),
                 1 => Self::Bytes(&*value.cast::<Bytes>()),
-                2 => Self::Path(object(value.cast()).0.with(|s| s.path_text().clone())),
+                2 => Self::Path(Rc::from_raw(paths::imre_path_text(value.cast()))),
                 _ => unreachable!(),
             }
         }

@@ -68,7 +68,9 @@ impl Types {
             Type::Callable(id) => matches!(storage.shapes.get(id), Some(Shape::Callable(..))),
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
-            Type::Class(id) | Type::StrEnum(id) | Type::Enum(id) => id < classes,
+            Type::Class(id) | Type::NamedException(id) | Type::StrEnum(id) | Type::Enum(id) => {
+                id < classes
+            }
             Type::Coroutine(id) | Type::Task(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::Awaitable(_)))
             }
@@ -91,6 +93,7 @@ impl Types {
             | Type::TextIO
             | Type::BinaryIO
             | Type::Path
+            | Type::PurePath(_)
             | Type::CompletedProcess(_)
             | Type::EventLoop
             | Type::TaskGroup
@@ -245,6 +248,7 @@ impl Types {
                 | Type::Enum(_)
                 | Type::Bytes
                 | Type::Path
+                | Type::PurePath(_)
         ) || matches!(ty, Type::Tuple(_) | Type::Class(_)) && self.immutable_key_field(ty)
     }
 
@@ -261,6 +265,7 @@ impl Types {
             | Type::Enum(_)
             | Type::Bytes
             | Type::Path
+            | Type::PurePath(_)
             | Type::None => true,
             Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
             Type::Tuple(_) => self
@@ -400,6 +405,7 @@ impl Types {
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::Path
+            | Type::PurePath(_)
             | Type::CompletedProcess(_)
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -719,7 +725,7 @@ impl TypeDescription<'_> {
             | Type::Set(id)
             | Type::Optional(id)
             | Type::Union(id) => id,
-            Type::Class(id) | Type::StrEnum(id) | Type::Enum(id) => {
+            Type::Class(id) | Type::NamedException(id) | Type::StrEnum(id) | Type::Enum(id) => {
                 return self.write_str(&(self.class_name)(id));
             }
             _ => return write!(self, "{ty}"),
