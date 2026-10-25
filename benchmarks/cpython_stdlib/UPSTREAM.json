@@ -43,6 +43,7 @@
     "Lib/test/test_pathlib/test_read.py": "482203c290a3c4e136d11ae04ad52b1f15a2b277",
     "Lib/test/test_pathlib/test_write.py": "15054e804ec9fdf86c8b0b736b66242599579e92",
     "Lib/test/test_posixpath.py": "21f06712548d888ddf999ae127881420011d881e",
+    "Lib/test/test_re.py": "f6e797b3785dbeb21c2e3bd94ebffed10f043b54",
     "Lib/test/test_shutil.py": "fb1a7d876a617e17bcecbb8d8b654a2a87dafe48",
     "Lib/test/test_subprocess.py": "7e04934c317a91d1f5f1a284929d5f35c9cf5a58",
     "Lib/test/test_sys.py": "0db0369500a7c7c965386bda5646046978fec3c7",

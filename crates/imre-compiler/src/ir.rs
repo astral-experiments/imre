@@ -623,6 +623,7 @@ pub(crate) enum Builtin {
     /// The compile-time validated pattern is independent of the source spelling.
     RegexCompile(String),
     RegexSearch,
+    RegexSub(Vec<u8>),
     RegexGroupDict,
     RegexMatchStart,
     /// A proved selector is a valid numeric index for every possible receiver.

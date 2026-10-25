@@ -3623,6 +3623,20 @@ impl Emitter<'_, '_> {
                     self.call(name, returns, &values)
                 }
             }
+            Builtin::RegexSub(template) => {
+                let name = self.byte_array(template.clone());
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_regex_sub(ptr {}, ptr {}, ptr @{name}, i64 {})",
+                    args[0].value.operand,
+                    args[1].value.operand,
+                    template.len()
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::RegexSearch | Builtin::RegexMatchStart => {
                 let operation = if matches!(builtin, Builtin::RegexMatchStart) {
                     "match"
@@ -6002,6 +6016,7 @@ declare void @imre_print_none()
 declare ptr @imre_str_static_literal(ptr, i64)
 declare ptr @imre_regex_compile(ptr, i64)
 declare ptr @imre_regex_search(ptr, ptr)
+declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_match(ptr, ptr)
 declare ptr @imre_log_get(i64)
 declare void @imre_log_config(i64, i64, i64, i1)

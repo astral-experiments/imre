@@ -605,11 +605,11 @@ pub(crate) fn lower_with_owners(
         }
     }
     let initializer_start = definitions.len();
-    let helpers = Helpers::new(definitions.len() + graph.initializer_modules().count());
+    let helpers = Helpers::new(definitions.len() + graph.initializers().count());
     let globals = ModuleValues::default();
     let mut initializations = Vec::new();
     let mut available = HashSet::new();
-    for module_id in graph.initializer_modules() {
+    for (module_id, range) in graph.initializers() {
         let checker = Checker::new(
             graph,
             module_id,
@@ -620,7 +620,7 @@ pub(crate) fn lower_with_owners(
             &globals,
         );
         initializations.push(
-            Initialization::lower(checker, &mut available)
+            Initialization::lower(checker, &mut available, range)
                 .map_err(|error| format!("{}:{error}", graph.modules[module_id].path.display()))?,
         );
     }
@@ -5139,6 +5139,20 @@ impl<'a> Checker<'a> {
                 )?;
                 return Ok(self.ordered_builtin(Builtin::UrlsafeB64encode, Type::Bytes, args));
             }
+            Some(Binding::Intrinsic(Intrinsic::Cast)) => {
+                self.reject_builtin_keywords(call)?;
+                let [ast::Expr::StringLiteral(target), value] = call.arguments.args.as_ref() else {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "typing.cast requires a quoted type and a value",
+                    ));
+                };
+                // cast returns its second argument verbatim. The quoted type is a
+                // runtime string constant; it does not check or change the value.
+                check_string(target, self.source)?;
+                return self.typed_expr(value);
+            }
             Some(Binding::Intrinsic(Intrinsic::Sha256)) => return self.sha256_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
@@ -5187,6 +5201,7 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::RegexSub)) => return self.sub_regex(call),
             Some(Binding::Intrinsic(
                 intrinsic @ (Intrinsic::GetSysconfigPath | Intrinsic::OsPathExists),
             )) => {
@@ -5675,14 +5690,15 @@ impl<'a> Checker<'a> {
                 .as_ref()
                 .is_some_and(|name| name.as_str() == "file")
             && self.resolve(&field.value) == Some(Binding::Intrinsic(Intrinsic::Stderr))
-            && let [text] = call.arguments.args.as_slice()
+            && call.arguments.args.len() <= 1
         {
+            let text = match call.arguments.args.first() {
+                Some(text) => self.expr_expected(text, Type::Str)?,
+                None => unpacking::string(""),
+            };
             return Ok(Expr {
                 ty: Type::None,
-                kind: ExprKind::Builtin(
-                    Builtin::StderrLine,
-                    vec![self.expr_expected(text, Type::Str)?],
-                ),
+                kind: ExprKind::Builtin(Builtin::StderrLine, vec![text]),
             });
         }
         match name.id.as_str() {
