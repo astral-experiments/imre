@@ -170,8 +170,8 @@ pipe implementation revision and remains useful for comparing individual calls.
 | --- | ---: | ---: |
 | Fully native | 0 | 0 |
 | Native method and subprocess operation, CPython fixture | 50 | 50 |
-| Host method and assertions, native subprocess operation | 70 | 70 |
-| Both host and native subprocess operations | 8 | 8 |
+| Host method and assertions, native subprocess operation | 69 | 69 |
+| Both host and native subprocess operations | 9 | 9 |
 | Host subprocess operation only | 6 | 6 |
 | Blocked | 163 | 163 |
 | Failed | 15 | 15 |

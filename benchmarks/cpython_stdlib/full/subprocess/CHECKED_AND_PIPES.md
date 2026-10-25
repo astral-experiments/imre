@@ -37,11 +37,15 @@ and retried on the same fd; both reached EOF and both children were reaped.
 The handler in the native parent forwarded each delivery over the fixture socket.
 The original Python signal callback ran once for each data child before the
 corresponding `communicate()` returned.
-The one-pipe path made no selector calls. For `test_select_unbuffered`, the
-host's select received the same open file description via SCM_RIGHTS. The
-native read took four bytes; FIONREAD found one byte left in the kernel. The
-small [C fixture](fixture_pipes.c) transfers signal disposition or an existing
-fd; the compiled process owns launch, communication, file operations and wait.
+The one-pipe path made no selector calls in either EINTR method. Both are
+host-driven native subprocess operations.
+
+`test_select_unbuffered` is **mixed**. Imre read four bytes; the host received
+the same open file description via SCM_RIGHTS and called its real `select()`.
+The returned readable object was the exact stream passed by the original
+method, with one byte left in the kernel. Imre closed the stream and reaped the
+child. The small [C fixture](fixture_pipes.c) transfers signal disposition or an
+existing fd.
 
 ### Reproduction on Linux
 

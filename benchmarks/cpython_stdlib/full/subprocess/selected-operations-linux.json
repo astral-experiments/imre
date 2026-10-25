@@ -834,14 +834,15 @@
               "roles": {
                 "body": "cpython",
                 "assertions": "cpython",
-                "operation": "imre",
+                "operation": "mixed",
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "87f27494ccc6bffcb3c8df1608fca86bc14af659fcdddd981ad7096b87986afe",
+                "actor_sha256": "a070fb7a13d96bf3dbf23eb509e9f7e4e975c848b353cb34001d036833cfa119",
                 "read_bytes": 4,
                 "remaining_kernel_bytes": 1,
                 "same_open_file_description": "SCM_RIGHTS",
+                "host_select_returned_original_stream": true,
                 "native_stream_closed": true,
                 "native_reaps": 1
               }
@@ -860,7 +861,7 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "5a25be3c76fa25eb80046fa892aa09002bf3d35a7a6cee331789e213c01c95ee",
+                "actor_sha256": "4daa27b6df38bcea291ccbbd2af94fc53b3cc06b48f06d078d276d3c8d313060",
                 "selector": "PollSelector",
                 "native_deliveries": 2,
                 "original_handler_calls": 2,
@@ -902,7 +903,7 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "b5c69529cd7adf7f36888d23362ab874709d5088462e28c52991c69bde19fe24",
+                "actor_sha256": "c502cf2281cd3f8dfde8c7c1181aa3218d724850a348f2075602d95370a4b7ef",
                 "selector": "SelectSelector",
                 "native_deliveries": 2,
                 "original_handler_calls": 2,
@@ -1765,14 +1766,15 @@
               "roles": {
                 "body": "cpython",
                 "assertions": "cpython",
-                "operation": "imre",
+                "operation": "mixed",
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "cbcfb0ca621ee8d0dae00f4d4d1386c8f23d44c9cbd815a864839a19fa6bf051",
+                "actor_sha256": "d0ff5fff769a3528854e20ffbd979af9d5be84271a91fb4ac101598c8db679b2",
                 "read_bytes": 4,
                 "remaining_kernel_bytes": 1,
                 "same_open_file_description": "SCM_RIGHTS",
+                "host_select_returned_original_stream": true,
                 "native_stream_closed": true,
                 "native_reaps": 1
               }
@@ -1791,7 +1793,7 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "832333243267f4368c51a5d50c3abbccf2feb033646b1f444e7148327a6939de",
+                "actor_sha256": "dee8f2a8319b7fcdfdd35edbda56785df9e394a08794bb8b0036bee4be3159da",
                 "selector": "PollSelector",
                 "native_deliveries": 2,
                 "original_handler_calls": 2,
@@ -1833,7 +1835,7 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "c4f5c1753133d627f4c39c055fd659b37f2995a1a48b240e6fab0097fa03ac08",
+                "actor_sha256": "6ab96a786e143f982de1938082aef0f21c856a525b5b1291c438401fb9cc2467",
                 "selector": "SelectSelector",
                 "native_deliveries": 2,
                 "original_handler_calls": 2,
