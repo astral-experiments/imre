@@ -236,6 +236,17 @@ impl Checker<'_> {
                 same
             });
         }
+        if [left.ty, right.ty].iter().all(|t| {
+            matches!(
+                t,
+                Type::FunctionRef | Type::Callable(_) | Type::OverloadStub
+            )
+        }) {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         // A comparison with a bool singleton only observes whether the other
         // operand is that same singleton; integer object identity is irrelevant.
         if let Some(union) = [left.ty, right.ty]
@@ -434,7 +445,7 @@ impl Checker<'_> {
             || (types.iter().all(|ty| matches!(ty, Type::Tuple(_)))
                 && types
                     .iter()
-                    .any(|ty| self.types.library_tuple_fields(*ty).is_some()))
+                    .any(|ty| self.types.tuple_metadata(*ty).is_some()))
             || types == [Type::Logger; 2]
             || types
                 .iter()

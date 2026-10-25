@@ -59,6 +59,9 @@ pub(super) struct Helper {
 pub(super) struct Helpers {
     first: usize,
     functions: RefCell<Vec<Option<Helper>>>,
+    /// Lifted functions normally leave scope after checking their enclosing body.
+    pub(super) local_annotations:
+        RefCell<HashMap<usize, (ModuleId, std::rc::Rc<ast::StmtFunctionDef>)>>,
     pub(super) list_builds: RefCell<HashMap<usize, ir::ListBuild>>,
 }
 
@@ -67,6 +70,7 @@ impl Helpers {
         Self {
             first,
             functions: RefCell::new(Vec::new()),
+            local_annotations: RefCell::default(),
             list_builds: RefCell::default(),
         }
     }
@@ -198,12 +202,7 @@ pub(super) fn function_reads(function: &ast::StmtFunctionDef) -> HashSet<String>
 impl Reads {
     fn visit_function(&mut self, function: &ast::StmtFunctionDef) {
         let mut bound = narrowing::assigned_names(&function.body);
-        bound.extend(
-            function
-                .parameters
-                .iter_non_variadic_params()
-                .map(|p| p.name().to_string()),
-        );
+        bound.extend(closed_calls::parameters(&function.parameters).map(|p| p.name.to_string()));
         self.bound.push(bound);
         self.visit_body(&function.body);
         self.bound.pop();

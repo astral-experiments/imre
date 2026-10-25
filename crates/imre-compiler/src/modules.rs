@@ -140,6 +140,11 @@ pub(crate) enum Intrinsic {
     ModuleSpec,
     CachePath { reverse: bool },
     GetAnnotations,
+    Overload,
+    GetOverloads,
+    OverloadRegistry,
+    OverloadDummy,
+    ClearOverloads,
     ForwardRef,
     AnnotationTypeRepr,
     AnnotationFormat(i64),
@@ -194,6 +199,7 @@ pub(crate) enum Intrinsic {
     FunctionCache,
     CacheInfo,
     LruCache,
+    SingleDispatch,
     CachedProperty,
     NewType,
     Partial,
@@ -208,6 +214,7 @@ pub(crate) enum Intrinsic {
     Pipe,
     Devnull,
     CheckOutput,
+    ShellOutput { status: bool },
     NullContext,
     IntConstant(i64),
     WallTime,
@@ -431,7 +438,7 @@ impl IntrinsicModule {
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
             "difflib" => Some(Self::Difflib),
-            "select" => Some(Self::Select),
+            "select" if cfg!(any(target_os = "linux", target_os = "macos")) => Some(Self::Select),
             "_imre_doctest" => Some(Self::DoctestRuntime),
             "_imre_mock" => Some(Self::MockRuntime),
             "pathlib" => Some(Self::Pathlib),
@@ -592,6 +599,11 @@ impl IntrinsicModule {
             }
             (Self::Unidiff, "PatchSet") => Intrinsic::PatchSet,
             (Self::CollectionsAbc, "Awaitable") => Intrinsic::Awaitable,
+            (Self::Typing, "overload") => Intrinsic::Overload,
+            (Self::Typing, "get_overloads") => Intrinsic::GetOverloads,
+            (Self::Typing, "_overload_registry") => Intrinsic::OverloadRegistry,
+            (Self::Typing, "_overload_dummy") => Intrinsic::OverloadDummy,
+            (Self::Typing, "clear_overloads") => Intrinsic::ClearOverloads,
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
             (Self::Typing, "NewType") => Intrinsic::NewType,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
@@ -603,6 +615,7 @@ impl IntrinsicModule {
                 Intrinsic::WrapperAttributes(WrapperAttributes::Updated)
             }
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
+            (Self::Functools, "singledispatch") => Intrinsic::SingleDispatch,
             (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
                 Intrinsic::Fnmatch(FnmatchOperation::Match {
                     normcase: name == "fnmatch",
@@ -628,6 +641,8 @@ impl IntrinsicModule {
             (Self::Subprocess, "PIPE") => Intrinsic::Pipe,
             (Self::Subprocess, "DEVNULL") => Intrinsic::Devnull,
             (Self::Subprocess, "check_output") => Intrinsic::CheckOutput,
+            (Self::Subprocess, "getoutput") => Intrinsic::ShellOutput { status: false },
+            (Self::Subprocess, "getstatusoutput") => Intrinsic::ShellOutput { status: true },
             (Self::Typing, "TYPE_CHECKING") => Intrinsic::TypeChecking,
             (Self::Sys, "stdin" | "__stdin__") => Intrinsic::Stdin,
             (Self::Sys, "stdout" | "__stdout__") => Intrinsic::Stdout,
@@ -889,6 +904,8 @@ pub(crate) struct SourceModule {
     /// Only an executed explicit submodule import populates the bare importlib namespace.
     importlib_children: HashMap<&'static str, TextSize>,
     pub(crate) aliases: Vec<TypeAlias>,
+    /// Decorated declarations register their original function at module initialization.
+    pub(crate) overloads: HashSet<usize>,
     pub(crate) type_guards: Vec<usize>,
     /// Fixed pattern declarations in the entry module precede ordinary executable statements.
     pub(crate) entry_globals: Vec<usize>,
@@ -1067,6 +1084,12 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
     }
 
+    /// A checked runtime overload can legally stand alone: calling the dummy raises.
+    pub(crate) fn runtime_overload(&self, module: ModuleId, name: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::RuntimeOverload(name));
+    }
+
     /// Mark the precise call whose behavior for missing arguments is handled by native lowering.
     pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
@@ -1077,6 +1100,12 @@ impl SourceGraph {
     pub(crate) fn checked_excess_argument(&self, module: ModuleId, argument: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::ExcessArgument(argument));
+    }
+
+    /// Native lowering accepts an inert body at this exact return annotation.
+    pub(crate) fn checked_inert_return(&self, module: ModuleId, annotation: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::InertReturn(annotation));
     }
 
     /// The native positional-only binder already raises at this exact keyword.
@@ -1205,7 +1234,7 @@ impl SourceGraph {
         (skipped, overloads)
     }
 
-    /// Entry segments initialize class and module globals and validate platform imports in order.
+    /// Entry segments preserve globals, platform import checks, and definition-time effects.
     pub(crate) fn initializers(
         &self,
         class_globals: bool,
@@ -1217,6 +1246,7 @@ impl SourceGraph {
                 *id != self.entry
                     || class_globals
                     || !module.entry_globals.is_empty()
+                    || !module.overloads.is_empty()
                     || (!segment.is_empty()
                         && errno_import(&module.parsed.syntax().body[segment.end - 1]).is_some())
             })
@@ -1602,6 +1632,7 @@ impl<'a> Loader<'a> {
             type_bindings: HashMap::new(),
             importlib_children: HashMap::new(),
             aliases: Vec::new(),
+            overloads: HashSet::new(),
             type_guards: Vec::new(),
             entry_globals: Vec::new(),
             executable: Vec::new(),
@@ -1758,15 +1789,26 @@ impl<'a> Loader<'a> {
                             "definitions must precede executable module statements",
                         ));
                     }
-                    self.bind(
-                        id,
-                        function.name.as_str(),
-                        Binding::Definition(DefinitionId {
-                            module: id,
-                            statement: index,
-                        }),
-                        statement,
-                    )?;
+                    let name = function.name.as_str();
+                    let current = Binding::Definition(DefinitionId {
+                        module: id,
+                        statement: index,
+                    });
+                    let decorated = matches!(function.decorator_list.as_slice(), [d]
+                        if resolve_binding(&self.modules, id, &d.expression) == Some(Binding::Intrinsic(Intrinsic::Overload)));
+                    let continues = matches!(self.modules[id].bindings.get(name), Some(Binding::Definition(previous))
+                        if previous.module == id && previous.statement + 1 == index && self.modules[id].overloads.contains(&previous.statement));
+                    if continues {
+                        // Nothing can observe the intermediate name between these
+                        // consecutive definitions. Intervening statements still go
+                        // through the ordinary static rebind rejection.
+                        self.modules[id].bindings.insert(name.into(), current);
+                    } else {
+                        self.bind(id, name, current, statement)?;
+                    }
+                    if decorated {
+                        self.modules[id].overloads.insert(index);
+                    }
                 }
                 ast::Stmt::ClassDef(class) => {
                     class_data_prefix |= class
@@ -2229,6 +2271,9 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
+            "selectors" if cfg!(any(target_os = "linux", target_os = "macos")) => {
+                Some(("selectors.py", include_str!("../stdlib/selectors.py")))
+            }
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
             "string" => Some((
                 "string/__init__.py",

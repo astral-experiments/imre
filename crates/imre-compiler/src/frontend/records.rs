@@ -1137,6 +1137,13 @@ impl Checker<'_> {
         {
             return Ok(names);
         }
+        if matches!(attribute.attr.as_str(), "assertIn" | "assertNotIn")
+            && let Some(receiver) = &receiver
+            && let Some(checked) =
+                self.unittest_membership(call, attribute.attr.as_str(), class, receiver)?
+        {
+            return Ok(checked);
+        }
         if matches!(attribute.attr.as_str(), "assertEqual" | "assertListEqual")
             && let Some(receiver) = &receiver
             && let Some(checked) =

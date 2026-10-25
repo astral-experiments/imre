@@ -157,7 +157,23 @@ impl<'a> Visitor<'a> for References<'_> {
                     }
                 }
             }
+            if matches!(name.as_str(), "assertIn" | "assertNotIn") {
+                self.found.attributes.extend(
+                    [
+                        "_assertTextMembership",
+                        "_assertTextListMembership",
+                        "_assertIntListMembership",
+                        "_assertTextDictMembership",
+                        "_assertIntKeyMembership",
+                    ]
+                    .into_iter()
+                    .map(str::to_owned),
+                );
+            }
             if matches!(name.as_str(), "assertEqual" | "assertListEqual") {
+                if name == "assertEqual" {
+                    self.found.attributes.insert("assertDictEqual".into());
+                }
                 self.found.attributes.extend(
                     [
                         "_baseAssertEqual",
@@ -370,6 +386,9 @@ impl Reachable {
                                 || unittest_method
                                 || assertion_exit
                                 || mock_dispatch
+                                || (source.is_bundled("selectors")
+                                    && class.name.as_str() == "PollSelector"
+                                    && name == "close")
                                 || refs.found.attributes.contains(name)
                                 || matches!(
                                     name,
