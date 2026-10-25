@@ -48,6 +48,8 @@ REJECTED = {
     "init_hook_skips_field": HOOK + "class Child(Build):\n    def prepare(self) -> None: pass\n",
     "init_hook_reads_before_write": HOOK + "class Child(Build):\n    def prepare(self) -> None: self.value = self.value + 1\n",
     "init_hook_leaks_receiver": HOOK + "def observe(value: Build) -> int: return value.value\nclass Child(Build):\n    def prepare(self) -> None: self.value = observe(self)\n",
+    "init_hook_observes_pending_field": HOOK + "class Child(Build):\n    def prepare(self) -> None:\n        print(self.value)\n        super().prepare()\n",
+    "init_hook_super_reads_pending_field": HOOK + "    def read(self) -> int: return self.value\nclass Child(Build):\n    def prepare(self) -> None: self.value = super().read()\n",
     "init_hook_duplicates_field": HOOK.replace("self.prepare()", "self.value = 2\n        self.prepare()"),
     "read_class_tuple_before_definition": 'def get() -> tuple[str]:\n    return Later.words\nvalue = get()\nclass Later:\n    words = ("late",)\n',
     "assign_to_class_string": 'class C:\n    label = "fixed"\nC.label = "new"\n',
