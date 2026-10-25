@@ -95,6 +95,9 @@ REJECTED = {
     "staticmethod": CELL.replace("    def add(", "    @staticmethod\n    def add("),
     "classmethod": CELL.replace("    def add(", "    @classmethod\n    def add("),
     "property": CELL.replace("    def add(", "    @property\n    def add("),
+    "read_only_assignment": "class C:\n    @property\n    def value(self) -> int: return 1\nC().value = 2\n",
+    "orphan_setter": "class C:\n    @value.setter\n    def value(self, n: int) -> None: pass\n",
+    "property_setter_arity": "class C:\n    def get(self) -> int: return 1\n    def put(self) -> None: pass\n    value = property(get, put)\n",
     "unused_dynamic_method": CELL.replace("return self.value", 'if False:\n            eval("1")\n        return self.value'),
     "same_shape_different_nominal_type": CELL
         + CELL.replace("Cell", "Other")
@@ -217,7 +220,7 @@ def main() -> None:
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "instance_layout.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py"]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "instance_layout.py", "property_setters.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py"]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)

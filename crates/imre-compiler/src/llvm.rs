@@ -4095,6 +4095,18 @@ impl Emitter<'_, '_> {
                 self.retain(&value);
                 self.owned(value)
             }
+            Builtin::CacheParameter(typed) => {
+                let operand = self.instruction(format!(
+                    "call ptr @imre_callable_cache_parameter(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(*typed)
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
             Builtin::CacheTable => self.call("imre_cache_table", returns, &[&args[0].value]),
             Builtin::CacheProbe(capacity) => {
                 let key = self.key_word(&args[1].value);
@@ -6756,6 +6768,8 @@ declare ptr @imre_cache_table(ptr)
 declare i1 @imre_cache_probe(ptr, i64, i64)
 declare void @imre_cache_insert(ptr, i64, i64, i64)
 declare i64 @imre_cache_stat(ptr, i32)
+declare void @imre_callable_copy_cache_policy(ptr, ptr, i64, i32) nounwind
+declare ptr @imre_callable_cache_parameter(ptr, i32)
 declare void @imre_cache_clear(ptr, i32, i32)
 declare ptr @imre_module_cache(i64, i32, i32)
 declare i64 @imre_document(i32, i64, i64, i64)
