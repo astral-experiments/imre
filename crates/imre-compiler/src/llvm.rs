@@ -5637,6 +5637,37 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::DefaultDictMissing => {
+                let key = self.key_word(&args[1].value);
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_defaultdict_missing(ptr {}, i64 {key})",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            Builtin::DefaultFactoryEnabled => {
+                let flag = self.instruction(format!(
+                    "call i32 @imre_defaultdict_has_factory(ptr {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {flag}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::DefaultFactorySet { enabled } => {
+                let receiver = &args[0].value;
+                let (_, list) = self.module.types.mapping(receiver.ty).unwrap();
+                let element = self.module.types.element(list).unwrap();
+                self.line(format!(
+                    "call void @imre_defaultdict_set_factory(ptr {}, i32 {}, i32 {})",
+                    receiver.operand,
+                    representation_kind(element, &self.module.types),
+                    u8::from(*enabled)
+                ));
+                none()
+            }
             Builtin::DefaultListDict => {
                 let (key, list) = self.module.types.mapping(returns).unwrap();
                 let element = self.module.types.element(list).unwrap();
@@ -7625,6 +7656,9 @@ declare i32 @imre_dict_try_pop(ptr, i64, ptr)
 declare i64 @imre_dict_pop(ptr, i64, i64, i32)
 declare i64 @imre_dict_get_default(ptr, i64, i64)
 declare i64 @imre_dict_setdefault(ptr, i64, i64)
+declare i64 @imre_defaultdict_missing(ptr, i64)
+declare i32 @imre_defaultdict_has_factory(ptr)
+declare void @imre_defaultdict_set_factory(ptr, i32, i32)
 declare void @imre_dict_set(ptr, i64, i64)
 declare void @imre_dict_delete(ptr, i64)
 declare void @imre_dict_clear(ptr)
