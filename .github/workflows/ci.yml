@@ -84,6 +84,7 @@ jobs:
               if test -f tests/fixtures/callables/annotations_deferred.py; then fixtures+=(tests/fixtures/callables/annotations_deferred.py); fi;;
             defaults) fixtures+=(tests/fixtures/module_values/wrapper_attributes/main.py);;
             dispatch) fixtures+=(tests/fixtures/callables/single_dispatch.py);;
+            percent) fixtures+=(tests/fixtures/text/percent_scalar.py tests/fixtures/text/percent_tuple.py);;
             links|wraps)
               fixtures+=(tests/fixtures/callables/wrapper_links.py tests/fixtures/module_values/wrapper_attributes/main.py)
               if test "$KIND" = wraps; then fixtures+=(tests/fixtures/callables/wraps_application.py); fi;;
@@ -164,7 +165,7 @@ jobs:
           SH
           bash "$RUNNER_TEMP/annotations"
       - name: Recheck current main for the defaults and annotation candidates
-        if: matrix.name == 'defaults' || matrix.name == 'annotation' || matrix.name == 'links' || matrix.name == 'wraps'
+        if: contains(fromJSON('["defaults","annotation","links","wraps","percent"]'), matrix.name)
         run: |
           while true; do
             read -r base tree commit < "$RUNNER_TEMP/source"
