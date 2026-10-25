@@ -77,6 +77,7 @@ impl Type {
             | Self::TimeoutExpired
             | Self::Path
             | Self::PurePath(_)
+            | Self::ModuleSpec(_)
             | Self::CompletedProcess(..)
             | Self::EventLoop
             | Self::Coroutine(_)
@@ -147,6 +148,7 @@ impl Type {
             | Self::TimeoutExpired
             | Self::Path
             | Self::PurePath(_)
+            | Self::ModuleSpec(_)
             | Self::CompletedProcess(..)
             | Self::EventLoop
             | Self::Coroutine(_)
@@ -734,6 +736,7 @@ impl Emitter<'_, '_> {
             | Type::Callable(_)
             | Type::ForwardRef(_)
             | Type::AnnotationValue(_)
+            | Type::ModuleSpec(_)
             | Type::CompletedProcess(..) => "record",
             Type::List(_)
             | Type::Dict(_)
@@ -3444,6 +3447,7 @@ impl Emitter<'_, '_> {
                 | Type::JsonObject
                 | Type::RegexMatch
                 | Type::Union(_)
+                | Type::ModuleSpec(_)
                 | Type::StringIterable => {
                     unreachable!("container comparison is rejected by the frontend")
                 }
@@ -5620,6 +5624,12 @@ impl Emitter<'_, '_> {
             Builtin::RecordCopy => {
                 self.call("imre_record_shallow_copy", returns, &[&args[0].value])
             }
+            Builtin::ModuleParentPrefix => {
+                self.call("imre_module_parent_prefix", returns, &[&args[0].value])
+            }
+            Builtin::ModuleCacheFromOrigin => {
+                self.call("imre_module_cache_from_origin", returns, &[&args[0].value])
+            }
             Builtin::NamespaceWrap | Builtin::NamespaceDict => self.call(
                 if matches!(builtin, Builtin::NamespaceWrap) {
                     "imre_namespace_wrap"
@@ -6172,6 +6182,7 @@ impl Emitter<'_, '_> {
                     | Type::JsonObject
                     | Type::RegexMatch
                     | Type::BinaryIO
+                    | Type::ModuleSpec(_)
                     | Type::CompletedProcess(..)
                     | Type::Tuple(_)
                     | Type::Optional(_)
@@ -6429,6 +6440,7 @@ impl Emitter<'_, '_> {
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
+            | Type::ModuleSpec(_)
             | Type::CompletedProcess(..)
             | Type::Tuple(_) => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
         }
@@ -6513,6 +6525,7 @@ impl Emitter<'_, '_> {
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
+            | Type::ModuleSpec(_)
             | Type::CompletedProcess(..)
             | Type::Tuple(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
         };
@@ -7059,7 +7072,11 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Bytes => 8,
         Type::Union(_) | Type::StringIterable => 9,
         Type::ListInt => 4,
-        Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(..) => 6,
+        Type::Class(_)
+        | Type::Tuple(_)
+        | Type::Callable(_)
+        | Type::ModuleSpec(_)
+        | Type::CompletedProcess(..) => 6,
         Type::List(_)
         | Type::Dict(_)
         | Type::Set(_)
@@ -7119,6 +7136,7 @@ fn record_name(ty: Type) -> String {
     match ty {
         Type::Class(id) => format!("class_{id}"),
         Type::Tuple(id) => format!("tuple_{id}"),
+        Type::ModuleSpec(id) => format!("module_spec_{id}"),
         Type::Callable(_) => "callable".to_owned(),
         Type::CompletedProcess(c, None) if c == crate::ir::ProcessCapture::TEXT => {
             "completed_process".to_owned()
@@ -7180,7 +7198,11 @@ fn record_layouts(module: &Module, output: &mut Output) {
             ],
         )
     });
-    for (ty, fields) in classes.chain(module.types.tuples()).chain(processes) {
+    for (ty, fields) in classes
+        .chain(module.types.tuples())
+        .chain(module.types.module_spec_layouts())
+        .chain(processes)
+    {
         let name = record_name(ty);
         let storage = fields
             .iter()
@@ -7888,6 +7910,8 @@ declare ptr @imre_regex_finditer(ptr, ptr)
 declare i32 @imre_regex_present(ptr, i64, i32)
 declare i64 @imre_regex_bound(ptr, i64, i32, i32)
 declare ptr @imre_str_get(ptr, i64)
+declare ptr @imre_module_parent_prefix(ptr)
+declare i64 @imre_module_cache_from_origin(i64)
 declare ptr @imre_str_slice(ptr, i64, i64, i64)
 declare ptr @imre_float_count(double, i32, i64)
 declare ptr @imre_progression(i64, i64, i64)

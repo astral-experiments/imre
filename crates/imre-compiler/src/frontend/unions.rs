@@ -161,6 +161,9 @@ impl Checker<'_> {
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
         match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::ModuleSpec)) => {
+                return Ok(vec![InstanceType::ModuleSpec]);
+            }
             Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => {
                 return Ok(vec![InstanceType::ForwardRef]);
             }

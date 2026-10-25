@@ -95,6 +95,8 @@ pub(crate) enum Type {
     StrDescriptor(StrDescriptor),
     /// A live namespace wrapper; the interned shape describes its string-keyed backing dict.
     SimpleNamespace(usize),
+    /// Nominal ModuleSpec backed by a record whose loader and state keep their exact types.
+    ModuleSpec(usize),
     Sha256,
     JsonDecoder,
     /// An open or closed ZIP archive retains its ordered central directory.
@@ -240,6 +242,7 @@ impl std::fmt::Display for Type {
             Self::PlainObject => "object",
             Self::StrDescriptor(_) => "method_descriptor",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
+            Self::ModuleSpec(_) => "importlib.machinery.ModuleSpec",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
@@ -960,6 +963,8 @@ pub(crate) enum Builtin {
     DictGet,
     DictCopy,
     DictFromKeysTarget,
+    ModuleParentPrefix,
+    ModuleCacheFromOrigin,
     NamespaceWrap,
     NamespaceDict,
     NamespaceGet,
@@ -1531,6 +1536,7 @@ pub(crate) enum InstanceType {
     Exact(Type),
     ForwardRef,
     SimpleNamespace,
+    ModuleSpec,
     StrEnum,
     List,
     Dict,
@@ -1555,6 +1561,7 @@ impl InstanceType {
             Self::Set => matches!(ty, Type::Set(_)),
             Self::Tuple => matches!(ty, Type::Tuple(_)),
             Self::SimpleNamespace => matches!(ty, Type::SimpleNamespace(_)),
+            Self::ModuleSpec => matches!(ty, Type::ModuleSpec(_)),
             Self::Exception(_) => matches!(
                 ty,
                 Type::Exception

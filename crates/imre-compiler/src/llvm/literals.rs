@@ -91,7 +91,7 @@ impl Emitter<'_, '_> {
                 roots.push(root.clone());
             }
             root
-        } else if values.iter().all(immutable_literal) {
+        } else if matches!(ty, Type::Tuple(_)) && values.iter().all(immutable_literal) {
             let unit = self.output.current;
             let roots = self.tuple_literals.entry(unit).or_default();
             let root = self
