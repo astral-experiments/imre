@@ -84,6 +84,7 @@ impl Types {
             | Type::Str
             | Type::Bytes
             | Type::ListInt
+            | Type::StringIterable
             | Type::StringKeys
             | Type::Iterator
             | Type::ByteOutput

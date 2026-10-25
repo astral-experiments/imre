@@ -232,6 +232,7 @@ impl Builtin {
             | Self::Slice
             | Self::StringFormat
             | Self::RegexSub(_)
+            | Self::StringIterationList
             | Self::StringJoin
             | Self::StringReplace
             | Self::StringGet
@@ -602,6 +603,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
                 | "imre_str_unquote"
+                | "imre_string_iterable_list"
                 | "imre_str_join"
                 | "imre_str_replace"
                 | "imre_print_str"

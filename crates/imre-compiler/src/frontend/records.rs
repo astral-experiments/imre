@@ -503,7 +503,16 @@ impl Checker<'_> {
         let previous = self.iterator_source.replace(expr.range());
         let result = self.boolean_operand(expr, hint);
         self.iterator_source = previous;
-        result.map(|value| self.document_iteration(value))
+        result.map(|value| {
+            if value.ty == Type::StringIterable {
+                Expr {
+                    ty: self.types.list(Type::Str),
+                    kind: ExprKind::Builtin(Builtin::StringIterationList, vec![value]),
+                }
+            } else {
+                self.document_iteration(value)
+            }
+        })
     }
 
     pub(super) fn record_generator(&self, context: MethodContext) -> bool {

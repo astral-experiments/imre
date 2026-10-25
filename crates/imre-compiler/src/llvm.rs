@@ -42,9 +42,12 @@ pub(crate) use units::emit_units;
 impl Type {
     fn llvm(self) -> &'static str {
         match self {
-            Self::Int | Self::StrEnum(_) | Self::Enum(_) | Self::Optional(_) | Self::Union(_) => {
-                "i64"
-            }
+            Self::Int
+            | Self::StrEnum(_)
+            | Self::Enum(_)
+            | Self::Optional(_)
+            | Self::Union(_)
+            | Self::StringIterable => "i64",
             Self::Float => "double",
             Self::Bool => "i1",
             Self::Str
@@ -138,7 +141,8 @@ impl Type {
             | Self::StrEnum(_)
             | Self::Enum(_)
             | Self::Optional(_)
-            | Self::Union(_) => "0",
+            | Self::Union(_)
+            | Self::StringIterable => "0",
         }
     }
 }
@@ -668,7 +672,7 @@ impl Emitter<'_, '_> {
         }
         let family = match ty {
             Type::Int => "int",
-            Type::Union(_) => "union",
+            Type::Union(_) | Type::StringIterable => "union",
             Type::Str | Type::StrLiteral(_) => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
@@ -3283,7 +3287,8 @@ impl Emitter<'_, '_> {
                 | Type::JsonValue
                 | Type::JsonObject
                 | Type::RegexMatch
-                | Type::Union(_) => {
+                | Type::Union(_)
+                | Type::StringIterable => {
                     unreachable!("container comparison is rejected by the frontend")
                 }
             }
@@ -3868,6 +3873,9 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
+            Builtin::StringIterationList => {
+                self.call("imre_string_iterable_list", returns, &[&args[0].value])
+            }
             Builtin::UnionInject => {
                 let value = self.own_operand(args.into_iter().next().unwrap());
                 return self.union_inject(value, returns);
@@ -4340,6 +4348,9 @@ impl Emitter<'_, '_> {
                 },
                 _ => unreachable!("float conversion was checked"),
             },
+            Builtin::Len if args[0].value.ty == Type::StringIterable => {
+                self.call("imre_string_iterable_len", Type::Int, &[&args[0].value])
+            }
             Builtin::Len if matches!(args[0].value.ty, Type::Tuple(_)) => {
                 small(self.module.types.fields(args[0].value.ty).unwrap().len() as i64)
             }
@@ -4871,7 +4882,8 @@ impl Emitter<'_, '_> {
                     | Type::Tuple(_)
                     | Type::Optional(_)
                     | Type::Callable(_)
-                    | Type::Union(_) => {
+                    | Type::Union(_)
+                    | Type::StringIterable => {
                         unreachable!("container printing is rejected")
                     }
                 }
@@ -5045,9 +5057,12 @@ impl Emitter<'_, '_> {
 
     fn word(&mut self, value: &Value) -> String {
         match value.ty {
-            Type::Int | Type::StrEnum(_) | Type::Enum(_) | Type::Optional(_) | Type::Union(_) => {
-                value.operand.clone()
-            }
+            Type::Int
+            | Type::StrEnum(_)
+            | Type::Enum(_)
+            | Type::Optional(_)
+            | Type::Union(_)
+            | Type::StringIterable => value.operand.clone(),
             Type::Float => self.instruction(format!("bitcast double {} to i64", value.operand)),
             Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
             Type::None => "0".to_owned(),
@@ -5103,9 +5118,12 @@ impl Emitter<'_, '_> {
     /// Changes only the compiler view of a word, leaving its ownership unchanged.
     fn decode_word(&mut self, word: String, ty: Type) -> Value {
         let operand = match ty {
-            Type::Int | Type::StrEnum(_) | Type::Enum(_) | Type::Optional(_) | Type::Union(_) => {
-                word
-            }
+            Type::Int
+            | Type::StrEnum(_)
+            | Type::Enum(_)
+            | Type::Optional(_)
+            | Type::Union(_)
+            | Type::StringIterable => word,
             Type::Float => self.instruction(format!("bitcast i64 {word} to double")),
             Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
             Type::None => "0".to_owned(),
@@ -5670,7 +5688,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Str | Type::StrLiteral(_) => 3,
         Type::StrEnum(_) | Type::Enum(_) => 10,
         Type::Bytes => 8,
-        Type::Union(_) => 9,
+        Type::Union(_) | Type::StringIterable => 9,
         Type::ListInt => 4,
         Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(_) => 6,
         Type::List(_)
@@ -5990,6 +6008,8 @@ declare i32 @imre_record_has_type(ptr, ptr) nounwind memory(read)
 declare ptr @imre_named_exception_new(ptr, ptr)
 declare ptr @imre_exception_new(i32, ptr)
 declare i32 @imre_exception_matches(ptr, i32)
+declare i64 @imre_string_iterable_len(i64)
+declare ptr @imre_string_iterable_list(i64)
 declare void @imre_union_retain(i64)
 declare void @imre_union_release(i64)
 declare i32 @imre_union_truthy(i64)
