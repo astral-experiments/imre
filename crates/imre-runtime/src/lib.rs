@@ -866,7 +866,7 @@ pub unsafe extern "C" fn imre_int_str(value: usize) -> *const Str {
 }
 
 /// Transfer a freshly formatted string to generated code, preserving allocation failure.
-fn checked_owned_str(text: Str) -> Result<*const Str, Error> {
+fn checked_owned_str(text: Str) -> Result<*const Str> {
     StrOwner::try_new(text)
         .map(StrOwner::into_raw)
         .map_err(|_| Error::allocation())
