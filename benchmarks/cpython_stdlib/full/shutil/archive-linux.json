@@ -9,7 +9,7 @@
           "unpack_archive": 0
         },
         "guarded_native_calls": 0,
-        "native_body_blocker": "assertRaises expected: type[ValueError]: only list[T], dict[K, V], set[T], and fixed tuple[T, ...] are supported"
+        "native_body_blocker": "unknown class method"
       },
       "test.test_shutil.TestArchives.test_make_archive_cwd": {
         "status": "blocked",
@@ -48,8 +48,38 @@
         "guarded_native_calls": 1
       },
       "test.test_shutil.TestArchives.test_make_tarfile_rootdir_nodir": {
-        "status": "blocked",
-        "reason": "original assertions need native OSError.errno and filename from the OS field implementation"
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 0,
+        "root_errors": [
+          [
+            "FileNotFoundError",
+            2,
+            true,
+            true
+          ],
+          [
+            "NotADirectoryError",
+            20,
+            true,
+            true
+          ],
+          [
+            "FileNotFoundError",
+            2,
+            true,
+            true
+          ],
+          [
+            "NotADirectoryError",
+            20,
+            true,
+            true
+          ]
+        ]
       },
       "test.test_shutil.TestArchives.test_make_tarfile_with_explicit_curdir": {
         "status": "host_driven_native",
@@ -84,8 +114,38 @@
         "guarded_native_calls": 1
       },
       "test.test_shutil.TestArchives.test_make_zipfile_rootdir_nodir": {
-        "status": "blocked",
-        "reason": "original assertions need native OSError.errno and filename from the OS field implementation"
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 0,
+        "root_errors": [
+          [
+            "FileNotFoundError",
+            2,
+            true,
+            true
+          ],
+          [
+            "NotADirectoryError",
+            20,
+            true,
+            true
+          ],
+          [
+            "FileNotFoundError",
+            2,
+            true,
+            true
+          ],
+          [
+            "NotADirectoryError",
+            20,
+            true,
+            true
+          ]
+        ]
       },
       "test.test_shutil.TestArchives.test_make_zipfile_with_explicit_curdir": {
         "status": "host_driven_native",
@@ -131,7 +191,10 @@
         },
         "guarded_native_calls": 0,
         "host_pathlike_conversions": 12,
-        "host": "original FakePath.__fspath__ in CPython"
+        "host_path_types": {
+          "FakePath": 12
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
       },
       "test.test_shutil.TestArchives.test_unpack_archive_gztar": {
         "status": "mixed",
@@ -141,7 +204,10 @@
         },
         "guarded_native_calls": 0,
         "host_pathlike_conversions": 12,
-        "host": "original FakePath.__fspath__ in CPython"
+        "host_path_types": {
+          "FakePath": 12
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
       },
       "test.test_shutil.TestArchives.test_unpack_archive_tar": {
         "status": "mixed",
@@ -151,7 +217,10 @@
         },
         "guarded_native_calls": 0,
         "host_pathlike_conversions": 12,
-        "host": "original FakePath.__fspath__ in CPython"
+        "host_path_types": {
+          "FakePath": 12
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
       },
       "test.test_shutil.TestArchives.test_unpack_archive_xztar": {
         "status": "mixed",
@@ -161,7 +230,10 @@
         },
         "guarded_native_calls": 0,
         "host_pathlike_conversions": 12,
-        "host": "original FakePath.__fspath__ in CPython"
+        "host_path_types": {
+          "FakePath": 12
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
       },
       "test.test_shutil.TestArchives.test_unpack_archive_zip": {
         "status": "mixed",
@@ -171,7 +243,10 @@
         },
         "guarded_native_calls": 0,
         "host_pathlike_conversions": 6,
-        "host": "original FakePath.__fspath__ in CPython"
+        "host_path_types": {
+          "FakePath": 6
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
       },
       "test.test_shutil.TestArchives.test_unpack_archive_zip_badpaths": {
         "status": "host_driven_native",
@@ -182,8 +257,23 @@
         "guarded_native_calls": 0
       },
       "test.test_shutil.TestArchives.test_unpack_registry": {
-        "status": "blocked",
-        "reason": "custom archive suffix dispatch invokes the registered callable with extra arguments"
+        "status": "mixed",
+        "calls_by_operation": {
+          "get_unpack_formats": 4,
+          "register_unpack_format": 3,
+          "unpack_archive": 1,
+          "unregister_unpack_format": 2
+        },
+        "native_calls": 10,
+        "callback_argument_types": [
+          [
+            "str",
+            "str",
+            "int"
+          ]
+        ],
+        "opt_level": 0,
+        "fixture": "original CPython TestArchives fixture, callback closure and assertions; one native process owns the registry and suffix dispatch"
       },
       "test.test_shutil.TestArchives.test_unzip_zipfile": {
         "status": "host_driven_native",
@@ -214,7 +304,7 @@
           "unpack_archive": 0
         },
         "guarded_native_calls": 0,
-        "native_body_blocker": "assertRaises expected: type[ValueError]: only list[T], dict[K, V], set[T], and fixed tuple[T, ...] are supported"
+        "native_body_blocker": "unknown class method"
       },
       "test.test_shutil.TestArchives.test_make_archive_cwd": {
         "status": "blocked",
@@ -253,8 +343,38 @@
         "guarded_native_calls": 1
       },
       "test.test_shutil.TestArchives.test_make_tarfile_rootdir_nodir": {
-        "status": "blocked",
-        "reason": "original assertions need native OSError.errno and filename from the OS field implementation"
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 0,
+        "root_errors": [
+          [
+            "FileNotFoundError",
+            2,
+            true,
+            true
+          ],
+          [
+            "NotADirectoryError",
+            20,
+            true,
+            true
+          ],
+          [
+            "FileNotFoundError",
+            2,
+            true,
+            true
+          ],
+          [
+            "NotADirectoryError",
+            20,
+            true,
+            true
+          ]
+        ]
       },
       "test.test_shutil.TestArchives.test_make_tarfile_with_explicit_curdir": {
         "status": "host_driven_native",
@@ -289,8 +409,38 @@
         "guarded_native_calls": 1
       },
       "test.test_shutil.TestArchives.test_make_zipfile_rootdir_nodir": {
-        "status": "blocked",
-        "reason": "original assertions need native OSError.errno and filename from the OS field implementation"
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 0,
+        "root_errors": [
+          [
+            "FileNotFoundError",
+            2,
+            true,
+            true
+          ],
+          [
+            "NotADirectoryError",
+            20,
+            true,
+            true
+          ],
+          [
+            "FileNotFoundError",
+            2,
+            true,
+            true
+          ],
+          [
+            "NotADirectoryError",
+            20,
+            true,
+            true
+          ]
+        ]
       },
       "test.test_shutil.TestArchives.test_make_zipfile_with_explicit_curdir": {
         "status": "host_driven_native",
@@ -336,7 +486,10 @@
         },
         "guarded_native_calls": 0,
         "host_pathlike_conversions": 12,
-        "host": "original FakePath.__fspath__ in CPython"
+        "host_path_types": {
+          "FakePath": 12
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
       },
       "test.test_shutil.TestArchives.test_unpack_archive_gztar": {
         "status": "mixed",
@@ -346,7 +499,10 @@
         },
         "guarded_native_calls": 0,
         "host_pathlike_conversions": 12,
-        "host": "original FakePath.__fspath__ in CPython"
+        "host_path_types": {
+          "FakePath": 12
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
       },
       "test.test_shutil.TestArchives.test_unpack_archive_tar": {
         "status": "mixed",
@@ -356,7 +512,10 @@
         },
         "guarded_native_calls": 0,
         "host_pathlike_conversions": 12,
-        "host": "original FakePath.__fspath__ in CPython"
+        "host_path_types": {
+          "FakePath": 12
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
       },
       "test.test_shutil.TestArchives.test_unpack_archive_xztar": {
         "status": "mixed",
@@ -366,7 +525,10 @@
         },
         "guarded_native_calls": 0,
         "host_pathlike_conversions": 12,
-        "host": "original FakePath.__fspath__ in CPython"
+        "host_path_types": {
+          "FakePath": 12
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
       },
       "test.test_shutil.TestArchives.test_unpack_archive_zip": {
         "status": "mixed",
@@ -376,7 +538,10 @@
         },
         "guarded_native_calls": 0,
         "host_pathlike_conversions": 6,
-        "host": "original FakePath.__fspath__ in CPython"
+        "host_path_types": {
+          "FakePath": 6
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
       },
       "test.test_shutil.TestArchives.test_unpack_archive_zip_badpaths": {
         "status": "host_driven_native",
@@ -387,8 +552,23 @@
         "guarded_native_calls": 0
       },
       "test.test_shutil.TestArchives.test_unpack_registry": {
-        "status": "blocked",
-        "reason": "custom archive suffix dispatch invokes the registered callable with extra arguments"
+        "status": "mixed",
+        "calls_by_operation": {
+          "get_unpack_formats": 4,
+          "register_unpack_format": 3,
+          "unpack_archive": 1,
+          "unregister_unpack_format": 2
+        },
+        "native_calls": 10,
+        "callback_argument_types": [
+          [
+            "str",
+            "str",
+            "int"
+          ]
+        ],
+        "opt_level": 3,
+        "fixture": "original CPython TestArchives fixture, callback closure and assertions; one native process owns the registry and suffix dispatch"
       },
       "test.test_shutil.TestArchives.test_unzip_zipfile": {
         "status": "host_driven_native",
