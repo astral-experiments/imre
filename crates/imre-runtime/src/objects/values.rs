@@ -312,6 +312,9 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                 (Storage::Dictionary(left), Storage::Dictionary(right)) => {
                     left.compare_entry(right, position)
                 }
+                (Storage::Deque(left), Storage::Deque(right)) => {
+                    left.compare_entry(right, position)
+                }
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Json(left), Storage::Json(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Document(left), Storage::Document(right)) => {
