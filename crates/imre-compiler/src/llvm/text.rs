@@ -110,6 +110,10 @@ impl Emitter<'_, '_> {
                 ));
                 return result;
             }
+            TextOperation::Translate => self.checked_instruction(format!(
+                "call ptr @imre_str_translate(ptr {source}, ptr {})",
+                args[1].value.operand
+            )),
             TextOperation::Dedent => {
                 self.instruction(format!("call ptr @imre_str_dedent(ptr {source})"))
             }

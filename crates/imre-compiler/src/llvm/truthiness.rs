@@ -104,6 +104,7 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("icmp ugt i32 {length}, 1"))
                 }
                 Type::ListInt
+                | Type::Deque(_)
                 | Type::Dict(_)
                 | Type::ReadOnlyObjectMapping
                 | Type::Set(_)
@@ -112,6 +113,7 @@ impl Emitter<'_, '_> {
                         Type::ListInt => "list",
                         Type::Dict(_) | Type::ReadOnlyObjectMapping => "dict",
                         Type::Set(_) | Type::StringKeys => "set",
+                        Type::Deque(_) => "deque",
                         _ => unreachable!(),
                     };
                     // These containers have at least one word per entry, so

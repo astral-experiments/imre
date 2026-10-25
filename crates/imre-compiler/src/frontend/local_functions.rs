@@ -161,7 +161,7 @@ impl Checker<'_> {
         let signature = signature(
             definition,
             self.graph,
-            self.module,
+            keyword_forwarding::Defaults::local(self.module),
             &self.classes.declarations,
             self.types,
             None,
