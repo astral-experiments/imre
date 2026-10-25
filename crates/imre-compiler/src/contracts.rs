@@ -58,6 +58,9 @@ impl Builtin {
 
         match self {
             Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
+            Self::Str if args.first().is_some_and(|e| e.ty == Type::Bytes) => {
+                Contract::new(true, PreservesLists)
+            }
             Self::Str
                 if args
                     .first()
@@ -784,6 +787,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_replace"
                 | "imre_print_str"
                 | "imre_print_bytes"
+                | "imre_bytes_str"
                 | "imre_bytes_count"
                 | "imre_bytes_list"
                 | "imre_bytes_contains_int"

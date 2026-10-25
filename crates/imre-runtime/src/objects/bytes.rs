@@ -158,10 +158,11 @@ pub(super) fn native_size(value: &Int) -> Result<isize> {
 }
 
 /// Uses Ruff's byte repr rules, including quote choice and lowercase hex escapes.
-fn repr(value: &[u8]) -> Str {
+fn repr(value: &[u8]) -> Result<Str> {
     let mut output = String::new();
-    write_repr(&mut output, value);
-    Str::from(output)
+    write_quoted_repr(&mut super::values::ReprWriter(&mut output), value)
+        .map_err(|_| Error::allocation())?;
+    Ok(Str::from(output))
 }
 
 pub(super) fn write_repr(output: &mut String, value: &[u8]) {
@@ -231,7 +232,10 @@ pub unsafe extern "C" fn imre_bytes_release(value: *const Bytes) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_str(value: *const Bytes) -> *const Str {
     // SAFETY: the rooted input is immutable and repr retains no borrowed data.
-    Rc::into_raw(Rc::new(repr(unsafe { &*value })))
+    finish(
+        repr(unsafe { &*value }).map(|text| Rc::into_raw(Rc::new(text))),
+        std::ptr::null(),
+    )
 }
 
 /// # Safety
@@ -239,8 +243,10 @@ pub unsafe extern "C" fn imre_bytes_str(value: *const Bytes) -> *const Str {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_print_bytes(value: *const Bytes) {
     // SAFETY: the rooted input is immutable and repr retains no borrowed data.
-    let text = repr(unsafe { &*value });
-    crate::output_bytes(text.as_bytes());
+    match repr(unsafe { &*value }) {
+        Ok(text) => crate::output_bytes(text.as_bytes()),
+        Err(error) => error.raise(),
+    }
 }
 
 /// # Safety
