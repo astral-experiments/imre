@@ -41,6 +41,27 @@
         "platform"
       ]
     },
+    "test.test_sys.SysModuleTest.test_getrecursionlimit": {
+      "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "original CPython SysModuleTest lifecycle",
+      "calls": [
+        {
+          "operation": "getrecursionlimit",
+          "args": [],
+          "reply": "1000"
+        },
+        {
+          "operation": "getrecursionlimit",
+          "args": [
+            42
+          ],
+          "reply": "TypeError: sys.getrecursionlimit() takes no arguments (1 given)"
+        }
+      ]
+    },
     "test.test_sys.SysModuleTest.test_ioencoding_nonascii": {
       "status": "upstream-skip",
       "reason": "requires FS encoding to match locale"
@@ -54,6 +75,51 @@
       "calls": [
         "sys.argv",
         "sys.orig_argv"
+      ]
+    },
+    "test.test_sys.SysModuleTest.test_setrecursionlimit": {
+      "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "original CPython SysModuleTest lifecycle",
+      "calls": [
+        {
+          "operation": "getrecursionlimit",
+          "args": [],
+          "reply": "1000"
+        },
+        {
+          "operation": "setrecursionlimit",
+          "args": [
+            10005
+          ],
+          "reply": "None"
+        },
+        {
+          "operation": "getrecursionlimit",
+          "args": [],
+          "reply": "10005"
+        },
+        {
+          "operation": "setrecursionlimit",
+          "args": [],
+          "reply": "TypeError: sys.setrecursionlimit() takes exactly one argument (0 given)"
+        },
+        {
+          "operation": "setrecursionlimit",
+          "args": [
+            -42
+          ],
+          "reply": "ValueError: recursion limit must be greater or equal than 1"
+        },
+        {
+          "operation": "setrecursionlimit",
+          "args": [
+            1000
+          ],
+          "reply": "None"
+        }
       ]
     },
     "test.test_sys.TestSysJIT.test_jit_is_available": {
