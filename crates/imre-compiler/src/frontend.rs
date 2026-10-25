@@ -5988,7 +5988,10 @@ impl<'a> Checker<'a> {
                 return self.text_function(call, "string", ir::TextOperation::Unquote);
             }
             Some(Binding::Intrinsic(Intrinsic::ShlexSplit)) => {
-                return self.text_function(call, "s", ir::TextOperation::ShlexSplit);
+                return self.shlex_split(call);
+            }
+            Some(Binding::Intrinsic(op @ (Intrinsic::ShlexQuote | Intrinsic::ShlexJoin))) => {
+                return self.shlex_call(call, op);
             }
             _ => {}
         }
