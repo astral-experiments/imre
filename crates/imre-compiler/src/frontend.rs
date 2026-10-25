@@ -163,7 +163,7 @@ impl ClassInfo {
                     .iter()
                     .map(|field| {
                         if field.name == crate::classes::EXCEPTION_ARGS_SLOT {
-                            return Ok(Type::ExceptionField);
+                            return Ok(Type::ValueView);
                         }
                         annotation_in_class(
                             &field.annotation,
@@ -5476,9 +5476,9 @@ impl<'a> Checker<'a> {
                     && attribute.attr.as_str() == "args"
                 {
                     let field = self.classes.fields[class].len() - 1;
-                    if self.classes.fields[class][field] == Type::ExceptionField {
+                    if self.classes.fields[class][field] == Type::ValueView {
                         return Ok(Expr {
-                            ty: Type::ExceptionField,
+                            ty: Type::ValueView,
                             kind: ExprKind::Field(
                                 Box::new(Self::exception_record(receiver)),
                                 field,

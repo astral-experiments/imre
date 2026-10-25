@@ -1400,7 +1400,7 @@ pub unsafe extern "C" fn imre_named_exception_record_new(
             },
         );
         let positional = tuple.then(|| {
-            let (kind, word) = exit_word(argument.cast());
+            let (kind, word) = value_word(argument.cast());
             debug_assert_eq!(kind.raw(), 6);
             imports::Positional(kind.acquire(word))
         });
