@@ -26,8 +26,8 @@ The complete original method stopped earlier, on its first dictionary comparison
 
 Stock [`TextWrapper` in CPython 3.14.5](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/textwrap.py#L66)
 uses `dict.fromkeys(map(ord, _whitespace), ord(' '))`. The distinct keys are
-9, 10, 11, 12, 13 and 32, each with value 32. The combined integration must
-run the original class initializer to test both dependencies together.
+9, 10, 11, 12, 13 and 32, each with value 32. The receipts below distinguish the expression
+from evaluation inside the original class and loading the complete stock module.
 
 ## Linux receipts
 
@@ -56,3 +56,14 @@ and the nested set control at `set(range(6))`. Later PR changes give the two
 event checks separate lists; [#910](https://github.com/astral-sh/imre/pull/910)
 supplies the set producer. These controls are outside both the single selected
 `test_dict` occurrence and the 659 occurrences in collections.
+
+The [exact private ord/map tip and mapping source](runs/1aede5ac54d6/source.json) produced the same
+[three stock outcomes](runs/1aede5ac54d6/textwrapper.json): four native matches for the expression,
+four compilation stops at the class assignment, and four at the same line in the whole module.
+Neither blocked scope ran the initializer.
+
+The tree that [merged in #900](runs/a41ca9d3baf5/source.json) matched [26 observations](runs/a41ca9d3baf5/fromkeys-four-modes.json)
+in all four modes, including the iterator exception and the aliased value. On the tree that
+[merged in #910](runs/5059d6b15f75/source.json), the [original nested set expression](runs/5059d6b15f75/set_range-four-modes.json)
+also matched in all four modes. The [complete DictTest method](runs/5059d6b15f75/evidence-fromkeys-linux.json)
+still stops at the first dictionary assertion at both levels. These controls add no native test occurrence.

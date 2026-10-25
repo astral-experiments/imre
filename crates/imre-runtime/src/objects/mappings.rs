@@ -823,6 +823,26 @@ impl Mapping {
         }
     }
 
+    /// Subscribe with a dynamic format-field key, preserving the mapping's missing-key policy.
+    pub(super) fn logging_item(&mut self, key: &OwnedWord) -> Result<Option<OwnedWord>, Error> {
+        if key.kind.raw() != self.tables.key_kind() {
+            return Ok(matches!(self.missing, Missing::Zero).then(|| {
+                // SAFETY: a Counter has integer values and zero is immediate.
+                unsafe { self.value_kind.acquire(Int::small(0).unwrap().0) }
+            }));
+        }
+        // SAFETY: the rooted key matches the table's exact representation.
+        unsafe { self.subscript(key.word) }
+    }
+
+    /// The caller roots a key with this table's exact representation.
+    unsafe fn subscript(&mut self, key: usize) -> Result<Option<OwnedWord>, Error> {
+        // SAFETY: the table owns its values and only a sealed list factory can run.
+        unsafe {
+            table!(&mut self.tables, table => table.subscript(key, self.value_kind, self.missing))
+        }
+    }
+
     pub(super) fn integer_entries(&self) -> impl Iterator<Item = (&Int, usize)> {
         let Tables::Int(table) = &self.tables else {
             fail("SystemError", "expected an integer-key dictionary");
@@ -832,6 +852,17 @@ impl Mapping {
             .iter()
             .flatten()
             .map(|entry| (&entry.key.0, entry.value))
+    }
+
+    /// A character ordinal probes only an exact integer-key table. Returned words
+    /// borrow this immutable mapping; string, bytes, and tuple keys never match.
+    pub(super) fn translation_entry(&self, ch: char) -> Option<(WordKind, usize)> {
+        let Tables::Int(table) = &self.tables else {
+            return None;
+        };
+        let key = Int::small(i64::from(u32::from(ch))).unwrap().into_raw();
+        // SAFETY: every Unicode ordinal is a tagged immediate of this table's key type.
+        unsafe { table.lookup(key) }.map(|entry| (self.value_kind, entry.value))
     }
 
     /// Transfers two exact owners only for a new key. Duplicate inputs are
@@ -1326,7 +1357,7 @@ impl Storage {
             _ => fail("SystemError", "expected a dictionary object"),
         }
     }
-    fn dictionary_mut(&mut self) -> &mut Mapping {
+    pub(super) fn dictionary_mut(&mut self) -> &mut Mapping {
         match self {
             Self::Dictionary(value) => value,
             _ => fail("SystemError", "expected a dictionary object"),
@@ -1762,10 +1793,9 @@ pub unsafe extern "C" fn imre_dict_get(value: *const Object, key: usize) -> usiz
     // SAFETY: this native subscription only hashes immutable keys and constructs
     // an empty builtin list, so no storage borrow crosses a user callback.
     let owned = unsafe {
-        object(value).0.with_mut(|storage| {
-        let mapping = storage.dictionary_mut();
-        table!(&mut mapping.tables, table => table.subscript(key, mapping.value_kind, mapping.missing))
-    })
+        object(value)
+            .0
+            .with_mut(|storage| storage.dictionary_mut().subscript(key))
     };
     match owned {
         Ok(Some(owned)) => return owned.into_word(),
@@ -2357,6 +2387,7 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
             Storage::StringIterator(iterator) => Ok(iterator.next()),
             Storage::LineIterator(iterator) => Ok(iterator.next()),
             Storage::BytesIterator(iterator) => Ok(iterator.next()),
+            Storage::DequeIterator(iterator) => iterator.next(),
             _ => storage
                 .mapping_iterator_mut()
                 .next()

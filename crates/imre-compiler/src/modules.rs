@@ -9,7 +9,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::analysis::{CheckedDiagnostic, Session};
-use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation};
+use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation, WrapperAttributes};
 use crate::watch::FileSystem;
 
 mod declarations;
@@ -77,9 +77,11 @@ pub(crate) enum IntrinsicModule {
     Asyncio,
     Contextlib,
     Inspect,
+    Linecache,
     Functools,
     Fnmatch,
     Time,
+    Warnings,
     Tomli,
     TomliW,
     Shutil,
@@ -123,6 +125,7 @@ pub(crate) enum IntrinsicModule {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
     GetAnnotations,
+    ForwardRef,
     AnnotationTypeRepr,
     AnnotationFormat(i64),
     Declaration(&'static str),
@@ -159,9 +162,11 @@ pub(crate) enum Intrinsic {
     TaskGroup,
     Semaphore,
     ContextManager,
+    Linecache(crate::ir::LinecacheOperation),
     InspectGetattrStatic,
     InspectIsMethodDescriptor,
     InspectSentinel,
+    WrapperAttributes(WrapperAttributes),
     FunctionCache,
     LruCache,
     CachedProperty,
@@ -182,6 +187,8 @@ pub(crate) enum Intrinsic {
     IntConstant(i64),
     WallTime,
     TimeSleep,
+    WarningFilter { simple: bool },
+    WarningReset,
     PatchSet,
     Awaitable,
     TypeVar,
@@ -235,6 +242,7 @@ pub(crate) enum Intrinsic {
     ZipFile,
     ZipInfo,
     BytesIo,
+    StringIo,
     BadZipFile,
     BadGzipFile,
     CsvReader,
@@ -251,6 +259,7 @@ pub(crate) enum Intrinsic {
     DefaultDict,
     NamedTuple,
     Counter,
+    Deque,
     Repeat,
     LengthHint,
     Count,
@@ -269,6 +278,7 @@ pub(crate) enum Intrinsic {
     JsonDumps,
     JsonDump,
     JsonLoads,
+    JsonDecoderClass,
     JsonLoad,
     JsonDecodeError,
     Any,
@@ -285,6 +295,8 @@ pub(crate) enum Intrinsic {
     Which,
     Copy(CopyOperation),
     RmTree,
+    CopyTree,
+    IgnorePatterns,
     ShutilError,
     SameFileError,
     SpecialFileError,
@@ -332,10 +344,12 @@ impl IntrinsicModule {
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
             "inspect" => Some(Self::Inspect),
+            "linecache" => Some(Self::Linecache),
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
             "fnmatch" => Some(Self::Fnmatch),
             "time" => Some(Self::Time),
+            "warnings" => Some(Self::Warnings),
             "tomli" => Some(Self::Tomli),
             "tomli_w" => Some(Self::TomliW),
             "shutil" => Some(Self::Shutil),
@@ -425,6 +439,7 @@ impl IntrinsicModule {
             return Some(Binding::IntrinsicModule(Self::ImreToml));
         }
         let symbol = match (self, name) {
+            (Self::AnnotationLib, "ForwardRef") => Intrinsic::ForwardRef,
             (Self::AnnotationLib, "get_annotations") => Intrinsic::GetAnnotations,
             (Self::AnnotationLib, "type_repr") => Intrinsic::AnnotationTypeRepr,
             (Self::AnnotationFormat, "VALUE") => Intrinsic::AnnotationFormat(1),
@@ -463,11 +478,24 @@ impl IntrinsicModule {
             (Self::Asyncio, "gather") => Intrinsic::Gather,
             (Self::Asyncio, "TaskGroup") => Intrinsic::TaskGroup,
             (Self::Asyncio, "Semaphore") => Intrinsic::Semaphore,
+            (Self::Linecache, name) => Intrinsic::Linecache(match name {
+                "getline" => crate::ir::LinecacheOperation::Getline,
+                "getlines" => crate::ir::LinecacheOperation::Getlines,
+                "updatecache" => crate::ir::LinecacheOperation::Update,
+                "clearcache" => crate::ir::LinecacheOperation::Clear,
+                "checkcache" => crate::ir::LinecacheOperation::Check,
+                "lazycache" => crate::ir::LinecacheOperation::Lazy,
+                "cache" => crate::ir::LinecacheOperation::Cache,
+                _ => return None,
+            }),
             (Self::Inspect, "getattr_static") => Intrinsic::InspectGetattrStatic,
             (Self::Inspect, "ismethoddescriptor") => Intrinsic::InspectIsMethodDescriptor,
             (Self::Inspect, "_sentinel") => Intrinsic::InspectSentinel,
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
+            (Self::Warnings, "simplefilter") => Intrinsic::WarningFilter { simple: true },
+            (Self::Warnings, "filterwarnings") => Intrinsic::WarningFilter { simple: false },
+            (Self::Warnings, "resetwarnings") => Intrinsic::WarningReset,
             (Self::Time, "sleep") => Intrinsic::TimeSleep,
             (Self::Time, "time") => Intrinsic::WallTime,
             (Self::Signal, "SIGINT") => Intrinsic::IntConstant(2),
@@ -481,6 +509,12 @@ impl IntrinsicModule {
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
             (Self::Typing, "NewType") => Intrinsic::NewType,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
+            (Self::Functools, "WRAPPER_ASSIGNMENTS") => {
+                Intrinsic::WrapperAttributes(WrapperAttributes::Assigned)
+            }
+            (Self::Functools, "WRAPPER_UPDATES") => {
+                Intrinsic::WrapperAttributes(WrapperAttributes::Updated)
+            }
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
             (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
                 Intrinsic::Fnmatch(FnmatchOperation::Match {
@@ -578,6 +612,7 @@ impl IntrinsicModule {
             (Self::Zipfile, "ZipFile") => Intrinsic::ZipFile,
             (Self::Zipfile, "ZipInfo") => Intrinsic::ZipInfo,
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
+            (Self::Io, "StringIO") => Intrinsic::StringIo,
             (Self::Zipfile, "BadZipFile") => Intrinsic::BadZipFile,
             (Self::Csv, "reader") => Intrinsic::CsvReader,
             (Self::Csv, "Error") => Intrinsic::CsvError,
@@ -592,6 +627,7 @@ impl IntrinsicModule {
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
             (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
+            (Self::Collections, "deque") => Intrinsic::Deque,
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
@@ -611,6 +647,7 @@ impl IntrinsicModule {
             (Self::Zlib, "error") => Intrinsic::ZlibError,
             (Self::ImreJson, "decode") => Intrinsic::JsonDecode,
             (Self::Json, "loads") => Intrinsic::JsonLoads,
+            (Self::Json | Self::JsonDecoder, "JSONDecoder") => Intrinsic::JsonDecoderClass,
             (Self::Json, "load") => Intrinsic::JsonLoad,
             (Self::Json, "dumps") => Intrinsic::JsonDumps,
             (Self::Json, "dump") => Intrinsic::JsonDump,
@@ -628,6 +665,8 @@ impl IntrinsicModule {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
             (Self::Shutil, "rmtree") => Intrinsic::RmTree,
+            (Self::Shutil, "copytree") => Intrinsic::CopyTree,
+            (Self::Shutil, "ignore_patterns") => Intrinsic::IgnorePatterns,
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Shutil, "copyfile") => Intrinsic::Copy(CopyOperation::File),
             (Self::Shutil, "copymode") => Intrinsic::Copy(CopyOperation::Mode),
@@ -869,6 +908,12 @@ impl SourceGraph {
             .push(CheckedDiagnostic::ExcessArgument(argument));
     }
 
+    /// The native positional-only binder already raises at this exact keyword.
+    pub(crate) fn checked_positional_keyword(&self, module: ModuleId, keyword: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::PositionalKeyword(keyword));
+    }
+
     pub(crate) fn checked_keywords(
         &self,
         module: ModuleId,
@@ -935,11 +980,16 @@ impl SourceGraph {
         )
     }
 
-    /// The entry needs its own initializer when it declares globals for later definitions.
-    pub(crate) fn initializers(&self) -> impl Iterator<Item = (ModuleId, Range<usize>)> + '_ {
+    /// The entry only needs an initializer if its class bodies or ordinary bindings own globals.
+    pub(crate) fn initializers(
+        &self,
+        class_globals: bool,
+    ) -> impl Iterator<Item = (ModuleId, Range<usize>)> + '_ {
         self.initialization
             .iter()
-            .filter(|(id, _)| *id != self.entry || !self.modules[*id].entry_globals.is_empty())
+            .filter(move |(id, _)| {
+                *id != self.entry || class_globals || !self.modules[*id].entry_globals.is_empty()
+            })
             .cloned()
     }
 
@@ -1140,13 +1190,22 @@ fn resolve_binding(
 
 const LOGGING_CLASSES: &str = "__imre_logging_classes__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
+const TEXTWRAP_WRAPPER: &str = "__imre_textwrap_wrapper__";
+
+fn textwrap_implementation(name: &str) -> Option<&'static str> {
+    match name {
+        "indent" => Some(TEXTWRAP_FUNCTIONS),
+        "TextWrapper" | "wrap" | "fill" | "shorten" => Some(TEXTWRAP_WRAPPER),
+        _ => None,
+    }
+}
 
 /// Resolve the public definitions compiled from Python alongside sealed native operations.
 fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) -> Option<Binding> {
     module.symbol(name).or_else(|| {
         let implementation = match module {
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
-            IntrinsicModule::Textwrap if name == "indent" => TEXTWRAP_FUNCTIONS,
+            IntrinsicModule::Textwrap => textwrap_implementation(name)?,
             _ => return None,
         };
         let (id, source) = modules
@@ -1157,7 +1216,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
                     (IntrinsicModule::Logging, ast::Stmt::ClassDef(_))
-                    | (IntrinsicModule::Textwrap, ast::Stmt::FunctionDef(_))))
+                    | (IntrinsicModule::Textwrap, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))))
         })
     })
 }
@@ -1712,29 +1771,33 @@ impl<'a> Loader<'a> {
         if module.is_some() {
             self.reject_stdlib_shadow(name)?;
         }
-        let bundle = match (name.split('.').next(), module) {
-            (Some("logging"), Some(_)) => Some((
+        let needs_textwrap = |implementation| {
+            matches!(module, Some(IntrinsicModule::Textwrap))
+                && imports.is_none_or(|names| {
+                    names.iter().any(|alias| {
+                        textwrap_implementation(alias.name.as_str()) == Some(implementation)
+                    })
+                })
+        };
+        // A named import loads only the bundled definitions it can call.
+        let bundles = [
+            (name.split('.').next() == Some("logging") && module.is_some()).then_some((
                 LOGGING_CLASSES,
                 include_str!("../stdlib/logging/classes.py"),
             )),
-            // A named import of a native operation needs no bundled function definitions.
-            (_, Some(module @ IntrinsicModule::Textwrap))
-                if imports.is_none_or(|names| {
-                    names
-                        .iter()
-                        .any(|alias| module.symbol(alias.name.as_str()).is_none())
-                }) =>
-            {
-                Some((
-                    TEXTWRAP_FUNCTIONS,
-                    include_str!("../stdlib/textwrap/functions.py"),
-                ))
+            needs_textwrap(TEXTWRAP_FUNCTIONS).then_some((
+                TEXTWRAP_FUNCTIONS,
+                include_str!("../stdlib/textwrap/functions.py"),
+            )),
+            needs_textwrap(TEXTWRAP_WRAPPER).then_some((
+                TEXTWRAP_WRAPPER,
+                include_str!("../stdlib/textwrap/wrapper.py"),
+            )),
+        ];
+        for (implementation, source) in bundles.into_iter().flatten() {
+            if self.by_name.contains_key(implementation) {
+                continue;
             }
-            _ => None,
-        };
-        if let Some((implementation, source)) = bundle
-            && !self.by_name.contains_key(implementation)
-        {
             let path = self.root.join(format!("{implementation}.py"));
             if self.fs.exists(&path) {
                 return Err(format!(
@@ -1797,7 +1860,7 @@ impl<'a> Loader<'a> {
         if name == LOGGING_CLASSES {
             return Err("the private logging implementation is not an importable module".into());
         }
-        if name == TEXTWRAP_FUNCTIONS {
+        if matches!(name, TEXTWRAP_FUNCTIONS | TEXTWRAP_WRAPPER) {
             return Err("the private textwrap implementation is not an importable module".into());
         }
         if let Some(&id) = self.by_name.get(name) {
@@ -1818,10 +1881,19 @@ impl<'a> Loader<'a> {
                 "unittest/__init__.py",
                 include_str!("../stdlib/unittest/__init__.py"),
             )),
+            "unittest.mock" => Some((
+                "unittest/mock.py",
+                include_str!("../stdlib/unittest/mock.py"),
+            )),
             _ => None,
         };
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
+            let parent = if let Some((parent, child)) = name.rsplit_once('.') {
+                Some((self.load_module(parent)?, child))
+            } else {
+                None
+            };
             // ty resolves this immutable source at its Python import path in the
             // in-memory project. It is part of the compiler, not a disk input.
             let path = self.root.join(filename);
@@ -1834,6 +1906,7 @@ impl<'a> Loader<'a> {
             )?;
             self.modules[id].bundled = true;
             self.scan(id)?;
+            self.bind_child(name, id, parent)?;
             return Ok(id);
         }
         if name == "stat" {
@@ -1993,6 +2066,16 @@ impl<'a> Loader<'a> {
         self.modules[id].root_index = root_index;
         self.modules[id].archive = archive;
         self.scan(id)?;
+        self.bind_child(name, id, parent)?;
+        Ok(id)
+    }
+
+    fn bind_child(
+        &mut self,
+        name: &str,
+        id: ModuleId,
+        parent: Option<(ModuleId, &str)>,
+    ) -> Result<(), String> {
         if let Some((parent, child)) = parent {
             let binding = Binding::Module(id);
             if let Some(previous) = self.modules[parent].bindings.get(child)
@@ -2006,7 +2089,7 @@ impl<'a> Loader<'a> {
                 .bindings
                 .insert(child.to_owned(), binding);
         }
-        Ok(id)
+        Ok(())
     }
 }
 

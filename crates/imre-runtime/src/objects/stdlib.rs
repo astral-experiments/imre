@@ -416,6 +416,37 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
     }
 }
 
+/// Parse a decimal field or item index, including Python's Unicode decimal digits.
+pub(super) fn format_index(name: &str) -> crate::Result<Option<usize>> {
+    let mut index = 0isize;
+    // A decimal prefix can overflow before a nondigit makes this a named field.
+    for ch in name.chars() {
+        let Some(digit) = crate::integer_text::decimal_digit(ch) else {
+            return Ok(None);
+        };
+        index = index
+            .checked_mul(10)
+            .and_then(|value| value.checked_add(isize::from(digit)))
+            .ok_or_else(|| {
+                Error::new(Kind::ValueError, "Too many decimal digits in format string")
+            })?;
+    }
+    Ok(Some(index as usize))
+}
+
+/// Both keyword-only formatters have an empty tuple of positional arguments.
+pub(super) fn check_keyword_field(name: &str) -> crate::Result<()> {
+    if let Some(index) = format_index(name)? {
+        return Err(Error::new(
+            Kind::IndexError,
+            compact_str::format_compact!(
+                "Replacement index {index} out of range for positional args tuple"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Substitutes plain named fields in encounter order. A missing field can raise
 /// before a malformed brace later in the same template.
 fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> crate::Result<Str> {
@@ -477,29 +508,7 @@ fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> 
             tail = &spec[end..];
         }
         rest = tail.strip_prefix('}').ok_or_else(unmatched)?;
-        // A decimal prefix can overflow before a nondigit makes this a named field.
-        let mut index = 0isize;
-        let mut positional = true;
-        for ch in name.chars() {
-            let Some(digit) = crate::integer_text::decimal_digit(ch) else {
-                positional = false;
-                break;
-            };
-            index = index
-                .checked_mul(10)
-                .and_then(|value| value.checked_add(isize::from(digit)))
-                .ok_or_else(|| {
-                    Error::new(Kind::ValueError, "Too many decimal digits in format string")
-                })?;
-        }
-        if positional {
-            return Err(Error::new(
-                Kind::IndexError,
-                compact_str::format_compact!(
-                    "Replacement index {index} out of range for positional args tuple"
-                ),
-            ));
-        }
+        check_keyword_field(name)?;
         let text = field(name).ok_or_else(|| Error::string_key(Str::new(name)))?;
         if !supported {
             return Err(Error::new(
