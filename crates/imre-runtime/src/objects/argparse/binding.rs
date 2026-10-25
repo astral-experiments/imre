@@ -8,7 +8,9 @@ use num_bigint::BigInt;
 use num_traits::{Signed, Zero};
 use serde::{Deserialize, Deserializer};
 
-use super::{Action, Kind, OptionSpec, Str, Words, imre_path_new, string_repr};
+use super::{
+    Action, Error, Kind, OptionSpec, Parser, Stop, Str, Words, imre_path_new, string_repr,
+};
 use crate::{Int, List, floats, parse_decimal_int};
 
 #[derive(Deserialize)]
@@ -164,9 +166,10 @@ impl OptionSpec {
     /// short options in a cluster have the same effect as separate occurrences.
     pub(super) fn flag_value<'a>(
         &'a self,
+        parser: &'a Parser,
         previous: Option<Bound<'a>>,
         spelling: &str,
-    ) -> Result<Bound<'a>, String> {
+    ) -> Result<Bound<'a>, Stop<'a>> {
         if self.action == Action::BooleanOptional {
             return Ok(Bound::Bool(!spelling.starts_with("--no-")));
         }
@@ -182,10 +185,15 @@ impl OptionSpec {
             };
             return Ok(Bound::Scalar(Scalar::Int(Int::new(n.big().as_ref() + 1))));
         }
-        self.bind(Some(&[]))
+        self.bind(parser, Some(&[]))
     }
 
-    pub(super) fn bind<'a>(&'a self, args: Option<&[&'a str]>) -> Result<Bound<'a>, String> {
+    pub(super) fn bind<'a>(
+        &'a self,
+        parser: &'a Parser,
+        args: Option<&[&'a str]>,
+    ) -> Result<Bound<'a>, Stop<'a>> {
+        let invalid = |message| Stop::Error(parser, message);
         let missing = args.is_none() || self.positional() && args.is_some_and(<[_]>::is_empty);
         if missing && let Some(member) = self.enum_default {
             return Ok(Bound::Enum(member));
@@ -208,12 +216,13 @@ impl OptionSpec {
             let Some(args) = args else {
                 return Ok(Bound::Absent);
             };
-            let values = args
-                .iter()
-                .map(|value| Scalar::convert(self, value))
-                .collect::<Result<Vec<_>, _>>()?;
+            let mut values = Vec::new();
+            values.try_reserve_exact(args.len())?;
+            for argument in args {
+                values.push(Scalar::convert(self, argument).map_err(invalid)?);
+            }
             for value in &values {
-                value.check(self)?;
+                value.check(self).map_err(invalid)?;
             }
             return Ok(Bound::List(values));
         }
@@ -230,28 +239,28 @@ impl OptionSpec {
         let value = if literal_integer {
             Scalar::Int(parse_decimal_int(text).expect("canonical integer literal"))
         } else {
-            Scalar::convert(self, text)?
+            Scalar::convert(self, text).map_err(invalid)?
         };
         if check {
-            value.check(self)?;
+            value.check(self).map_err(invalid)?;
         }
         Ok(Bound::Scalar(value))
     }
 
-    pub(super) fn word(&self, value: Bound<'_>) -> usize {
-        match value {
+    pub(super) fn word(&self, value: Bound<'_>) -> Result<usize, Error> {
+        Ok(match value {
             Bound::Absent => 0,
             Bound::Enum(member) => (member << 3) | 5,
             Bound::Bool(value) => usize::from(value) + usize::from(self.optional),
             Bound::Scalar(value) => value.word(self.kind, self.optional),
             Bound::List(values) if self.kind == Kind::Int => {
-                let ints = values
-                    .into_iter()
-                    .map(|value| match value {
-                        Scalar::Int(n) => n,
-                        _ => unreachable!(),
-                    })
-                    .collect();
+                let mut ints = Vec::new();
+                ints.try_reserve_exact(values.len())
+                    .map_err(|_| Error::allocation())?;
+                ints.extend(values.into_iter().map(|value| match value {
+                    Scalar::Int(n) => n,
+                    _ => unreachable!(),
+                }));
                 Rc::into_raw(Rc::new(List::new(ints))) as usize
             }
             Bound::List(values) => {
@@ -263,11 +272,15 @@ impl OptionSpec {
                 });
                 words
                     .values
+                    .try_reserve_exact(values.len())
+                    .map_err(|_| Error::allocation())?;
+                words
+                    .values
                     .extend(values.into_iter().map(|value| value.word(self.kind, false)));
                 let word = Rc::into_raw(words.into_object()) as usize;
                 // The closed str | list[str] union reserves tag 2 for the list.
                 if self.list_default { word | 2 } else { word }
             }
-        }
+        })
     }
 }

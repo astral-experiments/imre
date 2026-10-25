@@ -10,7 +10,7 @@ use std::rc::Rc;
 use serde::Deserialize;
 
 use super::exceptions::{self, Error, string_repr};
-use super::records::{RecordDescriptor, imre_record_new};
+use super::records::{RecordDescriptor, imre_record_new, imre_record_release};
 use super::{Object, Str, Words, fail};
 use crate::objects::paths::imre_path_new;
 
@@ -357,18 +357,17 @@ impl Parser {
                 return Err(Stop::Help(self));
             };
             self.select_group(seen, slot)?;
-            values[slot] = Some(
-                self.options[slot]
-                    .flag_value(values[slot].take(), spelling)
-                    .map_err(|e| Stop::Error(self, e))?,
-            );
+            values[slot] =
+                Some(self.options[slot].flag_value(self, values[slot].take(), spelling)?);
         }
         Ok(())
     }
 
     fn parse<'a>(&'a self, args: &[&'a str]) -> Result<Parsed<'a>, Stop<'a>> {
         let mut values = self.options.iter().map(|_| None).collect::<Vec<_>>();
-        let mut seen = vec![None; self.mutex_required.len()];
+        let mut seen = Vec::new();
+        seen.try_reserve_exact(self.mutex_required.len())?;
+        seen.resize(self.mutex_required.len(), None);
         let mut extras = Vec::new();
         let mut index = 0;
         let mut selected = None;
@@ -435,7 +434,8 @@ impl Parser {
                         selected = Some((child, name, parsed.words));
                         break 'parse;
                     };
-                    let mut taken = Vec::with_capacity(count);
+                    let mut taken = Vec::new();
+                    taken.try_reserve_exact(count)?;
                     for _ in 0..count {
                         if marker == Some(index) {
                             index += 1;
@@ -446,11 +446,7 @@ impl Parser {
                     if marker == Some(index) {
                         index += 1;
                     }
-                    values[slot] = Some(
-                        self.options[slot]
-                            .bind(Some(&taken))
-                            .map_err(|e| Stop::Error(self, e))?,
-                    );
+                    values[slot] = Some(self.options[slot].bind(self, Some(&taken))?);
                     if !taken.is_empty() {
                         self.select_group(&mut seen, slot)?;
                     }
@@ -533,6 +529,7 @@ impl Parser {
                                 ),
                             ));
                         }
+                        cluster.try_reserve(1)?;
                         cluster.push(slot.map(|slot| (slot, matched)));
                         suffix = rest;
                     }
@@ -566,7 +563,7 @@ impl Parser {
                         ),
                     ));
                 }
-                vec![value]
+                explicit.as_slice()
             } else if !option.takes_value() {
                 self.apply_flags([Some((slot, spelling))], &mut seen, &mut values)?;
                 continue;
@@ -591,14 +588,10 @@ impl Parser {
                         ),
                     ));
                 }
-                args[start..index].to_vec()
+                &args[start..index]
             };
             self.apply_flags(cluster, &mut seen, &mut values)?;
-            values[slot] = Some(
-                option
-                    .bind(Some(&taken))
-                    .map_err(|e| Stop::Error(self, e))?,
-            );
+            values[slot] = Some(option.bind(self, Some(taken))?);
             self.select_group(&mut seen, slot)?;
         }
         let mut missing = Vec::new();
@@ -610,7 +603,7 @@ impl Parser {
                     missing.push(option.error_name());
                     continue;
                 }
-                None => option.bind(None).map_err(|e| Stop::Error(self, e))?,
+                None => option.bind(self, None)?,
             };
             words.push(Word::Option(option, bound));
         }
@@ -869,7 +862,14 @@ pub unsafe extern "C" fn imre_argparse_parse(
         let result = imre_record_new(layout);
         for (index, field) in parsed.words.into_iter().enumerate() {
             let word = match field {
-                Word::Option(option, values) => option.word(values),
+                Word::Option(option, values) => match option.word(values) {
+                    Ok(word) => word,
+                    Err(error) => {
+                        // Unfilled record slots are zeroed so its initialized fields can be released.
+                        imre_record_release(result);
+                        return error.returning(std::ptr::null_mut());
+                    }
+                },
                 Word::Command(value) => value.map_or(0, |name| {
                     StrOwner::into_raw(StrOwner::new(Str::new(name))) as usize
                 }),

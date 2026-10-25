@@ -68,7 +68,19 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
-            Self::Linecache(..) => Contract::new(true, Unknown),
+            Self::Linecache(..) | Self::CachePath(_) => Contract::new(true, Unknown),
+            Self::Calendar(op) => Contract::new(
+                matches!(
+                    op,
+                    crate::ir::CalendarOp::DateTime
+                        | crate::ir::CalendarOp::Delta
+                        | crate::ir::CalendarOp::Zone
+                        | crate::ir::CalendarOp::Now
+                        | crate::ir::CalendarOp::Shift { .. }
+                        | crate::ir::CalendarOp::Negate
+                ),
+                PreservesOwners,
+            ),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
@@ -295,6 +307,7 @@ impl Builtin {
                 | ProcessOperation::Fd(_)
                 | ProcessOperation::Credential(_)
                 | ProcessOperation::CredentialId { .. }
+                | ProcessOperation::Readiness(_)
                 | ProcessOperation::OsErrorField(_)
                 | ProcessOperation::Strerror
                 | ProcessOperation::QuoteCommandArgument
@@ -460,10 +473,16 @@ impl Builtin {
             | Self::StringListFilter(_)
             | Self::StringListNonempty
             | Self::Str
+            | Self::SourceModule
+            | Self::SourceModuleAttribute { .. }
             | Self::NominalIdentity
             | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
             | Self::ForwardRefField(_)
+            | Self::BoxAnnotation(_)
+            | Self::AnnotationMember(_)
+            | Self::AnnotationIs
+            | Self::StaticFunction(_)
             | Self::NewForwardRef
             | Self::ClassNameView
             | Self::StrEnumName
@@ -477,7 +496,8 @@ impl Builtin {
             | Self::UnionProject => Contract::new(false, PreservesLists),
             Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
             Self::ListReserveRange => Contract::new(false, PreservesOwners),
-            Self::BinaryOpen(_)
+            Self::AnnotationRef
+            | Self::BinaryOpen(_)
             | Self::BinaryRead
             | Self::BinaryReadSize
             | Self::Ndiff
@@ -833,6 +853,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
             name,
             "int_floordiv"
                 | "imre_chr"
+                | "imre_annotation_ref"
                 | "imre_int_pow"
                 | "imre_int_modpow"
                 | "imre_int_negative_pow"
@@ -842,6 +863,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_import_error_reject_reset"
                 | "imre_exception_repr"
                 | "imre_json_iter"
+                | "imre_json_object_keys"
                 | "imre_json_len"
                 | "imre_json_get_receiver"
                 | "imre_json_add"
@@ -863,6 +885,13 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_float"
                 | "imre_log_file_new"
                 | "imre_log_clock_new"
+                | "imre_calendar_datetime"
+                | "imre_calendar_delta"
+                | "imre_calendar_zone"
+                | "imre_calendar_now"
+                | "imre_calendar_shift"
+                | "imre_calendar_negate"
+                | "imre_calendar_compare"
                 | "imre_log_file_close"
                 | "imre_log_file_flush"
                 | "imre_log_file_compute_int"
@@ -1020,6 +1049,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_upper"
                 | "imre_str_capitalize"
                 | "imre_module_cache_from_origin"
+                | "imre_cache_path_tag"
+                | "imre_cache_from_source"
+                | "imre_source_from_cache"
                 | "imre_str_slice"
                 | "imre_str_int_list"
                 | "imre_seq_get"

@@ -229,7 +229,10 @@ Its `decode(s)` method accepts Unicode text; `memo` returns the same dictionary
 on each read from that instance. Keys repeated within one document share the
 same string object. Separate decodes have independent key namespaces. Like
 CPython's default decoder, scanning does not consult or clear entries that a
-caller inserts into the public `memo` dictionary.
+caller inserts into the public `memo` dictionary. A saved `json.loads` function or bound
+`decoder.decode` method can be passed as a callable. Iterating a decoded value
+checked as `dict[str, Any]` yields its actual string keys in insertion order;
+sorting those keys preserves their owners.
 
 `json.dumps(value)` returns a string and `json.dump(value, stream)` writes to
 a text stream. Both accept scalar values, typed lists, tuples, dictionaries
@@ -345,6 +348,19 @@ A fixed-layout class can inherit from `collections.abc.Mapping[K, V]` or `typing
 `str.startswith(prefix)` and `str.endswith(suffix)` accept one positional string, without tuple alternatives or bounds. `str.find(sub[, start])` accepts a positional substring and an optional integer or `None` start, returning a Unicode scalar index or `-1`; an end bound and `rfind` are not yet supported. `str.partition(sep)` requires a nonempty positional string and returns a fixed `(before, separator, after)` tuple; a missing separator returns `(original, "", "")`. `str.isspace()` is false for an empty string and otherwise checks every character against Python's whitespace definition. These operations use native UTF-8 storage and do not import or call Python methods.
 
 `urllib.parse.unquote(string)` is a sealed native import for one positional or named string argument. It decodes percent escapes with the default UTF-8 replacement behavior. Byte inputs, configurable `encoding`/`errors`, and other URL parsing APIs remain unsupported.
+
+## Datetime and fixed UTC offsets
+
+`datetime.datetime`, `timedelta`, `timezone` and the `UTC` singleton have native immutable
+values. A datetime can be naive or use a fixed offset. `datetime.now(tz)` reads the system
+clock and requires a native `timezone`; there is no local or DST lookup. Civil construction,
+field reads, default ISO formatting, datetime comparisons, shifting a datetime by a
+timedelta, and fixed-zone names and offsets are supported. Timedelta construction accepts
+int, bool, and float units, normalizes negative durations, and checks overflow.
+
+The [datetime test inventory](../benchmarks/cpython_stdlib/full/datetime/README.md)
+lists the operations and original CPython cases checked. This does not change the typed
+TOML date boundary.
 
 ## CSV reader
 
@@ -871,6 +887,20 @@ The result exposes read-only `args: list[str]`, `returncode: int`, and the two s
 `check=True` or a failing `check_returncode()` raises the catch-only `subprocess.CalledProcessError`, which matches `subprocess.SubprocessError` and `Exception`. It exposes read-only `returncode: int`, `cmd: list[str]`, and the captured or absent `stdout`, `output`, and `stderr` fields. `stdout` and `output` expose the same capture. `cmd` aliases the original argument list, and the diagnostic reflects its current contents. These fixed getters raise `AttributeError` on unrelated exception instances. Missing executables and invalid working directories retain their ordinary operating-system error categories; they are not subprocess status errors.
 
 On POSIX, `os.open(path, flags, mode=0o777, *, dir_fd=None)` accepts text, bytes, or a native `Path`. It and `os.dup` and `os.pipe` return non-inheritable descriptors. `os.dup2` accepts an optional `inheritable` flag (true by default). Use `os.close`, `os.isatty`, `os.get_inheritable` / `os.set_inheritable`, and `os.get_blocking` / `os.set_blocking` directly on integer descriptors. `os.lseek(fd, position, whence)` reads or moves the shared offset. The runtime supplies the platform's open flags and `SEEK_SET`, `SEEK_CUR`, `SEEK_END`, `SEEK_DATA`, and `SEEK_HOLE` constants.
+
+On POSIX, `select.poll()` creates an independent poller. Its positional methods are
+`register(fd[, mask])`, `modify(fd, mask)`, `unregister(fd)`, and `poll([timeout])`.
+Descriptors are integers; the poller never owns or closes them. A repeated registration replaces the mask.
+Timeouts are milliseconds: zero checks immediately, and a negative number or `None` waits indefinitely.
+Results are fresh `(fd, mask)` tuples. The kernel can report `POLLERR`, `POLLHUP`, or `POLLNVAL`
+without those flags being requested. Unregister a descriptor before closing or reusing its number.
+An event loop can register several clients for `POLLIN` and enable `POLLOUT` only while bytes remain to send.
+
+`select.select(read, write, exceptional[, timeout])` accepts three integer lists and an optional timeout
+in seconds. It returns three fresh lists in input order, including duplicate ready descriptors.
+Closed descriptors raise `OSError(EBADF)`; descriptors outside the target's `FD_SETSIZE` raise `ValueError`.
+The native poller is not subject to the select fd-set limit. Objects with a dynamic `fileno()` and Python signal
+callbacks are outside this integer-fd interface.
 
 `os.environ.get(key)` and `os.getenv(key)` read a string from the environment and return `None` for a missing key. Both accept an optional `default` of type `str | None`. A string default gives a `str` result. `os.getcwd()` returns the current directory, and `os.fspath(path)` accepts a `str`, `bytes`, or native `Path`. `print(text, file=sys.stderr)` writes a string and a newline to standard error.
 

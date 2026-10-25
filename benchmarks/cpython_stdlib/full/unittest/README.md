@@ -124,6 +124,11 @@ checks both decisions after a reset, previously held call lists, child identity,
 and the different reset rules for children and cached return values. The mock
 tree can keep an exception instance as its `side_effect`.
 
+A Mock stored in an imported module records calls during module initialization,
+through an imported alias, and through the module attribute. The [import control](mock_globals/case.py)
+checks that all three calls share one history and compares the failed
+`assert_called_once()` message with CPython.
+
 `test_assert_any_call`, `test_assert_called_with` and
 `test_assert_called_once_with` exercise the callable form of
 `TestCase.assertRaises` on real Mock methods. The last also calls a lambda

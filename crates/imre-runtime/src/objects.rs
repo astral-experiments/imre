@@ -14,6 +14,8 @@ mod asyncio;
 mod boxed_values;
 mod builtins;
 mod bytes;
+mod cache_paths;
+mod calendar;
 mod chainmap;
 mod contexts;
 mod copying;
@@ -39,10 +41,12 @@ mod os;
 mod paths;
 pub(crate) mod posixpath;
 mod processes;
+mod readiness;
 pub(crate) mod records;
 mod regexes;
 mod sequences;
 mod shutil;
+mod source_modules;
 mod stdlib;
 mod string_enums;
 mod structs;
@@ -106,7 +110,12 @@ enum Storage {
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
     SimpleNamespace(Rc<Object>),
+    SourceModule {
+        name: crate::StrOwner,
+        filename: crate::StrOwner,
+    },
     Sha256(Box<sha2::Sha256>),
+    Poll(Box<readiness::Poll>),
     NativeModule(errno::Module),
     ModuleNamespace(Rc<errno::Registry>),
     ModuleMember(errno::Member),
@@ -137,6 +146,7 @@ enum Storage {
     HandlerLock(std::sync::Arc<logging::locks::HandlerLock>),
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),
+    Calendar(Box<calendar::Value>),
     LogRecord(Box<logging::record::Record>),
     LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),

@@ -16,7 +16,9 @@ mod argparse;
 mod assignments;
 mod asyncio;
 mod bytes;
+mod cache_paths;
 mod cached_properties;
+mod calendar;
 mod call_binding_errors;
 mod callables;
 mod calls;
@@ -55,6 +57,7 @@ mod json;
 mod keyword_forwarding;
 mod linecache;
 mod literals;
+mod local_classes;
 mod local_functions;
 mod logging;
 mod logging_formatters;
@@ -77,6 +80,7 @@ mod powers;
 mod processes;
 mod projected_equality;
 mod properties;
+mod readiness;
 mod record_inputs;
 mod records;
 mod regex;
@@ -456,6 +460,7 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "RecursionError" => return Some(43),
         "Warning" => return Some(80),
         "RuntimeWarning" => return Some(81),
+        "DeprecationWarning" => return Some(82),
         _ => {}
     }
     if name == "ImportError" {
@@ -1139,6 +1144,10 @@ pub(crate) fn lower_with_owners(
         .extend_layouts(&mut classes.fields);
     Ok((
         ir::Module {
+            ignore_python_environment: graph
+                .command_startup
+                .as_ref()
+                .is_some_and(|(flags, _)| flags.isolated),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             class_fields: classes.fields,
@@ -1374,9 +1383,15 @@ fn signature(
         });
         parameter_types.push(Some(ty));
     }
+    // A .pyi describes the linked C function. Its ellipsis is not an executable body.
+    let inert = graph.modules[module].archive.is_none() && annotations::inert_body(function);
+    if inert && let Some(ast::Expr::Name(n)) = function.returns.as_deref() {
+        graph.deferred_name(module, n.range());
+    }
     let returns = function
         .returns
         .as_deref()
+        .filter(|_| !inert)
         .filter(|value| {
             graph.resolve(module, value) != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
                 && namedtuples::annotation(graph, module, value, types).is_none()
@@ -1393,9 +1408,11 @@ fn signature(
             }
         })
         .transpose()?
+        .or(inert.then_some(Type::None))
         .or_else(|| match (receiver, function.name.as_str()) {
             (Some(_), "__init__" | "__post_init__") => Some(Type::None),
             (Some(_), "__str__" | "__repr__") => Some(Type::Str),
+            (Some(_), "__bool__") => Some(Type::Bool),
             _ => None,
         });
     let id = inference.register(parameter_types, returns);
@@ -1570,6 +1587,9 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::Any)) if graph.mutable_documents => {
             return Ok(documents::ANY);
         }
+        Some(Binding::Intrinsic(Intrinsic::Readiness(ir::Readiness::New))) => {
+            return Ok(Type::Poll);
+        }
         Some(Binding::Intrinsic(Intrinsic::Deque)) => return Ok(types.deque(Type::Int)),
         Some(Binding::Intrinsic(Intrinsic::Counter)) => return Ok(types.counter(Type::Str)),
         Some(Binding::Intrinsic(Intrinsic::ChainMap)) => {
@@ -1589,6 +1609,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
         Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return Ok(Type::ClockTime),
+        Some(Binding::Intrinsic(Intrinsic::Calendar(kind))) => return Ok(Type::Calendar(kind)),
         Some(Binding::Intrinsic(Intrinsic::ModuleType)) => return Ok(Type::NativeModule),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::StatResult)) => return Ok(types.stat_result()),
@@ -2009,6 +2030,7 @@ struct Checker<'a> {
     omitted_assert_free: HashMap<String, unbound_locals::Binding>,
     names: HashMap<String, usize>,
     local_functions: HashMap<String, local_functions::Binding>,
+    local_classes: HashMap<String, local_classes::Binding>,
     locals: Vec<Type>,
     assigned: assignments::Assigned,
     calls: HashSet<usize>,
@@ -2075,6 +2097,7 @@ impl<'a> Checker<'a> {
             omitted_assert_free: HashMap::new(),
             names: HashMap::new(),
             local_functions: HashMap::new(),
+            local_classes: HashMap::new(),
             locals: Vec::new(),
             assigned: assignments::Assigned::default(),
             calls: HashSet::new(),
@@ -2100,6 +2123,7 @@ impl<'a> Checker<'a> {
         if (name != "__doc__" && reserved(name))
             || self.graph.modules[self.module].bindings.contains_key(name)
             || self.local_functions.contains_key(name)
+            || self.local_classes.contains_key(name)
             || self.class_receiver.as_deref() == Some(name)
         {
             return Err(error(
@@ -2514,6 +2538,10 @@ impl<'a> Checker<'a> {
             }
         }
         if matches!(concrete, Type::Callable(_)) {
+            if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::JsonLoads)) {
+                let value = self.json_load_callable(None, Some(concrete), expression)?;
+                return self.coerce(value, expected, expression);
+            }
             if let Some(Binding::Intrinsic(
                 op @ (Intrinsic::Copy(_)
                 | Intrinsic::RmTree
@@ -2538,6 +2566,11 @@ impl<'a> Checker<'a> {
                     return self.coerce(value, expected, expression);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
+                    let value =
+                        self.json_load_callable(Some(receiver), Some(concrete), expression)?;
+                    return self.coerce(value, expected, expression);
+                }
                 if let Type::Class(class) | Type::StrEnum(class) | Type::Enum(class) = receiver.ty {
                     let value =
                         self.class_attribute(attribute, class, Some(receiver), Some(concrete))?;
@@ -3112,18 +3145,7 @@ impl<'a> Checker<'a> {
             }
         }
         let value = self.iteration_expression(expression, None)?;
-        let value = if matches!(
-            value.ty,
-            Type::JsonRoot | Type::JsonValue | Type::JsonObject
-        ) {
-            Expr {
-                ty: self.types.list(Type::JsonValue),
-                kind: ExprKind::Builtin(Builtin::JsonIter, vec![value]),
-            }
-        } else {
-            value
-        };
-        Ok((value, false))
+        Ok((self.json_iteration(value), false))
     }
 
     /// Checks an iterable in its current lexical scope, before target binding.
@@ -3415,6 +3437,11 @@ impl<'a> Checker<'a> {
                 lower_body,
             );
         }
+        let iterable = if items {
+            iterable
+        } else {
+            self.json_iteration(iterable)
+        };
         if matches!(
             iterable.ty,
             Type::TextIO | Type::StringIO | Type::BinaryIO | Type::CsvReader
@@ -3852,10 +3879,11 @@ impl<'a> Checker<'a> {
             return Ok((Vec::new(), true));
         }
         let result = match statement {
-            ast::Stmt::FunctionDef(function) => {
-                self.define_local_function(function)?;
+            ast::Stmt::ClassDef(class) if !self.module_scope => {
+                self.define_local_class(class)?;
                 None
             }
+            ast::Stmt::FunctionDef(function) => self.define_local_function(function)?,
             ast::Stmt::Assign(assign) => {
                 return Ok((self.assignment_statement(assign)?, true));
             }
@@ -4007,6 +4035,9 @@ impl<'a> Checker<'a> {
                 }
             }
             ast::Stmt::Expr(expression) => {
+                if matches!(&*expression.value, ast::Expr::EllipsisLiteral(_)) {
+                    return Ok((Vec::new(), true));
+                }
                 if let ast::Expr::Yield(yielded) = &*expression.value
                     && let Some(element) = self.generator_item
                     && let Some(value) = &yielded.value
@@ -4933,6 +4964,9 @@ impl<'a> Checker<'a> {
         } else {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
+        if let (Type::Calendar(first), Type::Calendar(second)) = (left.ty, right.ty) {
+            return calendar::binary(first, second, left, right, binary, self.source);
+        }
         if binary.op == ast::Operator::Mod
             && matches!(left.ty, Type::Str | Type::StrLiteral(_))
             && matches!(right.ty, Type::Str | Type::StrLiteral(_))
@@ -5137,11 +5171,31 @@ impl<'a> Checker<'a> {
                 &format!("no native implementation for {symbol}"),
             ));
         }
+        if let ast::Expr::Attribute(attr) = expression
+            && let Some(value) = self.calendar_class_attribute(attr)
+        {
+            return Ok(value);
+        }
         if let Some(target) = self.resolve(expression) {
+            if target == Binding::Intrinsic(Intrinsic::CalendarUtc) {
+                return Ok(calendar::utc());
+            }
             if matches!(target, Binding::Module(_) | Binding::IntrinsicModule(_))
                 && let Some(module) = self.module_docs(target, expression)?
             {
                 return Ok(module);
+            }
+            if let Binding::Module(id) = target {
+                return Ok(Expr {
+                    ty: Type::SourceModule,
+                    kind: ExprKind::Builtin(
+                        Builtin::SourceModule,
+                        vec![
+                            unpacking::string(&self.graph.modules[id].name),
+                            unpacking::string(self.graph.module_filename(id).to_string_lossy()),
+                        ],
+                    ),
+                });
             }
             if let Some(value) = self.errno_value(target, expression) {
                 return Ok(value);
@@ -5158,8 +5212,18 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Int(level.to_string()),
             });
         }
+        if let Some(prefix) = self.cache_config(expression) {
+            return Ok(cache_paths::op(
+                ir::CachePathOperation::Get(prefix),
+                self.types.optional(Type::Str),
+                vec![],
+            ));
+        }
         self.reject_class_receiver_value(expression)?;
-        if self.local_function_binding(expression).is_some() {
+        if let Some(binding) = self.local_function_binding(expression) {
+            if let Some(slot) = binding.value_slot {
+                return Ok(self.local(slot));
+            }
             return Err(error(
                 self.source,
                 expression,
@@ -5240,6 +5304,7 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::BuiltinsLast, vec![]),
                     });
                 }
+                Intrinsic::JsonLoads => return self.json_load_callable(None, None, expression),
                 Intrinsic::DescriptorConstant(name) => {
                     return Ok(Expr {
                         ty: Type::Int,
@@ -5504,6 +5569,11 @@ impl<'a> Checker<'a> {
                         )
                     }
                     ast::UnaryOp::USub | ast::UnaryOp::UAdd => {
+                        if value.ty == Type::Calendar(ir::CalendarType::Delta)
+                            && unary.op == ast::UnaryOp::USub
+                        {
+                            return Ok(calendar::op(ir::CalendarOp::Negate, value.ty, vec![value]));
+                        }
                         if self.types.is_counter(value.ty) {
                             let op = if unary.op == ast::UnaryOp::UAdd {
                                 ir::CounterOp::Positive
@@ -5680,6 +5750,11 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                if let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
+                    && values.iter().all(|v| v.ty == Type::SourceModule)
+                {
+                    return Ok(Self::identity_result(values, *op == ast::CmpOp::NotEq));
+                }
                 if values.iter().all(|v| matches!(v.ty, Type::ForwardRef(_))) {
                     let ops = compare
                         .ops
@@ -5696,6 +5771,11 @@ impl<'a> Checker<'a> {
                     });
                 }
                 let mut values = self.numeric_union_comparison(values);
+                if let Some(result) =
+                    calendar::equality(self.types, &mut values, compare.ops.as_ref())
+                {
+                    return Ok(result);
+                }
                 if let ([left, right], [op]) = (values.as_slice(), compare.ops.as_ref())
                     && let Some(result) = inspect::equality(left, right, *op)
                 {
@@ -5845,7 +5925,14 @@ impl<'a> Checker<'a> {
                         self.expect(ty, right, expression)?;
                     }
                     let ordered = numeric
-                        || matches!(ty, Type::Bytes | Type::ClockTime)
+                        || matches!(
+                            ty,
+                            Type::Bytes
+                                | Type::ClockTime
+                                | Type::Calendar(
+                                    ir::CalendarType::Delta | ir::CalendarType::DateTime
+                                )
+                        )
                         || matches!(ty, Type::Tuple(_)) && self.types.ordered_key(ty);
                     let op = match op {
                         ast::CmpOp::Eq => Compare::Equal,
@@ -5869,11 +5956,12 @@ impl<'a> Checker<'a> {
                             "regex objects do not support value comparisons in Imre",
                         ));
                     }
-                    let tuple_list = self.types.element(ty).is_some_and(|item| {
-                        self.types.is_value_struct(item)
+                    let comparable_list = self.types.element(ty).is_some_and(|item| {
+                        item == Type::Str
+                            || self.types.is_value_struct(item)
                             || matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
                     });
-                    if matches!(ty, Type::ListInt | Type::List(_)) && !tuple_list
+                    if matches!(ty, Type::ListInt | Type::List(_)) && !comparable_list
                         || matches!(
                             ty,
                             Type::ChainMap(_)
@@ -6062,7 +6150,7 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
-                if attribute.attr.as_str() == "machinery"
+                if matches!(attribute.attr.as_str(), "machinery" | "util")
                     && self.resolve(&attribute.value)
                         == Some(Binding::IntrinsicModule(
                             crate::modules::IntrinsicModule::Importlib,
@@ -6072,11 +6160,32 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         attribute,
-                        "import importlib.machinery before reading the machinery attribute",
+                        &format!(
+                            "import importlib.{} before reading the {} attribute",
+                            attribute.attr, attribute.attr
+                        ),
                     ));
+                }
+                if let Some(class) = self.local_class(&attribute.value)? {
+                    let value = match attribute.attr.as_str() {
+                        "__name__" => class.name.as_str(),
+                        "__qualname__" => class.qualname.as_str(),
+                        "__module__" => self.runtime_module_name(self.module),
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                attribute,
+                                "local class attribute requires supported native metadata",
+                            ));
+                        }
+                    };
+                    return Ok(unpacking::string(value));
                 }
                 if let Some(flag) = self.command_flag(attribute)? {
                     return Ok(flag);
+                }
+                if let Some(text) = self.testcase_class_text(attribute)? {
+                    return Ok(text);
                 }
                 if let Some((_, declaration)) = self.namedtuple_factory(&attribute.value) {
                     return self.namedtuple_class_attribute(attribute, &declaration);
@@ -6112,12 +6221,28 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if matches!(receiver.ty, Type::AnnotationValue(_)) {
+                    return self.annotation_attribute(receiver, attribute);
+                }
                 if let Type::ChainMap(id) = receiver.ty
                     && attribute.attr.as_str() == "maps"
                 {
                     return Ok(Expr {
                         ty: self.types.list(Type::Dict(id)),
                         kind: ExprKind::Builtin(Builtin::ChainMapMaps, vec![receiver]),
+                    });
+                }
+                if receiver.ty == Type::SourceModule
+                    && matches!(attribute.attr.as_str(), "__name__" | "__file__")
+                {
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::SourceModuleAttribute {
+                                filename: attribute.attr.as_str() == "__file__",
+                            },
+                            vec![receiver],
+                        ),
                     });
                 }
                 if let Type::ForwardRef(layout) = receiver.ty {
@@ -6153,6 +6278,9 @@ impl<'a> Checker<'a> {
                 }
                 if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
                     return Ok(self.string_join_value(Some(receiver), attribute));
+                }
+                if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
+                    return self.json_load_callable(Some(receiver), None, attribute);
                 }
                 if let Some(element) = self.types.deque_element(receiver.ty) {
                     return self.deque_attribute(attribute, receiver, element);
@@ -6239,6 +6367,9 @@ impl<'a> Checker<'a> {
                         ty: self.types.dict(Type::Str, Type::Str),
                         kind: ExprKind::Builtin(Builtin::JsonDecoderMemo, vec![receiver]),
                     });
+                }
+                if let Type::Calendar(kind) = receiver.ty {
+                    return self.calendar_attribute(kind, receiver, attribute);
                 }
                 if matches!(receiver.ty, Type::TimedFileHandler | Type::ClockTime) {
                     return self.timed_attribute(receiver, attribute);
@@ -6803,6 +6934,10 @@ impl<'a> Checker<'a> {
                 "argument unpacking requires a source-defined function or method",
             ));
         }
+        if let Some(Binding::Intrinsic(Intrinsic::CachePath { reverse })) = self.resolve(&call.func)
+        {
+            return self.cache_path_call(call, reverse);
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ModuleSpec)) {
             return self.module_spec(call);
         }
@@ -7049,6 +7184,9 @@ impl<'a> Checker<'a> {
                     ),
                 });
             }
+            Some(Binding::Intrinsic(Intrinsic::Readiness(op))) => {
+                return self.readiness_call(call, op);
+            }
             Some(Binding::Intrinsic(Intrinsic::Fd(op))) => return self.fd_call(call, op),
             Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
                 return self.credential_call(call, name);
@@ -7122,6 +7260,9 @@ impl<'a> Checker<'a> {
                 return self.timed_handler(call);
             }
             Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return self.clock_time(call),
+            Some(Binding::Intrinsic(Intrinsic::Calendar(kind))) => {
+                return self.calendar_constructor(kind, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
                 return self.configure_logging(call);
             }
@@ -7265,6 +7406,15 @@ impl<'a> Checker<'a> {
         {
             return self.environ_method(attribute, call);
         }
+        if let ast::Expr::Attribute(attr) = call.func.as_ref()
+            && self.resolve(&attr.value)
+                == Some(Binding::Intrinsic(Intrinsic::Calendar(
+                    ir::CalendarType::DateTime,
+                )))
+            && attr.attr.as_str() == "now"
+        {
+            return self.calendar_now(call);
+        }
         if let Some(class) = self.class_reference(&call.func) {
             return self.construct(call, class);
         }
@@ -7340,6 +7490,10 @@ impl<'a> Checker<'a> {
             return self.simple_exception(call, kind);
         }
         if let Some(binding) = self.resolve(&call.func) {
+            if let Binding::Value(_) = binding {
+                let callable = self.expr(&call.func)?;
+                return self.invoke(call, callable);
+            }
             let Binding::Definition(definition) = binding else {
                 return Err(error(self.source, call, "a module is not callable"));
             };
@@ -7490,6 +7644,9 @@ impl<'a> Checker<'a> {
             if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch) {
                 return self.regex_method(receiver, attribute, call);
             }
+            if receiver.ty == Type::Poll {
+                return self.poll_method(receiver, attribute, call);
+            }
             if receiver.ty == Type::Sha256 {
                 return self.sha256_method(receiver, attribute, call);
             }
@@ -7518,6 +7675,9 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::ZipFile {
                 return self.zipfile_method(receiver, attribute, call);
+            }
+            if let Type::Calendar(kind) = receiver.ty {
+                return self.calendar_method(kind, receiver, attribute, call);
             }
             if receiver.ty == Type::TimedFileHandler {
                 return self.timed_method(receiver, attribute, call);
@@ -8011,6 +8171,12 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if args.len() == 1
+            && matches!(args[0].ty, Type::Calendar(_))
+            && matches!(name.id.as_str(), "str" | "print" | "repr")
+        {
+            return Ok(calendar::format_builtin(name.id.as_str(), args));
+        }
         if name.id == "hash" {
             let [value] = args.as_slice() else {
                 return Err(error(self.source, call, "hash requires one argument"));
