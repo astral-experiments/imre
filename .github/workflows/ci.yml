@@ -192,6 +192,11 @@ jobs:
           for suite in build_cache module_objects link_cache build_output; do
             env -i HOME="$RUNNER_TEMP" PATH=/usr/bin:/bin python3 "tests/$suite.py" --compiler target/release/imre
           done
+      - name: Run complete upstream shallow-copy methods in native Imre
+        run: |
+          python3 benchmarks/cpython_stdlib/full/copy/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/copy-native.json"
+          cmp benchmarks/cpython_stdlib/full/copy/native-linux.json "$RUNNER_TEMP/copy-native.json"
+          python3 benchmarks/cpython_stdlib/full/copy/allocation_failure.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Run complete itertools methods in native Imre
         run: |
           for opt in 0 3; do
@@ -228,6 +233,8 @@ jobs:
         run: |
           python3 benchmarks/cpython_stdlib/native_csv.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
           python3 benchmarks/cpython_stdlib/full/shutil/check_csv_handlers.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+          python3 benchmarks/cpython_stdlib/full/csv/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/test-csv.json"
+          cmp benchmarks/cpython_stdlib/full/csv/native-linux.json "$RUNNER_TEMP/test-csv.json"
       - name: Compare native suites with CPython
         run: |
           python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-ordinary --suites differential imports classes text containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \

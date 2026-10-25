@@ -26,9 +26,9 @@ class Case:
         self.checks = 0
 
     def readerAssertEqual(self, data: str, expected: list[list[str]]) -> None:
-        with open("input.csv", "w", encoding="utf-8") as stream:
+        with open("input.csv", "w", encoding="utf-8", newline="") as stream:
             stream.write(data)
-        with open("input.csv", "r", encoding="utf-8") as stream:
+        with open("input.csv", "r", encoding="utf-8", newline="") as stream:
             actual = list(csv.reader(stream))
         assert len(expected) == len(actual)
         for index in range(len(expected)):

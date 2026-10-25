@@ -11,10 +11,18 @@ recently used key; zero disables storage, and `None` keeps all results.
 `cache_clear()` resets entries and counters. `cache_info()` supports unpacking
 and indexing the four snapshot fields.
 
+`functools.partial` retains positional arguments for a synchronous callable with
+a fixed signature. Calls fill positional `functools.Placeholder` slots first.
+The partial can be returned, called repeatedly, or passed as a callback. Bound
+methods retain their receiver; captured mutable arguments keep their identity.
+Passing a placeholder last or as a keyword raises `TypeError`. Binding keyword
+defaults and inspecting a partial's attributes are not yet supported.
+
 | Area | Supported behavior |
 | --- | --- |
 | Modules | Closed UTF-8 source graph; imports can follow literal exports in imported modules; entry definitions precede executable statements; imported initializers run once in dependency/source order; optional docstrings |
 | Imports | Absolute, `from`, and package-relative imports; aliases and package re-exports; fixed module, definition, and exported value bindings; shared mutable values; no import cycles |
+| Copying | `copy.copy(x)` on builtin scalar values, enum members, plain fixed tuples, concrete lists, dictionaries, and sets; mutable copies retain their original children |
 | Functions | Exact signatures declared or inferred from concrete calls, scalar defaults, and checked bodies; direct positional and keyword calls; positional-only and keyword-only parameters; exact callable values, bound methods, and noncapturing lambdas; no recursive call cycles |
 | Types | `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed `pathlib.Path` and `subprocess.CompletedProcess[str]`, `typing.TextIO` and `typing.BinaryIO`, the sealed builtin `Exception` family, fixed nominal classes, string-valued `enum.StrEnum` and `typing.Literal`, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, exact `typing.Callable[[T1, T2], R]` signatures, `str \| bytes`, and `T \| None`; locals have one inferred or declared storage type |
 | Classes | Fixed fields, explicit or dataclass-generated initialization, typed instance/class/static methods, read-only properties, method-local `typing.Self`, alias-visible mutation, and frozen dataclasses |
@@ -312,6 +320,10 @@ for multiline fields. Errors use `csv.Error`; the default field limit is
 `quotechar`, `escapechar`, `doublequote`, `skipinitialspace` and `strict`
 keywords customize it. Other dialects, writers, dictionary adapters, and
 changing the field limit are outside the subset. An explicit text `lineterminator` is validated against the dialect characters; the reader recognizes CR and LF independently of this setting. A nonstring raises `TypeError`.
+
+Use `open(path, encoding="utf-8", newline="")` or `Path.open(..., newline="")`
+to preserve original line endings inside quoted fields. The default text reader
+recognizes the same physical lines and translates their endings to `\n`.
 
 ## Fixed regular expressions
 
