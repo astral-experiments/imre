@@ -199,7 +199,7 @@ pub unsafe extern "C" fn imre_exception_keyword_message(
             .collect();
         match suggestions::declaration_order((&*wrong).as_str(), &choices) {
             Some(spelling) => Rc::into_raw(Rc::new(
-                format!("{}. Did you mean '{spelling}'?", &*prefix).into(),
+                format!("{}. Did you mean '{spelling}'?", *prefix).into(),
             )),
             None => Rc::into_raw(acquire_rc(prefix as usize)),
         }
@@ -542,11 +542,8 @@ pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) ->
                 _ => return false,
             };
             // SAFETY: the exact int stays rooted throughout the lossless comparison.
-            if crate::floats::compare(
-                &*unsafe { Int::borrow(integer) },
-                f64::from_bits(float as u64),
-            ) != 0
-            {
+            let integer = unsafe { Int::borrow(integer) };
+            if crate::floats::compare(&integer, f64::from_bits(float as u64)) != 0 {
                 return false;
             }
         } else {
