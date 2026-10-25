@@ -317,6 +317,7 @@ impl Builtin {
             | Self::IntBounded { .. }
             | Self::IntSignAsFloat
             | Self::IsInstance(_)
+            | Self::IsBuiltinSubclass
             | Self::IsNone
             | Self::JsonIsInt
             | Self::Len
@@ -348,6 +349,13 @@ impl Builtin {
             | Self::Str
             | Self::NominalIdentity
             | Self::StrEnumMember { .. }
+            | Self::ForwardRefField(_)
+            | Self::BoxAnnotation(_)
+            | Self::AnnotationMember(_)
+            | Self::AnnotationIs
+            | Self::StaticFunction(_)
+            | Self::NewForwardRef
+            | Self::ClassNameView
             | Self::StrEnumName
             | Self::StrEnumValue
             | Self::EnumString
@@ -357,7 +365,8 @@ impl Builtin {
             | Self::UnionProject => Contract::new(false, PreservesLists),
             Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
             Self::ListReserveRange => Contract::new(false, PreservesOwners),
-            Self::BinaryOpen(_)
+            Self::AnnotationRef
+            | Self::BinaryOpen(_)
             | Self::BinaryRead
             | Self::BinaryReadSize
             | Self::BinaryWrite
@@ -665,6 +674,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
             name,
             "int_floordiv"
                 | "imre_chr"
+                | "imre_annotation_ref"
                 | "imre_json_index"
                 | "imre_exception_message"
                 | "imre_exception_repr"

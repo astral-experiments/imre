@@ -81,36 +81,44 @@ impl Emitter<'_, '_> {
         }
     }
 
-    pub(super) fn tuple(&mut self, ty: Type, values: &[Expr]) -> Value {
-        let cache = if values.iter().all(immutable_literal) {
-            let unit = self.output.current;
-            let roots = self.tuple_literals.entry(unit).or_default();
-            let root = self
-                .output
-                .global_ref(format!("tuple_literal_{unit}_{}", roots.len()));
-            roots.push(root.clone());
-            let prior = self.instruction(format!("load ptr, ptr @{root}"));
-            let missing = self.instruction(format!("icmp eq ptr {prior}, null"));
-            let build = self.label();
-            let ready = self.label();
-            self.branch(&missing, &build, &ready);
-            self.start(&build);
-            Some((root, ready))
-        } else {
-            None
-        };
-
+    /// Allocate an ordinary record even when every field is a constant. Unlike a
+    /// tuple literal, a nominal Python constructor produces a fresh identity.
+    pub(super) fn fresh_record(&mut self, ty: Type, values: &[Expr]) -> Value {
         let object = self.record(ty);
         for (field, value) in values.iter().enumerate() {
             let value = self.operand(value);
             self.set_field(&object, field, &value.value);
             self.release_operand(&value);
         }
-        let Some((root, ready)) = cache else {
-            return object;
-        };
-        // Transfer the constructor's owner to the root. Each evaluation takes
-        // its own reference, just as it would for a freshly allocated tuple.
+        object
+    }
+
+    pub(super) fn tuple(&mut self, ty: Type, values: &[Expr]) -> Value {
+        if !values.iter().all(immutable_literal) {
+            return self.fresh_record(ty, values);
+        }
+        let unit = self.output.current;
+        let roots = self.tuple_literals.entry(unit).or_default();
+        let root = self
+            .output
+            .global_ref(format!("tuple_literal_{unit}_{}", roots.len()));
+        roots.push(root.clone());
+        self.rooted_record(ty, &root, |emitter| emitter.fresh_record(ty, values))
+    }
+
+    /// Give the root the constructor's owner. Each read receives its own reference.
+    pub(super) fn rooted_record(
+        &mut self,
+        ty: Type,
+        root: &str,
+        build: impl FnOnce(&mut Self) -> Value,
+    ) -> Value {
+        let prior = self.instruction(format!("load ptr, ptr @{root}"));
+        let missing = self.instruction(format!("icmp eq ptr {prior}, null"));
+        let (construct, ready) = (self.label(), self.label());
+        self.branch(&missing, &construct, &ready);
+        self.start(&construct);
+        let object = build(self);
         self.line(format!("store ptr {}, ptr @{root}", object.operand));
         self.forget(&object);
         self.jump(&ready);
@@ -167,7 +175,12 @@ impl Emitter<'_, '_> {
             )
             .unwrap();
         }
-        for root in self.tuple_literals.values().flatten() {
+        for root in self
+            .tuple_literals
+            .values()
+            .flatten()
+            .chain(&self.static_functions)
+        {
             self.output
                 .global(self.output.entry, root, "global", "ptr")
                 .push_str("null\n");
@@ -252,7 +265,12 @@ ready:
             )
             .unwrap();
         }
-        for root in self.tuple_literals.values().flatten() {
+        for root in self
+            .tuple_literals
+            .values()
+            .flatten()
+            .chain(&self.static_functions)
+        {
             writeln!(
                 self.output.entry_buffer(),
                 "  %{root} = load ptr, ptr @{root}\n  store ptr null, ptr @{root}\n  call void @imre_record_release(ptr %{root})"

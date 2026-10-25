@@ -178,6 +178,20 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
                 match raw & !NULLABLE {
                     5 => object_element(left as *const Object, right as *const Object, position),
                     6 => record_field(left as *const usize, right as *const usize, position),
+                    13 => {
+                        let (a, left) = super::annotations::member(left);
+                        let (b, right) = super::annotations::member(right);
+                        if a != b {
+                            Comparison::Done(false)
+                        } else {
+                            Comparison::Child {
+                                left,
+                                right,
+                                kind: a,
+                                resume: None,
+                            }
+                        }
+                    }
                     9 => {
                         let (left, left_kind) = super::unions::member(left);
                         let (right, right_kind) = super::unions::member(right);
@@ -227,9 +241,10 @@ unsafe fn scalar_equal(left: usize, right: usize, kind: WordKind) -> bool {
     // SAFETY: the shared kind selects the exact scalar or rooted allocation.
     unsafe {
         match raw & !NULLABLE {
+            12 => super::annotations::equal(left, right),
             0 | 1 | 10 => left == right,
             2 => integer_equal(left, right),
-            3 => *(left as *const Str) == *(right as *const Str),
+            3 | 11 => *(left as *const Str) == *(right as *const Str),
             4 => {
                 if left == right {
                     return true;
@@ -479,6 +494,12 @@ unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
         match raw & !NULLABLE {
             0 => output.push_str("None"),
             10 => super::string_enums::write_repr(output, word),
+            12 => super::annotations::write_repr(output, word),
+            13 => {
+                let (member, value) = super::annotations::member(word);
+                write_repr(output, value, member);
+            }
+            11 => write!(output, "<class '{}'>", *(word as *const Str)).unwrap(),
             1 => {
                 let value = if raw & NULLABLE != 0 { word - 1 } else { word };
                 output.push_str(if value == 0 { "False" } else { "True" });

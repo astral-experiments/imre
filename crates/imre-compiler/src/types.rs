@@ -87,6 +87,13 @@ impl Types {
                 storage.shapes.get(id),
                 Some(Shape::Callable(..) | Shape::CachedCallable(_))
             ),
+            Type::ForwardRef(id) => {
+                matches!(storage.shapes.get(id), Some(Shape::Tuple(fields)) if fields.len() == 5)
+            }
+            Type::AnnotationValue(id) => {
+                matches!(storage.shapes.get(id), Some(Shape::Tuple(fields))
+                if fields.iter().all(|t| matches!(t, Type::BuiltinClass | Type::Str | Type::None | Type::ForwardRef(_))))
+            }
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
             Type::Class(id) | Type::NamedException(id) | Type::StrEnum(id) | Type::Enum(id) => {
@@ -101,6 +108,7 @@ impl Types {
             Type::AsyncProcess(bits) => bits <= 3,
             Type::Int
             | Type::Float
+            | Type::BuiltinClass
             | Type::Bool
             | Type::Str
             | Type::Bytes
@@ -639,6 +647,15 @@ impl Types {
         }
     }
 
+    pub(crate) fn forward_ref(&self, owner: Type) -> Type {
+        let module = self.optional(Type::Str);
+        let Type::Tuple(id) = self.tuple(vec![Type::Str, module, owner, Type::Bool, Type::Bool])
+        else {
+            unreachable!()
+        };
+        Type::ForwardRef(id)
+    }
+
     pub(crate) fn fields(&self, ty: Type) -> Option<Vec<Type>> {
         let Type::Tuple(id) = ty else {
             return None;
@@ -729,6 +746,9 @@ impl Types {
 
     /// Enumerates stored types for the class-field acyclicity check.
     pub(crate) fn children(&self, ty: Type) -> Vec<Type> {
+        if let Type::ForwardRef(id) | Type::AnnotationValue(id) = ty {
+            return self.fields(Type::Tuple(id)).unwrap();
+        }
         if let Some(element) = self
             .element(ty)
             .or_else(|| self.payload(ty))
