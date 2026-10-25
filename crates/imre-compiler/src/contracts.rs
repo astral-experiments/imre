@@ -607,6 +607,7 @@ impl Builtin {
             | Self::DictAsBase
             | Self::DictClear
             | Self::ListClear
+            | Self::ListReverse
             | Self::DictIter(_)
             | Self::GlobalSet(_)
             | Self::ExactRecord(_)

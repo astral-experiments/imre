@@ -1033,6 +1033,7 @@ pub(crate) enum Builtin {
     Append,
     Pop,
     ListClear,
+    ListReverse,
     IsNone,
     /// Promotes an exact str/bytes owner without allocating or changing identity.
     UnionInject,
