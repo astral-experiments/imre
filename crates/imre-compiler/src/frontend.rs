@@ -25,6 +25,7 @@ mod dispatch;
 mod documents;
 mod enums;
 mod expansions;
+mod fixed_tuples;
 mod functools;
 mod hashlib;
 mod inference;
@@ -1646,6 +1647,7 @@ struct Checker<'a> {
     /// A later local assignment shadows builtin iter throughout a function.
     local_iter: bool,
     context_method: bool,
+    fixed_tuple: Option<fixed_tuples::Call>,
     generator_item: Option<Type>,
     asynchronous: bool,
     /// Capture only the outer sum of an assignment with a neighboring sum.
@@ -1707,6 +1709,7 @@ impl<'a> Checker<'a> {
             zip_sum_rhs: None,
             asynchronous: false,
             context_method: false,
+            fixed_tuple: None,
             generator_item: None,
             zip_sums: HashMap::new(),
             source: &graph.modules[module].source,
@@ -3242,6 +3245,7 @@ impl<'a> Checker<'a> {
         let reachable = self.reachable;
         let enclosing_sum = self.zip_sum_rhs;
         let mut previous_sum = false;
+        let mut length_guard = None;
         for (index, statement) in statements.iter().enumerate() {
             if let ast::Stmt::Assign(assignment) = statement
                 && let [ast::Expr::Name(name)] = assignment.targets.as_slice()
@@ -3291,7 +3295,13 @@ impl<'a> Checker<'a> {
                     && (previous_sum || statements.get(index + 1).and_then(zip_sums::rhs).is_some())
             });
             previous_sum = sum.is_some();
+            let tuple = length_guard.and_then(|guard| self.guarded_tuple(statement, guard));
+            let enclosing_tuple = std::mem::replace(&mut self.fixed_tuple, tuple);
             let (mut lowered, continues) = self.statement(statement)?;
+            self.fixed_tuple = enclosing_tuple;
+            length_guard = self
+                .list_length_guard(statement)
+                .or_else(|| length_guard.filter(|guard| fixed_tuples::preserves(*guard, &lowered)));
             self.remember_regex_assignment(statement, &mut lowered, &statements[index + 1..]);
             if let Some(flag) =
                 unbound_locals::assigned(statement).and_then(|n| self.bound_flags.get(n))
@@ -4676,6 +4686,9 @@ impl<'a> Checker<'a> {
                     } else {
                         receiver
                     };
+                    if let Some(fields) = self.types.fields(receiver.ty) {
+                        return self.tuple_contains(key, receiver, &fields, compare);
+                    }
                     let (key_type, builtin) =
                         if let Some((key, _)) = self.types.mapping(receiver.ty) {
                             (key, Builtin::DictContains)
@@ -5322,6 +5335,9 @@ impl<'a> Checker<'a> {
     }
 
     fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
+        if let Some(tuple) = self.fixed_tuple.filter(|proof| proof.at == call.range()) {
+            return Ok(self.materialize_fixed_tuple(tuple));
+        }
         if let Some(value) = self.sys_call(call)? {
             return Ok(value);
         }
@@ -5643,6 +5659,20 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::Dedent)) => {
                 return self.text_function(call, "text", ir::TextOperation::Dedent);
+            }
+            Some(Binding::Intrinsic(Intrinsic::UrlsafeB64encode)) => {
+                let args = self.arguments(
+                    call,
+                    &[Parameter {
+                        name: "s".into(),
+                        ty: Type::Bytes,
+                        kind: ParameterKind::PositionalOrKeyword,
+                        default: None,
+                        sign_only: false,
+                    }],
+                    None,
+                )?;
+                return Ok(self.ordered_builtin(Builtin::UrlsafeB64encode, Type::Bytes, args));
             }
             Some(Binding::Intrinsic(Intrinsic::Unquote)) => {
                 return self.text_function(call, "string", ir::TextOperation::Unquote);
@@ -5983,6 +6013,15 @@ impl<'a> Checker<'a> {
                 return Ok(Expr {
                     ty,
                     kind: ExprKind::Builtin(builtin, args),
+                });
+            }
+            if receiver.ty == Type::Bytes
+                && attribute.attr.as_str() == "decode"
+                && matches!(call.arguments.args.as_ref(), [ast::Expr::StringLiteral(s)] if s.value.to_str().eq_ignore_ascii_case("ascii"))
+            {
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::DecodeAscii, vec![receiver]),
                 });
             }
             if call.arguments.args.is_empty()
