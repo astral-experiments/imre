@@ -66,8 +66,9 @@ compilation reaches `dataclasses.Field` on the next line. The controls use the
 same pinned files and preserve stderr for both entry points.
 
 Separately, 152 source-defined methods in the numeric-head run stop on
-`Exception.__init__(self, message)` in the unchanged `ArgumentParserError`
-fixture. For example, `TestAddSubparsers.test_abbreviation` receives the
+`Exception.__init__(self, message, stdout, stderr)` in the unchanged
+`ArgumentParserError` fixture. Its separate `error_code` field is not in
+the three-element `.args` tuple. For example, `TestAddSubparsers.test_abbreviation` receives the
 straight-line exception initializer diagnostic at both levels before its
 body can run. The [unittest coordination note](https://github.com/astral-sh/imre/pull/587#issuecomment-6393355465)
 tracks the explicit base initializer. These observations remain blocked.
