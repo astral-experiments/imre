@@ -87,6 +87,7 @@ type Runs = SmallVec<[(usize, usize); 8]>;
 /// Detect monotone runs, extend short runs with stable binary insertion, and
 /// merge using only the Python less-than operation. A failed comparison never
 /// leaves the index array with a duplicated or missing owner.
+/// The comparison call sequence is specific to this sorting implementation.
 fn sort_indices(
     order: &mut [usize],
     runs: &mut Runs,
