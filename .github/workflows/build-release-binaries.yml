@@ -19,13 +19,17 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             runner: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-aarch64-4' || 'ubuntu-24.04-arm' }}
           - target: aarch64-apple-darwin
-            runner: ${{ github.repository == 'astral-sh/imre' && 'namespace-profile-macos-15' || 'macos-15' }}
+            runner: macos-15  # Includes Xcode 26 for the CPython 3.14 SDK; our Namespace image stops at 16.4.
     env:
       TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Select the macOS SDK used for CPython compatibility
+        if: runner.os == 'macOS'
+        run: bash .github/scripts/select-macos-sdk.sh
 
       - name: Install Linux native toolchain
         if: runner.os == 'Linux'
