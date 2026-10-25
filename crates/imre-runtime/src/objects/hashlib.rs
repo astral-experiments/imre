@@ -1,5 +1,6 @@
 //! SHA-256 handles share a mutable hash state; digest reads finalize a snapshot.
 
+use crate::StrOwner;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -41,9 +42,9 @@ pub extern "C" fn imre_hash_algorithms_available() -> *const Object {
         let set = slot.get_or_insert_with(|| {
             // SAFETY: the fresh string-keyed set transfers one reference to this slot.
             let set = unsafe { Rc::from_raw(imre_set_new(3)) };
-            let name = Rc::new(Str::from("sha256"));
+            let name = StrOwner::new(Str::from("sha256"));
             // SAFETY: both exact inputs are rooted; the set acquires its own key.
-            unsafe { imre_set_add(Rc::as_ptr(&set), Rc::as_ptr(&name) as usize) };
+            unsafe { imre_set_add(Rc::as_ptr(&set), StrOwner::as_ptr(&name) as usize) };
             set
         });
         Rc::into_raw(Rc::clone(set))
@@ -69,7 +70,7 @@ fn hex(digest: Output<Sha256>) -> *const Str {
         result.push(char::from(HEX[(byte >> 4) as usize]));
         result.push(char::from(HEX[(byte & 15) as usize]));
     }
-    Rc::into_raw(Rc::new(result))
+    StrOwner::into_raw(StrOwner::new(result))
 }
 
 /// # Safety
