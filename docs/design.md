@@ -137,6 +137,37 @@ Synchronous subprocess calls form another sealed Unix boundary. The checker fixe
 
 Timed subprocess calls pass integer and float seconds through separate native entry points. The runtime keeps the original value for `TimeoutExpired` and starts a monotonic deadline after launch. A nonblocking poll loop drains both streams without waiting for descendants that inherit a pipe. Expiry snapshots undecoded bytes, kills and reaps the direct child, and closes captures. Catch bindings and `isinstance` narrowing expose `bytes | None` captures. The compiler gives `.timeout` an exact numeric layout when all deadline sites agree on its kind.
 
+The [value struct contract](subset.md#immutable-value-structs) uses the annotated class and
+decorator form established by [PEP 557](https://peps.python.org/pep-0557/).
+[Brett Cannon’s record prototype](https://discuss.python.org/t/struct-in-python/62777/2)
+explored dedicated declaration syntax; Imre keeps existing Python syntax and opts into
+different *identity and storage* rules through the decorator. [PEP 585](https://peps.python.org/pep-0585/#objects-created-with-bare-types-and-parameterized-types-are-exactly-the-same)
+explains why ordinary CPython erases the element argument when creating a list.
+The compatibility module therefore implements value behavior, while the Imre compiler uses
+the checked element type to select native row storage.
+
+Repeating a singleton stores one immutable record and a count. A different slot
+needs only an entry in a touched 64-slot block: the bitmap identifies changed
+positions, and its set bits index consecutive scalar payloads in that block.
+Writing back the default bits removes the entry; deleting the last one frees the
+table. The list handle stays the same. An escaped value owns its snapshot.
+Legacy consumers can request a boxed pointer array; unchanged slots reuse the
+same immutable record, and mutation invalidates the array.
+
+The runtime considers packing when inserting a new exception. It packs when over
+one quarter of the slots differ, or when over 1/64 differ and at least half of
+the blocks contain an exception. It counts distinct changed slots, including a
+newly appended slot, against the resulting length. The [density benchmark](../benchmarks/results/2026-10-25-struct-edit-density.md)
+compares clustered and scattered edits. A successful conversion takes O(n) work
+and stays dense thereafter; a failed reservation can still fall back to a sparse
+write. Replacing an existing exception or reading the list never triggers packing.
+
+A proven read-only scan hoists its view of dense or uniform storage. For sparse
+lists it caches a run in the loop frame: an untouched run broadcasts one row,
+and adjacent edits within a block use consecutive rows. Neither needs per-row
+boxes. Indexed reads can look up their block directly; slices map touched
+positions through the normalized stride without building an array of length n.
+
 Ordinary floats use LLVM `double` values and double fields; homogeneous containers carry their raw binary64 bits under one shared descriptor. They need no reference ownership. LLVM receives no fast-math permission. Mixed arithmetic explicitly checks integer conversion, while mixed comparisons compare an exact truncated-float integer and fractional sign. Integer true division scales the arbitrary-precision ratio and rounds once to nearest-even, including subnormals, instead of converting both operands independently. Optional floats own nullable `Rc<f64>` payloads so signed zero and every NaN bit pattern remain distinct from None.
 
 Float literals come from Ruff's AST. String conversion normalizes Python's decimal grammar before Rust's correctly rounded parser, using the existing pinned ICU character categories for Unicode digits. Ruff supplies nonfinite formatting; finite shortest digits use the already-pinned Ryu implementation because Ruff's current Rust-based finite formatter differs from Python at decimal ties. A small notation adaptation adds Python's exponent threshold, sign, and minimum width. Explicit exact-type checking prevents Python typing's permitted int-to-float assignment widening from silently changing stored values.

@@ -91,7 +91,7 @@ impl Emitter<'_, '_> {
                 roots.push(root.clone());
             }
             Some(root)
-        } else if values.iter().all(immutable_literal) {
+        } else if matches!(ty, Type::Tuple(_)) && values.iter().all(immutable_literal) {
             let unit = self.output.current;
             let roots = self.tuple_literals.entry(unit).or_default();
             let root = self
@@ -112,12 +112,7 @@ impl Emitter<'_, '_> {
             (root, ready)
         });
 
-        let object = self.record(ty);
-        for (field, value) in values.iter().enumerate() {
-            let value = self.operand(value);
-            self.set_field(&object, field, &value.value);
-            self.release_operand(&value);
-        }
+        let object = self.record_from_fields(ty, values);
         let Some((root, ready)) = cache else {
             return object;
         };
@@ -134,6 +129,17 @@ impl Emitter<'_, '_> {
         };
         self.retain(&value);
         value
+    }
+
+    /// Construct a new owner, even when all field values are literals.
+    pub(super) fn record_from_fields(&mut self, ty: Type, values: &[Expr]) -> Value {
+        let object = self.record(ty);
+        for (field, value) in values.iter().enumerate() {
+            let value = self.operand(value);
+            self.set_field(&object, field, &value.value);
+            self.release_operand(&value);
+        }
+        object
     }
 
     /// Main releases the literal roots after locals/globals on either exit.
@@ -225,6 +231,19 @@ ready:
             if lazy_constructor(ty).is_some() {
                 continue;
             }
+            // Stock CPython interns ASCII name characters and its Latin-1
+            // character singletons. Distinct equal dynamic strings stay distinct.
+            let init = if ty == Type::Str
+                && self.uses_string_interning
+                && (bytes
+                    .iter()
+                    .all(|b| b.is_ascii_alphanumeric() || *b == b'_')
+                    || matches!(bytes.as_slice(), [_] | [0xc2..=0xc3, 0x80..=0xbf]))
+            {
+                "imre_str_interned_literal"
+            } else {
+                init
+            };
             let bytes_name = self.output.string_name(*id, "str");
             let root = self.output.string_name(*id, "literal");
             writeln!(

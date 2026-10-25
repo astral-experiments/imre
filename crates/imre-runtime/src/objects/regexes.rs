@@ -18,6 +18,7 @@ use super::{
 };
 
 pub(super) struct Pattern {
+    spelling: Rc<Str>,
     regex: Regex,
     cache: meta::Cache,
     slots: Vec<Option<NonMaxUsize>>,
@@ -57,7 +58,12 @@ fn leading_literal(hir: &Hir) -> Option<&[u8]> {
 }
 
 impl Pattern {
+    #[cfg(test)]
     fn new(source: &str) -> Self {
+        Self::with_spelling(source, source)
+    }
+
+    fn with_spelling(source: &str, spelling: &str) -> Self {
         let hir = regex_syntax::Parser::new()
             .parse(source)
             .expect("validated fixed regex");
@@ -117,6 +123,7 @@ impl Pattern {
             })
             .collect();
         Self {
+            spelling: Rc::new(Str::from(spelling.to_owned())),
             regex,
             cache,
             slots,
@@ -213,6 +220,18 @@ impl Pattern {
         self.regex
             .search_slots_with(&mut self.cache, &input, &mut self.slots)
             .is_some()
+    }
+
+    /// Hide the matcher's synthetic final-newline group and restore Python's visible endpoint.
+    fn visible_spans(&mut self, text_len: usize) -> Spans {
+        let mut visible = self.slots.len();
+        if let Some(slot) = self.final_newline_slot {
+            if let Some(start) = self.slots[slot] {
+                self.slots[1] = Some(start);
+            }
+            visible = slot;
+        }
+        Spans::new(&self.slots[..visible], text_len)
     }
 
     fn search(&mut self, text: &str) -> bool {
@@ -337,16 +356,76 @@ fn handle(storage: Storage) -> *const Object {
 /// Instantiates a literal already validated by the compiler with this regex engine.
 ///
 /// # Safety
-/// `data` holds the `len` UTF-8 bytes of the translated pattern, or is empty.
+/// `data` holds a translated UTF-8 pattern (the original ABI), or 0xff,
+/// its eight-byte little-endian Python spelling length, the original spelling
+/// and the translated pattern. Both strings are validated UTF-8.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_regex_compile(data: *const u8, len: usize) -> *const Object {
-    let source = if len == 0 {
-        ""
+    let bytes = if len == 0 {
+        &[][..]
     } else {
-        // SAFETY: the compiler emits initialized static UTF-8 bytes of this exact length.
-        unsafe { str::from_utf8_unchecked(std::slice::from_raw_parts(data, len)) }
+        // SAFETY: the compiler emits initialized static bytes of this length.
+        unsafe { std::slice::from_raw_parts(data, len) }
     };
-    handle(Storage::RegexPattern(Box::new(Pattern::new(source))))
+    let (spelling, translated) = if let Some(record) = bytes.strip_prefix(&[0xff]) {
+        let (length, strings) = record.split_at(8);
+        let length = u64::from_le_bytes(length.try_into().unwrap()) as usize;
+        strings.split_at(length)
+    } else {
+        (bytes, bytes)
+    };
+    // SAFETY: both slices come from complete Rust strings emitted by the compiler.
+    let (spelling, source) = unsafe {
+        (
+            str::from_utf8_unchecked(spelling),
+            str::from_utf8_unchecked(translated),
+        )
+    };
+    handle(Storage::RegexPattern(Box::new(Pattern::with_spelling(
+        source, spelling,
+    ))))
+}
+
+/// Return the original Python spelling even when the native engine expanded an escape.
+///
+/// # Safety
+/// `pattern` must be a rooted compiled pattern.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_spelling(pattern: *const Object) -> *const Str {
+    // SAFETY: the caller keeps the pattern alive throughout the borrow.
+    unsafe {
+        object(pattern).0.with(|storage| {
+            let Storage::RegexPattern(pattern) = storage else {
+                unreachable!()
+            };
+            Rc::into_raw(pattern.spelling.clone())
+        })
+    }
+}
+
+/// Compile an exception assertion's runtime string with the same translator as
+/// fixed literals. Never reinterpret an unsupported pattern as literal text.
+///
+/// # Safety
+/// `spelling` must point to a rooted Python string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_unittest_compile_pattern(spelling: *const Str) -> *const Object {
+    // SAFETY: the caller retains its string for this call.
+    let spelling = unsafe { &*spelling };
+    match imre_regex::translate(spelling, false) {
+        Ok(pattern) => handle(Storage::RegexPattern(Box::new(Pattern::with_spelling(
+            &pattern.source,
+            spelling,
+        )))),
+        Err(reason) => {
+            Error::new(
+                Kind::NotImplementedError,
+                format!("unsupported native exception regex: {reason}"),
+            )
+            .raise();
+            ptr::null()
+        }
+    }
 }
 
 /// Substitute all matches; a miss retains the original string.
@@ -423,20 +502,75 @@ unsafe fn match_text(pattern: *const Object, text: *const Str, anchored: bool) -
             if !found {
                 return ptr::null();
             }
-            let mut visible = compiled.slots.len();
-            if let Some(slot) = compiled.final_newline_slot {
-                if let Some(start) = compiled.slots[slot] {
-                    compiled.slots[1] = Some(start);
-                }
-                visible = slot;
-            }
+            let spans = compiled.visible_spans((&*text).len());
             handle(Storage::RegexMatch(Match {
                 pattern: acquire_rc(pattern as usize),
                 text: acquire_rc(text as usize),
-                spans: Spans::new(&compiled.slots[..visible], (&*text).len()),
+                spans,
             }))
         })
     }
+}
+
+/// A one-shot cursor over a statically nonempty pattern; each match snapshots
+/// the group spans and retains the original text independently of the cursor.
+pub(super) struct FindIter {
+    pattern: Rc<Object>,
+    text: Rc<Str>,
+    offset: Option<usize>,
+}
+
+impl FindIter {
+    pub(super) fn next(&mut self) -> Option<(super::OwnedWord, Option<super::OwnedWord>)> {
+        let offset = self.offset.take()?;
+        // SAFETY: this cursor owns a distinct pattern; a search cannot reenter or mutate the cursor.
+        unsafe {
+            self.pattern.0.with_mut(|storage| {
+                let Storage::RegexPattern(compiled) = storage else {
+                    unreachable!()
+                };
+                let input = Input::new(self.text.as_str()).span(offset..self.text.len());
+                compiled.regex.search_slots_with(
+                    &mut compiled.cache,
+                    &input,
+                    &mut compiled.slots,
+                )?;
+                let spans = compiled.visible_spans(self.text.len());
+                let start = compiled.slots[0].unwrap().get();
+                let end = compiled.slots[1].unwrap().get();
+                debug_assert!(start < end);
+                self.offset = (end < self.text.len()).then_some(end);
+                let found = handle(Storage::RegexMatch(Match {
+                    pattern: Rc::clone(&self.pattern),
+                    text: Rc::clone(&self.text),
+                    spans,
+                }));
+                // SAFETY: the match transfers one object owner to the shared cursor ABI.
+                Some((
+                    super::OwnedWord::from_owned(found as usize, super::words::WordKind::new(5)),
+                    None,
+                ))
+            })
+        }
+    }
+}
+
+/// Iterate a proved nonempty pattern without materializing the matches.
+///
+/// # Safety
+/// Both pointers must be rooted native objects of the indicated types.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_finditer(
+    pattern: *const Object,
+    text: *const Str,
+) -> *const Object {
+    handle(Storage::RegexIterator(FindIter {
+        // SAFETY: each input remains rooted until the cursor retains its own owners.
+        pattern: unsafe { acquire_rc(pattern as usize) },
+        // SAFETY: the original text is live through this acquisition.
+        text: unsafe { acquire_rc(text as usize) },
+        offset: Some(0),
+    }))
 }
 
 impl Match {

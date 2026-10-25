@@ -113,6 +113,15 @@ impl Emitter<'_, '_> {
         self.instruction(format!("icmp ne i32 {matched}, 0"))
     }
 
+    /// Borrow the payload only if this erased value retains the exact record.
+    pub(super) fn boxed_record(&mut self, value: &Value, class: usize) -> String {
+        let layout = self.output.global_ref(format!("layout_class_{class}"));
+        self.instruction(format!(
+            "call ptr @imre_object_record_payload(ptr {}, ptr @{layout})",
+            value.operand
+        ))
+    }
+
     /// Inspect exception and record layouts only after proving the payload is present
     /// and selecting its tag if it is part of a finite union.
     pub(super) fn instance_test(&mut self, value: &Value, classes: &[InstanceType]) -> String {
@@ -137,7 +146,7 @@ impl Emitter<'_, '_> {
         {
             return "true".to_owned();
         }
-        if value.ty == Type::ExceptionField {
+        if value.ty == Type::ObjectValue {
             // The view retains its heterogeneous payload. None is not a class
             // accepted by this subset, and bool is also an instance of int.
             let mask = [
@@ -145,19 +154,46 @@ impl Emitter<'_, '_> {
                 (1, Type::Bool),
                 (2, Type::Int),
                 (3, Type::Str),
+                (4, Type::ListInt),
+                (5, Type::Dict(0)),
                 (6, Type::Tuple(0)),
+                (7, Type::Float),
                 (8, Type::Bytes),
+                (12, Type::Set(0)),
             ]
             .iter()
             .filter(|(_, ty)| classes.iter().any(|class| class.accepts(*ty)))
             .fold(0, |mask, (kind, _)| mask | 1 << *kind);
-            let kind = self.instruction(format!(
-                "call i32 @imre_system_exit_code_kind(ptr {})",
-                value.operand
-            ));
-            let bit = self.instruction(format!("shl i32 1, {kind}"));
-            let matched = self.instruction(format!("and i32 {bit}, {mask}"));
-            return self.instruction(format!("icmp ne i32 {matched}, 0"));
+            let mut matched = (mask != 0).then(|| {
+                let kind = self.instruction(format!(
+                    "call i32 @imre_system_exit_code_kind(ptr {})",
+                    value.operand
+                ));
+                let bit = self.instruction(format!("shl i32 1, {kind}"));
+                let found = self.instruction(format!("and i32 {bit}, {mask}"));
+                self.instruction(format!("icmp ne i32 {found}, 0"))
+            });
+            for class in classes {
+                let found = match class {
+                    InstanceType::Exact(Type::Class(class)) => {
+                        let ptr = self.boxed_record(value, *class);
+                        self.instruction(format!("icmp ne ptr {ptr}, null"))
+                    }
+                    InstanceType::Exception(kind) => {
+                        let child = self.instruction(format!(
+                            "call i32 @imre_exception_field_matches(ptr {}, i32 {kind})",
+                            value.operand
+                        ));
+                        self.instruction(format!("icmp ne i32 {child}, 0"))
+                    }
+                    _ => continue,
+                };
+                matched = Some(match matched {
+                    Some(previous) => self.instruction(format!("or i1 {previous}, {found}")),
+                    None => found,
+                });
+            }
+            return matched.unwrap_or_else(|| "false".into());
         }
         let mut result = "false".to_owned();
         for &class in classes {
