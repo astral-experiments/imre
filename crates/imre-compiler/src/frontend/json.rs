@@ -476,7 +476,27 @@ impl Checker<'_> {
         for keyword in &call.arguments.keywords {
             let name = keyword.arg.as_ref().unwrap().as_str();
             let value = if name == "separators" {
-                let value = self.expr(&keyword.value)?;
+                let value = match &keyword.value {
+                    // The encoder only unpacks this fresh display; its members can
+                    // have different types, and each must be evaluated in order.
+                    ast::Expr::List(items)
+                        if !items.elts.iter().any(ast::Expr::is_starred_expr) =>
+                    {
+                        let values = items
+                            .elts
+                            .iter()
+                            .map(|item| self.expr(item))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        Expr {
+                            ty: self.types.tuple(values.iter().map(|v| v.ty).collect()),
+                            kind: ExprKind::Tuple(values),
+                        }
+                    }
+                    ast::Expr::Dict(items) if items.items.is_empty() => {
+                        self.expr_expected(&keyword.value, self.types.dict(Type::Str, Type::Int))?
+                    }
+                    _ => self.expr(&keyword.value)?,
+                };
                 check_standard_encoding(value.ty, self.types)
                     .map_err(|message| error(self.source, keyword, message))?;
                 value

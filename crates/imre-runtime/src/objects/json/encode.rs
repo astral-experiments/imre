@@ -53,6 +53,7 @@ unsafe fn separators(word: usize, schema: &Schema) -> Result<Option<Separators>,
             FLOAT => "float",
             BOOLEAN => "bool",
             BYTES => "bytes",
+            PATH => "PosixPath",
             LIST => "list",
             DICTIONARY | INTEGER_DICTIONARY => "dict",
             TUPLE => "tuple",
@@ -60,15 +61,23 @@ unsafe fn separators(word: usize, schema: &Schema) -> Result<Option<Separators>,
             _ => "object",
         }
     }
-    let strings = |first: (usize, &Schema), second: (usize, &Schema)| {
+    fn field(word: usize, schema: &Schema) -> (usize, u32) {
+        let kind = if schema.kind == OPTIONAL {
+            if word == 0 { NONE } else { schema.child().kind }
+        } else {
+            schema.kind
+        };
+        (word, kind)
+    }
+    let strings = |first: (usize, u32), second: (usize, u32)| {
         // The key separator is validated first by the default encoder.
         for (field, ty) in [(5, second.1), (6, first.1)] {
-            if ty.kind != STRING {
+            if ty != STRING {
                 return Err(Error::new(
                     Kind::TypeError,
                     format!(
                         "make_encoder() argument {field} must be str, not {}",
-                        typename(ty.kind)
+                        typename(ty)
                     ),
                 ));
             }
@@ -95,12 +104,29 @@ unsafe fn separators(word: usize, schema: &Schema) -> Result<Option<Separators>,
                     Rc::new(Str::new(chars.next().unwrap().encode_utf8(&mut [0; 4]))),
                 )))
             }
+            BYTES => {
+                length((&*(word as *const crate::Bytes)).len())?;
+                strings((0, INTEGER), (0, INTEGER))
+            }
+            DICTIONARY | INTEGER_DICTIONARY | SET => object(word as *const Object).0.with(|s| {
+                let (size, kind, [a, b]) = s.first_two_keys();
+                length(size)?;
+                let kind = match kind {
+                    2 | 10 => INTEGER,
+                    3 => STRING,
+                    5 => PATH,
+                    6 => TUPLE,
+                    8 => BYTES,
+                    _ => unreachable!("checked key storage"),
+                };
+                strings((a, kind), (b, kind))
+            }),
             TUPLE => {
                 let fields = schema.fields();
                 length(fields.len())?;
                 let member = |i: usize| {
                     let ty = fields[i].schema();
-                    (
+                    field(
                         ty.storage()
                             .read_record_field((word as *const usize).add(i)),
                         ty,
@@ -110,12 +136,18 @@ unsafe fn separators(word: usize, schema: &Schema) -> Result<Option<Separators>,
             }
             LIST if schema.word_kind == 4 => (&*(word as *const List)).0.with(|items| {
                 length(items.len())?;
-                strings((items[0].0, schema.child()), (items[1].0, schema.child()))
+                strings(
+                    field(items[0].0, schema.child()),
+                    field(items[1].0, schema.child()),
+                )
             }),
             LIST => object(word as *const Object).0.with(|s| {
                 let words = &s.sequence().values;
                 length(words.len())?;
-                strings((words[0], schema.child()), (words[1], schema.child()))
+                strings(
+                    field(words[0], schema.child()),
+                    field(words[1], schema.child()),
+                )
             }),
             _ => Err(Error::new(
                 Kind::TypeError,
