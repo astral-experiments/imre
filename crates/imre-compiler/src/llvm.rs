@@ -7678,6 +7678,24 @@ mod tests {
     }
 
     #[test]
+    fn exception_field_display_checks_for_allocation_failure() {
+        let llvm = compile("def show(label: str, quoted: bool) -> str:\n    try:\n        raise SystemExit((label, label))\n    except SystemExit as error:\n        if quoted:\n            return repr(error.code)\n        return str(error.code)\nprint(show(\"text\", True))\n", &CompileOptions::default()).unwrap();
+        for call in [
+            "call ptr @imre_system_exit_code_text(",
+            "call ptr @imre_exception_field_repr(",
+        ] {
+            let (_, after) = llvm.split_once(call).unwrap();
+            assert!(
+                after
+                    .lines()
+                    .nth(1)
+                    .unwrap()
+                    .contains("call i32 @imre_error_pending()")
+            );
+        }
+    }
+
+    #[test]
     fn record_allocation_errors_escape_nested_calls() {
         let llvm = compile(
             "def make(n: int) -> tuple[int, int]:\n    return (n, 1)\ndef outer(n: int) -> tuple[int, int]:\n    return make(n)\ntry:\n    print(outer(3)[0])\nexcept MemoryError:\n    print(0)\n",

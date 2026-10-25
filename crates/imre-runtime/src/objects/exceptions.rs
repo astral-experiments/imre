@@ -1113,11 +1113,12 @@ impl Storage {
         self.exception().kind
     }
 
-    fn exception_message(&self) -> Rc<Str> {
-        match &self.exception().payload {
-            Payload::Import(err) => err.message(),
-            Payload::Positional(args) => args.message(),
-            Payload::Exit(code) => exit_text(code.as_ref(), ""),
+    fn exception_message(&self) -> Rendered {
+        Ok(match &self.exception().payload {
+            Payload::Import(err) => err.message()?,
+            Payload::Positional(args) => args.message()?,
+            Payload::Exit(Some(code)) => imports::word_text(code.kind, code.word, false)?,
+            Payload::Exit(None) => Rc::new(Str::new("")),
             Payload::Empty => Rc::new(Str::new("")),
             Payload::Message(message) => Rc::clone(message),
             Payload::Arguments(arguments) => Rc::clone(&arguments.message),
@@ -1127,16 +1128,7 @@ impl Storage {
             ))),
             Payload::Process(process) => Rc::new(process.message()),
             Payload::Timeout(timeout) => Rc::new(timeout.message()),
-            Payload::Key(key) if key.kind == WordKind::new(3) => {
-                // SAFETY: this owned kind-3 word is a live string.
-                Rc::new(string_repr(unsafe { &*(key.word as *const Str) }))
-            }
-            Payload::Key(key) => {
-                let mut message = String::new();
-                // SAFETY: the exception owns the immutable key and its exact kind.
-                unsafe { super::values::write_repr(&mut message, key.word, key.kind) };
-                Rc::new(Str::from(message))
-            }
+            Payload::Key(key) => imports::word_text(key.kind, key.word, true)?,
             Payload::Group(members) => {
                 let count = members.len();
                 let suffix = if count == 1 { "" } else { "s" };
@@ -1144,7 +1136,7 @@ impl Storage {
                     "unhandled errors in a TaskGroup ({count} sub-exception{suffix})"
                 )))
             }
-        }
+        })
     }
 }
 
@@ -1258,7 +1250,7 @@ pub unsafe extern "C" fn imre_system_exit_code_text(value: *const Object) -> *co
     // SAFETY: the caller roots the immutable exit payload.
     unsafe {
         let (kind, word) = exit_word(value);
-        Rc::into_raw(imports::word_text(kind, word, false))
+        finish_display(imports::word_text(kind, word, false))
     }
 }
 
@@ -1517,6 +1509,15 @@ pub unsafe extern "C" fn imre_named_exception_record(value: *const Object) -> *c
     }
 }
 
+type Rendered = std::result::Result<Rc<Str>, std::fmt::Error>;
+
+fn finish_display(result: Rendered) -> *const Str {
+    finish(
+        result.map(Rc::into_raw).map_err(|_| Error::allocation()),
+        std::ptr::null(),
+    )
+}
+
 /// Format after the storage borrow ends: a Python display method may read aliases,
 /// mutate its fields, or raise. The payload stays live through the callback.
 unsafe fn display(value: *const Object, repr: bool) -> *const Str {
@@ -1545,43 +1546,40 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
             return unsafe { super::values::imre_value_repr(layout.record.word, 6) };
         }
     }
+    use std::fmt::Write as _;
     // SAFETY: base message formatting uses only sealed immutable builtin payloads.
-    unsafe {
+    let result = unsafe {
         object(value).0.with(|s| {
             if !repr {
-                return Rc::into_raw(s.exception_message());
+                return s.exception_message();
             }
-            let e = s.exception();
-            let arg = match &e.payload {
-                Payload::Import(err) => err.args.repr_args(),
-                Payload::Positional(args) => args.repr_args(),
-                Payload::Empty => Str::new(""),
+            let exception = s.exception();
+            let mut result = String::new();
+            let mut output = super::values::ReprWriter(&mut result);
+            output.write_str(exception.name())?;
+            output.write_char('(')?;
+            match &exception.payload {
+                Payload::Import(err) => err.args.write_repr_args(&mut output)?,
+                Payload::Positional(args) => args.write_repr_args(&mut output)?,
+                Payload::Empty | Payload::Exit(None) => {}
                 Payload::Arguments(arguments) => {
-                    let mut result = String::new();
                     for (index, arg) in arguments.args.iter().enumerate() {
                         if index != 0 {
-                            result.push_str(", ");
+                            output.write_str(", ")?;
                         }
-                        super::values::write_repr(&mut result, arg.word, arg.kind);
+                        super::values::try_write_repr(&mut output, arg.word, arg.kind)?;
                     }
-                    result.into()
                 }
-                Payload::Key(k) => {
-                    let mut s = String::new();
-                    super::values::write_repr(&mut s, k.word, k.kind);
-                    s.into()
+                Payload::Key(key) | Payload::Exit(Some(key)) => {
+                    super::values::try_write_repr(&mut output, key.word, key.kind)?;
                 }
-                Payload::Exit(None) => Str::new(""),
-                Payload::Exit(Some(k)) => {
-                    let mut s = String::new();
-                    super::values::write_repr(&mut s, k.word, k.kind);
-                    s.into()
-                }
-                _ => string_repr(&s.exception_message()),
-            };
-            Rc::into_raw(Rc::new(format!("{}({})", e.name(), arg).into()))
+                _ => write_quoted_repr(s.exception_message()?.as_str(), &mut output)?,
+            }
+            output.write_char(')')?;
+            Ok(Rc::new(Str::from(result)))
         })
-    }
+    };
+    finish_display(result)
 }
 
 /// Return the current repr of a nominal exception's fields or builtin arguments.

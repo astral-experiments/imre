@@ -59,6 +59,13 @@ impl Builtin {
         match self {
             Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
             Self::Str
+                if args.first().is_some_and(|e| {
+                    matches!(e.ty, Type::ImportException | Type::ExceptionField)
+                }) =>
+            {
+                Contract::new(true, PreservesLists)
+            }
+            Self::Str
                 if args
                     .first()
                     .is_some_and(|e| matches!(e.ty, Type::Exception | Type::NamedException(_))) =>
@@ -70,10 +77,9 @@ impl Builtin {
             Self::ImportErrorNew { .. }
             | Self::ImportErrorField(_)
             | Self::ExceptionFieldLen
-            | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
-            Self::ExceptionTupleView | Self::ExceptionFieldRepr => {
-                Contract::new(false, PreservesOwners)
-            }
+            | Self::ExceptionFieldIndex
+            | Self::ExceptionFieldRepr => Contract::new(true, PreservesLists),
+            Self::ExceptionTupleView => Contract::new(false, PreservesOwners),
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {
                 Contract::new(false, PreservesLists)
@@ -732,6 +738,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_int_negative_pow"
                 | "imre_json_index"
                 | "imre_exception_message"
+                | "imre_system_exit_code_text"
+                | "imre_exception_field_repr"
                 | "imre_import_error_reject_reset"
                 | "imre_exception_repr"
                 | "imre_json_iter"
