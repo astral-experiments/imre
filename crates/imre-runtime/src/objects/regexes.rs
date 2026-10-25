@@ -526,7 +526,7 @@ pub unsafe extern "C" fn imre_regex_groupdict(value: *const Object) -> *const Ob
     let mut entries = Mapping::new(key_kind.raw(), value_kind.raw());
     // SAFETY: immutable match and pattern borrows cannot overlap a mutation.
     // Each inserted word transfers exactly the owned Rc produced below, or None.
-    unsafe {
+    let inserted = unsafe {
         object(value).0.with(|storage| {
             let matched = storage.regex_match();
             matched.pattern.0.with(|storage| {
@@ -541,12 +541,16 @@ pub unsafe extern "C" fn imre_regex_groupdict(value: *const Object) -> *const Ob
                     entries.insert_unique(
                         OwnedWord::from_owned(key, key_kind),
                         OwnedWord::from_owned(capture, value_kind),
-                    );
+                    )?;
                 }
+                Ok(())
             })
         })
-    }
-    handle(Storage::Dictionary(Box::new(entries)))
+    };
+    crate::finish(
+        inserted.map(|()| handle(Storage::Dictionary(Box::new(entries)))),
+        std::ptr::null(),
+    )
 }
 
 /// Checks participation without allocating the capture substring.
