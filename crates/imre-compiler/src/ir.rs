@@ -56,7 +56,7 @@ pub(crate) enum Type {
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture),
     /// A synchronous child with statically known captured stream types.
-    Popen(ProcessCapture, bool),
+    Popen(ProcessCapture, bool, usize),
     /// Async process handle, with bits for the captured stdout and stderr slots.
     AsyncProcess(u8),
     Coroutine(usize),
