@@ -825,10 +825,16 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
     }
 
-    /// Mark the precise call where lowering raises Python's missing-argument TypeError.
+    /// Mark the precise call whose behavior for missing arguments is handled by native lowering.
     pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::MissingArgument(call));
+    }
+
+    /// An optional handler lock either enters the captured lock or raises TypeError on None.
+    pub(crate) fn checked_optional_lock_context(&self, module: ModuleId, expr: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::OptionalLockContext(expr));
     }
 
     pub(crate) fn checked_keywords(
