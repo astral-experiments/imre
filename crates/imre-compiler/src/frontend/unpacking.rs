@@ -183,6 +183,17 @@ impl Checker<'_> {
             ast::Expr::Name(_) => self.assign(target, value),
             ast::Expr::Subscript(subscript) => {
                 let receiver = self.expr(&subscript.value)?;
+                if let Some((key, element)) = self.types.chainmap_entries(receiver.ty) {
+                    let value = self.coerce(value, element, target)?;
+                    let key = self.expr_expected(&subscript.slice, key)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(
+                            Builtin::ChainMapSetItem,
+                            vec![value, receiver, key],
+                        ),
+                    }));
+                }
                 if matches!(receiver.ty, Type::Document(_)) {
                     if let ast::Expr::Slice(slice) = &*subscript.slice {
                         if slice.lower.is_some() || slice.upper.is_some() || slice.step.is_some() {
@@ -233,6 +244,24 @@ impl Checker<'_> {
                 Ok(Statement::SetItem(receiver, index, value))
             }
             ast::Expr::Attribute(attribute) => {
+                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::PopenSelector)) {
+                    let value = self.coerce(value, Type::ProcessSelectorClass, target)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(
+                            Builtin::Process(ir::ProcessOperation::SetSelector),
+                            vec![value],
+                        ),
+                    }));
+                }
+                if let Some(prefix) = self.cache_config(target) {
+                    let value = self.coerce(value, self.types.optional(Type::Str), target)?;
+                    return Ok(Statement::Expr(cache_paths::op(
+                        ir::CachePathOperation::Set(prefix),
+                        Type::None,
+                        vec![value],
+                    )));
+                }
                 if let Some(Binding::Intrinsic(Intrinsic::LogRecordFlag(mask))) =
                     self.resolve(target)
                 {
@@ -243,7 +272,35 @@ impl Checker<'_> {
                         vec![logging::number(mask), value],
                     )));
                 }
+                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
+                    if !sys::displayable(value.ty) {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "builtins._ requires a supported display value",
+                        ));
+                    }
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::BuiltinsSetLast, vec![value]),
+                    }));
+                }
+                if let Some(class) = self.class_reference(&attribute.value)
+                    && matches!(
+                        self.classes.declarations.definitions[class]
+                            .static_bindings
+                            .get(attribute.attr.as_str()),
+                        Some(crate::classes::ClassValue::Runtime { .. })
+                    )
+                {
+                    return self.store_class_data(class, attribute, value);
+                }
                 let receiver = self.expr(&attribute.value)?;
+                if let Some(class) =
+                    self.mutable_instance_data(receiver.ty, attribute.attr.as_str())
+                {
+                    return self.store_instance_data(class, attribute, receiver, value);
+                }
                 if receiver.ty == Type::Logger && attribute.attr.as_str() == "propagate" {
                     let value = self.coerce(value, Type::Bool, target)?;
                     // The RHS precedes evaluation of the assignment target.
@@ -268,6 +325,11 @@ impl Checker<'_> {
                         value,
                     ));
                 }
+                if matches!(receiver.ty, Type::ModuleSpec(_))
+                    && attribute.attr.as_str() == "has_location"
+                {
+                    return self.set_module_spec_location(attribute, receiver, value);
+                }
                 if receiver.ty == Type::LogRecord {
                     let value = self.check_record_value(value, target)?;
                     return Ok(Statement::Expr(logging_records::op(
@@ -283,6 +345,15 @@ impl Checker<'_> {
                     return Ok(Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::ZipMinReadSize, vec![value, receiver]),
+                    }));
+                }
+                if let Type::ChainMap(id) = receiver.ty
+                    && attribute.attr.as_str() == "maps"
+                {
+                    let maps = self.coerce(value, self.types.list(Type::Dict(id)), target)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::ChainMapSetMaps, vec![maps, receiver]),
                     }));
                 }
                 if let Some(class) = self.writable_property(receiver.ty, attribute) {
@@ -740,9 +811,9 @@ impl Checker<'_> {
 }
 
 impl Checker<'_> {
-    /// A struct sequence's result shape is known for constant slice bounds. Capture
+    /// A fixed tuple's result shape is known for constant slice bounds. Capture
     /// the receiver once, even when the selected fields are empty or out of order.
-    pub(super) fn struct_sequence_slice(
+    pub(super) fn fixed_tuple_slice(
         &mut self,
         receiver: Expr,
         fields: &[Type],

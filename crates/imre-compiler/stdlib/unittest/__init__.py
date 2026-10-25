@@ -2,6 +2,8 @@
 
 
 import difflib
+import re
+from fnmatch import fnmatchcase
 from types import ModuleType
 from typing import ClassVar
 
@@ -115,17 +117,22 @@ def _pretty_list(flat: str, items: list[str]) -> list[str]:
 
 class TestCase:
     failureException: ClassVar[type[Exception]] = AssertionError
+    _testMethodName: str
     longMessage: bool
     maxDiff: int | None
     _diffThreshold: int
 
     def __init__(self) -> None:
+        self._testMethodName = "runTest"
         self.longMessage = True
         self.maxDiff = 640
         self._diffThreshold = 65536
 
     def countTestCases(self) -> int:
         return 1
+
+    def id(self) -> str:
+        return self.__class__.__module__ + "." + self.__class__.__qualname__ + "." + self._testMethodName
 
     def _formatMessage(self, msg: str | None, standardMsg: str) -> str:
         if msg is None:
@@ -154,13 +161,13 @@ class TestCase:
     def _bound_assertRaises(self) -> _BoundRaises:
         return _BoundRaises(self)
 
-    def assertTrue(self, expr: bool, msg: str | None = None) -> None:
+    def assertTrue(self, expr: object, msg: str | None = None) -> None:
         if not expr:
-            self.fail(self._formatMessage(msg, repr(expr) + " is not true"))
+            raise self.failureException(self._formatMessage(msg, repr(expr) + " is not true"))
 
-    def assertFalse(self, expr: bool, msg: str | None = None) -> None:
+    def assertFalse(self, expr: object, msg: str | None = None) -> None:
         if expr:
-            self.fail(self._formatMessage(msg, repr(expr) + " is not false"))
+            raise self.failureException(self._formatMessage(msg, repr(expr) + " is not false"))
 
     def assertLess(self, a: int, b: int, msg: str | None = None) -> None:
         if not a < b:
@@ -178,9 +185,10 @@ class TestCase:
         if not a >= b:
             self.fail(self._formatMessage(msg, f"{a!r} not greater than or equal to {b!r}"))
 
-    def _baseAssertEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    def _baseAssertEqual(self, first: bool | int, second: bool | int, msg: str | None = None) -> None:
         if first != second:
-            self.fail(self._formatMessage(msg, f"{first!r} != {second!r}"))
+            left, right = _short_reprs(repr(first), repr(second))
+            raise self.failureException(self._formatMessage(msg, left + " != " + right))
 
     def _truncateMessage(self, message: str, diff: str) -> str:
         limit = self.maxDiff
@@ -206,6 +214,8 @@ class TestCase:
                 second += "\n"
             changes = list(difflib.ndiff(_kept_lines(first), _kept_lines(second)))
             standard = self._truncateMessage(standard, "\n" + "".join(changes))
+        else:
+            raise self.failureException(self._formatMessage(msg, standard))
         self.fail(self._formatMessage(msg, standard))
 
     def _list_difference(self, left: list[str], right: list[str], pretty1: list[str],
@@ -264,7 +274,7 @@ class TestCase:
 
     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
         if first == second:
-            self.fail(self._formatMessage(msg, f"{first!r} == {second!r}"))
+            raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
 
     def assertHasAttr(self, obj: ModuleType, name: str, msg: str | None = None) -> None:
         if not hasattr(obj, name):
@@ -316,13 +326,24 @@ class _AssertRaisesContext:
     _expected: list[int]
     _label: str
     _caught: Exception | None
+    _regex: re.Pattern[str] | None
+    _spelling: str
 
-    def __init__(self, case: TestCase, kinds: list[int], label: str, msg: str | None, error: str | None) -> None:
+    def __init__(self, case: TestCase, kinds: list[int], label: str, msg: str | None, error: str | None,
+                 pattern: re.Pattern[str] | None, spelling: str) -> None:
         self.test_case = case
         self._expected = _checked_expected(kinds, error)
         self._label = label
         self.msg = msg
         self._caught = None
+        self._regex = pattern
+        self._spelling = spelling
+
+    def _check_regex(self, exc: Exception) -> None:
+        pattern = self._regex
+        if pattern is not None and pattern.search(str(exc)) is None:
+            standard = '"' + self._spelling + '" does not match "' + str(exc) + '"'
+            raise self.test_case.failureException(self.test_case._formatMessage(self.msg, standard))
 
     def _missing(self) -> None:
         raise self.test_case.failureException(self.test_case._formatMessage(self.msg, self._label + " not raised"))
@@ -379,6 +400,40 @@ class TestResult:
 from typing import Callable
 import sys
 import time
+
+
+class TestLoader:
+    testMethodPrefix: str
+    testNamePatterns: list[str] | None
+    errors: list[str]
+
+    def __init__(self) -> None:
+        self.testMethodPrefix = "test"
+        self.testNamePatterns = None
+        self.errors = []
+
+    def _getTestCaseNames(self, owner: str, names: list[str], descriptors: list[str]) -> list[str]:
+        prefix = self.testMethodPrefix
+        if not prefix or prefix.startswith("_"):
+            raise NotImplementedError("native TestLoader cannot enumerate Python's private class metadata")
+        for name in descriptors:
+            if name.startswith(prefix):
+                raise NotImplementedError("native TestLoader cannot inspect descriptor " + owner + "." + name)
+        patterns = self.testNamePatterns
+        selected: list[str] = []
+        for name in names:
+            if name.startswith(prefix):
+                if patterns is None:
+                    selected.append(name)
+                else:
+                    for pattern in patterns:
+                        if fnmatchcase(owner + "." + name, pattern):
+                            selected.append(name)
+                            break
+        return selected
+
+
+defaultTestLoader = TestLoader()
 
 
 def main() -> None:

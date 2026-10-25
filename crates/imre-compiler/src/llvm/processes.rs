@@ -4,6 +4,7 @@ use super::*;
 use crate::ir::ProcessOperation;
 
 mod descriptors;
+mod readiness;
 
 fn shutil_tag(ty: Type) -> u32 {
     match ty {
@@ -60,6 +61,23 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            ProcessOperation::SelectorClass(mode) => {
+                let which = mode.map_or(2, u32::from);
+                let operand =
+                    self.instruction(format!("call ptr @imre_popen_selector_class(i32 {which})"));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::SetSelector => {
+                self.line(format!(
+                    "call void @imre_popen_set_selector(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
             ProcessOperation::NewLoop | ProcessOperation::EnsureTask => {
                 let call = if matches!(operation, ProcessOperation::NewLoop) {
                     "call ptr @imre_async_loop_new()".to_owned()
@@ -346,11 +364,12 @@ impl Emitter<'_, '_> {
                     ("i1", args[9].value.operand.clone()),
                     ("i1", args[11].value.operand.clone()),
                 ];
-                // The original configuration remains the prefix. Only borrowed
-                // streams need the three-word trailer in runtime RedirectConfig.
-                let layout = if [12, 0, 4]
-                    .into_iter()
-                    .any(|shift| matches!((streams >> shift) & 15, 6 | 7))
+                // ChildConfig embeds RedirectConfig, which embeds the legacy prefix.
+                let child_options = streams & (1 << 18) != 0;
+                if child_options
+                    || [12, 0, 4]
+                        .into_iter()
+                        .any(|shift| matches!((streams >> shift) & 15, 6 | 7))
                 {
                     for (index, shift) in [(4, 12), (5, 0), (6, 4)] {
                         let word = if matches!((streams >> shift) & 15, 6 | 7) {
@@ -360,11 +379,31 @@ impl Emitter<'_, '_> {
                         };
                         fields.push(("i64", word));
                     }
-                    "{ptr, ptr, ptr, ptr, i64, i32, i32, i32, i32, i1, i1, i64, i64, i64}"
-                } else {
-                    "{ptr, ptr, ptr, ptr, i64, i32, i32, i32, i32, i1, i1}"
-                };
-                let config = self.entry_alloca(layout);
+                }
+                if child_options {
+                    let pass_fds = streams & (1 << 19) != 0;
+                    let start = args.len() - 3 - usize::from(pass_fds);
+                    fields.extend([
+                        ("i64", args[start].value.operand.clone()),
+                        ("i64", args[start + 1].value.operand.clone()),
+                        ("i1", args[start + 2].value.operand.clone()),
+                    ]);
+                    if pass_fds {
+                        fields.extend([
+                            ("i64", self.word(&args[start + 3].value)),
+                            ("i32", kind(start + 3).to_string()),
+                        ]);
+                    }
+                }
+                let layout = format!(
+                    "{{{}}}",
+                    fields
+                        .iter()
+                        .map(|(ty, _)| *ty)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                let config = self.entry_alloca(&layout);
                 let mut aggregate = "poison".to_owned();
                 for (i, (ty, value)) in fields.iter().enumerate() {
                     aggregate = self.instruction(format!(
@@ -427,6 +466,14 @@ impl Emitter<'_, '_> {
             }
             ProcessOperation::PopenArgs => self.call("imre_popen_args", returns, &[&args[0].value]),
             ProcessOperation::PopenPid => self.call("imre_popen_pid", returns, &[&args[0].value]),
+            ProcessOperation::PopenActive => self.call("imre_popen_active", returns, &[]),
+            ProcessOperation::PopenCleanup => {
+                self.line("call void @imre_popen_cleanup()");
+                none()
+            }
+            ProcessOperation::PopenIdentity => {
+                self.call("imre_popen_identity", returns, &[&args[0].value])
+            }
             ProcessOperation::PopenStatus { poll } => {
                 let control = self.instruction(format!(
                     "call ptr @imre_popen_control(ptr {})",
@@ -548,7 +595,42 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::DescriptorConstant(name) => self.os_descriptor_constant(name),
+            ProcessOperation::Readiness(op) => self.readiness(op, args, returns),
             ProcessOperation::Fd(operation) => self.os_descriptor(operation, args, returns),
+            ProcessOperation::CredentialId { group } => {
+                let operand = self.checked_instruction(format!(
+                    "call i64 @imre_os_credential_id(i64 {}, i32 {})",
+                    args[0].value.operand,
+                    u8::from(group)
+                ));
+                Value {
+                    ty: Type::Int,
+                    operand,
+                    small_integer: true,
+                }
+            }
+            ProcessOperation::Credential(name) => {
+                if returns == Type::None {
+                    let words = args
+                        .iter()
+                        .map(|arg| format!("i64 {}", arg.value.operand))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.checked_line(format!("call void @imre_os_{name}({words})"));
+                    none()
+                } else if returns == Type::Int {
+                    let operand = self.instruction(format!("call i64 @imre_os_{name}()"));
+                    Value {
+                        ty: returns,
+                        operand,
+                        small_integer: true,
+                    }
+                } else {
+                    let tuple = self.record(returns);
+                    self.checked_line(format!("call void @imre_os_{name}(ptr {})", tuple.operand));
+                    tuple
+                }
+            }
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
             ProcessOperation::RmTree => {
                 let [path, ignore, _, _, fd] = args else {
@@ -705,6 +787,18 @@ impl Emitter<'_, '_> {
                     args[0].value.operand
                 ));
                 self.unpack_word(word, returns)
+            }
+            ProcessOperation::QuoteCommandArgument => {
+                let word = self.word(&args[0].value);
+                let kind = representation_kind(args[0].value.ty, &self.module.types);
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_subprocess_quote_argument(i64 {word}, i32 {kind})"
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
             }
             ProcessOperation::Strerror => {
                 let operand = self.checked_instruction(format!(
