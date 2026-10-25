@@ -268,19 +268,14 @@ impl Popen {
                 };
             }
         }
+        let select = selector::current();
         while pollfds.iter().any(|poll| poll.fd >= 0) {
             let remaining = timeout.map(|t| t - start.elapsed().as_secs_f64());
             if remaining.is_some_and(|t| t <= 0.0) {
                 return data.timeout();
             }
-            let ms = remaining.map(poll_milliseconds).transpose()?.unwrap_or(-1);
-            // SAFETY: each open descriptor remains rooted in self.pipes for this poll.
-            if unsafe { libc::poll(pollfds.as_mut_ptr(), 3, ms) } < 0 {
-                let error = io::Error::last_os_error();
-                if error.kind() == io::ErrorKind::Interrupted {
-                    continue;
-                }
-                return Err(errno_error(error));
+            if !selector::wait(select, &mut pollfds, remaining)? {
+                continue;
             }
             if timeout.is_some_and(|t| start.elapsed().as_secs_f64() >= t) {
                 return data.timeout();

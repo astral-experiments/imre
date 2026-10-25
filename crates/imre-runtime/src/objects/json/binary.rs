@@ -1,5 +1,6 @@
 //! Detect the encoding of binary JSON before handing text to the standard reader.
 
+use crate::StrOwner;
 use std::borrow::Cow;
 use std::rc::Rc;
 
@@ -125,7 +126,7 @@ pub unsafe extern "C" fn imre_json_loads_bytes(bytes: *const Bytes) -> *const Ob
     let bytes = unsafe { acquire_rc::<Bytes>(bytes as usize) };
     let result = decode(&bytes).and_then(|text| {
         super::readonly::loads(&text, || {
-            crate::Str::try_new(text.as_ref()).ok().map(Rc::new)
+            crate::Str::try_new(text.as_ref()).ok().map(StrOwner::new)
         })
     });
     finish(result, std::ptr::null())
@@ -134,6 +135,7 @@ pub unsafe extern "C" fn imre_json_loads_bytes(bytes: *const Bytes) -> *const Ob
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::objects::exceptions::{imre_error_take, imre_exception_repr};
 
     #[test]
     fn invalid_utf8_retains_the_original_bytes() {
@@ -142,5 +144,27 @@ mod tests {
         assert_eq!(Rc::strong_count(&bytes), 2);
         drop(error);
         assert_eq!(Rc::strong_count(&bytes), 1);
+    }
+
+    #[test]
+    fn wide_decode_error_retains_the_original_bytes() {
+        let bytes = Rc::new(vec![0xff, 0xfe, b'"', 0, 3]);
+        let original = Rc::downgrade(&bytes);
+        // SAFETY: bytes roots its exact runtime handle throughout the decode.
+        assert!(unsafe { imre_json_loads_bytes(Rc::as_ptr(&bytes)) }.is_null());
+        drop(bytes);
+        // SAFETY: take and repr each transfer one owner, and the exception stays rooted.
+        let (error, repr) = unsafe {
+            let error = Rc::from_raw(imre_error_take());
+            let repr = crate::StrOwner::from_raw(imre_exception_repr(Rc::as_ptr(&error)));
+            (error, repr)
+        };
+        assert_eq!(
+            repr.as_str(),
+            r#"UnicodeDecodeError('utf-16-le', b'\xff\xfe"\x00\x03', 4, 5, 'truncated data')"#
+        );
+        assert!(original.upgrade().is_some());
+        drop(error);
+        assert!(original.upgrade().is_none());
     }
 }

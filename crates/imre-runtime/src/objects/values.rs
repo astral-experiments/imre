@@ -2,6 +2,7 @@
 //! Structural traversal uses explicit cursors. Exception repr may call Python;
 //! it roots outstanding cursors before releasing control to the callback.
 
+use crate::StrOwner;
 use std::cmp::Ordering;
 use std::fmt::Write;
 use std::rc::Rc;
@@ -111,13 +112,13 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
     }
     // SAFETY: both pointers are rooted record payloads.
     let (left_layout, right_layout) = unsafe { (descriptor(left), descriptor(right)) };
-    // SAFETY: nonnull semantic descriptors are immutable compiler-emitted data.
+    // SAFETY: semantic descriptors stay rooted through the comparison.
     let Some(semantics) = (unsafe { left_layout.semantics.as_ref() }) else {
         return Comparison::Done(false);
     };
-    if !std::ptr::eq(left_layout, right_layout) && !left_layout.same_class(right_layout) {
-        // Named tuples compare structurally with other tuple layouts. Both
-        // descriptors must agree on how to read every word before traversing.
+    let distinct = !std::ptr::eq(left_layout, right_layout);
+    if distinct && !left_layout.same_class(right_layout) {
+        // Tuples can compare across layouts; records can share a nominal class.
         // SAFETY: the immutable descriptors cover each initialized field.
         let compatible = unsafe {
             semantics.kind == TUPLE
@@ -126,8 +127,6 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
                     .as_ref()
                     .is_some_and(|other| other.kind == TUPLE)
                 && left_layout.length == right_layout.length
-                && (0..left_layout.length)
-                    .all(|i| *left_layout.kinds.add(i) == *right_layout.kinds.add(i))
         };
         if !compatible {
             return Comparison::Done(false);
@@ -144,6 +143,11 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
                 continue;
             }
             let kind = WordKind::new(*left_layout.kinds.add(index));
+            // Check the kind exactly once per visited field, including across
+            // resumptions after comparing a nested tuple.
+            if distinct && kind.raw() != *right_layout.kinds.add(index) {
+                return Comparison::Done(false);
+            }
             let left_word = kind.read_record_field(left.add(index));
             let right_word = kind.read_record_field(right.add(index));
             if left_layout.is_value_struct() && kind.raw() == 7 {
@@ -213,6 +217,20 @@ pub(super) unsafe fn try_equal(left: usize, right: usize, kind: WordKind) -> Res
                 match raw & !NULLABLE {
                     5 => object_element(left as *const Object, right as *const Object, position),
                     6 => record_field(left as *const usize, right as *const usize, position),
+                    13 => {
+                        let (a, left) = super::annotations::member(left);
+                        let (b, right) = super::annotations::member(right);
+                        if a != b {
+                            Comparison::Done(false)
+                        } else {
+                            Comparison::Child {
+                                left,
+                                right,
+                                kind: a,
+                                resume: None,
+                            }
+                        }
+                    }
                     9 => {
                         let (left, left_kind) = super::unions::member(left);
                         let (right, right_kind) = super::unions::member(right);
@@ -359,6 +377,9 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                 (Storage::Deque(left), Storage::Deque(right)) => {
                     left.compare_entry(right, position)
                 }
+                (Storage::Calendar(left), Storage::Calendar(right)) => {
+                    Comparison::Done(super::calendar::equal(left, right))
+                }
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Json(left), Storage::Json(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Document(left), Storage::Document(right)) => {
@@ -391,7 +412,7 @@ pub unsafe extern "C" fn imre_value_repr(word: usize, kind: u32) -> *const Str {
     if super::exceptions::imre_error_pending() != 0 {
         return std::ptr::null();
     }
-    Rc::into_raw(Rc::new(Str::from(output)))
+    StrOwner::into_raw(StrOwner::new(Str::from(output)))
 }
 
 /// # Safety
@@ -436,15 +457,27 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
                         Storage::ObjectValue(field) => Some(ReprTask::Word(field.word, field.kind)),
+                        Storage::Calendar(value) => {
+                            super::calendar::write_repr(value, output);
+                            None
+                        }
                         Storage::ModuleMember(member) => {
                             let text = member.text(1);
                             if !text.is_null() {
                                 // SAFETY: the metadata formatter returns an independently owned string.
-                                output.push_str(Rc::from_raw(text).as_str());
+                                output.push_str(crate::StrOwner::from_raw(text).as_str());
                             }
                             None
                         }
                         Storage::Exception(_) => Some(ReprTask::Exception(owner)),
+                        Storage::SourceModule { name, filename } => {
+                            output.push_str("<module ");
+                            super::exceptions::push_string_repr(name, output);
+                            output.push_str(" from ");
+                            super::exceptions::push_string_repr(filename, output);
+                            output.push('>');
+                            None
+                        }
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None
@@ -456,6 +489,14 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                                 super::inspect::descriptor_name(*index)
                             )
                             .unwrap();
+                            None
+                        }
+                        Storage::ProcessSelectorClass(select) => {
+                            output.push_str(if *select {
+                                "<class 'selectors.SelectSelector'>"
+                            } else {
+                                "<class 'selectors.PollSelector'>"
+                            });
                             None
                         }
                         Storage::IteratorAdapter(adapter) => {
@@ -593,7 +634,7 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                     if text.is_null() {
                         return;
                     }
-                    let text = Rc::from_raw(text);
+                    let text = crate::StrOwner::from_raw(text);
                     if super::exceptions::imre_error_pending() != 0 {
                         return;
                     }
@@ -680,6 +721,10 @@ unsafe fn write_scalar(
             0 => output.push_str("None"),
             10 => super::string_enums::write_repr(output, word),
             12 => super::annotations::write_repr(output, word),
+            13 => {
+                let (member, value) = super::annotations::member(word);
+                write_repr(output, value, member);
+            }
             11 => write!(output, "<class '{}'>", *(word as *const Str)).unwrap(),
             1 => {
                 let value = if raw & NULLABLE != 0 { word - 1 } else { word };
@@ -928,7 +973,7 @@ mod tests {
             right.cast::<f64>().write(f64::NAN);
             assert_eq!(imre_record_equal(left, left), 1);
             assert_eq!(imre_record_equal(left, right), 0);
-            let rendered = Rc::from_raw(imre_value_repr(left as usize, 6));
+            let rendered = StrOwner::from_raw(imre_value_repr(left as usize, 6));
             assert_eq!(rendered.as_str(), "Reading(value=nan)");
             left.cast::<f64>().write(-0.0);
             right.cast::<f64>().write(0.0);

@@ -1,7 +1,8 @@
 //! Sealed UTF-8 text and byte streams. Explicit operations report language errors;
 //! final ownership cleanup only closes resources and never changes error state.
 
-use std::fs::OpenOptions;
+use crate::StrOwner;
+use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
@@ -23,8 +24,10 @@ use buffered::{Input, Output};
 
 pub(super) struct FileState {
     fd: Option<RawFd>,
+    // Closing a stream releases its descriptor, not its original I/O class.
+    raw: bool,
     stream: Option<Stream>,
-    pub(super) name: Option<Rc<Str>>,
+    pub(super) name: Option<StrOwner>,
     // Preserve access mode after close: binary wrong-direction errors take precedence.
     kind: FileKind,
 }
@@ -42,6 +45,7 @@ enum FileKind {
 
 enum Stream {
     Read(Input),
+    UnreadGzip { file: File, capacity: usize },
     Write(Output),
     Memory(Memory),
     TextMemory(text_memory::TextMemory),
@@ -53,6 +57,7 @@ impl Stream {
     fn close(self) -> io::Result<()> {
         let (file, flushed) = match self {
             Self::Read(input) => (input.into_file(), Ok(())),
+            Self::UnreadGzip { file, .. } => (file, Ok(())),
             Self::Write(writer) => writer.finish(),
             Self::Memory(_) | Self::TextMemory(_) | Self::Member(_) => return Ok(()),
         };
@@ -143,6 +148,7 @@ impl FileState {
         };
         Rc::new(Object(StorageCell::new(Storage::File(Box::new(Self {
             fd: Some(fd),
+            raw: !text && capacity == 0,
             name: None,
             stream: Some(stream),
             kind,
@@ -178,6 +184,17 @@ impl FileState {
         } else {
             "I/O operation on closed file."
         };
+        if let Some(Stream::UnreadGzip { file, capacity }) = self
+            .stream
+            .take_if(|stream| matches!(stream, Stream::UnreadGzip { .. }))
+        {
+            self.stream = Some(Stream::Read(Input::new(
+                file,
+                true,
+                self.kind == FileKind::GzipBinaryRead,
+                capacity,
+            )));
+        }
         let stream = self
             .stream
             .as_mut()
@@ -225,6 +242,9 @@ impl FileState {
                 Kind::ValueError,
                 "read length must be non-negative or -1",
             ));
+        }
+        if size == 0 && matches!(self.stream, Some(Stream::UnreadGzip { .. })) {
+            return Ok(Bytes::new());
         }
         self.input()?.read_bytes(usize::try_from(size).ok())
     }
@@ -280,9 +300,11 @@ impl FileState {
             return Err(Error::new(Kind::ValueError, "flush of closed file"));
         }
         match self.stream()? {
-            Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) | Stream::TextMemory(_) => {
-                Ok(())
-            }
+            Stream::Read(_)
+            | Stream::UnreadGzip { .. }
+            | Stream::Member(_)
+            | Stream::Memory(_)
+            | Stream::TextMemory(_) => Ok(()),
             Stream::Write(writer) => writer.flush().map_err(os_error),
         }
     }
@@ -340,14 +362,22 @@ pub(super) fn os_error(error: io::Error) -> Error {
     {
         return Error::new(gzip.0, gzip.to_string());
     }
+    // Read::read_to_end reports a failed Vec reservation without an OS errno.
     if error.kind() == io::ErrorKind::OutOfMemory && error.raw_os_error().is_none() {
-        return Error::allocation();
+        return Error::memory_error();
     }
     Error::new(os_error_kind(error.kind()), error.to_string())
 }
 
 fn os_error_kind(kind: io::ErrorKind) -> Kind {
     match kind {
+        io::ErrorKind::WouldBlock => Kind::BlockingIOError,
+        io::ErrorKind::BrokenPipe => Kind::BrokenPipeError,
+        io::ErrorKind::ConnectionAborted => Kind::ConnectionAbortedError,
+        io::ErrorKind::ConnectionRefused => Kind::ConnectionRefusedError,
+        io::ErrorKind::ConnectionReset => Kind::ConnectionResetError,
+        io::ErrorKind::Interrupted => Kind::InterruptedError,
+        io::ErrorKind::TimedOut => Kind::TimeoutError,
         io::ErrorKind::AlreadyExists => Kind::FileExistsError,
         io::ErrorKind::NotFound => Kind::FileNotFoundError,
         io::ErrorKind::PermissionDenied => Kind::PermissionError,
@@ -365,7 +395,7 @@ pub(crate) fn errno_error(error: io::Error) -> Error {
 pub(super) fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
     errno_with_filenames(
         error,
-        path.map(|s| super::exceptions::Filename::Str(Rc::new(Str::from(s)))),
+        path.map(|s| super::exceptions::Filename::Str(StrOwner::new(Str::from(s)))),
         None,
     )
 }
@@ -391,7 +421,12 @@ fn with_errno_description(error: io::Error, build: impl FnOnce(Kind, i32, &str) 
     }
     // SAFETY: the successful call initialized a terminated string.
     let description = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
-    build(os_error_kind(error.kind()), errno, &description)
+    let kind = match errno {
+        libc::EINPROGRESS | libc::EALREADY => Kind::BlockingIOError,
+        libc::ESHUTDOWN => Kind::BrokenPipeError,
+        _ => os_error_kind(error.kind()),
+    };
+    build(kind, errno, &description)
 }
 
 /// Opens a UTF-8 text stream in read, write, append, or exclusive-create mode.
@@ -449,6 +484,7 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
     let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
     let fd = file.as_raw_fd();
     let stream = match mode {
+        0 if gzip => Stream::UnreadGzip { file, capacity },
         0 | 4 => {
             let mut input = Input::new(file, gzip, binary, capacity);
             if mode == 4 {
@@ -460,8 +496,9 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
     };
     Ok(FileState {
         fd: Some(fd),
+        raw: false,
         stream: Some(stream),
-        name: Some(Rc::new(Str::new(path))),
+        name: Some(StrOwner::new(Str::new(path))),
         kind: match (binary, mode) {
             (false, _) => FileKind::Text,
             (true, 0) if gzip => FileKind::GzipBinaryRead,
@@ -642,7 +679,7 @@ pub unsafe extern "C" fn imre_text_read(value: *const Object) -> *const Str {
             .with_mut(|storage| storage.file_mut().read())
     };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(text))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(text))),
         std::ptr::null(),
     )
 }
@@ -660,7 +697,7 @@ pub unsafe extern "C" fn imre_text_readline(value: *const Object) -> *const Str 
             .with_mut(|storage| storage.file_mut().readline())
     };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(text))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(text))),
         std::ptr::null(),
     )
 }
@@ -747,6 +784,18 @@ pub unsafe extern "C" fn imre_text_flush(value: *const Object) -> u32 {
 }
 
 /// # Safety
+/// The caller roots the binary file. Only the immutable class flag is read.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_file_is_raw(value: *const Object) -> u32 {
+    // SAFETY: no language callbacks or file operations are needed for isinstance.
+    unsafe {
+        object(value)
+            .0
+            .with(|storage| u32::from(storage.file().raw))
+    }
+}
+
+/// # Safety
 /// The file stays rooted throughout this descriptor query.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_file_fileno(value: *const Object) -> usize {
@@ -800,6 +849,23 @@ mod tests {
     };
     use super::super::{imre_object_release, imre_seq_append, imre_seq_new};
 
+    #[test]
+    fn buffer_allocation_failure_is_distinct_from_os_enomem() {
+        Error::memory_error().raise();
+        let empty = imre_error_take();
+        os_error(io::Error::from(io::ErrorKind::OutOfMemory)).raise();
+        let error = imre_error_take();
+        // A failed reservation must use the preallocated, argument-free exception.
+        assert_eq!(error, empty);
+        // SAFETY: each take transferred one owner of the same exception.
+        unsafe {
+            imre_object_release(error);
+            imre_object_release(empty);
+        }
+        os_error(io::Error::from_raw_os_error(libc::ENOMEM)).raise();
+        take_error(Kind::OSError);
+    }
+
     struct Directory(PathBuf);
 
     #[test]
@@ -834,7 +900,7 @@ mod tests {
                 // SAFETY: take transfers the exception owner; message returns its own string.
                 let message = unsafe {
                     let error = Rc::from_raw(imre_error_take());
-                    Rc::from_raw(imre_exception_message(Rc::as_ptr(&error)))
+                    StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)))
                 };
                 assert!(message.starts_with(&format!("[Errno {errno}] ")));
                 assert!(message.ends_with(": b'raw-\\xff-link'"));
@@ -901,6 +967,7 @@ mod tests {
         Rc::new(Object(StorageCell::new(Storage::File(Box::new(
             FileState {
                 fd: Some(file.as_raw_fd()),
+                raw: false,
                 stream: Some(Stream::Write(Output::new(file, 8192, false))),
                 kind: FileKind::Text,
                 name: None,
@@ -961,6 +1028,33 @@ mod tests {
             input.text_line().unwrap_err().raise();
             take_error(Kind::UnicodeDecodeError);
         }
+    }
+
+    #[test]
+    fn unread_gzip_keeps_the_descriptor_without_allocating_read_buffers() {
+        let directory = Directory::new();
+        let path = directory.0.join("data.gz");
+        std::fs::write(&path, member(b"original")).unwrap();
+        let mut state = open_state(path.to_str().unwrap(), 0, true, true)
+            .ok()
+            .unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, member(b"replacement")).unwrap();
+
+        state.flush().ok().unwrap();
+        assert_eq!(state.read_into(&mut []).ok().unwrap(), 0);
+        assert!(
+            state
+                .read_size(&Int::from_usize(0))
+                .ok()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(matches!(state.stream, Some(Stream::UnreadGzip { .. })));
+        let mut prefix = [0; 3];
+        assert_eq!(state.read_into(&mut prefix).ok().unwrap(), 3);
+        assert_eq!(&prefix, b"ori");
+        assert_eq!(state.read_size(&Int::from_usize(8)).ok().unwrap(), b"ginal");
     }
 
     #[test]
@@ -1057,9 +1151,12 @@ mod tests {
         // SAFETY: all file and string handles remain rooted; reads transfer ownership.
         unsafe {
             assert_eq!(imre_text_enter(Rc::as_ptr(&file)), 1);
-            let text = Rc::from_raw(imre_text_read(Rc::as_ptr(&file)));
+            let text = StrOwner::from_raw(imre_text_read(Rc::as_ptr(&file)));
             assert_eq!(text.as_str(), "a\nβ\nc\n\0tail");
-            assert_eq!(Rc::from_raw(imre_text_read(Rc::as_ptr(&file))).as_str(), "");
+            assert_eq!(
+                StrOwner::from_raw(imre_text_read(Rc::as_ptr(&file))).as_str(),
+                ""
+            );
             assert_eq!(imre_text_flush(Rc::as_ptr(&file)), 1);
             assert_eq!(imre_text_write(Rc::as_ptr(&file), &Str::new("x")), 0);
             let error = imre_error_take();
@@ -1091,7 +1188,7 @@ mod tests {
             }
             imre_object_release(error);
             assert_eq!(
-                Rc::from_raw(imre_text_read(Rc::as_ptr(&invalid))).as_str(),
+                StrOwner::from_raw(imre_text_read(Rc::as_ptr(&invalid))).as_str(),
                 ""
             );
         }
@@ -1129,11 +1226,11 @@ mod tests {
         let path = directory.0.join("output");
         let file = open(path.to_str().unwrap(), 1);
         let alias = file.clone();
-        let text = Rc::new(Str::new("partsé\0"));
+        let text = StrOwner::new(Str::new("partsé\0"));
         let ending = "🦀\n";
         let parts = [
             StringPart {
-                data: Rc::as_ptr(&text).cast(),
+                data: StrOwner::as_ptr(&text).cast(),
                 length: usize::MAX,
             },
             StringPart {
