@@ -713,6 +713,8 @@ Positional and named arguments accept `nargs="?"`, `"*"`, `"+"`, or a positive i
 
 Arguments accept the built-in `int` and `float` converters. Integer arguments also support fixed or variable length lists. Literal numeric choices compare converted values; string choices may be a single string of characters, and integer choices may be a literal `range`. Failure to convert an argument reports that option and its original value on stderr. String defaults and constants are converted when used. An integer default or constant on a string argument retains its integer type.
 
+Set `prefix_chars` to declare alternate option prefixes. The help flags follow the chosen prefix; `add_help=False` disables them and lets an application reuse their spellings. `allow_abbrev=False` disables single- and double-prefix abbreviations while preserving short-option grouping. Options may set a literal `dest` independently of their spellings.
+
 Use `group = parser.add_argument_group(title, description)` to place arguments in a separate help section. Arguments added to a group bind in the same order and populate the same namespace as arguments added directly to the parser.
 
 A parser can require a subcommand with `add_subparsers(dest="command", required=True)`. Each literal `add_parser("name", help="...")` introduces a child parser with its own options. The namespace carries the selected command and that child's fields. A `match args.command` case or `if args.command == "name"` branch selects its concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
