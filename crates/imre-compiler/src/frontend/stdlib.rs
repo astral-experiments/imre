@@ -2,6 +2,13 @@
 
 use super::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum JoinStyle {
+    Plain,
+    Shell,
+    WindowsCommand,
+}
+
 /// All leaves must be plain local reads so no later operand can change the
 /// keys captured by an earlier union. Bound the number of membership probes.
 fn local_key_union(expr: &Expr, dictionaries: &mut Vec<Expr>) -> bool {
@@ -335,24 +342,57 @@ impl Checker<'_> {
                 "str.join requires one string iterable",
             ));
         };
-        self.join_parts(receiver, source, call, false)
+        self.join_parts(receiver, source, call, JoinStyle::Plain)
     }
 
-    /// For shlex.join, quote each yielded item before requesting the next one.
+    /// Quote or convert each yielded item before asking for the next one.
     pub(super) fn join_parts(
         &mut self,
         receiver: Expr,
         source: &ast::Expr,
         call: &ast::ExprCall,
-        shell_quote: bool,
+        style: JoinStyle,
     ) -> Result<Expr, String> {
-        let input = self.expansion_input(source, (!shell_quote).then_some(Type::Str))?;
+        let input = if style == JoinStyle::WindowsCommand
+            && let ast::Expr::List(display) = source
+            && !display
+                .elts
+                .iter()
+                .any(|item| matches!(item, ast::Expr::Starred(_)))
+        {
+            Iteration::Container {
+                iterable: self.process_argument_list(display)?,
+                items: false,
+                start: None,
+            }
+        } else {
+            self.expansion_input(source, (style == JoinStyle::Plain).then_some(Type::Str))?
+        };
+        if style == JoinStyle::WindowsCommand
+            && let Iteration::Container { iterable, .. } = &input
+            && let Some(name) = match iterable.ty {
+                Type::None => Some("NoneType"),
+                Type::Int => Some("int"),
+                Type::Bool => Some("bool"),
+                Type::Float => Some("float"),
+                Type::Path => Some("PosixPath"),
+                Type::PurePath(ir::PathFlavor::Posix) => Some("PurePosixPath"),
+                Type::PurePath(ir::PathFlavor::Windows) => Some("PureWindowsPath"),
+                _ => None,
+            }
+        {
+            return self.sys_type_error(
+                call,
+                Type::Str,
+                format!("'{name}' object is not iterable"),
+            );
+        }
         if let Iteration::Container {
             iterable,
             items: false,
             start: None,
         } = &input
-            && !shell_quote
+            && style == JoinStyle::Plain
             && matches!(
                 self.types.element(iterable.ty),
                 Some(Type::Str | Type::StrLiteral(_))
@@ -379,10 +419,19 @@ impl Checker<'_> {
             ),
         ];
         body.extend(self.expand_items(input, call, |checker, value| {
-            let value = if shell_quote {
-                checker.shlex_quote_value(value, call)?
-            } else {
-                checker.coerce(value, Type::Str, call)?
+            let value = match style {
+                JoinStyle::Plain => checker.coerce(value, Type::Str, call)?,
+                JoinStyle::Shell => checker.shlex_quote_value(value, call)?,
+                JoinStyle::WindowsCommand => {
+                    let path = Self::string_value(checker.fspath(value, source)?);
+                    Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::Process(ir::ProcessOperation::QuoteCommandArgument),
+                            vec![path],
+                        ),
+                    }
+                }
             };
             Ok(vec![Statement::Expr(Expr {
                 ty: Type::None,
@@ -656,7 +705,7 @@ impl Checker<'_> {
         {
             return self.record_text(value, field);
         }
-        if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ExceptionField {
+        if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ObjectValue {
             return Ok(Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::ExceptionFieldRepr, vec![value]),
@@ -728,7 +777,7 @@ impl Checker<'_> {
                 | Type::Bytes
                 | Type::None
                 | Type::Exception
-                | Type::ExceptionField
+                | Type::ObjectValue
                 | Type::ImportException
                 | Type::TimeoutExpired
         ) {

@@ -25,25 +25,26 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-The [replay of `f148af0`](https://github.com/astral-sh/imre/actions/runs/40185453005)
-includes logger hierarchy and handler propagation, the level registry, timed
-file handlers, records, single and batch formatters, filters and configuration.
+The local replay of `449f10c8657d3e67230e080c2ce006501a4d0a5e` includes logger hierarchy, handler registration,
+formatters, and ordinary, timed and [size-based rotation](rotation.md).
 Both levels have the same counts:
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 10 |
+| Imre | Imre | Imre | CPython hooks and native child | 16 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
-| CPython | CPython | Imre | CPython | 35 |
-| Blocked before execution | | | | 220 |
+| CPython | CPython | Imre | CPython | 38 |
+| Blocked before execution | | | | 211 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
 identity, immediate child membership, stopped handler propagation, level-name mapping independence, daily
 rollover with an explicit time, record representation, formatter precision,
-an empty name filter, and the default and custom buffering formatters.
+an empty name filter, both buffering formatters, and [FileHandler](files.md)
+delayed creation and emission after closing a file opened in write mode.
+Four additional unchanged rotation bodies check actual files and rollover decisions.
 Four bodies verify native stderr with the original
-CPython output helper. The 35 host-driven methods exercise enablement caches and global suppression, the registry, timed
+CPython output helper. The 38 host-driven methods exercise named handler registration, the registry, timed and rotating
 files, record flags, [formatters](formatters.md), or [configuration](config.md).
 Setup and registered cleanup stay with their test. The report keeps original method locations, individual
 compiler or adapter blockers, and the three pinned skip conditions. It

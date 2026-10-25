@@ -61,7 +61,7 @@ pub(super) enum Scalar<'a> {
 impl<'a> Scalar<'a> {
     fn convert(option: &OptionSpec, text: &'a str) -> Result<Self, String> {
         let value = match option.kind {
-            Kind::Str | Kind::Path => Some(Self::Text(text)),
+            Kind::Str | Kind::Path | Kind::Class => Some(Self::Text(text)),
             Kind::Int => {
                 if text.len() > 640
                     && !super::decimal_digits_allowed(
@@ -164,7 +164,11 @@ impl OptionSpec {
     pub(super) fn flag_value<'a>(
         &'a self,
         previous: Option<Bound<'a>>,
+        spelling: &str,
     ) -> Result<Bound<'a>, String> {
+        if self.action == Action::BooleanOptional {
+            return Ok(Bound::Bool(!spelling.starts_with("--no-")));
+        }
         if self.action == Action::Count {
             let n = match previous {
                 Some(Bound::Scalar(Scalar::Int(n))) => n,

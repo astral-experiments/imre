@@ -1,6 +1,8 @@
 //! POSIX descriptors are integers in the program's descriptor table. A call
 //! can observe a closed number or a number subsequently reused by the kernel.
 
+mod credentials;
+
 use super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::files::{errno_error, errno_with_filenames};
 use super::{Bytes, Int, Str, c_int};
@@ -8,6 +10,47 @@ use num_traits::ToPrimitive;
 use std::ffi::CString;
 use std::io;
 use std::rc::Rc;
+
+pub(super) mod links;
+pub(super) mod stat_result;
+
+/// Query the same POSIX metadata for Path views, fresh predicates, and metadata copies.
+pub(super) fn metadata(
+    path: impl AsRef<std::path::Path>,
+    follow: bool,
+) -> io::Result<std::fs::Metadata> {
+    if follow {
+        std::fs::metadata(path)
+    } else {
+        std::fs::symlink_metadata(path)
+    }
+}
+
+/// Snapshot names and the kernel's directory-entry types without looking up an inode.
+pub(super) fn directory_entry_types(
+    root: &str,
+) -> io::Result<Vec<(std::ffi::OsString, rustix::fs::FileType)>> {
+    use rustix::fs::{Dir, Mode, OFlags, open};
+    use std::os::unix::ffi::OsStringExt;
+
+    let fd = open(
+        root,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?;
+    let mut entries = Vec::new();
+    for item in Dir::new(fd)? {
+        let entry = item?;
+        let name = entry.file_name().to_bytes();
+        if !matches!(name, b"." | b"..") {
+            entries.push((
+                std::ffi::OsString::from_vec(name.to_vec()),
+                entry.file_type(),
+            ));
+        }
+    }
+    Ok(entries)
+}
 
 macro_rules! descriptor_constants {
     ($($name:ident = $flag:ident),* $(,)?) => {$(
@@ -28,12 +71,17 @@ descriptor_constants! {
 ///
 /// # Safety
 /// `value` is the rooted str, bytes or Path selected by `tag`.
-unsafe fn syscall_path(value: *const (), tag: u32, function: &str) -> Result<(CString, Filename)> {
+unsafe fn syscall_path(
+    value: *const (),
+    tag: u32,
+    function: &str,
+    parameter: &str,
+) -> Result<(CString, Filename)> {
     let terminated = |bytes: &[u8]| {
         CString::new(bytes).map_err(|_| {
             Error::new(
                 Kind::ValueError,
-                format!("{function}: embedded null character in path"),
+                format!("{function}: embedded null character in {parameter}"),
             )
         })
     };
@@ -68,7 +116,7 @@ pub unsafe extern "C" fn imre_os_open(
     finish(
         (|| {
             // SAFETY: the caller's representation tag describes this rooted path.
-            let (name, path) = unsafe { syscall_path(path, bytes, "open") }?;
+            let (name, path) = unsafe { syscall_path(path, bytes, "open", "path") }?;
             let flags = c_int(flags)? | libc::O_CLOEXEC;
             let mode = c_int(mode)?;
             // SAFETY: dir_fd is a rooted optional integer according to the ABI.
@@ -99,7 +147,7 @@ pub unsafe extern "C" fn imre_os_unlink(value: *const (), tag: u32, fd: usize, r
     let result = (|| {
         let function = if remove == 0 { "unlink" } else { "remove" };
         // SAFETY: the path's owner stays live through the syscall and error rendering.
-        let (path, name) = unsafe { syscall_path(value, tag, function) }?;
+        let (path, name) = unsafe { syscall_path(value, tag, function, "path") }?;
         // SAFETY: fd is a rooted optional integer.
         let dir_fd = unsafe { directory_fd(fd) }?;
         // SAFETY: the zero-terminated path is owned until unlinkat returns.
@@ -269,41 +317,58 @@ fn set_cloexec(fd: i32) -> Result<()> {
 /// The caller supplies two writable word slots in a fresh tuple.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_os_pipe(out: *mut usize) {
+    // SAFETY: the caller supplies the two uninitialized integer slots.
+    finish(unsafe { make_pipe(out, libc::O_CLOEXEC) }, ());
+}
+
+/// Atomically create a pipe with the caller's flags, including inheritable ends for zero.
+///
+/// # Safety
+/// The caller supplies two writable word slots in a fresh tuple.
+#[cfg(target_os = "linux")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_os_pipe2(out: *mut usize, flags: usize) {
+    // SAFETY: no descriptor is published until both ends were created successfully.
     finish(
-        (|| {
-            let mut fds = [-1; 2];
-            // SAFETY: both pipe variants initialize the two writable int slots.
-            let result = unsafe {
-                #[cfg(target_os = "linux")]
-                {
-                    libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC)
-                }
-                #[cfg(not(target_os = "linux"))]
-                {
-                    libc::pipe(fds.as_mut_ptr())
-                }
-            };
-            checked(result)?;
-            #[cfg(not(target_os = "linux"))]
-            if let Err(error) = set_cloexec(fds[0]).and_then(|()| set_cloexec(fds[1])) {
-                // SAFETY: the fresh pipe owns both descriptors until publication.
-                unsafe {
-                    libc::close(fds[0]);
-                    libc::close(fds[1]);
-                }
-                return Err(error);
-            }
-            for (index, fd) in fds.into_iter().enumerate() {
-                // SAFETY: each initialized slot takes one immediate integer.
-                unsafe {
-                    out.add(index)
-                        .write(Int::from_usize(fd as usize).into_raw())
-                };
-            }
-            Ok(())
-        })(),
+        c_int(flags).and_then(|flags| unsafe { make_pipe(out, flags) }),
         (),
     );
+}
+
+/// Initialize the caller's two tuple slots only after establishing the requested flags.
+unsafe fn make_pipe(out: *mut usize, flags: libc::c_int) -> Result<()> {
+    let mut fds = [-1; 2];
+    // SAFETY: both pipe variants initialize the two writable int slots.
+    let result = unsafe {
+        #[cfg(target_os = "linux")]
+        {
+            libc::pipe2(fds.as_mut_ptr(), flags)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            libc::pipe(fds.as_mut_ptr())
+        }
+    };
+    checked(result)?;
+    #[cfg(not(target_os = "linux"))]
+    if flags & libc::O_CLOEXEC != 0
+        && let Err(error) = set_cloexec(fds[0]).and_then(|()| set_cloexec(fds[1]))
+    {
+        // SAFETY: the fresh pipe owns both descriptors until publication.
+        unsafe {
+            libc::close(fds[0]);
+            libc::close(fds[1]);
+        }
+        return Err(error);
+    }
+    for (index, fd) in fds.into_iter().enumerate() {
+        // SAFETY: each initialized slot takes one immediate integer.
+        unsafe {
+            out.add(index)
+                .write(Int::from_usize(fd as usize).into_raw())
+        };
+    }
+    Ok(())
 }
 
 #[unsafe(no_mangle)]

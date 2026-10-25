@@ -15,6 +15,7 @@ mod buffered;
 mod gzip;
 mod path_text;
 mod seekable;
+mod text_memory;
 use seekable::Memory;
 pub(super) use seekable::disk_offset;
 
@@ -34,6 +35,7 @@ enum FileKind {
     BinaryRead,
     GzipBinaryRead,
     Memory,
+    TextMemory,
     Member,
     BinaryWrite,
 }
@@ -42,17 +44,17 @@ enum Stream {
     Read(Input),
     Write(Output),
     Memory(Memory),
+    TextMemory(text_memory::TextMemory),
     Member(Box<super::zipfile::Member>),
 }
 
 impl Stream {
-    /// Closes exactly once even when flushing fails. `into_parts` prevents a
-    /// second implicit flush; a close error takes precedence over a flush error.
+    /// Closes exactly once even when flushing fails. A close error takes precedence.
     fn close(self) -> io::Result<()> {
         let (file, flushed) = match self {
             Self::Read(input) => (input.into_file(), Ok(())),
             Self::Write(writer) => writer.finish(),
-            Self::Memory(_) | Self::Member(_) => return Ok(()),
+            Self::Memory(_) | Self::TextMemory(_) | Self::Member(_) => return Ok(()),
         };
         close_file(file).and(flushed)
     }
@@ -154,10 +156,16 @@ impl FileState {
     }
 
     pub(super) fn read(&mut self) -> Result<Str> {
+        if self.kind == FileKind::TextMemory {
+            return self.text_memory()?.read(None, false);
+        }
         self.input()?.read_text()
     }
 
     pub(super) fn readline(&mut self) -> Result<Str> {
+        if self.kind == FileKind::TextMemory {
+            return self.text_memory()?.read(None, true);
+        }
         self.input()?.text_line()
     }
 
@@ -258,15 +266,23 @@ impl FileState {
     }
 
     pub(super) fn write(&mut self, text: &str) -> Result<()> {
+        if self.kind == FileKind::TextMemory {
+            return self.text_memory()?.write(text);
+        }
         self.write_bytes(text.as_bytes())
     }
 
     pub(super) fn flush(&mut self) -> Result<()> {
+        if self.kind == FileKind::TextMemory {
+            return Ok(());
+        }
         if self.kind == FileKind::BinaryWrite && self.stream.is_none() {
             return Err(Error::new(Kind::ValueError, "flush of closed file"));
         }
         match self.stream()? {
-            Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) => Ok(()),
+            Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) | Stream::TextMemory(_) => {
+                Ok(())
+            }
             Stream::Write(writer) => writer.flush().map_err(os_error),
         }
     }
@@ -280,10 +296,8 @@ pub(super) fn decode_utf8_text(bytes: Vec<u8>) -> Result<Str> {
 
 fn decode_text(bytes: Vec<u8>, preserve_newlines: bool) -> Result<Str> {
     let text = String::from_utf8(bytes).map_err(|error| {
-        Error::new(
-            Kind::UnicodeDecodeError,
-            format!("invalid UTF-8 at byte {}", error.utf8_error().valid_up_to()),
-        )
+        let bounds = error.utf8_error();
+        super::bytes::decode_owned_error(Rc::new(error.into_bytes()), bounds)
     })?;
     if preserve_newlines || !text.contains('\r') {
         return Ok(Str::from(text));
@@ -326,8 +340,9 @@ pub(super) fn os_error(error: io::Error) -> Error {
     {
         return Error::new(gzip.0, gzip.to_string());
     }
+    // Read::read_to_end reports a failed Vec reservation without an OS errno.
     if error.kind() == io::ErrorKind::OutOfMemory && error.raw_os_error().is_none() {
-        return Error::allocation();
+        return Error::memory_error();
     }
     Error::new(os_error_kind(error.kind()), error.to_string())
 }
@@ -348,7 +363,7 @@ pub(crate) fn errno_error(error: io::Error) -> Error {
     errno_with_filename(error, None)
 }
 
-fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
+pub(super) fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
     errno_with_filenames(
         error,
         path.map(|s| super::exceptions::Filename::Str(Rc::new(Str::from(s)))),
@@ -432,7 +447,7 @@ pub(super) fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*c
 fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
     let (file, metadata) = open_file(path, mode)?;
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
-    let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
+    let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
     let fd = file.as_raw_fd();
     let stream = match mode {
         0 | 4 => {
@@ -785,6 +800,23 @@ mod tests {
         imre_exception_message, imre_exception_new,
     };
     use super::super::{imre_object_release, imre_seq_append, imre_seq_new};
+
+    #[test]
+    fn buffer_allocation_failure_is_distinct_from_os_enomem() {
+        Error::memory_error().raise();
+        let empty = imre_error_take();
+        os_error(io::Error::from(io::ErrorKind::OutOfMemory)).raise();
+        let error = imre_error_take();
+        // A failed reservation must use the preallocated, argument-free exception.
+        assert_eq!(error, empty);
+        // SAFETY: each take transferred one owner of the same exception.
+        unsafe {
+            imre_object_release(error);
+            imre_object_release(empty);
+        }
+        os_error(io::Error::from_raw_os_error(libc::ENOMEM)).raise();
+        take_error(Kind::OSError);
+    }
 
     struct Directory(PathBuf);
 

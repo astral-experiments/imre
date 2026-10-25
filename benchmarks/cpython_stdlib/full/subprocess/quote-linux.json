@@ -1,0 +1,163 @@
+{
+  "schema": "imre.subprocess.quoting/v1",
+  "imre_revision": "60b8ad0660d86de724b589adf4108aee38b63f8e",
+  "tested_tree": "994019c21241169804e8d43a7c5bd9b7b25a479e",
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "toolchain": {
+        "imre": "9af4bb5bc67fabd5cac8614134fb47049b55abc72f3b1c7660911df1ddebb06a",
+        "runtime": "49c692b288834b44849ce8290c0171b6e23f8af687694e6b7ab03829f40c4ac6",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "observer_sha256": "5c24cfe34ec60ae5b1978bf9e820a52f9f85b8fbd97f5b5a991cf00d9b9134b1",
+      "rows": {
+        "test.test_subprocess.ProcessTestCase.test_list2cmdline": [
+          {
+            "execution": "native-body",
+            "body": "Imre",
+            "assertions": "Imre",
+            "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "a2dcff9faa9ec44da990768fa1ce096e7ce9f2f43979d9d9d05525939396e731",
+            "native_program_sha256": "238b7c66571a8ad0e150006d2b3fd76a0cda9922f90cd14aeb86aab0184023c4",
+            "observed_program_sha256": "b0f33e3cf154f6179db85a9942fbc1f6c681666039243bfb55776e45d6a07e24",
+            "arguments_per_original_call": [
+              3,
+              3,
+              3,
+              3,
+              3,
+              3,
+              3,
+              2
+            ],
+            "assertions_rejecting_substituted_result": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8
+            ],
+            "native_argument_quotes": 23,
+            "native_joins": 8
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_list2cmdline": [
+          {
+            "execution": "native-body",
+            "body": "Imre",
+            "assertions": "Imre",
+            "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "a2dcff9faa9ec44da990768fa1ce096e7ce9f2f43979d9d9d05525939396e731",
+            "native_program_sha256": "963c7585c86979fb59801fdb5c0c4d76a30c24f781055ec0754c5c88ffa54c2c",
+            "observed_program_sha256": "ed9fd0320f5dc1c399b6d1fce76b08d0e0b2597a0b895761b19a76be030f4657",
+            "arguments_per_original_call": [
+              3,
+              3,
+              3,
+              3,
+              3,
+              3,
+              3,
+              2
+            ],
+            "assertions_rejecting_substituted_result": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8
+            ],
+            "native_argument_quotes": 23,
+            "native_joins": 8
+          }
+        ]
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "toolchain": {
+        "imre": "9af4bb5bc67fabd5cac8614134fb47049b55abc72f3b1c7660911df1ddebb06a",
+        "runtime": "49c692b288834b44849ce8290c0171b6e23f8af687694e6b7ab03829f40c4ac6",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "observer_sha256": "5c24cfe34ec60ae5b1978bf9e820a52f9f85b8fbd97f5b5a991cf00d9b9134b1",
+      "rows": {
+        "test.test_subprocess.ProcessTestCase.test_list2cmdline": [
+          {
+            "execution": "native-body",
+            "body": "Imre",
+            "assertions": "Imre",
+            "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "a2dcff9faa9ec44da990768fa1ce096e7ce9f2f43979d9d9d05525939396e731",
+            "native_program_sha256": "a53556b5de1aa174f9dc280bc389ad628ebde6c63429c06afd1561a5d96aa8ab",
+            "observed_program_sha256": "27950cef68393b1a9d7262ddeeab6c653b4997e5a8e2f4bb871ed3c1be03bcf3",
+            "arguments_per_original_call": [
+              3,
+              3,
+              3,
+              3,
+              3,
+              3,
+              3,
+              2
+            ],
+            "assertions_rejecting_substituted_result": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8
+            ],
+            "native_argument_quotes": 23,
+            "native_joins": 8
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_list2cmdline": [
+          {
+            "execution": "native-body",
+            "body": "Imre",
+            "assertions": "Imre",
+            "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "a2dcff9faa9ec44da990768fa1ce096e7ce9f2f43979d9d9d05525939396e731",
+            "native_program_sha256": "05ed002d0338029f84e66140404b7d774f2fafe8a46c82e0f9916192af5da92a",
+            "observed_program_sha256": "a56f2fe5f12e851448fcb6e4701d9890dca4732aa9f79e405aef4a1b7a5e482d",
+            "arguments_per_original_call": [
+              3,
+              3,
+              3,
+              3,
+              3,
+              3,
+              3,
+              2
+            ],
+            "assertions_rejecting_substituted_result": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8
+            ],
+            "native_argument_quotes": 23,
+            "native_joins": 8
+          }
+        ]
+      }
+    }
+  ]
+}

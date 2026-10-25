@@ -1,0 +1,5 @@
+Union is the maximum of value in either of the input counters.
+
+>>> Counter('abbb') | Counter('bcc')
+Counter({'b': 3, 'c': 2, 'a': 1})
+

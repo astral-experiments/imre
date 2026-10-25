@@ -6,6 +6,10 @@ use super::*;
 /// A callable signature is not a storage edge, but a callable value may own a
 /// bound receiver. Such values cannot enter heap aggregates in this milestone.
 pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
+    // The declaration reader boxes only owners it has proven to be noncapturing.
+    if matches!(ty, Type::AnnotationValue(_)) {
+        return false;
+    }
     matches!(ty, Type::Callable(_))
         || types
             .children(ty)
@@ -14,7 +18,11 @@ pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
 }
 
 fn invalid_aggregate(ty: Type, types: &Types) -> bool {
-    if matches!(ty, Type::Callable(_)) || types.is_partial_frame(ty) {
+    if matches!(
+        ty,
+        Type::Callable(_) | Type::ForwardRef(_) | Type::AnnotationValue(_)
+    ) || types.is_partial_frame(ty)
+    {
         false
     } else if let Some(payload) = types.payload(ty) {
         invalid_aggregate(payload, types)
@@ -177,10 +185,12 @@ impl Checker<'_> {
             ));
         }
         let skip = usize::from(receiver.is_some());
-        if signature.params[skip..]
-            .iter()
-            .any(|parameter| parameter.kind == ParameterKind::KeywordOnly)
-        {
+        if signature.params[skip..].iter().any(|parameter| {
+            matches!(
+                parameter.kind,
+                ParameterKind::KeywordOnly | ParameterKind::KeywordRest
+            )
+        }) {
             return Err(error(
                 self.source,
                 node,
@@ -218,19 +228,26 @@ impl Checker<'_> {
                 signature.returns
             },
         );
-        let ty = if receiver.is_none()
-            && let Some(&policy) = self.classes.cached.get(&signature.id)
-        {
+        let unbound = receiver.is_none();
+        let ty = if unbound && let Some(&policy) = self.classes.cached.get(&signature.id) {
             self.types.declared_cache(ty, signature.id, policy)
         } else {
             ty
         };
-        Ok(Expr {
+        let value = Expr {
             ty,
             kind: ExprKind::Callable {
                 function: signature.id,
                 receiver: receiver.map(Box::new),
             },
+        };
+        Ok(if unbound {
+            Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::StaticFunction(signature.id), vec![value]),
+            }
+        } else {
+            value
         })
     }
 
@@ -307,6 +324,7 @@ impl Checker<'_> {
             ));
         }
         let id = self.helpers.reserve();
+        let omitted_free = self.unbound_assert_captures();
         let mut helper = Checker::new(
             self.graph,
             self.module,
@@ -316,6 +334,7 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.local_iter = bound.contains("iter");
         helper.class = self.class;
@@ -388,6 +407,14 @@ impl Checker<'_> {
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
         if let Type::StrDescriptor(method) = callable.ty {
             return self.invoke_descriptor(call, callable, method);
+        }
+        if let Type::Class(class) = callable.ty
+            && self.native_mock(class)
+        {
+            return self.mock_arguments(call, class, callable, "_record");
+        }
+        if let Some(result) = self.invoke_bound_unittest(call, &callable)? {
+            return Ok(result);
         }
         let (params, returns) = self.types.signature(callable.ty).ok_or_else(|| {
             error(
