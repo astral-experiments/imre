@@ -3605,7 +3605,15 @@ impl Emitter<'_, '_> {
                 use crate::ir::LogOperation::*;
                 let name = match operation {
                     Get => "imre_log_get",
+                    AddLevel => "imre_log_add_level",
+                    LevelName => "imre_log_level_name",
+                    LevelForName => "imre_log_level_for_name",
+                    CheckLevel => "imre_log_check_level",
+                    Names => "imre_log_names",
+                    Numbers => "imre_log_numbers",
+                    NamesCopy => "imre_log_names_copy",
                     Configure => "imre_log_config",
+                    ConfigureName => "imre_log_config_named",
                     Name => "imre_log_name",
                     Parent => "imre_log_parent",
                     Root => "imre_log_root",
@@ -6011,6 +6019,16 @@ declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_match(ptr, ptr)
 declare ptr @imre_log_get(i64)
+declare void @imre_log_add_level(i64, ptr)
+declare ptr @imre_log_level_name(i64)
+declare i64 @imre_log_level_for_name(ptr)
+declare i64 @imre_log_check_level(ptr)
+declare ptr @imre_log_names()
+declare ptr @imre_log_numbers()
+declare ptr @imre_log_names_copy()
+declare void @imre_log_config_named(ptr, i64, i64, i1)
+declare i64 @imre_union_from_int(i64)
+declare i64 @imre_union_into_int(i64)
 declare void @imre_log_config(i64, i64, i64, i1)
 declare ptr @imre_log_name(ptr)
 declare i64 @imre_log_parent(ptr)

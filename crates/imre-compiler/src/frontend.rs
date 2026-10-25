@@ -4115,6 +4115,7 @@ impl<'a> Checker<'a> {
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
             match symbol {
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
+                Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
                 Intrinsic::SysExecutable | Intrinsic::SysPlatform => {
                     let operation = match symbol {
                         Intrinsic::SysExecutable => {
@@ -5166,6 +5167,11 @@ impl<'a> Checker<'a> {
                 return self.fspath_argument(path);
             }
             Some(Binding::Intrinsic(Intrinsic::GetLogger)) => return self.get_logger(call),
+            Some(Binding::Intrinsic(
+                symbol @ (Intrinsic::AddLevelName
+                | Intrinsic::GetLevelName
+                | Intrinsic::LevelNamesMapping),
+            )) => return self.logging_levels(symbol, call),
             Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
                 return self.configure_logging(call);
             }

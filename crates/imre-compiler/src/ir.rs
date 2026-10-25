@@ -822,7 +822,15 @@ pub(crate) enum PosixPathOperation {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LogOperation {
     Get,
+    AddLevel,
+    LevelName,
+    LevelForName,
+    CheckLevel,
+    Names,
+    Numbers,
+    NamesCopy,
     Configure,
+    ConfigureName,
     Name,
     Level,
     Root,
