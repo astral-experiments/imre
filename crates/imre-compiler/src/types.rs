@@ -52,6 +52,7 @@ struct Storage {
     ids: HashMap<Shape, usize>,
     hashable_records: HashSet<usize>,
     custom_truth: HashSet<usize>,
+    pathlike_records: HashSet<usize>,
     fallible_keys: HashSet<usize>,
     concrete_subclasses: HashMap<usize, Vec<Type>>,
 }
@@ -99,6 +100,7 @@ impl Types {
             Type::Popen(_, _, id) => matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_))),
             Type::Int
             | Type::Float
+            | Type::BuiltinClass
             | Type::Bool
             | Type::Str
             | Type::Bytes
@@ -225,6 +227,10 @@ impl Types {
 
     pub(crate) fn set_hashable_records(&self, records: HashSet<usize>) {
         self.0.borrow_mut().hashable_records = records;
+    }
+
+    pub(crate) fn set_pathlike_records(&self, records: HashSet<usize>) {
+        self.0.borrow_mut().pathlike_records = records;
     }
 
     pub(crate) fn set_custom_truth(&self, records: HashSet<usize>) {
@@ -401,11 +407,28 @@ impl Types {
             {
                 Type::Union(self.intern(Shape::Union(vec![Type::Str, *other])))
             }
+            [Type::Str, record @ Type::Class(id)] | [record @ Type::Class(id), Type::Str]
+                if self.0.borrow().pathlike_records.contains(id)
+                    && !self.0.borrow().custom_truth.contains(id) =>
+            {
+                Type::Union(self.intern(Shape::Union(vec![Type::Str, *record])))
+            }
             [record @ Type::Class(id), Type::Exception]
             | [Type::Exception, record @ Type::Class(id)]
                 if !self.0.borrow().custom_truth.contains(id) =>
             {
                 Type::Union(self.intern(Shape::Union(vec![*record, Type::Exception])))
+            }
+            choices @ [_, _, ..]
+                if choices
+                    .iter()
+                    .all(|ty| matches!(ty, Type::Str | Type::Bytes | Type::Path)) =>
+            {
+                let ordered = [Type::Str, Type::Bytes, Type::Path]
+                    .into_iter()
+                    .filter(|ty| choices.contains(ty))
+                    .collect();
+                Type::Union(self.intern(Shape::Union(ordered)))
             }
             _ => return None,
         };

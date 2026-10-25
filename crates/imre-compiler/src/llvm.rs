@@ -51,6 +51,7 @@ impl Type {
             Self::Float => "double",
             Self::Bool => "i1",
             Self::Str
+            | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
             | Self::ListInt
@@ -108,6 +109,7 @@ impl Type {
             Self::Int => "1",
             Self::Float => "0.0",
             Self::Str
+            | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
             | Self::ListInt
@@ -696,7 +698,7 @@ impl Emitter<'_, '_> {
         let family = match ty {
             Type::Int => "int",
             Type::Union(_) | Type::StringIterable => "union",
-            Type::Str | Type::StrLiteral(_) => "str",
+            Type::Str | Type::StrLiteral(_) | Type::BuiltinClass => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
             Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(_) => {
@@ -3203,7 +3205,7 @@ impl Emitter<'_, '_> {
                     "icmp {predicate} i64 {}, {}",
                     left.operand, right.operand
                 )),
-                Type::Str | Type::StrLiteral(_) | Type::Optional(_) => {
+                Type::Str | Type::StrLiteral(_) | Type::BuiltinClass | Type::Optional(_) => {
                     let equal = if matches!(left.ty, Type::Optional(_))
                         || matches!(right.ty, Type::Optional(_))
                     {
@@ -3529,6 +3531,7 @@ impl Emitter<'_, '_> {
         if matches!(
             builtin,
             Builtin::LiteralStringView
+                | Builtin::ClassNameView
                 | Builtin::DictAsBase
                 | Builtin::RecordView
                 | Builtin::DirectoryContextView
@@ -3660,6 +3663,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::LiteralStringView
+            | Builtin::ClassNameView
             | Builtin::DictAsBase
             | Builtin::RecordView
             | Builtin::DirectoryContextView => {
@@ -5168,6 +5172,14 @@ impl Emitter<'_, '_> {
                 returns,
                 &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
             ),
+            Builtin::DeepCopy => {
+                let source = self.word(&args[0].value);
+                let kind = representation_kind(returns, &self.module.types);
+                let result = self.checked_instruction(format!(
+                    "call i64 @imre_deep_copy(i64 {source}, i32 {kind})"
+                ));
+                self.decode_word(result, returns)
+            }
             Builtin::RecordCopy => {
                 self.call("imre_record_shallow_copy", returns, &[&args[0].value])
             }
@@ -5395,6 +5407,13 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::DictClear => {
+                self.line(format!(
+                    "call void @imre_dict_clear(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
             Builtin::DictDelete => {
                 let key = self.key_word(&args[1].value);
                 self.checked_line(format!(
@@ -5555,6 +5574,7 @@ impl Emitter<'_, '_> {
                     }
                     Type::None => self.void_call("imre_print_none", &[]),
                     Type::ListInt
+                    | Type::BuiltinClass
                     | Type::Class(_)
                     | Type::List(_)
                     | Type::Dict(_)
@@ -5795,6 +5815,7 @@ impl Emitter<'_, '_> {
             Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
             | Type::ListInt
@@ -5866,6 +5887,7 @@ impl Emitter<'_, '_> {
             Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
             | Type::ListInt
@@ -6451,6 +6473,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Int => 2,
         Type::Float => 7,
         Type::Str | Type::StrLiteral(_) => 3,
+        Type::BuiltinClass => 11,
         Type::StrEnum(_) | Type::Enum(_) => 10,
         Type::Bytes => 8,
         Type::Union(_) | Type::StringIterable => 9,
@@ -6692,6 +6715,12 @@ declare ptr @imre_os_strerror(i64)
 @imre_os_o_directory = external constant i64
 @imre_os_o_nofollow = external constant i64
 @imre_os_o_nonblock = external constant i64
+@imre_os_seek_set = external constant i64
+@imre_os_seek_cur = external constant i64
+@imre_os_seek_end = external constant i64
+@imre_os_seek_data = external constant i64
+@imre_os_seek_hole = external constant i64
+declare i64 @imre_os_lseek(i64, i64, i64)
 declare i64 @imre_os_dup(i64)
 declare i64 @imre_os_dup2(i64, i64, i64)
 declare void @imre_os_pipe(ptr)
@@ -6703,6 +6732,7 @@ declare void @imre_os_set_inheritable(i64, i64)
 declare ptr @imre_shutil_which(ptr, i64, ptr, i32, i32, ptr, ptr)
 declare ptr @imre_shutil_confstr_cs_path()
 declare ptr @imre_shutil_os_defpath()
+declare void @imre_shutil_rmtree(ptr, i32, i32, i64, i32, ptr, ptr, ptr, ptr)
 declare i64 @imre_shutil_copy(i32, ptr, i32, ptr, i32, i32)
 declare void @imre_subprocess_check(ptr)
 declare i64 @imre_subprocess_error_field(ptr, i32)
@@ -6978,6 +7008,7 @@ define internal i64 @imre_seq_borrow_index_proven_fast(ptr %sequence, i64 %index
 declare ptr @imre_seq_repeat(ptr, i64)
 declare ptr @imre_dict_new(i32, i32)
 declare ptr @imre_dict_copy(ptr)
+declare i64 @imre_deep_copy(i64, i32)
 declare ptr @imre_record_shallow_copy(ptr)
 declare ptr @imre_default_list_dict_new(i32, i32)
 declare ptr @imre_deque_new(i32, i64)
@@ -7012,6 +7043,7 @@ declare i64 @imre_dict_pop(ptr, i64, i64, i32)
 declare i64 @imre_dict_get_default(ptr, i64, i64)
 declare void @imre_dict_set(ptr, i64, i64)
 declare void @imre_dict_delete(ptr, i64)
+declare void @imre_dict_clear(ptr)
 declare ptr @imre_dict_iter(ptr, i32)
 declare ptr @imre_set_new(i32)
 declare i64 @imre_set_len(ptr)
@@ -7055,7 +7087,8 @@ declare ptr @imre_str_join(ptr, ptr)
 declare ptr @imre_str_format(ptr, ptr, i64)
 declare ptr @imre_str_replace(ptr, ptr, ptr)
 declare ptr @imre_str_dedent(ptr)
-declare ptr @imre_shlex_split(ptr)
+declare ptr @imre_shlex_split_options(ptr, i32, i32)
+declare ptr @imre_shlex_quote(ptr)
 declare ptr @imre_sys_executable()
 declare void @imre_subprocess_to_stderr(ptr, i32)
 declare ptr @imre_float_format(double, i32, i32)

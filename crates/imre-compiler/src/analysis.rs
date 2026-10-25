@@ -211,7 +211,12 @@ impl Session {
     }
 
     /// Parses a normalized source once; semantic checks wait until every import is present.
-    pub(crate) fn add(&mut self, path: &Path, source: &str) -> Result<ParsedModuleRef, String> {
+    pub(crate) fn add(
+        &mut self,
+        path: &Path,
+        source: &str,
+        kind: crate::SourceKind,
+    ) -> Result<ParsedModuleRef, String> {
         let path = path.to_str().ok_or("module paths must be valid UTF-8")?;
         check_source_complexity(source).map_err(|error| format!("{path}: {error}"))?;
         let file = self.write_file(path, source)?;
@@ -220,7 +225,12 @@ impl Session {
             return Err(format!("{path}: {error}"));
         }
         check_handler_count(parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
-        check_indentation(source, parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
+        // The parser has already checked Python indentation; file inputs additionally
+        // enforce Imre's source-file policy. -c accepts legal tab-indented blocks.
+        if kind == crate::SourceKind::File {
+            check_indentation(source, parsed.tokens())
+                .map_err(|error| format!("{path}: {error}"))?;
+        }
         let mut limits = SuiteLimits {
             tokens: parsed.tokens(),
             scope_start: TextSize::default(),
@@ -272,6 +282,15 @@ impl Session {
     fn parsed(&self, file: File) -> ParsedModuleRef {
         ruff_db::parsed::parsed_module(&self.db, self.db.program_file(file).python_file(&self.db))
             .load(&self.db)
+    }
+
+    /// Refresh the semantic AST after a source rewrite that preserves byte offsets.
+    pub(crate) fn replace_source(&mut self, module: usize, source: String) -> ParsedModuleRef {
+        let file = self.files[module];
+        let original = ruff_db::source::source_text(&self.db, file);
+        let value = original.with_text(source, &Default::default());
+        file.set_source_text_override(&mut self.db).to(Some(value));
+        self.parsed(file)
     }
 
     /// Start diagnostics with independent rules and Salsa storage. Every file has already
@@ -1040,7 +1059,11 @@ mod diagnostic_mode_tests {
         let root = Path::new("/project");
         let mut session = Session::new(root, &[]).unwrap();
         session
-            .add(&root.join("main.py"), "def f(x: int) -> None:\n    x()\n")
+            .add(
+                &root.join("main.py"),
+                "def f(x: int) -> None:\n    x()\n",
+                crate::SourceKind::File,
+            )
             .unwrap();
         let file = session.files[0];
         assert!(
