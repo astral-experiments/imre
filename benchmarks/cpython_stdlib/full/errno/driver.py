@@ -4,6 +4,10 @@ from suite import ErrnoAttributeTests, ErrorcodeTests
 import sys
 
 
+def fail_import(name: str | None, spelling: str | None) -> None:
+    raise ImportError("cannot import", name=name, name_from=spelling)
+
+
 def run(mode: str) -> None:
     if mode == "test_for_improper_attributes":
         ErrnoAttributeTests().test_for_improper_attributes()
@@ -11,6 +15,12 @@ def run(mode: str) -> None:
         ErrnoAttributeTests().test_using_errorcode()
     elif mode == "test_attributes_in_errorcode":
         ErrorcodeTests().test_attributes_in_errorcode()
+    elif mode == "optional-hint":
+        fail_import("errno", "EDAOM")
+    elif mode == "optional-module":
+        fail_import(None, "EDAOM")
+    elif mode == "optional-spelling":
+        fail_import("errno", None)
     elif mode == "caught-import":
         try:
             raise ImportError("cannot import", name="errno", name_from="EDAOM")

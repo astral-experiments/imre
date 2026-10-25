@@ -106,6 +106,13 @@ def main():
                                                "original module-level frozenset and unittest case, and ran "
                                                "native unittest assertions; a host driver scheduled each ID",
                                      "source_blob": digest, "process_stdout": actual[1].decode().strip()}}
+            for mode in ("optional-hint", "optional-module", "optional-spelling"):
+                expected = run(args.python, "-E", root / "driver.py", mode, cwd=root)
+                actual = run(root / "driver", mode, cwd=root)
+                assert expected.returncode == actual.returncode == 1 and expected.stdout == actual.stdout == b""
+                message = expected.stderr.splitlines()[-1:]
+                assert message == [b"ImportError: cannot import" + (b". Did you mean: 'EDOM'?" if mode == "optional-hint" else b"")]
+                assert actual.stderr.splitlines() == message, (expected.stderr, actual.stderr)
             for case in missing:
                 command = [args.compiler.resolve(), "build", root / (case + ".py"), "--module-root", root,
                            "--runtime", args.runtime.resolve(), "--clang", args.clang,
@@ -123,7 +130,7 @@ def main():
                 if case == "close-spelling":
                     assert b"Did you mean: 'EDOM'?" in expected.stderr
                 assert actual.stderr.splitlines() == expected.stderr.splitlines()[-1:], (expected.stderr, actual.stderr)
-            print(f"O{opt}: {len(tests)}/{len(tests)} original methods, 2 failure controls, complete platform registry and three unused failing imports and caught error fields matched")
+            print(f"O{opt}: {len(tests)}/{len(tests)} original methods, 2 failure controls, complete platform registry and three unused failing imports and caught error fields/optional hints matched")
             if args.evidence:
                 reports.append(build_report(reference, int(opt), [(t, "complete module, fresh native process")
                                             for t in tests], observations))
@@ -135,7 +142,8 @@ def main():
                           "tests": {t: {"status": "native"} for t in tests},
                           "controls": {"missing-code": "matched", "missing-attribute": "matched",
                                        "unknown-unused-import": "matched", "absent-target-unused-import": "matched",
-                                       "close-spelling-import-hint": "matched", "caught-import-fields": "matched"},
+                                       "close-spelling-import-hint": "matched", "optional-import-hints": "matched",
+                                       "caught-import-fields": "matched"},
                           "registry_observations": len(oracle[("operations",)][1].splitlines())}
                 (args.result_dir / f"native-{sys.platform}-O{opt}.json").write_text(json.dumps(report, indent=2) + "\n")
     if args.evidence:
