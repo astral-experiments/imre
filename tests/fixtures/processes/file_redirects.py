@@ -107,3 +107,26 @@ try:
     subprocess.Popen(["/bin/bad\x00command"], stdin=subprocess.STDOUT)
 except ValueError:
     print("embedded NUL in the command")
+
+try:
+    subprocess.Popen(exit_zero, stdin=36893488147419103232, stdout=destination)
+except ValueError as closed:
+    print(str(closed))
+for executable in ("/bin/sh", "/bin/bad\x00command"):
+    try:
+        subprocess.Popen([executable], stdin=36893488147419103232)
+    except OverflowError:
+        print("oversized descriptor")
+    except ValueError:
+        print("invalid executable")
+    try:
+        subprocess.Popen([executable], stdin=36893488147419103232, cwd=".")
+    except OverflowError:
+        print("oversized descriptor with cwd")
+
+empty: list[str] = []
+try:
+    print(subprocess.Popen(empty, executable="/bin/sh", stdin=subprocess.DEVNULL).wait())
+except ValueError as invalid:
+    print(str(invalid))
+print(subprocess.Popen(empty, executable="/bin/sh", stdin=subprocess.DEVNULL, cwd=".").wait())
