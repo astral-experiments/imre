@@ -3577,9 +3577,11 @@ impl<'a> Checker<'a> {
         }
         let stored = self.types.directory_value(manager.ty);
         let archive = manager.ty == Type::ZipFile;
+        let popen = matches!(manager.ty, Type::Popen(_));
         if temporary.is_none()
             && stored.is_none()
             && !archive
+            && !popen
             && !matches!(manager.ty, Type::TextIO | Type::BinaryIO)
         {
             return Err(error(
@@ -3612,7 +3614,7 @@ impl<'a> Checker<'a> {
         let (nested, falls) = self.with_items(remaining, body)?;
         protected.extend(nested);
         let mut statements = vec![Statement::Assign(captured, manager)];
-        if temporary.is_none() && stored.is_none() && !archive {
+        if temporary.is_none() && stored.is_none() && !archive && !popen {
             statements.push(Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::TextEnter, vec![self.local(captured)]),
@@ -3622,6 +3624,8 @@ impl<'a> Checker<'a> {
             Builtin::Path(ir::PathOperation::ContextExit)
         } else if temporary.is_some() {
             Builtin::Path(ir::PathOperation::CleanupTemporaryDirectory)
+        } else if popen {
+            Builtin::Process(ir::ProcessOperation::PopenExit)
         } else if archive {
             Builtin::ZipClose
         } else {
@@ -4985,6 +4989,9 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::AsyncProcess(_)) {
                     return self.async_returncode(receiver, attribute);
                 }
+                if matches!(receiver.ty, Type::Popen(_)) {
+                    return self.popen_attribute(receiver, attribute);
+                }
                 if matches!(receiver.ty, Type::CompletedProcess(_)) {
                     return self.process_attribute(receiver, attribute);
                 }
@@ -5381,6 +5388,7 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetCwd), vec![]),
                 });
             }
+            Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call),
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
                 self.reject_builtin_keywords(call)?;
@@ -5583,6 +5591,9 @@ impl<'a> Checker<'a> {
             };
             if receiver.ty.is_path() {
                 return self.path_method(receiver, attribute, call);
+            }
+            if matches!(receiver.ty, Type::Popen(_)) {
+                return self.popen_method(receiver, attribute, call);
             }
             if matches!(receiver.ty, Type::CompletedProcess(_)) {
                 return self.process_method(receiver, attribute, call);

@@ -163,6 +163,13 @@ impl Builtin {
                 | ProcessOperation::CheckOutput
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
+                | ProcessOperation::Popen { .. }
+                | ProcessOperation::PopenPid
+                | ProcessOperation::PopenArgs
+                | ProcessOperation::PopenStatus { .. }
+                | ProcessOperation::PopenExit
+                | ProcessOperation::PopenWait
+                | ProcessOperation::PopenSignal
                 | ProcessOperation::AsyncSpawn { .. }
                 | ProcessOperation::AsyncStatus { wait: false }
                 | ProcessOperation::Coroutine { .. }
