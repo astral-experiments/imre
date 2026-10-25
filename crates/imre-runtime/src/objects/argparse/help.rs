@@ -104,6 +104,13 @@ impl OptionSpec {
         };
         if summary {
             if !self.takes_value() {
+                if self.action == super::Action::BooleanOptional {
+                    return paint(
+                        color,
+                        option_color(&self.flag, false),
+                        &self.flags().collect::<Vec<_>>().join(" | "),
+                    );
+                }
                 return paint(color, option_color(&self.flag, false), &self.flag);
             }
             return if color {

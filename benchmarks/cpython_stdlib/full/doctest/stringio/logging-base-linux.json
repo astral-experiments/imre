@@ -1,0 +1,659 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "fixture_revision": "34e18ec6302116dee51f731401cb01aae42f1e22",
+  "implementation_revision": "9ebd30160ad9c29cb9873ad932bccb1706badb3f",
+  "observations": {
+    "O0": {
+      "controls": {
+        "all_streams": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/0/control_all_streams/case.py (-O0)\n<scratch>/0/control_all_streams/case.py:24:16: Imre: supported file methods are read(), binary read(size), readline(), write(data), flush(), and close()\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "csv_shared": {
+          "native_stdout_sha256": "0ee630d120c79e49bb7083917e54677c9f53b172c69ad3fe756b87646063ef1a",
+          "outcome": "matched"
+        },
+        "json_shared": {
+          "native_stdout_sha256": "c61ba28d3d372a893ad4e54356654c53a0fa796899e8d458977443991eeded25",
+          "outcome": "matched"
+        }
+      },
+      "counts": {
+        "blocked": 8,
+        "passed": 11
+      },
+      "methods": {
+        "test.test_memoryio.CStringIOTest.testInit": {
+          "evidence": {
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "ed90f8d34bda4bdc644421154f8696eb4f05aec0d93d22062c38b3cb8c7fb89e",
+            "operation": "native io.StringIO",
+            "opt_level": 0
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "imre",
+            "body": "imre",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.testRead": {
+          "evidence": {
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "36919deb666fb52f35f3eaa781ee99cd3b1988dbb3144179e67083f6eec2883b",
+            "operation": "native io.StringIO",
+            "opt_level": 0
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "imre",
+            "body": "imre",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.testReadNoArgs": {
+          "evidence": {
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "13f10ba32f90c1d70530ed4c70b72520ffe88b4b895764dc6c5e1a0501623986",
+            "operation": "native io.StringIO",
+            "opt_level": 0
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "imre",
+            "body": "imre",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.testTell": {
+          "evidence": {
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "7bc4c773215c4d238da3d37f384ac4f47e8c099e1873d2648b62d3bbe8e82a16",
+            "operation": "native io.StringIO",
+            "opt_level": 0
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "imre",
+            "body": "imre",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_flush": {
+          "evidence": {
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "307febcb111778805af4c2e4f79acb3059c2afd685f71d0235c2976af34bd65a",
+            "operation": "native io.StringIO",
+            "opt_level": 0
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "imre",
+            "body": "imre",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_getvalue": {
+          "evidence": {
+            "fixture": "original CPython module, class, instance and method; native stream factory",
+            "method_sha256": "23b3657562151499bfd699eefc1e5a571aad53b213f173940fd85f135c634849",
+            "native_calls": {
+              "StringIO": 3,
+              "close": 1,
+              "getvalue": 5,
+              "read": 1
+            },
+            "operation": "io.StringIO held by the native child",
+            "opt_level": 0
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "cpython",
+            "body": "cpython",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_issue5265": {
+          "evidence": {
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "d76731882ca724ea2b63dcba541cda836311ced90f7e4af8a6ca5ca9afba2e44",
+            "operation": "native io.StringIO",
+            "opt_level": 0
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "imre",
+            "body": "imre",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_newline_cr": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/0/test_newline_cr/case.py (-O0)\n<scratch>/0/test_newline_cr/case.py:29:28: Imre: supported file methods are read(), binary read(size), readline(), write(data), flush(), and close()\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_newline_crlf": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/0/test_newline_crlf/case.py (-O0)\n<scratch>/0/test_newline_crlf/case.py:29:28: Imre: supported file methods are read(), binary read(size), readline(), write(data), flush(), and close()\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_newline_default": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/0/test_newline_default/case.py (-O0)\n<scratch>/0/test_newline_default/case.py:30:28: Imre: iter requires a supported iterator\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_newline_empty": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/0/test_newline_empty/case.py (-O0)\n<scratch>/0/test_newline_empty/case.py:32:28: Imre: iter requires a supported iterator\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_newline_lf": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/0/test_newline_lf/case.py (-O0)\n<scratch>/0/test_newline_lf/case.py:30:28: Imre: iter requires a supported iterator\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_newline_none": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/0/test_newline_none/case.py (-O0)\n<scratch>/0/test_newline_none/case.py:32:28: Imre: iter requires a supported iterator\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_newlines_property": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/0/test_newlines_property/case.py (-O0)\n<scratch>/0/test_newlines_property/case.py:30:28: Imre: field access requires a fixed class instance\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_overseek": {
+          "evidence": {
+            "fixture": "original CPython module, class, instance and method; native stream factory",
+            "method_sha256": "90eefd43be8211ab58fe5e1614018f84035a381895ec76365d593550be97b61a",
+            "native_calls": {
+              "StringIO": 1,
+              "getvalue": 3,
+              "read": 1,
+              "seek": 1,
+              "tell": 1,
+              "write": 2
+            },
+            "operation": "io.StringIO held by the native child",
+            "opt_level": 0
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "cpython",
+            "body": "cpython",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_relative_seek": {
+          "evidence": {
+            "fixture": "original CPython module, class, instance and method; native stream factory",
+            "method_sha256": "74f4c94fee73bcdc99971daddba448f9826874a1a435fb99bcd235f89bfb53eb",
+            "native_calls": {
+              "StringIO": 1,
+              "seek": 6
+            },
+            "operation": "io.StringIO held by the native child",
+            "opt_level": 0
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "cpython",
+            "body": "cpython",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_tell": {
+          "evidence": {
+            "fixture": "original CPython module, class, instance and method; native stream factory",
+            "method_sha256": "e027d8a667f613917da14d9eba98d1f1bb99683e181713a3293b49bb3d89a315",
+            "native_calls": {
+              "StringIO": 1,
+              "close": 1,
+              "seek": 2,
+              "tell": 4
+            },
+            "operation": "io.StringIO held by the native child",
+            "opt_level": 0
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "cpython",
+            "body": "cpython",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_textio_properties": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/0/test_textio_properties/case.py (-O0)\n<scratch>/0/test_textio_properties/case.py:28:27: Imre: field access requires a fixed class instance\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_widechar": {
+          "evidence": {
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "ff0e6d66124e09372bad17af7940f8153e246cd1d128abdeddf7e27500603488",
+            "operation": "native io.StringIO",
+            "opt_level": 0
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "imre",
+            "body": "imre",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        }
+      }
+    },
+    "O3": {
+      "controls": {
+        "all_streams": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/3/control_all_streams/case.py (-O3)\n<scratch>/3/control_all_streams/case.py:24:16: Imre: supported file methods are read(), binary read(size), readline(), write(data), flush(), and close()\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "csv_shared": {
+          "native_stdout_sha256": "0ee630d120c79e49bb7083917e54677c9f53b172c69ad3fe756b87646063ef1a",
+          "outcome": "matched"
+        },
+        "json_shared": {
+          "native_stdout_sha256": "c61ba28d3d372a893ad4e54356654c53a0fa796899e8d458977443991eeded25",
+          "outcome": "matched"
+        }
+      },
+      "counts": {
+        "blocked": 8,
+        "passed": 11
+      },
+      "methods": {
+        "test.test_memoryio.CStringIOTest.testInit": {
+          "evidence": {
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "ed90f8d34bda4bdc644421154f8696eb4f05aec0d93d22062c38b3cb8c7fb89e",
+            "operation": "native io.StringIO",
+            "opt_level": 3
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "imre",
+            "body": "imre",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.testRead": {
+          "evidence": {
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "36919deb666fb52f35f3eaa781ee99cd3b1988dbb3144179e67083f6eec2883b",
+            "operation": "native io.StringIO",
+            "opt_level": 3
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "imre",
+            "body": "imre",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.testReadNoArgs": {
+          "evidence": {
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "13f10ba32f90c1d70530ed4c70b72520ffe88b4b895764dc6c5e1a0501623986",
+            "operation": "native io.StringIO",
+            "opt_level": 3
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "imre",
+            "body": "imre",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.testTell": {
+          "evidence": {
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "7bc4c773215c4d238da3d37f384ac4f47e8c099e1873d2648b62d3bbe8e82a16",
+            "operation": "native io.StringIO",
+            "opt_level": 3
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "imre",
+            "body": "imre",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_flush": {
+          "evidence": {
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "307febcb111778805af4c2e4f79acb3059c2afd685f71d0235c2976af34bd65a",
+            "operation": "native io.StringIO",
+            "opt_level": 3
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "imre",
+            "body": "imre",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_getvalue": {
+          "evidence": {
+            "fixture": "original CPython module, class, instance and method; native stream factory",
+            "method_sha256": "23b3657562151499bfd699eefc1e5a571aad53b213f173940fd85f135c634849",
+            "native_calls": {
+              "StringIO": 3,
+              "close": 1,
+              "getvalue": 5,
+              "read": 1
+            },
+            "operation": "io.StringIO held by the native child",
+            "opt_level": 3
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "cpython",
+            "body": "cpython",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_issue5265": {
+          "evidence": {
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "d76731882ca724ea2b63dcba541cda836311ced90f7e4af8a6ca5ca9afba2e44",
+            "operation": "native io.StringIO",
+            "opt_level": 3
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "imre",
+            "body": "imre",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_newline_cr": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/3/test_newline_cr/case.py (-O3)\n<scratch>/3/test_newline_cr/case.py:29:28: Imre: supported file methods are read(), binary read(size), readline(), write(data), flush(), and close()\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_newline_crlf": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/3/test_newline_crlf/case.py (-O3)\n<scratch>/3/test_newline_crlf/case.py:29:28: Imre: supported file methods are read(), binary read(size), readline(), write(data), flush(), and close()\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_newline_default": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/3/test_newline_default/case.py (-O3)\n<scratch>/3/test_newline_default/case.py:30:28: Imre: iter requires a supported iterator\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_newline_empty": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/3/test_newline_empty/case.py (-O3)\n<scratch>/3/test_newline_empty/case.py:32:28: Imre: iter requires a supported iterator\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_newline_lf": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/3/test_newline_lf/case.py (-O3)\n<scratch>/3/test_newline_lf/case.py:30:28: Imre: iter requires a supported iterator\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_newline_none": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/3/test_newline_none/case.py (-O3)\n<scratch>/3/test_newline_none/case.py:32:28: Imre: iter requires a supported iterator\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_newlines_property": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/3/test_newlines_property/case.py (-O3)\n<scratch>/3/test_newlines_property/case.py:30:28: Imre: field access requires a fixed class instance\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_overseek": {
+          "evidence": {
+            "fixture": "original CPython module, class, instance and method; native stream factory",
+            "method_sha256": "90eefd43be8211ab58fe5e1614018f84035a381895ec76365d593550be97b61a",
+            "native_calls": {
+              "StringIO": 1,
+              "getvalue": 3,
+              "read": 1,
+              "seek": 1,
+              "tell": 1,
+              "write": 2
+            },
+            "operation": "io.StringIO held by the native child",
+            "opt_level": 3
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "cpython",
+            "body": "cpython",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_relative_seek": {
+          "evidence": {
+            "fixture": "original CPython module, class, instance and method; native stream factory",
+            "method_sha256": "74f4c94fee73bcdc99971daddba448f9826874a1a435fb99bcd235f89bfb53eb",
+            "native_calls": {
+              "StringIO": 1,
+              "seek": 6
+            },
+            "operation": "io.StringIO held by the native child",
+            "opt_level": 3
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "cpython",
+            "body": "cpython",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_tell": {
+          "evidence": {
+            "fixture": "original CPython module, class, instance and method; native stream factory",
+            "method_sha256": "e027d8a667f613917da14d9eba98d1f1bb99683e181713a3293b49bb3d89a315",
+            "native_calls": {
+              "StringIO": 1,
+              "close": 1,
+              "seek": 2,
+              "tell": 4
+            },
+            "operation": "io.StringIO held by the native child",
+            "opt_level": 3
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "cpython",
+            "body": "cpython",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_textio_properties": {
+          "evidence": {
+            "stage": "compile"
+          },
+          "outcome": "blocked",
+          "reason": " Compiling <scratch>/3/test_textio_properties/case.py (-O3)\n<scratch>/3/test_textio_properties/case.py:28:27: Imre: field access requires a fixed class instance\n",
+          "roles": {
+            "assertions": "unobserved",
+            "body": "unobserved",
+            "fixture": "unobserved",
+            "operation": "unobserved"
+          }
+        },
+        "test.test_memoryio.CStringIOTest.test_widechar": {
+          "evidence": {
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "method_sha256": "ff0e6d66124e09372bad17af7940f8153e246cd1d128abdeddf7e27500603488",
+            "operation": "native io.StringIO",
+            "opt_level": 3
+          },
+          "outcome": "passed",
+          "roles": {
+            "assertions": "imre",
+            "body": "imre",
+            "fixture": "mixed",
+            "operation": "imre"
+          }
+        }
+      }
+    }
+  },
+  "original_class_denominator": 39,
+  "schema_version": 1,
+  "selected": 19,
+  "workflow": "https://github.com/astral-sh/imre/actions/runs/40178958522/job/121125670241"
+}

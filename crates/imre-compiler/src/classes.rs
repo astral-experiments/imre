@@ -8,14 +8,16 @@ use ruff_python_ast::visitor::{Visitor, walk_expr};
 use crate::ir::Type;
 use crate::modules::{Binding, DefinitionId, Intrinsic, SourceGraph, SourceModule};
 
+mod constants;
 mod dataclasses;
 mod enums;
 mod exceptions;
 mod inheritance;
 mod record_hash;
+pub(crate) use constants::ClassValue;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
 pub(crate) use exceptions::explicit_message_initializer;
-pub(crate) use inheritance::super_init;
+pub(crate) use inheritance::{super_init, super_method};
 
 pub(crate) const EXCEPTION_ARGS_SLOT: &str = "<exception arguments>";
 
@@ -58,7 +60,7 @@ pub(crate) struct Class {
     pub(crate) dataclass: Option<DataclassOptions>,
     pub(crate) enum_members: Option<enums::Members>,
     pub(crate) exception_aliases: HashMap<String, ExceptionAlias>,
-    pub(crate) static_bindings: HashMap<String, Binding>,
+    pub(crate) static_bindings: HashMap<String, ClassValue>,
     pub(crate) generated_initializer: bool,
     /// Index into `methods`, including the initializer itself.
     pub(crate) initializer: Option<usize>,
@@ -76,6 +78,15 @@ pub(crate) struct Field {
 }
 
 impl Classes {
+    /// Even an entry module with no ordinary globals must initialize its owned class tuples.
+    pub(crate) fn owns_class_tuples(&self, module: usize) -> bool {
+        self.definitions.iter().any(|class| {
+            class.definition.module == module && class.static_bindings.values().any(|value| {
+                matches!(value, ClassValue::Strings { owner, .. } if *owner == class.definition)
+            })
+        })
+    }
+
     pub(crate) fn instance(&self, id: usize) -> Type {
         if let Some(members) = &self.definitions[id].enum_members {
             if members.plain {
@@ -225,7 +236,7 @@ fn collect_class(
     let mut methods: Vec<ast::StmtFunctionDef> = Vec::new();
     let mut method_kinds = Vec::new();
     let mut initializer = None;
-    for statement in &node.body {
+    for (ordinal, statement) in node.body.iter().enumerate() {
         // A call through an upcast uses its declared layout. Do not erase an
         // override which could select a different callable at runtime.
         let member = match statement {
@@ -362,7 +373,7 @@ fn collect_class(
                 }
                 let unary_protocol = matches!(
                     name,
-                    "__str__" | "__bool__" | "__iter__" | "__copy__" | "__fspath__"
+                    "__str__" | "__bool__" | "__index__" | "__iter__" | "__copy__" | "__fspath__"
                 );
                 if name.starts_with("__")
                     && name != "__init__"
@@ -492,12 +503,14 @@ fn collect_class(
             }
             ast::Stmt::Assign(assign)
                 if let [ast::Expr::Name(name)] = assign.targets.as_slice()
-                    && let Some(binding) = class_static_binding(
+                    && let Some(binding) = constants::value(
                         graph,
-                        definition.module,
+                        definition,
+                        ordinal,
                         &assign.value,
                         &class_bindings,
-                    ) =>
+                        &static_bindings,
+                    )? =>
             {
                 if !names.insert(name.id.to_string())
                     || name.id.starts_with("__")
@@ -551,6 +564,15 @@ fn collect_class(
         && let Some(init) = initializer
     {
         inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields)?;
+    }
+    if fields
+        .iter()
+        .any(|field| static_bindings.contains_key(&field.name))
+    {
+        return Err(module.error(
+            node,
+            "an instance field cannot shadow a fixed class binding",
+        ));
     }
     let generated_initializer =
         initializer.is_none() && dataclass.is_some_and(|options| options.init);

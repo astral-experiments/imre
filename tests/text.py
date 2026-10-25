@@ -12,9 +12,14 @@ from comprehensions import require_result, run
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "text"
 STDLIB = FIXTURES.parents[2] / "benchmarks" / "cpython_stdlib"
 REJECTED = {
+    "ord_bytearray": 'ord(bytearray(b"x"))',
+    "ord_memoryview": 'ord(memoryview(b"x"))',
+    "ord_nested_argument": 'def required(x: str) -> str:\n    return x\nord(c=required())',
     "splitlines_nested_argument": 'def number(value: int) -> int:\n    return value\n"x".splitlines(number("x"))',
     "isspace_nested_argument": 'def number(value: int) -> int:\n    return value\n"x".isspace(number("x"))',
     "splitlines_unproven_unpack": 'def lines(options: list[int]) -> list[str]:\n    return "x".splitlines(*options)',
+    "expandtabs_deprecated_index": "class Width:\n    def __index__(self) -> bool:\n        return True\n'x'.expandtabs(Width())",
+    "expandtabs_dynamic_args": "def run(args: list[int]) -> str:\n    return 'x'.expandtabs(*args)",
     "split_bytes": '"abc".split(b"b")',
     "split_wrong_limit": '"abc".split("b", True)',
     "split_duplicate": '"abc".split("b", sep="c")',
@@ -30,6 +35,9 @@ REJECTED = {
     "find_wrong_start": '"abc".find("a", True)',
     "partition_keyword": '"abc".partition(sep="b")',
     "partition_missing": '"abc".partition()',
+    "translate_sequence": 'def tr(table: list[str]) -> str:\n    return "a".translate(table)',
+    "translate_counter_missing": 'from collections import Counter\ntable = Counter({97: 98})\n"a".translate(table)',
+    "translate_nested_keyword": 'def number(value: int, /) -> int:\n    return value\n"a".translate(table=number(value=1))',
     "unquote_bytes": 'from urllib.parse import unquote\nunquote(b"abc")',
     "unquote_codec": 'from urllib.parse import unquote\nunquote("abc", encoding="ascii")',
     "unquote_errors": 'from urllib.parse import unquote\nunquote("abc", errors="strict")',

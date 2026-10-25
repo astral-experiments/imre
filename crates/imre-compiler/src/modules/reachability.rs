@@ -48,6 +48,22 @@ impl<'a> Visitor<'a> for References<'_> {
             self.found.attributes.insert("__copy__".to_owned());
             self.found.instance_attributes.insert("__copy__".to_owned());
         }
+        // Only a supplied, successfully bound width can invoke __index__.
+        if let ast::Expr::Call(call) = expr
+            && let ast::Expr::Attribute(attr) = call.func.as_ref()
+            && attr.attr.as_str() == "expandtabs"
+            && call.arguments.args.len() + call.arguments.keywords.len() == 1
+            && call
+                .arguments
+                .keywords
+                .first()
+                .is_none_or(|kw| kw.arg.as_deref() == Some("tabsize"))
+        {
+            self.found.attributes.insert("__index__".to_owned());
+            self.found
+                .instance_attributes
+                .insert("__index__".to_owned());
+        }
         if !matches!(expr, ast::Expr::Name(n) if n.ctx == ast::ExprContext::Store)
             && let Some(Binding::Value(id)) = self.graph.resolve(self.module, expr)
         {
@@ -61,6 +77,29 @@ impl<'a> Visitor<'a> for References<'_> {
         }
         if let ast::Expr::Attribute(attr) = expr {
             let name = attr.attr.to_string();
+            if matches!(
+                name.as_str(),
+                "assertEqual" | "assertListEqual" | "assertRaises"
+            ) {
+                self.found.attributes.insert(format!("_bound_{name}"));
+            }
+            if name == "assertRaises" {
+                self.found
+                    .attributes
+                    .insert("_raise_missing_callable".into());
+                if let Some(module) = self
+                    .graph
+                    .modules
+                    .iter()
+                    .find(|m| m.bundled && m.name == "unittest")
+                {
+                    for symbol in ["_AssertRaisesContext", "_raise_call_type_error"] {
+                        if let Some(Binding::Definition(def)) = module.bindings.get(symbol) {
+                            self.found.definitions.insert(*def);
+                        }
+                    }
+                }
+            }
             if matches!(name.as_str(), "assertEqual" | "assertListEqual") {
                 self.found.attributes.extend(
                     [
@@ -74,17 +113,6 @@ impl<'a> Visitor<'a> for References<'_> {
                     .into_iter()
                     .map(str::to_owned),
                 );
-            }
-            if name == "assertRaises"
-                && let Some(module) = self
-                    .graph
-                    .modules
-                    .iter()
-                    .find(|m| m.bundled && m.name == "unittest")
-                && let Some(Binding::Definition(context)) =
-                    module.bindings.get("_AssertRaisesContext")
-            {
-                self.found.definitions.insert(*context);
             }
             if let Some(Binding::Definition(owner)) = self.graph.resolve(self.module, &attr.value) {
                 self.found.class_attributes.insert((owner, name.clone()));
@@ -267,9 +295,24 @@ impl Reachable {
                                     || (source.bundled
                                         && class.name.as_str() == "_MainRunner"
                                         && matches!(name, "_start" | "_run" | "_finish")));
+                            let mock_dispatch = source.bundled
+                                && source.name == "unittest.mock"
+                                && match class.name.as_str() {
+                                    "Mock" => matches!(
+                                        name,
+                                        "_child"
+                                            | "_record"
+                                            | "_assert_any_call"
+                                            | "_assert_called_with"
+                                            | "_assert_called_once_with"
+                                    ),
+                                    "_Call" => matches!(name, "_represent" | "_represent_list"),
+                                    _ => false,
+                                };
                             if (property
                                 || unittest_method
                                 || assertion_exit
+                                || mock_dispatch
                                 || refs.found.attributes.contains(name)
                                 || matches!(
                                     name,
