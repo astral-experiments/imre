@@ -475,14 +475,12 @@ impl Error {
         filename: Option<Filename>,
         filename2: Option<Filename>,
     ) -> Self {
-        let mut message = format!("[Errno {errno}] {description}");
+        let message = format!("[Errno {errno}] {description}");
         let os_paths = filename.map(|first| {
-            let paths = Box::new(os::Filenames {
+            Box::new(os::Filenames {
                 first,
                 second: filename2,
-            });
-            paths.append_message(&mut message);
-            paths
+            })
         });
         Self::errno_arguments(kind, errno, description, message, os_paths)
     }
@@ -1121,13 +1119,16 @@ impl Storage {
             Payload::Exit(None) => Rc::new(Str::new("")),
             Payload::Empty => Rc::new(Str::new("")),
             Payload::Message(message) => Rc::clone(message),
-            Payload::Arguments(arguments) => Rc::clone(&arguments.message),
+            Payload::Arguments(arguments) => match &arguments.os_paths {
+                Some(paths) => paths.message(&arguments.message)?,
+                None => Rc::clone(&arguments.message),
+            },
             Payload::Json(e) => Rc::new(Str::from(format!(
                 "{}: line {} column {} (char {})",
                 e.msg, e.lineno, e.colno, e.pos
             ))),
-            Payload::Process(process) => Rc::new(process.message()),
-            Payload::Timeout(timeout) => Rc::new(timeout.message()),
+            Payload::Process(process) => Rc::new(process.message()?),
+            Payload::Timeout(timeout) => Rc::new(timeout.message()?),
             Payload::Key(key) => imports::word_text(key.kind, key.word, true)?,
             Payload::Group(members) => {
                 let count = members.len();
