@@ -408,9 +408,9 @@ fn start_section(output: &mut String) {
 
 impl Parser {
     /// Subparser names use the parent's uncolored usage without its options.
-    pub(super) fn set_child_programs(&mut self) {
+    pub(super) fn set_child_programs(&mut self) -> Result<(), Error> {
         let Some(commands) = &mut self.subcommands else {
-            return;
+            return Ok(());
         };
         let mut parts = vec![(len(&self.prog), self.prog.clone())];
         parts.extend(self.options.iter().filter(|o| o.positional()).map(|o| {
@@ -427,9 +427,18 @@ impl Parser {
         } else {
             usage_lines(&parts, len(&self.prog) + 1, 0, width)
         };
+        let prog = prog.trim_matches(python_whitespace);
         for child in &mut commands.choices {
-            child.parser.prog = format!("{} {}", prog.trim_matches(python_whitespace), child.name);
+            let child_prog = &mut child.parser.prog;
+            child_prog.clear();
+            child_prog
+                .try_reserve_exact(prog.len() + 1 + child.name.len())
+                .map_err(|_| Error::allocation())?;
+            child_prog.push_str(prog);
+            child_prog.push(' ');
+            child_prog.push_str(&child.name);
         }
+        Ok(())
     }
 
     fn description(&self, text: &str, width: usize, indent: usize) -> String {
