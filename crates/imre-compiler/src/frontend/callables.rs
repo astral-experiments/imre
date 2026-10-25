@@ -6,6 +6,10 @@ use super::*;
 /// A callable signature is not a storage edge, but a callable value may own a
 /// bound receiver. Such values cannot enter heap aggregates in this milestone.
 pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
+    // The declaration reader boxes only owners it has proven to be noncapturing.
+    if matches!(ty, Type::AnnotationValue(_)) {
+        return false;
+    }
     matches!(ty, Type::Callable(_))
         || types
             .children(ty)
@@ -14,7 +18,11 @@ pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
 }
 
 fn invalid_aggregate(ty: Type, types: &Types) -> bool {
-    if matches!(ty, Type::Callable(_) | Type::ForwardRef(_)) || types.is_partial_frame(ty) {
+    if matches!(
+        ty,
+        Type::Callable(_) | Type::ForwardRef(_) | Type::AnnotationValue(_)
+    ) || types.is_partial_frame(ty)
+    {
         false
     } else if let Some(payload) = types.payload(ty) {
         invalid_aggregate(payload, types)
@@ -218,19 +226,26 @@ impl Checker<'_> {
                 signature.returns
             },
         );
-        let ty = if receiver.is_none()
-            && let Some(&policy) = self.classes.cached.get(&signature.id)
-        {
+        let unbound = receiver.is_none();
+        let ty = if unbound && let Some(&policy) = self.classes.cached.get(&signature.id) {
             self.types.declared_cache(ty, signature.id, policy)
         } else {
             ty
         };
-        Ok(Expr {
+        let value = Expr {
             ty,
             kind: ExprKind::Callable {
                 function: signature.id,
                 receiver: receiver.map(Box::new),
             },
+        };
+        Ok(if unbound {
+            Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::StaticFunction(signature.id), vec![value]),
+            }
+        } else {
+            value
         })
     }
 

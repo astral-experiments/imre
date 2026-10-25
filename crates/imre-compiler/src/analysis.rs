@@ -516,6 +516,7 @@ pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
     Call(TextRange),
     DictDeletion(TextRange),
+    DeferredName(TextRange),
     Keyword(TextRange),
     TupleListRead(TextRange),
     MissingArgument(TextRange),
@@ -536,6 +537,7 @@ impl CheckedDiagnostic {
             Self::BuiltinImport(range) => (range, 5),
             Self::ExcessArgument(range) => (range, 6),
             Self::PositionalKeyword(range) => (range, 7),
+            Self::DeferredName(range) => (range, 9),
         };
         (range.start(), range.end(), kind)
     }
@@ -547,6 +549,7 @@ impl CheckedDiagnostic {
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
+            Self::DeferredName(name) => diagnostic == "unresolved-reference" && name == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
             Self::PositionalKeyword(keyword) => {
                 diagnostic == "positional-only-parameter-as-kwarg" && keyword == range

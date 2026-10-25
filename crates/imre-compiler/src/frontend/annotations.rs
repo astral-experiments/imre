@@ -3,6 +3,16 @@
 use super::*;
 use ruff_python_codegen::{Generator, Mode};
 
+/// A declaration consisting of docstrings, pass and ellipses always returns None.
+/// Its Python return annotation remains visible to reflection.
+pub(super) fn inert_body(function: &ast::StmtFunctionDef) -> bool {
+    function.body.iter().all(|stmt| {
+        matches!(stmt, ast::Stmt::Pass(_))
+            || matches!(stmt, ast::Stmt::Expr(e) if matches!(&*e.value,
+            ast::Expr::EllipsisLiteral(_) | ast::Expr::StringLiteral(_)))
+    })
+}
+
 /// Builtin classes form a closed nominal domain, independent of the values they construct.
 pub(super) fn is_builtin_type(name: &str) -> bool {
     matches!(
@@ -54,6 +64,12 @@ fn function_entries(function: &ast::StmtFunctionDef) -> Vec<(&str, &ast::Expr)> 
         .filter_map(|p| p.annotation.as_deref().map(|a| (p.name.as_str(), a)))
         .chain(function.returns.as_deref().map(|a| ("return", a)))
         .collect()
+}
+
+/// Undeclared names may still be provided by the Python 3.14 builtin namespace.
+fn potential_forward_name(name: &str) -> bool {
+    !ruff_python_stdlib::builtins::is_python_builtin(name, 14, false)
+        && !ruff_python_stdlib::builtins::python_magic_globals(14).any(|n| n == name)
 }
 
 fn field_entries(body: &[ast::Stmt]) -> Vec<(&str, &ast::Expr)> {
@@ -246,14 +262,15 @@ impl Checker<'_> {
                 entries,
             },
         };
-        let raise = |message: String| Expr {
-            ty: self.types.dict(Type::Str, Type::Str),
+        let error_ty = self.types.dict(Type::Str, Type::Str);
+        let raise = |kind: &str, message: String| Expr {
+            ty: error_ty,
             kind: ExprKind::Builtin(
                 Builtin::RaiseException,
                 vec![Expr {
                     ty: Type::Exception,
                     kind: ExprKind::Exception {
-                        kind: exception_kind("ValueError").unwrap(),
+                        kind: exception_kind(kind).unwrap(),
                         message: Some(Box::new(unpacking::string(message))),
                     },
                 }],
@@ -261,6 +278,24 @@ impl Checker<'_> {
         };
         // Source references below are ordinary loads; do not elide an effectful
         // object expression just because the selected format will raise.
+        let local_owner = self
+            .local_function_binding(obj)
+            .and_then(|b| b.value_slot)
+            .map(|slot| self.local(slot));
+        let lexical = local_owner.is_some();
+        let named_function = match self.resolve(obj) {
+            Some(Binding::Definition(d)) if self.functions.contains_key(&d) => Some(d),
+            _ => None,
+        };
+        let owner = if let Some(d) = named_function
+            && format == 3
+            && let ast::Stmt::FunctionDef(f) = &self.graph.modules[d.module].parsed.syntax().body[d.statement]
+            && function_entries(f).into_iter().any(|(_, a)| matches!(a, ast::Expr::Name(n)
+                if potential_forward_name(n.id.as_str()) && !self.graph.modules[d.module].bindings.contains_key(n.id.as_str()))) {
+            Some(self.expr(obj)?)
+        } else {
+            local_owner
+        };
         let (id, entries) = match self.resolve(obj) {
             Some(Binding::Definition(d)) => {
                 let m = &self.graph.modules[d.module];
@@ -310,16 +345,18 @@ impl Checker<'_> {
         };
         if eval_str && format != 1 {
             return Ok(raise(
+                "ValueError",
                 "eval_str=True is only supported with format=Format.VALUE".into(),
             ));
         }
         if format == 2 {
             return Ok(raise(
+                "ValueError",
                 "The VALUE_WITH_FAKE_GLOBALS format is for internal use only".into(),
             ));
         }
         if !matches!(format, 1 | 3 | 4) {
-            return Ok(raise(format!("Unsupported format {format}")));
+            return Ok(raise("ValueError", format!("Unsupported format {format}")));
         }
         let module = &self.graph.modules[id];
         let postponed = module
@@ -327,7 +364,7 @@ impl Checker<'_> {
             .values()
             .any(|b| *b == Binding::Intrinsic(Intrinsic::FutureAnnotations));
         let mut lowered = Vec::new();
-        let mut element = None;
+        let mut members = Vec::new();
         for (name, a) in entries {
             let value = if postponed && !eval_str {
                 unpacking::string(spelling(a))
@@ -364,6 +401,51 @@ impl Checker<'_> {
                         ty: Type::None,
                         kind: ExprKind::None,
                     },
+                    ast::Expr::Name(n)
+                        if !module.bindings.contains_key(n.id.as_str())
+                            && potential_forward_name(n.id.as_str())
+                            && (lexical || named_function.is_some()) =>
+                    {
+                        if lexical
+                            && let Some(&slot) = self.names.get(n.id.as_str())
+                            && self.assigned.contains(&slot)
+                        {
+                            self.local(slot)
+                        } else if format == 1 {
+                            return Ok(raise(
+                                "NameError",
+                                format!("name '{}' is not defined", n.id),
+                            ));
+                        } else {
+                            let owner = owner
+                                .as_ref()
+                                .ok_or_else(|| {
+                                    error(
+                                        self.source,
+                                        obj,
+                                        "unresolved annotation needs its native function owner",
+                                    )
+                                })?
+                                .clone();
+                            let module_type = self.types.optional(Type::Str);
+                            Expr {
+                                ty: self.types.forward_ref(owner.ty),
+                                kind: ExprKind::Builtin(
+                                    Builtin::NewForwardRef,
+                                    vec![
+                                        unpacking::string(n.id.as_str()),
+                                        Expr {
+                                            ty: module_type,
+                                            kind: ExprKind::Absent(Box::new(none_value())),
+                                        },
+                                        owner,
+                                        bool_value(false),
+                                        bool_value(false),
+                                    ],
+                                ),
+                            }
+                        }
+                    }
                     _ => {
                         return Err(error(
                             &module.source,
@@ -373,19 +455,89 @@ impl Checker<'_> {
                     }
                 }
             };
-            if element
-                .replace(value.ty)
-                .is_some_and(|previous| previous != value.ty)
+            if !members.contains(&value.ty) {
+                members.push(value.ty);
+            }
+            lowered.push((unpacking::string(name), value));
+        }
+        let element = match members.as_slice() {
+            [] => Type::Str,
+            [member] if !matches!(member, Type::ForwardRef(_)) => *member,
+            _ if members.iter().all(|t| {
+                matches!(
+                    t,
+                    Type::Str | Type::None | Type::BuiltinClass | Type::ForwardRef(_)
+                )
+            }) =>
             {
+                members.sort_by_key(|t| match t {
+                    Type::None => 0,
+                    Type::Str => 3,
+                    Type::BuiltinClass => 11,
+                    _ => 12,
+                });
+                let Type::Tuple(id) = self.types.tuple(members) else {
+                    unreachable!()
+                };
+                let element = Type::AnnotationValue(id);
+                lowered = lowered
+                    .into_iter()
+                    .map(|(key, value)| (key, self.box_annotation(value, element)))
+                    .collect();
+                element
+            }
+            _ => {
                 return Err(error(
                     self.source,
                     obj,
                     "annotation dictionary values need a common native representation",
                 ));
             }
-            lowered.push((unpacking::string(name), value));
+        };
+        Ok(dict(self.types, element, lowered))
+    }
+
+    pub(super) fn box_annotation(&self, value: Expr, ty: Type) -> Expr {
+        if matches!(value.ty, Type::AnnotationValue(_)) {
+            return value;
         }
-        Ok(dict(self.types, element.unwrap_or(Type::Str), lowered))
+        let Type::Tuple(layout) = self.types.tuple(vec![value.ty]) else {
+            unreachable!()
+        };
+        Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::BoxAnnotation(layout), vec![value]),
+        }
+    }
+
+    pub(super) fn annotation_attribute(
+        &self,
+        value: Expr,
+        attr: &ast::ExprAttribute,
+    ) -> Result<Expr, String> {
+        let Some(layout) = self
+            .types
+            .children(value.ty)
+            .into_iter()
+            .find_map(|ty| match ty {
+                Type::ForwardRef(id) => Some(id),
+                _ => None,
+            })
+        else {
+            return Err(error(
+                self.source,
+                attr,
+                "annotation has no known ForwardRef member",
+            ));
+        };
+        let reference = Expr {
+            ty: Type::ForwardRef(layout),
+            kind: ExprKind::Builtin(
+                Builtin::AnnotationRef,
+                vec![value, unpacking::string(attr.attr.as_str())],
+            ),
+        };
+        self.forward_ref_attribute(layout, reference, attr)
     }
 }
 

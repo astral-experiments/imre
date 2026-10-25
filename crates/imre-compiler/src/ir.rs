@@ -11,6 +11,8 @@ pub(crate) enum Type {
     BuiltinClass,
     /// An immutable annotation reference with a known layout for its owner.
     ForwardRef(usize),
+    /// One of the exact values returned by a heterogeneous annotation dictionary.
+    AnnotationValue(usize),
     Str,
     /// A closed domain of strings with ordinary string storage and ownership.
     StrLiteral(usize),
@@ -192,6 +194,7 @@ impl std::fmt::Display for Type {
             Self::Bool => "bool",
             Self::BuiltinClass => "type",
             Self::ForwardRef(_) => "annotationlib.ForwardRef",
+            Self::AnnotationValue(_) => "annotation value",
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
@@ -611,6 +614,11 @@ pub(crate) enum Builtin {
     ClassNameView,
     NewForwardRef,
     ForwardRefField(usize),
+    BoxAnnotation(usize),
+    AnnotationMember(usize),
+    AnnotationRef,
+    AnnotationIs,
+    StaticFunction(usize),
     StrEnumValue,
     EnumLookup(usize),
     EnumString,
