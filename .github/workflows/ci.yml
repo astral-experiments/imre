@@ -84,7 +84,7 @@ jobs:
               python3 -B tests/processes.py "${ordinary[@]}"
               ;;
             list-clear)
-              python3 -B tests/assignments.py "${ordinary[@]}"
+              python3 -B tests/primitives.py "${ordinary[@]}"
               ;;
             text-stream)
               python3 -I -B tests/fixtures/files/string_io.py > "$results/stringio-reference.txt"
