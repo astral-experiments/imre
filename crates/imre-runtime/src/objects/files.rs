@@ -269,7 +269,7 @@ impl FileState {
         let Stream::Write(writer) = stream else {
             return Err(Error::new(Kind::UnsupportedOperation, "not writable"));
         };
-        writer.write(bytes).map_err(os_error)
+        writer.write(bytes).map_err(errno_error)
     }
 
     pub(super) fn write(&mut self, text: &str) -> Result<()> {
@@ -290,7 +290,7 @@ impl FileState {
             Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) | Stream::TextMemory(_) => {
                 Ok(())
             }
-            Stream::Write(writer) => writer.flush().map_err(os_error),
+            Stream::Write(writer) => writer.flush().map_err(errno_error),
         }
     }
 }

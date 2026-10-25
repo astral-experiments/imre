@@ -15,19 +15,24 @@ with open('recovered.bin', 'wb') as stream:
         stream.write(payload)
         stream.flush()
     except OSError as error:
-        print(error.errno)
+        print(repr(error.errno))
+        print('exception-metadata ' + repr(error))
     try:
         stream.seek(0)
     except OSError as error:
-        print(error.errno)
+        print(repr(error.errno))
+        print('exception-metadata ' + repr(error))
     os.dup2(saved, fd)
     os.close(saved)
-    prefix = os.read(reader, len(payload))
+    with open('/proc/self/fd/' + str(reader), 'rb') as pipe:
+        os.set_blocking(pipe.fileno(), False)
+        prefix = pipe.read(4096)
     os.close(reader)
     print(len(prefix))
     print(stream.tell() == 5 + len(payload) - len(prefix))
-    print(os.path.getsize('recovered.bin') == 0)
+    with open('recovered.bin', 'rb') as unflushed:
+        print(unflushed.read() == b'')
     print(stream.seek(2, os.SEEK_CUR) == 7 + len(payload) - len(prefix))
     stream.write(b'!')
 with open('recovered.bin', 'rb') as recovered:
-    print(recovered.read() == b'\x00' * 5 + payload[len(prefix):] + b'\x00\x00!')
+    print(prefix == payload[:len(prefix)] and recovered.read() == b'\x00' * 5 + payload[len(prefix):] + b'\x00\x00!')

@@ -32,14 +32,22 @@ def compare(tools, work):
                 os.close(writer)
             assert result.returncode == 0 and not result.stderr, (result.returncode, result.stdout, result.stderr)
             contents = (directory / 'recovered.bin').read_bytes()
-            return {'stdout': result.stdout.splitlines(), 'bytes': len(contents),
-                    'sha256': hashlib.sha256(contents).hexdigest()}
+            lines = result.stdout.splitlines()
+            metadata = [line.removeprefix('exception-metadata ') for line in lines
+                        if line.startswith('exception-metadata ')]
+            return ({'stdout': [line for line in lines if not line.startswith('exception-metadata ')],
+                     'bytes': len(contents), 'sha256': hashlib.sha256(contents).hexdigest()}, metadata)
 
-        expected = invoke([sys.executable, '-B', source], sub / 'reference')
+        expected, ref_errors = invoke([sys.executable, '-B', source], sub / 'reference')
         if source.name == 'buffered_partial_case.py':
             assert expected['stdout'][2:] == ['4096', 'True', 'True', 'True', 'True'], expected
+            assert len(ref_errors) == 2
+        details = {'reference': ref_errors, 'status': 'reference-only'}
         if binary is not None:
-            actual = invoke([binary], sub / 'native')
+            actual, native_errors = invoke([binary], sub / 'native')
             assert actual == expected, (source.name, actual, expected)
-        reports[source.name] = expected
+            details.update(native=native_errors, status='pass' if native_errors == ref_errors else 'failed')
+            if native_errors != ref_errors:
+                details['tracking'] = 'https://github.com/astral-sh/imre/issues/1040'
+        reports[source.name] = {**expected, **({'exception_metadata': details} if ref_errors else {})}
     return reports
