@@ -53,6 +53,23 @@ class CountingEmitter(NullHandler):
     def emit(self, record: LogRecord | None) -> None:
         self.calls += 1
 
+created: list[int] = []
+
+class ObservedLock(NullHandler):
+    def createLock(self) -> None:
+        created.append(self.level)
+        if self.level == 9:
+            raise RuntimeError("lock")
+        super().createLock()
+
+observed = ObservedLock("WARNING")
+print(observed.lock is None)
+try:
+    ObservedLock(9)
+except RuntimeError as error:
+    print(str(error))
+print(repr(created))
+
 handler = NullHandler("WARNING")
 print(isinstance(handler, Handler))
 print(handler.level)
