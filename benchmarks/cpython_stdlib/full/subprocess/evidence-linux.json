@@ -8,12 +8,12 @@
     "denominator": 353,
     "distinct_ids": 353,
     "counts": {
-      "blocked": 173,
+      "blocked": 170,
       "failed": 13,
-      "host-driven-native-operation": 81,
+      "host-driven-native-operation": 82,
       "host-operation": 6,
       "mixed": 9,
-      "native-body-host-fixture": 30,
+      "native-body-host-fixture": 32,
       "reference-skip": 41
     },
     "records": [
@@ -1643,25 +1643,24 @@
         "opt_level": 0,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "AttributeError: property 'returncode' of 'Remote' object has no setter",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
-          "native_actor_calls": {
-            "Popen": 1,
-            "poll": 119,
-            "returncode": 120,
-            "streams": 1
-          }
+          "opt_level": 0,
+          "source": "instance-poll-linux.json",
+          "imre_revision": "838784d2b823c2c6966dc13318203e5e8272c42f",
+          "tested_tree": "c38d89f219a076b740301e096dd0878d00ef04a7",
+          "method_sha256": "c36d3acf832c32045b8e7386644c15b0de3fc636dc05860cb99b2889c24076ea",
+          "native_body_diagnostic": "<case>/case.py:19:14: Imre: name is not a local value; globals and first-class functions are unsupported",
+          "operation": "Native Popen reaps exit 1, calls the replacement poll inside send_signal, attempts SIGTERM on that same PID (ESRCH), and observes ECHILD after the original scope restores poll. No SIGKILL.",
+          "fixture": "Original CPython method, implicit no-exception outcome and mock.patch.object scope; its exact lambda is installed and removed on the native Popen. Leaving the patch on the host alone yields zero kill syscalls."
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_shell_sequence",
@@ -2323,19 +2322,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.call",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:13:9: Imre: unknown class method"
+          "opt_level": 0,
+          "source": "call-timeout-linux.json",
+          "imre_revision": "f4e461af62b885ebf1b62614334a1a2329bb251d",
+          "tested_tree": "699ee364f8dc47709f29c2c3c2f28583b397567e",
+          "method_sha256": "27e33f202fd2ac697949d65a9b9c7515899cc3a2888f48fa6833da0c039a741b",
+          "operation": "Compiled native parent launches the requested interpreter, times out, sends SIGKILL and reaps that PID. Substituting /bin/true makes the native assertRaises fail.",
+          "fixture": "Original CPython module, class and instance hooks; unchanged body and assertion in the compiled native instance."
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_call_nonzero",
@@ -5057,19 +5060,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.call",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:13:9: Imre: unknown class method"
+          "opt_level": 0,
+          "source": "call-timeout-linux.json",
+          "imre_revision": "f4e461af62b885ebf1b62614334a1a2329bb251d",
+          "tested_tree": "699ee364f8dc47709f29c2c3c2f28583b397567e",
+          "method_sha256": "27e33f202fd2ac697949d65a9b9c7515899cc3a2888f48fa6833da0c039a741b",
+          "operation": "Compiled native parent launches the requested interpreter, times out, sends SIGKILL and reaps that PID. Substituting /bin/true makes the native assertRaises fail.",
+          "fixture": "Original CPython module, class and instance hooks; unchanged body and assertion in the compiled native instance."
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_call_nonzero",
@@ -8562,12 +8569,12 @@
     "denominator": 353,
     "distinct_ids": 353,
     "counts": {
-      "blocked": 173,
+      "blocked": 170,
       "failed": 13,
-      "host-driven-native-operation": 81,
+      "host-driven-native-operation": 82,
       "host-operation": 6,
       "mixed": 9,
-      "native-body-host-fixture": 30,
+      "native-body-host-fixture": 32,
       "reference-skip": 41
     },
     "records": [
@@ -10197,25 +10204,24 @@
         "opt_level": 3,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "AttributeError: property 'returncode' of 'Remote' object has no setter",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
-          "native_actor_calls": {
-            "Popen": 1,
-            "poll": 108,
-            "returncode": 109,
-            "streams": 1
-          }
+          "opt_level": 3,
+          "source": "instance-poll-linux.json",
+          "imre_revision": "838784d2b823c2c6966dc13318203e5e8272c42f",
+          "tested_tree": "c38d89f219a076b740301e096dd0878d00ef04a7",
+          "method_sha256": "c36d3acf832c32045b8e7386644c15b0de3fc636dc05860cb99b2889c24076ea",
+          "native_body_diagnostic": "<case>/case.py:19:14: Imre: name is not a local value; globals and first-class functions are unsupported",
+          "operation": "Native Popen reaps exit 1, calls the replacement poll inside send_signal, attempts SIGTERM on that same PID (ESRCH), and observes ECHILD after the original scope restores poll. No SIGKILL.",
+          "fixture": "Original CPython method, implicit no-exception outcome and mock.patch.object scope; its exact lambda is installed and removed on the native Popen. Leaving the patch on the host alone yields zero kill syscalls."
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_shell_sequence",
@@ -10877,19 +10883,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.call",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:13:9: Imre: unknown class method"
+          "opt_level": 3,
+          "source": "call-timeout-linux.json",
+          "imre_revision": "f4e461af62b885ebf1b62614334a1a2329bb251d",
+          "tested_tree": "699ee364f8dc47709f29c2c3c2f28583b397567e",
+          "method_sha256": "27e33f202fd2ac697949d65a9b9c7515899cc3a2888f48fa6833da0c039a741b",
+          "operation": "Compiled native parent launches the requested interpreter, times out, sends SIGKILL and reaps that PID. Substituting /bin/true makes the native assertRaises fail.",
+          "fixture": "Original CPython module, class and instance hooks; unchanged body and assertion in the compiled native instance."
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_call_nonzero",
@@ -13611,19 +13621,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.call",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:13:9: Imre: unknown class method"
+          "opt_level": 3,
+          "source": "call-timeout-linux.json",
+          "imre_revision": "f4e461af62b885ebf1b62614334a1a2329bb251d",
+          "tested_tree": "699ee364f8dc47709f29c2c3c2f28583b397567e",
+          "method_sha256": "27e33f202fd2ac697949d65a9b9c7515899cc3a2888f48fa6833da0c039a741b",
+          "operation": "Compiled native parent launches the requested interpreter, times out, sends SIGKILL and reaps that PID. Substituting /bin/true makes the native assertRaises fail.",
+          "fixture": "Original CPython module, class and instance hooks; unchanged body and assertion in the compiled native instance."
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_call_nonzero",

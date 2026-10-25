@@ -1,6 +1,7 @@
 //! Walk held directory descriptors. Snapshot names, unlink leaves, then visit
 //! subdirectories in reverse enumeration order and remove their parents last.
 
+use crate::StrOwner;
 use std::ffi::{CString, OsStr};
 use std::fs::File;
 use std::io;
@@ -328,7 +329,7 @@ pub unsafe extern "C" fn imre_shutil_rmtree(
         let spelling;
         let bytes = if let Some(original) = &original {
             // SAFETY: original roots the path, and imre_path_text transfers one owner.
-            spelling = unsafe { Rc::from_raw(paths::imre_path_text(Rc::as_ptr(original))) };
+            spelling = unsafe { StrOwner::from_raw(paths::imre_path_text(Rc::as_ptr(original))) };
             spelling.as_bytes()
         } else {
             // SAFETY: the remaining tags name a rooted str or bytes.
@@ -372,14 +373,21 @@ pub unsafe extern "C" fn imre_shutil_rmtree(
                     Ok(())
                 };
             };
-            let path = Rc::new(paths::path_utf8(path.as_os_str().to_owned())?);
+            let path = StrOwner::new(paths::path_utf8(path.as_os_str().to_owned())?);
             error.raise();
             let exc = take_pending().expect("the walk just raised this error");
             let mut previous = Some(Rc::clone(&exc));
             swap_active(&mut previous);
             // SAFETY: this synchronous call borrows its three owners. The active
             // exception lets a native handler inspect it or use a bare raise.
-            unsafe { handler(context, op as u32, Rc::as_ptr(&path), Rc::as_ptr(&exc)) };
+            unsafe {
+                handler(
+                    context,
+                    op as u32,
+                    StrOwner::as_ptr(&path),
+                    Rc::as_ptr(&exc),
+                )
+            };
             swap_active(&mut previous);
             match take_pending() {
                 Some(raised) => Err(WalkError::Raised(raised)),

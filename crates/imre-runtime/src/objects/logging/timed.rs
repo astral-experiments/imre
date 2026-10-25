@@ -1,4 +1,5 @@
 //! Calendar scheduling and retained file streams for TimedRotatingFileHandler.
+use crate::StrOwner;
 use std::fs;
 use std::mem::MaybeUninit;
 use std::os::unix::fs::MetadataExt;
@@ -136,9 +137,9 @@ pub(super) fn float_seconds(value: f64) -> Result<i64> {
 }
 
 pub(in crate::objects) struct Handler {
-    filename: Rc<Str>,
+    filename: StrOwner,
     stream: Option<Rc<Object>>,
-    when: Rc<Str>,
+    when: StrOwner,
     period: Period,
     interval: Int,
     backups: Int,
@@ -327,7 +328,9 @@ impl Handler {
             .map_err(|_| Error::allocation())?;
         for path in files {
             let name = super::super::paths::path_utf8(path.into_os_string())?;
-            names.values.push(Rc::into_raw(Rc::new(name)) as usize);
+            names
+                .values
+                .push(StrOwner::into_raw(StrOwner::new(name)) as usize);
         }
         Ok(names.into_object())
     }
@@ -464,7 +467,7 @@ pub unsafe extern "C" fn imre_log_file_new(
     // SAFETY: all borrowed arguments remain rooted while the handler acquires them.
     let (filename, when, interval, backups, clock) = unsafe {
         (
-            Rc::from_raw(abs.cast::<Str>()),
+            StrOwner::from_raw(abs.cast::<Str>()),
             (&*when).to_uppercase(),
             Int::borrow(interval),
             (*Int::borrow(count)).clone(),
@@ -483,7 +486,7 @@ pub unsafe extern "C" fn imre_log_file_new(
         let mut handler = Handler {
             filename,
             stream,
-            when: Rc::new(Str::from(when)),
+            when: StrOwner::new(Str::from(when)),
             period,
             interval,
             backups,
@@ -528,15 +531,15 @@ macro_rules! read {
         }
     };
 }
-read!(imre_log_file_when, *const Str, |h| Rc::into_raw(
+read!(imre_log_file_when, *const Str, |h| StrOwner::into_raw(
     h.when.clone()
 ));
-read!(imre_log_file_filename, *const Str, |h| Rc::into_raw(
+read!(imre_log_file_filename, *const Str, |h| StrOwner::into_raw(
     h.filename.clone()
 ));
-read!(imre_log_file_suffix, *const Str, |h| Rc::into_raw(Rc::new(
-    Str::from(h.period.suffix())
-)));
+read!(imre_log_file_suffix, *const Str, |h| StrOwner::into_raw(
+    StrOwner::new(Str::from(h.period.suffix()))
+));
 read!(imre_log_file_count, usize, |h| h.backups.clone().into_raw());
 read!(imre_log_file_interval, usize, |h| h
     .interval
@@ -643,9 +646,9 @@ mod tests {
     #[test]
     fn calendar_rollover_preserves_float_rounding() {
         let mut handler = Handler {
-            filename: Rc::default(),
+            filename: crate::StrOwner::new(Str::default()),
             stream: None,
-            when: Rc::default(),
+            when: crate::StrOwner::new(Str::default()),
             period: Period::Week(0),
             interval: Int::new(BigInt::from(7 * DAY)),
             backups: Int::small(0).unwrap(),
