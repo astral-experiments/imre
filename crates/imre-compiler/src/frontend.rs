@@ -69,6 +69,7 @@ mod powers;
 mod processes;
 mod projected_equality;
 mod properties;
+mod readiness;
 mod record_inputs;
 mod records;
 mod regex;
@@ -6702,6 +6703,9 @@ impl<'a> Checker<'a> {
                     ),
                 });
             }
+            Some(Binding::Intrinsic(Intrinsic::Readiness(op))) => {
+                return self.readiness_call(call, op);
+            }
             Some(Binding::Intrinsic(Intrinsic::Fd(op))) => return self.fd_call(call, op),
             Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
                 self.arguments(call, &[], None)?;
@@ -7097,6 +7101,9 @@ impl<'a> Checker<'a> {
             }
             if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch) {
                 return self.regex_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::Poll {
+                return self.poll_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Sha256 {
                 return self.sha256_method(receiver, attribute, call);

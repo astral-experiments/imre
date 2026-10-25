@@ -308,6 +308,7 @@ impl Checker<'_> {
             || types == [Type::ClockTime; 2]
             || types == [Type::PathInfo; 2]
             || types == [Type::JsonDecoder; 2]
+            || types == [Type::Poll; 2]
             || types == [Type::Sha256; 2])
         {
             return Err(error(

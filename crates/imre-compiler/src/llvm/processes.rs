@@ -4,6 +4,7 @@ use super::*;
 use crate::ir::ProcessOperation;
 
 mod descriptors;
+mod readiness;
 
 fn shutil_tag(ty: Type) -> u32 {
     match ty {
@@ -548,6 +549,7 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::DescriptorConstant(name) => self.os_descriptor_constant(name),
+            ProcessOperation::Readiness(op) => self.readiness(op, args, returns),
             ProcessOperation::Fd(operation) => self.os_descriptor(operation, args, returns),
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
             ProcessOperation::RmTree => {
