@@ -247,6 +247,8 @@ impl Builtin {
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Fd(_)
+                | ProcessOperation::Credential(_)
+                | ProcessOperation::CredentialId { .. }
                 | ProcessOperation::OsErrorField(_)
                 | ProcessOperation::Strerror
                 | ProcessOperation::Which
