@@ -17,8 +17,8 @@ expectation. It checks that hook on the reference build before compiling and
 returns a failure status if any native case is blocked or fails.
 
 At both [O0](doctests-O0.json) and [O3](doctests-O3.json), the native programs
-execute 10 complete doctests: Counter construction, update, addition,
+execute 11 complete doctests: Counter construction, update, subtract, addition,
 subtraction, union, intersection and their four in-place forms. Their output
-checks run on the host. Six compile blockers remain, including Counter's
-`most_common`, `elements` and `subtract`, the namedtuple examples and deque.
+checks run on the host. Five compile blockers remain: the Counter class
+examples, `most_common`, `elements`, the namedtuple examples and deque.
 These 16 IDs are already included in the 659-case denominator.

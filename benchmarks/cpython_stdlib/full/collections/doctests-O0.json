@@ -5,7 +5,7 @@
     "collections.Counter": {
       "examples": 18,
       "status": "compile-blocked",
-      "diagnostic": "case.py:5:1: Imre: supported dictionary methods are get(key[, default]), loop-head items(), and keys() in a key union"
+      "diagnostic": "case.py:5:1: Imre: supported dictionary methods are get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
     },
     "collections.Counter.__add__": {
       "examples": 1,
@@ -51,12 +51,11 @@
     "collections.Counter.most_common": {
       "examples": 1,
       "status": "compile-blocked",
-      "diagnostic": "case.py:3:1: Imre: supported dictionary methods are get(key[, default]), loop-head items(), and keys() in a key union"
+      "diagnostic": "case.py:3:1: Imre: supported dictionary methods are get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
     },
     "collections.Counter.subtract": {
       "examples": 5,
-      "status": "compile-blocked",
-      "diagnostic": "case.py:5:1: Imre: supported dictionary methods are get(key[, default]), loop-head items(), and keys() in a key union"
+      "status": "native-body/host-output-check"
     },
     "collections.Counter.update": {
       "examples": 5,

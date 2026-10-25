@@ -308,10 +308,8 @@ fn checked_lower(
     graph: &mut modules::SourceGraph,
 ) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
     let lowered = frontend::lower_with_owners(graph)?;
-    let (skipped, decorators) = graph.diagnostic_scopes();
-    graph
-        .session
-        .check_scopes(skipped.as_deref(), &decorators)?;
+    let (skipped, overloads) = graph.diagnostic_scopes();
+    graph.session.check_scopes(skipped.as_deref(), &overloads)?;
     Ok(lowered)
 }
 
@@ -326,12 +324,12 @@ fn checked_lower_with(
     let lowered = frontend::lower_with_owners(graph);
     cache.retain_hints(graph, lowered.is_ok());
     let lowered = lowered?;
-    let (skipped, decorators) = graph.diagnostic_scopes();
+    let (skipped, overloads) = graph.diagnostic_scopes();
     cache.check_scopes(
         &mut graph.session,
         &graph.inputs,
         skipped.as_deref(),
-        &decorators,
+        &overloads,
     )?;
     Ok(lowered)
 }
@@ -478,6 +476,16 @@ mod tests {
         }
         let flat = format!("print(len([{}]))\n", "(1 + 2),".repeat(256));
         compile(&flat, &CompileOptions::default()).unwrap();
+
+        let fields = "{1 + 2} ".repeat(256);
+        super::check(&format!("print(f'{fields}')\n")).unwrap();
+        for fields in [
+            format!("{fields}{{{}}}", "1+".repeat(256) + "1"),
+            format!("{{{}}}{fields}", "1+".repeat(256) + "1"),
+        ] {
+            let error = super::check(&format!("print(f'{fields}')\n")).unwrap_err();
+            assert!(error.contains("syntax complexity limit"), "{error}");
+        }
     }
 
     #[test]
