@@ -21,7 +21,7 @@ impl Import {
         if self.msg.kind.raw() == 3 {
             word_text(self.msg.kind, self.msg.word, false)
         } else {
-            self.args.message()
+            self.args.message(false)
         }
     }
 
@@ -56,12 +56,12 @@ impl Positional {
         unsafe { tuple_item(self.0.word, index) }
     }
 
-    pub(super) fn message(&self) -> StrOwner {
+    pub(super) fn message(&self, quote_single: bool) -> StrOwner {
         match self.len() {
             0 => StrOwner::new(Str::new("")),
             1 => {
                 let (kind, word) = self.item(0);
-                word_text(kind, word, false)
+                word_text(kind, word, quote_single)
             }
             _ => word_text(self.0.kind, self.0.word, true),
         }
