@@ -787,6 +787,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_config"
                 | "imre_log_config_named"
                 | "imre_log_check_level"
+                | "imre_log_invalid_level"
+                | "imre_log_is_enabled"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
                 | "imre_str_unquote"
