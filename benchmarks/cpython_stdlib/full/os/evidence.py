@@ -41,6 +41,10 @@ BODY_OPERATIONS = {
     "DeviceEncodingTests.test_bad_fd": "os.device_encoding",
     "PosixUidGidTests.test_setreuid_neg1": "os.setreuid(-1, -1)",
     "PosixUidGidTests.test_setregid_neg1": "os.setregid(-1, -1)",
+    "PosixTester.test_getresuid": "posix.getresuid",
+    "PosixTester.test_getresgid": "posix.getresgid",
+    "PosixTester.test_setresuid": "posix.getresuid and posix.setresuid",
+    "PosixTester.test_setresgid": "posix.getresgid and posix.setresgid",
 }
 PRIVATE = {"test_argument_required", "test_bad_pathlike", "test_garbage_in_exception_out",
            "test_return_bytes", "test_return_string"}
@@ -148,6 +152,21 @@ def paired_runs(paths):
     return {"cpython_commit": commits.pop(), "cases": dict(sorted(levels[0].items()))}
 
 
+def paired_credentials(paths):
+    result = paired_runs(paths)
+    left, right = (json.loads(path.read_bytes()) for path in paths)
+    for key in ("reference_skips", "converter", "supplemental_boundaries"):
+        if left[key] != right[key]:
+            raise ValueError(f"credential {key} differs between optimization levels")
+        result[key] = left[key]
+    converter = result["converter"]
+    if converter["source_sha256"] != hashlib.sha256((HERE / "credential_arguments.py").read_bytes()).hexdigest():
+        raise ValueError("credential differential source differs from the tested file")
+    if converter["matching_lines"] < 1 or not set(result["reference_skips"]).isdisjoint(result["cases"]):
+        raise ValueError("empty converter differential or credential skip also counted as an execution")
+    return result
+
+
 def generate(suite, output, runs, probes):
     manifest = json.loads((HERE / (suite + ".json")).read_bytes())
     reference = json.loads((HERE / f"reference-{suite}-linux.json").read_bytes())
@@ -238,8 +257,9 @@ def main():
         sys.path.insert(0, str(args.cpython_source.resolve() / "Lib"))
     runs = {name: paired_runs(paths) for name, paths in [
         ("values-linux.json", args.values_results), ("descriptors-linux.json", args.descriptor_results),
-        ("credential-children-linux.json", args.credential_results),
     ] if paths}
+    if args.credential_results:
+        runs["credential-children-linux.json"] = paired_credentials(args.credential_results)
     if bool(args.method_results) != bool(args.compiler_commit):
         parser.error("--method-results and --compiler-commit must be supplied together")
     probe_name = "method-preflight-linux.json"

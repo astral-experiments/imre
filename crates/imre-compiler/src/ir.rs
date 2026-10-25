@@ -1323,6 +1323,10 @@ pub(crate) enum ProcessOperation {
     EnvironGet,
     GetCwd,
     Fd(FdOperation),
+    Credential(&'static str),
+    CredentialId {
+        group: bool,
+    },
     OsErrorField(u32),
     Strerror,
     DescriptorConstant(&'static str),

@@ -89,6 +89,7 @@ pub(crate) enum IntrinsicModule {
     Tempfile,
     Subprocess,
     Os,
+    Posix,
     PosixPath,
     Urllib,
     UrllibParse,
@@ -293,6 +294,7 @@ pub(crate) enum Intrinsic {
     GetCwd,
     Strerror,
     Fd(crate::ir::FdOperation),
+    Credential(&'static str),
     DescriptorConstant(&'static str),
     FsPath,
     PosixNormcase,
@@ -342,6 +344,7 @@ impl IntrinsicModule {
             "tempfile" => Some(Self::Tempfile),
             "subprocess" => Some(Self::Subprocess),
             "os" => Some(Self::Os),
+            "posix" if cfg!(unix) => Some(Self::Posix),
             "os.path" | "posixpath" => Some(Self::PosixPath),
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
@@ -380,8 +383,8 @@ impl IntrinsicModule {
         if self == Self::Logging && name == "config" {
             return Some(Binding::IntrinsicModule(Self::LoggingConfig));
         }
-        if self == Self::Os {
-            if name == "path" {
+        if matches!(self, Self::Os | Self::Posix) {
+            if self == Self::Os && name == "path" {
                 return Some(Binding::IntrinsicModule(Self::PosixPath));
             }
             if let Some(symbol) = os::symbol(name) {
@@ -838,6 +841,28 @@ impl SourceGraph {
     ) {
         self.checked_diagnostics.borrow_mut()[module]
             .extend(keywords.map(CheckedDiagnostic::Keyword));
+    }
+
+    /// Native lowering already evaluates these operands and raises TypeError.
+    /// Diagnostics on nested expressions must still be reported independently.
+    pub(crate) fn checked_positional_binding(
+        &self,
+        module: ModuleId,
+        call: &ast::ExprCall,
+        arity: usize,
+    ) {
+        let mut checked = self.checked_diagnostics.borrow_mut();
+        let sites = &mut checked[module];
+        if call.arguments.args.len() < arity {
+            sites.push(CheckedDiagnostic::MissingArgument(call.range()));
+        }
+        for arg in call.arguments.args.iter().skip(arity) {
+            sites.push(CheckedDiagnostic::ExtraPositional(arg.range()));
+        }
+        for kw in &call.arguments.keywords {
+            sites.push(CheckedDiagnostic::PositionalOnlyKeyword(kw.range()));
+            sites.push(CheckedDiagnostic::Keyword(kw.range()));
+        }
     }
 
     /// Record the exact list read proved by lowering a fixed-width tuple spread.
