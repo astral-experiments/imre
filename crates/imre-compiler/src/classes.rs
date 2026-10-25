@@ -165,9 +165,18 @@ impl Classes {
                 compare: false,
             });
         }
+        let data_names: HashSet<_> = definitions
+            .iter()
+            .flat_map(|class| {
+                class.static_bindings.iter().filter_map(|(name, value)| {
+                    matches!(value, ClassValue::Runtime { .. }).then_some(name.as_str())
+                })
+            })
+            .collect();
+        let attribute_writes = constants::attribute_writes(graph, &data_names);
         Ok(Self {
             definitions,
-            attribute_writes: constants::attribute_writes(graph),
+            attribute_writes,
             ids,
             exceptions: resolved.ids,
             exception_declarations: resolved.named,

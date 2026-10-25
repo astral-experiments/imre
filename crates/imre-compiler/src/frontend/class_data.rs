@@ -306,6 +306,20 @@ impl Checker<'_> {
         let Type::Class(class) = ty else { return None };
         self.shadow(class, name).map(|_| class)
     }
+    fn writable_shadow(&self, class: usize, attr: &ast::ExprAttribute) -> Result<Shadow, String> {
+        if self.classes.declarations.definitions[class]
+            .dataclass
+            .is_some_and(|options| options.frozen)
+        {
+            return Err(error(
+                self.source,
+                attr,
+                "frozen dataclass attributes cannot be reassigned",
+            ));
+        }
+        self.shadow(class, attr.attr.as_str())
+            .ok_or_else(|| error(self.source, attr, "class data layout is not initialized"))
+    }
     /// Assignment evaluates its right hand side before its target, including on failure.
     pub(super) fn store_instance_data(
         &mut self,
@@ -316,9 +330,7 @@ impl Checker<'_> {
     ) -> Result<Statement, String> {
         let slot = self.hidden(value.ty);
         let branch = self.dispatch_record(class, receiver, attr, |me, concrete, view| {
-            let s = me
-                .shadow(concrete, attr.attr.as_str())
-                .ok_or_else(|| error(me.source, attr, "class data layout is not initialized"))?;
+            let s = me.writable_shadow(concrete, attr)?;
             let v = me.coerce(me.local(slot), s.ty, attr)?;
             let v = me.coerce(v, s.stored, attr)?;
             Ok(scope(
@@ -344,16 +356,14 @@ impl Checker<'_> {
     ) -> Result<Statement, String> {
         let name = attr.attr.as_str();
         self.dispatch_record(class, receiver, attr, |me, concrete, view| {
-            let s = me
-                .shadow(concrete, name)
-                .ok_or_else(|| error(me.source, attr, "class data layout is not initialized"))?;
+            let s = me.writable_shadow(concrete, attr)?;
             let release = me.coerce(none(), s.stored, attr)?;
             let cls = &me.classes.declarations.definitions[concrete].name;
             let exc = Expr {
                 ty: Type::Exception,
                 kind: ExprKind::Exception {
                     kind: exception_kind("AttributeError").unwrap(),
-                    message: Some(Box::new(unpacking::string(&format!(
+                    message: Some(Box::new(unpacking::string(format!(
                         "'{cls}' object has no attribute '{name}'"
                     )))),
                 },

@@ -3,13 +3,20 @@
 use super::*;
 use std::rc::Rc;
 
-pub(super) fn attribute_writes(graph: &SourceGraph) -> HashMap<String, HashSet<Type>> {
+pub(super) fn attribute_writes(
+    graph: &SourceGraph,
+    names: &HashSet<&str>,
+) -> HashMap<String, HashSet<Type>> {
     use ruff_python_ast::visitor::walk_stmt;
-    struct Writes(HashMap<String, HashSet<Type>>);
-    impl<'a> Visitor<'a> for Writes {
+    if names.is_empty() {
+        return HashMap::new();
+    }
+    struct Writes<'a>(HashMap<String, HashSet<Type>>, &'a HashSet<&'a str>);
+    impl<'a> Visitor<'a> for Writes<'_> {
         fn visit_expr(&mut self, expr: &'a ast::Expr) {
             if let ast::Expr::Attribute(attr) = expr
                 && attr.ctx != ast::ExprContext::Load
+                && self.1.contains(attr.attr.as_str())
             {
                 self.0.entry(attr.attr.to_string()).or_default();
             }
@@ -29,7 +36,9 @@ pub(super) fn attribute_writes(graph: &SourceGraph) -> HashMap<String, HashSet<T
                     _ => None,
                 };
                 for target in &assign.targets {
-                    if let (Some(ty), ast::Expr::Attribute(attr)) = (hint, target) {
+                    if let (Some(ty), ast::Expr::Attribute(attr)) = (hint, target)
+                        && self.1.contains(attr.attr.as_str())
+                    {
                         self.0.entry(attr.attr.to_string()).or_default().insert(ty);
                     }
                 }
@@ -37,7 +46,7 @@ pub(super) fn attribute_writes(graph: &SourceGraph) -> HashMap<String, HashSet<T
             walk_stmt(self, stmt);
         }
     }
-    let mut writes = Writes(HashMap::new());
+    let mut writes = Writes(HashMap::new(), names);
     for module in &graph.modules {
         for stmt in &module.parsed.syntax().body {
             writes.visit_stmt(stmt);
