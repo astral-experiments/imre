@@ -132,6 +132,7 @@ pub(crate) enum Intrinsic {
     AddLevelName,
     LevelNamesMapping,
     HandlerRename,
+    HandlerLock,
     HandlerLookup,
     HandlerLevelType,
     LevelMap { names: bool },
@@ -1583,6 +1584,7 @@ impl<'a> Loader<'a> {
                     for alias in &import.names {
                         let method = match alias.name.as_str() {
                             "_rename_handler" => Intrinsic::HandlerRename,
+                            "_Lock" => Intrinsic::HandlerLock,
                             "_lookup_handler" => Intrinsic::HandlerLookup,
                             "_Level" => Intrinsic::HandlerLevelType,
                             _ => {

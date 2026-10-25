@@ -52,6 +52,7 @@ pub(crate) enum Type {
     TimeoutExpired,
     /// A sealed UTF-8 text stream; aliases share its open/closed state.
     TextIO,
+    HandlerLock,
     /// A sealed byte stream; aliases share its open/closed state.
     BinaryIO,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
@@ -192,6 +193,7 @@ impl std::fmt::Display for Type {
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
             Self::StringIterable => "Iterable[str]",
             Self::TextIO => "typing.TextIO",
+            Self::HandlerLock => "_thread.RLock",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
@@ -1174,6 +1176,16 @@ pub(crate) enum LogRecordOperation {
 pub(crate) enum LogOperation {
     Get,
     HandlerRename,
+    LockNew,
+    LockAcquire,
+    LockAcquireInt,
+    LockRelease,
+    LockCount,
+    LockOwned,
+    LockLocked,
+    LockEnter,
+    LockExit,
+    LockReset,
     HandlerLookup,
     AddLevel,
     LevelName,

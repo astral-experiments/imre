@@ -129,6 +129,7 @@ impl Types {
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::TextIO
+            | Type::HandlerLock
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
@@ -493,6 +494,7 @@ impl Types {
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::TextIO
+            | Type::HandlerLock
             | Type::Path
             | Type::PurePath(_)
             | Type::CompletedProcess(..)
@@ -810,6 +812,7 @@ impl Types {
             match ty {
                 Type::Cursor(_)
                 | Type::TextIO
+                | Type::HandlerLock
                 | Type::BinaryIO
                 | Type::CsvReader
                 | Type::ZipFile
