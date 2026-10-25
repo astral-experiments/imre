@@ -178,6 +178,12 @@ impl View {
         .into_handle()
     }
 
+    fn try_handle(storage: Storage) -> Result<*const Object, Error> {
+        crate::ObjectOwner::try_new(Object(StorageCell::new(storage)))
+            .map(crate::ObjectOwner::into_raw)
+            .map_err(|_| Error::allocation())
+    }
+
     fn into_handle(self) -> *const Object {
         crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
             Storage::Json(self),
@@ -332,19 +338,31 @@ impl View {
         Ok(Self::single(node))
     }
 
-    fn array(&self, children: &[usize]) -> *const Object {
+    fn array(&self, children: &[usize]) -> Result<*const Object, Error> {
         if let Some(items) = self.nodes.root_items() {
-            return crate::ObjectOwner::into_raw(crate::ObjectOwner::clone(items));
+            return Ok(crate::ObjectOwner::into_raw(crate::ObjectOwner::clone(
+                items,
+            )));
         }
         Self::children(&self.nodes, children)
     }
 
-    fn children(nodes: &Nodes, children: &[usize]) -> *const Object {
+    fn children(nodes: &Nodes, children: &[usize]) -> Result<*const Object, Error> {
         let mut result = Words::new(5);
         result
             .values
-            .extend(children.iter().map(|&i| Self::handle(nodes, i) as usize));
-        crate::ObjectOwner::into_raw(result.into_object())
+            .try_reserve_exact(children.len())
+            .map_err(|_| Error::allocation())?;
+        for &index in children {
+            let child = Self {
+                nodes: nodes.child(),
+                index,
+            };
+            result
+                .values
+                .push(Self::try_handle(Storage::Json(child))? as usize);
+        }
+        Self::try_handle(result.into_storage())
     }
 
     fn select(&self, mut path: &[u8], mode: u32, literal: Option<&Str>) -> Result<usize, Error> {
@@ -383,11 +401,14 @@ impl View {
                 let view = array.try_view()?;
                 view.project(view.index, mode, literal)
             }
-            (5 | 6, Node::Array(children)) => Ok(if index == self.index {
-                self.array(children)
-            } else {
-                Self::children(&self.nodes, children)
-            } as usize),
+            (5 | 6, Node::Array(children)) => {
+                let items = if index == self.index {
+                    self.array(children)
+                } else {
+                    Self::children(&self.nodes, children)
+                }?;
+                Ok(items as usize)
+            }
             (7, Node::Bool(value)) => Ok(usize::from(*value) + usize::from(optional)),
             (8, Node::Float(_) | Node::ConstantNan) => {
                 let value = match node {
@@ -1002,7 +1023,7 @@ pub unsafe extern "C" fn imre_json_iter(value: *const Object) -> *const Object {
             let view = view.try_resolved(view.index)?.0;
             let mut items = Words::new(5);
             match &view.nodes[view.index] {
-                Node::Array(children) => return Ok(view.array(children)),
+                Node::Array(children) => return view.array(children),
                 Node::Object(fields) => return collect_keys::<false>(fields),
                 Node::String(text) => items.values.extend(text.chars().map(|ch| {
                     View::single(Node::String(StrOwner::new(Str::new(
