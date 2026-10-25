@@ -7548,7 +7548,13 @@ impl<'a> Checker<'a> {
                                 ),
                                 Expr {
                                     ty: Type::Str,
-                                    kind: ExprKind::Builtin(Builtin::SysStreamEncoding, vec![]),
+                                    kind: ExprKind::Builtin(
+                                        Builtin::SysStreamText {
+                                            descriptor: 2,
+                                            errors: false,
+                                        },
+                                        vec![],
+                                    ),
                                 },
                             ),
                             unpacking::string("'>"),
