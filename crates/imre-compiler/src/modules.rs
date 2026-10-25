@@ -62,6 +62,7 @@ pub(crate) enum IntrinsicModule {
     Importlib,
     ImportlibMachinery,
     ImportlibUtil,
+    Array,
     AnnotationLib,
     AnnotationFormat,
     Declaration(&'static str),
@@ -144,6 +145,7 @@ pub(crate) enum Intrinsic {
     CopyContext,
     ModuleSpec,
     CachePath { reverse: bool },
+    NominalClass(&'static str),
     GetAnnotations,
     Overload,
     GetOverloads,
@@ -421,6 +423,7 @@ impl IntrinsicModule {
 
     fn named(name: &str) -> Option<Self> {
         match name {
+            "array" => Some(Self::Array),
             "annotationlib" => Some(Self::AnnotationLib),
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
@@ -539,6 +542,16 @@ impl IntrinsicModule {
             return Some(Binding::IntrinsicModule(Self::ImreToml));
         }
         let symbol = match (self, name) {
+            (Self::Array, "array") => Intrinsic::NominalClass("array.array"),
+            (Self::CollectionsAbc, "Sequence") => {
+                Intrinsic::NominalClass("collections.abc.Sequence")
+            }
+            (Self::CollectionsAbc, "MutableSequence") => {
+                Intrinsic::NominalClass("collections.abc.MutableSequence")
+            }
+            (Self::CollectionsAbc, "MutableMapping") => {
+                Intrinsic::NominalClass("collections.abc.MutableMapping")
+            }
             (Self::AnnotationLib, "ForwardRef") => Intrinsic::ForwardRef,
             (Self::AnnotationLib, "get_annotations") => Intrinsic::GetAnnotations,
             (Self::AnnotationLib, "type_repr") => Intrinsic::AnnotationTypeRepr,
@@ -751,7 +764,7 @@ impl IntrinsicModule {
             (Self::Typing, "assert_never") => Intrinsic::AssertNever,
             (Self::Typing, "cast") => Intrinsic::Cast,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
-            (Self::Typing | Self::CollectionsAbc, "Sequence") => Intrinsic::Sequence,
+            (Self::Typing, "Sequence") => Intrinsic::Sequence,
             (Self::Typing | Self::CollectionsAbc, "Mapping") => Intrinsic::Mapping {
                 typing_alias: self == Self::Typing,
             },

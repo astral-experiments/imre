@@ -501,6 +501,7 @@ impl Builtin {
             | Self::StaticFunction(_)
             | Self::NewForwardRef
             | Self::ClassNameView
+            | Self::ClassNamePart { .. }
             | Self::StrEnumName
             | Self::StrEnumValue
             | Self::EnumString

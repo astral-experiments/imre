@@ -42,6 +42,7 @@ type WeakObject = shared::Weak<objects::Object>;
 use string_owner::{StrOwner, WeakStr};
 mod integer_power;
 mod integer_text;
+mod nominal_classes;
 mod objects;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod run_start;

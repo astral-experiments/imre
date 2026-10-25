@@ -38,10 +38,26 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
 }
 
 pub(super) fn builtin_type(name: &str) -> Option<Expr> {
-    (is_builtin_type(name) || super::warnings::is_warning_class(name)).then(|| Expr {
+    (is_builtin_type(name) || super::warnings::is_warning_class(name)).then(|| class_value(name))
+}
+
+/// Class objects use the pooled name for identity, including its module for
+/// types outside builtins. This does not require constructing an instance.
+pub(super) fn class_value(name: &str) -> Expr {
+    Expr {
         ty: Type::BuiltinClass,
         kind: ExprKind::Builtin(Builtin::ClassNameView, vec![unpacking::string(name)]),
-    })
+    }
+}
+
+/// Both annotations describe the same item interface; their class values differ.
+pub(super) fn sequence_annotation(binding: Option<Binding>) -> bool {
+    matches!(
+        binding,
+        Some(Binding::Intrinsic(
+            Intrinsic::Sequence | Intrinsic::NominalClass("collections.abc.Sequence")
+        ))
+    )
 }
 
 pub(super) fn type_name(value: Expr) -> Expr {
