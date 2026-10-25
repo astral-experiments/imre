@@ -379,10 +379,15 @@ fn collect_class(
                     let mut accessors = methods
                         .iter()
                         .zip(&method_kinds)
-                        .filter(|(m, _)| m.name.as_str() == name)
-                        .map(|(_, &k)| k);
-                    if accessors.next() != Some(MethodKind::Property) || accessors.next().is_some()
-                    {
+                        .filter(|(m, _)| m.name.as_str() == name);
+                    let getter = accessors.next().is_some_and(|(m, kind)| {
+                        *kind == MethodKind::Property
+                            && !m.decorator_list.iter().any(|d| {
+                                graph.resolve(definition.module, &d.expression)
+                                    == Some(Binding::Intrinsic(Intrinsic::CachedProperty))
+                            })
+                    });
+                    if !getter || accessors.next().is_some() {
                         return Err(
                             module.error(method, "a property setter needs its preceding getter")
                         );
@@ -758,7 +763,7 @@ fn method_kind(
     }
     Err(module.error(
         decorator,
-        "method decorators must be unshadowed @property, @classmethod, or @staticmethod; properties are read-only",
+        "unsupported method decorator on a fixed-layout class",
     ))
 }
 
