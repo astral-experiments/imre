@@ -162,6 +162,8 @@ jobs:
       - name: Check pinned types.SimpleNamespace tests and dictionary aliases
         run: |
           python3 benchmarks/cpython_stdlib/full/types/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-types.json"
+      - name: Compare importlib ModuleSpec constructors and properties with pinned CPython
+        run: python3 benchmarks/cpython_stdlib/full/importlib/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-importlib.json"
       - name: Check pinned linecache methods, cache mutation, and source encodings
         run: |
           python3 benchmarks/cpython_stdlib/full/linecache/generate_codecs.py --check
