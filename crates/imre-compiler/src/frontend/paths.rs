@@ -368,12 +368,15 @@ impl Checker<'_> {
                 "unsupported native PurePath method",
             ));
         }
+        if matches!(name, "read_text" | "write_text" | "write_bytes") {
+            return self.path_io(receiver, name, call);
+        }
         if name == "open" {
             return self.path_open(receiver, call);
         }
         if matches!(
             name,
-            "mkdir" | "unlink" | "replace" | "resolve" | "with_name" | "write_bytes"
+            "mkdir" | "unlink" | "replace" | "resolve" | "with_name"
         ) {
             return self.path_call(receiver, name, call);
         }
@@ -391,9 +394,7 @@ impl Checker<'_> {
             "is_file" => (PathOperation::IsFile, Type::Bool, 0),
             "is_dir" => (PathOperation::IsDir, Type::Bool, 0),
             "is_absolute" => (PathOperation::IsAbsolute, Type::Bool, 0),
-            "read_text" => (PathOperation::ReadText, Type::Str, 0),
             "read_bytes" => (PathOperation::ReadBytes, Type::Bytes, 0),
-            "write_text" => (PathOperation::WriteText, Type::Int, 1),
             "rmdir" => (PathOperation::Rmdir, Type::None, 0),
             _ => return Err(error(self.source, call, "unsupported native Path method")),
         };
@@ -404,17 +405,113 @@ impl Checker<'_> {
                 &format!("Path.{name} requires {arity} positional arguments"),
             ));
         }
-        match kind {
-            PathOperation::ReadText | PathOperation::WriteText
-                if call.arguments.keywords.is_empty() => {}
-            PathOperation::ReadText | PathOperation::WriteText => self.utf8_encoding(call)?,
-            _ => self.reject_builtin_keywords(call)?,
+        self.reject_builtin_keywords(call)?;
+        Ok(operation(kind, ty, vec![receiver]))
+    }
+
+    /// Keep all arguments alive in source order. Path.write_text and write_bytes
+    /// validate their data before opening the file, even when other options are invalid.
+    fn path_io(
+        &mut self,
+        receiver: Expr,
+        name: &str,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        if name == "read_text"
+            && call.arguments.args.is_empty()
+            && call.arguments.keywords.is_empty()
+        {
+            return Ok(operation(
+                PathOperation::ReadText,
+                Type::Str,
+                vec![receiver],
+            ));
         }
-        let mut args = vec![receiver];
-        if let Some(value) = call.arguments.args.first() {
-            args.push(self.expr_expected(value, Type::Str)?);
+        let write = name != "read_text";
+        let binary = name == "write_bytes";
+        let expected = if binary { Type::Bytes } else { Type::Str };
+        let mut params = Vec::new();
+        if write {
+            params.push(parameter("data", expected, None));
         }
-        Ok(operation(kind, ty, args))
+        if !binary {
+            let optional = self.types.optional(Type::Str);
+            let absent = Expr {
+                ty: optional,
+                kind: ExprKind::Absent(Box::new(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                })),
+            };
+            for key in ["encoding", "errors", "newline"] {
+                params.push(parameter(key, optional, Some(absent.clone())));
+            }
+        }
+        let mut arguments =
+            self.arguments_with(call, &params, Some(receiver), |checker, index, value| {
+                if write && index == 0 {
+                    let data = checker.expr(value)?;
+                    let ty = data.ty;
+                    if matches!(ty, Type::StrLiteral(_)) {
+                        return checker.coerce(data, Type::Str, value);
+                    }
+                    if matches!(ty, Type::Optional(_) | Type::Union(_) | Type::None) {
+                        let union = checker.types.union(&[Type::Str, Type::Bytes]).unwrap();
+                        let payload = checker.types.payload(ty).unwrap_or(ty);
+                        if !matches!(
+                            payload,
+                            Type::None | Type::Str | Type::Bytes | Type::StrLiteral(_)
+                        ) && payload != union
+                        {
+                            return Err(error(
+                                checker.source,
+                                value,
+                                "narrow the Path write data to a concrete type",
+                            ));
+                        }
+                        return checker.coerce(data, checker.types.optional(union), value);
+                    }
+                    Ok(data)
+                } else {
+                    checker.expr_expected(value, params[index].ty)
+                }
+            })?;
+        let data = write.then(|| arguments.values[arguments.order[1]].ty);
+        let kind = if data.is_some_and(|ty| self.types.payload(ty).is_some()) {
+            PathOperation::WriteUnion { binary }
+        } else if let Some(actual) = data.filter(|ty| *ty != expected) {
+            let name = match actual {
+                Type::List(_) | Type::ListInt => "list".to_owned(),
+                Type::Tuple(_) => "tuple".to_owned(),
+                Type::Dict(_) => "dict".to_owned(),
+                Type::Set(_) => "set".to_owned(),
+                Type::Class(id) => self.classes.declarations.definitions[id].name.clone(),
+                Type::StrEnum(_) => {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "use str(member) or member.value for Path text I/O",
+                    ));
+                }
+                _ => self.type_name(actual),
+            };
+            let message = if binary {
+                format!("memoryview: a bytes-like object is required, not '{name}'")
+            } else {
+                format!("data must be str, not {name}")
+            };
+            arguments.order.push(arguments.values.len());
+            arguments.values.push(unpacking::string(&message));
+            PathOperation::WriteTypeError
+        } else if binary {
+            PathOperation::WriteBytes
+        } else if write {
+            PathOperation::WriteText
+        } else {
+            PathOperation::ReadText
+        };
+        Ok(self.ordered_path_operation(kind, if write { Type::Int } else { Type::Str }, arguments))
     }
 
     /// Method arguments retain source evaluation order even when keywords bind
@@ -461,11 +558,6 @@ impl Checker<'_> {
                 PathOperation::WithName,
                 receiver.ty,
                 vec![parameter("name", Type::Str, None)],
-            ),
-            "write_bytes" => (
-                PathOperation::WriteBytes,
-                Type::Int,
-                vec![parameter("data", Type::Bytes, None)],
             ),
             _ => unreachable!("only path methods with parameters have this signature"),
         };

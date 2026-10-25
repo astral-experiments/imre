@@ -105,6 +105,8 @@ impl Builtin {
                     | PathOperation::Match { .. }
                     | PathOperation::Resolve
                     | PathOperation::WriteText
+                    | PathOperation::WriteUnion { .. }
+                    | PathOperation::WriteTypeError
                     | PathOperation::WriteBytes
                     | PathOperation::Mkdir
                     | PathOperation::Unlink
@@ -173,6 +175,8 @@ impl Builtin {
                 | ProcessOperation::Await
                 | ProcessOperation::RunLoop
                 | ProcessOperation::JoinGroup
+                | ProcessOperation::GeneratorNext
+                | ProcessOperation::GeneratorYield
                 | ProcessOperation::Acquire => Contract::new(true, Unknown),
                 ProcessOperation::Executable
                 | ProcessOperation::CheckOutput
@@ -180,9 +184,11 @@ impl Builtin {
                 | ProcessOperation::Run { .. }
                 | ProcessOperation::Popen { .. }
                 | ProcessOperation::PopenPid
+                | ProcessOperation::PopenPipe(_)
                 | ProcessOperation::PopenArgs
                 | ProcessOperation::PopenStatus { .. }
                 | ProcessOperation::PopenExit
+                | ProcessOperation::PopenCommunicate { .. }
                 | ProcessOperation::PopenWait
                 | ProcessOperation::PopenSignal
                 | ProcessOperation::AsyncSpawn { .. }
@@ -194,6 +200,7 @@ impl Builtin {
                 | ProcessOperation::ContextEnter
                 | ProcessOperation::ContextExit
                 | ProcessOperation::ContextThrow
+                | ProcessOperation::GeneratorTake
                 | ProcessOperation::ContextYield
                 | ProcessOperation::CreateTask
                 | ProcessOperation::NewLoop
@@ -212,6 +219,7 @@ impl Builtin {
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Which
+                | ProcessOperation::CopyFile
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)
@@ -341,6 +349,8 @@ impl Builtin {
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
             | Self::DictDelete
+            | Self::DictPop
+            | Self::DictTryPop(_)
             | Self::DictGatherBytesInt
             | Self::DictGatherStrInt
             | Self::FileReadline
@@ -375,6 +385,7 @@ impl Builtin {
             | Self::SysPlatform
             | Self::OsName
             | Self::SysArgv
+            | Self::FileFileno
             | Self::TextClose
             | Self::TextEnter
             | Self::TextFlush
@@ -382,7 +393,11 @@ impl Builtin {
             | Self::TextRead
             | Self::TextWrite
             | Self::TomlKeys => Contract::new(true, Unknown),
-            Self::Repeat | Self::CursorLengthHint => Contract::new(true, PreservesLists),
+            Self::Repeat
+            | Self::CursorLengthHint
+            | Self::Progression { .. }
+            | Self::Islice
+            | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
             | Self::DefaultListDict
             | Self::CounterNew
@@ -686,6 +701,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_path_read_bytes"
                 | "imre_path_read_text"
                 | "imre_path_write_text"
+                | "imre_path_read_text_options"
+                | "imre_path_write_text_options"
+                | "imre_path_write_type_error"
+                | "imre_path_write_bytes_union"
+                | "imre_path_write_text_union"
                 | "imre_path_write_bytes"
                 | "imre_path_mkdir"
                 | "imre_path_unlink"
@@ -743,6 +763,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
                 | "imre_dict_delete"
+                | "imre_dict_pop"
                 | "imre_cursor_length_hint"
                 | "imre_mapping_iter_next"
                 | "imre_exception_raise"
