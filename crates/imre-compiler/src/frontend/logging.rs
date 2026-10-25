@@ -1,115 +1,563 @@
-//! Logging keeps the logger's name and accepts closed scalar substitutions.
-
+//! Bind the standard logger registry and keep message conversion behind the level check.
 use super::*;
+use ir::LogOperation as Log;
+
+const DEFAULT_FORMAT: &str = "%(levelname)s:%(name)s:%(message)s";
+
+fn operation(op: Log, ty: Type, args: Vec<Expr>) -> Expr {
+    Expr {
+        ty,
+        kind: ExprKind::Builtin(Builtin::Logging(op), args),
+    }
+}
+
+pub(super) fn number(level: u8) -> Expr {
+    Expr {
+        ty: Type::Int,
+        kind: ExprKind::Int(level.to_string()),
+    }
+}
+
+fn text(value: &str) -> Expr {
+    Expr {
+        ty: Type::Str,
+        kind: ExprKind::Str(value.to_owned()),
+    }
+}
+
+fn absent(ty: Type) -> Expr {
+    Expr {
+        ty,
+        kind: ExprKind::Absent(Box::new(Expr {
+            ty: Type::None,
+            kind: ExprKind::None,
+        })),
+    }
+}
+
+fn parameter(name: &str, ty: Type, kind: ParameterKind, default: Expr) -> Parameter {
+    Parameter {
+        name: name.to_owned(),
+        ty,
+        kind,
+        default: Some(default),
+        sign_only: false,
+    }
+}
+
+fn required(name: &str, ty: Type) -> Parameter {
+    Parameter {
+        name: name.into(),
+        ty,
+        kind: ParameterKind::PositionalOrKeyword,
+        default: None,
+        sign_only: false,
+    }
+}
 
 impl Checker<'_> {
-    pub(super) fn logging_method(
+    /// Bind the private operations used by the public handler implementation.
+    pub(super) fn handler_operation(
         &mut self,
-        logger: Expr,
-        attr: &ast::ExprAttribute,
+        symbol: Intrinsic,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        self.reject_builtin_keywords(call)?;
-        let level = match attr.attr.as_str() {
-            "debug" => 10,
-            "info" => 20,
-            _ => {
-                return Err(error(
-                    self.source,
-                    attr,
-                    "supported logger methods are debug and info",
-                ));
-            }
+        let source = &self.graph.modules[self.module];
+        let Some(Binding::Definition(def)) = source.bindings.get("Handler") else {
+            return Err(error(
+                self.source,
+                call,
+                "missing logging.Handler definition",
+            ));
         };
-        let (format, values) = call
-            .arguments
-            .args
-            .split_first()
-            .ok_or_else(|| error(self.source, call, "logging requires a message"))?;
-        let message = if values.is_empty() {
-            self.expr_expected(format, Type::Str)?
-        } else {
-            let ast::Expr::StringLiteral(format) = format else {
-                return Err(error(
-                    self.source,
-                    format,
-                    "logging with substitutions requires a literal format",
-                ));
-            };
-            check_string(format, self.source)?;
-            let mut pieces = Vec::new();
-            let mut values = values.iter();
-            let mut chars = format.value.to_str().chars();
-            let mut literal = String::new();
-            while let Some(ch) = chars.next() {
-                if ch != '%' {
-                    literal.push(ch);
-                    continue;
+        let handler = Type::Class(self.classes.declarations.ids[def]);
+        let optional_name = self.types.optional(Type::Str);
+        let (op, result, params) = match symbol {
+            Intrinsic::HandlerRename => (
+                Log::HandlerRename,
+                Type::None,
+                vec![
+                    required("handler", handler),
+                    required("old", optional_name),
+                    required("new", optional_name),
+                ],
+            ),
+            Intrinsic::HandlerLookup => (
+                Log::HandlerLookup,
+                self.types.optional(handler),
+                vec![required("name", Type::Str)],
+            ),
+            Intrinsic::PrintActiveException => (Log::PrintActiveException, Type::None, vec![]),
+            _ => unreachable!(),
+        };
+        let args = self.arguments(call, &params, None)?;
+        Ok(self.ordered_builtin(Builtin::Logging(op), result, args))
+    }
+
+    /// A configuration literal can contain differently typed values. Give each
+    /// nested map and list its ordered, mutable document layout at construction.
+    pub(super) fn logging_dictionary_config(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let parameters = [required("config", documents::MAP)];
+        let mut scalar = None;
+        let mut args = self.arguments_with(call, &parameters, None, |checker, _, argument| {
+            if matches!(argument, ast::Expr::Dict(_)) {
+                return checker.expr_expected(argument, documents::MAP);
+            }
+            let value = checker.expr(argument)?;
+            if let Some((Type::Str, ty)) = checker.types.mapping(value.ty) {
+                scalar = match ty {
+                    Type::None => Some(0),
+                    Type::Bool => Some(1),
+                    Type::Int => Some(2),
+                    Type::Str => Some(3),
+                    Type::Float => Some(7),
+                    _ => None,
+                };
+                if scalar.is_some() {
+                    return Ok(value);
                 }
-                match chars.next() {
-                    Some('%') => literal.push('%'),
-                    Some('s') => {
-                        if !literal.is_empty() {
-                            pieces.push(Expr {
-                                ty: Type::Str,
-                                kind: ExprKind::Str(std::mem::take(&mut literal)),
-                            });
-                        }
-                        let value = values
-                            .next()
-                            .ok_or_else(|| error(self.source, call, "too few logging arguments"))?;
-                        let value = self.expr(value)?;
-                        if !matches!(
-                            value.ty,
-                            Type::Str
-                                | Type::StrLiteral(_)
-                                | Type::StrEnum(_)
-                                | Type::Path
-                                | Type::Int
-                                | Type::Bool
-                                | Type::Float
-                                | Type::None
-                        ) {
-                            return Err(error(
-                                self.source,
-                                call,
-                                "logging substitutions require scalar values or paths",
-                            ));
-                        }
-                        pieces.push(Expr {
-                            ty: Type::Str,
-                            kind: ExprKind::Builtin(Builtin::Str, vec![value]),
-                        });
-                    }
+            }
+            checker.document_coerce(value, documents::MAP, argument)
+        })?;
+        let op = if let Some(kind) = scalar {
+            args.order.push(args.values.len());
+            args.values.push(number(kind));
+            Log::DictConfigTyped
+        } else {
+            Log::DictConfig
+        };
+        Ok(self.ordered_builtin(Builtin::Logging(op), Type::None, args))
+    }
+
+    /// Read the configuration path only after evaluating all call arguments.
+    pub(super) fn logging_file_config(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let parameters = [
+            required("fname", Type::Str),
+            parameter(
+                "defaults",
+                Type::None,
+                ParameterKind::PositionalOrKeyword,
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                },
+            ),
+            parameter(
+                "disable_existing_loggers",
+                Type::Bool,
+                ParameterKind::PositionalOrKeyword,
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(true),
+                },
+            ),
+            parameter(
+                "encoding",
+                self.types.optional(Type::Str),
+                ParameterKind::PositionalOrKeyword,
+                absent(self.types.optional(Type::Str)),
+            ),
+        ];
+        let args = self.arguments(call, &parameters, None)?;
+        Ok(self.ordered_builtin(Builtin::Logging(Log::FileConfig), Type::None, args))
+    }
+
+    pub(super) fn logging_level_map(&self, names: bool) -> Expr {
+        let (op, key, value) = if names {
+            (Log::Names, Type::Str, Type::Int)
+        } else {
+            (Log::Numbers, Type::Int, Type::Str)
+        };
+        operation(op, self.types.dict(key, value), vec![])
+    }
+
+    pub(super) fn logging_levels(
+        &mut self,
+        symbol: Intrinsic,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let (op, ty, args) = match symbol {
+            Intrinsic::AddLevelName => (
+                Log::AddLevel,
+                Type::None,
+                self.arguments(
+                    call,
+                    &[
+                        required("level", Type::Int),
+                        required("levelName", Type::Str),
+                    ],
+                    None,
+                )?,
+            ),
+            Intrinsic::LevelNamesMapping => (
+                Log::NamesCopy,
+                self.types.dict(Type::Str, Type::Int),
+                self.arguments(call, &[], None)?,
+            ),
+            Intrinsic::GetLevelName => {
+                let args = self.arguments_with(
+                    call,
+                    &[required("level", Type::Int)],
+                    None,
+                    |checker, _, arg| Ok(Self::string_value(checker.expr(arg)?)),
+                )?;
+                let (op, ty) = match args.values[0].ty {
+                    Type::Int => (Log::LevelName, Type::Str),
+                    Type::Str => (Log::LevelForName, self.types.string_or_int()),
                     _ => {
                         return Err(error(
                             self.source,
                             call,
-                            "logging supports %s and %% in literal formats",
+                            "expected a string or integer logging level",
                         ));
                     }
-                }
+                };
+                (op, ty, args)
             }
-            if values.next().is_some() {
-                return Err(error(self.source, call, "too many logging arguments"));
-            }
-            if !literal.is_empty() {
-                pieces.push(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Str(literal),
-                });
-            }
-            pieces
-                .into_iter()
-                .reduce(|left, right| Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Binary(Binary::Concat, Box::new(left), Box::new(right)),
-                })
-                .expect("at least one substitution")
+            _ => unreachable!(),
         };
+        Ok(self.ordered_builtin(Builtin::Logging(op), ty, args))
+    }
+
+    pub(super) fn root_logger(&self) -> Expr {
+        operation(
+            Log::Get,
+            Type::Logger,
+            vec![absent(self.types.optional(Type::Str))],
+        )
+    }
+
+    pub(super) fn get_logger(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let name = self.types.optional(Type::Str);
+        let params = [parameter(
+            "name",
+            name,
+            ParameterKind::PositionalOrKeyword,
+            absent(name),
+        )];
+        let args = self.arguments(call, &params, None)?;
+        Ok(self.ordered_builtin(Builtin::Logging(Log::Get), Type::Logger, args))
+    }
+
+    pub(super) fn configure_logging(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let level = self.types.optional(Type::Int);
+        let string = self.types.optional(Type::Str);
+        let params = [
+            parameter("level", level, ParameterKind::KeywordOnly, absent(level)),
+            parameter(
+                "format",
+                string,
+                ParameterKind::KeywordOnly,
+                self.coerce(text(DEFAULT_FORMAT), string, call)?,
+            ),
+            parameter(
+                "datefmt",
+                string,
+                ParameterKind::KeywordOnly,
+                absent(string),
+            ),
+            parameter(
+                "force",
+                Type::Bool,
+                ParameterKind::KeywordOnly,
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(false),
+                },
+            ),
+        ];
+        let mut op = Log::Configure;
+        let args = self.arguments_with(call, &params, None, |checker, index, arg| {
+            if index == 0 {
+                let value = Self::string_value(checker.expr(arg)?);
+                if value.ty == Type::Str {
+                    op = Log::ConfigureName;
+                    return Ok(value);
+                }
+                return checker.coerce(value, level, arg);
+            }
+            checker.expr_expected(arg, params[index].ty)
+        })?;
+        Ok(self.ordered_builtin(Builtin::Logging(op), Type::None, args))
+    }
+
+    pub(super) fn logger_attribute(
+        &self,
+        logger: Expr,
+        attribute: &ast::ExprAttribute,
+    ) -> Result<Expr, String> {
+        match attribute.attr.as_str() {
+            "disabled" => Ok(operation(Log::Disabled, Type::Bool, vec![logger])),
+            "propagate" => Ok(operation(Log::Propagate, Type::Bool, vec![logger])),
+            "root" => Ok(operation(Log::Root, Type::Logger, vec![logger])),
+            "parent" => Ok(operation(
+                Log::Parent,
+                self.types.optional(Type::Logger),
+                vec![logger],
+            )),
+            "name" => Ok(operation(Log::Name, Type::Str, vec![logger])),
+            "level" => Ok(operation(Log::Level, Type::Int, vec![logger])),
+            _ => Err(error(
+                self.source,
+                attribute,
+                "supported logger attributes are name, level, parent and root",
+            )),
+        }
+    }
+
+    pub(super) fn logger_method(
+        &mut self,
+        logger: Expr,
+        attribute: &ast::ExprAttribute,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        if attribute.attr.as_str() == "hasHandlers" {
+            let args = self.arguments(call, &[], Some(logger))?;
+            return Ok(self.ordered_builtin(Builtin::Logging(Log::HasHandlers), Type::Bool, args));
+        }
+        if attribute.attr.as_str() == "getChildren" {
+            let args = self.arguments(call, &[], Some(logger))?;
+            return Ok(self.ordered_builtin(
+                Builtin::Logging(Log::Children),
+                self.types.set(Type::Logger),
+                args,
+            ));
+        }
+        if attribute.attr.as_str() == "setLevel" {
+            let args = self.arguments_with(
+                call,
+                &[required("level", Type::Int)],
+                Some(logger),
+                |checker, _, arg| {
+                    let value = Self::string_value(checker.expr(arg)?);
+                    if value.ty == Type::Str {
+                        Ok(operation(Log::CheckLevel, Type::Int, vec![value]))
+                    } else {
+                        checker.coerce(value, Type::Int, arg)
+                    }
+                },
+            )?;
+            return Ok(self.ordered_builtin(Builtin::Logging(Log::SetLevel), Type::None, args));
+        }
+        self.reject_builtin_keywords(call)?;
+        let args = call.arguments.args.as_ref();
+        let name = attribute.attr.as_str();
+        let (level, args) = match (name, args) {
+            ("getEffectiveLevel", []) => {
+                return Ok(operation(Log::EffectiveLevel, Type::Int, vec![logger]));
+            }
+            ("isEnabledFor", [level]) => {
+                let level = self.expr_expected(level, Type::Int)?;
+                return Ok(operation(Log::Enabled, Type::Bool, vec![logger, level]));
+            }
+            ("log", [level, args @ ..]) => (self.expr_expected(level, Type::Int)?, args),
+            ("debug", args) => (number(10), args),
+            ("info", args) => (number(20), args),
+            ("warning", args) => (number(30), args),
+            ("error", args) => (number(40), args),
+            ("critical" | "fatal", args) => (number(50), args),
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "unsupported logger method or argument count",
+                ));
+            }
+        };
+        self.log_message(logger, level, args, false, call)
+    }
+
+    pub(super) fn root_log(
+        &mut self,
+        level: Option<u8>,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        self.reject_builtin_keywords(call)?;
+        let args = call.arguments.args.as_ref();
+        let (level, args) = if let Some(level) = level {
+            (number(level), args)
+        } else if let Some((level, args)) = args.split_first() {
+            (self.expr_expected(level, Type::Int)?, args)
+        } else {
+            return Err(error(self.source, call, "missing log level"));
+        };
+        self.log_message(self.root_logger(), level, args, true, call)
+    }
+
+    fn log_message(
+        &mut self,
+        logger: Expr,
+        level: Expr,
+        args: &[ast::Expr],
+        root: bool,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let Some((message, operands)) = args.split_first() else {
+            return Err(error(self.source, call, "missing log message"));
+        };
+        let mut values = vec![logger, level, self.expr(message)?];
+        for operand in operands {
+            values.push(self.expr(operand)?);
+        }
+        // Python evaluates all arguments, even when a logger discards an event.
+        let mut body = Vec::new();
+        let mut clear = Vec::new();
+        for value in values {
+            let slot = self.hidden(value.ty);
+            body.push(Statement::Assign(slot, value));
+            clear.push(slot);
+        }
+        // Module-level convenience functions install the default handler after
+        // evaluating the message arguments, even when the root filters the event.
+        if root {
+            let string = self.types.optional(Type::Str);
+            body.push(Statement::Expr(operation(
+                Log::Configure,
+                Type::None,
+                vec![
+                    absent(self.types.optional(Type::Int)),
+                    self.coerce(text(DEFAULT_FORMAT), string, call)?,
+                    absent(string),
+                    Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Bool(false),
+                    },
+                ],
+            )));
+        }
+        let logger = self.local(clear[0]);
+        let level = self.local(clear[1]);
+        let message = if operands.is_empty() {
+            self.log_scalar(self.local(clear[2]), 's', message)?
+        } else {
+            let ast::Expr::StringLiteral(format) = message else {
+                return Err(error(
+                    self.source,
+                    message,
+                    "log messages with arguments require a literal format",
+                ));
+            };
+            self.log_format(format.value.to_str(), &clear[3..], message)?
+        };
+        let enabled = operation(
+            Log::Enabled,
+            Type::Bool,
+            vec![logger.clone(), level.clone()],
+        );
+        let emit = operation(Log::Emit, Type::None, vec![logger, level, message]);
         Ok(Expr {
             ty: Type::None,
-            kind: ExprKind::Builtin(Builtin::LogWrite(level), vec![logger, message]),
+            kind: ExprKind::Scope {
+                body,
+                clear,
+                value: Box::new(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Conditional(
+                        Box::new(enabled),
+                        Box::new(emit),
+                        Box::new(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::None,
+                        }),
+                    ),
+                }),
+            },
         })
+    }
+
+    fn log_scalar(&self, value: Expr, kind: char, node: &ast::Expr) -> Result<Expr, String> {
+        if kind == 's' && matches!(value.ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)) {
+            return Ok(Self::string_value(value));
+        }
+        if kind == 's' && value.ty == Type::Path {
+            return Ok(paths::operation(
+                ir::PathOperation::Text,
+                Type::Str,
+                vec![value],
+            ));
+        }
+        if kind == 'd' && value.ty == Type::Bool {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Conditional(
+                    Box::new(value),
+                    Box::new(text("1")),
+                    Box::new(text("0")),
+                ),
+            });
+        }
+        if (kind == 'd' && value.ty != Type::Int)
+            || !matches!(
+                value.ty,
+                Type::Str
+                    | Type::StrLiteral(_)
+                    | Type::Bytes
+                    | Type::Int
+                    | Type::Float
+                    | Type::Bool
+                    | Type::None
+            )
+        {
+            return Err(error(
+                self.source,
+                node,
+                "log format argument requires a supported scalar type",
+            ));
+        }
+        Ok(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::Repr, vec![Self::string_value(value)]),
+        })
+    }
+
+    fn log_format(
+        &self,
+        mut format: &str,
+        slots: &[usize],
+        node: &ast::Expr,
+    ) -> Result<Expr, String> {
+        let mut parts = Vec::new();
+        let mut slots = slots.iter();
+        while let Some((literal, tail)) = format.split_once('%') {
+            if !literal.is_empty() {
+                parts.push(text(literal));
+            }
+            let Some(kind) = tail.chars().next() else {
+                return Err(error(self.source, node, "incomplete log format"));
+            };
+            match kind {
+                '%' => parts.push(text("%")),
+                's' | 'r' | 'd' => {
+                    let slot = slots
+                        .next()
+                        .ok_or_else(|| error(self.source, node, "missing log format argument"))?;
+                    parts.push(self.log_scalar(self.local(*slot), kind, node)?);
+                }
+                _ => {
+                    return Err(error(
+                        self.source,
+                        node,
+                        "supported log conversions are %s, %r, %d and %%",
+                    ));
+                }
+            }
+            format = &tail[kind.len_utf8()..];
+        }
+        if slots.next().is_some() {
+            return Err(error(self.source, node, "unused log format argument"));
+        }
+        if !format.is_empty() {
+            parts.push(text(format));
+        }
+        Ok(parts
+            .into_iter()
+            .reduce(|a, b| Expr {
+                ty: Type::Str,
+                kind: ExprKind::Binary(Binary::Concat, Box::new(a), Box::new(b)),
+            })
+            .unwrap_or_else(|| text("")))
     }
 }

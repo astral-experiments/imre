@@ -14,15 +14,23 @@ from native_json import HERE, sha256, vendored_decode
 from upstream import verify_upstream
 
 
+class NativeUnicodeDecodeError(UnicodeDecodeError):
+    """Transport only the native exception category and rendered message."""
+
+    def __str__(self):
+        return self.args[0]
+
+
 # Expected native operation counts guard against vacuous skips or a host JSON call.
 METHODS = {
-    "Decode": {"empty_objects": 3, "string_with_utf8_bom": 4},
+    "Decode": {"empty_objects": 3, "string_with_utf8_bom": 4, "bytes": 1},
     "Dump": {"dump": 1, "dumps": 1},
     "Float": {"floats": 15, "ints": 6, "out_of_range": 2, "allow_nan": 9},
     "Indent": {"indent0": 4},
     "Unicode": {"encoding3": 1, "encoding4": 1, "encoding5": 1, "encoding6": 1,
                 "encoding7": 1, "ascii_non_printable_encode": 2, "big_unicode_encode": 2,
-                "big_unicode_decode": 2, "unicode_preservation": 3, "bytes_encode": 2},
+                "big_unicode_decode": 2, "unicode_preservation": 3, "bytes_encode": 2,
+                "bytes_decode": 20},
 }
 
 
@@ -36,6 +44,27 @@ def unpack_native_repr(payload):
     return ast.literal_eval(NumberNames().visit(ast.parse(payload, mode="eval")))
 
 
+def check_bounded_malformed_object(program, directory):
+    import resource
+
+    # Duplicate keys keep CPython's dictionary small even when the first field is nested.
+    repeated = b'"a":0,' * 1_000_000
+
+    def bound_memory():
+        resource.setrlimit(resource.RLIMIT_AS, (64 << 20, 64 << 20))
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+    for document in (b'{' + repeated + b'"bad":}', b'{"nested":{' + repeated + b'"a":0},"bad":}'):
+        (directory / "input.bin").write_bytes(document)
+        expected = (f"JSONDecodeError\nExpecting value: line 1 column {len(document)} "
+                    f"(char {len(document) - 1})\n").encode()
+        for command in ([sys.executable, "-I", "-S", HERE / "json_values_driver.py"], [program]):
+            run = subprocess.run([*command, "load", "file", "1", "1", "None"], cwd=directory,
+                                 capture_output=True, timeout=30, preexec_fn=bound_memory)
+            if (run.returncode, run.stdout, run.stderr) != (0, expected, b""):
+                raise RuntimeError(f"bounded json.load failed: {command[0]}, {run!r}")
+
+
 class Native:
     def __init__(self, program, directory, error):
         self.program = program
@@ -46,7 +75,7 @@ class Native:
     def invoke(self, method, shape, data, ensure_ascii=True, allow_nan=True, indent=None):
         (self.directory / "input.bin").write_bytes(data)
         (self.directory / "output.txt").unlink(missing_ok=True)
-        args = [method, shape, str(int(ensure_ascii)), str(int(allow_nan)), str(indent)]
+        args = [method, shape, str(int(ensure_ascii)), str(int(allow_nan)), str(indent), "fields"]
         run = subprocess.run([self.program, *args], cwd=self.directory, capture_output=True,
                              timeout=10)
         if run.returncode or run.stderr:
@@ -56,17 +85,26 @@ class Native:
         if not sep or not run.stdout.endswith(b"\n"):
             raise RuntimeError("incomplete native JSON response")
         if tag == "JSONDecodeError":
-            # The selected upstream method checks only the native category and message.
+            # Do not call CPython's initializer: that would recompute line and
+            # column on the host and could hide an incorrect native position.
+            message, fields = payload.rsplit("\n", 1)
             error = self.error.__new__(self.error)
-            ValueError.__init__(error, payload)
+            ValueError.__init__(error, message)
+            error.msg, error.doc, error.pos, error.lineno, error.colno = ast.literal_eval(fields)
             raise error
         if tag in {"TypeError", "ValueError"}:
             raise {"TypeError": TypeError, "ValueError": ValueError}[tag](payload)
+        if tag == "UnicodeDecodeError":
+            error = NativeUnicodeDecodeError.__new__(NativeUnicodeDecodeError)
+            UnicodeError.__init__(error, payload)
+            raise error
         if tag != "OK":
             raise RuntimeError(f"unexpected native result {tag!r}")
         return payload
 
     def loads(self, document):
+        if isinstance(document, bytes):
+            return unpack_native_repr(self.invoke("loads", "bytes", document))
         return unpack_native_repr(self.invoke("loads", "str", document.encode()))
 
     def load(self, fp):
@@ -128,6 +166,9 @@ def main():
                 if "call " + call not in generated:
                     raise RuntimeError(f"native driver omits {call}")
             report["sha256"]["executable"] = sha256(program)
+            if sys.platform == "linux":
+                check_bounded_malformed_object(program, directory)
+                report["bounded_malformed_object"] = "pass"
             for group, methods in METHODS.items():
                 name = "test_" + group.lower()
                 module = importlib.import_module("test.test_json." + name)

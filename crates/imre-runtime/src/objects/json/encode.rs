@@ -1,6 +1,7 @@
 //! Writes typed storage directly, without constructing a dynamic JSON tree.
 
 use num_traits::ToPrimitive;
+use std::cmp::Ordering;
 
 use super::*;
 use crate::objects::{List, files::FileState, object};
@@ -11,6 +12,10 @@ const BYTES: u32 = 12;
 const SET: u32 = 13;
 const PATH: u32 = 14;
 const JSON_VIEW: u32 = 15;
+const DOCUMENT: u32 = 16;
+
+type Separator<'a, T> = Result<T, &'a str>;
+type Separators<'a, T> = (Separator<'a, T>, Separator<'a, T>);
 
 #[derive(Clone, Copy)]
 enum Indent<'a> {
@@ -19,10 +24,178 @@ enum Indent<'a> {
 }
 
 #[derive(Default)]
+struct StandardOptions<'a> {
+    allow_nan: bool,
+    sort_keys: bool,
+    separators: Option<Separators<'a, Rc<Str>>>,
+}
+
+fn length(size: usize) -> Result<(), Error> {
+    match size {
+        2 => Ok(()),
+        0 | 1 => Err(Error::new(
+            Kind::ValueError,
+            format!("not enough values to unpack (expected 2, got {size})"),
+        )),
+        _ => Err(Error::new(
+            Kind::ValueError,
+            format!("too many values to unpack (expected 2, got {size})"),
+        )),
+    }
+}
+
+/// Read both separators once. Taking string references here keeps a caller's
+/// list alive only long enough to snapshot its entries.
+unsafe fn separators(
+    word: usize,
+    schema: &Schema,
+) -> Result<Option<Separators<'_, Rc<Str>>>, Error> {
+    fn typename(kind: u32) -> &'static str {
+        match kind {
+            NONE => "NoneType",
+            INTEGER => "int",
+            FLOAT => "float",
+            BOOLEAN => "bool",
+            BYTES => "bytes",
+            PATH => "PosixPath",
+            LIST => "list",
+            DICTIONARY | INTEGER_DICTIONARY => "dict",
+            TUPLE => "tuple",
+            SET => "set",
+            _ => "object",
+        }
+    }
+    fn name(schema: &Schema) -> &str {
+        if schema.kind == RECORD {
+            // SAFETY: a record schema references immutable compiler metadata. Internal
+            // records may omit the class name.
+            unsafe {
+                if let Some(info) = schema.record.as_ref().and_then(|r| r.semantics.as_ref())
+                    && info.name_len != 0
+                {
+                    return std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                        info.name,
+                        info.name_len,
+                    ));
+                }
+            }
+        }
+        typename(schema.kind)
+    }
+    fn part(word: usize, kind: u32) -> Separator<'static, Rc<Str>> {
+        if kind == STRING {
+            // SAFETY: the descriptor identifies a string rooted by the container.
+            Ok(unsafe { crate::objects::acquire_rc(word) })
+        } else {
+            Err(typename(kind))
+        }
+    }
+    fn field(word: usize, schema: &Schema) -> Separator<'_, Rc<Str>> {
+        if schema.kind == OPTIONAL {
+            if word == 0 {
+                return Err("NoneType");
+            }
+            return field(word, schema.child());
+        }
+        if schema.kind == RECORD {
+            Err(name(schema))
+        } else {
+            part(word, schema.kind)
+        }
+    }
+    let pair = |first, second| Ok(Some((first, second)));
+    // SAFETY: the caller supplies an initialized word with this exact immutable schema.
+    unsafe {
+        match schema.kind {
+            NONE => Ok(None),
+            OPTIONAL if word == 0 => Ok(None),
+            OPTIONAL => separators(word, schema.child()),
+            STRING => {
+                let mut chars = (&*(word as *const Str)).chars();
+                length(chars.clone().count())?;
+                Ok(Some((
+                    Ok(Rc::new(Str::new(
+                        chars.next().unwrap().encode_utf8(&mut [0; 4]),
+                    ))),
+                    Ok(Rc::new(Str::new(
+                        chars.next().unwrap().encode_utf8(&mut [0; 4]),
+                    ))),
+                )))
+            }
+            BYTES => {
+                length((&*(word as *const crate::Bytes)).len())?;
+                pair(part(0, INTEGER), part(0, INTEGER))
+            }
+            DICTIONARY | INTEGER_DICTIONARY | SET => object(word as *const Object).0.with(|s| {
+                let (size, kind, [a, b]) = s.first_two_keys();
+                length(size)?;
+                let kind = match kind {
+                    2 | 10 => INTEGER,
+                    3 => STRING,
+                    5 => PATH,
+                    6 => TUPLE,
+                    8 => BYTES,
+                    _ => unreachable!("checked key storage"),
+                };
+                pair(part(a, kind), part(b, kind))
+            }),
+            TUPLE => {
+                let fields = schema.fields();
+                length(fields.len())?;
+                let member = |i: usize| {
+                    let ty = fields[i].schema();
+                    field(
+                        ty.storage()
+                            .read_record_field((word as *const usize).add(i)),
+                        ty,
+                    )
+                };
+                pair(member(0), member(1))
+            }
+            LIST if schema.word_kind == 4 => (&*(word as *const List)).0.with(|items| {
+                length(items.len())?;
+                pair(
+                    field(items[0].0, schema.child()),
+                    field(items[1].0, schema.child()),
+                )
+            }),
+            LIST => object(word as *const Object).0.with(|s| {
+                if let Some(rows) = s.sequence_storage().rows() {
+                    length(rows.len())?;
+                    // The rows stay rooted while we classify the two separators.
+                    let child = schema.child();
+                    debug_assert_eq!(child.kind, RECORD);
+                    let item = |i| field(rows.row(i).as_ptr() as usize, child);
+                    return pair(item(0), item(1));
+                }
+                let words = &s.sequence().values;
+                length(words.len())?;
+                pair(
+                    field(words[0], schema.child()),
+                    field(words[1], schema.child()),
+                )
+            }),
+            _ => {
+                let ty = name(schema);
+                let ty = &ty[..ty.floor_char_boundary(200)];
+                Err(Error::new(
+                    Kind::TypeError,
+                    format!("cannot unpack non-iterable {ty} object"),
+                ))
+            }
+        }
+    }
+}
+
+#[derive(Default)]
 struct Encoder<'a> {
     output: String,
     indent: Option<Indent<'a>>,
     ensure_ascii: bool,
+    sort_keys: bool,
+    separators: Option<Separators<'a, &'a str>>,
+    /// A compact list combines the separator with a primitive only after rendering it.
+    pending_item_error: Option<&'a str>,
     /// The first-party schema encoder rejects all non-finite numbers.
     allow_nan: Option<bool>,
     stream: Option<&'a mut FileState>,
@@ -53,6 +226,9 @@ fn plain_ascii(bytes: &[u8]) -> bool {
 
 impl Encoder<'_> {
     fn emit(&mut self) -> Result<(), Error> {
+        if let Some(ty) = self.pending_item_error {
+            return Err(Self::separator_error(ty));
+        }
         if let Some(stream) = &mut self.stream
             && !self.output.is_empty()
         {
@@ -229,17 +405,72 @@ impl Encoder<'_> {
         Ok(())
     }
 
-    fn separator(&mut self, index: usize, depth: usize) -> Result<(), Error> {
-        if self.indent.is_some() {
-            if index != 0 {
-                self.append(",")?;
+    /// Report a non-text separator once a streaming chunk actually needs it.
+    fn separator_error(ty: &str) -> Error {
+        Error::new(
+            Kind::TypeError,
+            format!("JSON separator must be str, not {ty}"),
+        )
+    }
+
+    fn separator(&mut self, index: usize, depth: usize, object: bool) -> Result<(), Error> {
+        let default = if self.indent.is_some() { "," } else { ", " };
+        match self.separators.map_or(Ok(default), |(item, _)| item) {
+            Ok(item) if index != 0 => self.append(item)?,
+            Err(ty) if self.indent.is_some() => {
+                // An indented object yields its opening brace before building its separator.
+                if object && index == 0 {
+                    self.emit()?;
+                }
+                return Err(Self::separator_error(ty));
             }
-            self.newline(depth + 1)
-        } else if index != 0 {
-            self.append(", ")
-        } else {
-            Ok(())
+            Err(ty) if index != 0 && object => return Err(Self::separator_error(ty)),
+            Err(ty) if index != 0 => self.pending_item_error = Some(ty),
+            _ => {}
         }
+        if self.indent.is_some() {
+            self.newline(depth + 1)?;
+        }
+        Ok(())
+    }
+
+    fn key_separator(&mut self) -> Result<(), Error> {
+        match self.separators.map_or(Ok(": "), |(_, key)| key) {
+            Ok(key) => self.append(key),
+            Err(ty) => {
+                self.emit()?;
+                Err(Self::separator_error(ty))
+            }
+        }
+    }
+
+    /// The ordinary path streams entries in insertion order. Sorting needs only
+    /// borrowed keys and value words; all remain rooted by the enclosing mapping.
+    fn ordered<T>(
+        &mut self,
+        entries: impl Iterator<Item = T>,
+        cmp: impl Fn(&T, &T) -> Ordering,
+        mut entry: impl FnMut(&mut Self, usize, T) -> Result<(), Error>,
+    ) -> Result<bool, Error> {
+        let mut nonempty = false;
+        if self.sort_keys {
+            let mut sorted = Vec::new();
+            for item in entries {
+                sorted.try_reserve(1).map_err(|_| Error::allocation())?;
+                sorted.push(item);
+            }
+            sorted.sort_unstable_by(cmp);
+            for (i, item) in sorted.into_iter().enumerate() {
+                nonempty = true;
+                entry(self, i, item)?;
+            }
+        } else {
+            for (i, item) in entries.enumerate() {
+                nonempty = true;
+                entry(self, i, item)?;
+            }
+        }
+        Ok(nonempty)
     }
 
     fn end(&mut self, delimiter: char, nonempty: bool, depth: usize) -> Result<(), Error> {
@@ -262,7 +493,7 @@ impl Encoder<'_> {
         let mut nonempty = false;
         for (index, (value, schema)) in values.into_iter().enumerate() {
             nonempty = true;
-            self.separator(index, depth)?;
+            self.separator(index, depth, false)?;
             // SAFETY: the enclosing storage borrow roots this exact child word.
             unsafe { self.value(value, schema, depth + 1) }?;
             self.emit()?;
@@ -277,20 +508,23 @@ impl Encoder<'_> {
         entries: impl Iterator<Item = (K, usize)>,
         schema: &Schema,
         depth: usize,
+        cmp: impl Fn(&K, &K) -> Ordering,
         key: impl Fn(&mut Self, K) -> Result<(), Error>,
     ) -> Result<(), Error> {
         self.begin('{', depth)?;
-        let mut nonempty = false;
-        for (index, (name, value)) in entries.enumerate() {
-            nonempty = true;
-            self.separator(index, depth)?;
-            key(self, name)?;
-            self.append(": ")?;
-            self.emit()?;
-            // SAFETY: the dictionary holds the exact typed child during this call.
-            unsafe { self.value(value, schema, depth + 1) }?;
-            self.emit()?;
-        }
+        let nonempty = self.ordered(
+            entries,
+            |a, b| cmp(&a.0, &b.0),
+            |this, index, (name, value)| {
+                this.separator(index, depth, true)?;
+                key(this, name)?;
+                this.key_separator()?;
+                this.emit()?;
+                // SAFETY: the dictionary holds the exact typed child during this call.
+                unsafe { this.value(value, schema, depth + 1) }?;
+                this.emit()
+            },
+        )?;
         self.end('}', nonempty, depth)
     }
 
@@ -307,6 +541,7 @@ impl Encoder<'_> {
             Node::String(text) => self.string(text),
             Node::Integer(value) => self.integer(value),
             Node::Float(value) => self.float(*value),
+            Node::ConstantNan => self.float(f64::NAN),
             Node::Deferred(array) => {
                 let v = array.view();
                 self.document(v, v.index, depth)
@@ -322,7 +557,7 @@ impl Encoder<'_> {
                         items.0.with(|storage| {
                             let children = &storage.sequence().values;
                             for (i, &value) in children.iter().enumerate() {
-                                self.separator(i, depth)?;
+                                self.separator(i, depth, false)?;
                                 // SAFETY: the root list owns each checked immutable child handle.
                                 object(value as *const Object).0.with(|storage| {
                                     let Storage::Json(child) = storage else {
@@ -337,7 +572,7 @@ impl Encoder<'_> {
                     }?
                 } else {
                     for (i, &child) in children.iter().enumerate() {
-                        self.separator(i, depth)?;
+                        self.separator(i, depth, false)?;
                         self.document(view, child, depth + 1)?;
                         self.emit()?;
                     }
@@ -348,15 +583,19 @@ impl Encoder<'_> {
             Node::Object(fields) => {
                 self.emit()?;
                 self.begin('{', depth)?;
-                for (i, key) in readonly::keys(fields).enumerate() {
-                    self.separator(i, depth)?;
-                    self.string(key)?;
-                    self.append(": ")?;
-                    self.emit()?;
-                    self.document(view, node.lookup(key).unwrap(), depth + 1)?;
-                    self.emit()?;
-                }
-                self.end('}', !fields.is_empty(), depth)
+                let nonempty = self.ordered(
+                    readonly::keys(fields),
+                    |a, b| a.cmp(b),
+                    |this, i, key| {
+                        this.separator(i, depth, true)?;
+                        this.string(key)?;
+                        this.key_separator()?;
+                        this.emit()?;
+                        this.document(view, node.lookup(key).unwrap(), depth + 1)?;
+                        this.emit()
+                    },
+                )?;
+                self.end('}', nonempty, depth)
             }
         }
     }
@@ -401,6 +640,15 @@ impl Encoder<'_> {
                 }
                 LIST => {
                     object(word as *const Object).0.with(|storage| {
+                        if let Some(rows) = storage.sequence_storage().rows() {
+                            // RECORD reads fields through the schema; a row needs no object header.
+                            let child = schema.child();
+                            debug_assert_eq!(child.kind, RECORD);
+                            return self.array(
+                                (0..rows.len()).map(|i| (rows.row(i).as_ptr() as usize, child)),
+                                depth,
+                            );
+                        }
                         self.array(
                             storage
                                 .sequence()
@@ -411,6 +659,13 @@ impl Encoder<'_> {
                         )
                     })?;
                 }
+                DOCUMENT => object(word as *const Object).0.with(|storage| {
+                    let Storage::Document(doc) = storage else {
+                        unreachable!("checked native document")
+                    };
+                    let view = doc.view()?;
+                    self.document(&view, view.index, depth)
+                })?,
                 JSON_VIEW => object(word as *const Object).0.with(|storage| {
                     let Storage::Json(view) = storage else {
                         unreachable!("checked JSON view")
@@ -452,9 +707,9 @@ impl Encoder<'_> {
                 RECORD => {
                     self.begin('{', depth)?;
                     for (index, field) in schema.fields().iter().enumerate() {
-                        self.separator(index, depth)?;
+                        self.separator(index, depth, true)?;
                         self.string(field.name())?;
-                        self.append(": ")?;
+                        self.key_separator()?;
                         let child = field.schema();
                         let word = child
                             .storage()
@@ -470,6 +725,7 @@ impl Encoder<'_> {
                                 storage.dictionary().string_entries(),
                                 schema.child(),
                                 depth,
+                                |a, b| a.cmp(b),
                                 |output, key| output.string(key),
                             )
                         } else {
@@ -477,6 +733,7 @@ impl Encoder<'_> {
                                 storage.dictionary().integer_entries(),
                                 schema.child(),
                                 depth,
+                                |a, b| crate::imre_int_compare(a.0, b.0).cmp(&0),
                                 |output, key| {
                                     output.append("\"")?;
                                     output.integer(key)?;
@@ -493,6 +750,33 @@ impl Encoder<'_> {
     }
 }
 
+/// Return the string handled directly by JSONEncoder.encode before it creates an encoder.
+///
+/// # Safety
+/// The caller roots the value described by the schema for this lookup.
+unsafe fn root_string(word: usize, schema: &Schema) -> Option<Rc<Str>> {
+    // SAFETY: the concrete schema identifies the rooted string, optional, or document.
+    unsafe {
+        match schema.kind {
+            STRING => Some(crate::objects::acquire_rc(word)),
+            OPTIONAL if word != 0 => root_string(word, schema.child()),
+            JSON_VIEW | DOCUMENT => object(word as *const Object)
+                .0
+                .with(|storage| match storage {
+                    Storage::Json(view) => match &view.nodes[view.index] {
+                        readonly::Node::String(text) => Some(Rc::clone(text)),
+                        _ => None,
+                    },
+                    Storage::Document(readonly::document::Value::String(text)) => {
+                        Some(Rc::clone(text))
+                    }
+                    _ => None,
+                }),
+            _ => None,
+        }
+    }
+}
+
 /// # Safety
 /// The rooted value and optional indentation use the supplied static layouts.
 unsafe fn encode(
@@ -501,9 +785,20 @@ unsafe fn encode(
     indent: usize,
     indent_text: bool,
     ensure_ascii: u32,
-    allow_nan: Option<bool>,
+    options: Option<StandardOptions<'_>>,
     stream: Option<&mut FileState>,
 ) -> Result<String, Error> {
+    if options.is_some() && stream.is_none()
+        // SAFETY: the caller roots the value and its schema for encoding.
+        && let Some(text) = unsafe { root_string(word, &*schema) }
+    {
+        let mut encoder = Encoder {
+            ensure_ascii: ensure_ascii != 0,
+            ..Encoder::default()
+        };
+        encoder.string(&text)?;
+        return Ok(encoder.output);
+    }
     let indent = if indent == 0 {
         None
     } else if indent_text {
@@ -519,7 +814,7 @@ unsafe fn encode(
             .ok_or_else(|| {
                 Error::new(
                     Kind::OverflowError,
-                    if allow_nan.is_some() {
+                    if options.is_some() {
                         "cannot fit 'int' into an index-sized integer"
                     } else {
                         "JSON indent does not fit in a platform index"
@@ -528,11 +823,43 @@ unsafe fn encode(
             })?;
         Some(Indent::Spaces(value.max(0) as usize))
     };
+    let separators = options
+        .as_ref()
+        .and_then(|o| o.separators.as_ref())
+        .map(|(item, key)| {
+            fn text<'a>(value: &'a Separator<'_, Rc<Str>>) -> Separator<'a, &'a str> {
+                value.as_ref().map(|s| s.as_str()).map_err(|&ty| ty)
+            }
+            (text(item), text(key))
+        });
+    if stream.is_none()
+        && let Some((item, key)) = separators
+    {
+        // The in-memory encoder checks the key separator first, after converting indent.
+        for (field, separator) in [(5, key), (6, item)] {
+            if let Err(ty) = separator {
+                // The C argument parser formats at most 50 bytes of the type name
+                // and decodes the complete diagnostic as UTF-8.
+                let mut message =
+                    format!("make_encoder() argument {field} must be str, not ").into_bytes();
+                message.extend_from_slice(&ty.as_bytes()[..ty.len().min(50)]);
+                return Err(match String::from_utf8(message) {
+                    Ok(text) => Error::new(Kind::TypeError, text),
+                    Err(error) => {
+                        crate::objects::bytes::decode_error(error.as_bytes(), error.utf8_error())
+                    }
+                });
+            }
+        }
+    }
     let mut encoder = Encoder {
         output: String::new(),
         indent,
         ensure_ascii: ensure_ascii != 0,
-        allow_nan,
+        allow_nan: options.as_ref().map(|o| o.allow_nan),
+        sort_keys: options.as_ref().is_some_and(|o| o.sort_keys),
+        separators,
+        pending_item_error: None,
         stream,
     };
     // SAFETY: the caller roots the complete graph and immutable schema.
@@ -568,18 +895,27 @@ pub unsafe extern "C" fn imre_json_dumps(
     indent_text: u32,
     ensure_ascii: u32,
     allow_nan: u32,
+    sort_keys: u32,
+    sep: usize,
+    sep_schema: *const Schema,
 ) -> *const Str {
     // SAFETY: the compiler supplies the exact rooted schema and indentation.
     let result = unsafe {
-        encode(
-            word,
-            schema,
-            indent,
-            indent_text != 0,
-            ensure_ascii,
-            Some(allow_nan != 0),
-            None,
-        )
+        separators(sep, &*sep_schema).and_then(|separators| {
+            encode(
+                word,
+                schema,
+                indent,
+                indent_text != 0,
+                ensure_ascii,
+                Some(StandardOptions {
+                    allow_nan: allow_nan != 0,
+                    sort_keys: sort_keys != 0,
+                    separators,
+                }),
+                None,
+            )
+        })
     };
     finish(
         result.map(|text| Rc::into_raw(Rc::new(Str::from(text)))),
@@ -597,20 +933,29 @@ pub unsafe extern "C" fn imre_json_dump(
     indent_text: u32,
     ensure_ascii: u32,
     allow_nan: u32,
+    sort_keys: u32,
+    sep: usize,
+    sep_schema: *const Schema,
     stream: *const Object,
 ) -> u32 {
     // SAFETY: text writes cannot reenter the encoder or mutate the input graph.
     let result = unsafe {
-        object(stream).0.with_mut(|storage| {
-            encode(
-                word,
-                schema,
-                indent,
-                indent_text != 0,
-                ensure_ascii,
-                Some(allow_nan != 0),
-                Some(storage.file_mut()),
-            )
+        separators(sep, &*sep_schema).and_then(|separators| {
+            object(stream).0.with_mut(|storage| {
+                encode(
+                    word,
+                    schema,
+                    indent,
+                    indent_text != 0,
+                    ensure_ascii,
+                    Some(StandardOptions {
+                        allow_nan: allow_nan != 0,
+                        sort_keys: sort_keys != 0,
+                        separators,
+                    }),
+                    Some(storage.file_mut()),
+                )
+            })
         })
     };
     finish(result.map(|_| 1), 0)
@@ -712,7 +1057,7 @@ mod tests {
             let text = format!("{}1{}", "[".repeat(depth), "]".repeat(depth));
             // The internal decoder builds this valid acyclic graph without the
             // public depth check, so encoding must enforce its own boundary.
-            let value = decode(&text, schema).unwrap();
+            let value = decode(&text, schema, &mut None).unwrap();
             let mut output = encoder();
             // SAFETY: the decoder owns every word with the live exact schema.
             let result = unsafe { output.value(value.word, schema, 0) };
