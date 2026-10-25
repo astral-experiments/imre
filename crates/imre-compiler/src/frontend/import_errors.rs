@@ -16,11 +16,15 @@ impl Checker<'_> {
         matches!(
             ty,
             Type::None | Type::Bool | Type::Int | Type::Str | Type::StrLiteral(_) | Type::Bytes
-        ) || self.types.fields(ty).is_some_and(|items| {
-            items
-                .into_iter()
-                .all(|item| self.import_argument_supported(item))
-        })
+        ) || self
+            .types
+            .payload(ty)
+            .is_some_and(|ty| self.import_argument_supported(ty))
+            || self.types.fields(ty).is_some_and(|items| {
+                items
+                    .into_iter()
+                    .all(|item| self.import_argument_supported(item))
+            })
     }
 
     pub(super) fn import_error(

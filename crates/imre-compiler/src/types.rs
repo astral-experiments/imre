@@ -23,11 +23,22 @@ enum Shape {
     NamedTuple(DefinitionId, Vec<Type>),
     PartialFrame(Vec<Type>),
     Callable(Vec<Type>, Type),
+    CachedCallable(CachedFunction),
     Awaitable(Type),
     DirectoryContext(Type),
     ProcessArgs(Type),
     Optional(Type),
     Union(Vec<Type>),
+}
+
+/// The callable ABI stays unchanged; the frame owns both the wrappee and its cache.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct CachedFunction {
+    pub callable: Type,
+    pub frame: Type,
+    pub table: Type,
+    pub capacity: i64,
+    pub typed: bool,
 }
 
 #[derive(Clone)]
@@ -73,6 +84,7 @@ impl Types {
             }
             Type::Cursor(id) => matches!(storage.shapes.get(id), Some(Shape::Cursor(_))),
             Type::List(id) => matches!(storage.shapes.get(id), Some(Shape::List(_))),
+            Type::CacheState(id) => matches!(storage.shapes.get(id), Some(Shape::Dict(..))),
             Type::Dict(id) => matches!(
                 storage.shapes.get(id),
                 Some(Shape::Dict(..) | Shape::DefaultListDict(..) | Shape::Counter(_))
@@ -82,7 +94,10 @@ impl Types {
                 storage.shapes.get(id),
                 Some(Shape::Tuple(_) | Shape::NamedTuple(..) | Shape::PartialFrame(_))
             ),
-            Type::Callable(id) => matches!(storage.shapes.get(id), Some(Shape::Callable(..))),
+            Type::Callable(id) => matches!(
+                storage.shapes.get(id),
+                Some(Shape::Callable(..) | Shape::CachedCallable(_))
+            ),
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
             Type::Class(id) | Type::NamedException(id) | Type::StrEnum(id) | Type::Enum(id) => {
@@ -128,6 +143,8 @@ impl Types {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -165,6 +182,7 @@ impl Types {
                 | Shape::NamedTuple(_, fields)
                 | Shape::PartialFrame(fields)
                 | Shape::Union(fields) => fields.clone(),
+                Shape::CachedCallable(c) => vec![c.callable, c.frame, c.table],
                 Shape::Callable(params, returns) => {
                     params.iter().copied().chain([*returns]).collect()
                 }
@@ -174,6 +192,7 @@ impl Types {
                 if let Type::StrLiteral(child_id)
                 | Type::Cursor(child_id)
                 | Type::List(child_id)
+                | Type::CacheState(child_id)
                 | Type::Dict(child_id)
                 | Type::Set(child_id)
                 | Type::Tuple(child_id)
@@ -459,6 +478,7 @@ impl Types {
             | Type::Enum(_)
             | Type::Iterator
             | Type::Cursor(_)
+            | Type::CacheState(_)
             | Type::ByteOutput
             | Type::Exception
             | Type::ImportException
@@ -482,6 +502,8 @@ impl Types {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -636,10 +658,23 @@ impl Types {
         Type::Callable(self.intern(Shape::Callable(params, returns)))
     }
 
+    pub(crate) fn cached_callable(&self, layout: CachedFunction) -> Type {
+        Type::Callable(self.intern(Shape::CachedCallable(layout)))
+    }
+
+    pub(crate) fn cached_function(&self, ty: Type) -> Option<CachedFunction> {
+        let Type::Callable(id) = ty else { return None };
+        match self.0.borrow().shapes[id] {
+            Shape::CachedCallable(layout) => Some(layout),
+            _ => None,
+        }
+    }
+
     pub(crate) fn signature(&self, ty: Type) -> Option<(Vec<Type>, Type)> {
         let Type::Callable(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
             Shape::Callable(params, returns) => Some((params.clone(), *returns)),
+            Shape::CachedCallable(c) => self.signature(c.callable),
             _ => unreachable!("callable type identity has a callable shape"),
         }
     }
@@ -883,6 +918,7 @@ impl TypeDescription<'_> {
                     write!(self, "{value:?}")?;
                 }
             }
+            Shape::CachedCallable(c) => return self.write_type(c.callable),
             Shape::Callable(params, returns) => {
                 self.write_str("Callable[[")?;
                 self.write_types(params, ", ")?;

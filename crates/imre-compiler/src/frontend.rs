@@ -37,6 +37,7 @@ mod functools;
 mod hashlib;
 mod import_errors;
 mod inference;
+mod inspect;
 mod iterables;
 mod itertools;
 mod json;
@@ -161,6 +162,9 @@ impl ClassInfo {
                     .fields
                     .iter()
                     .map(|field| {
+                        if field.name == crate::classes::EXCEPTION_ARGS_SLOT {
+                            return Ok(Type::ExceptionField);
+                        }
                         annotation_in_class(
                             &field.annotation,
                             graph,
@@ -1120,7 +1124,13 @@ fn signature(
                     .default
                     .as_deref()
                     .filter(|_| !empty_sequence)
-                    .map(|value| calls::scalar_literal(value, source).map(|value| value.ty))
+                    .map(|value| {
+                        if inspect::is_sentinel(graph, module, value) {
+                            Ok(Type::PlainObject)
+                        } else {
+                            calls::scalar_literal(value, source).map(|value| value.ty)
+                        }
+                    })
                     .transpose()?)
         };
         parameter_types.push(ty);
@@ -1144,6 +1154,8 @@ fn signature(
                         ty,
                         kind: ExprKind::List(Vec::new()),
                     })
+                } else if ty == Type::PlainObject && inspect::is_sentinel(graph, module, value) {
+                    Ok(inspect::sentinel())
                 } else {
                     calls::scalar_default(value, ty, types, source)
                 }
@@ -4581,7 +4593,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level)
-            | Intrinsic::SignalNumber(level)
+            | Intrinsic::IntConstant(level)
             | Intrinsic::AnnotationFormat(level),
         )) = self.resolve(expression)
         {
@@ -4675,6 +4687,7 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::HashAvailable, vec![]),
                     });
                 }
+                Intrinsic::InspectSentinel => return Ok(inspect::sentinel()),
                 Intrinsic::OsDevnull => {
                     return Ok(Expr {
                         ty: Type::Str,
@@ -5033,6 +5046,11 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                if let ([left, right], [op]) = (values.as_slice(), compare.ops.as_ref())
+                    && let Some(result) = inspect::equality(left, right, *op)
+                {
+                    return Ok(result);
+                }
                 if values.iter().any(|value| {
                     matches!(
                         value.ty,
@@ -5380,6 +5398,13 @@ impl<'a> Checker<'a> {
                 {
                     return self.namedtuple_class_attribute(attribute, &declaration);
                 }
+                if let Some(method) = ir::StrDescriptor::named(attribute.attr.as_str())
+                    && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
+                    && !self.names.contains_key("str")
+                    && self.resolve(&attribute.value).is_none()
+                {
+                    return Ok(inspect::descriptor(method));
+                }
                 if attribute.attr.as_str() == "join"
                     && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
                     && !self.names.contains_key("str")
@@ -5404,6 +5429,9 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
+                    return Ok(wrapped);
+                }
                 if receiver.ty == Type::BuiltinClass {
                     match attribute.attr.as_str() {
                         "__name__" | "__qualname__" => return Ok(annotations::type_name(receiver)),
@@ -5420,6 +5448,9 @@ impl<'a> Checker<'a> {
                         _ => {}
                     }
                 }
+                if let Type::StrDescriptor(method) = receiver.ty {
+                    return self.descriptor_attribute(receiver, method, attribute);
+                }
                 if let Some(definition) = self.types.namedtuple_definition(receiver.ty) {
                     return self.namedtuple_instance_attribute(attribute, receiver, definition);
                 }
@@ -5429,6 +5460,16 @@ impl<'a> Checker<'a> {
                 if let Type::NamedException(class) = receiver.ty
                     && attribute.attr.as_str() == "args"
                 {
+                    let field = self.classes.fields[class].len() - 1;
+                    if self.classes.fields[class][field] == Type::ExceptionField {
+                        return Ok(Expr {
+                            ty: Type::ExceptionField,
+                            kind: ExprKind::Field(
+                                Box::new(Self::exception_record(receiver)),
+                                field,
+                            ),
+                        });
+                    }
                     let message = Expr {
                         ty: self.types.optional(Type::Str),
                         kind: ExprKind::Field(
@@ -5674,6 +5715,19 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        if call
+            .func
+            .as_name_expr()
+            .is_some_and(|n| n.id == "object" && !self.names.contains_key("object"))
+            && self.resolve(&call.func).is_none()
+            && call.arguments.args.is_empty()
+            && call.arguments.keywords.is_empty()
+        {
+            return Ok(Expr {
+                ty: Type::PlainObject,
+                kind: ExprKind::Builtin(Builtin::NewPlainObject, vec![]),
+            });
+        }
         // A method result becomes the next receiver before its arguments are
         // evaluated. Check such chains in that order without retaining a full
         // expression and call-dispatch frame for every intermediate receiver.
@@ -5702,7 +5756,10 @@ impl<'a> Checker<'a> {
         if let Some(tuple) = self.fixed_tuple.filter(|proof| proof.at == call.range()) {
             return Ok(self.materialize_fixed_tuple(tuple));
         }
-        if let Some(value) = self.cache_control(call)? {
+        if let Some(value) = self.cache_constructor(call)? {
+            return Ok(value);
+        }
+        if let Some(value) = self.cache_control(call, receiver.as_ref())? {
             return Ok(value);
         }
         if let Some(value) = self.sys_call(call)? {
@@ -5784,6 +5841,9 @@ impl<'a> Checker<'a> {
         }
         if crate::classes::super_init(call) {
             return self.call_super_initializer(call);
+        }
+        if let Some(expr) = self.explicit_exception_initializer(call)? {
+            return Ok(expr);
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "most_common"
@@ -6094,6 +6154,12 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
                 return self.root_log(level, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::InspectIsMethodDescriptor)) => {
+                return self.is_method_descriptor(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::InspectGetattrStatic)) => {
+                return self.static_attribute(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::CsvReader)) => return self.csv_reader(call),
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
             Some(Binding::Intrinsic(Intrinsic::TimeSleep)) => {
@@ -6275,6 +6341,13 @@ impl<'a> Checker<'a> {
             return self.invoke(call, callable);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func {
+            if let Some(method) = ir::StrDescriptor::named(attribute.attr.as_str())
+                && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
+                && !self.names.contains_key("str")
+                && self.resolve(&attribute.value).is_none()
+            {
+                return self.invoke_descriptor(call, inspect::descriptor(method), method);
+            }
             if attribute.attr.as_str() == "count"
                 && let ast::Expr::Attribute(parts) = &*attribute.value
                 && parts.attr.as_str() == "parts"
@@ -7011,6 +7084,23 @@ impl<'a> Checker<'a> {
                 }
             } else {
                 text
+            });
+        }
+        if args.len() == 1
+            && matches!(args[0].ty, Type::PlainObject | Type::StrDescriptor(_))
+            && matches!(name.id.as_str(), "repr" | "str" | "print")
+        {
+            let rendered = Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::Repr, args),
+            };
+            return Ok(if name.id == "print" {
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::Print, vec![rendered]),
+                }
+            } else {
+                rendered
             });
         }
         if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
