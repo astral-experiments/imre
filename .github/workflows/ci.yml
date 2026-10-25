@@ -18,7 +18,7 @@ jobs:
     uses: $/.github/workflows/build-release-binaries.yml
 
   macos-arm64:
-    runs-on: ${{ github.repository == 'astral-sh/imre' && 'namespace-profile-macos-15' || 'macos-15' }}
+    runs-on: macos-15  # Includes Xcode 26 for the CPython 3.14 SDK; our Namespace image stops at 16.4.
     timeout-minutes: 45
     env:
       IMRE_REAL_WHEEL: .cpython-wheel-reference/Lib/ensurepip/_bundled/pip-26.1.1-py3-none-any.whl
@@ -27,6 +27,8 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
+      - name: Select the macOS SDK used for CPython compatibility
+        run: bash .github/scripts/select-macos-sdk.sh
       - run: cargo build --workspace --release --locked
       - name: Verify the standard library reference and native ledgers
         run: |
@@ -46,8 +48,10 @@ jobs:
           target/release/imre build tests/programs/control_flow.py -o "$RUNNER_TEMP/control_flow"
           lipo "$RUNNER_TEMP/control_flow" -verify_arch arm64
           python3 tests/run_suites.py --workers 3 --log-dir "$RUNNER_TEMP/imre-suites" \
-            --suites unittest_main differential io files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
+            --suites unittest_main differential io errno files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
+          cat "$RUNNER_TEMP/imre-suites/errno.log"
+          python3 tests/unittest_main.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --manifest benchmarks/cpython_stdlib/full/errno/UPSTREAM.json --upstream-source benchmarks/cpython_stdlib/full/errno/upstream/Lib/test/test_errno.py --opt-levels 3
 
       - name: Get the pinned CPython test files and bundled pip wheel
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -142,6 +146,7 @@ jobs:
         run: |
           python3 benchmarks/cpython_stdlib/test_suite_evidence.py
           python3 tests/unittest_main.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+          python3 tests/unittest_main.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --manifest benchmarks/cpython_stdlib/full/errno/UPSTREAM.json --upstream-source benchmarks/cpython_stdlib/full/errno/upstream/Lib/test/test_errno.py --clang /usr/bin/clang-18
           python3 benchmarks/cpython_stdlib/full/unittest/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-unittest.json"
           python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/unittest/reference-linux.json "$RUNNER_TEMP/cpython-unittest.json"
       - name: Compare static inspect lookups with the pinned CPython suite
@@ -312,7 +317,7 @@ jobs:
           cmp benchmarks/cpython_stdlib/full/csv/native-linux.json "$RUNNER_TEMP/test-csv.json"
       - name: Compare native suites with CPython
         run: |
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-ordinary --suites differential imports classes text containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-ordinary --suites errno differential imports classes text containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
       - name: Run original string core methods in native Imre
         run: python3 benchmarks/cpython_stdlib/full/string/native_core.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
@@ -342,7 +347,7 @@ jobs:
           python3 tests/wheel_record.py --compiler target/release/imre --runtime "target/asan/$imre_target/release/libimre_runtime.a" --clang clang-18 --sanitize --opt-levels 0
           python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-asan-o1 --suites differential imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
             -- --compiler target/release/imre --runtime "target/asan/$imre_target/release/libimre_runtime.a" --clang clang-18 --sanitize --opt-levels 1
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-asan-o0 --suites containers tuple_keys fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions files paths processes argparse_cli \
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-asan-o0 --suites errno containers tuple_keys fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions files paths processes argparse_cli \
             -- --compiler target/release/imre --runtime "target/asan/$imre_target/release/libimre_runtime.a" --clang clang-18 --sanitize --opt-levels 0
       - name: Validate the route planner against an independent oracle
         run: |

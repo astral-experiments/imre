@@ -347,6 +347,38 @@ pub type Str = compact_str::CompactString;
 /// Immutable byte storage; ABI handles own an Rc and never expose a mutable view.
 pub type Bytes = Vec<u8>;
 
+/// Return true when text contains a cased character and every cased character is uppercase.
+///
+/// # Safety
+/// The caller roots an immutable native string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_is_upper(value: *const Str) -> u32 {
+    use icu_properties::{
+        CodePointSetData,
+        props::{Cased, Uppercase},
+    };
+    // SAFETY: the caller supplies a rooted, exact UTF-8 string.
+    let text = unsafe { &*value };
+    let mut seen = false;
+    for c in text.chars() {
+        if c.is_ascii_uppercase() {
+            seen = true;
+        } else if c.is_ascii_lowercase() || c == '\u{295}' {
+            // U+0295 was lowercase in Unicode 16, uncased in newer ICU data.
+            return 0;
+        } else if !c.is_ascii()
+            && CodePointSetData::new::<Cased>().contains(c)
+            && !integer_text::newer_printable(c)
+        {
+            if !CodePointSetData::new::<Uppercase>().contains(c) {
+                return 0;
+            }
+            seen = true;
+        }
+    }
+    u32::from(seen)
+}
+
 /// LLVM's C main bypasses Rust's SIGPIPE setup. Ignore it once before publishing
 /// buffered writers, so a disconnected pipe reports an ordinary I/O error. The
 /// closed runtime has no signal API or callbacks that could change this policy.

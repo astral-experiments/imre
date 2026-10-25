@@ -26,7 +26,7 @@ pub(in crate::objects) enum Value {
 }
 
 impl Value {
-    fn object(self) -> Rc<Object> {
+    pub(in crate::objects) fn object(self) -> Rc<Object> {
         Rc::new(Object(StorageCell::new(Storage::Document(self))))
     }
     fn word(self) -> usize {
