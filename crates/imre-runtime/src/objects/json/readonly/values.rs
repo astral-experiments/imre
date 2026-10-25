@@ -30,7 +30,7 @@ impl View {
         }
         match (left, right) {
             (Node::Null, Node::Null) => true,
-            (Node::Datetime(a), Node::Datetime(b)) => a == b,
+            (Node::Datetime(a), Node::Datetime(b)) => super::super::toml::datetimes_equal(a, b),
             (Node::String(a), Node::String(b)) => a == b,
             (Node::Float(a), Node::Float(b)) => a == b,
             (Node::Integer(a), Node::Integer(b)) => a.0 == b.0 || a.big() == b.big(),
