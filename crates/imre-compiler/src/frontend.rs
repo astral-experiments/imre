@@ -49,6 +49,7 @@ mod logging_records;
 mod matching;
 mod module_values;
 mod namedtuples;
+mod namespaces;
 mod native_generators;
 mod os;
 mod partials;
@@ -3620,19 +3621,36 @@ impl<'a> Checker<'a> {
                 for target in &delete.targets {
                     if let ast::Expr::Name(name) = target
                         && let Some(&slot) = self.names.get(name.id.as_str())
-                        && matches!(self.locals[slot], Type::Cursor(_))
+                        && matches!(
+                            self.locals[slot],
+                            Type::Cursor(_) | Type::SimpleNamespace(_)
+                        )
                     {
                         if !self.assigned.contains(&slot) {
                             return Err(error(
                                 self.source,
                                 target,
-                                "iterator deletion requires a bound local",
+                                "deletion requires a bound local",
                             ));
                         }
                         self.assigned.remove(&slot);
                         self.narrowed.remove_mut(&slot);
                         statements.push(Statement::Clear(slot));
                         continue;
+                    }
+                    if let ast::Expr::Attribute(attr) = target {
+                        let receiver = self.expr(&attr.value)?;
+                        if matches!(receiver.ty, Type::SimpleNamespace(_)) {
+                            let name = self.namespace_attr_name(attr)?;
+                            statements.push(Statement::Expr(Expr {
+                                ty: Type::None,
+                                kind: ExprKind::Builtin(
+                                    Builtin::NamespaceDelete,
+                                    vec![receiver, name],
+                                ),
+                            }));
+                            continue;
+                        }
                     }
                     let ast::Expr::Subscript(target) = target else {
                         return Err(error(
@@ -5515,6 +5533,9 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::ZipFile | Type::ZipInfo) {
                     return self.zip_attribute(receiver, attribute);
                 }
+                if let Type::SimpleNamespace(id) = receiver.ty {
+                    return self.namespace_attribute(receiver, id, attribute);
+                }
                 if receiver.ty == Type::CsvReader && attribute.attr.as_str() == "line_num" {
                     return Ok(Expr {
                         ty: Type::Int,
@@ -5927,6 +5948,9 @@ impl<'a> Checker<'a> {
                 call,
                 "argument unpacking requires a source-defined function or method",
             ));
+        }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::SimpleNamespace)) {
+            return self.simple_namespace(call);
         }
         calls::reject_unpacking(call, self.source)?;
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "set")
@@ -7103,6 +7127,12 @@ impl<'a> Checker<'a> {
                 rendered
             });
         }
+        if name.id == "vars"
+            && let [receiver] = args.as_slice()
+            && let Type::SimpleNamespace(id) = receiver.ty
+        {
+            return Ok(namespaces::backing(receiver.clone(), id));
+        }
         if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
             if name.id == "repr" || (name.id == "str" && self.types.element(args[0].ty).is_some()) {
                 if !dataclass_values::can_format(args[0].ty, self.types, self.classes) {
@@ -7122,6 +7152,7 @@ impl<'a> Checker<'a> {
                     args[0].ty,
                     Type::Class(_)
                         | Type::CompletedProcess(..)
+                        | Type::SimpleNamespace(_)
                         | Type::Dict(_)
                         | Type::StringIterable
                 ) || (name.id == "print" && self.types.element(args[0].ty).is_some()))
