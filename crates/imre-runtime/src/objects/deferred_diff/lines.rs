@@ -4,10 +4,11 @@
 
 use super::super::{LineOffsets, Object, Str, Words, exceptions, owned_line};
 use super::{Deferred, View, suffix};
+use crate::StrOwner;
 use std::{cell::OnceCell, ops::Range, rc::Rc};
 
 pub(super) struct TextLines {
-    source: Rc<Str>,
+    source: StrOwner,
     rows: Vec<Range<usize>>,
     /// With only LF between retained ranges, joining with LF can copy once.
     continuous_lf: bool,
@@ -15,7 +16,7 @@ pub(super) struct TextLines {
 }
 
 impl TextLines {
-    fn new(source: Rc<Str>) -> Result<Self, exceptions::Error> {
+    fn new(source: StrOwner) -> Result<Self, exceptions::Error> {
         let mut offsets = LineOffsets::new(&source);
         let mut rows = Vec::new();
         let mut continuous_lf = true;
@@ -47,7 +48,7 @@ impl TextLines {
             result.values.extend(
                 self.rows
                     .iter()
-                    .map(|row| Rc::into_raw(owned_line(&self.source, row.clone())) as usize),
+                    .map(|row| StrOwner::into_raw(owned_line(&self.source, row.clone())) as usize),
             );
             result.update_header();
             result
@@ -74,7 +75,7 @@ impl TextLines {
             return Words::new(3);
         }
         let selection = Self {
-            source: Rc::clone(&self.source),
+            source: self.source.clone(),
             rows,
             continuous_lf: false,
             materialized: OnceCell::new(),
@@ -90,12 +91,12 @@ impl TextLines {
 
     pub(super) fn joined(&self, separator: &str) -> *const Str {
         let Some(first) = self.rows.first() else {
-            return Rc::into_raw(Rc::new(Str::default()));
+            return StrOwner::into_raw(super::super::text::owned_string(""));
         };
         let last = self.rows.last().unwrap();
         let contiguous = self.rows.len() == 1 || (separator == "\n" && self.continuous_lf);
         if contiguous && first.start == 0 && last.end == self.source.len() {
-            return Rc::into_raw(Rc::clone(&self.source));
+            return StrOwner::into_raw(self.source.clone());
         }
         let size = if contiguous {
             Some(last.end - first.start)
@@ -122,20 +123,26 @@ impl TextLines {
                 result.push_str(&self.source[row.clone()]);
             }
         }
-        Rc::into_raw(Rc::new(result))
+        StrOwner::try_new(result).map_or_else(
+            |_| {
+                exceptions::sequence_allocation_failed();
+                std::ptr::null()
+            },
+            StrOwner::into_raw,
+        )
     }
 }
 
 impl Deferred {
     /// Tiny strings already fit the ordinary inline sequence; avoid a range table.
     pub(in super::super) fn split_lines(
-        source: &Rc<Str>,
+        source: &StrOwner,
     ) -> Result<Option<*const Object>, exceptions::Error> {
         if source.len() < 1024 {
             return Ok(None);
         }
         {
-            let lines = TextLines::new(Rc::clone(source))?;
+            let lines = TextLines::new(source.clone())?;
             let words = if lines.len() <= 3 {
                 lines.ordered();
                 lines.materialized.into_inner().unwrap()

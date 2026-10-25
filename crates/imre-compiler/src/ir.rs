@@ -1774,11 +1774,33 @@ pub(crate) enum ProcessOperation {
     TimeoutField(u32),
 }
 
+/// Binary pipe handles have one static type but may own either a raw or a
+/// buffered stream. The Python class still distinguishes them after close.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum IoBase {
+    Any,
+    Raw,
+    Buffered,
+    Text,
+}
+
+impl IoBase {
+    pub(crate) fn matches(self, ty: Type) -> Option<bool> {
+        match (self, ty) {
+            (Self::Raw | Self::Buffered, Type::BinaryIO) => None,
+            (Self::Any, Type::TextIO | Type::StringIO | Type::BinaryIO)
+            | (Self::Text, Type::TextIO | Type::StringIO) => Some(true),
+            _ => Some(false),
+        }
+    }
+}
+
 /// Sealed Python runtime categories; parameterized container annotations are
 /// never runtime classes, and exception categories use their existing hierarchy.
 #[derive(Clone, Copy)]
 pub(crate) enum InstanceType {
     Exact(Type),
+    IoBase(IoBase),
     ForwardRef,
     SimpleNamespace,
     ModuleSpec,
@@ -1793,6 +1815,7 @@ pub(crate) enum InstanceType {
 impl InstanceType {
     pub(crate) fn accepts(self, ty: Type) -> bool {
         match self {
+            Self::IoBase(base) => base.matches(ty) != Some(false),
             Self::Exact(Type::CompletedProcess(..)) => matches!(ty, Type::CompletedProcess(..)),
             Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool),
             Self::Exact(Type::Str) => {

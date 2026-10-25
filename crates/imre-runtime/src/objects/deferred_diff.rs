@@ -5,6 +5,7 @@
 use super::difflib::{Output, materialize_words};
 use super::exceptions::Error;
 use super::{Object, Str, Words, object};
+use crate::StrOwner;
 use std::cell::{OnceCell, Ref, RefCell};
 use std::rc::{Rc, Weak};
 
@@ -193,7 +194,7 @@ fn filter(
             // SAFETY: retain the source string before adding it to the independent list.
             unsafe { values.kind.acquire(word) }.into_word()
         } else {
-            Rc::into_raw(Rc::new(Str::new(selected))) as usize
+            StrOwner::into_raw(StrOwner::new(Str::new(selected))) as usize
         };
         result.values.push(element);
     }

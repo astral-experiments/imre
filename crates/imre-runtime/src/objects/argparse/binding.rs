@@ -1,5 +1,6 @@
 //! Bound actions retain their converted values until the namespace takes ownership.
 
+use crate::StrOwner;
 use std::borrow::Cow;
 use std::rc::Rc;
 
@@ -132,9 +133,9 @@ impl<'a> Scalar<'a> {
                 let text = owned_text(value)?;
                 if kind == Kind::Path {
                     // SAFETY: the source remains live until Path takes an owner or normalizes it.
-                    unsafe { imre_path_new(Rc::as_ptr(&text)) as usize }
+                    unsafe { imre_path_new(StrOwner::as_ptr(&text)) as usize }
                 } else {
-                    Rc::into_raw(text) as usize
+                    StrOwner::into_raw(text) as usize
                 }
             }
         })

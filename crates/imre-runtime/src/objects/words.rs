@@ -5,6 +5,7 @@
 //! a nullable value; optional booleans use 0=None, 1=False, and 2=True.
 //! Bare float words hold all binary64 bits; nullable floats instead own an Rc<f64>.
 
+use crate::StrOwner;
 use smallvec::SmallVec;
 use std::cell::Cell;
 use std::mem::ManuallyDrop;
@@ -104,7 +105,7 @@ impl WordKind {
                         Rc::increment_strong_count(word as *const num_bigint::BigInt);
                     }
                 }
-                3 | 11 => Rc::increment_strong_count(word as *const Str),
+                3 | 11 => StrOwner::increment_strong_count(word as *const Str),
                 4 => Rc::increment_strong_count(word as *const List),
                 5 => Rc::increment_strong_count(word as *const Object),
                 6 | 12 | 13 => records::imre_record_retain(word as *const usize),
@@ -129,7 +130,7 @@ impl WordKind {
             match self.base() {
                 0 | 1 | 10 => {}
                 2 => drop(Int(word)),
-                3 | 11 => Rc::decrement_strong_count(word as *const Str),
+                3 | 11 => StrOwner::decrement_strong_count(word as *const Str),
                 4 => crate::imre_list_release(word as *const List),
                 5 => records::release_object_word(Rc::from_raw(word as *const Object)),
                 6 | 12 | 13 => records::imre_record_release(word as *const usize),
@@ -589,13 +590,13 @@ mod tests {
         };
         use super::super::{imre_seq_append, imre_seq_data_readonly};
 
-        let held = Rc::new(Str::new("rooted"));
-        let weak = Rc::downgrade(&held);
+        let held = StrOwner::new(Str::new("rooted"));
+        let weak = StrOwner::downgrade(&held);
         let input = Words::new(3).into_object();
         // SAFETY: all handles remain rooted through their last access. The
         // buffer pointer is read before either the list or a copy is changed.
         unsafe {
-            imre_seq_append(Rc::as_ptr(&input), Rc::as_ptr(&held) as usize, 3);
+            imre_seq_append(Rc::as_ptr(&input), StrOwner::as_ptr(&held) as usize, 3);
             let diff = Rc::from_raw(imre_ndiff_deferred(Rc::as_ptr(&input), Rc::as_ptr(&input)));
             let copy = Rc::from_raw(imre_str_list_copy(Rc::as_ptr(&diff)));
             drop(held);

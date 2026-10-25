@@ -2,9 +2,8 @@
 //! the original string; blank context lines and newline markers can require
 //! normalization. Parsed files and hunks retain their storage independently.
 
-use super::{
-    Error, Int, Kind, Object, Storage, StorageCell, Str, Words, acquire_rc, finish, object,
-};
+use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, Words, finish, object};
+use crate::StrOwner;
 use std::{borrow::Cow, fmt::Write, ops::Range, ptr, rc::Rc};
 
 pub(super) struct PatchSet {
@@ -13,12 +12,12 @@ pub(super) struct PatchSet {
 }
 
 pub(super) struct PatchedFile {
-    path: Rc<Str>,
+    path: StrOwner,
     hunks: Rc<Object>,
 }
 
 pub(super) struct Hunk {
-    input: Rc<Str>,
+    input: StrOwner,
     header: Str,
     source_start: Int,
     body: Range<usize>,
@@ -247,7 +246,7 @@ fn binary_paths(line: &str) -> Option<(&str, &str)> {
 
 const NO_NEWLINE: &str = "\\ No newline at end of file";
 
-fn parse(input: &Rc<Str>) -> Result<PatchSet, Error> {
+fn parse(input: &StrOwner) -> Result<PatchSet, Error> {
     let mut files: Vec<File<'_>> = Vec::new();
     let mut current: Option<usize> = None;
     let mut last_source = None;
@@ -335,7 +334,7 @@ fn parse(input: &Rc<Str>) -> Result<PatchSet, Error> {
                 .map(Int::from_usize)
                 .unwrap_or_else(|_| Int::new(source.start.parse().expect("validated decimal")));
             let mut hunk = Hunk {
-                input: Rc::clone(input),
+                input: input.clone(),
                 header: normalized_header,
                 source_start: start,
                 body: span.end..span.end,
@@ -422,7 +421,7 @@ fn parse(input: &Rc<Str>) -> Result<PatchSet, Error> {
     let mut modified = Vec::new();
     let files = sequence(files.into_iter().map(|file| {
         let is_modified = file.modified();
-        let path = Rc::new(file.path());
+        let path = StrOwner::new(file.path());
         let hunks = sequence(
             file.hunks
                 .into_iter()
@@ -442,7 +441,7 @@ fn parse(input: &Rc<Str>) -> Result<PatchSet, Error> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_patch_parse(text: *const Str) -> *const Object {
     // SAFETY: the caller roots this exact immutable string throughout acquisition.
-    let input = unsafe { acquire_rc::<Str>(text as usize) };
+    let input = unsafe { StrOwner::acquire_word(text as usize) };
     finish(
         parse(&input).map(|set| Rc::into_raw(boxed(Storage::PatchSet(set)))),
         ptr::null(),
@@ -481,15 +480,15 @@ projection!(imre_patch_hunks, PatchedFile, *const Object, |file| {
     Rc::into_raw(Rc::clone(&file.hunks))
 });
 projection!(imre_patch_path, PatchedFile, *const Str, |file| {
-    Rc::into_raw(Rc::clone(&file.path))
+    StrOwner::into_raw(file.path.clone())
 });
 projection!(imre_patch_source_start, Hunk, usize, |hunk| hunk
     .source_start
     .clone()
     .into_raw());
-projection!(imre_patch_hunk_text, Hunk, *const Str, |hunk| Rc::into_raw(
-    Rc::new(hunk.text())
-));
+projection!(imre_patch_hunk_text, Hunk, *const Str, |hunk| {
+    StrOwner::into_raw(StrOwner::new(hunk.text()))
+});
 
 /// # Safety
 /// The caller roots one of the three sealed list subclasses.

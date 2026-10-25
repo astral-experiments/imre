@@ -3,6 +3,7 @@
 use super::super::exceptions::{Result, push_string_repr, string_repr, write_string_repr};
 use super::super::json::readonly::document::Value;
 use super::{Error, Int, Kind, LOGGERS, Object, Str, finish, levels, name, object};
+use crate::StrOwner;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Write};
@@ -115,7 +116,7 @@ pub unsafe extern "C" fn imre_log_routed_emit(
     }
 }
 
-type Pairs = Vec<(Rc<Str>, Value)>;
+type Pairs = Vec<(StrOwner, Value)>;
 
 fn pairs(mapping: &Value) -> Result<Pairs> {
     match mapping {
@@ -153,7 +154,7 @@ fn display(value: Value) -> String {
     enum Part {
         Value(Value),
         Text(&'static str),
-        Key(Rc<Str>),
+        Key(StrOwner),
     }
     let mut pending = vec![Part::Value(value)];
     let mut out = String::new();
@@ -367,11 +368,11 @@ pub unsafe extern "C" fn imre_log_typed_dict_config(map: *const Object, kind: us
                         0 => Value::Null,
                         1 => Value::Bool(word != 0),
                         2 => Value::Integer((*Int::borrow(word)).clone()),
-                        3 => Value::String(super::super::acquire_rc(word)),
+                        3 => Value::String(crate::StrOwner::acquire_word(word)),
                         7 => Value::Float(f64::from_bits(word as u64)),
                         _ => unreachable!("compiler checked the configuration value kind"),
                     };
-                    (Rc::new(k.clone()), value)
+                    (StrOwner::new(k.clone()), value)
                 })
                 .collect()
         })
