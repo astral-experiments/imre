@@ -54,8 +54,37 @@ impl Sequence {
     }
 }
 
+pub(super) unsafe fn try_acquire(mode: u32, word: usize) -> Result<Rc<Object>, Error> {
+    let name = match mode {
+        8 => "NoneType",
+        9 => "int",
+        10 => "bool",
+        11 => "float",
+        12 => {
+            // A text stream is its own iterator, but iter(closed_stream) raises
+            // immediately even when the caller never requests an item.
+            // SAFETY: mode 12 denotes a rooted text stream; no user code runs here.
+            return unsafe {
+                let stream: Rc<Object> = acquire_rc(word);
+                stream
+                    .0
+                    .with_mut(|storage| storage.file_mut().ensure_open())?;
+                Ok(stream)
+            };
+        }
+        _ => {
+            // SAFETY: the caller roots the exact source denoted by the mode.
+            return Ok(unsafe { acquire(mode, word) });
+        }
+    };
+    Err(Error::new(
+        Kind::TypeError,
+        format!("'{name}' object is not iterable"),
+    ))
+}
+
 /// The compiler supplies a rooted value of the exact selected source form.
-pub(super) unsafe fn acquire(mode: u32, source: usize) -> Rc<Object> {
+unsafe fn acquire(mode: u32, source: usize) -> Rc<Object> {
     // SAFETY: all leaf constructors return one independent owner. A cursor
     // input is already an iterator, so its position and identity are shared.
     unsafe {

@@ -474,6 +474,8 @@ impl Builtin {
             | Self::CursorLengthHint
             | Self::Progression { .. }
             | Self::Tee
+            | Self::Batched
+            | Self::TupleIndex
             | Self::Islice
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter

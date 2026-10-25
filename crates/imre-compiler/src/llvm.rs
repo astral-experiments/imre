@@ -104,6 +104,7 @@ impl Type {
             | Self::JsonObject
             | Self::RegexMatch
             | Self::BinaryIO
+            | Self::VarTuple(_)
             | Self::Tuple(_) => "ptr",
             Self::None => "i8",
         }
@@ -167,6 +168,7 @@ impl Type {
             | Self::JsonObject
             | Self::RegexMatch
             | Self::BinaryIO
+            | Self::VarTuple(_)
             | Self::Tuple(_) => "null",
             Self::Bool
             | Self::None
@@ -713,9 +715,11 @@ impl Emitter<'_, '_> {
             Type::Str | Type::StrLiteral(_) | Type::BuiltinClass => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
-            Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(..) => {
-                "record"
-            }
+            Type::Class(_)
+            | Type::VarTuple(_)
+            | Type::Tuple(_)
+            | Type::Callable(_)
+            | Type::CompletedProcess(..) => "record",
             Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
@@ -3324,7 +3328,7 @@ impl Emitter<'_, '_> {
                     };
                     self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
                 }
-                Type::Tuple(_) => {
+                Type::Tuple(_) | Type::VarTuple(_) => {
                     if matches!(op, Compare::Equal | Compare::NotEqual) {
                         let equal = self.instruction(format!(
                             "call i32 @imre_record_equal(ptr {}, ptr {})",
@@ -5125,6 +5129,7 @@ impl Emitter<'_, '_> {
                         match args[0].value.ty {
                             Type::Str => "imre_str_len",
                             Type::Bytes => "imre_bytes_len",
+                            Type::VarTuple(_) => "imre_tuple_len",
                             Type::ListInt => "imre_list_len",
                             Type::List(_) => "imre_seq_len_fast",
                             Type::Dict(_) => "imre_dict_len",
@@ -5350,12 +5355,34 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::Batched => {
+                let source = &args[0].value;
+                let mode = checked_iterable_mode(source.ty);
+                let word = self.word(source);
+                let size = &args[1].value.operand;
+                let strict = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
+                let operand = self.checked_pointer(format!(
+                    "call ptr @imre_batched(i32 {mode}, i64 {word}, i64 {size}, i32 {strict})"
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
+            Builtin::TupleIndex => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_tuple_get(ptr {}, i64 {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
             Builtin::Islice | Builtin::Cycle => {
                 let source = &args[0].value;
                 let mode = iterable_mode(source.ty);
                 let word = self.word(source);
                 let operand = if args.len() == 1 {
-                    self.instruction(format!("call ptr @imre_cycle(i32 {mode}, i64 {word})"))
+                    self.checked_pointer(format!("call ptr @imre_cycle(i32 {mode}, i64 {word})"))
                 } else {
                     let start = self.word(&args[1].value);
                     let stop = self.word(&args[2].value);
@@ -5835,6 +5862,7 @@ impl Emitter<'_, '_> {
                     | Type::BinaryIO
                     | Type::CompletedProcess(..)
                     | Type::Tuple(_)
+                    | Type::VarTuple(_)
                     | Type::Optional(_)
                     | Type::Callable(_)
                     | Type::Union(_)
@@ -6084,6 +6112,7 @@ impl Emitter<'_, '_> {
             | Type::JsonObject
             | Type::RegexMatch
             | Type::CompletedProcess(..)
+            | Type::VarTuple(_)
             | Type::Tuple(_) => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
         }
     }
@@ -6161,6 +6190,7 @@ impl Emitter<'_, '_> {
             | Type::JsonObject
             | Type::RegexMatch
             | Type::CompletedProcess(..)
+            | Type::VarTuple(_)
             | Type::Tuple(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
         };
         Value {
@@ -6678,15 +6708,26 @@ fn integer_string_argument(expression: &Expr) -> Option<&Expr> {
 /// Selects a concrete iterator constructor without inspecting a dynamic Python object.
 fn iterable_mode(ty: Type) -> u32 {
     match ty {
-        Type::Cursor(_) => 0,
+        Type::Cursor(_) | Type::CsvReader => 0,
         Type::Str => 1,
         Type::Bytes => 2,
         Type::ListInt => 3,
         Type::List(_) => 4,
-        Type::Tuple(_) => 5,
+        Type::Tuple(_) | Type::VarTuple(_) => 5,
         Type::Dict(_) => 6,
         Type::Set(_) => 7,
+        Type::TextIO | Type::StringIO => 12,
         _ => unreachable!("checked iterable"),
+    }
+}
+
+fn checked_iterable_mode(ty: Type) -> u32 {
+    match ty {
+        Type::None => 8,
+        Type::Int => 9,
+        Type::Bool => 10,
+        Type::Float => 11,
+        _ => iterable_mode(ty),
     }
 }
 
@@ -6704,7 +6745,11 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Bytes => 8,
         Type::Union(_) | Type::StringIterable => 9,
         Type::ListInt => 4,
-        Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(..) => 6,
+        Type::Class(_)
+        | Type::VarTuple(_)
+        | Type::Tuple(_)
+        | Type::Callable(_)
+        | Type::CompletedProcess(..) => 6,
         Type::List(_)
         | Type::Dict(_)
         | Type::Set(_)
@@ -7486,6 +7531,9 @@ declare ptr @imre_float_count(double, i32, i64)
 declare ptr @imre_progression(i64, i64, i64)
 declare ptr @imre_tee(i32, i64, ptr)
 declare ptr @imre_islice(i32, i64, i64, i64, i64)
+declare i64 @imre_tuple_len(ptr)
+declare i64 @imre_tuple_get(ptr, i64)
+declare ptr @imre_batched(i32, i64, i64, i32)
 declare ptr @imre_cycle(i32, i64)
 declare i64 @imre_cursor_length_hint(ptr, i64)
 declare ptr @imre_repeat(i32, i64, i64)

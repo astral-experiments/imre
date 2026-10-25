@@ -22,6 +22,7 @@ enum Shape {
     Tuple(Vec<Type>),
     NamedTuple(DefinitionId, Vec<Type>),
     PartialFrame(Vec<Type>),
+    VarTuple(Type),
     Callable(Vec<Type>, Type),
     DeclaredCache(Type, usize),
     CachedCallable(CachedFunction),
@@ -105,6 +106,7 @@ impl Types {
                 storage.shapes.get(id),
                 Some(Shape::Tuple(_) | Shape::NamedTuple(..) | Shape::PartialFrame(_))
             ),
+            Type::VarTuple(id) => matches!(storage.shapes.get(id), Some(Shape::VarTuple(_))),
             Type::Callable(id) => matches!(
                 storage.shapes.get(id),
                 Some(Shape::Callable(..) | Shape::DeclaredCache(..) | Shape::CachedCallable(_))
@@ -182,7 +184,8 @@ impl Types {
         for (id, shape) in storage.shapes.iter().enumerate() {
             let children: Vec<Type> = match shape {
                 Shape::StringLiterals(_) => Vec::new(),
-                Shape::Cursor(ty)
+                Shape::VarTuple(ty)
+                | Shape::Cursor(ty)
                 | Shape::List(ty)
                 | Shape::Set(ty)
                 | Shape::Counter(ty)
@@ -205,6 +208,7 @@ impl Types {
                 self.verify_type(child, classes)?;
                 if let Type::StrLiteral(child_id)
                 | Type::Cursor(child_id)
+                | Type::VarTuple(child_id)
                 | Type::List(child_id)
                 | Type::CacheState(child_id)
                 | Type::Dict(child_id)
@@ -592,6 +596,18 @@ impl Types {
         id
     }
 
+    pub(crate) fn var_tuple(&self, element: Type) -> Type {
+        Type::VarTuple(self.intern(Shape::VarTuple(element)))
+    }
+
+    pub(crate) fn var_tuple_element(&self, ty: Type) -> Option<Type> {
+        let Type::VarTuple(id) = ty else { return None };
+        let Shape::VarTuple(element) = self.0.borrow().shapes[id] else {
+            unreachable!()
+        };
+        Some(element)
+    }
+
     pub(crate) fn cursor(&self, element: Type) -> Type {
         Type::Cursor(self.intern(Shape::Cursor(element)))
     }
@@ -923,6 +939,7 @@ impl Types {
             .or_else(|| self.payload(ty))
             .or_else(|| self.set_element(ty))
             .or_else(|| self.cursor_element(ty))
+            .or_else(|| self.var_tuple_element(ty))
         {
             vec![element]
         } else if let Some((key, value)) = self.mapping(ty) {
@@ -986,6 +1003,7 @@ impl TypeDescription<'_> {
             Type::StrLiteral(id)
             | Type::List(id)
             | Type::Cursor(id)
+            | Type::VarTuple(id)
             | Type::Tuple(id)
             | Type::Callable(id)
             | Type::Dict(id)
@@ -1015,6 +1033,11 @@ impl TypeDescription<'_> {
                 self.write_types(params, ", ")?;
                 self.write_str("], ")?;
                 self.write_type(*returns)?;
+            }
+            Shape::VarTuple(element) => {
+                self.write_str("tuple[")?;
+                self.write_type(*element)?;
+                self.write_str(", ...")?;
             }
             Shape::Cursor(element) => {
                 self.write_str("Iterator[")?;

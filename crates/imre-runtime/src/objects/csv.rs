@@ -261,7 +261,7 @@ impl Row {
 }
 
 impl Reader {
-    fn next(&mut self) -> Result<Option<Rc<Object>>> {
+    pub(super) fn next(&mut self) -> Result<Option<Rc<Object>>> {
         let mut row = Row {
             fields: Words::new(3),
             field: String::new(),

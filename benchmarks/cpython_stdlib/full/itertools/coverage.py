@@ -123,26 +123,25 @@ class OriginalSource:
         preamble += "".join(value for _, value in sorted(globals_.items()))
         reviewed = REVIEWED.get(owner + "." + method)
         equality = reviewed[0] if reviewed else EXAMPLE_TYPES.get(method) if owner == "TestExamples" else None
-        prefix = typed_case(equality) if equality else testcase_fixture()
+        prefix = equality_fixture(equality)
         fixture = preamble + prefix + "".join(self.region(h) + "\n" for h in sorted(helpers.values(), key=lambda n: n.lineno))
         return fixture, names
 
 
-def typed_case(ty):
-    # The current native TestCase has a single equality signature. These typed
-    # operands use the native recursive comparison, including unequal lengths.
-    if ty.startswith("list["):
-        check = """        if len(first) != len(second):
+def equality_fixture(ty):
+    if ty in {None, "int", "str", "list[int]", "list[str]", "list[bytes]"}:
+        return testcase_fixture()
+    if not ty.startswith("list[tuple["):
+        raise ValueError(f"unreviewed equality fixture: {ty}")
+    # The bundled assertion does not yet support lists of tuples.
+    return f"""\nclass NativeCase:
+    def assertEqual(self, first: {ty}, second: {ty}) -> None:
+        if len(first) != len(second):
             raise AssertionError("unequal lengths")
         for i in range(len(first)):
             if first[i] != second[i]:
                 raise AssertionError("unequal items")
 """
-    else:
-        check = """        if first != second:
-            raise AssertionError("unequal operands")
-"""
-    return f"\nclass NativeCase:\n    def assertEqual(self, first: {ty}, second: {ty}) -> None:\n" + check
 
 
 def private_reason(owner, method, node):
@@ -181,20 +180,20 @@ def checked_doctest(manifest, case, source_root=None):
 
 
 def batched_example(tools, directory, example):
-    """A statement-only example: the host launches native batched and compares its output."""
-    if example.options or example.exc_msg or not isinstance(ast.parse(example.source).body[0], ast.For):
-        raise ValueError("review the doctest interactive mode before compiling this changed example")
-    data = example.source.encode()
-    binary = tools.build(b"from itertools import batched\n" + data, directory)
+    """Run the pinned example and its output comparison inside the native suite."""
+    binary = tools.build(b"import doctest\nimport itertools\n"
+                         b"suite = doctest.DocTestSuite(itertools)\n"
+                         b"print(suite.countTestCases())\nfor case in suite:\n    print(case.id())\n"
+                         b"suite.debug()\nprint('checked')\n", directory)
 
     def execute(case, original):
-        run = subprocess.run([binary], capture_output=True, text=True, timeout=60)
-        if run.returncode or run.stderr or not doctest.OutputChecker().check_output(example.want, run.stdout, 0):
-            raise AssertionError(f"native batched example: {run.returncode}, {run.stdout!r}, {run.stderr!r}")
-        return {"observation": {"roles": roles(body="imre", operation="imre", assertions="cpython", fixture="mixed"),
-                "evidence": {"operation": "itertools.batched; iteration and tuple printing in Imre",
-                             "fixture": "original CPython DocTestCase hooks and OutputChecker; native import in child",
-                             "example_sha256": hashlib.sha256(data).hexdigest(), "opt_level": tools.level}}}
+        result = subprocess.run([binary], capture_output=True, text=True, timeout=60)
+        if (result.returncode, result.stdout, result.stderr) != (0, f"1\n{case.id()}\nchecked\n", ""):
+            raise AssertionError(f"native DocTestSuite: {result.returncode}, {result.stdout!r}, {result.stderr!r}")
+        return {"observation": {"roles": roles(body="imre", operation="imre", assertions="imre", fixture="mixed"),
+                "evidence": {"operation": "itertools.batched; original for loop, tuple display and doctest output comparison in Imre",
+                             "fixture": "original CPython DocTestCase setup and teardown; native DocTestSuite in child",
+                             "example_sha256": hashlib.sha256(example.source.encode()).hexdigest(), "opt_level": tools.level}}}
     return execute
 
 

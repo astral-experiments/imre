@@ -35,11 +35,11 @@ impl Checker<'_> {
             },
             ([arg], []) => {
                 let value = self.expr(arg)?;
-                self.index_word(value, arg, false)?
+                self.index_value(value, arg)?
             }
             ([], [kw]) if kw.arg.as_deref() == Some("tabsize") => {
                 let value = self.expr(&kw.value)?;
-                self.index_word(value, &kw.value, false)?
+                self.index_value(value, &kw.value)?
             }
             _ => {
                 // Signature errors precede conversion, after all source operands ran.
@@ -69,6 +69,14 @@ impl Checker<'_> {
                 vec![receiver, flag],
             ),
         })
+    }
+
+    pub(in crate::frontend) fn index_value(
+        &mut self,
+        value: Expr,
+        at: &ast::Expr,
+    ) -> Result<Expr, String> {
+        self.index_word(value, at, false)
     }
 
     /// Convert an integer or a concrete __index__ result exactly once. Python
@@ -151,6 +159,7 @@ impl Checker<'_> {
             Type::Tuple(_) if !self.types.is_partial_frame(value.ty) => {
                 record.as_ref().map_or("tuple", |r| r.name.as_str())
             }
+            Type::VarTuple(_) => "tuple",
             Type::PlainObject => "object",
             Type::Class(id) | Type::StrEnum(id) | Type::Enum(id) => {
                 self.classes.declarations.definitions[id].name.as_str()

@@ -1697,6 +1697,11 @@ fn annotation_with_aliases(
                 }
             }
             ast::Expr::Name(name) if name.id == "tuple" => {
+                if let ast::Expr::Tuple(fields) = &*value.slice
+                    && let [element, ast::Expr::EllipsisLiteral(_)] = fields.elts.as_slice()
+                {
+                    return Ok(types.var_tuple(nested(element)?));
+                }
                 let fields = if let ast::Expr::Tuple(fields) = &*value.slice {
                     fields
                         .elts
@@ -2082,6 +2087,17 @@ impl<'a> Checker<'a> {
             return Ok(Expr {
                 ty: expected,
                 kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
+            });
+        }
+        if let Some(element) = self.types.var_tuple_element(expected)
+            && self
+                .types
+                .fields(value.ty)
+                .is_some_and(|fields| fields.iter().all(|&ty| ty == element))
+        {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
             });
         }
         if let (Some(source), Some(destination)) = (
@@ -5318,7 +5334,27 @@ impl<'a> Checker<'a> {
                         && matches!((ty, right), (Type::Tuple(_), Type::Tuple(_)))
                         && self.types.fields(ty) == self.types.fields(right);
                     let paths = ty.is_path() && right.is_path();
-                    if !numeric && !records && !paths && !tuples {
+                    let variable_tuple = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
+                        && matches!(
+                            (ty, right),
+                            (Type::VarTuple(_), Type::Tuple(_) | Type::VarTuple(_))
+                                | (Type::Tuple(_), Type::VarTuple(_))
+                        )
+                        && self
+                            .types
+                            .var_tuple_element(ty)
+                            .or_else(|| self.types.var_tuple_element(right))
+                            .is_some_and(|elem| {
+                                self.types.hashable_key(elem)
+                                    && [ty, right].into_iter().all(|t| {
+                                        self.types.var_tuple_element(t) == Some(elem)
+                                            || self
+                                                .types
+                                                .fields(t)
+                                                .is_some_and(|fs| fs.iter().all(|&f| f == elem))
+                                    })
+                            });
+                    if !numeric && !records && !paths && !tuples && !variable_tuple {
                         self.expect(ty, right, expression)?;
                     }
                     let ordered = numeric
@@ -5353,6 +5389,7 @@ impl<'a> Checker<'a> {
                         || matches!(ty, Type::StringKeys | Type::Optional(_) | Type::Union(_))
                         || matches!(ty, Type::Dict(_)) && !self.types.is_counter(ty)
                         || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
+                        || matches!(ty, Type::VarTuple(_)) && !variable_tuple
                     {
                         return Err(error(
                             self.source,
@@ -5454,6 +5491,13 @@ impl<'a> Checker<'a> {
                         }
                     } else {
                         expression
+                    });
+                }
+                if let Some(element) = self.types.var_tuple_element(list.ty) {
+                    let index = self.expr_expected(&subscript.slice, Type::Int)?;
+                    return Ok(Expr {
+                        ty: element,
+                        kind: ExprKind::Builtin(Builtin::TupleIndex, vec![list, index]),
                     });
                 }
                 if let Some(fields) = self.types.fields(list.ty) {
@@ -6249,6 +6293,7 @@ impl<'a> Checker<'a> {
                 return self.sha256_constructor(call, op == Intrinsic::HashNew);
             }
             Some(Binding::Intrinsic(Intrinsic::StringIo)) => return self.string_io(call),
+            Some(Binding::Intrinsic(Intrinsic::Batched)) => return self.batched_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::BytesIo)) => {
                 let args = self.arguments(
                     call,
@@ -7356,6 +7401,7 @@ impl<'a> Checker<'a> {
                         | Type::CompletedProcess(..)
                         | Type::SimpleNamespace(_)
                         | Type::Dict(_)
+                        | Type::VarTuple(_)
                         | Type::StringIterable
                 ) || (name.id == "print" && self.types.element(args[0].ty).is_some()))
             {
@@ -7460,6 +7506,7 @@ impl<'a> Checker<'a> {
                             | Type::Set(_)
                             | Type::StringKeys
                             | Type::Tuple(_)
+                            | Type::VarTuple(_)
                     ) =>
             {
                 (Builtin::Len, Type::Int)
