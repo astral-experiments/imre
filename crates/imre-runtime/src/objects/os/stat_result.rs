@@ -189,6 +189,9 @@ pub unsafe extern "C" fn imre_stat_extra_int(result: *const usize, index: u32) -
         #[cfg(not(target_os = "macos"))]
         7 => return absent("st_gen").returning(0),
         8 => return absent("st_birthtime_ns").returning(0),
+        9 => 19 + u64::from(cfg!(target_os = "macos")) * 3,
+        10 => SEQUENCE_FIELDS as u64,
+        11 => 3,
         _ => unreachable!("unknown stat field"),
     };
     Int::from_usize(value as usize).into_raw()

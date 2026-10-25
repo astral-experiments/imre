@@ -15,7 +15,9 @@ mod contexts;
 mod copying;
 mod csv;
 mod deferred_diff;
+mod deque;
 mod difflib;
+mod errno;
 pub(crate) mod exceptions;
 mod files;
 mod fnmatch;
@@ -81,6 +83,8 @@ enum Storage {
     Plain,
     StrDescriptor(u32),
     Sequence(Words),
+    Deque(Box<deque::Deque>),
+    DequeIterator(deque::DequeIterator),
     Dictionary(mappings::TableOwner<mappings::Mapping>),
     FunctionCache(Box<mappings::FunctionCache>),
     Set(mappings::TableOwner<mappings::Set>),
@@ -93,6 +97,9 @@ enum Storage {
     ByteOutput(bytes::ByteOutput),
     SimpleNamespace(Rc<Object>),
     Sha256(Box<sha2::Sha256>),
+    NativeModule(errno::Module),
+    ModuleNamespace(Rc<errno::Registry>),
+    ModuleMember(errno::Member),
     CsvReader(Box<csv::Reader>),
     Exception(exceptions::Exception),
     ExceptionField(OwnedWord),

@@ -306,27 +306,21 @@ impl Checker<'_> {
         &self,
         receiver: Expr,
         attribute: &ast::ExprAttribute,
+        declaration: &crate::types::NamedTuple,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
-        if let Some(index) = crate::types::STAT_SEQUENCE_FIELDS
-            .iter()
-            .position(|field| *field == name)
-        {
-            if index < 7 {
-                return Ok(Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Field(Box::new(receiver), index),
-                });
-            }
-            return Ok(operation(
-                PathOperation::StatTime((index - 7) as u32),
-                Type::Float,
-                vec![receiver],
-            ));
+        if name == "__match_args__" {
+            // The three indexed timestamps are unnamed in CPython's struct sequence.
+            let positional = crate::types::NamedTuple {
+                name: declaration.name.clone(),
+                fields: declaration.fields[..7].to_vec(),
+            };
+            return self.namedtuple_instance_attribute(attribute, receiver, &positional);
         }
-        if name == "st_birthtime" {
+        let times = ["st_atime", "st_mtime", "st_ctime", "st_birthtime"];
+        if let Some(index) = times.iter().position(|field| *field == name) {
             return Ok(operation(
-                PathOperation::StatTime(3),
+                PathOperation::StatTime(index as u32),
                 Type::Float,
                 vec![receiver],
             ));
@@ -341,6 +335,9 @@ impl Checker<'_> {
             "st_flags",
             "st_gen",
             "st_birthtime_ns",
+            "n_fields",
+            "n_sequence_fields",
+            "n_unnamed_fields",
         ];
         if let Some(index) = fields.iter().position(|field| *field == name) {
             return Ok(operation(
@@ -349,11 +346,7 @@ impl Checker<'_> {
                 vec![receiver],
             ));
         }
-        Err(error(
-            self.source,
-            attribute,
-            "unknown native stat_result attribute",
-        ))
+        self.namedtuple_instance_attribute(attribute, receiver, declaration)
     }
 
     pub(super) fn path_method(

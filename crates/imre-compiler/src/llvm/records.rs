@@ -62,10 +62,7 @@ fn bytes(output: &mut String, name: &str, value: &str) {
 /// Names and field flags are shared constants. Record allocation size, field
 /// offsets, and ownership operations do not depend on generated value behavior.
 pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut String) -> String {
-    let named = module
-        .types
-        .namedtuple_definition(ty)
-        .and_then(|id| module.types.namedtuple(id));
+    let named = module.types.tuple_metadata(ty);
     let (kind, flags, class_name, qualified_name, fields) = match ty {
         Type::Class(class) => {
             let Some(metadata) = module.class_metadata.get(class) else {
@@ -105,24 +102,13 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
                 field_metadata(output, name, layout),
             )
         }
-        Type::Tuple(_) if module.types.is_stat_result(ty) => (
-            1,
-            3 | 8, // tuple behavior, with untraced stat attributes after the sequence
-            "os.stat_result",
-            "os.stat_result",
-            field_metadata(
-                output,
-                name,
-                crate::types::STAT_SEQUENCE_FIELDS
-                    .into_iter()
-                    .map(|field| (field, 3)),
-            ),
-        ),
         Type::Tuple(_) if named.is_some() => {
             let declaration = named.as_ref().unwrap();
+            // stat_result appends raw numeric attributes after the visible tuple.
+            let flags = 3 | (u32::from(module.types.is_stat_result(ty)) << 3);
             (
                 1,
-                3,
+                flags,
                 declaration.name.as_str(),
                 declaration.name.as_str(),
                 field_metadata(

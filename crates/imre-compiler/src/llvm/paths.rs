@@ -55,7 +55,7 @@ impl Emitter<'_, '_> {
                     "call i64 @imre_stat_extra_int(ptr {}, i32 {index})",
                     args[0].value.operand
                 );
-                let operand = if index >= 6 {
+                let operand = if (6..=8).contains(&index) {
                     self.checked_instruction(call)
                 } else {
                     self.instruction(call)
