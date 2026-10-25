@@ -8,7 +8,7 @@ use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
-use crate::analysis::{CheckedOverload, Session};
+use crate::analysis::{CheckedDiagnostic, Session};
 use crate::ir::PosixPathOperation;
 use crate::watch::FileSystem;
 
@@ -126,6 +126,8 @@ pub(crate) enum Intrinsic {
     LevelMap { names: bool },
     LogRecord,
     MakeLogRecord,
+    LogFormatter,
+    ClockConverter(bool),
     LogRecordFlag(u8),
     BasicConfig,
     LogLevel(i64),
@@ -160,6 +162,7 @@ pub(crate) enum Intrinsic {
     NullContext,
     SignalNumber(i64),
     WallTime,
+    TimeSleep,
     PatchSet,
     Awaitable,
     TypeVar,
@@ -362,6 +365,9 @@ impl IntrinsicModule {
             (Self::AnnotationFormat, "FORWARDREF") => Intrinsic::AnnotationFormat(3),
             (Self::AnnotationFormat, "STRING") => Intrinsic::AnnotationFormat(4),
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
+            (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
+            (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
+            (Self::Time, "localtime") => Intrinsic::ClockConverter(false),
             (Self::Logging, "LogRecord") => Intrinsic::LogRecord,
             (Self::Logging, "logThreads") => Intrinsic::LogRecordFlag(1),
             (Self::Logging, "logProcesses") => Intrinsic::LogRecordFlag(2),
@@ -390,6 +396,7 @@ impl IntrinsicModule {
             (Self::Asyncio, "Semaphore") => Intrinsic::Semaphore,
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
+            (Self::Time, "sleep") => Intrinsic::TimeSleep,
             (Self::Time, "time") => Intrinsic::WallTime,
             (Self::Signal, "SIGINT") => Intrinsic::SignalNumber(2),
             (Self::Signal, "SIGTERM") => Intrinsic::SignalNumber(15),
@@ -597,6 +604,7 @@ pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
     deferred_names: std::cell::RefCell<Vec<Vec<TextRange>>>,
+    checked_keywords: std::cell::RefCell<Vec<Vec<TextRange>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -699,6 +707,12 @@ impl SourceGraph {
             .is_none_or(|r| r.inherited_class_method(class, name))
     }
 
+    pub(crate) fn unused_literal_global(&self, definition: DefinitionId) -> bool {
+        self.reachable
+            .as_ref()
+            .is_some_and(|r| r.unused_literals.contains(&definition))
+    }
+
     pub(crate) fn includes_method(&self, module: ModuleId, method: &ast::StmtFunctionDef) -> bool {
         self.reachable
             .as_ref()
@@ -723,10 +737,18 @@ impl SourceGraph {
         self.deferred_names.borrow_mut()[module].push(name);
     }
 
+    pub(crate) fn checked_keywords(
+        &self,
+        module: ModuleId,
+        keywords: impl Iterator<Item = TextRange>,
+    ) {
+        self.checked_keywords.borrow_mut()[module].extend(keywords);
+    }
+
     /// Source ranges where the reachable profile or native lowering handles diagnostics.
     pub(crate) fn diagnostic_scopes(
         &self,
-    ) -> (Option<Vec<Vec<TextRange>>>, Vec<Vec<CheckedOverload>>) {
+    ) -> (Option<Vec<Vec<TextRange>>>, Vec<Vec<CheckedDiagnostic>>) {
         let overloads: Vec<Vec<_>> = self
             .modules
             .iter()
@@ -754,19 +776,25 @@ impl SourceGraph {
                         };
                         (self.resolve(id, &decorator.expression)
                             == Some(Binding::Intrinsic(Intrinsic::ContextManager)))
-                        .then_some(CheckedOverload::Decorator(decorator.range()))
+                        .then_some(CheckedDiagnostic::Decorator(decorator.range()))
                     })
                     .chain({
                         let mut calls = self.checked_calls.borrow()[id].clone();
                         calls.sort_unstable_by_key(|range| (range.start(), range.end()));
                         calls.dedup();
-                        calls.into_iter().map(CheckedOverload::Call)
+                        calls.into_iter().map(CheckedDiagnostic::Call)
+                    })
+                    .chain({
+                        let mut keywords = self.checked_keywords.borrow()[id].clone();
+                        keywords.sort_unstable_by_key(|range| (range.start(), range.end()));
+                        keywords.dedup();
+                        keywords.into_iter().map(CheckedDiagnostic::Keyword)
                     })
                     .chain({
                         let mut names = self.deferred_names.borrow()[id].clone();
                         names.sort_unstable_by_key(|range| (range.start(), range.end()));
                         names.dedup();
-                        names.into_iter().map(CheckedOverload::DeferredName)
+                        names.into_iter().map(CheckedDiagnostic::DeferredName)
                     })
                     .collect()
             })
@@ -1113,6 +1141,7 @@ impl<'a> Loader<'a> {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             deferred_names: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            checked_keywords: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?

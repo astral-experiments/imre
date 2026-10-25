@@ -64,6 +64,7 @@ enum Storage {
     ByteOutput(bytes::ByteOutput),
     Sha256(Box<sha2::Sha256>),
     Exception(exceptions::Exception),
+    ExceptionField(OwnedWord),
     File(Box<files::FileState>),
     ZipFile(Box<zipfile::Archive>),
     ZipInfo(Rc<zipfile::Info>),
@@ -87,6 +88,7 @@ enum Storage {
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),
     LogRecord(Box<logging::record::Record>),
+    LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
 }

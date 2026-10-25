@@ -371,7 +371,7 @@ impl Session {
     pub(crate) fn check_scopes(
         &mut self,
         skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedOverload>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
@@ -382,7 +382,7 @@ impl Session {
     fn errors(
         &self,
         skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedOverload>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         let errors: Vec<_> = self
             .files
@@ -413,25 +413,27 @@ struct CheckedFile<'db> {
     #[returns(copy)]
     file: File,
     skipped: Vec<TextRange>,
-    overloads: Vec<CheckedOverload>,
+    overloads: Vec<CheckedDiagnostic>,
 }
 
-/// The frontend validates context-manager decorators and the exact calls
-/// it lowers with a signature different from typeshed's overloads.
+/// Only exclude the exact ty diagnostic already checked by native lowering.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum CheckedOverload {
+pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
     Call(TextRange),
     DeferredName(TextRange),
+    Keyword(TextRange),
 }
 
-impl CheckedOverload {
-    fn covers(self, rule: &str, range: TextRange) -> bool {
-        match (rule, self) {
-            ("no-matching-overload", Self::Decorator(decorator)) => decorator.contains_range(range),
-            ("no-matching-overload", Self::Call(call)) => call == range,
-            ("unresolved-reference", Self::DeferredName(name)) => name == range,
-            _ => false,
+impl CheckedDiagnostic {
+    fn covers(self, diagnostic: &str, range: TextRange) -> bool {
+        match self {
+            Self::Decorator(decorator) => {
+                diagnostic == "no-matching-overload" && decorator.contains_range(range)
+            }
+            Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
+            Self::DeferredName(name) => diagnostic == "unresolved-reference" && name == range,
+            Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
         }
     }
 }
@@ -621,7 +623,7 @@ impl AnalysisCache {
         fresh: &mut Session,
         inputs: &crate::SourceInputs,
         skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedOverload>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         if let Some(cached) = &mut self.diagnostics
             && cached.same_files(fresh, inputs)
