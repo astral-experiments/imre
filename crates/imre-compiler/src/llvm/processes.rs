@@ -269,7 +269,8 @@ impl Emitter<'_, '_> {
             }
             ProcessOperation::Popen { streams }
             | ProcessOperation::Call { streams, .. }
-            | ProcessOperation::CheckOutput { streams, .. } => {
+            | ProcessOperation::CheckOutput { streams, .. }
+            | ProcessOperation::Run { streams, .. } => {
                 let cwd =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
                 let env =
@@ -317,15 +318,28 @@ impl Emitter<'_, '_> {
                     ));
                     return self.unpack_word(word, returns);
                 }
-                let operand = if let ProcessOperation::CheckOutput {
-                    validation, errors, ..
-                } = operation
-                {
-                    let timeout = &args[12].value;
-                    let kind = if timeout.ty == Type::Int { 2 } else { 7 };
-                    self.checked_instruction(format!("call ptr @imre_check_output_config(ptr {config}, i32 {kind}, i64 {}, i64 {}, i32 {validation}, i32 {errors})", timeout.operand, args[13].value.operand))
-                } else {
-                    self.checked_instruction(format!("call ptr @imre_popen_config(ptr {config})"))
+                let operand = match operation {
+                    ProcessOperation::Run {
+                        validation, errors, ..
+                    }
+                    | ProcessOperation::CheckOutput {
+                        validation, errors, ..
+                    } => {
+                        let timeout = &args[12].value;
+                        let kind = if timeout.ty == Type::Int { 2 } else { 7 };
+                        let (checked, descriptor) =
+                            if matches!(operation, ProcessOperation::Run { .. }) {
+                                let name = self
+                                    .output
+                                    .global_ref(format!("layout_{}", record_name(returns)));
+                                (args[14].value.operand.as_str(), format!("@{name}"))
+                            } else {
+                                ("true", "null".to_owned())
+                            };
+                        self.checked_instruction(format!("call ptr @imre_run_config(ptr {config}, i32 {kind}, i64 {}, i64 {}, i32 {validation}, i32 {errors}, i1 {checked}, ptr {descriptor})", timeout.operand, args[13].value.operand))
+                    }
+                    _ => self
+                        .checked_instruction(format!("call ptr @imre_popen_config(ptr {config})")),
                 };
                 self.owned(Value {
                     ty: returns,
@@ -438,32 +452,6 @@ impl Emitter<'_, '_> {
                     args[0].value.operand
                 ));
                 none()
-            }
-            ProcessOperation::Run { streams } => {
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(returns)));
-                let cwd =
-                    self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
-                let environment =
-                    self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
-                let check = self.instruction(format!("zext i1 {} to i32", args[3].value.operand));
-                let (kind, timeout) = match args.get(4) {
-                    Some(arg) => (
-                        if arg.value.ty == Type::Int { 2 } else { 7 },
-                        arg.value.operand.as_str(),
-                    ),
-                    None => (0, "0"),
-                };
-                let operand = self.checked_instruction(format!(
-                    "call ptr @imre_subprocess_run_modes(ptr {}, ptr {cwd}, ptr {environment}, i32 {check}, i32 {streams}, i32 {kind}, i64 {timeout}, ptr @{layout})",
-                    args[0].value.operand
-                ));
-                self.owned(Value {
-                    ty: returns,
-                    operand,
-                    small_integer: false,
-                })
             }
             ProcessOperation::EnvironGet if returns == Type::Str => self.call(
                 "imre_environ_get",

@@ -1351,7 +1351,10 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
-            return Ok(Type::CompletedProcess(crate::ir::ProcessCapture::TEXT));
+            return Ok(Type::CompletedProcess(
+                crate::ir::ProcessCapture::TEXT,
+                None,
+            ));
         }
         _ => {}
     }
@@ -1432,7 +1435,7 @@ fn annotation_with_aliases(
                     ));
                 }
             };
-            Ok(Type::CompletedProcess(capture))
+            Ok(Type::CompletedProcess(capture, None))
         }
         ast::Expr::Subscript(value)
             if matches!(
@@ -5434,7 +5437,7 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::Popen(..)) {
                     return self.popen_attribute(receiver, attribute);
                 }
-                if matches!(receiver.ty, Type::CompletedProcess(_)) {
+                if matches!(receiver.ty, Type::CompletedProcess(..)) {
                     return self.process_attribute(receiver, attribute);
                 }
                 if matches!(
@@ -6254,7 +6257,7 @@ impl<'a> Checker<'a> {
             if matches!(receiver.ty, Type::Popen(..)) {
                 return self.popen_method(receiver, attribute, call);
             }
-            if matches!(receiver.ty, Type::CompletedProcess(_)) {
+            if matches!(receiver.ty, Type::CompletedProcess(..)) {
                 return self.process_method(receiver, attribute, call);
             }
             if matches!(
@@ -6915,7 +6918,7 @@ impl<'a> Checker<'a> {
                 && (matches!(
                     args[0].ty,
                     Type::Class(_)
-                        | Type::CompletedProcess(_)
+                        | Type::CompletedProcess(..)
                         | Type::Dict(_)
                         | Type::StringIterable
                 ) || (name.id == "print" && self.types.element(args[0].ty).is_some()))
