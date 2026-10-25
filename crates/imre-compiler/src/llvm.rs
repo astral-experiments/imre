@@ -3868,6 +3868,44 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
+            Builtin::FunctionCacheProbe(id, capacity) => {
+                let key = self.key_word(&args[0].value);
+                Value {
+                    ty: Type::Bool,
+                    operand: self.checked_instruction(format!(
+                        "call i1 @imre_function_cache_probe(i64 {id}, i64 {key}, i64 {capacity})"
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::FunctionCacheInsert(id, capacity) => {
+                let key = self.key_word(&args[0].value);
+                let value = self.word(&args[1].value);
+                self.checked_line(format!("call void @imre_function_cache_insert(i64 {id}, i64 {key}, i64 {value}, i64 {capacity})"));
+                Value {
+                    ty: Type::None,
+                    operand: "0".into(),
+                    small_integer: false,
+                }
+            }
+            Builtin::FunctionCacheStat(id, field) => {
+                let operand = self.instruction(format!(
+                    "call i64 @imre_function_cache_stat(i64 {id}, i32 {field})"
+                ));
+                self.owned(Value {
+                    ty: Type::Int,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            Builtin::FunctionCacheClear(id) => {
+                self.line(format!("call void @imre_function_cache_clear(i64 {id})"));
+                Value {
+                    ty: Type::None,
+                    operand: "0".into(),
+                    small_integer: false,
+                }
+            }
             Builtin::HashStr => self.call("imre_string_hash", returns, &[&args[0].value]),
             Builtin::HashRecord => Value {
                 ty: Type::Int,
@@ -6179,6 +6217,10 @@ declare ptr @imre_async_semaphore(i64)
 declare void @imre_async_permit(ptr, i1 zeroext)
 declare ptr @imre_json_empty_object()
 declare ptr @imre_function_cache(i64, i32, i32)
+declare i1 @imre_function_cache_probe(i64, i64, i64)
+declare void @imre_function_cache_insert(i64, i64, i64, i64)
+declare i64 @imre_function_cache_stat(i64, i32)
+declare void @imre_function_cache_clear(i64)
 declare i64 @imre_document(i32, i64, i64, i64)
 declare i64 @imre_string_hash(ptr)
 declare void @imre_prepare_record_key(ptr)
