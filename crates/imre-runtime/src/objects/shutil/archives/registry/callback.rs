@@ -3,6 +3,7 @@
 use super::*;
 use crate::objects::{mappings, records};
 use crate::{Bytes, Int, List};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 pub(in super::super) struct Callback {
     function: OwnedWord,
@@ -11,6 +12,7 @@ pub(in super::super) struct Callback {
     metadata: OwnedWord,
     extras: OwnedWord,
     nonstring_keys: bool,
+    pub(super) root_flag: Option<&'static AtomicU8>,
 }
 
 fn type_error(message: impl Into<Str>) -> Error {
@@ -141,6 +143,7 @@ impl Callback {
                 metadata: WordKind::new(6).acquire(metadata as usize),
                 extras: WordKind::new(extras_kind & 0xffff).acquire(extras),
                 nonstring_keys: extras_kind & 0x10000 != 0,
+                root_flag: None,
             }
         }
     }
@@ -263,6 +266,11 @@ impl Callback {
             }
         }
         Ok(())
+    }
+
+    pub(in super::super) fn supports_root_dir(&self) -> bool {
+        self.root_flag
+            .is_some_and(|flag| flag.load(Ordering::Relaxed) != 0)
     }
 
     pub(in super::super) fn pack(

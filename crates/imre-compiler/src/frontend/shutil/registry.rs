@@ -33,6 +33,7 @@ impl Checker<'_> {
         }
         let func = if unpack { 2 } else { 1 };
         let mut signature = None;
+        let mut root_flag = None;
         let mut name = String::new();
         let mut module = self.module;
         let mut args = self.arguments_with(call, &params, None, |c, i, expr| {
@@ -46,6 +47,9 @@ impl Checker<'_> {
                         .name
                         .to_string();
                     module = id.module;
+                    if !unpack {
+                        root_flag = Some((id.module, id.statement));
+                    }
                     signature = Some(definition.params.clone());
                     // The runtime binds keyword-only values before calling this closed ABI.
                     for p in &mut definition.params {
@@ -207,6 +211,7 @@ impl Checker<'_> {
             Builtin::Process(ir::ProcessOperation::RegisterArchive {
                 unpack,
                 frame: layout,
+                root_flag,
             }),
             Type::None,
             args,

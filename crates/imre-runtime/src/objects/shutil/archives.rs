@@ -126,14 +126,19 @@ fn make(base: &str, format: &str, options: MakeOptions<'_>) -> Result<Option<Rc<
     if let registry::Handler::Custom(callback) = handler {
         let mut saved = None;
         let mut base = Rc::new(Str::from(base));
+        let mut callback_root = None;
         if let Some(root) = &root {
-            let cwd = std::env::current_dir().map_err(errno_error)?;
-            base = Rc::new(normalized(&base, Some(&cwd))?);
-            if !dry_run {
-                std::env::set_current_dir(root.text.as_str())
-                    .map_err(|e| path_error(e, Path::new(root.text.as_str())))?;
+            if callback.supports_root_dir() {
+                callback_root = Some(root.text.clone());
+            } else {
+                let cwd = std::env::current_dir().map_err(errno_error)?;
+                base = Rc::new(normalized(&base, Some(&cwd))?);
+                if !dry_run {
+                    std::env::set_current_dir(root.text.as_str())
+                        .map_err(|e| path_error(e, Path::new(root.text.as_str())))?;
+                }
+                saved = Some(cwd);
             }
-            saved = Some(cwd);
         }
         let result = callback.pack(
             base,
@@ -141,7 +146,7 @@ fn make(base: &str, format: &str, options: MakeOptions<'_>) -> Result<Option<Rc<
             dry,
             owner,
             group,
-            None,
+            callback_root,
         );
         // Restore even on the dry path and while a callback exception is pending.
         if let Some(cwd) = saved {

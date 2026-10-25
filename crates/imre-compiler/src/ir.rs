@@ -1513,9 +1513,12 @@ pub(crate) enum ProcessOperation {
         row: Type,
     },
     UnregisterArchive(bool),
+    /// The module and statement identify a single source-level function object.
+    SetArchiveRoot((usize, usize)),
     RegisterArchive {
         unpack: bool,
         frame: Option<Type>,
+        root_flag: Option<(usize, usize)>,
     },
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.

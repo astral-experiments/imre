@@ -272,6 +272,7 @@ impl Builtin {
                 | ProcessOperation::UnpackArchive
                 | ProcessOperation::ArchiveFormats { .. }
                 | ProcessOperation::UnregisterArchive(_)
+                | ProcessOperation::SetArchiveRoot(_)
                 | ProcessOperation::RegisterArchive { .. }
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView

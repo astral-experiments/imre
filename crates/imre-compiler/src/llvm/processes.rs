@@ -15,6 +15,13 @@ fn shutil_tag(ty: Type) -> u32 {
 }
 
 impl Emitter<'_, '_> {
+    /// A declaration and all its registrations refer to the same live flag across codegen units.
+    fn archive_root_ref(&mut self, (module, statement): (usize, usize)) -> String {
+        let name = format!("archive_root_{module}_{statement}");
+        self.archive_root_flags.insert(name.clone());
+        self.output.global_ref(name)
+    }
+
     /// Keep the callee, bound context, return ownership, and parameter ABI together.
     fn shutil_copier(&mut self, copy: &Operand) -> (String, String, String, u32, u32) {
         if copy.value.ty == Type::Str {
@@ -572,7 +579,19 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
-            ProcessOperation::RegisterArchive { unpack, frame } => {
+            ProcessOperation::SetArchiveRoot(id) => {
+                let flag = self.archive_root_ref(id);
+                let value = self.instruction(format!("zext i1 {} to i8", args[0].value.operand));
+                self.line(format!(
+                    "store atomic i8 {value}, ptr @{flag} monotonic, align 1"
+                ));
+                none()
+            }
+            ProcessOperation::RegisterArchive {
+                unpack,
+                frame,
+                root_flag,
+            } => {
                 let [name, exts, function, extras, description, adapter, metadata] = args else {
                     unreachable!()
                 };
@@ -609,7 +628,11 @@ impl Emitter<'_, '_> {
                     let func = &args[2].value;
                     let func_kind = representation_kind(func.ty, &self.module.types);
                     let func_word = self.word(func);
-                    self.checked_line(format!("call void @imre_shutil_register_pack(ptr {}, i64 {func_word}, i32 {func_kind}, i64 {word}, i32 {kind}, ptr {}, ptr {target}, ptr {layout}, ptr {metadata})",name.value.operand,description.value.operand));
+                    let root = root_flag.map_or_else(
+                        || "null".to_owned(),
+                        |id| format!("@{}", self.archive_root_ref(id)),
+                    );
+                    self.checked_line(format!("call void @imre_shutil_register_pack(ptr {}, i64 {func_word}, i32 {func_kind}, i64 {word}, i32 {kind}, ptr {}, ptr {target}, ptr {layout}, ptr {metadata}, ptr {root})",name.value.operand,description.value.operand));
                 }
                 none()
             }

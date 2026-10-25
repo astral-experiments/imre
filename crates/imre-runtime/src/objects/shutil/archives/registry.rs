@@ -201,6 +201,7 @@ fn replace(entries: &mut Vec<Entry>, entry: Entry) -> Result<()> {
 /// # Safety
 /// The compiler roots the arguments, and pairs each packing adapter with its callable,
 /// frame layout and metadata. A null adapter denotes an evaluated non-callable.
+/// A non-null root flag points to the function's static atomic byte.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_shutil_register_pack(
     name: *const Str,
@@ -212,6 +213,7 @@ pub unsafe extern "C" fn imre_shutil_register_pack(
     adapter: *const (),
     frame: *const RecordDescriptor,
     metadata: *const usize,
+    root_flag: *const std::sync::atomic::AtomicU8,
 ) {
     let result = REGISTRY.with_borrow_mut(|registry| -> Result<()> {
         if adapter.is_null() {
@@ -234,7 +236,7 @@ pub unsafe extern "C" fn imre_shutil_register_pack(
             ));
         }
         // SAFETY: the typed adapter and frame are static; the callback acquires all live records.
-        let callback = unsafe {
+        let mut callback = unsafe {
             Callback::new(
                 function as *const usize,
                 adapter,
@@ -244,6 +246,8 @@ pub unsafe extern "C" fn imre_shutil_register_pack(
                 extras_kind,
             )
         };
+        // SAFETY: this flag, when present, lives for the entire native program.
+        callback.root_flag = unsafe { root_flag.as_ref() };
         callback.check_pack_extras()?;
         let entry = Entry {
             // SAFETY: both strings are rooted by the caller.
