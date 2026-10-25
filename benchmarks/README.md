@@ -2,6 +2,13 @@
 
 The [Rust, CPython and Imre comparison](runtime-suite.md) covers six workloads with checked outputs, raw samples and a command to reproduce the tables and chart.
 
+## Packed value structs
+
+[Packed struct lists vs frozen dataclasses](results/2026-10-25-struct-points.md) measures
+construction, repeated scans, and peak process memory on Imre and CPython. It includes
+both independently constructed points and a list created by repeating one point.
+The [harness](struct_points.py) checks every sample against an independent checksum.
+
 ## Route planner
 
 The example computes shortest routes across weighted grids using Dijkstra's algorithm and its own binary heap. CPython and Imre execute the same `examples/route_planner.py` source, receive the same input, and must produce exactly the same output. The compiler generates LLVM IR and links a native executable against the independent Rust runtime. There is no rewritten native kernel or CPython interpreter inside that executable.
