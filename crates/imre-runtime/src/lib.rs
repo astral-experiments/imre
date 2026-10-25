@@ -379,7 +379,7 @@ struct Output<W = RawStdout> {
 }
 
 struct BinaryOutput<W> {
-    stdout: W,
+    inner: W,
     buffer: Vec<u8>,
     written: usize,
 }
@@ -430,7 +430,7 @@ impl<W: Write> Output<W> {
         let _ = buffer.try_reserve_exact(capacity);
         Self {
             raw: BinaryOutput {
-                stdout: stream,
+                inner: stream,
                 buffer,
                 written: 0,
             },
@@ -469,13 +469,22 @@ impl<W: Write> Write for Output<W> {
 }
 
 impl<W: Write> BinaryOutput<W> {
+    /// Buffer writes to a file or pipe up to its configured binary capacity.
+    fn with_capacity(capacity: usize, inner: W) -> Self {
+        Self {
+            inner,
+            buffer: Vec::with_capacity(capacity),
+            written: 0,
+        }
+    }
+
     #[cold]
     fn write_all_slow(&mut self, mut bytes: &[u8]) -> io::Result<()> {
         if let Err(error) = self.flush_buffer() {
             return self.buffer_after_error(bytes, error);
         }
         while !bytes.is_empty() && bytes.len() >= self.buffer.capacity() {
-            match self.stdout.write(bytes) {
+            match self.inner.write(bytes) {
                 Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
                 Ok(count) => bytes = &bytes[count..],
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
@@ -504,7 +513,7 @@ impl<W: Write> BinaryOutput<W> {
 
     fn flush_buffer(&mut self) -> io::Result<()> {
         while self.written < self.buffer.len() {
-            match self.stdout.write(&self.buffer[self.written..]) {
+            match self.inner.write(&self.buffer[self.written..]) {
                 Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
                 Ok(count) => self.written += count,
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
@@ -523,7 +532,7 @@ impl<W: Write> Write for BinaryOutput<W> {
             self.flush_buffer()?;
         }
         if bytes.len() >= self.buffer.capacity() {
-            return self.stdout.write(bytes);
+            return self.inner.write(bytes);
         }
         self.buffer.extend_from_slice(bytes);
         Ok(bytes.len())
@@ -542,7 +551,7 @@ impl<W: Write> Write for BinaryOutput<W> {
 
     fn flush(&mut self) -> io::Result<()> {
         self.flush_buffer()?;
-        self.stdout.flush()
+        self.inner.flush()
     }
 }
 
@@ -569,8 +578,8 @@ fn write_output(write: impl FnOnce(&mut Output) -> io::Result<()>) -> io::Result
 
 /// Handles write failures only after releasing the writer lock.
 fn output(write: impl FnOnce(&mut Output) -> io::Result<()>) {
-    if write_output(write).is_err() {
-        Error::new(Kind::OSError, "could not write standard output").raise();
+    if let Err(error) = write_output(write) {
+        objects::errno_error(error).raise();
     }
 }
 
@@ -582,8 +591,8 @@ fn output(write: impl FnOnce(&mut Output) -> io::Result<()>) {
 pub unsafe extern "C" fn imre_stderr_line(text: *const Str) {
     // SAFETY: the caller owns the text for this call.
     let text = unsafe { &*text };
-    if sys::write_stderr(text, true).is_err() {
-        Error::new(Kind::OSError, "could not write standard error").raise();
+    if let Err(error) = sys::write_stderr(text, true) {
+        objects::errno_error(error).raise();
     }
 }
 
@@ -1078,31 +1087,52 @@ pub unsafe extern "C" fn imre_list_release(value: *const List) {
 
 /// Converts an index before a storage borrow, without truncating large integers.
 #[inline]
-fn decode_index(value: &Int) -> Result<isize> {
-    if let Some(raw) = value
-        .as_small()
-        .and_then(|value| isize::try_from(value).ok())
-    {
-        Ok(raw)
+fn signed_index(value: &Int) -> Option<isize> {
+    if let Some(raw) = value.as_small().and_then(|n| isize::try_from(n).ok()) {
+        Some(raw)
     } else {
-        big_index(&value.big()).ok_or_else(Error::index)
+        big_index(&value.big())
     }
 }
 
-/// Normalizes negative indices and rejects out-of-bounds accesses.
-// Expose the bounds check to get/set so LLVM can remove their redundant checks.
+fn decode_index(value: &Int) -> Result<isize> {
+    signed_index(value).ok_or_else(Error::index)
+}
+
 #[inline]
-fn index(raw: isize, length: usize) -> Result<usize> {
-    let normalized = if raw < 0 {
-        // An underflow wraps above `length`, so the same bounds check rejects it.
+fn normalized_index(raw: isize, length: usize) -> Option<usize> {
+    // An underflow wraps above length, so the same bounds check rejects it.
+    let at = if raw < 0 {
         length.wrapping_add_signed(raw)
     } else {
         raw as usize
     };
-    if normalized >= length {
-        return Err(Error::index());
-    }
-    Ok(normalized)
+    (at < length).then_some(at)
+}
+
+/// Normalizes negative list indices and rejects out-of-bounds accesses.
+#[inline]
+fn index(raw: isize, length: usize) -> Result<usize> {
+    normalized_index(raw, length).ok_or_else(Error::index)
+}
+
+/// Returns a bounded fixed-tuple field offset, or sets IndexError before the load.
+///
+/// # Safety
+/// The caller roots the exact integer and supplies the tuple's real length.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_tuple_index(word: usize, length: usize) -> usize {
+    // SAFETY: the generated call preserves the exact integer for this conversion.
+    let value = unsafe { Int::borrow(word) };
+    let Some(raw) = signed_index(&value) else {
+        return Error::new(
+            Kind::IndexError,
+            "cannot fit 'int' into an index-sized integer",
+        )
+        .returning(0);
+    };
+    normalized_index(raw, length)
+        .unwrap_or_else(|| Error::new(Kind::IndexError, "tuple index out of range").returning(0))
 }
 
 /// Keeps arbitrary-precision conversion out of the common indexed-access path.
@@ -1374,6 +1404,28 @@ pub unsafe extern "C" fn imre_list_append_pair(
 /// Returns an owned nonzero integer word, or raw zero with a pending error.
 ///
 /// # Safety
+/// The caller roots the exact integer returned by a Python length slot.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_length_result(value: usize) -> usize {
+    // SAFETY: this is the nonzero tagged result of the user's __len__ method.
+    let n = unsafe { Int::borrow(value) };
+    let negative = n
+        .as_small()
+        .map_or_else(|| n.big().sign() == num_bigint::Sign::Minus, |i| i < 0);
+    if negative {
+        return Error::new(Kind::ValueError, "__len__() should return >= 0").returning(0);
+    }
+    if decode_index(&n).is_err() {
+        return Error::new(
+            Kind::OverflowError,
+            "cannot fit 'int' into an index-sized integer",
+        )
+        .returning(0);
+    }
+    (*n).clone().into_raw()
+}
+
+/// # Safety
 /// The argument must be a live list handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_list_pop(list: *const List) -> usize {
@@ -1635,17 +1687,13 @@ mod tests {
     #[test]
     fn output_works_with_and_without_a_reserved_buffer() {
         for capacity in [0, 8] {
-            let mut output = BinaryOutput {
-                stdout: Vec::new(),
-                buffer: Vec::with_capacity(capacity),
-                written: 0,
-            };
+            let mut output = BinaryOutput::with_capacity(capacity, Vec::new());
             output.write_all(b"abc").unwrap();
-            assert_eq!(output.stdout.is_empty(), capacity != 0);
+            assert_eq!(output.inner.is_empty(), capacity != 0);
             output.write_all(b"0123456789").unwrap();
             output.write_all(b"z").unwrap();
             output.flush().unwrap();
-            assert_eq!(output.stdout, b"abc0123456789z");
+            assert_eq!(output.inner, b"abc0123456789z");
         }
     }
 
@@ -1658,13 +1706,13 @@ mod tests {
         output.captures.push(Vec::new());
         assert_eq!(output.write(b"inner").unwrap(), 5);
         output.flush().unwrap();
-        assert!(output.raw.stdout.is_empty());
+        assert!(output.raw.inner.is_empty());
         assert_eq!(output.captures.pop().unwrap(), b"inner");
         output.write_all(b"example").unwrap();
         assert_eq!(output.captures.pop().unwrap(), b"outer example");
         output.write_all(b"after").unwrap();
         output.flush().unwrap();
-        assert_eq!(output.raw.stdout, b"before after");
+        assert_eq!(output.raw.inner, b"before after");
     }
 
     #[test]
@@ -1690,18 +1738,14 @@ mod tests {
             }
         }
 
-        let mut output = BinaryOutput {
-            stdout: Sink::default(),
-            buffer: Vec::with_capacity(16),
-            written: 0,
-        };
+        let mut output = BinaryOutput::with_capacity(16, Sink::default());
         output.write_all(b"partial").unwrap();
         assert_eq!(
             output.flush().unwrap_err().kind(),
             io::ErrorKind::BrokenPipe
         );
         output.flush().unwrap();
-        assert_eq!(output.stdout.bytes, b"partial");
+        assert_eq!(output.inner.bytes, b"partial");
     }
 
     #[test]
@@ -1729,11 +1773,7 @@ mod tests {
         ] {
             let mut pipe = [0; 2];
             let mut restored = [0; 4];
-            let mut output = BinaryOutput {
-                stdout: Pipe(&mut pipe),
-                buffer: Vec::with_capacity(4),
-                written: 0,
-            };
+            let mut output = BinaryOutput::with_capacity(4, Pipe(&mut pipe));
             output.write_all(prefix.as_bytes()).unwrap();
             let result = output.write_all(next.as_bytes()).map_err(|e| e.kind());
             assert_eq!(
@@ -1744,7 +1784,7 @@ mod tests {
                     Err(io::ErrorKind::WouldBlock)
                 }
             );
-            output.stdout = Pipe(&mut restored);
+            output.inner = Pipe(&mut restored);
             output.flush().unwrap();
             assert_eq!(&pipe, b"ab");
             assert_eq!(&restored, b"cdef");
