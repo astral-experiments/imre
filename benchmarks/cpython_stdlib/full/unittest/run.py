@@ -27,7 +27,7 @@ ASSERTIONS = {
 # precise source diagnostic in the report; a different failure stops the gate.
 EQUALITY_BLOCKERS = {
     "testAssertMultiLineEqualTruncates": (1016, "6:34: Imre: too many positional arguments"),
-    "testAssertEqual_diffThreshold": (1029, "7:47: Imre: unsupported numeric operator"),
+    "testAssertEqual_diffThreshold": (1036, "14:9: Imre: unknown class method"),
     "testAssertEqual_shorten": (1067, "9:9: Imre: unknown class method"),
 }
 
@@ -85,7 +85,7 @@ def run(args, level, root):
     if (reference["module"], reference["cpython_commit"]) != (manifest["module"], manifest["commit"]):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level)
-    families = dict.fromkeys(["protocol", "import", *args.exception_family])
+    families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
     for name in ["equality_protocol", *("context_" + family for family in families)]:
         control = root / name
         control.mkdir()
@@ -163,7 +163,7 @@ def main():
         parser.add_argument("--" + option, type=Path, required=True)
     parser.add_argument("--cpython-source", type=Path)
     parser.add_argument("--exception-family", action="append", choices=("csv", "import"), default=[],
-                        help="also require a sibling exception family's differential control at both levels")
+                        help="explicitly require a family control (csv and import are checked by default)")
     args = parser.parse_args()
     if sys.version_info[:3] != (3, 14, 5):
         parser.error("run with test-enabled CPython 3.14.5")

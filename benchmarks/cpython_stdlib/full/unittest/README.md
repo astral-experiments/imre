@@ -65,8 +65,8 @@ all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
 
 Three additional complete equality methods are attempted at each level.
 `testAssertMultiLineEqualTruncates` constructs a TestCase with a method name;
-`testAssertEqual_diffThreshold` uses exponentiation; `testAssertEqual_shorten`
-registers a cleanup. Each record retains the original passing reference,
+`testAssertEqual_diffThreshold` and `testAssertEqual_shorten` both reach
+`addCleanup`. Each record retains the original passing reference,
 the native diagnostic, source line, and method hash.
 
 The [context control](context_protocol.py) compares caught errors, stored managers, argument order and early exits with CPython at both levels. It adds no upstream IDs.
@@ -77,7 +77,6 @@ The [context control](context_protocol.py) compares caught errors, stored manage
 both optimization levels. It exercises nested mismatched handlers and the
 identity of the original caught object for LookupError, NameError,
 UnicodeEncodeError and shutil's OSError subclasses. The default gate also checks
-the identity, name and path of [structured import errors](https://github.com/astral-sh/imre/pull/590).
-On a build that includes [native CSV](https://github.com/astral-sh/imre/pull/468),
-add `--exception-family csv` to exercise csv.Error against unrelated handlers.
+the identity, name and path of [structured import errors](https://github.com/astral-sh/imre/pull/590)
+and [csv.Error](https://github.com/astral-sh/imre/pull/468) against unrelated handlers.
 These controls must compile, run, and match the reference; they contribute no upstream IDs.
