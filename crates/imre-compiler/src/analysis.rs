@@ -121,6 +121,17 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
+        // typeshed omits inspect's private default; preserve all its public signatures.
+        let inspect = vendored
+            .read_to_string("stdlib/inspect.pyi")
+            .map_err(|e| e.to_string())?;
+        system
+            .fs()
+            .write_file_all(
+                SystemPathBuf::from(root).join("inspect.pyi"),
+                format!("{inspect}\n_sentinel: object\n"),
+            )
+            .map_err(|e| e.to_string())?;
         // Popen tests and programs pass shell=0/1. Preserve all of typeshed's
         // overloads while admitting the integer truth values CPython accepts.
         let subprocess = vendored
@@ -419,6 +430,25 @@ impl Session {
             ty.is_assignable_to(&self.db, &env, instance)
         })
         .map(|(_, ty)| ty)
+    }
+
+    /// Compare an argv expression to the canonical built-in list[str] instance,
+    /// as declared for sys.argv in ty's vendored standard library. Equality
+    /// (not assignability) rules out Any and lists with a different field ABI.
+    pub(crate) fn is_string_list(&self, module: usize, value: &Expr) -> bool {
+        self.used_hints.set(true);
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        let Some(actual) = value.inferred_type(&model) else {
+            return false;
+        };
+        let Ok(sys) = ruff_db::files::vendored_path_to_file(&self.db, "stdlib/sys/__init__.pyi")
+        else {
+            return false;
+        };
+        let sys_model = SemanticModel::new(&self.db, self.db.program_file(sys));
+        self.parsed(sys).syntax().body.iter().any(|stmt| {
+            matches!(stmt, Stmt::AnnAssign(a) if a.target.as_name_expr().is_some_and(|name| name.id == "argv") && a.target.inferred_type(&sys_model) == Some(actual))
+        })
     }
 
     pub(crate) fn is_never(&self, module: usize, value: &ruff_python_ast::Expr) -> bool {
