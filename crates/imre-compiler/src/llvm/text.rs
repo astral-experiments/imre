@@ -47,6 +47,9 @@ impl Emitter<'_, '_> {
     ) -> Value {
         let source = &args[0].value.operand;
         let operand = match operation {
+            TextOperation::Lower => {
+                self.checked_instruction(format!("call ptr @imre_str_lower(ptr {source})"))
+            }
             TextOperation::Split(reverse) => {
                 let separator =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
