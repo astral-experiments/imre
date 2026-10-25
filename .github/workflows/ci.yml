@@ -9,7 +9,7 @@ on:
       audit:
         description: Source of the requested per-occurrence results
         type: choice
-        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace, percent-scalar]
+        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace, percent-scalar, record-attributes]
         required: true
 permissions:
   contents: read
@@ -153,6 +153,16 @@ jobs:
                 cargo test --locked -p imre-runtime --lib -j 2 only_the_outermost_release_unblocks_another_thread
               fi
               PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/null_handler.py "${tools[@]}" --result "$results/null-handler.json"
+              ;;
+            record-attributes)
+              fixture=tests/fixtures/files/logging_record_attributes.py
+              python3 -I -B "$fixture" > "$results/attributes-reference.txt"
+              for opt in 0 3; do
+                "$imre" build "$fixture" --no-cache --opt-level "$opt" --runtime "$runtime" --clang /usr/bin/clang-18 -o "$RUNNER_TEMP/record-attributes"
+                "$RUNNER_TEMP/record-attributes" > "$results/attributes-O$opt.txt"
+                diff -u "$results/attributes-reference.txt" "$results/attributes-O$opt.txt"
+              done
+              python3 -B tests/files.py "${ordinary[@]}"
               ;;
             list-clear)
               python3 -B tests/primitives.py "${ordinary[@]}"
