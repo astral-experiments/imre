@@ -3805,7 +3805,24 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::Text(operation) => self.text_builtin(*operation, &args, returns),
-            Builtin::RegexCompile(pattern) => self.pooled_literal(pattern.as_bytes(), returns),
+            Builtin::RegexCompile { source, spelling } => {
+                // Distinct Python spellings may compile to the same engine pattern.
+                // A non-UTF-8 prefix separates this record from legacy UTF-8 literals.
+                let mut bytes = vec![0xff];
+                bytes.extend_from_slice(&(spelling.len() as u64).to_le_bytes());
+                bytes.extend_from_slice(spelling.as_bytes());
+                bytes.extend_from_slice(source.as_bytes());
+                self.pooled_literal(&bytes, returns)
+            }
+            Builtin::RegexSpelling => self.call("imre_regex_spelling", returns, &[&args[0].value]),
+            Builtin::UnittestCompilePattern => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @imre_unittest_compile_pattern(ptr {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
             Builtin::Timed(operation) => {
                 use crate::ir::TimedOperation::*;
                 let name = match operation {
@@ -7331,6 +7348,10 @@ declare ptr @imre_union_path_text(i64)
 declare ptr @imre_sysconfig_scripts()
 declare i32 @imre_path_text_exists(ptr)
 declare ptr @imre_path_info(ptr)
+declare ptr @imre_path_stat(ptr, i32, i32, ptr)
+declare void @imre_path_check_stat(ptr)
+declare double @imre_stat_time(ptr, i32)
+declare i64 @imre_stat_extra_int(ptr, i32)
 declare ptr @imre_path_info_repr(ptr)
 declare i32 @imre_path_query(ptr, i32, i32)
 declare i32 @imre_path_match(ptr, ptr, i64, i32)
@@ -7755,6 +7776,8 @@ declare void @imre_print_bool(i32)
 declare void @imre_print_none()
 declare ptr @imre_str_static_literal(ptr, i64)
 declare ptr @imre_regex_compile(ptr, i64)
+declare ptr @imre_regex_spelling(ptr)
+declare ptr @imre_unittest_compile_pattern(ptr)
 declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_match(ptr, ptr)

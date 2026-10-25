@@ -1005,10 +1005,13 @@ impl Checker<'_> {
         {
             return Ok(checked);
         }
-        if attribute.attr.as_str() == "assertRaises"
-            && !self.classes.methods[class].contains_key("assertRaises")
+        if matches!(
+            attribute.attr.as_str(),
+            "assertRaises" | "assertRaisesRegex"
+        ) && !self.classes.methods[class].contains_key(attribute.attr.as_str())
             && let Some(receiver) = &receiver
-            && let Some(context) = self.unittest_assert_raises(call, class, receiver)?
+            && let Some(context) =
+                self.unittest_assert_raises(call, class, receiver, attribute.attr.as_str())?
         {
             return Ok(context);
         }
