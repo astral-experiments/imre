@@ -39,6 +39,7 @@ sha2 = { version = "=0.11.1", default-features = false }
 unicode-case-mapping = "=1.0.0"
 
 [build-dependencies]
+regex-syntax.workspace = true
 cc = "=1.7.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
