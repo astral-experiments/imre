@@ -1,8 +1,9 @@
 //! Owning, type-erased views of native Python scalars, sequences, and eligible dataclasses.
 use super::exceptions::Error;
 use super::words::WordKind;
-use super::{Bytes, Object, Storage, StorageCell, Str, acquire_rc, object, records, values};
+use super::{Bytes, Object, Storage, StorageCell, Str, object, records, values};
 use crate::Int;
+use crate::StrOwner;
 use std::rc::Rc;
 
 // A tuple may store an optional scalar in its nullable representation. Views
@@ -46,17 +47,17 @@ pub(super) unsafe fn tuple_item(tuple: usize, index: usize) -> (WordKind, usize)
     }
 }
 
-pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rc<Str> {
+pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> StrOwner {
     if kind.raw() == 3 && !repr {
         // SAFETY: the owning field roots the exact string.
-        return unsafe { acquire_rc(word) };
+        return unsafe { crate::StrOwner::acquire_word(word) };
     }
     let mut result = String::new();
     // SAFETY: only concrete, representable field types reach this routine.
     unsafe {
         values::write_checked_repr(&mut result, word, kind);
     }
-    Rc::new(result.into())
+    StrOwner::new(result.into())
 }
 
 /// Transfer the formatted string only after all visited fields and callbacks succeed.
@@ -74,7 +75,7 @@ pub(super) unsafe fn checked_text(kind: WordKind, word: usize, repr: bool) -> *c
         }
         let text = word_text(kind, word, repr);
         if super::exceptions::imre_error_pending() == 0 {
-            Rc::into_raw(text)
+            StrOwner::into_raw(text)
         } else {
             std::ptr::null()
         }

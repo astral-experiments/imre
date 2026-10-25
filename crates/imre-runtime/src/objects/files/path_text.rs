@@ -1,9 +1,10 @@
 //! Whole-file text conversion uses the same descriptor, buffering, and close path as binary I/O.
 
+use crate::StrOwner;
 use std::borrow::Cow;
 
 use super::super::bytes::{ascii_decode_error, decode_error, owned_input};
-use super::{Error, Int, Kind, Object, Rc, Result, Str, finish, object, with_path_file};
+use super::{Error, Int, Kind, Object, Result, Str, finish, object, with_path_file};
 
 #[derive(Clone, Copy)]
 enum Codec {
@@ -161,9 +162,9 @@ impl Codec {
                     };
                     let owner = if text == original.as_str() {
                         // SAFETY: the path writer roots its original native string throughout encoding.
-                        unsafe { super::super::acquire_rc(original as *const Str as usize) }
+                        unsafe { StrOwner::acquire_word(original as *const Str as usize) }
                     } else {
-                        Rc::new(Str::from(text))
+                        StrOwner::new(Str::from(text))
                     };
                     let reason = format!("ordinal not in range({limit})");
                     return Err(Error::unicode_encode(
@@ -344,7 +345,7 @@ pub unsafe extern "C" fn imre_path_read_text_options(
             .with(|storage| read(storage.path(), encoding, errors, newline))
     };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(text))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(text))),
         std::ptr::null(),
     )
 }

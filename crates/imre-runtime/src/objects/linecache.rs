@@ -1,5 +1,6 @@
 //! Filesystem-backed source lines, using the same dictionary, tuple and list
 //! objects exposed to Python. Cache mutation and list aliases stay observable.
+use crate::StrOwner;
 mod source;
 
 use std::cell::{Cell, RefCell};
@@ -79,11 +80,16 @@ fn stamp(meta: &fs::Metadata) -> Option<(u64, f64)> {
 
 struct SourceFile {
     path: PathBuf,
-    original: Option<Rc<Str>>,
+    original: Option<StrOwner>,
     stamp: (u64, f64),
 }
 
-fn stat(filename: &Rc<Str>, globals: Option<&Object>, root: &str, env: bool) -> Option<SourceFile> {
+fn stat(
+    filename: &StrOwner,
+    globals: Option<&Object>,
+    root: &str,
+    env: bool,
+) -> Option<SourceFile> {
     if filename.is_empty()
         || filename.contains('\0')
         || (filename.starts_with('<')
@@ -94,12 +100,13 @@ fn stat(filename: &Rc<Str>, globals: Option<&Object>, root: &str, env: bool) -> 
     }
     let fullname = if filename.starts_with("<frozen ") {
         let globals = globals?;
-        let key = Rc::new(Str::new("__file__"));
+        let key = StrOwner::new(Str::new("__file__"));
         // SAFETY: globals is string-to-string and both it and the key are rooted.
-        let file =
-            unsafe { mappings::lookup(std::ptr::from_ref(globals), Rc::as_ptr(&key) as usize) }?;
+        let file = unsafe {
+            mappings::lookup(std::ptr::from_ref(globals), StrOwner::as_ptr(&key) as usize)
+        }?;
         // SAFETY: transfer the acquired, correctly typed string owner.
-        unsafe { Rc::from_raw(file.into_word() as *const Str) }
+        unsafe { StrOwner::from_raw(file.into_word() as *const Str) }
     } else {
         filename.clone()
     };
@@ -156,10 +163,10 @@ fn remove(cache: &Rc<Object>, key: &Str) {
 
 fn load(
     cache: &Rc<Object>,
-    name: &Rc<Str>,
+    name: &StrOwner,
     globals: Option<&Object>,
     root: &str,
-    newline: &Rc<Str>,
+    newline: &StrOwner,
     env: bool,
     layout: *const records::RecordDescriptor,
 ) -> Result<Rc<Object>> {
@@ -187,14 +194,14 @@ fn load(
         } else {
             let mut item = Str::new(line);
             item.push('\n');
-            Rc::new(item)
+            StrOwner::new(item)
         };
-        list.values.push(Rc::into_raw(item) as usize);
+        list.values.push(StrOwner::into_raw(item) as usize);
     }
     let lines = list.into_object();
     let fullname = match original {
         Some(original) => original,
-        None => Rc::new(Str::new(path.to_str().ok_or_else(|| {
+        None => StrOwner::new(Str::new(path.to_str().ok_or_else(|| {
             Error::new(
                 Kind::NotImplementedError,
                 "linecache: source search path contains a non-Unicode filename",
@@ -216,7 +223,7 @@ fn load(
             (2, Int::new(size.into()).into_raw()),
             (7, mtime.to_bits() as usize),
             (5, Rc::into_raw(lines.clone()) as usize),
-            (3, Rc::into_raw(fullname) as usize),
+            (3, StrOwner::into_raw(fullname) as usize),
         ]
         .into_iter()
         .enumerate()
@@ -224,7 +231,11 @@ fn load(
             OwnedWord::from_owned(value, WordKind::new(kind))
                 .initialize_record_field(record.add(i));
         }
-        mappings::dict_set(Rc::as_ptr(cache), Rc::as_ptr(name) as usize, owner.word)?;
+        mappings::dict_set(
+            Rc::as_ptr(cache),
+            StrOwner::as_ptr(name) as usize,
+            owner.word,
+        )?;
     }
     Ok(lines)
 }
@@ -282,10 +293,10 @@ pub(super) unsafe fn cached_lines(
         remove(cache, name);
         match load(
             cache,
-            &acquire_rc(std::ptr::from_ref(name) as usize),
+            &crate::StrOwner::acquire_word(std::ptr::from_ref(name) as usize),
             globals,
             root,
-            &acquire_rc(std::ptr::from_ref(newline) as usize),
+            &crate::StrOwner::acquire_word(std::ptr::from_ref(newline) as usize),
             env,
             layout,
         ) {
@@ -341,7 +352,7 @@ pub unsafe extern "C" fn imre_linecache_check(name: *const Str) {
                 cache.0.with(|s| {
                     s.dictionary()
                         .string_entries()
-                        .map(|(k, _)| acquire_rc::<Str>(std::ptr::from_ref(k) as usize))
+                        .map(|(k, _)| crate::StrOwner::acquire_word(std::ptr::from_ref(k) as usize))
                         .collect::<Vec<_>>()
                 })
             };
@@ -361,14 +372,14 @@ pub unsafe extern "C" fn imre_linecache_line_int(
     missing: *const Str,
 ) -> *const Str {
     // SAFETY: input owners survive lookup; a missing row acquires the caller's pooled empty string.
-    Rc::into_raw(unsafe {
-        line_at(super::object(lines), n).unwrap_or_else(|| acquire_rc(missing as usize))
+    StrOwner::into_raw(unsafe {
+        line_at(super::object(lines), n).unwrap_or_else(|| StrOwner::acquire_word(missing as usize))
     })
 }
 
 /// # Safety
 /// The caller roots an exact str list and a tagged Python integer.
-pub(super) unsafe fn line_at(lines: &Object, n: usize) -> Option<Rc<Str>> {
+pub(super) unsafe fn line_at(lines: &Object, n: usize) -> Option<crate::StrOwner> {
     // SAFETY: the borrowed list roots each selected string until acquired.
     unsafe {
         lines.0.with(|s| {
@@ -376,7 +387,7 @@ pub(super) unsafe fn line_at(lines: &Object, n: usize) -> Option<Rc<Str>> {
                 .as_small()
                 .and_then(|i| usize::try_from(i).ok()?.checked_sub(1))
                 .and_then(|i| s.sequence().values.get(i))
-                .map(|&word| acquire_rc(word))
+                .map(|&word| crate::StrOwner::acquire_word(word))
         })
     }
 }
@@ -399,6 +410,6 @@ pub unsafe extern "C" fn imre_linecache_line_float(
         .returning(std::ptr::null())
     } else {
         // SAFETY: the rooted literal transfers an independent return reference.
-        Rc::into_raw(unsafe { acquire_rc(missing as usize) })
+        StrOwner::into_raw(unsafe { crate::StrOwner::acquire_word(missing as usize) })
     }
 }
