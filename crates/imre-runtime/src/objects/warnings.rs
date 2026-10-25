@@ -263,6 +263,24 @@ fn filtered(
 
 const LINE_OVERFLOW: &str = "Python int too large to convert to C ssize_t";
 
+/// Apply the active filters at a native standard-library RuntimeWarning call site.
+pub(super) fn runtime_warning(
+    module: &'static str,
+    line: isize,
+    message: &str,
+) -> crate::Result<()> {
+    let warning = filtered(2, module, line, || message.to_owned())
+        .map_err(|()| Error::new(Kind::OverflowError, LINE_OVERFLOW))?;
+    if let Some((action, message)) = warning {
+        if action == Action::Error {
+            return Err(Error::new(Kind::RuntimeWarning, message));
+        }
+        let diagnostic = format!("{module}.py:{line}: RuntimeWarning: {message}");
+        let _ = crate::sys::write_stderr(&diagnostic, true);
+    }
+    Ok(())
+}
+
 /// Report the unreaped handle before the destructor performs its own poll.
 pub(super) fn unobserved_child(pid: libc::pid_t) {
     const LINE: isize = 1139; // subprocess.Popen.__del__

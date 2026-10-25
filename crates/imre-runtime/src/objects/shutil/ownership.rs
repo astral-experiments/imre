@@ -118,11 +118,15 @@ impl Arg {
         })
     }
 
-    pub(super) fn path_or_fd(&self, operation: &str) -> Result<(i32, Option<CString>)> {
+    pub(super) fn path_or_fd(
+        &self,
+        operation: &str,
+        line: isize,
+    ) -> Result<(i32, Option<CString>)> {
         let (fd, name) = match self {
             Arg::Text(name) | Arg::Path(name) => (-1, Some(name.as_bytes())),
             Arg::Bytes(name) => (-1, Some(name.as_slice())),
-            Arg::Bool(fd) => (i32::from(*fd), None),
+            Arg::Bool(fd) => (bool_fd(*fd, line)?, None),
             Arg::Integer(fd) => (Arg::fd(fd)?, None),
             other => {
                 return Err(Error::new(
@@ -161,6 +165,11 @@ impl Arg {
     }
 }
 
+fn bool_fd(fd: bool, line: isize) -> Result<i32> {
+    super::super::warnings::runtime_warning("shutil", line, "bool is used as a file descriptor")?;
+    Ok(i32::from(fd))
+}
+
 fn overflow(name: &str, below: bool) -> Error {
     Error::new(
         Kind::OverflowError,
@@ -176,6 +185,7 @@ fn overflow(name: &str, below: bool) -> Error {
 }
 
 fn chown(path: Arg, user: Arg, group: Arg, dir_fd: Arg, follow: bool) -> Result<()> {
+    const LINE: isize = 1490; // Lib/shutil.py: os.chown
     if matches!(user, Arg::None) && matches!(group, Arg::None) {
         return Err(Error::new(
             Kind::ValueError,
@@ -184,12 +194,12 @@ fn chown(path: Arg, user: Arg, group: Arg, dir_fd: Arg, follow: bool) -> Result<
     }
     let user = user.resolve(true)?;
     let group = group.resolve(false)?;
-    let (path_fd, name) = path.path_or_fd("chown")?;
+    let (path_fd, name) = path.path_or_fd("chown", LINE)?;
     let uid = user.id("uid")?;
     let gid = group.id("gid")?;
     let dir_fd = match dir_fd {
         Arg::None => libc::AT_FDCWD,
-        Arg::Bool(fd) => i32::from(fd),
+        Arg::Bool(fd) => bool_fd(fd, LINE)?,
         Arg::Integer(n) => Arg::fd(&n)?,
         other => {
             return Err(Error::new(

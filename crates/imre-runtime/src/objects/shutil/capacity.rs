@@ -23,7 +23,7 @@ unsafe fn record<const N: usize>(layout: *const RecordDescriptor, values: [Int; 
 }
 
 fn usage(path: Arg) -> Result<[Int; 3]> {
-    let (fd, name) = path.path_or_fd("statvfs")?;
+    let (fd, name) = path.path_or_fd("statvfs", 1431)?; // Lib/shutil.py: os.statvfs
     let mut st = MaybeUninit::<libc::statvfs>::uninit();
     // SAFETY: the OS initializes st on success. A path is terminated; the -1
     // descriptor sentinel supplies a null pathname to the OS as in os.statvfs.
