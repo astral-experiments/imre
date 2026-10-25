@@ -978,6 +978,45 @@ pub(crate) fn write_string_repr(value: &str, out: &mut impl std::fmt::Write) -> 
     write_escaped_string(&UnicodeEscape::new_repr(value), out, !value.is_ascii())
 }
 
+/// Render the portable spelling into a container repr without first copying the whole path.
+/// A literal backslash is the only character whose quoted spelling starts with two backslashes.
+pub(super) fn push_windows_path_repr(value: &str, out: &mut String) {
+    struct PosixSeparators<'a> {
+        out: &'a mut String,
+        escape: bool,
+    }
+
+    impl std::fmt::Write for PosixSeparators<'_> {
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            for ch in text.chars() {
+                if self.escape {
+                    if ch == '\\' {
+                        self.out.push('/');
+                    } else {
+                        self.out.push('\\');
+                        self.out.push(ch);
+                    }
+                    self.escape = false;
+                } else if ch == '\\' {
+                    self.escape = true;
+                } else {
+                    self.out.push(ch);
+                }
+            }
+            Ok(())
+        }
+    }
+
+    let mut writer = PosixSeparators { out, escape: false };
+    write_escaped_string(
+        &UnicodeEscape::new_repr(value),
+        &mut writer,
+        !value.is_ascii(),
+    )
+    .unwrap();
+    debug_assert!(!writer.escape);
+}
+
 fn write_escaped_string(
     escaped: &UnicodeEscape<'_>,
     out: &mut impl std::fmt::Write,
@@ -2217,6 +2256,23 @@ mod tests {
             );
             drop(take_error(Kind::RuntimeError));
             assert_eq!((key, value), (17, 19));
+        }
+    }
+
+    #[test]
+    fn windows_path_repr_preserves_other_escapes() {
+        for raw in [
+            r"\\server\share\folder",
+            "C:\\one'\t\\two\"\n",
+            "C:\\'\0\\\r\\𐐀\\\u{1faea}",
+            r"C:\x00\next",
+        ] {
+            let mut rendered = String::from("prefix ");
+            push_windows_path_repr(raw, &mut rendered);
+            assert_eq!(
+                &rendered[7..],
+                string_repr(&raw.replace('\\', "/")).as_str()
+            );
         }
     }
 

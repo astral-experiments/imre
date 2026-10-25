@@ -548,7 +548,11 @@ pub unsafe extern "C" fn imre_regex_groupdict(value: *const Object) -> *const Ob
         })
     };
     crate::finish(
-        inserted.map(|()| handle(Storage::Dictionary(Box::new(entries)))),
+        inserted.map(|()| {
+            handle(Storage::Dictionary(
+                crate::objects::mappings::TableOwner::new(entries),
+            ))
+        }),
         std::ptr::null(),
     )
 }

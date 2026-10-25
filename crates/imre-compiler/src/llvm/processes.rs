@@ -286,7 +286,7 @@ impl Emitter<'_, '_> {
                         &self.module.types,
                     )
                 };
-                let fields = [
+                let mut fields = vec![
                     ("ptr", args[0].value.operand.clone()),
                     ("ptr", cwd),
                     ("ptr", env),
@@ -299,7 +299,24 @@ impl Emitter<'_, '_> {
                     ("i1", args[9].value.operand.clone()),
                     ("i1", args[11].value.operand.clone()),
                 ];
-                let layout = "{ptr, ptr, ptr, ptr, i64, i32, i32, i32, i32, i1, i1}";
+                // The original configuration remains the prefix. Only borrowed
+                // streams need the three-word trailer in runtime RedirectConfig.
+                let layout = if [12, 0, 4]
+                    .into_iter()
+                    .any(|shift| matches!((streams >> shift) & 15, 6 | 7))
+                {
+                    for (index, shift) in [(4, 12), (5, 0), (6, 4)] {
+                        let word = if matches!((streams >> shift) & 15, 6 | 7) {
+                            self.word(&args[index].value)
+                        } else {
+                            "0".to_owned()
+                        };
+                        fields.push(("i64", word));
+                    }
+                    "{ptr, ptr, ptr, ptr, i64, i32, i32, i32, i32, i1, i1, i64, i64, i64}"
+                } else {
+                    "{ptr, ptr, ptr, ptr, i64, i32, i32, i32, i32, i1, i1}"
+                };
                 let config = self.entry_alloca(layout);
                 let mut aggregate = "poison".to_owned();
                 for (i, (ty, value)) in fields.iter().enumerate() {
@@ -493,6 +510,7 @@ impl Emitter<'_, '_> {
                 let (ptr, tag) = match path.value.ty {
                     Type::None => ("null", 2),
                     Type::Bytes => (path.value.operand.as_str(), 1),
+                    Type::Path | Type::PurePath(_) => (path.value.operand.as_str(), 3),
                     _ => (path.value.operand.as_str(), 0),
                 };
                 let (fd, fd_kind) = match fd.value.ty {
