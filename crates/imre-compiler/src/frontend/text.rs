@@ -194,11 +194,15 @@ impl Checker<'_> {
                 }
             } else {
                 let predicate = match name {
-                    "isspace" => TextOperation::IsSpace,
-                    "isupper" => TextOperation::IsUpper,
+                    "isalnum" => ir::TextPredicate::Alnum,
+                    "isspace" => ir::TextPredicate::Space,
+                    "isupper" => ir::TextPredicate::Upper,
                     _ => unreachable!("resolved text predicate"),
                 };
-                ExprKind::Builtin(Builtin::Text(predicate), vec![receiver])
+                ExprKind::Builtin(
+                    Builtin::Text(TextOperation::Predicate(predicate)),
+                    vec![receiver],
+                )
             };
             return Ok(Expr { ty: returns, kind });
         }
@@ -253,17 +257,7 @@ impl Checker<'_> {
                 args.keywords[0].arg.as_deref().unwrap()
             )
         };
-        values.push(Expr {
-            ty: Type::Exception,
-            kind: ExprKind::Exception {
-                kind: exception_kind("TypeError").unwrap(),
-                message: Some(Box::new(unpacking::string(message))),
-            },
-        });
-        Ok(Expr {
-            ty: returns,
-            kind: ExprKind::Builtin(Builtin::RaiseException, values),
-        })
+        Ok(calls::type_error(returns, values, message))
     }
 
     fn translation_argument(&mut self, argument: &ast::Expr) -> Result<Expr, String> {

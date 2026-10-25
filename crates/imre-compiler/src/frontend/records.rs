@@ -588,6 +588,20 @@ impl Checker<'_> {
         })
     }
 
+    /// Check a method at an immediate consumer after its receiver has been evaluated.
+    pub(super) fn iteration_method_call(
+        &mut self,
+        call: &ast::ExprCall,
+        method: &ast::ExprAttribute,
+        class: usize,
+        receiver: Expr,
+    ) -> Result<Expr, String> {
+        let previous = self.iterator_source.replace(call.range());
+        let result = self.class_method_call(call, method, class, Some(receiver));
+        self.iterator_source = previous;
+        result
+    }
+
     pub(super) fn record_generator(&self, context: MethodContext) -> bool {
         let record = &self.classes.declarations.definitions[context.class];
         iterator_result(
@@ -897,7 +911,7 @@ impl Checker<'_> {
         self.direct_class_attribute(attribute, class, receiver, expected)
     }
 
-    fn direct_class_attribute(
+    pub(super) fn direct_class_attribute(
         &mut self,
         attribute: &ast::ExprAttribute,
         class: usize,
@@ -914,7 +928,7 @@ impl Checker<'_> {
         if attribute.attr.starts_with("__")
             && !matches!(
                 attribute.attr.as_str(),
-                "__str__" | "__post_init__" | "__copy__"
+                "__str__" | "__post_init__" | "__copy__" | "__fspath__"
             )
         {
             return Err(error(
@@ -1016,7 +1030,7 @@ impl Checker<'_> {
         if attribute.attr.starts_with("__")
             && !matches!(
                 attribute.attr.as_str(),
-                "__str__" | "__post_init__" | "__copy__"
+                "__str__" | "__post_init__" | "__copy__" | "__fspath__"
             )
             && !(self.classes.declarations.definitions[class].mapping
                 && matches!(
