@@ -204,6 +204,7 @@ pub(crate) enum Intrinsic {
     GroupBy,
     Chain,
     AbstractSet,
+    MappingAbc,
     TomllibLoad,
     TomlDecodeError,
     Dedent,
@@ -438,6 +439,7 @@ impl IntrinsicModule {
             (Self::Itertools, "groupby") => Intrinsic::GroupBy,
             (Self::Itertools, "chain") => Intrinsic::Chain,
             (Self::CollectionsAbc, "Set") => Intrinsic::AbstractSet,
+            (Self::CollectionsAbc, "Mapping") => Intrinsic::MappingAbc,
             (Self::Tomllib, "load") => Intrinsic::TomllibLoad,
             (Self::Tomllib, "TOMLDecodeError") => Intrinsic::TomlDecodeError,
             (Self::Textwrap, "dedent") => Intrinsic::Dedent,
@@ -533,7 +535,7 @@ impl SourceModule {
 
 pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
-    checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
+    checked_calls: std::cell::RefCell<Vec<Vec<CheckedOverload>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -653,7 +655,12 @@ impl SourceGraph {
     /// Record only this call's overload diagnostic. Nested arguments still get
     /// their own diagnostics, including calls with the same method name.
     pub(crate) fn checked_overload(&self, module: ModuleId, call: TextRange) {
-        self.checked_calls.borrow_mut()[module].push(call);
+        self.checked_calls.borrow_mut()[module].push(CheckedOverload::Call(call));
+    }
+
+    /// The abstract Mapping constructor is lowered to a catchable TypeError.
+    pub(crate) fn checked_abstract_mapping(&self, module: ModuleId, call: TextRange) {
+        self.checked_calls.borrow_mut()[module].push(CheckedOverload::AbstractMappingCall(call));
     }
 
     /// Source ranges where the reachable profile or native lowering handles diagnostics.
@@ -691,9 +698,15 @@ impl SourceGraph {
                     })
                     .chain({
                         let mut calls = self.checked_calls.borrow()[id].clone();
-                        calls.sort_unstable_by_key(|range| (range.start(), range.end()));
+                        calls.sort_unstable_by_key(|scope| {
+                            (
+                                scope.range().start(),
+                                scope.range().end(),
+                                matches!(scope, CheckedOverload::AbstractMappingCall(_)),
+                            )
+                        });
                         calls.dedup();
-                        calls.into_iter().map(CheckedOverload::Call)
+                        calls.into_iter()
                     })
                     .collect()
             })

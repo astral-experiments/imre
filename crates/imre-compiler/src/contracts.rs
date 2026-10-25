@@ -369,6 +369,7 @@ impl Builtin {
             | Self::ZipNamelist
             | Self::ZipClose
             | Self::Input
+            | Self::LengthResult
             | Self::ParseArgs { .. }
             | Self::Pop
             | Self::Print

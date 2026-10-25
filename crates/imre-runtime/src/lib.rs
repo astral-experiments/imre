@@ -1242,6 +1242,28 @@ pub unsafe extern "C" fn imre_list_append_pair(
 /// Returns an owned nonzero integer word, or raw zero with a pending error.
 ///
 /// # Safety
+/// The caller roots the exact integer returned by a Python length slot.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_length_result(value: usize) -> usize {
+    // SAFETY: this is the nonzero tagged result of the user's __len__ method.
+    let n = unsafe { Int::borrow(value) };
+    let negative = n
+        .as_small()
+        .map_or_else(|| n.big().sign() == num_bigint::Sign::Minus, |i| i < 0);
+    if negative {
+        return Error::new(Kind::ValueError, "__len__() should return >= 0").returning(0);
+    }
+    if decode_index(&n).is_err() {
+        return Error::new(
+            Kind::OverflowError,
+            "cannot fit 'int' into an index-sized integer",
+        )
+        .returning(0);
+    }
+    (*n).clone().into_raw()
+}
+
+/// # Safety
 /// The argument must be a live list handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_list_pop(list: *const List) -> usize {
