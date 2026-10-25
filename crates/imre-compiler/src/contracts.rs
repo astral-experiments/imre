@@ -432,6 +432,7 @@ impl Builtin {
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
             Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
+            Self::SortByComparator => Contract::new(true, Unknown),
             Self::ListReserveRange => Contract::new(false, PreservesOwners),
             Self::BinaryOpen(_)
             | Self::BinaryRead

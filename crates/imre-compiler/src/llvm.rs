@@ -4384,6 +4384,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::SortByKeys
+            | Builtin::SortByComparator
             | Builtin::SortDetach
             | Builtin::ListExtendUnhinted
             | Builtin::SortRestore
@@ -7700,6 +7701,7 @@ declare void @imre_list_extend_unhinted(ptr, i32)
 declare ptr @imre_sort_detach(ptr, i32)
 declare void @imre_sort_restore(ptr, i32, ptr, i32)
 declare void @imre_sort_by_keys(ptr, i32, ptr, i32, i32)
+declare void @imre_sort_by_comparator(ptr, i32, ptr, ptr, i32, i32, i32)
 declare ptr @imre_str_join(ptr, ptr)
 declare ptr @imre_str_format(ptr, ptr, i64)
 declare ptr @imre_str_replace(ptr, ptr, ptr)
