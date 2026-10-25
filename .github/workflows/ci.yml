@@ -11,6 +11,10 @@ on:
         type: choice
         default: decoder
         options: [decoder, decoder-merge, decoder-current-main, key-body, number-hooks]
+      retain_tools:
+        description: Retain the verified Linux compiler and runtime for local fixture runs
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -284,6 +288,27 @@ jobs:
               print(name, flush=True)
               subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', command], check=True)
           PY
+      - name: Package the verified Linux tools for local runs
+        if: ${{ success() && inputs.retain_tools }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          results="$JSON_RESULTS"
+          if test -f "$results/latest/source.txt"; then results="$results/latest"; fi
+          manifest="$RUNNER_TEMP/json-tools-manifest"
+          mkdir "$manifest"
+          git show -s --format='%H %T' > "$manifest/source.txt"
+          cmp "$manifest/source.txt" "$results/source.txt"
+          (cd "$(dirname "$JSON_IMRE")" && sha256sum imre libimre_runtime.a) > "$manifest/SHA256SUMS"
+          tar -czf "$RUNNER_TEMP/json-tools-linux.tar.gz" -C "$manifest" source.txt SHA256SUMS -C "$(dirname "$JSON_IMRE")" imre libimre_runtime.a
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ success() && inputs.retain_tools }}
+        with:
+          name: json-tools-${{ inputs.source }}
+          path: ${{ runner.temp }}/json-tools-linux.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 2
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
