@@ -31,6 +31,19 @@ All 24 original ABC methods remain blocked on this tree. The
 659 at each level: 7 native bodies with host fixtures, 13 host-driven native
 operations, 4 without a collections operation, 3 reference skips and 632 blocked.
 
+After [deque #561](https://github.com/astral-sh/imre/pull/561) landed, the
+[array and deque merge tree](array/60fafd7a2c54/source.json) still matched
+[all 532 registration observations](array/60fafd7a2c54/array-four-modes.json).
+With its imports resolved, the original `test_MutableSequence` now reaches
+[`self.assertNotIsInstance(sample(), MutableSequence)` at line 1970](upstream/Lib/test/test_collections.py#L1970)
+at [O0](array/60fafd7a2c54/abc-O0.json) and [O3](array/60fafd7a2c54/abc-O3.json).
+All 24 methods still compile-stop on this tree. Four [unittest controls](array/60fafd7a2c54/unittest-assertions.json)
+use only builtin classes and isolate `assertIsInstance`, `assertNotIsInstance`,
+`assertIsSubclass` and `assertNotIsSubclass`. CPython distinguishes each positive
+case from its deliberately false one. Imre reports “unknown class method” on all
+four in each compiler mode. The [unittest handoff](https://github.com/astral-sh/imre/pull/934#issuecomment-6397068344)
+tracks this shared dependency.
+
 The [four original collections startup checks](array/7ae08a4f0d74/startup.json)
 now reach [`import pickle` at line 9](upstream/Lib/test/test_collections.py#L9)
 and execute zero tests. In the primary suite four original methods use pickle:
