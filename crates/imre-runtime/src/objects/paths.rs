@@ -968,7 +968,7 @@ impl PathIterator {
         Ok(Self { root, state })
     }
 
-    fn next(&mut self) -> Result<*const Object> {
+    pub(super) fn next(&mut self) -> Result<*const Object> {
         let next = match &mut self.state {
             IterationState::Glob(glob) => glob.next(),
             IterationState::Snapshot(names) => names
@@ -1053,21 +1053,6 @@ pub unsafe extern "C" fn imre_path_iter(path: *const Object, pattern: *const Str
 pub unsafe extern "C" fn imre_path_next(iterator: *const Object) -> *const Object {
     // SAFETY: the root is held through this single synchronous pull.
     finish(unsafe { pull_path(iterator) }, std::ptr::null())
-}
-
-/// # Safety
-/// Root a pathlib iterator, raising StopIteration when there is no next value.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_path_next_required(iterator: *const Object) -> *const Object {
-    // SAFETY: no callback or storage reference escapes the exclusive iterator step.
-    let result = unsafe { pull_path(iterator) }.and_then(|path| {
-        if path.is_null() {
-            Err(Error::new(Kind::StopIteration, ""))
-        } else {
-            Ok(path)
-        }
-    });
-    finish(result, std::ptr::null())
 }
 
 unsafe fn pull_path(iterator: *const Object) -> Result<*const Object> {

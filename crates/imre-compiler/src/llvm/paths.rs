@@ -188,18 +188,6 @@ impl Emitter<'_, '_> {
                 };
                 let operand = self.checked_instruction(call);
                 self.owned(Value {
-                    ty: Type::PathIterator,
-                    operand,
-                    small_integer: false,
-                })
-            }
-            PathOperation::Next => {
-                let pointer = self.checked_instruction(format!(
-                    "call ptr @imre_path_next(ptr {})",
-                    args[0].value.operand
-                ));
-                let operand = self.instruction(format!("ptrtoint ptr {pointer} to i64"));
-                self.owned(Value {
                     ty: returns,
                     operand,
                     small_integer: false,
@@ -207,7 +195,6 @@ impl Emitter<'_, '_> {
             }
             _ => {
                 let name = match operation {
-                    PathOperation::Pull => "imre_path_next_required",
                     PathOperation::Scripts => "imre_sysconfig_scripts",
                     PathOperation::Absolute => "imre_path_absolute",
                     PathOperation::New => "imre_path_new",

@@ -728,7 +728,7 @@ impl Checker<'_> {
             }
             return Ok(operation(
                 PathOperation::Iterdir,
-                Type::PathIterator,
+                self.types.cursor(Type::Path),
                 vec![receiver],
             ));
         }
@@ -763,7 +763,7 @@ impl Checker<'_> {
             PathOperation::Glob {
                 recursive: name == "rglob",
             },
-            Type::PathIterator,
+            self.types.cursor(Type::Path),
             args,
         ))
     }

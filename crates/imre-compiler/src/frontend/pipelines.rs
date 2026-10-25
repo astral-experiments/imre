@@ -305,7 +305,7 @@ impl Checker<'_> {
             if receiver.ty == Type::Path {
                 let iterator = self.path_iterator(receiver, call, attribute.attr.as_str())?;
                 return Ok(Some(Iteration::Prepared(
-                    self.prepare_path_iterator(iterator),
+                    self.prepare_cursor(iterator, Type::Path),
                 )));
             }
             if let Type::Class(class) = receiver.ty {
@@ -683,66 +683,6 @@ impl Checker<'_> {
             elementless: false,
             writes: HashSet::new(),
             clear: vec![iterator, value, ready],
-        }
-    }
-
-    /// Method evaluation creates the iterator at Python's observable point.
-    /// Runtime iterdir snapshots eagerly; glob waits for the first pull. Private
-    /// nullable results own every yielded path until the consumer acquires it.
-    pub(super) fn prepare_path_iterator(&mut self, expression: Expr) -> Prepared {
-        let iterator = self.hidden(Type::PathIterator);
-        let optional = self.hidden(self.types.optional(Type::Path));
-        let value = self.hidden(Type::Path);
-        let ready = self.hidden(Type::Bool);
-        let done = self.hidden(Type::Bool);
-        let pull = vec![
-            Statement::Assign(
-                optional,
-                paths::operation(
-                    ir::PathOperation::Next,
-                    self.locals[optional],
-                    vec![self.local(iterator)],
-                ),
-            ),
-            Statement::Assign(
-                ready,
-                not(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Builtin(Builtin::IsNone, vec![self.local(optional)]),
-                }),
-            ),
-            Statement::If(
-                self.local(ready),
-                vec![Statement::Assign(
-                    value,
-                    Expr {
-                        ty: Type::Path,
-                        kind: ExprKind::Unwrap(Box::new(self.local(optional))),
-                    },
-                )],
-                vec![
-                    Statement::Assign(done, boolean(true)),
-                    Statement::Clear(iterator),
-                ],
-            ),
-            Statement::Clear(optional),
-        ];
-        Prepared {
-            evaluate: vec![
-                Statement::Assign(iterator, expression),
-                Statement::Assign(done, boolean(false)),
-            ],
-            acquire: Vec::new(),
-            next: vec![
-                Statement::Clear(value),
-                Statement::Assign(ready, boolean(false)),
-                Statement::If(not(self.local(done)), pull, Vec::new()),
-            ],
-            value,
-            ready,
-            elementless: false,
-            writes: HashSet::new(),
-            clear: vec![iterator, optional, value, ready, done],
         }
     }
 

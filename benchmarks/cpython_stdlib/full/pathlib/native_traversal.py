@@ -18,6 +18,7 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 BENCHMARK = HERE.parents[1]
 sys.path.insert(0, str(BENCHMARK))
+from suite_evidence import roles
 from suite_inventory import load_suite, verify_interpreter_tests
 from suite_native import Toolchain, native_method, run_in_fixtures
 from upstream import verify_upstream
@@ -197,7 +198,7 @@ class NativeCase:
             raise AssertionError("different directory members")
 """
         return native_method(tools, directory, MODULE.with_name('test_read.py'),
-                             'ReadTestBase', case.id(), fixture)(case, original)
+                             'ReadTestBase', case.id(), fixture, operation=('imre', 'Path.iterdir'))(case, original)
     # These IDs have the same definition but distinct concrete fixture classes.
     ctor = case.cls.__name__
     source = f"""from pathlib import {ctor}
@@ -211,7 +212,8 @@ class NativeCase:
         if first != second:
             raise AssertionError("different paths")
 """
-    return native_method(tools, directory, MODULE, 'PathTest', case.id(), source)(case, original)
+    return native_method(tools, directory, MODULE, 'PathTest', case.id(), source,
+                         operation=('imre', 'Path.glob and Path.rglob across suspended cursors'))(case, original)
 
 
 def host_method(binary, directory, case, original):
@@ -254,17 +256,55 @@ def host_method(binary, directory, case, original):
     if not bridge.calls['glob'] and not bridge.calls['rglob'] and not bridge.calls['iterdir']:
         raise AssertionError('no native traversal reached')
     body = inspect.getsource(inspect.unwrap(original)).encode()
-    return {'execution': 'mixed' if host_calls or bridge.host else 'host-driven-native-operations',
+    calls = dict(sorted(bridge.calls.items()))
+    host = sorted(host_calls | bridge.host)
+    proof = {'operation': ', '.join(k for k in ('glob', 'rglob', 'iterdir') if k in calls),
+             'fixture': 'original CPython hooks; path and cursor values held by Imre',
+             'native_calls': calls, 'host_product_calls': host,
+             'method_source_sha256': hashlib.sha256(body).hexdigest()}
+    observation = {'roles': roles(body='cpython', assertions='cpython',
+                                  operation='mixed' if host else 'imre', fixture='cpython'),
+                   'evidence': proof}
+    return {'execution': 'mixed' if host else 'host-driven-native-operations',
             'body': 'CPython', 'assertions': 'CPython', 'fixture_execution': 'original CPython hooks',
-            'native_calls': dict(sorted(bridge.calls.items())),
-            'host_product_calls': sorted(host_calls | bridge.host),
-            'method_source_sha256': hashlib.sha256(body).hexdigest()}
+            'native_calls': calls, 'host_product_calls': host,
+            'method_source_sha256': proof['method_source_sha256'], 'observation': observation}
 
 
 HOST = ('test_glob_empty_pattern', 'test_glob_case_sensitive', 'test_glob_recurse_symlinks_common',
         'test_rglob_recurse_symlinks_common', 'test_rglob_recurse_symlinks_false', 'test_rglob_symlink_loop',
         'test_glob_pathlike', 'test_rglob_pathlike', 'test_glob_dotdot', 'test_glob_dot',
         'test_glob_above_recursion_limit', 'test_rglob_posix', 'test_iterdir_symlink')
+
+
+def traversal_adapters(tools, work):
+    binary = tools.build((HERE / 'traversal_driver.py').read_bytes(), work)
+    def run(case, original):
+        directory = work / case.id()
+        directory.mkdir()
+        if case.id().endswith('test_glob_many_open_files'):
+            return native_body(tools, directory, case, original)
+        if case.id() == READ + 'test_iterdir':
+            try:
+                return native_body(tools, directory, case, original)
+            except RuntimeError as exc:
+                diagnostic = str(exc).strip().split('Imre: ')[-1]
+                # The untouched method adds a second list of names in place.
+                # Run the entire routine under its original fixtures and keep
+                # this failed native-body attempt separate from operations.
+                if diagnostic != 'arithmetic requires int or float operands':
+                    raise
+                evidence = host_method(binary, directory, case, original)
+                evidence['native_body_blocker'] = {
+                    'operation': 'expected += [linkA, linkB, brokenLink, brokenLinkLoop]',
+                    'diagnostic': diagnostic}
+                evidence['observation']['evidence']['native_body_blocker'] = evidence['native_body_blocker']
+                return evidence
+        return host_method(binary, directory, case, original)
+    ids = {PREFIX + cls + '.' + name:run for cls in ('PathTest','PosixPathTest')
+           for name in (*HOST, 'test_glob_many_open_files')}
+    ids.update({READ + name: run for name in ('test_glob', 'test_iterdir', 'test_iterdir_nodir')})
+    return ids
 
 
 def main():
@@ -285,31 +325,7 @@ def main():
     tools = Toolchain(args.imre.resolve(), args.runtime.resolve(), args.clang.resolve(), args.opt_level)
     with tempfile.TemporaryDirectory(prefix='pl-') as tmp, chdir(tmp):
         work = Path(tmp)
-        binary = tools.build((HERE / 'traversal_driver.py').read_bytes(), work)
-        def run(case, original):
-            directory = work / case.id()
-            directory.mkdir()
-            if case.id().endswith('test_glob_many_open_files'):
-                return native_body(tools, directory, case, original)
-            if case.id() == READ + 'test_iterdir':
-                try:
-                    return native_body(tools, directory, case, original)
-                except RuntimeError as exc:
-                    diagnostic = str(exc).strip().split('Imre: ')[-1]
-                    # The untouched method adds a second list of names in place.
-                    # Run the entire routine under its original fixtures and keep
-                    # this failed native-body attempt separate from operations.
-                    if diagnostic != 'arithmetic requires int or float operands':
-                        raise
-                    evidence = host_method(binary, directory, case, original)
-                    evidence['native_body_blocker'] = {
-                        'operation': 'expected += [linkA, linkB, brokenLink, brokenLinkLoop]',
-                        'diagnostic': diagnostic}
-                    return evidence
-            return host_method(binary, directory, case, original)
-        ids = {PREFIX + cls + '.' + name:run for cls in ('PathTest','PosixPathTest')
-               for name in (*HOST, 'test_glob_many_open_files')}
-        ids.update({READ + name: run for name in ('test_glob', 'test_iterdir', 'test_iterdir_nodir')})
+        ids = traversal_adapters(tools, work)
         evidence, failures, skips = run_in_fixtures(load_suite('test.test_pathlib'), ids)
     report = {'cpython_commit': commit, 'opt_level': args.opt_level, 'evidence': evidence,
               'failures': failures, 'skips': skips}

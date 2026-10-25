@@ -2717,9 +2717,6 @@ impl<'a> Checker<'a> {
             return Ok(Iteration::Range(args));
         }
         let (iterable, items) = self.iteration_source(expression)?;
-        if iterable.ty == Type::PathIterator {
-            return Ok(Iteration::Prepared(self.prepare_path_iterator(iterable)));
-        }
         if let Some(prepared) = self.record_iteration(&iterable, expression)? {
             return Ok(Iteration::Prepared(prepared));
         }
@@ -6405,39 +6402,6 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
-        if let [iterator] = args.as_slice()
-            && iterator.ty == Type::PathIterator
-        {
-            if name.id == "next" {
-                return Ok(paths::operation(ir::PathOperation::Pull, Type::Path, args));
-            }
-            if name.id == "iter" {
-                return Ok(args.into_iter().next().unwrap());
-            }
-        }
-        if name.id == "next"
-            && let [iterator, default] = args.as_slice()
-            && iterator.ty == Type::PathIterator
-            && default.ty == Type::None
-        {
-            let optional = self.types.optional(Type::Path);
-            let slot = self.hidden(Type::PathIterator);
-            return Ok(Expr {
-                ty: optional,
-                kind: ExprKind::Scope {
-                    body: vec![
-                        Statement::Assign(slot, iterator.clone()),
-                        Statement::Expr(default.clone()),
-                    ],
-                    value: Box::new(paths::operation(
-                        ir::PathOperation::Next,
-                        optional,
-                        vec![self.local(slot)],
-                    )),
-                    clear: vec![slot],
-                },
-            });
-        }
         if name.id == "hash" {
             let [value] = args.as_slice() else {
                 return Err(error(self.source, call, "hash requires one argument"));
