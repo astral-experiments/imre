@@ -83,6 +83,7 @@ pub unsafe extern "C" fn imre_repeat(kind: u32, value: usize, times: usize) -> *
 }
 
 mod sources;
+mod tee;
 use std::cell::{Cell, RefCell};
 
 pub(super) enum Adapter {
@@ -90,6 +91,7 @@ pub(super) enum Adapter {
     Progression(sources::Progression),
     FloatCount { current: Cell<f64>, step: OwnedWord },
     Slice(Slice),
+    Tee(tee::Fork),
     Cycle(Cycle),
 }
 
@@ -133,6 +135,7 @@ impl Adapter {
             }
             Self::Progression(_) => "range_iterator",
             Self::Sequence(_) => "iterator",
+            Self::Tee(_) => "itertools._tee",
             Self::Slice(_) => "itertools.islice",
             Self::Cycle(_) => "itertools.cycle",
         };
@@ -158,6 +161,7 @@ impl Adapter {
                     )))
                 }
             }
+            Self::Tee(fork) => fork.next(),
             Self::Slice(slice) => slice.next(),
             Self::Cycle(cycle) => cycle.next(),
         }
