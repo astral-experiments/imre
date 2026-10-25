@@ -490,6 +490,18 @@ impl Types {
         matches!(&self.0.borrow().shapes[id], Shape::Union(members) if members == &[Type::Bool, Type::Int])
     }
 
+    /// A universal newline decoder reports either one spelling, a tuple of the
+    /// distinct spellings in canonical order, or None before it has seen one.
+    pub(crate) fn text_newlines_result(&self) -> Type {
+        let pair = self.tuple(vec![Type::Str; 2]);
+        let triple = self.tuple(vec![Type::Str; 3]);
+        self.optional(Type::Union(self.intern(Shape::Union(vec![
+            Type::Str,
+            pair,
+            triple,
+        ]))))
+    }
+
     pub(crate) fn members(&self, ty: Type) -> Option<Vec<Type>> {
         let Type::Union(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
