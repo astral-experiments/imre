@@ -41,13 +41,19 @@ The unchanged `Test_TestCase.testAssertRaisesNoExceptionType` exercises five
 invalid calls. Its nested assertions, validation, and catches run in Imre under
 the upstream host fixture runner.
 
-Nine `TestLongMessage` methods run under the original CPython class and setup.
+Ten `TestLongMessage` methods run under the original CPython class and setup.
 Each tests all four combinations of long/short diagnostics and omitted/explicit
 messages. The bound operation executes in a native child, which returns the
 actual assertion failure and its message. The original helper checks those
 messages on the host. For `testAssertRaises`, the original host callback returns
-normally before Imre performs the missing-exception check. These nine are
+normally before Imre performs the missing-exception check. These ten are
 host-driven native operations.
+
+`testAssertDictEqual` passes its original dictionaries to the native assertion
+four times; its unchanged host helper checks the returned failure messages.
+The [dictionary control](mapping_protocol.py) separately checks native equality
+for differently ordered mappings, real mismatches, custom failure classes,
+truncated differences, and long Unicode values.
 
 Five original `Test_TestCase` methods run their entire bodies and native
 assertions: `testAssertMultiLineEqual`, `testAssertEqualSingleLine`,
@@ -58,13 +64,13 @@ compares complete failure messages, including first differing and extra list
 elements, Unicode, truncation, custom messages, and a subclass's failure class.
 It adds no upstream IDs.
 
-At each of O0 and O3: 8 fully native passes, 8 native bodies with host
-fixtures, 9 host-driven native operations (36 calls), 10 compile blockers,
-1,053 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
+At each of O0 and O3: 13 fully native passes, 8 native bodies with host
+fixtures, 10 host-driven native operations (40 calls), 15 compile blockers,
+1,042 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
 all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
 
 The [native loader example](NATIVE_LOADER.md) exercises the same original
-constructor with native default fixtures and identifies the seven blocked methods.
+constructor and ten original method-discovery callers with native fixtures: six pass and five have recorded blockers.
 
 Three additional complete equality methods are attempted at each level.
 `testAssertMultiLineEqualTruncates` constructs a TestCase with a method name;

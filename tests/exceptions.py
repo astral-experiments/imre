@@ -34,6 +34,35 @@ ACCEPTED = {
     },
     "explicit_base": (Path(__file__).parent / "fixtures/exceptions/explicit_base.py").read_text(),
     "import_error": (Path(__file__).parent / "fixtures/exceptions/import_error.py").read_text(),
+    "private_forwarding_parameter_names": """
+class Problem(Exception):
+    def __init__(__self, __message, *args, __detail="detail"):
+        __self.value = __message
+        super().__init__(__message, __detail, *args)
+
+class Child(Problem):
+    def __init__(self, value, detail):
+        super().__init__(value, _Problem__detail=detail)
+
+try:
+    print(repr(Problem(_Problem__message="yes", _Problem__detail="extra").args))
+except TypeError as e:
+    print(str(e))
+try:
+    print(repr(Problem(__message="wrong").args))
+except TypeError as e:
+    print(str(e))
+try:
+    Problem("positional", _Problem__self="duplicate")
+except TypeError as e:
+    print(str(e))
+try:
+    Problem()
+except TypeError as e:
+    print(str(e))
+
+print(repr(Child("nested", "forwarded").args))
+""",
     "classvar_exception_constructor": """
 from typing import ClassVar
 

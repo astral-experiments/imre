@@ -66,6 +66,9 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::Str if args.first().is_some_and(|e| e.ty == Type::Int) => {
+                Contract::new(true, PreservesOwners)
+            }
             Self::Linecache(..) | Self::CachePath(_) => Contract::new(true, Unknown),
             Self::Calendar(op) => Contract::new(
                 matches!(
@@ -245,7 +248,9 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::Process(operation) => match operation {
-                ProcessOperation::DescriptorConstant(_) => Contract::new(false, PreservesLists),
+                ProcessOperation::DescriptorConstant(_)
+                | ProcessOperation::SelectorClass(_)
+                | ProcessOperation::SetSelector => Contract::new(false, PreservesLists),
                 ProcessOperation::RunUntilComplete
                 | ProcessOperation::CloseLoop
                 | ProcessOperation::Gather { .. }
@@ -341,6 +346,7 @@ impl Builtin {
             | Self::WrapperAttributes(_)
             | Self::Chr
             | Self::Ord
+            | Self::Random(_)
             | Self::IntegerPower
             | Self::ModularPower
             | Self::NegativeIntegerPower
@@ -414,6 +420,7 @@ impl Builtin {
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::Bool
+            | Self::DefaultFactoryEnabled
             | Self::EnumLookup(_)
             | Self::DictSumValues
             | Self::Encode
@@ -518,6 +525,7 @@ impl Builtin {
             | Self::ChainMapGet(_)
             | Self::DictPop
             | Self::DictSetDefault
+            | Self::DefaultDictMissing
             | Self::DictTryPop(_)
             | Self::DictGatherBytesInt
             | Self::DictGatherStrInt
@@ -561,6 +569,8 @@ impl Builtin {
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
             | Self::ExceptionFieldIdentity { .. }
+            | Self::SysThreadInfo
+            | Self::SysThreadText { .. }
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::OsName
@@ -568,7 +578,7 @@ impl Builtin {
             | Self::SysOrigArgv
             | Self::DocCaptureStart
             | Self::DocCaptureTake
-            | Self::DocAscii
+            | Self::AsciiEscape
             | Self::SysArgv
             | Self::FileFileno
             | Self::TextClose
@@ -582,10 +592,15 @@ impl Builtin {
             | Self::CursorLengthHint
             | Self::Progression { .. }
             | Self::Tee
+            | Self::TupleBufferNew
+            | Self::TupleBufferPush
+            | Self::TupleBufferFinish
+            | Self::TupleIndex
             | Self::Islice
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
             | Self::DefaultListDict
+            | Self::DefaultFactorySet { .. }
             | Self::DequeMaxlen
             | Self::DequeIter { .. }
             | Self::CounterNew
@@ -683,7 +698,8 @@ impl Builtin {
                 args.is_empty() && result == types.tuple(vec![Type::Str; fields.names().len()])
             }
             Self::CallableContext => {
-                matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result))
+                matches!(args, [callable] if types.cached_function(callable.ty).map(|c| c.frame)
+                    .or_else(|| types.dispatcher(callable.ty).map(|d| d.frame)) == Some(result))
             }
             Self::CacheParameter(_) => {
                 matches!(args, [wrapper] if types.cached_function(wrapper.ty).is_some())
@@ -857,6 +873,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
             "int_floordiv"
                 | "imre_chr"
                 | "imre_annotation_ref"
+                | "imre_random_bits"
+                | "imre_random_choice_index"
+                | "imre_random_progression"
                 | "imre_int_pow"
                 | "imre_int_modpow"
                 | "imre_int_negative_pow"
@@ -1038,6 +1057,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_zip_open"
                 | "imre_zip_namelist"
                 | "imre_zip_close"
+                | "imre_int_str"
                 | "imre_int_parse"
                 | "imre_int_float"
                 | "imre_float_int"

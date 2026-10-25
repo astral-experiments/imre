@@ -22,6 +22,7 @@ import argv_case
 import encoding_methods
 import jit_case
 import locale_case
+import thread_case
 from filesystem_case import filesystem_method
 
 MODULE = "test.test_sys"
@@ -67,6 +68,11 @@ def select(toolchain, work, source, module):
         case_id = f"{MODULE}.{cls}.{method}"
         executions[case_id] = native_method(toolchain, directory(work, method),
                                              source, cls, case_id, fixture, operation=("imre", operation))
+
+    thread = toolchain.build((HERE / "thread_info.py").read_bytes(), directory(work, "thread-info"))
+    thread_case.check_record(thread, toolchain.clang)
+    executions[SYS + "test_thread_info"] = thread_case.observer(
+        module, thread, pinned_methods["SysModuleTest", "test_thread_info"], toolchain.level)
 
     # Both implementations check internal consistency using their own language version.
     metadata = HERE / "version_info.py"
