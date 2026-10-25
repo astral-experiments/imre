@@ -8,6 +8,25 @@ import tempfile
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures/socketserver"
 REJECT = {
+    "timed_listener_subclass": (
+        "from socketserver import TCPServer, BaseRequestHandler\n"
+        "class Timed(TCPServer):\n"
+        "    timeout = 0\n"
+        'with Timed(("127.0.0.1", 0), BaseRequestHandler) as server:\n'
+        "    server.handle_request()\n",
+        "record overrides must have a common result layout",
+    ),
+    "class_data_is_not_an_instance_field": (
+        "class Partial:\n"
+        "    shared = True\n"
+        "    value: int\n"
+        "    def __init__(self) -> None:\n"
+        "        inspect(self)\n"
+        "def inspect(record: Partial) -> None:\n"
+        "    print(record.value)\n"
+        "Partial()\n",
+        "initialize all instance fields before passing self to a callback",
+    ),
     "unsafe_initializer": (
         "from socketserver import BaseRequestHandler, TCPServer\n"
         "import socket\n"
@@ -33,9 +52,8 @@ REJECT = {
 
 
 TIMED_LISTENER = """from socketserver import TCPServer, BaseRequestHandler
-class Timed(TCPServer):
-    timeout = 0
-with Timed(("127.0.0.1", 0), BaseRequestHandler) as server:
+with TCPServer(("127.0.0.1", 0), BaseRequestHandler) as server:
+    server.timeout = 0
     try:
         server.handle_request()
         print("timed out")

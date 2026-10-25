@@ -1051,13 +1051,20 @@ fn check_initializer(
     let mut called_exception_base = false;
     for (index, statement) in initializer.body.iter().enumerate() {
         if index + 1 == initializer.body.len()
-            && initialized.len() == declared.len()
             && (inherited.is_empty() || called_super)
             && let ast::Stmt::Expr(s) = statement
             && let ast::Expr::Call(call) = &*s.value
             && matches!(&*call.func, ast::Expr::Name(_))
             && matches!(call.arguments.args.first(), Some(ast::Expr::Name(n)) if n.id == receiver)
         {
+            // Initialized also contains readable class attributes, which cannot
+            // stand in for a missing field when Python receives the instance.
+            if !declared.is_subset(&initialized) {
+                return Err(module.error(
+                    statement,
+                    "initialize all instance fields before passing self to a callback",
+                ));
+            }
             return Ok(true);
         }
         if exception_layout

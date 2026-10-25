@@ -39,9 +39,9 @@ O3, [evidence-linux.json](evidence-linux.json) records:
 | `test_TCPServer` | CPython, with original host thread and stream assertions | A native server echoes the three original requests. A wrong reply fails the original assertion. |
 
 The other 24 are reference-only. There are no reference skips. No whole native
-suite, native threads or native forever-loop execution is counted. On the core
-socket branch, the unchanged test module first rejects `import select` at line
-8. It also imports `threading` and defines threaded and forking fixtures.
+suite, native threads or native forever-loop execution is counted. On the
+integrated networking build, the unchanged test module reaches `import
+threading` at line 11, which is unsupported. It also defines forking fixtures.
 
 To reproduce with test-enabled CPython 3.14.5 and an Imre build:
 
