@@ -118,7 +118,7 @@ impl PurePath {
             let mut fields = drive.split(sep);
             let host = fields.nth(2).unwrap_or_default();
             match fields.count() {
-                1 if !matches!(host, "" | "." | "?") => root = "\\",
+                1 if !matches!(host, "" | "." | "?" | "?.") => root = "\\",
                 3 => root = "\\",
                 _ => {}
             }
