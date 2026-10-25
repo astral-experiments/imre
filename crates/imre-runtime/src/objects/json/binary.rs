@@ -121,7 +121,9 @@ pub unsafe extern "C" fn imre_json_loads_bytes(bytes: *const Bytes) -> *const Ob
     // SAFETY: the caller supplies live immutable bytes until the parse completes.
     let bytes = unsafe { acquire_rc::<Bytes>(bytes as usize) };
     let result = decode(&bytes).and_then(|text| {
-        super::readonly::loads(&text, || Rc::new(crate::Str::from(text.as_ref())))
+        super::readonly::loads(&text, || {
+            crate::Str::try_new(text.as_ref()).ok().map(Rc::new)
+        })
     });
     finish(result, std::ptr::null())
 }
