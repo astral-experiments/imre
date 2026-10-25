@@ -452,6 +452,10 @@ jobs:
               diff -u "$RUNNER_TEMP/iterator.reference" "$RUNNER_TEMP/iterator.native"
             done
           done
+      - name: Compare runtime tuple spreads and check the unchanged itertools entry points
+        run: |
+          python3 benchmarks/cpython_stdlib/full/itertools/tuple_spread_audit.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-git .cpython-stdlib-reference --result "$RUNNER_TEMP/itertools-tuple-spreads.json"
+          python3 benchmarks/cpython_stdlib/full/itertools/whole_files.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-git .cpython-stdlib-reference --result "$RUNNER_TEMP/itertools-whole-files.json"
       - name: Run vendored CPython Counter methods in native Imre
         run: python3 benchmarks/cpython_stdlib/native_counter.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/cpython-counter.json"
       - name: Compare native doctest suites with the pinned interpreter

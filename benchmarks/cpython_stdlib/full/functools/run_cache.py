@@ -28,19 +28,18 @@ length = len
 
 
 class Snapshot(tuple):
-    """Transport native tuple values; this adapter performs named access on the host."""
+    """Transport positional values and a handle to this exact snapshot in the native child."""
 
-    def __new__(cls, values, counts):
+    def __new__(cls, values, wrapper, token):
         result = super().__new__(cls, values)
-        result.counts = counts
+        result.wrapper = wrapper
+        result.token = token
         return result
 
     def __getattr__(self, name):
-        fields = ("hits", "misses", "maxsize", "currsize")
-        if name not in fields:
+        if name not in ("hits", "misses", "maxsize", "currsize"):
             raise AttributeError(name)
-        self.counts["host_named_fields"] += 1
-        return self[fields.index(name)]
+        return self.wrapper.read_field(self.token, name)
 
 
 class Build:
@@ -140,18 +139,36 @@ class Wrapper:
             raise RuntimeError(f"unexpected native cache response: {reply}")
         return self.objects[int(reply.split()[1])]
 
-    def native_cache_info(self):
+    def save_snapshot(self):
         self.start(self.shape if self.shape is not None else (int,) * self.arity)
         self.send(1)
-        op, hits, misses, size, current = self.read().split()
+        op, token, hits, misses, size, current = self.read().split()
         if op != "info":
             raise RuntimeError(op)
-        return (int(hits), int(misses), None if size == "None" else int(size), int(current))
+        values = (int(hits), int(misses), None if size == "None" else int(size), int(current))
+        return int(token), values
 
     def cache_info(self):
-        values = self.native_cache_info()
+        token, values = self.save_snapshot()
         self.counts["snapshots"] += 1
-        return Snapshot(values, self.counts)
+        return Snapshot(values, self, token)
+
+    def read_field(self, token, name):
+        self.send(4, token, name)
+        tag, value = self.read().split()
+        if tag != "field":
+            raise RuntimeError(f"unexpected cache_info field response: {tag}")
+        self.counts["native_named_fields"] += 1
+        return None if value == "None" else int(value)
+
+    def expected_info(self, values):
+        self.start(self.shape if self.shape is not None else (int,) * self.arity)
+        self.send(5, *values)
+        tag, _, payload = self.read().partition(" ")
+        if tag != "expected":
+            raise RuntimeError(f"unexpected _CacheInfo constructor response: {tag}")
+        self.counts["native_expected_constructors"] += 1
+        return ast.literal_eval(payload)
 
     def cache_clear(self):
         self.start(self.shape if self.shape is not None else (int,) * self.arity)
@@ -224,17 +241,26 @@ def exercise(build, case, original, counts):
             raise UnsupportedFixture("cache fixture requires literal maxsize and typed")
         return lambda f: decorate(f, f"functools.lru_cache(maxsize={maxsize!r}, typed={typed!r})")
 
-    # Preserve both fresh module identities and the expected _CacheInfo constructor.
+    def expected_info(*args, **kwargs):
+        # The upstream expected tuples use these four integer/None keywords in this order.
+        if (args or not wrappers or tuple(kwargs) != ("hits", "misses", "maxsize", "currsize")
+                or any(type(v) is not int for k, v in kwargs.items() if k != "maxsize")
+                or (kwargs["maxsize"] is not None and type(kwargs["maxsize"]) is not int)):
+            raise UnsupportedFixture("unsupported _CacheInfo arguments in expected value")
+        return wrappers[-1].expected_info(kwargs.values())
+
+    # The host retains each distinct upstream module and runs its original method.
     try:
         with patch.object(case.module, "lru_cache", lru_cache), patch.object(
-                case.module, "cache", lambda f: decorate(f, "functools.cache")):
+                case.module, "cache", lambda f: decorate(f, "functools.cache")), patch.object(
+                case.module, "_CacheInfo", expected_info):
             original()
         for wrapper in wrappers:
             if wrapper.bound_len_calls:
                 if builtins.len is not initial_len:
                     raise AssertionError("the original method did not restore builtins.len by identity")
                 bindings.append({"binding": "builtins.len", "calls_while_replaced": wrapper.bound_len_calls,
-                                 "cache_info_before_teardown": wrapper.native_cache_info(),
+                                 "cache_info_before_teardown": wrapper.save_snapshot()[1],
                                  "original_is_callback": wrapper.function is initial_len,
                                  "original_identity_restored": True})
     finally:
@@ -247,6 +273,28 @@ def exercise(build, case, original, counts):
     if bindings:
         result["binding_observations"] = bindings
     return result
+
+
+def verify_snapshot_transport(build):
+    """A handle must still read the old native tuple after a lookup, hit and clear."""
+    counts = Counter()
+    wrapper = Wrapper(build, lambda n: n, "functools.lru_cache(maxsize=2, typed=False)", counts)
+    try:
+        empty = wrapper.cache_info()
+        wrapper(7)
+        miss = wrapper.cache_info()
+        wrapper(7)
+        hit = wrapper.cache_info()
+        wrapper.cache_clear()
+        cleared = wrapper.cache_info()
+        observed = [(snap.hits, snap.misses, snap.maxsize, snap.currsize)
+                    for snap in (hit, empty, cleared, miss, hit)]
+        if observed != [(1, 1, 2, 1), (0, 0, 2, 0), (0, 0, 2, 0), (0, 1, 2, 1), (1, 1, 2, 1)]:
+            raise AssertionError(f"retained native snapshots changed: {observed}")
+        return {"read_order": ["hit", "empty", "cleared", "miss", "hit"],
+                "values": observed, "native_named_fields": counts["native_named_fields"]}
+    finally:
+        wrapper.close()
 
 
 def main():
@@ -263,11 +311,12 @@ def main():
     verify_interpreter_tests(manifest)
     ref = json.loads((HERE / "reference-linux.json").read_text())
     report = {"module": manifest["module"], "denominator": ref["denominator"],
-              "cpython_commit": manifest["commit"], "optimization_levels": {}}
+              "cpython_commit": manifest["commit"], "optimization_levels": {}, "transport_controls": {}}
     failed = False
     for level in (0, 3):
         with tempfile.TemporaryDirectory() as temp:
             build = Build(Path(temp), args, level)
+            report["transport_controls"][str(level)] = verify_snapshot_transport(build)
             all_cases = list(cases(load_suite(manifest["module"])))
             if {case.id() for case in all_cases} != ref["reference"].keys():
                 raise RuntimeError("reference denominator changed")
