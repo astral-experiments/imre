@@ -396,6 +396,7 @@ impl Builtin {
             | Self::IsInstance(_)
             | Self::IsBuiltinSubclass
             | Self::IsNone
+            | Self::MockCallList { .. }
             | Self::JsonIsInt
             | Self::Len
             | Self::JsonEmptyObject
