@@ -1,5 +1,7 @@
 //! Ordinal lookup for exact built-in dictionaries: a miss copies and None deletes.
 
+use num_traits::ToPrimitive;
+
 use super::super::{mappings::Mapping, object, unions, words::NULLABLE};
 use super::{Error, Int, Kind, Object, Rc, Result, Str, finish, owned_string};
 
@@ -28,7 +30,9 @@ fn replacement(table: &Mapping, ch: char) -> Result<Piece<'_>> {
         })),
         2 => {
             // SAFETY: the table keeps this integer live for the whole lookup.
-            match unsafe { Int::borrow(word) }.as_small() {
+            let value = unsafe { Int::borrow(word) };
+            // A closed str-or-int result boxes even small integers for its tag bits.
+            match value.as_small().or_else(|| value.big().to_i64()) {
                 Some(0xd800..=0xdfff) => Err(Error::new(
                     Kind::ValueError,
                     "surrogates are outside the native string domain",

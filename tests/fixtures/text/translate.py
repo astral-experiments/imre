@@ -1,4 +1,7 @@
 """Plain dictionaries map ordinals lazily; None deletes, a miss preserves."""
+import logging
+
+
 def ints(text: str, table: dict[int, int]) -> None:
     try: print(repr(text.translate(table)))
     except ValueError as error: print(error)
@@ -47,6 +50,13 @@ def identity(value: str) -> None:
     print(value.translate(lookup) is value)
 
 
+# getLevelName returns a closed str-or-int result; the integer is boxed even if small.
+def from_level(level: str) -> None:
+    table = {97: logging.getLevelName(level)}
+    try: print(repr("a?".translate(table)))
+    except ValueError as error: print(str(error))
+
+
 whitespace = {9: 32, 10: 32, 11: 32, 12: 32, 13: 32, 32: 32}
 for text in ["", " ", "hello", "x\t\r\n\v\f y", "☼\u2028\x85\xa0"]:
     ints(text, whitespace)
@@ -91,3 +101,11 @@ try: print(source("x").translate(table=make_table()))
 except TypeError as error: print(error)
 try: print(source("x").translate(make_table(), ignored=late()))
 except ValueError as error: print(error)
+
+
+from_level("INFO")
+from_level("not_a_registered_level")
+logging.addLevelName(0x10ffff, "LAST")
+logging.addLevelName(1 << 100, "BIG")
+from_level("LAST")
+from_level("BIG")
