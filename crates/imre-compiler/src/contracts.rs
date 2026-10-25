@@ -247,6 +247,7 @@ impl Builtin {
             | Self::KeyDifference
             | Self::RegexGroupDict
             | Self::DictGet
+            | Self::DictCopy
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
             | Self::JsonLoads

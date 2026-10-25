@@ -18,6 +18,7 @@ mod callables;
 mod calls;
 mod comprehensions;
 mod contexts;
+mod copying;
 mod counter;
 mod dataclass_values;
 mod dispatch;
@@ -5445,6 +5446,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
                 return self.cursor_length_hint(call);
             }
+            Some(Binding::Intrinsic(Intrinsic::ShallowCopy)) => return self.shallow_copy(call),
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
                 return Err(error(
