@@ -465,6 +465,18 @@ pub(crate) enum Compare {
     GreaterEqual,
 }
 
+/// Native multiset arithmetic over integer counts. Values match the runtime ABI.
+#[repr(u32)]
+#[derive(Clone, Copy)]
+pub(crate) enum CounterOp {
+    Add,
+    Subtract,
+    Union,
+    Intersection,
+    Positive,
+    Negative,
+}
+
 /// Public ZIP entry metadata read from the central directory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ZipField {
@@ -512,6 +524,8 @@ pub(crate) enum Builtin {
     EnumLookup(usize),
     EnumString,
     NominalIdentity,
+    /// Match an exception against the category list retained by an assertion context.
+    ExceptionMatchesAny,
     LiteralStringView,
     StringListContains,
     StringContains,
@@ -547,6 +561,9 @@ pub(crate) enum Builtin {
     Formatter(FormatterOperation),
     Input,
     Chr,
+    IntegerPower,
+    ModularPower,
+    NegativeIntegerPower,
     Int,
     Float,
     /// Represents an exact integer by its sign for a proved zero-comparison parameter.
@@ -571,6 +588,7 @@ pub(crate) enum Builtin {
     },
     ImportErrorField(u32),
     ImportErrorReset,
+    ImportErrorRejectReset,
     ExceptionFieldRepr,
     ExceptionFieldLen,
     ExceptionFieldIndex,
@@ -747,6 +765,8 @@ pub(crate) enum Builtin {
         empty_list: bool,
     },
     JsonAdd,
+    /// Compare two parsed values, observing mutations to an original root list.
+    JsonEqual,
     /// Both lookups borrow the same local JSON document and use literal integer defaults.
     JsonAddFields(String, String),
     JsonIsInt,
@@ -795,11 +815,16 @@ pub(crate) enum Builtin {
     TextClosed,
     FileFileno,
     DictGet,
+    DictCopy,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
     CounterNew,
     CounterTotal,
     CounterUpdate,
+    CounterMath {
+        op: CounterOp,
+        inplace: bool,
+    },
     DictSumValues,
     /// Widens a defaultdict owner to its ordinary dictionary interface.
     DictAsBase,
@@ -1090,6 +1115,18 @@ pub(crate) enum FdOperation {
     SetInheritable,
 }
 
+/// Filesystem copy operations using the same ordered pair of path operands.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub(crate) enum CopyOperation {
+    File = 0,
+    Mode = 1,
+    Stat = 2,
+    Xattr = 3,
+    Copy = 4,
+    Copy2 = 5,
+}
+
 /// Synchronous process operations cannot invoke language callbacks.
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
@@ -1174,7 +1211,7 @@ pub(crate) enum ProcessOperation {
     Fd(FdOperation),
     OpenFlag(&'static str),
     Which,
-    CopyFile,
+    Copy(CopyOperation),
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,

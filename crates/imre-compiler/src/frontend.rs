@@ -19,6 +19,7 @@ mod callables;
 mod calls;
 mod comprehensions;
 mod contexts;
+mod copying;
 mod counter;
 mod csv;
 mod dataclass_values;
@@ -44,9 +45,11 @@ mod matching;
 mod module_values;
 mod native_generators;
 mod os;
+mod partials;
 mod paths;
 mod pipelines;
 mod posixpath;
+mod powers;
 mod processes;
 mod projected_equality;
 mod record_inputs;
@@ -64,6 +67,7 @@ mod timed_handlers;
 mod truthiness;
 mod unbound_locals;
 mod unions;
+mod unittest;
 mod unpacking;
 mod zip_sums;
 mod zipfile;
@@ -320,6 +324,7 @@ const RESERVED: &[&str] = &[
     "set",
     "len",
     "abs",
+    "pow",
     "chr",
     "sorted",
     "divmod",
@@ -346,7 +351,7 @@ const RESERVED: &[&str] = &[
     "__file__",
 ];
 
-/// These numbers are the sealed exception categories in the runtime ABI.
+/// Indices are runtime ABI categories. Empty entries belong to imported modules.
 pub(crate) fn exception_kind(name: &str) -> Option<u32> {
     match name {
         "NotImplementedError" => return Some(37),
@@ -1178,7 +1183,7 @@ fn recursive_call_root(graph: &[HashSet<usize>]) -> Option<usize> {
     None
 }
 
-fn error(source: &str, node: &impl Ranged, message: &str) -> String {
+pub(crate) fn error(source: &str, node: &impl Ranged, message: &str) -> String {
     let offset = usize::from(node.start());
     let prefix = &source[..offset];
     let line = prefix.bytes().filter(|&byte| byte == b'\n').count() + 1;
@@ -2272,6 +2277,14 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Tuple(tuple) if self.types.fields(concrete).is_some() => {
                 let fields = self.types.fields(concrete).unwrap();
+                if tuple
+                    .elts
+                    .iter()
+                    .any(|v| matches!(v, ast::Expr::Starred(_)))
+                {
+                    let value = self.expanded_tuple(tuple, Some(&fields))?;
+                    return self.coerce(value, expected, expression);
+                }
                 if tuple.elts.len() != fields.len() {
                     return Err(error(
                         self.source,
@@ -3464,7 +3477,11 @@ impl<'a> Checker<'a> {
                 } else if let ast::Expr::Name(_) = &*assign.target {
                     let left = self.expr(&assign.target)?;
                     let right = self.expr(&assign.value)?;
-                    let value = self.binary_expr(assign.op, left, right, statement)?;
+                    let value = if self.types.is_counter(left.ty) {
+                        self.counter_math(assign.op, left, right, true, statement)?
+                    } else {
+                        self.binary_expr(assign.op, left, right, statement)?
+                    };
                     if self.types.element(value.ty).is_some() {
                         return Err(error(
                             self.source,
@@ -3773,6 +3790,11 @@ impl<'a> Checker<'a> {
         } else {
             self.expr(&item.context_expr)?
         };
+        if let Type::Class(class) = manager.ty
+            && self.unittest_context(class)
+        {
+            return self.assert_raises_scope(item, remaining, body, class, manager);
+        }
         if manager.ty == Type::GeneratorContext {
             return self.generator_scope(item, remaining, body, manager);
         }
@@ -3855,7 +3877,7 @@ impl<'a> Checker<'a> {
     /// Class-form raises construct a new instance, just like an explicit call.
     fn simple_exception(&mut self, call: &ast::ExprCall, kind: u32) -> Result<Expr, String> {
         if self.is_import_error(kind) {
-            return self.import_error(call, kind);
+            return self.import_error(call, kind, None);
         }
         if kind == 32 {
             return self.system_exit(call, false);
@@ -4332,6 +4354,16 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::PercentInteger, vec![left, right]),
             });
         }
+        if op == ast::Operator::Pow {
+            let (operation, ty) = self.integer_power(&left, &right, false, node)?;
+            return Ok(Expr {
+                ty,
+                kind: ExprKind::Builtin(
+                    operation,
+                    vec![powers::integer(left), powers::integer(right)],
+                ),
+            });
+        }
         let left = Self::integer_addend(op, left, right.ty);
         let right = Self::integer_addend(op, right, left.ty);
         let (op, ty) = self.binary_op(op, left.ty, right.ty, node)?;
@@ -4648,6 +4680,13 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Set(set) => return self.set_literal(set, None),
             ast::Expr::Tuple(tuple) => {
+                if tuple
+                    .elts
+                    .iter()
+                    .any(|v| matches!(v, ast::Expr::Starred(_)))
+                {
+                    return self.expanded_tuple(tuple, None);
+                }
                 let values = tuple
                     .elts
                     .iter()
@@ -4722,6 +4761,9 @@ impl<'a> Checker<'a> {
                     self.expect(left.ty, right.ty, binary)?;
                     return self.concat_lists(left, right, binary);
                 }
+                if self.types.is_counter(left.ty) && self.types.is_counter(right.ty) {
+                    return self.counter_math(binary.op, left, right, false, expression);
+                }
                 return self.binary_expr(binary.op, left, right, expression);
             }
             ast::Expr::UnaryOp(unary) => {
@@ -4747,6 +4789,20 @@ impl<'a> Checker<'a> {
                         )
                     }
                     ast::UnaryOp::USub | ast::UnaryOp::UAdd => {
+                        if self.types.is_counter(value.ty) {
+                            let op = if unary.op == ast::UnaryOp::UAdd {
+                                ir::CounterOp::Positive
+                            } else {
+                                ir::CounterOp::Negative
+                            };
+                            return Ok(Expr {
+                                ty: value.ty,
+                                kind: ExprKind::Builtin(
+                                    Builtin::CounterMath { op, inplace: false },
+                                    vec![value],
+                                ),
+                            });
+                        }
                         if !matches!(value.ty, Type::Int | Type::Float) {
                             return Err(error(
                                 self.source,
@@ -5160,6 +5216,12 @@ impl<'a> Checker<'a> {
                 })?;
                 let index = self.expr(&subscript.slice)?;
                 self.expect(Type::Int, index.ty, expression)?;
+                if let ExprKind::Field(tuple, _) = &list.kind
+                    && self.types.fields(tuple.ty).is_some()
+                {
+                    self.graph
+                        .checked_tuple_list_read(self.module, subscript.range());
+                }
                 (
                     element,
                     ExprKind::Builtin(Builtin::ListGet, vec![list, index]),
@@ -5187,6 +5249,13 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if attribute.attr.as_str() == "join"
+                    && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
+                    && !self.names.contains_key("str")
+                    && self.resolve(&attribute.value).is_none()
+                {
+                    return Ok(self.string_join_value(None, attribute));
+                }
                 if attribute.attr.as_str() == "encoding"
                     && matches!(
                         self.resolve(&attribute.value),
@@ -5204,6 +5273,9 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
+                    return Ok(self.string_join_value(Some(receiver), attribute));
+                }
                 if let Type::NamedException(class) = receiver.ty
                     && attribute.attr.as_str() == "args"
                 {
@@ -5687,6 +5759,7 @@ impl<'a> Checker<'a> {
                 };
                 return self.typed_expr(value);
             }
+            Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
             Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
@@ -5727,6 +5800,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
                 return self.cursor_length_hint(call);
             }
+            Some(Binding::Intrinsic(Intrinsic::ShallowCopy)) => return self.shallow_copy(call),
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Tee)) => return self.tee_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Count)) => return self.count_cursor(call),
@@ -5757,7 +5831,7 @@ impl<'a> Checker<'a> {
                 return self.popen(call, Some(true));
             }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
-            Some(Binding::Intrinsic(Intrinsic::CopyFile)) => return self.shutil_copyfile(call),
+            Some(Binding::Intrinsic(Intrinsic::Copy(op))) => return self.shutil_copy(op, call),
             Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
                 self.reject_builtin_keywords(call)?;
                 let [path] = call.arguments.args.as_ref() else {
@@ -5969,11 +6043,7 @@ impl<'a> Checker<'a> {
                 None => self.expr(&attribute.value)?,
             };
             if receiver.ty == Type::ImportException && attribute.attr.as_str() == "__init__" {
-                let replacement = self.import_error(call, 41)?;
-                return Ok(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(Builtin::ImportErrorReset, vec![receiver, replacement]),
-                });
+                return self.import_error(call, 41, Some(receiver));
             }
             if matches!(receiver.ty, Type::NamedException(_))
                 && matches!(attribute.attr.as_str(), "__init__" | "__post_init__")
@@ -6415,6 +6485,7 @@ impl<'a> Checker<'a> {
             "list" => return self.list_call(call, None),
             "sorted" => return self.sorted_call(call, None),
             "abs" => return self.abs_call(call),
+            "pow" => return self.pow_call(call),
             "next" => return self.next_cursor(call),
             "iter" if call.arguments.args.len() == 1 => return self.iter_cursor(call),
             "sum" => return self.sum_call(call),
@@ -6825,7 +6896,7 @@ impl<'a> Checker<'a> {
             }
         };
         let path = self.path_argument(path)?;
-        let (ty, builtin) = match (gzip, mode) {
+        let (ty, mut builtin) = match (gzip, mode) {
             (true, "rt") => (Type::TextIO, Builtin::GzipOpen),
             (true, "rb") => (Type::BinaryIO, Builtin::GzipOpen),
             (true, _) => {
@@ -6845,13 +6916,61 @@ impl<'a> Checker<'a> {
         };
         if ty == Type::BinaryIO {
             self.reject_builtin_keywords(call)?;
-        } else if gzip || !call.arguments.keywords.is_empty() {
+        } else if gzip {
             self.utf8_encoding(call)?;
+        } else {
+            let (mut encoding, mut newline) = (false, false);
+            for keyword in &call.arguments.keywords {
+                match keyword.arg.as_deref() {
+                    Some("encoding") if !encoding => {
+                        self.utf8_encoding_keyword(keyword)?;
+                        encoding = true;
+                    }
+                    Some("newline") if !newline => {
+                        builtin = self.text_newline(&keyword.value, builtin)?;
+                        newline = true;
+                    }
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            keyword,
+                            "unexpected or repeated text open keyword",
+                        ));
+                    }
+                }
+            }
         }
         Ok(Expr {
             ty,
             kind: ExprKind::Builtin(builtin, vec![path]),
         })
+    }
+
+    /// POSIX writers already preserve newlines. Readers must retain CR and
+    /// CRLF while still recognizing each as a physical line terminator.
+    fn text_newline(&self, value: &ast::Expr, builtin: Builtin) -> Result<Builtin, String> {
+        if !matches!(builtin, Builtin::TextOpen(_)) {
+            return Err(error(
+                self.source,
+                value,
+                "binary open does not accept newline",
+            ));
+        }
+        match value {
+            ast::Expr::NoneLiteral(_) => Ok(builtin),
+            ast::Expr::StringLiteral(s) if s.value.to_str().is_empty() => {
+                Ok(if matches!(builtin, Builtin::TextOpen(0)) {
+                    Builtin::TextOpen(4)
+                } else {
+                    builtin
+                })
+            }
+            _ => Err(error(
+                self.source,
+                value,
+                "expected newline=None or an empty literal string",
+            )),
+        }
     }
 
     /// Validate an explicit encoding for native text I/O.

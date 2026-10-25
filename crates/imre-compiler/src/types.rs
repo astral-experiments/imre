@@ -18,6 +18,7 @@ enum Shape {
     Counter(Type),
     Set(Type),
     Tuple(Vec<Type>),
+    PartialFrame(Vec<Type>),
     Callable(Vec<Type>, Type),
     Awaitable(Type),
     DirectoryContext(Type),
@@ -67,7 +68,10 @@ impl Types {
                 Some(Shape::Dict(..) | Shape::DefaultListDict(..) | Shape::Counter(_))
             ),
             Type::Set(id) => matches!(storage.shapes.get(id), Some(Shape::Set(_))),
-            Type::Tuple(id) => matches!(storage.shapes.get(id), Some(Shape::Tuple(_))),
+            Type::Tuple(id) => matches!(
+                storage.shapes.get(id),
+                Some(Shape::Tuple(_) | Shape::PartialFrame(_))
+            ),
             Type::Callable(id) => matches!(storage.shapes.get(id), Some(Shape::Callable(..))),
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
@@ -144,7 +148,9 @@ impl Types {
                 | Shape::ProcessArgs(ty)
                 | Shape::Optional(ty) => vec![*ty],
                 Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => vec![*key, *value],
-                Shape::Tuple(fields) | Shape::Union(fields) => fields.clone(),
+                Shape::Tuple(fields) | Shape::PartialFrame(fields) | Shape::Union(fields) => {
+                    fields.clone()
+                }
                 Shape::Callable(params, returns) => {
                     params.iter().copied().chain([*returns]).collect()
                 }
@@ -390,9 +396,9 @@ impl Types {
         Some(if nullable { self.optional(ty) } else { ty })
     }
 
-    /// A dynamic logging name resolves to an integer or to its fallback string.
-    /// Narrow this result before using it as either concrete type.
-    pub(crate) fn logging_level_result(&self) -> Type {
+    /// A closed builtin result that can be either a string or an integer.
+    /// Narrow the result before using it as either concrete type.
+    pub(crate) fn string_or_int(&self) -> Type {
         Type::Union(self.intern(Shape::Union(vec![Type::Str, Type::Int])))
     }
 
@@ -502,6 +508,15 @@ impl Types {
 
     pub(crate) fn tuple(&self, elements: Vec<Type>) -> Type {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
+    }
+
+    /// Immutable private storage for the callable and arguments retained by partial.
+    pub(crate) fn partial_frame(&self, fields: Vec<Type>) -> Type {
+        Type::Tuple(self.intern(Shape::PartialFrame(fields)))
+    }
+
+    pub(crate) fn is_partial_frame(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::PartialFrame(_)))
     }
 
     pub(crate) fn process_args(&self, command: Type) -> usize {
@@ -618,7 +633,7 @@ impl Types {
             return None;
         };
         match &self.0.borrow().shapes[id] {
-            Shape::Tuple(fields) => Some(fields.clone()),
+            Shape::Tuple(fields) | Shape::PartialFrame(fields) => Some(fields.clone()),
             _ => unreachable!("tuple type identity has a tuple shape"),
         }
     }
@@ -631,7 +646,9 @@ impl Types {
             .iter()
             .enumerate()
             .filter_map(|(id, shape)| match shape {
-                Shape::Tuple(fields) => Some((Type::Tuple(id), fields.clone())),
+                Shape::Tuple(fields) | Shape::PartialFrame(fields) => {
+                    Some((Type::Tuple(id), fields.clone()))
+                }
                 _ => None,
             })
             .collect()
@@ -810,7 +827,7 @@ impl TypeDescription<'_> {
                 })?;
                 self.write_type(*element)?;
             }
-            Shape::Tuple(fields) => {
+            Shape::Tuple(fields) | Shape::PartialFrame(fields) => {
                 self.write_str("tuple[")?;
                 self.write_types(fields, ", ")?;
             }

@@ -12,14 +12,31 @@ use super::records::{RecordDescriptor, imre_record_new};
 use super::{Object, Str, Words, fail};
 use crate::objects::paths::imre_path_new;
 
+mod binding;
 mod help;
 mod nargs;
 
+use binding::{Bound, IntegerRange};
 use nargs::{Nargs, positional_counts};
+
+/// Large decimal conversions obey the interpreter's configured digit limit,
+/// including leading zeroes. Underscores and signs do not count.
+fn decimal_digits_allowed(count: usize) -> bool {
+    if count <= 640 {
+        return true;
+    }
+    let limit = std::env::var("PYTHONINTMAXSTRDIGITS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(4300);
+    limit == 0 || count <= limit
+}
 
 #[derive(Deserialize, Copy, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
 enum Kind {
+    Int,
+    Float,
     Str,
     Path,
     Bool,
@@ -28,6 +45,8 @@ enum Kind {
 #[derive(Deserialize)]
 struct OptionSpec {
     flag: String,
+    dest: String,
+    positional: bool,
     #[serde(default)]
     aliases: Vec<String>,
     enum_default: Option<usize>,
@@ -37,6 +56,12 @@ struct OptionSpec {
     list_default: bool,
     required: bool,
     choices: Vec<String>,
+    range: Option<IntegerRange>,
+    has_choices: bool,
+    int_default: bool,
+    int_constant: bool,
+    float_default: bool,
+    float_constant: bool,
     converter: Option<String>,
     default: Option<String>,
     path_default: bool,
@@ -56,6 +81,9 @@ struct Parser {
     #[serde(default)]
     prog: String,
     raw: bool,
+    prefixes: String,
+    help_flags: Option<[String; 2]>,
+    abbrev: bool,
     options: Vec<OptionSpec>,
     #[serde(default)]
     groups: Vec<ArgumentGroup>,
@@ -83,11 +111,11 @@ enum Token<'a> {
     Ambiguous(Vec<&'a str>),
     Help(Option<&'a str>),
     Option(usize, Option<&'a str>),
-    Cluster(&'a str),
+    Cluster(char, &'a str),
 }
 
 enum Word<'a> {
-    Option(&'a OptionSpec, Option<Vec<&'a str>>),
+    Option(&'a OptionSpec, Bound<'a>),
     Command(&'a str),
 }
 
@@ -103,107 +131,142 @@ enum Stop<'a> {
 }
 
 impl Parser {
+    fn normalize_numbers(&mut self) {
+        for option in &mut self.options {
+            let integer = |text: &mut String| {
+                if !text
+                    .strip_prefix('-')
+                    .unwrap_or(text)
+                    .bytes()
+                    .all(|ch| ch.is_ascii_digit())
+                {
+                    *text = crate::parse_integer_literal(text)
+                        .expect("integer literal from schema")
+                        .to_string();
+                }
+            };
+            if option.kind == Kind::Int {
+                option.choices.iter_mut().for_each(integer);
+            }
+            if option.int_default
+                && let Some(default) = &mut option.default
+            {
+                integer(default);
+            }
+            if option.int_constant
+                && let Some(constant) = &mut option.constant
+            {
+                integer(constant);
+            }
+            if option.kind != Kind::Float {
+                continue;
+            }
+            let format = |text: &mut String| {
+                *text = crate::floats::render(crate::floats::parse(text).expect("literal float"))
+                    .to_string();
+            };
+            for choice in &mut option.choices {
+                format(choice);
+            }
+            if option.float_default
+                && let Some(default) = &mut option.default
+            {
+                format(default);
+            }
+            if option.float_constant
+                && let Some(constant) = &mut option.constant
+            {
+                format(constant);
+            }
+        }
+        if let Some(commands) = &mut self.subcommands {
+            for child in &mut commands.choices {
+                child.parser.normalize_numbers();
+            }
+        }
+    }
+
+    fn flags(&self) -> impl Iterator<Item = (&str, Option<usize>)> {
+        self.help_flags
+            .iter()
+            .flatten()
+            .map(|flag| (flag.as_str(), None))
+            .chain(
+                self.options
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, o)| !o.positional())
+                    .flat_map(|(i, o)| o.flags().map(move |flag| (flag, Some(i)))),
+            )
+    }
+
+    fn help_name(&self) -> String {
+        self.help_flags.as_ref().expect("help action").join("/")
+    }
+
+    /// Resolve exact spellings first, then enumerate every possible long
+    /// abbreviation and short cluster in declaration order.
     fn token<'a>(&'a self, arg: &'a str) -> Token<'a> {
         if arg == "--" {
             return Token::End;
         }
-        let Some(tail) = arg.strip_prefix('-') else {
+        let mut chars = arg.chars();
+        let Some(prefix) = chars.next().filter(|&c| self.prefixes.contains(c)) else {
             return Token::Value;
         };
-        if tail.is_empty() {
+        let token = |slot, value| match slot {
+            None => Token::Help(value),
+            Some(i) => Token::Option(i, value),
+        };
+        if let Some((_, slot)) = self.flags().find(|(s, _)| *s == arg) {
+            return token(slot, None);
+        }
+        let Some(second) = chars.next() else {
             return Token::Value;
-        }
-        let (flag, explicit) = arg
+        };
+        let (head, explicit) = arg
             .split_once('=')
-            .map_or((arg, None), |(flag, value)| (flag, Some(value)));
-        if matches!(flag, "-h" | "--help") {
-            return Token::Help(explicit);
-        }
-        if let Some(index) = self
-            .options
-            .iter()
-            .position(|option| option.flags().any(|s| s == flag))
+            .map_or((arg, None), |(h, v)| (h, Some(v)));
+        if explicit.is_some()
+            && let Some((_, slot)) = self.flags().find(|(s, _)| *s == head)
         {
-            return Token::Option(index, explicit);
+            return token(slot, explicit);
         }
-        if flag.starts_with("--") || flag == "-" {
-            let mut names: Vec<_> = ["-h", "--help"]
-                .into_iter()
-                .filter(|name| name.starts_with(flag))
-                .collect();
-            let help = !names.is_empty();
-            let matches = self
-                .options
-                .iter()
-                .enumerate()
-                .flat_map(|(index, option)| option.flags().map(move |flag| (index, flag)))
-                .filter(|(_, spelling)| spelling.starts_with(flag));
-            let mut option = None;
-            for (index, matched) in matches {
-                names.push(matched);
-                option = Some(index);
-            }
-            if names.len() > 1 {
-                return Token::Ambiguous(names);
-            }
-            if help {
-                return Token::Help(explicit);
-            }
-            if let Some(index) = option {
-                return Token::Option(index, explicit);
+        let long = self.prefixes.contains(second);
+        let short = &arg[..prefix.len_utf8() + second.len_utf8()];
+        let mut matches = Vec::new();
+        for (flag, slot) in self.flags() {
+            if !long && flag == short {
+                matches.push((flag, Token::Cluster(prefix, &arg[prefix.len_utf8()..])));
+            } else if self.abbrev && flag.starts_with(head) {
+                matches.push((flag, token(slot, explicit)));
             }
         }
-        if let Some(first) = arg.get(..2)
-            && arg.len() > first.len()
-            && (first == "-h"
-                || self
-                    .options
-                    .iter()
-                    .any(|option| option.flags().any(|s| s == first)))
-        {
-            return Token::Cluster(&arg[1..]);
+        if matches.len() > 1 {
+            return Token::Ambiguous(matches.into_iter().map(|(flag, _)| flag).collect());
         }
-        // Python's negative-number matcher starts with -\.?\d.
-        let numeric = tail
-            .strip_prefix('.')
-            .unwrap_or(tail)
-            .chars()
-            .next()
-            .and_then(crate::integer_text::decimal_digit)
-            .is_some();
-        if numeric || arg.contains(' ') {
+        if let Some((_, found)) = matches.pop() {
+            return found;
+        }
+        let numeric = |s: &str| {
+            s.strip_prefix('-').is_some_and(|s| {
+                s.strip_prefix('.')
+                    .unwrap_or(s)
+                    .chars()
+                    .next()
+                    .and_then(crate::integer_text::decimal_digit)
+                    .is_some()
+            })
+        };
+        if (numeric(arg) && !self.flags().any(|(name, _)| numeric(name))) || arg.contains(' ') {
             Token::Value
         } else {
             Token::Unknown
         }
     }
 
-    fn check_choices<'a>(&'a self, option: &OptionSpec, taken: &[&str]) -> Result<(), Stop<'a>> {
-        if !option.choices.is_empty()
-            && let Some(value) = taken
-                .iter()
-                .find(|&&value| !option.choices.iter().any(|choice| choice == value))
-        {
-            let choices = option
-                .choices
-                .iter()
-                .map(|choice| string_repr(choice))
-                .collect::<Vec<_>>()
-                .join(", ");
-            return Err(Stop::Error(
-                self,
-                format!(
-                    "argument {}: invalid choice: {} (choose from {choices})",
-                    option.error_name(),
-                    string_repr(value)
-                ),
-            ));
-        }
-        Ok(())
-    }
-
     fn parse<'a>(&'a self, args: &[&'a str]) -> Result<Parsed<'a>, Stop<'a>> {
-        let mut values = vec![None; self.options.len()];
+        let mut values = self.options.iter().map(|_| None).collect::<Vec<_>>();
         let mut extras = Vec::new();
         let mut index = 0;
         let mut selected = None;
@@ -279,8 +342,11 @@ impl Parser {
                     if marker == Some(index) {
                         index += 1;
                     }
-                    self.check_choices(&self.options[slot], &taken)?;
-                    values[slot] = Some(taken);
+                    values[slot] = Some(
+                        self.options[slot]
+                            .bind(Some(&taken))
+                            .map_err(|e| Stop::Error(self, e))?,
+                    );
                 }
                 extras.extend(args[index..end].iter().copied().map(Cow::Borrowed));
                 index = end;
@@ -297,7 +363,8 @@ impl Parser {
                     return Err(Stop::Error(
                         self,
                         format!(
-                            "argument -h/--help: ignored explicit argument {}",
+                            "argument {}: ignored explicit argument {}",
+                            self.help_name(),
                             string_repr(value)
                         ),
                     ));
@@ -313,20 +380,21 @@ impl Parser {
                     extras.push(Cow::Borrowed(arg));
                     continue;
                 }
-                Token::Cluster(mut suffix) => {
+                Token::Cluster(prefix, mut suffix) => {
                     let mut take = None;
                     while !suffix.is_empty() {
-                        let Some((letter, rest)) = suffix.split_at_checked(1) else {
-                            extras.push(Cow::Owned(format!("-{suffix}")));
-                            break;
-                        };
+                        let letter = suffix.chars().next().unwrap();
+                        let rest = &suffix[letter.len_utf8()..];
+                        let spelling = format!("{prefix}{letter}");
                         let option = self.options.iter().enumerate().find(|(_, option)| {
-                            option
-                                .flags()
-                                .any(|flag| flag.strip_prefix('-') == Some(letter))
+                            !option.positional() && option.flags().any(|s| s == spelling)
                         });
-                        if letter != "h" && option.is_none() {
-                            extras.push(Cow::Owned(format!("-{suffix}")));
+                        let help = self
+                            .help_flags
+                            .as_ref()
+                            .is_some_and(|flags| flags[0] == spelling);
+                        if !help && option.is_none() {
+                            extras.push(Cow::Owned(format!("{prefix}{suffix}")));
                             break;
                         }
                         if let Some((slot, option)) = option
@@ -340,9 +408,14 @@ impl Parser {
                         }
                         // argparse resolves the entire cluster (including errors)
                         // before invoking its first action, which may be help.
-                        if rest.starts_with(['-', '=']) {
+                        if rest.starts_with('=')
+                            || rest
+                                .chars()
+                                .next()
+                                .is_some_and(|c| self.prefixes.contains(c))
+                        {
                             let name = option.map_or_else(
-                                || "-h/--help".into(),
+                                || self.help_name(),
                                 |(_, option)| option.error_name(),
                             );
                             return Err(Stop::Error(
@@ -354,7 +427,7 @@ impl Parser {
                             ));
                         }
                         if let Some((slot, _)) = option {
-                            values[slot] = Some(Vec::new());
+                            values[slot] = Some(Bound::Bool(true));
                         } else {
                             clustered_help = true;
                         }
@@ -421,16 +494,25 @@ impl Parser {
             if clustered_help {
                 return Err(Stop::Help(self));
             }
-            self.check_choices(option, &taken)?;
-            values[slot] = Some(taken);
+            values[slot] = Some(
+                option
+                    .bind(Some(&taken))
+                    .map_err(|e| Stop::Error(self, e))?,
+            );
         }
-        let mut missing = self
-            .options
-            .iter()
-            .zip(&values)
-            .filter(|(option, value)| option.required && value.is_none())
-            .map(|(option, _)| option.error_name())
-            .collect::<Vec<_>>();
+        let mut missing = Vec::new();
+        let mut words = Vec::with_capacity(values.len());
+        for (option, value) in self.options.iter().zip(values) {
+            let bound = match value {
+                Some(value) => value,
+                None if option.required => {
+                    missing.push(option.error_name());
+                    continue;
+                }
+                None => option.bind(None).map_err(|e| Stop::Error(self, e))?,
+            };
+            words.push(Word::Option(option, bound));
+        }
         if let Some(commands) = &self.subcommands
             && selected.is_none()
         {
@@ -445,12 +527,6 @@ impl Parser {
                 ),
             ));
         }
-        let mut words: Vec<_> = self
-            .options
-            .iter()
-            .zip(values)
-            .map(|(option, value)| Word::Option(option, value))
-            .collect();
         let child = selected.map(|(child, name, mut rest)| {
             words.push(Word::Command(name));
             words.append(&mut rest);
@@ -464,63 +540,17 @@ impl Parser {
     }
 }
 
-fn scalar(kind: Kind, text: &str) -> usize {
-    let text = Rc::new(Str::new(text));
-    match kind {
-        Kind::Str => Rc::into_raw(text) as usize,
-        // SAFETY: the source remains live until Path takes an owner or normalizes it.
-        Kind::Path => unsafe { imre_path_new(Rc::as_ptr(&text)) as usize },
-        Kind::Bool => unreachable!(),
-    }
-}
-
 impl OptionSpec {
     fn flags(&self) -> impl Iterator<Item = &str> {
         std::iter::once(self.flag.as_str()).chain(self.aliases.iter().map(String::as_str))
     }
 
     fn positional(&self) -> bool {
-        !self.flag.starts_with('-')
+        self.positional
     }
 
     fn error_name(&self) -> String {
         self.flags().collect::<Vec<_>>().join("/")
-    }
-
-    fn word(&self, args: Option<Vec<&str>>) -> usize {
-        let missing =
-            args.is_none() || self.positional() && args.as_ref().is_some_and(Vec::is_empty);
-        if missing && let Some(member) = self.enum_default {
-            return (member << 3) | 5;
-        }
-        if self.kind == Kind::Bool {
-            let value = args
-                .is_some()
-                .then_some(true)
-                .or_else(|| self.default.as_deref().map(|value| value == "True"));
-            return value.map_or(0, |value| usize::from(value) + usize::from(self.optional));
-        }
-        if self.nargs.list() {
-            if missing && self.list_default {
-                return scalar(Kind::Str, self.default.as_deref().unwrap());
-            }
-            let Some(args) = args else { return 0 };
-            let mut values = Words::new(if self.kind == Kind::Path { 5 } else { 3 });
-            values
-                .values
-                .extend(args.into_iter().map(|value| scalar(self.kind, value)));
-            let word = Rc::into_raw(values.into_object()) as usize;
-            // The closed str | list[str] union reserves tag 2 for the list.
-            return if self.list_default { word | 2 } else { word };
-        }
-        let value = if missing {
-            self.default.as_deref()
-        } else {
-            args.as_ref()
-                .and_then(|args| args.first().copied())
-                .or(self.constant.as_deref())
-        };
-        value.map_or(0, |value| scalar(self.kind, value))
     }
 }
 
@@ -543,6 +573,7 @@ pub unsafe extern "C" fn imre_argparse_parse(
     let (schema, description, argv) = unsafe { (&*schema, &*description, &*argv) };
     let mut parser: Parser = serde_json::from_str(schema)
         .unwrap_or_else(|_| fail("SystemError", "invalid argparse schema"));
+    parser.normalize_numbers();
     parser.set_child_programs();
     // SAFETY: argv is a rooted list[str]; take independent string owners before
     // reading the argument values or constructing the output namespace.
@@ -619,11 +650,11 @@ pub unsafe extern "C" fn imre_argparse_parse(
         for (index, field) in parsed.words.into_iter().enumerate() {
             let word = match field {
                 Word::Option(option, values) => option.word(values),
-                Word::Command(value) => scalar(Kind::Str, value),
+                Word::Command(value) => Rc::into_raw(Rc::new(Str::new(value))) as usize,
             };
             let dest = result.add(index);
             match *layout_ref.kinds.add(index) {
-                3 | 5 => dest.cast::<*const ()>().write(word as *const ()),
+                3..=5 => dest.cast::<*const ()>().write(word as *const ()),
                 _ => dest.write(word),
             }
         }
