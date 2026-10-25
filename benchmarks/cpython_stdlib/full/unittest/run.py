@@ -170,6 +170,8 @@ def run(args, level, root):
             if module == "testmock.testmock" and method == "test_assert_called_exception_message":
                 # The original pattern formats positional {0} before entering assertRaisesRegex.
                 expected = (533, "8:53: Imre: str.format requires named arguments")
+            elif module == "testmock.testpatch" and method == "test_patch_dict_stop_without_start":
+                expected = (827, "10:26: Imre: expected bool, got bool | None; annotations are enforced contracts")
             if expected:
                 line, diagnostic = expected
                 if observation["reason"].endswith("<case>/case.py:" + diagnostic):

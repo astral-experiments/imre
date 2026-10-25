@@ -64,10 +64,14 @@ compares complete failure messages, including first differing and extra list
 elements, Unicode, truncation, custom messages, and a subclass's failure class.
 It adds no upstream IDs.
 
-At each of O0 and O3: 0 fully native passes, 15 native bodies with host
-fixtures, 10 host-driven native operations (40 calls), 10 compile blockers,
-1,053 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
+At each of O0 and O3: 0 fully native passes, 17 native bodies with host
+fixtures, 10 host-driven native operations (40 calls), 11 compile blockers,
+1,050 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
 all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
+
+The [patch.dict audit](PATCH_DICT.md) runs the same two passing patch methods
+with native default fixtures and reports all 18 original methods that call
+`patch.dict` directly.
 
 Three additional complete equality methods are attempted at each level.
 `testAssertMultiLineEqualTruncates` constructs a TestCase with a method name;
