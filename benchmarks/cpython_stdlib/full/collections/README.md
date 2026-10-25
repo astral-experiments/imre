@@ -8,8 +8,8 @@ free-threading test. The loader includes inherited test methods and both
 upstream test inputs.
 
 See the [complete native routine baseline](routines.md) for per-ID results at
-both optimization levels and the [array startup inventory](startup.md) for
-the full-module entry point.
+both optimization levels and the [startup dependency inventory](startup.md) for
+the array import and argparse's use of Mapping as a class base.
 
 | Suite | IDs |
 | --- | ---: |
