@@ -1,5 +1,5 @@
 //! Owning, type-erased views of native Python scalar and tuple values.
-use super::exceptions::{Error, Kind};
+use super::exceptions::{Error, Kind, Rendered, finish_display};
 use super::words::WordKind;
 use super::{Object, Storage, StorageCell, Str, acquire_rc, records, values};
 use crate::Int;
@@ -28,17 +28,17 @@ pub(super) unsafe fn tuple_item(tuple: usize, index: usize) -> (WordKind, usize)
     }
 }
 
-pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rc<Str> {
+pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rendered {
     if kind.raw() == 3 && !repr {
         // SAFETY: the owning field roots the exact string.
-        return unsafe { acquire_rc(word) };
+        return Ok(unsafe { acquire_rc(word) });
     }
     let mut result = String::new();
     // SAFETY: only concrete, representable field types reach this routine.
     unsafe {
-        values::write_repr(&mut result, word, kind);
+        values::try_write_repr(&mut values::ReprWriter(&mut result), word, kind)?;
     }
-    Rc::new(result.into())
+    Ok(Rc::new(result.into()))
 }
 
 /// The default CPython decimal conversion limit is tested only when a selected
@@ -61,12 +61,15 @@ pub(super) unsafe fn checked_text(kind: WordKind, word: usize, repr: bool) -> *c
                 }
             } else if k.raw() == 6 {
                 let n = records::descriptor(w as *const usize).length;
+                if pending.try_reserve(n).is_err() {
+                    return Error::allocation().returning(std::ptr::null());
+                }
                 pending.extend((0..n).map(|i| tuple_item(w, i)));
             }
             let Some(value) = pending.pop() else { break };
             next = value;
         }
-        Rc::into_raw(word_text(kind, word, repr))
+        finish_display(word_text(kind, word, repr))
     }
 }
 

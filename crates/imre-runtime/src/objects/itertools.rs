@@ -147,27 +147,31 @@ impl Adapter {
         }
     }
 
-    pub(super) fn write_repr(&self, output: &mut String, owner: *const Object) {
+    pub(super) fn write_repr(
+        &self,
+        output: &mut super::values::ReprWriter<'_>,
+        owner: *const Object,
+    ) -> std::fmt::Result {
         use std::fmt::Write;
         let name = match self {
             Self::Progression(count) if count.stop.is_none() => {
                 let current = count.current.borrow();
-                write!(output, "count({}", current.big()).unwrap();
+                write!(output, "count({}", current.big())?;
                 if count.step.as_small() != Some(1) {
-                    write!(output, ", {}", count.step.big()).unwrap();
+                    write!(output, ", {}", count.step.big())?;
                 }
-                output.push(')');
-                return;
+                output.write_char(')')?;
+                return Ok(());
             }
             Self::FloatCount { current, step } => {
-                write!(output, "count({}", crate::floats::render(current.get())).unwrap();
+                write!(output, "count({}", crate::floats::render(current.get()))?;
                 if step.kind.raw() != 2 || step.word != Int::small(1).unwrap().0 {
-                    output.push_str(", ");
+                    output.write_str(", ")?;
                     // SAFETY: step owns its exact numeric representation.
-                    unsafe { values::write_repr(output, step.word, step.kind) };
+                    unsafe { values::try_write_repr(output, step.word, step.kind)? };
                 }
-                output.push(')');
-                return;
+                output.write_char(')')?;
+                return Ok(());
             }
             Self::Progression(_) => "range_iterator",
             Self::Sequence(_) => "iterator",
@@ -175,11 +179,11 @@ impl Adapter {
             Self::Slice(_) => "itertools.islice",
             Self::Cycle(_) => "itertools.cycle",
             Self::PathWalk(_) => {
-                write!(output, "<generator object Path.walk at {owner:p}>").unwrap();
-                return;
+                write!(output, "<generator object Path.walk at {owner:p}>")?;
+                return Ok(());
             }
         };
-        write!(output, "<{name} object at {owner:p}>").unwrap();
+        write!(output, "<{name} object at {owner:p}>")
     }
 
     fn advance(&self, item: Option<ItemResult>) -> Advance {

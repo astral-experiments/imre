@@ -26,17 +26,17 @@ impl Error {
 }
 
 impl Errors {
-    pub(super) fn message(&self) -> Rc<Str> {
-        let mut repr = String::new();
-        // SAFETY: the list and all its tuple entries are retained by this payload.
+    pub(super) fn message(&self) -> super::Rendered {
+        let mut text = String::new();
+        self.write_message(&mut values::ReprWriter(&mut text))?;
+        Ok(Rc::new(Str::from(text)))
+    }
+
+    pub(super) fn write_message(&self, output: &mut values::ReprWriter<'_>) -> std::fmt::Result {
+        // SAFETY: this payload roots the list and every tuple entry during representation.
         unsafe {
-            values::write_repr(
-                &mut repr,
-                Rc::as_ptr(&self.entries) as usize,
-                WordKind::new(5),
-            )
-        };
-        Rc::new(repr.into())
+            values::try_write_repr(output, Rc::as_ptr(&self.entries) as usize, WordKind::new(5))
+        }
     }
 }
 

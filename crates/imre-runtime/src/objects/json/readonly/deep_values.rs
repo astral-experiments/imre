@@ -82,7 +82,11 @@ pub(super) fn equal(left: &View, right: &View) -> bool {
     true
 }
 
-pub(super) fn write_repr(view: &View, out: &mut String) {
+pub(super) fn write_repr(
+    view: &View,
+    out: &mut crate::objects::values::ReprWriter<'_>,
+) -> std::fmt::Result {
+    use std::fmt::Write as _;
     let mut stack = vec![(view, view.index, 0)];
     while let Some((view, index, next)) = stack.pop() {
         let (view, index) = view.resolved(index);
@@ -90,20 +94,20 @@ pub(super) fn write_repr(view: &View, out: &mut String) {
         let (offset, child) = match node {
             Node::Array(items) => {
                 if next == 0 {
-                    out.push('[');
+                    out.write_char('[')?;
                 }
                 let Some(&child) = items.get(next) else {
-                    out.push(']');
+                    out.write_char(']')?;
                     continue;
                 };
                 if next != 0 {
-                    out.push_str(", ");
+                    out.write_str(", ")?;
                 }
                 (next, child)
             }
             Node::Object(fields) => {
                 if next == 0 {
-                    out.push('{');
+                    out.write_char('{')?;
                 }
                 let mut offset = next;
                 while offset < fields.len()
@@ -114,24 +118,26 @@ pub(super) fn write_repr(view: &View, out: &mut String) {
                     offset += 1;
                 }
                 let Some((key, _)) = fields.get(offset) else {
-                    out.push('}');
+                    out.write_char('}')?;
                     continue;
                 };
                 if offset != 0 {
-                    out.push_str(", ");
+                    out.write_str(", ")?;
                 }
-                crate::objects::exceptions::push_string_repr(key, out);
-                out.push_str(": ");
+                crate::objects::exceptions::write_quoted_repr(key, out)?;
+                out.write_str(": ")?;
                 (offset, node.lookup(key).unwrap())
             }
             _ => {
-                view.write_at(index, out);
+                view.write_at(index, out)?;
                 continue;
             }
         };
+        stack.try_reserve(2).map_err(|_| std::fmt::Error)?;
         stack.push((view, index, offset + 1));
         stack.push((view, child, 0));
     }
+    Ok(())
 }
 
 /// TOML's recursive writer retains its own nesting limit. Check the selected

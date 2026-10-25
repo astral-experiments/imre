@@ -61,6 +61,13 @@ impl Builtin {
             Self::Str
                 if args
                     .first()
+                    .is_some_and(|e| matches!(e.ty, Type::Bytes | Type::ImportException)) =>
+            {
+                Contract::new(true, PreservesLists)
+            }
+            Self::Str
+                if args
+                    .first()
                     .is_some_and(|e| matches!(e.ty, Type::Exception | Type::NamedException(_))) =>
             {
                 Contract::new(true, Unknown)
@@ -117,6 +124,9 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::DictContains | Self::DictGetDefault | Self::DictTryGet(_) | Self::SetContains => {
+                Contract::new(true, PreservesLists)
+            }
             Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
@@ -311,6 +321,7 @@ impl Builtin {
             | Self::SplitLines
             | Self::FreezeStrings
             | Self::SetAdd
+            | Self::SetDiscard
             | Self::CounterUpdate
             | Self::KeySet
             | Self::KeyUnion
@@ -364,11 +375,8 @@ impl Builtin {
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::Bool
-            | Self::DictContains
-            | Self::DictGetDefault
             | Self::EnumLookup(_)
             | Self::DictSumValues
-            | Self::DictTryGet(_)
             | Self::Encode
             | Self::CsvLineNumber
             | Self::Sha256Hex
@@ -418,7 +426,6 @@ impl Builtin {
             | Self::RegexSearch
             | Self::RegexMatchStart
             | Self::SequenceGetInBounds
-            | Self::SetContains
             | Self::Split
             | Self::StringListFilter(_)
             | Self::StringListNonempty
@@ -530,7 +537,6 @@ impl Builtin {
             | Self::ListDistinct
             | Self::ListExtendUnhinted
             | Self::DequeClear
-            | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
             | Self::SplitLinesIter
@@ -822,6 +828,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_formatter_time"
                 | "imre_formatter_message"
                 | "imre_logrecord_message"
+                | "imre_logrecord_repr"
                 | "imre_log_config"
                 | "imre_log_dict_config"
                 | "imre_log_typed_dict_config"
@@ -836,6 +843,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_replace"
                 | "imre_print_str"
                 | "imre_print_bytes"
+                | "imre_bytes_str"
                 | "imre_bytes_count"
                 | "imre_bytes_list"
                 | "imre_bytes_contains_int"

@@ -100,6 +100,10 @@ def main() -> None:
     assert len(negative) == 1 and len(positive) == 1
     was = Producer()
     print(sum((was := Producer()).values()))
+    tied = Counter({"first": 0, "second": -1, "third": 0})
+    del tied["first"]
+    tied["first"] = 0
+    assert repr(tied) == "Counter({'third': 0, 'first': 0, 'second': -1})"
     c = Counter(a=big, z=0)
     plain_alias(Counter(a=1))
     plain_alias(c)

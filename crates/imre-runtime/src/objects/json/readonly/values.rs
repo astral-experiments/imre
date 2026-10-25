@@ -3,7 +3,6 @@
 use std::fmt::Write as _;
 
 use super::{Node, View, deep_values};
-use crate::objects::exceptions::push_string_repr;
 
 impl View {
     /// Containers use identity before comparing their elements. Direct equality
@@ -73,65 +72,73 @@ impl View {
         }
     }
 
-    pub(in crate::objects) fn write_repr(&self, output: &mut String) {
+    pub(in crate::objects) fn write_repr(
+        &self,
+        output: &mut crate::objects::values::ReprWriter<'_>,
+    ) -> std::fmt::Result {
         if let Some(items) = self.nodes.root_items() {
             // SAFETY: the root owns this ordinary list through the entire repr traversal.
             unsafe {
-                crate::objects::values::write_repr(
+                crate::objects::values::try_write_repr(
                     output,
                     std::rc::Rc::as_ptr(items) as usize,
                     crate::objects::words::WordKind::new(5),
                 )
-            };
+            }
         } else if self.nodes.deep() {
-            deep_values::write_repr(self, output);
+            deep_values::write_repr(self, output)
         } else {
-            self.write_at(self.index, output);
+            self.write_at(self.index, output)
         }
     }
 
-    pub(super) fn write_at(&self, i: usize, output: &mut String) {
+    pub(super) fn write_at(
+        &self,
+        i: usize,
+        output: &mut crate::objects::values::ReprWriter<'_>,
+    ) -> std::fmt::Result {
         let node = &self.nodes[i];
         match node {
-            Node::Null => output.push_str("None"),
-            Node::Datetime(value) => output.push_str(value),
-            Node::Bool(b) => output.push_str(if *b { "True" } else { "False" }),
+            Node::Null => output.write_str("None")?,
+            Node::Datetime(value) => output.write_str(value)?,
+            Node::Bool(b) => output.write_str(if *b { "True" } else { "False" })?,
             Node::Integer(i) => {
                 if let Some(i) = i.as_small() {
-                    write!(output, "{i}").unwrap();
+                    write!(output, "{i}")?;
                 } else {
-                    write!(output, "{}", i.big()).unwrap();
+                    write!(output, "{}", i.big())?;
                 }
             }
-            Node::Float(f) => output.push_str(&crate::floats::render(*f)),
-            Node::ConstantNan => output.push_str("nan"),
-            Node::String(s) => push_string_repr(s, output),
-            Node::Deferred(array) => array.view().write_repr(output),
+            Node::Float(f) => output.write_str(&crate::floats::render(*f))?,
+            Node::ConstantNan => output.write_str("nan")?,
+            Node::String(s) => crate::objects::exceptions::write_quoted_repr(s, output)?,
+            Node::Deferred(array) => array.view().write_repr(output)?,
             Node::Array(items) => {
-                output.push('[');
+                output.write_char('[')?;
                 for (offset, &item) in items.iter().enumerate() {
                     if offset != 0 {
-                        output.push_str(", ");
+                        output.write_str(", ")?;
                     }
-                    self.write_at(item, output);
+                    self.write_at(item, output)?;
                 }
-                output.push(']');
+                output.write_char(']')?;
             }
             Node::Object(fields) => {
-                output.push('{');
+                output.write_char('{')?;
                 for (offset, (name, _)) in fields.iter().enumerate() {
                     if fields[..offset].iter().any(|(old, _)| old == name) {
                         continue;
                     }
                     if offset != 0 {
-                        output.push_str(", ");
+                        output.write_str(", ")?;
                     }
-                    push_string_repr(name, output);
-                    output.push_str(": ");
-                    self.write_at(node.lookup(name).unwrap(), output);
+                    crate::objects::exceptions::write_quoted_repr(name, output)?;
+                    output.write_str(": ")?;
+                    self.write_at(node.lookup(name).unwrap(), output)?;
                 }
-                output.push('}');
+                output.write_char('}')?;
             }
         }
+        Ok(())
     }
 }
