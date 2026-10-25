@@ -346,11 +346,12 @@ impl Emitter<'_, '_> {
                     ("i1", args[9].value.operand.clone()),
                     ("i1", args[11].value.operand.clone()),
                 ];
-                // The original configuration remains the prefix. Only borrowed
-                // streams need the three-word trailer in runtime RedirectConfig.
-                let layout = if [12, 0, 4]
-                    .into_iter()
-                    .any(|shift| matches!((streams >> shift) & 15, 6 | 7))
+                // ChildConfig embeds RedirectConfig, which embeds the legacy prefix.
+                let child_options = streams & (1 << 18) != 0;
+                if child_options
+                    || [12, 0, 4]
+                        .into_iter()
+                        .any(|shift| matches!((streams >> shift) & 15, 6 | 7))
                 {
                     for (index, shift) in [(4, 12), (5, 0), (6, 4)] {
                         let word = if matches!((streams >> shift) & 15, 6 | 7) {
@@ -360,11 +361,24 @@ impl Emitter<'_, '_> {
                         };
                         fields.push(("i64", word));
                     }
-                    "{ptr, ptr, ptr, ptr, i64, i32, i32, i32, i32, i1, i1, i64, i64, i64}"
-                } else {
-                    "{ptr, ptr, ptr, ptr, i64, i32, i32, i32, i32, i1, i1}"
-                };
-                let config = self.entry_alloca(layout);
+                }
+                if child_options {
+                    let start = args.len() - 3;
+                    fields.extend([
+                        ("i64", args[start].value.operand.clone()),
+                        ("i64", args[start + 1].value.operand.clone()),
+                        ("i1", args[start + 2].value.operand.clone()),
+                    ]);
+                }
+                let layout = format!(
+                    "{{{}}}",
+                    fields
+                        .iter()
+                        .map(|(ty, _)| *ty)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                let config = self.entry_alloca(&layout);
                 let mut aggregate = "poison".to_owned();
                 for (i, (ty, value)) in fields.iter().enumerate() {
                     aggregate = self.instruction(format!(
