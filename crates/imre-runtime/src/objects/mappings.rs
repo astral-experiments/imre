@@ -19,7 +19,7 @@ use std::rc::{Rc, Weak};
 
 use super::exceptions::{Error, Kind};
 use super::words::{NULLABLE, OwnedWord, WordKind};
-use super::{Bytes, Int, List, Object, Storage, StorageCell, Str, acquire_rc, fail, object};
+use super::{Bytes, Int, List, Object, Storage, StorageCell, Str, fail, object};
 
 pub(super) type StringPairs = Vec<(StrOwner, StrOwner)>;
 

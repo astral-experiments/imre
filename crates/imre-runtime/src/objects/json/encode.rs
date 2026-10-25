@@ -1,5 +1,6 @@
 //! Writes typed storage directly, without constructing a dynamic JSON tree.
 
+#[cfg(test)]
 use crate::ObjectOwner;
 use crate::StrOwner;
 use num_traits::ToPrimitive;

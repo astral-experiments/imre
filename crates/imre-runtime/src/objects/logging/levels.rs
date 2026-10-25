@@ -2,7 +2,6 @@
 //! name as an alias, and reassigning a name preserves the other number's label.
 use crate::ObjectOwner;
 use crate::StrOwner;
-use std::rc::Rc;
 
 use super::super::exceptions::string_repr;
 use super::super::mappings::{imre_dict_new, imre_dict_set, lookup};

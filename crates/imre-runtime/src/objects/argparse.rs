@@ -5,7 +5,6 @@ use crate::ObjectOwner;
 use crate::StrOwner;
 use std::borrow::Cow;
 use std::io::{self, Write};
-use std::rc::Rc;
 
 use icu_properties::props::{EnumeratedProperty, GeneralCategory};
 use serde::Deserialize;

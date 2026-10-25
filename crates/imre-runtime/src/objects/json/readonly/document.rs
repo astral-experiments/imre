@@ -10,9 +10,7 @@ use super::{Node, Nodes, View};
 use crate::objects::mappings::{
     dict_set, imre_dict_contains, imre_dict_delete, imre_dict_get, imre_dict_new,
 };
-use crate::objects::{
-    Error, Int, Kind, Object, Storage, StorageCell, Str, Words, acquire_rc, object,
-};
+use crate::objects::{Error, Int, Kind, Object, Storage, StorageCell, Str, Words, object};
 
 #[derive(Clone)]
 pub(in crate::objects) enum Value {

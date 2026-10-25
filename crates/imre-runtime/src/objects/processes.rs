@@ -21,7 +21,7 @@ use super::files::{decode_utf8_text, os_error};
 use super::mappings::{StringPairs, imre_dict_contains, imre_dict_new};
 use super::records::{RecordDescriptor, imre_record_new};
 use super::words::{OwnedWord, WordKind};
-use super::{Bytes, Int, Object, Storage, Str, acquire_rc, fail, object};
+use super::{Bytes, Int, Object, Storage, Str, fail, object};
 
 mod asynchronous;
 pub(super) use asynchronous::AsyncProcess;

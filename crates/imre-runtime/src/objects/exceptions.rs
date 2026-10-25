@@ -15,7 +15,7 @@ use num_traits::ToPrimitive;
 use ruff_python_literal::escape::{Escape, UnicodeEscape};
 
 use super::words::{OwnedWord, WordKind};
-use super::{Object, Storage, StorageCell, Str, acquire_rc, fail, object};
+use super::{Object, Storage, StorageCell, Str, fail, object};
 
 #[repr(C)]
 pub struct NamedDescriptor {

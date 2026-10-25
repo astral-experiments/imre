@@ -2,6 +2,7 @@
 //! buffers are each bounded even when the caller requests the entire member.
 use crate::StrOwner;
 use std::io::SeekFrom;
+#[cfg(test)]
 use std::rc::Rc;
 
 use flate2::{Crc, Decompress, FlushDecompress, Status};

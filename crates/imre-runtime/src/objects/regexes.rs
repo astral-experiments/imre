@@ -7,7 +7,6 @@ mod captures;
 use captures::AnchoredCaptures;
 use std::cell::Cell;
 use std::ptr;
-use std::rc::Rc;
 
 use memchr::memmem::Finder;
 use regex_automata::meta::{self, Regex};
@@ -15,9 +14,7 @@ use regex_automata::util::primitives::NonMaxUsize;
 use regex_automata::{Anchored, Input, PatternID};
 use regex_syntax::hir::{Hir, HirKind, literal::Extractor};
 
-use super::{
-    Error, Int, Kind, Object, Storage, StorageCell, Str, acquire_rc, fail, finish, object,
-};
+use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, fail, finish, object};
 
 pub(super) struct Pattern {
     regex: Regex,

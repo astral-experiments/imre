@@ -6,7 +6,7 @@ use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::rc::Rc;
 
-use super::{Object, fail, words::WordKind};
+use super::{fail, words::WordKind};
 
 pub(super) mod strings;
 

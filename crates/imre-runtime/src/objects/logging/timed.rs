@@ -5,16 +5,13 @@ use std::fs;
 use std::mem::MaybeUninit;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
-use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
 use super::super::exceptions::{Error, Kind, Result, finish};
-use super::super::{
-    Int, Object, Storage, StorageCell, Str, Words, acquire_rc, fail, files, object, posixpath,
-};
+use super::super::{Int, Object, Storage, StorageCell, Str, Words, fail, files, object, posixpath};
 
 const DAY: i64 = 86_400;
 
