@@ -1,10 +1,10 @@
 //! Copy directly between open descriptions with the offset and fallback rules of shutil.
-use std::cell::Cell;
 use std::io;
 use std::os::fd::RawFd;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::super::exceptions::{Error, Result, finish, Filename};
+use super::super::exceptions::{Error, Filename, Result, finish};
 use super::super::files::{errno_error, errno_with_filenames};
 use super::super::{Int, Object, Str, object};
 
@@ -12,15 +12,19 @@ pub(super) const RANGE: u32 = 0;
 pub(super) const SENDFILE: u32 = 1;
 pub(super) const FCOPYFILE: u32 = 2;
 
-thread_local! {
-    static FLAGS: Cell<[bool; 3]> = const { Cell::new([
-        cfg!(target_os = "linux"), cfg!(any(target_os = "linux", target_os = "android")),
-        cfg!(target_os = "macos"),
-    ]) };
-}
+static FLAGS: [AtomicBool; 3] = [
+    AtomicBool::new(cfg!(target_os = "linux")),
+    AtomicBool::new(cfg!(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "solaris",
+        target_os = "illumos"
+    ))),
+    AtomicBool::new(cfg!(target_os = "macos")),
+];
 
 pub(super) fn enabled(method: u32) -> bool {
-    FLAGS.with(|flags| flags.get()[method as usize])
+    FLAGS[method as usize].load(Ordering::Relaxed)
 }
 
 #[unsafe(no_mangle)]
@@ -30,11 +34,7 @@ pub extern "C" fn imre_shutil_fastcopy_flag(method: u32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_shutil_set_fastcopy_flag(method: u32, value: u32) {
-    FLAGS.with(|flags| {
-        let mut state = flags.get();
-        state[method as usize] = value != 0;
-        flags.set(state);
-    });
+    FLAGS[method as usize].store(value != 0, Ordering::Relaxed);
 }
 
 fn blocksize(fd: RawFd) -> usize {
@@ -73,7 +73,26 @@ fn transfer(method: u32, src: RawFd, dst: RawFd, offset: i64, size: usize) -> io
             Ok(n as usize)
         }
     }
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    #[cfg(any(target_os = "solaris", target_os = "illumos"))]
+    {
+        if method != SENDFILE {
+            return Err(io::Error::from_raw_os_error(libc::ENOSYS));
+        }
+        let mut at = offset as libc::off_t;
+        // SAFETY: Solaris accepts an input offset by address and retains neither descriptor.
+        let n = unsafe { libc::sendfile(dst, src, &mut at, size) };
+        if n < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(n as usize)
+        }
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "solaris",
+        target_os = "illumos"
+    )))]
     {
         let _ = (method, src, dst, offset, size);
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
@@ -100,7 +119,7 @@ pub(super) fn copy_fds(
             return Err(if fallback {
                 Error::fastcopy_giveup(Some(e))
             } else {
-                e
+                e.suppress_context()
             });
         }
         #[cfg(not(target_os = "macos"))]
@@ -126,7 +145,10 @@ pub(super) fn copy_fds(
                     imre_shutil_set_fastcopy_flag(SENDFILE, 0);
                     return Err(Error::fastcopy_giveup(Some(error)));
                 }
-                if code != Some(libc::ENOSPC) && offset == 0 {
+                if code == Some(libc::ENOSPC) {
+                    return Err(error.suppress_context());
+                }
+                if offset == 0 {
                     // SAFETY: lseek with zero displacement observes the current offset.
                     let position = unsafe { libc::lseek(dst, 0, libc::SEEK_CUR) };
                     if position < 0 {
@@ -157,8 +179,7 @@ pub unsafe extern "C" fn imre_shutil_fastcopy(
             object(ptr).0.with(|s| {
                 let f = s.file();
                 Ok((
-                    f.fileno()
-                        .map_err(|e| Error::fastcopy_giveup(Some(e)))?,
+                    f.fileno().map_err(|e| Error::fastcopy_giveup(Some(e)))?,
                     f.name.clone(),
                 ))
             })
@@ -182,7 +203,11 @@ pub unsafe extern "C" fn imre_shutil_fastcopy(
             0
         };
         copy_fds(method, src, dst, flags, |e| {
-            errno_with_filenames(e, from.clone().map(Filename::Str), to.clone().map(Filename::Str))
+            errno_with_filenames(
+                e,
+                from.clone().map(Filename::Str),
+                to.clone().map(Filename::Str),
+            )
         })
     })();
     finish(result, ());

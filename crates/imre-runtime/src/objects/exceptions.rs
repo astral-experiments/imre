@@ -441,7 +441,12 @@ pub(crate) struct Error {
     kind: Kind,
     // A missing payload uses the preallocated MemoryError when raised.
     payload: Option<Payload>,
-    cause: Option<Rc<Object>>,
+    cause: Option<ExplicitCause>,
+}
+
+enum ExplicitCause {
+    Exception(Rc<Object>),
+    None,
 }
 
 impl Error {
@@ -627,7 +632,13 @@ impl Error {
 
     /// Retain the original exception when a native operation translates an error.
     pub(super) fn with_cause(mut self, cause: Self) -> Self {
-        self.cause = Some(cause.into_object());
+        self.cause = Some(ExplicitCause::Exception(cause.into_object()));
+        self
+    }
+
+    /// Match raising the original exception from None, including __suppress_context__.
+    pub(super) fn suppress_context(mut self) -> Self {
+        self.cause = Some(ExplicitCause::None);
         self
     }
 
@@ -826,16 +837,19 @@ fn new_exception(kind: Kind, payload: impl Into<Payload>) -> Rc<Object> {
     exception_with_cause(kind, payload.into(), None)
 }
 
-fn exception_with_cause(kind: Kind, payload: Payload, cause: Option<Rc<Object>>) -> Rc<Object> {
+fn exception_with_cause(kind: Kind, payload: Payload, cause: Option<ExplicitCause>) -> Rc<Object> {
     Rc::new(Object(StorageCell::new(Storage::Exception(Exception {
         kind,
         payload,
         suppress_context: cause.is_some(),
-        details: cause.map(|cause| {
-            Rc::new(ExceptionDetails {
+        details: cause.and_then(|cause| {
+            let ExplicitCause::Exception(cause) = cause else {
+                return None;
+            };
+            Some(Rc::new(ExceptionDetails {
                 cause: Some(cause),
                 ..Default::default()
-            })
+            }))
         }),
     }))))
 }
