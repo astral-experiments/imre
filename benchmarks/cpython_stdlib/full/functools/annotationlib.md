@@ -82,6 +82,17 @@ ForwardRef implementation at `69f7e15` and the unittest assertion context at
 These are supplemental annotation
 tests, separate from the 325 functools and four free-threaded occurrences.
 
+The native declaration evaluator can now represent an unknown bare name on a
+known function. With `Format.VALUE` it raises `NameError` when annotations
+are read. With `Format.FORWARDREF` it returns a fresh annotation dictionary
+that can contain both a builtin class and an owned `ForwardRef`.
+`annotations_deferred.py` compares the known class, all public properties of
+the unresolved return, the original owner across local and module reads,
+independent local function identities, and later dictionary mutation with
+CPython. These operations are native; the fixture is outside the functools
+denominator. A cache wrapper's metadata, user-supplied evaluation namespaces
+and arbitrary annotation expressions need further support.
+
 Using the untouched import and unittest entry points from the coordinator's
 76d74f9 startup run (both default and reachable-only), the first diagnosis
 moves from test_functools.py:2 (annotationlib) to line 3 (builtins). The two

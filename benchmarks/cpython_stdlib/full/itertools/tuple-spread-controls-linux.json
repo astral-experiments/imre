@@ -1,0 +1,127 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "helper": "Lib/test/support/threading_helper.py",
+  "git_blob": "cf87233f0e2e938a9f2e7d7906844ca009416432",
+  "line": 277,
+  "expression": "(func, *args)",
+  "native_controls": [
+    {
+      "opt_level": "0",
+      "reachable_only": false,
+      "lines": 38,
+      "stdout_sha256": "d7b10f0e01a69932df09d62fc7b14a8c63ec34f2daf7b0454759e70a967f19e1"
+    },
+    {
+      "opt_level": "3",
+      "reachable_only": false,
+      "lines": 38,
+      "stdout_sha256": "d7b10f0e01a69932df09d62fc7b14a8c63ec34f2daf7b0454759e70a967f19e1"
+    },
+    {
+      "opt_level": "0",
+      "reachable_only": true,
+      "lines": 38,
+      "stdout_sha256": "d7b10f0e01a69932df09d62fc7b14a8c63ec34f2daf7b0454759e70a967f19e1"
+    },
+    {
+      "opt_level": "3",
+      "reachable_only": true,
+      "lines": 38,
+      "stdout_sha256": "d7b10f0e01a69932df09d62fc7b14a8c63ec34f2daf7b0454759e70a967f19e1"
+    }
+  ],
+  "reference_stdout": [
+    "('field', 1)",
+    "('append', 9)",
+    "('field', 2)",
+    "(1, 3, 4, 7, 3, 4, 9, 2)",
+    "[3, 4, 9]",
+    "('field', 1)",
+    "('append', 9)",
+    "('field', 2)",
+    "(1, 7, 9, 2)",
+    "('field', 3)",
+    "(3, 3)",
+    "3",
+    "('field', 1)",
+    "(1, 1)",
+    "(2, 42)",
+    "4",
+    "1",
+    "('field', 10)",
+    "(0, 2, 3, 10)",
+    "-1",
+    "('first', 2, 'last')",
+    "('first', 4, 'last')",
+    "('field', 4)",
+    "('pull', 1)",
+    "('pull', 2)",
+    "failed during iteration",
+    "('field', 4)",
+    "('pull', 1)",
+    "('pull', 3)",
+    "('field', 5)",
+    "(4, 1, 3, 5)",
+    "('field', 6)",
+    "Value after * must be an iterable, not int",
+    "(([1, 5], [2]), 2, True)",
+    "(1025, 0, 1024, True)",
+    "tuple index out of range",
+    "('append', 9)",
+    "(4, 6, 7, 4, 6, 9)"
+  ],
+  "reachability": {
+    "whole_file_diagnostic": "spread_helper.py:3:5: Imre: unknown function or unsupported builtin arguments",
+    "reachable_native": [
+      {
+        "opt_level": "0",
+        "stdout": "3\n"
+      },
+      {
+        "opt_level": "3",
+        "stdout": "3\n"
+      }
+    ],
+    "unrelated_iteration_diagnostic": "bad.py:2:9: Imre: iteration requires a concrete list, dictionary, set, string, bytes, or range"
+  },
+  "source": "vendored and pinned Git Lib/test",
+  "whole_suite": {
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "compiler_sha256": "89eed3de177f7b36889db837b6886ca68ba29eec9669088902b044499fed6a22",
+    "operation": "check",
+    "tests_executed": 0,
+    "source": "git",
+    "support_files": [],
+    "checks": [
+      {
+        "suite": "test.test_itertools",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"_thread\""
+      },
+      {
+        "suite": "test.test_itertools",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"_thread\""
+      },
+      {
+        "suite": "test.test_itertools",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"_thread\""
+      },
+      {
+        "suite": "test.test_itertools",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"_thread\""
+      }
+    ]
+  },
+  "credit": "Supplemental native controls; startup checks executed zero upstream test bodies."
+}

@@ -1,0 +1,158 @@
+{
+  "schema": "imre.subprocess.raw-pipe-readiness/v1",
+  "platform": "linux",
+  "imre_revision": "f4e461af62b885ebf1b62614334a1a2329bb251d",
+  "tested_tree": "699ee364f8dc47709f29c2c3c2f28583b397567e",
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "toolchain": {
+        "imre": "8e8dd4f2323c05683f936e8ddaeba4928276727d239ba87bb664a030bce6e494",
+        "runtime": "760ca4c905f17913fc80a16806a4f764df75b613e012294727083985a93a02a3",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_select_unbuffered": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "mixed",
+              "fixture": "cpython"
+            },
+            "observed": {
+              "native_parent_sha256": "65606987a4bdd9b4fa88a61d0ea05a6ee64d15aa82712abb6b5c9bee559ea443",
+              "data_child_argv": [
+                "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "-c",
+                "import sys;sys.stdout.write(\"apple\")"
+              ],
+              "native_read_request": 4,
+              "native_read_result": 4,
+              "native_returned": "appl",
+              "unread_kernel_bytes": 1,
+              "host_select_returned_original_stream": true,
+              "data_child_alive_at_select": null,
+              "native_pipe_closes": 1,
+              "native_reaps": 1
+            }
+          }
+        ]
+      },
+      "controls": {
+        "raw-held": {
+          "native_parent_sha256": "c0461e3ddeb3945bd277871540b34b38adc326f564a2beb0d90437b90b585fcd",
+          "data_child_argv": [
+            "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+            "-c",
+            "import os; os.write(1, b'apple'); os.read(0, 1)"
+          ],
+          "native_read_request": 4,
+          "native_read_result": 4,
+          "native_returned": "appl",
+          "unread_kernel_bytes": 1,
+          "host_select_returned_original_stream": true,
+          "data_child_alive_at_select": true,
+          "native_pipe_closes": 1,
+          "native_reaps": 1
+        },
+        "buffered-held": {
+          "native_parent_sha256": "a2d5552866d4c13f685795d5b8268f5b6eba03a54115ef5110ff62c9b05d056f",
+          "data_child_argv": [
+            "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+            "-c",
+            "import os; os.write(1, b'apple'); os.read(0, 1)"
+          ],
+          "native_read_request": 131072,
+          "native_read_result": 5,
+          "native_returned": "appl",
+          "unread_kernel_bytes": 0,
+          "host_select_returned_original_stream": false,
+          "data_child_alive_at_select": true,
+          "native_pipe_closes": 1,
+          "native_reaps": 1
+        }
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "toolchain": {
+        "imre": "8e8dd4f2323c05683f936e8ddaeba4928276727d239ba87bb664a030bce6e494",
+        "runtime": "760ca4c905f17913fc80a16806a4f764df75b613e012294727083985a93a02a3",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_select_unbuffered": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "mixed",
+              "fixture": "cpython"
+            },
+            "observed": {
+              "native_parent_sha256": "e58d284c97bd487cffdfd3fb66f23b0c81c7849c76c5134ac76796886cead634",
+              "data_child_argv": [
+                "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "-c",
+                "import sys;sys.stdout.write(\"apple\")"
+              ],
+              "native_read_request": 4,
+              "native_read_result": 4,
+              "native_returned": "appl",
+              "unread_kernel_bytes": 1,
+              "host_select_returned_original_stream": true,
+              "data_child_alive_at_select": null,
+              "native_pipe_closes": 1,
+              "native_reaps": 1
+            }
+          }
+        ]
+      },
+      "controls": {
+        "raw-held": {
+          "native_parent_sha256": "b102ee2ab9939d38674d30398358111bfce7639de384b1f5650d7d678c5be519",
+          "data_child_argv": [
+            "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+            "-c",
+            "import os; os.write(1, b'apple'); os.read(0, 1)"
+          ],
+          "native_read_request": 4,
+          "native_read_result": 4,
+          "native_returned": "appl",
+          "unread_kernel_bytes": 1,
+          "host_select_returned_original_stream": true,
+          "data_child_alive_at_select": true,
+          "native_pipe_closes": 1,
+          "native_reaps": 1
+        },
+        "buffered-held": {
+          "native_parent_sha256": "123c8b9622b5172bb0f121ad0e4824cd5218d367ff10a88d23def3c8c5c9292d",
+          "data_child_argv": [
+            "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+            "-c",
+            "import os; os.write(1, b'apple'); os.read(0, 1)"
+          ],
+          "native_read_request": 131072,
+          "native_read_result": 5,
+          "native_returned": "appl",
+          "unread_kernel_bytes": 0,
+          "host_select_returned_original_stream": false,
+          "data_child_alive_at_select": true,
+          "native_pipe_closes": 1,
+          "native_reaps": 1
+        }
+      }
+    }
+  ]
+}

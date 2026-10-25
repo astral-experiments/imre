@@ -1,4 +1,5 @@
 //! Bind native warning filters in source order before validating their arguments.
+mod display;
 use super::*;
 
 const CATEGORIES: &[&str] = &[
@@ -15,6 +16,11 @@ const CATEGORIES: &[&str] = &[
     "BytesWarning",
     "EncodingWarning",
 ];
+
+/// Warning categories have the ordinary, immutable identity of builtin classes.
+pub(super) fn is_warning_class(name: &str) -> bool {
+    CATEGORIES.contains(&name)
+}
 
 impl Checker<'_> {
     /// Keep the source spelling for CPython's filter deduplication, separately

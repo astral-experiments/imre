@@ -94,7 +94,8 @@ print(emitter.calls)
 emitter.emit(first)
 print(emitter.calls)
 """
-    return {"null": base, "recording": recording}, method
+    return {"null": base, "recording": recording, "locks": (HERE / "lock_values.py").read_bytes(),
+            "buffers": (HERE / "buffer_values.py").read_bytes()}, method
 
 
 def output(command, cwd):
@@ -127,7 +128,7 @@ def main():
               "method_sha256": hashlib.sha256(method).hexdigest(), "levels": levels,
               "logging_occurrences": 0}
     args.result.write_text(json.dumps(report, indent=2) + "\n")
-    print("NullHandler and the unchanged RecordingHandler.handle match at O0/O3; zero test IDs")
+    print("Handler locks, buffers, NullHandler and unchanged RecordingHandler.handle match at O0/O3; zero test IDs")
 
 
 if __name__ == "__main__":

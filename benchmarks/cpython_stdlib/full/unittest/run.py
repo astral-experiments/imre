@@ -1,10 +1,12 @@
 """Run complete pinned unittest methods against native Imre at both optimization levels."""
 import argparse
+import ast
 import hashlib
 from collections import Counter
 from contextlib import contextmanager
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,11 +14,35 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 from suite_inventory import load_suite, verify_files, verify_interpreter_tests
+from source_modules import verify as verify_source_modules
 from suite_evidence import roles, write_reports
 from suite_native import (NativeCompileError, NativeDefaultMethod, Toolchain, compile_blocker,
                           method_bytes, native_method, run_evidence, testcase_fixture)
 
 PREFIX = "test.test_unittest."
+def loader_methods():
+    path = HERE / "upstream/Lib/test/test_unittest/test_loader.py"
+    owner, = (c for c in ast.parse(path.read_bytes()).body
+              if isinstance(c, ast.ClassDef) and c.name == "Test_TestLoader")
+    methods = {m.name: "unittest.TestLoader.getTestCaseNames"
+               for m in owner.body if isinstance(m, ast.FunctionDef)
+               and any(isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                       and call.func.attr == "getTestCaseNames" for call in ast.walk(m))}
+    methods["test___init__"] = "unittest.TestLoader construction and its errors list"
+    return methods
+
+
+DEFAULT_LOADER_METHODS = loader_methods()
+# These methods still run on CPython. Keep the native attempt in each report;
+# a different compiler failure must fail the gate.
+LOADER_BLOCKERS = {
+    "test_getTestCaseNames__not_a_TestCase": "5:23: Imre: local class base requires supported native class metadata",
+    "test_getTestCaseNames__testNamePatterns__attribute_access_regression":
+        "6:13: Imre: local class body requires plain methods without defaults or inert class attributes",
+    "test_partial_functions": "6:9: Imre: local functions require annotated parameters and return types",
+    "test_sortTestMethodsUsing__None": "10:9: Imre: unknown field; dynamic attributes and first-class methods are unsupported",
+    "test_sortTestMethodsUsing__getTestCaseNames": "5:9: Imre: local functions require annotated parameters and return types",
+}
 ASSERTIONS = {
     "testAssertTrue": "assertTrue", "testAssertFalse": "assertFalse",
     "testAssertLess": "assertLess", "testAssertLessEqual": "assertLessEqual",
@@ -48,7 +74,7 @@ MOCK_BLOCKERS = {
     "test_reset_sideeffect": (1890, '7:18: Imre: unexpected keyword argument "return_value"'),
 }
 CALLABLE_BLOCKERS = {
-    "testAssertRaisesCallable": (1457, "6:9: Imre: unsupported statement in the Imre subset"),
+    "testAssertRaisesCallable": (1457, "6:29: Imre: local class base requires supported native class metadata"),
     "test_assertRaises": (61, "6:9: Imre: local functions require annotated parameters and return types"),
 }
 
@@ -113,20 +139,29 @@ def run(args, level, root):
     if (reference["module"], reference["cpython_commit"]) != (manifest["module"], manifest["commit"]):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level, args.reachable_only)
+    verify_source_modules(lang, root)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
-    for name in ["truth_protocol", "equality_protocol", "mapping_protocol", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
-                 "callable_binding", "context_regex", *("context_" + family for family in families)]:
+    for name in ["truth_protocol", "equality_protocol", "mapping_protocol", "boolean_equality", "mock_protocol", "mock_reset", "mock_globals", "callable_protocol", "bound_assertions",
+                 "callable_binding", "context_regex", "loader_names", *("context_" + family for family in families)]:
         control = root / name
-        control.mkdir()
-        program = HERE / (name + ".py")
+        if (HERE / name).is_dir():
+            shutil.copytree(HERE / name, control)
+            program = control / "case.py"
+        else:
+            control.mkdir()
+            program = HERE / (name + ".py")
+        if name == "loader_names":
+            shutil.copytree(HERE / "upstream/Lib/test/test_unittest/namespace_test_pkg/bar", control / "bar")
         native = lang.build(program.read_bytes(), control)
-        oracle = subprocess.run([sys.executable, "-B", program], capture_output=True, timeout=30, check=True)
+        oracle = subprocess.run([sys.executable, "-E", "-B", control / "case.py"], cwd=control,
+                                capture_output=True, timeout=30, check=True)
         observed = subprocess.run([native], capture_output=True, timeout=30, check=True)
         if (observed.stdout, observed.stderr) != (oracle.stdout, oracle.stderr):
             raise AssertionError(f"{program.name} differs from CPython: {observed!r} != {oracle!r}")
     driver = root / "assertions"
     driver.mkdir()
     executions, native_defaults, blocked, measured_blockers = {}, {}, {}, set()
+    expected_loader_blocks = {}
     host = {PREFIX + "test_assertions.TestLongMessage." + name: op for name, op in ASSERTIONS.items()}
     try:
         binary = lang.build((HERE / "assertion_driver.py").read_bytes(), driver)
@@ -135,6 +170,7 @@ def run(args, level, root):
     else:
         executions.update({name: check_assertion(binary, op, level) for name, op in host.items()})
     for module, owner, method, operation in (
+        *(("test_loader", "Test_TestLoader", method, operation) for method, operation in DEFAULT_LOADER_METHODS.items()),
         ("test_result", "Test_TestResult", "test_stop", "unittest.TestResult.stop"),
         ("test_result", "Test_TestResult", "test_startTestRun_stopTestRun", "unittest.TestResult.startTestRun and stopTestRun"),
         ("test_case", "Test_TestCase", "testAssertRaisesNoExceptionType", "unittest.TestCase.assertRaises"),
@@ -155,11 +191,19 @@ def run(args, level, root):
         case_id = PREFIX + f"{module}.{owner}.{method}"
         directory = root / method
         directory.mkdir()
-        if module == "testmock.testmock" and method in DEFAULT_MOCK_METHODS:
+        default_fixture = ((module == "testmock.testmock" and method in DEFAULT_MOCK_METHODS)
+                           or (module == "test_loader" and method in DEFAULT_LOADER_METHODS))
+        if default_fixture:
             blob = manifest["files"][path.relative_to(HERE / "upstream").as_posix()]
             native_defaults[case_id, 1] = NativeDefaultMethod(lang, directory, path, blob, ("imre", operation))
+            if module == "test_loader" and method in LOADER_BLOCKERS:
+                diagnostic = f"Compiling <case>/case.py (-O{level})\n<case>/case.py:{LOADER_BLOCKERS[method]}"
+                expected_loader_blocks[case_id, 1] = diagnostic, {
+                    "stage": "compile", "source_blob": blob,
+                    "method_sha256": hashlib.sha256(method_bytes(path, owner, method)).hexdigest(),
+                }
             continue
-        fixture = testcase_fixture("bool" if method == "test_stop" else None)
+        fixture = testcase_fixture()
         if module == "testmock.testmock":
             fixture = "from unittest.mock import Mock\n" + fixture
         try:
@@ -176,7 +220,7 @@ def run(args, level, root):
             if expected:
                 line, diagnostic = expected
                 if observation["reason"].endswith("<case>/case.py:" + diagnostic):
-                    measured_blockers.add(case_id)
+                    measured_blockers.add((case_id, 1))
                 observation["evidence"].update(
                     original_source=f"{path.relative_to(HERE / 'upstream')}:{line}",
                     method_sha256=hashlib.sha256(method_bytes(path, owner, method)).hexdigest(),
@@ -184,12 +228,24 @@ def run(args, level, root):
             blocked[case_id, 1] = observation
     report = run_evidence(load_suite(manifest["module"]), executions, reference, level,
                           preflight=blocked, native_defaults=native_defaults, exceptions=reference_skips(level))
+    for row in report["records"]:
+        expected = expected_loader_blocks.get((row["id"], row["occurrence"]))
+        if (expected and row["classification"] == "blocked" and row["reference"] == "pass"
+                and (row["reason"].strip(), row["evidence"]) == expected):
+            measured_blockers.add((row["id"], row["occurrence"]))
     failures = [r for r in report["records"]
                 if (r["outcome"] not in {"pass", "not-run"}
-                    and not (r["outcome"] == "blocked" and r["id"] in measured_blockers))
+                    and not (r["outcome"] == "blocked" and (r["id"], r["occurrence"]) in measured_blockers))
                 or r["classification"] in {"reference-failure", "reference-disagreement"}]
     for row in failures:
         print(row["id"], row.get("reason", row["reference"]), file=sys.stderr)
+    # Retain original-method observations even when a separate control fails.
+    from loader_class_boundaries import verify as verify_local_class_boundaries
+    try:
+        verify_local_class_boundaries(lang, root)
+    except (NativeCompileError, AssertionError, subprocess.SubprocessError) as exc:
+        print(f"local class discovery control failed at O{level}: {exc}", file=sys.stderr)
+        return report, True
     return report, bool(failures)
 
 
