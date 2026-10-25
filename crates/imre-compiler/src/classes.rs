@@ -13,6 +13,7 @@ mod dataclasses;
 mod enums;
 mod exceptions;
 mod inheritance;
+mod init_hooks;
 mod record_hash;
 pub(crate) use constants::ClassValue;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
@@ -49,6 +50,8 @@ pub(crate) struct Class {
     pub(crate) node: ast::StmtClassDef,
     pub(crate) fields: Vec<Field>,
     pub(crate) methods: Vec<ast::StmtFunctionDef>,
+    /// Field writes required of every override called during construction.
+    pub(crate) init_hooks: HashMap<String, Vec<String>>,
     pub(crate) method_kinds: Vec<MethodKind>,
     /// Declaring class for the corresponding method's imports and lexical super.
     pub(crate) method_origins: Vec<DefinitionId>,
@@ -615,21 +618,6 @@ fn collect_class(
             ));
         }
     };
-    if let Some(initializer) = initializer
-        && method_origins[initializer] == definition
-    {
-        check_initializer(
-            module,
-            &methods[initializer],
-            &fields,
-            if generated_initializer {
-                &[]
-            } else {
-                inherited_fields
-            },
-            exception_layout,
-        )?;
-    }
     let mut bases = Vec::new();
     if let Some((id, base)) = base {
         bases.push(id);
@@ -647,9 +635,42 @@ fn collect_class(
             }
         }
     }
+    let mut init_hooks = base
+        .map(|(_, parent)| parent.init_hooks.clone())
+        .unwrap_or_default();
+    for (name, expected) in &init_hooks {
+        if names.contains(name) {
+            let actual =
+                init_hooks::method_writes(graph, &methods, &method_kinds, &method_origins, name);
+            if actual.transpose()?.as_ref() != Some(expected) {
+                return Err(module.error(
+                    node,
+                    "an initializer hook override must initialize the same fields",
+                ));
+            }
+        }
+    }
+    if let Some(initializer) = initializer
+        && method_origins[initializer] == definition
+    {
+        check_initializer(
+            module,
+            &methods[initializer],
+            &fields,
+            if generated_initializer {
+                &[]
+            } else {
+                inherited_fields
+            },
+            exception_layout,
+            &mut init_hooks,
+            |name| init_hooks::method_writes(graph, &methods, &method_kinds, &method_origins, name),
+        )?;
+    }
     Ok(Class {
         definition,
         name: node.name.as_str().to_owned(),
+        init_hooks,
         node: node.clone(),
         fields,
         toml_hash: hash.is_some(),
@@ -724,6 +745,23 @@ fn class_static_binding(
     }
     let binding = graph.resolve(module, value)?;
     match (wrapped, binding) {
+        (false, Binding::Value(id)) => {
+            // A compiled regex is an immutable object in a fixed module binding.
+            let stmt = &graph.modules[id.module].parsed.syntax().body[id.statement];
+            let init = match stmt {
+                ast::Stmt::Assign(a) => Some(a.value.as_ref()),
+                ast::Stmt::AnnAssign(a) => a.value.as_deref(),
+                _ => None,
+            };
+            if let Some(ast::Expr::Call(call)) = init
+                && graph.resolve(id.module, &call.func)
+                    == Some(Binding::Intrinsic(Intrinsic::RegexCompile))
+            {
+                Some(binding)
+            } else {
+                None
+            }
+        }
         (false, Binding::IntrinsicModule(_)) | (true, Binding::Intrinsic(_)) => Some(binding),
         (true, Binding::Definition(id))
             if matches!(
@@ -797,6 +835,8 @@ fn check_initializer(
     fields: &[Field],
     inherited: &[Field],
     exception_layout: bool,
+    hooks: &mut init_hooks::Hooks,
+    lookup: impl Fn(&str) -> Option<Result<Vec<String>, String>>,
 ) -> Result<(), String> {
     let receiver = initializer
         .parameters
@@ -831,6 +871,27 @@ fn check_initializer(
             // Calling BaseException directly bypasses any user base initializer.
             // Its ordinary fields still have to be initialized by this method.
             called_exception_base = true;
+            continue;
+        }
+        if let Some(name) = init_hooks::called_method(statement, receiver)
+            && name != "__init__"
+            && let Some(writes) = lookup(name)
+        {
+            let writes = writes?;
+            for field in &writes {
+                let Some(&declared_field) = declared.get(field.as_str()) else {
+                    return Err(
+                        module.error(statement, "initializer hook writes an undeclared field")
+                    );
+                };
+                if !initialized.insert(declared_field) {
+                    return Err(module.error(
+                        statement,
+                        "initializer hook writes an already initialized field",
+                    ));
+                }
+            }
+            hooks.insert(name.to_owned(), writes);
             continue;
         }
         let assignment = match statement {

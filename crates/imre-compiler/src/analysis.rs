@@ -110,6 +110,13 @@ impl Session {
         system
             .fs()
             .write_file_all(
+                intrinsic.join("_logging.pyi"),
+                include_str!("../stdlib/logging/runtime.pyi"),
+            )
+            .map_err(|error| error.to_string())?;
+        system
+            .fs()
+            .write_file_all(
                 intrinsic.join("toml.pyi"),
                 "from typing import TypeVar\n_T = TypeVar(\"_T\")\ndef decode(text: str, schema: type[_T], /) -> _T: ...\n",
             )
