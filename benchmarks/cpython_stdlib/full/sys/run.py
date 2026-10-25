@@ -19,6 +19,7 @@ from suite_native import Toolchain, native_method, run_evidence, run_in_fixtures
 from suite_evidence import roles
 from occurrences import blocked_methods, reference_skips
 import argv_case
+import encoding_methods
 import jit_case
 import locale_case
 from filesystem_case import filesystem_method
@@ -119,7 +120,8 @@ def select(toolchain, work, source, module):
                                              "fixture": "original SysModuleTest lifecycle and reap_children teardown",
                                              "native_calls": len(calls), "calls": calls, "opt_level": toolchain.level}}}
 
-    executions[SYS + "test_getdefaultencoding"] = default_encoding_case
+    default_id = SYS + "test_getdefaultencoding"
+    executions[default_id] = encoding_methods.select(toolchain, work, source, default_id, default_encoding_case)
     fs_id = SYS + "test_getfilesystemencoding"
     executions[fs_id] = filesystem_method(toolchain, directory(work, "filesystem"), source, fs_id)
 

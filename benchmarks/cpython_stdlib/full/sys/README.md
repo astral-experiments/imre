@@ -32,7 +32,7 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 
 - `test_sys_exception_no_exception`: the complete method queries native handler state and compares the result to `None`. A separate program checks object identity across nested handlers, calls and handler exit.
 - `test_43581`: the complete method reads both stream attributes and executes the shared native unittest string equality assertion. CPython runs the original fixture.
-- `test_getdefaultencoding`: both calls execute in the native driver; the original body and assertions run on CPython.
+- `test_getdefaultencoding`: the complete method runs both the callable `assertRaises` and the result type assertion in Imre. CPython runs the original fixture and teardown. When the shared TestCase lacks `assertIsInstance`, the [encoding fixture](encoding_methods.py) checks the requested native class and compares its failure paths with CPython.
 - `test_getfilesystemencoding`: the unchanged method and its unchanged `check_fsencoding` helper run in the native binary. The helper calls native `codecs.lookup`, and its assertions run there too. The pinned CPython suite retains its original instance lifecycle and `SysModuleTest.tearDown`.
 - `test_jit_is_available` and `test_jit_is_enabled`: Imre answers the parent capability query and executes both original child assertions under `PYTHON_JIT=0` and `=1`. CPython runs the parent, fixtures and child-status assertions. The fixture builds the original child source directly; its automatic `-X faulthandler` option is outside this check.
 - `test_ioencoding_nonascii`: the canonical reference and native gate both skip under the unchanged locale decorator. See the separate UTF-8-mode run below.
@@ -54,7 +54,7 @@ reference reasons even where UTF-8 mode also provides native evidence.
 
 [evidence-linux.json](evidence-linux.json) is the versioned [shared evidence
 contract](../../NATIVE_EVIDENCE.md): 97 distinct occurrences at each of O0 and O3.
-The [Linux CI run](https://github.com/astral-sh/imre/actions/runs/40173735073) executed source `35158607886bce3fec10dd8e965d891e803e1088` (tree `f80a4bcd512cdb24ff2f279f59adb6d2075bef8a`). Its `sys-evidence-linux` artifact contains both optimization reports, the legacy outcomes, and the tested commit and tree. The checked-in reports retain those records with two exceptions. The blocked displayhook method’s native builtin reads and writes were measured at `e1486d3f5ebc54b757c45ea3f4e402e2bdbe4238` ([builtin coverage](BUILTINS.md)). The complete filesystem-encoding method and its helper were measured at `72e9edd38c9c58deec4d52e84b9ad1881910271c`. The pinned suite has no companion module; `native-O*.json` describes the same occurrences.
+The default-encoding method and the other unchanged records retain the [#1186 Linux measurement](https://github.com/astral-sh/imre/actions/runs/40219407454/job/121247497342). The filesystem-encoding method and its helper retain the [#702 measurement](https://github.com/astral-sh/imre/pull/702) at `72e9edd38c9c58deec4d52e84b9ad1881910271c`. Both fixtures run on CPython. The pinned suite has no companion module.
 
 At each level the two JIT capability methods add two mixed results. `test_jit_is_active` made one native availability query in the parent; its first original child stopped at line 2 on `import _testcapi` before any `is_active` call or child assertion. The second child was not reached. Its individual private-API proposal remains unapproved.
 

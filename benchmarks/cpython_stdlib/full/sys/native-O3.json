@@ -21,14 +21,11 @@
     },
     "test.test_sys.SysModuleTest.test_getdefaultencoding": {
       "status": "pass",
-      "execution": "host-driven-native",
-      "body": "CPython",
-      "assertions": "CPython",
-      "fixture_execution": "CPython module/class/instance hooks",
-      "calls": [
-        "default-argument",
-        "default"
-      ]
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "b41ff7224ca4fe5cf266aa3439044a27a07e0c7a03680061baf2c50a7557e80b"
     },
     "test.test_sys.SysModuleTest.test_getfilesystemencoding": {
       "status": "pass",
