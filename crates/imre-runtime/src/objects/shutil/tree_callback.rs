@@ -1,5 +1,19 @@
 use super::*;
 
+/// Report a noncallable copy_function only when a leaf actually needs copying.
+///
+/// # Safety
+/// The native caller keeps the message string rooted through invocation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_shutil_noncallable(
+    message: *const Str,
+    _: *const (),
+    _: *const (),
+) -> u8 {
+    // SAFETY: the frontend supplied the exact diagnostic as the callback context.
+    Error::new(Kind::TypeError, unsafe { &*message }.clone()).returning(0)
+}
+
 pub(super) fn handle(name: &Name) -> *const () {
     match name {
         Name::Text(s) | Name::Path(s) => Rc::as_ptr(s).cast(),

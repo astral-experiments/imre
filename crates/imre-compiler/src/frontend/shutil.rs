@@ -59,7 +59,7 @@ impl Checker<'_> {
         }
     }
 
-    /// Pass a copying or removal routine as a value, specializing its path types from a Callable annotation.
+    /// Pass a filesystem operation as a value, specializing paths from a Callable annotation.
     pub(super) fn shutil_function_value(
         &mut self,
         op: Intrinsic,
@@ -90,6 +90,16 @@ impl Checker<'_> {
             kind: ExprKind::None,
         };
         let (op, result, args) = match (op, params.as_slice()) {
+            (Intrinsic::Move, [src, dst]) if path(*src) && path(*dst) => (
+                ir::ProcessOperation::Move(self.shutil_tree_issue()),
+                self.move_result(*dst),
+                vec![local(0), local(1), flag(true)],
+            ),
+            (Intrinsic::DestInSrc, [src, dst]) if path(*src) && path(*dst) => (
+                ir::ProcessOperation::DestInSrc,
+                Type::Bool,
+                vec![local(0), local(1)],
+            ),
             (Intrinsic::Copy(op), [src, dst]) if path(*src) && path(*dst) => (
                 ir::ProcessOperation::Copy(op),
                 self.copy_result(op, *dst),
@@ -190,6 +200,29 @@ impl Checker<'_> {
             Some(Binding::Intrinsic(Intrinsic::Copy(ir::CopyOperation::Copy2))) => true,
             _ => {
                 let value = self.expr(expr)?;
+                let name = match value.ty {
+                    Type::None => Some("NoneType"),
+                    Type::Bool => Some("bool"),
+                    Type::Int => Some("int"),
+                    Type::Float => Some("float"),
+                    Type::Str | Type::StrLiteral(_) => Some("str"),
+                    Type::Bytes => Some("bytes"),
+                    _ => None,
+                };
+                if let Some(name) = name {
+                    // A successful rename, an empty directory, or a symlink need
+                    // never invoke the copier. Evaluate the supplied object now.
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Scope {
+                            body: vec![Statement::Expr(value)],
+                            clear: vec![],
+                            value: Box::new(unpacking::string(format!(
+                                "'{name}' object is not callable"
+                            ))),
+                        },
+                    });
+                }
                 if self.types.signature(value.ty).is_none() {
                     return Err(error(
                         self.source,
@@ -209,6 +242,17 @@ impl Checker<'_> {
     fn shutil_tree_issue(&self) -> Type {
         let path = self.types.union(&[Type::Str, Type::Bytes]).unwrap();
         self.types.tuple(vec![path, path, Type::Str])
+    }
+
+    /// A rename to the same directory returns None; a joined destination is text.
+    fn move_result(&self, dst: Type) -> Type {
+        if dst == Type::Path {
+            self.types
+                .union(&[Type::Str, Type::Path, Type::None])
+                .unwrap()
+        } else {
+            self.types.optional(dst)
+        }
     }
 
     pub(super) fn shutil_move(
@@ -271,13 +315,7 @@ impl Checker<'_> {
                     ));
                 }
             }
-            let result = if dst == Type::Path {
-                self.types
-                    .union(&[Type::Str, Type::Path, Type::None])
-                    .unwrap()
-            } else {
-                self.types.optional(dst)
-            };
+            let result = self.move_result(dst);
             (ir::ProcessOperation::Move(self.shutil_tree_issue()), result)
         };
         Ok(self.ordered_builtin(Builtin::Process(op), result, args))

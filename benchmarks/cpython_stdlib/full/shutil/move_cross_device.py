@@ -38,6 +38,10 @@ def byte_types(src: str | bytes, dst: str | bytes) -> None:
 def remove_source(src: str, dst: str) -> None:
     Path(src).unlink()
 
+def invalid_copier() -> int:
+    print("evaluated copier")
+    return 42
+
 def same_filename(value: str | bytes | Path | None, expected: str) -> bool:
     if isinstance(value, str):
         return value == expected
@@ -65,6 +69,10 @@ try:
         shutil.move(sys.argv[1].encode(), sys.argv[2].encode(), copy_function=byte_types)
     elif sys.argv[3] == "remove-source":
         shutil.move(sys.argv[1], sys.argv[2], copy_function=remove_source)
+    elif sys.argv[3] == "invalid":
+        shutil.move(sys.argv[1], sys.argv[2], copy_function=invalid_copier())
+    elif sys.argv[3] == "none":
+        shutil.move(sys.argv[1], sys.argv[2], copy_function=None)
     elif sys.argv[3] == "protected-parent":
         root = Path(sys.argv[1])
         try:
@@ -74,6 +82,8 @@ try:
     else:
         shutil.move(sys.argv[1], sys.argv[2], copy_function=refuse)
 except ValueError as error:
+    print(str(error))
+except TypeError as error:
     print(str(error))
 except FileNotFoundError as error:
     print(f"missing source {error_number(error.errno)} {same_filename(error.filename, sys.argv[1])} {error.filename2 is None}")
@@ -96,9 +106,10 @@ def run(program, source_mount, destination_mount, kind, action):
         dst = Path(dst_tmp) / "result"
         if kind == "file":
             src.write_bytes(b"payload\x00")
-        elif kind == "directory":
+        elif kind in ("directory", "empty"):
             src.mkdir()
-            (src/"child").write_bytes(b"child")
+            if kind == "directory":
+                (src/"child").write_bytes(b"child")
         else:
             src.symlink_to("missing")
         if action == "into":
@@ -142,6 +153,8 @@ def main():
         cases.extend(("file", action) for action in ("into", "path-source", "path-destination", "bytes", "remove-source"))
         cases.extend((("symlink", "refuse"), ("symlink", "existing-link-target")))
         cases.append(("directory", "protected-parent"))
+        cases.extend((kind, "invalid") for kind in ("file", "directory", "empty", "symlink"))
+        cases.append(("file", "none"))
         def trials(command):
             return {case:run(command, args.source_mount, args.destination_mount, *case) for case in cases}
         reference = trials([sys.executable, "-IB", source])
@@ -159,6 +172,12 @@ def main():
             ("directory", [("child", ("file", b"child"))]))
         assert reference["symlink", "existing-link-target"] == (
             f"existing link target {errno.EEXIST} True True\n", ("symlink","missing"), ("file", b"original destination"))
+        invalid = "evaluated copier\n'int' object is not callable\n"
+        assert reference["file", "invalid"] == (invalid, ("file", b"payload\x00"), None)
+        assert reference["directory", "invalid"] == (invalid, ("directory", [("child", ("file", b"child"))]), ("directory", []))
+        assert reference["empty", "invalid"] == ("evaluated copier\n", None, ("directory", []))
+        assert reference["symlink", "invalid"] == ("evaluated copier\n", None, ("symlink", "missing"))
+        assert reference["file", "none"] == ("'NoneType' object is not callable\n", ("file", b"payload\x00"), None)
         if args.oracle_only:
             print(reference)
             return

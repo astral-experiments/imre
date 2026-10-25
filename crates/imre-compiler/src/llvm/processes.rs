@@ -17,6 +17,15 @@ fn shutil_tag(ty: Type) -> u32 {
 impl Emitter<'_, '_> {
     /// Keep the callee, bound context, return ownership, and parameter ABI together.
     fn shutil_copier(&mut self, copy: &Operand) -> (String, String, String, u32, u32) {
+        if copy.value.ty == Type::Str {
+            return (
+                "0".into(),
+                "@imre_shutil_noncallable".into(),
+                copy.value.operand.clone(),
+                0,
+                0,
+            );
+        }
         if copy.value.ty == Type::Bool {
             return (
                 self.instruction(format!("zext i1 {} to i32", copy.value.operand)),

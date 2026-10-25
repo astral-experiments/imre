@@ -2236,8 +2236,12 @@ impl<'a> Checker<'a> {
             }
         }
         if matches!(concrete, Type::Callable(_)) {
-            if let Some(Binding::Intrinsic(op @ (Intrinsic::Copy(_) | Intrinsic::RmTree))) =
-                self.resolve(expression)
+            if let Some(Binding::Intrinsic(
+                op @ (Intrinsic::Copy(_)
+                | Intrinsic::RmTree
+                | Intrinsic::Move
+                | Intrinsic::DestInSrc),
+            )) = self.resolve(expression)
             {
                 let value = self.shutil_function_value(op, Some(concrete), expression)?;
                 return self.coerce(value, expected, expression);
@@ -4739,8 +4743,9 @@ impl<'a> Checker<'a> {
         {
             return self.callable_value(&signature, None, None, expression);
         }
-        if let Some(Binding::Intrinsic(op @ (Intrinsic::Copy(_) | Intrinsic::RmTree))) =
-            self.resolve(expression)
+        if let Some(Binding::Intrinsic(
+            op @ (Intrinsic::Copy(_) | Intrinsic::RmTree | Intrinsic::Move | Intrinsic::DestInSrc),
+        )) = self.resolve(expression)
         {
             return self.shutil_function_value(op, None, expression);
         }
