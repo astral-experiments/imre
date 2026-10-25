@@ -258,6 +258,7 @@ jobs:
                       'tests/fixtures/text/percent_tuple.py',
                       'tests/fixtures/text/formatter_ownership.py',
                       'tests/fixtures/iterator_pipelines/source_generator.py',
+                      'tests/fixtures/iterables/mixed_method_sources.py',
                       'tests/fixtures/containers/chainmap.py',
                       'benchmarks/cpython_stdlib/full/sys/display_values.py')
           report = {'source': os.environ['JSON_TEST_REVISION'], 'cpython': sys.version, 'fixtures': {}}
