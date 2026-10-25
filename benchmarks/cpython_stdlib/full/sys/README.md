@@ -44,3 +44,26 @@ rejects missing IDs and duplicate classifications. An exclusion proposal is
 listed with its reason, remains in the denominator, and has no native credit.
 The seven platform/build skips and the default-locale skip retain their original
 reference reasons even where UTF-8 mode also provides native evidence.
+
+## Evidence per occurrence
+
+[evidence-linux.json](evidence-linux.json) is the versioned [shared evidence
+contract](../../NATIVE_EVIDENCE.md): 97 distinct occurrences at each of O0 and O3.
+This baseline was executed with Imre compiler/runtime source `7630556901c9936c9ca112f7fb2f4e52f3706fd3`. The pinned suite has no companion module. The two shorter `native-O*.json`
+files retain their original records and are not additional test occurrences.
+
+The versioned gate loads the original suite and runs its selected methods
+under their CPython fixtures. For every remaining non-skipped method it either
+tries to compile the complete definition or records the original decorator
+that requires an adapter. An unreviewed exception proposal remains a blocker.
+The actual native CLI failure for `test_orig_argv` is recorded separately.
+The unchanged locale-dependent method can pass under `-X utf8` even though
+the reference skipped it; the contract records that as a reference disagreement.
+
+Pass `--evidence /tmp/sys-evidence-O$opt.json` to the command above for each
+optimization level. Combine and validate the two files with:
+
+```sh
+jq -s . /tmp/sys-evidence-O0.json /tmp/sys-evidence-O3.json > /tmp/sys-evidence.json
+python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/sys/reference-linux.json /tmp/sys-evidence.json
+```

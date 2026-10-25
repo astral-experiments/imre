@@ -15,7 +15,9 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path[:0] = [str(HERE), str(STDLIB)]
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
-from suite_native import Toolchain, native_method, run_in_fixtures
+from suite_native import Toolchain, native_method, run_evidence, run_in_fixtures
+from suite_evidence import roles
+from occurrences import blocked_methods, reference_skips
 
 MODULE = "test.test_sys"
 SYS = MODULE + ".SysModuleTest."
@@ -53,13 +55,18 @@ def output(binary):
 
 def select(toolchain, work, source, module):
     executions = {}
-    for cls, method, fixture in [
-        ("SysModuleTest", "test_43581", STRING_EQUAL),
-        ("ActiveExceptionTests", "test_sys_exception_no_exception", EXCEPTION_EQUAL),
+    lines = source.read_bytes().splitlines(keepends=True)
+    pinned_methods = {(cls.name, method.name): hashlib.sha256(b"".join(
+        lines[min([method.lineno, *(d.lineno for d in method.decorator_list)]) - 1:method.end_lineno]
+    )).hexdigest() for cls in ast.parse(b"".join(lines)).body if isinstance(cls, ast.ClassDef)
+       for method in cls.body if isinstance(method, ast.FunctionDef)}
+    for cls, method, fixture, operation in [
+        ("SysModuleTest", "test_43581", STRING_EQUAL, "sys.__stdout__.encoding and sys.__stderr__.encoding"),
+        ("ActiveExceptionTests", "test_sys_exception_no_exception", EXCEPTION_EQUAL, "sys.exception() outside a handler"),
     ]:
         case_id = f"{MODULE}.{cls}.{method}"
         executions[case_id] = native_method(toolchain, directory(work, method),
-                                             source, cls, case_id, fixture)
+                                             source, cls, case_id, fixture, operation=("imre", operation))
 
     # Independent object-identity regression; never counts as an upstream ID.
     exercise = HERE / "active_exception.py"
@@ -99,8 +106,17 @@ def select(toolchain, work, source, module):
             original()
         if not calls:
             raise AssertionError(f"{case.id()} made no native calls")
+        is_default = "default" in calls
         return {"execution": "host-driven-native", "body": "CPython", "assertions": "CPython",
-                "fixture_execution": "CPython module/class/instance hooks", "calls": calls}
+                "fixture_execution": "CPython module/class/instance hooks", "calls": calls,
+                "observation": {"roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
+                                "evidence": {"operation": ", ".join("sys." + name for name in
+                                             (["getdefaultencoding"] if is_default else ["getfilesystemencoding", "platform"])),
+                                             "assertions": ("upstream TypeError and result type assertions" if is_default else
+                                                            "upstream check_fsencoding; codecs.lookup runs on the host"),
+                                             "method_sha256": pinned_methods[type(case).__name__, case._testMethodName],
+                                             "fixture": "original SysModuleTest lifecycle and reap_children teardown",
+                                             "native_calls": len(calls), "calls": calls, "opt_level": toolchain.level}}}
 
     for method in ("test_getdefaultencoding", "test_getfilesystemencoding"):
         executions[SYS + method] = encoding_case
@@ -122,7 +138,13 @@ def select(toolchain, work, source, module):
             raise AssertionError(sources)
         return {"execution": "host-driven-native", "body": "CPython; child source: Imre",
                 "assertions": "CPython", "fixture_execution": "CPython module/class/instance hooks",
-                "child_sha256": sources[0]}
+                "child_sha256": sources[0],
+                "observation": {"roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
+                                "evidence": {"operation": "native child prints the original non-ASCII value through stdout",
+                                             "fixture": "upstream CPython locale/subprocess decorators, child environment and pipes",
+                                             "assertions": "original CPython comparison with os.fsencode",
+                                             "method_sha256": pinned_methods[type(case).__name__, case._testMethodName],
+                                             "native_calls": 1, "child_sha256": sources[0], "opt_level": toolchain.level}}}
 
     executions[SYS + "test_ioencoding_nonascii"] = nonascii
     return executions
@@ -134,6 +156,7 @@ def main():
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--opt-level", type=int, choices=(0, 3), required=True)
     parser.add_argument("--cpython-source", type=Path)
+    parser.add_argument("--evidence", type=Path, help="write the versioned report for this optimization level")
     args = parser.parse_args()
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5):
         parser.error("run with the test-enabled CPython 3.14.5 release")
@@ -160,13 +183,32 @@ def main():
     toolchain = Toolchain(args.imre, args.runtime, args.clang, args.opt_level)
     with tempfile.TemporaryDirectory(prefix="imre-test-sys-") as tmp:
         executions = select(toolchain, Path(tmp), source, test_sys)
-        evidence, failures, skips = run_in_fixtures(suite, executions)
+        if args.evidence:
+            preflight = blocked_methods(toolchain, Path(tmp), source, reference, executions, test_sys)
+            evidence = {}
+
+            def capture(callback):
+                def execute(case, original):
+                    record = callback(case, original)
+                    evidence.setdefault(case.id(), []).append(record)
+                    return record
+                return execute
+
+            report = run_evidence(suite, {name: capture(fn) for name, fn in executions.items()},
+                                  reference, args.opt_level, preflight=preflight,
+                                  exceptions=reference_skips(reference, args.opt_level))
+            args.evidence.write_text(json.dumps(report, indent=2) + "\n")
+            selected = [r for r in report["records"] if r["id"] in executions]
+            failures = [r for r in selected if r["outcome"] not in {"pass", "skip"}]
+            skips = [(r["id"], r["reason"]) for r in selected if r["outcome"] == "skip"]
+        else:
+            evidence, failures, skips = run_in_fixtures(suite, executions)
     if failures:
         raise AssertionError(failures)
     results = {}
     for case_id, occurrences in evidence.items():
         item, = occurrences
-        results[case_id] = {"status": "pass", **item}
+        results[case_id] = {"status": "pass", **{k: v for k, v in item.items() if k != "observation"}}
     for case_id, reason in skips:
         results[case_id] = {"status": "upstream-skip", "reason": reason}
     if set(results) != executions.keys():
