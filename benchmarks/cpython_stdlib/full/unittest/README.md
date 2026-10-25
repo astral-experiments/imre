@@ -58,10 +58,13 @@ compares complete failure messages, including first differing and extra list
 elements, Unicode, truncation, custom messages, and a subclass's failure class.
 It adds no upstream IDs.
 
-At each of O0 and O3: 0 fully native passes, 15 native bodies with host
-fixtures, 9 host-driven native operations (36 calls), 9 compile blockers,
-1,055 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
+At each of O0 and O3: 0 fully native passes, 16 native bodies with host
+fixtures, 9 host-driven native operations (36 calls), 10 compile blockers,
+1,053 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
 all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
+
+The [native loader example](NATIVE_LOADER.md) exercises the same original
+constructor with native default fixtures and identifies the seven blocked methods.
 
 Three additional complete equality methods are attempted at each level.
 `testAssertMultiLineEqualTruncates` constructs a TestCase with a method name;

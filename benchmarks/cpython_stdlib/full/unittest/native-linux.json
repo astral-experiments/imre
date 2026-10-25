@@ -10,8 +10,8 @@
   "counts": {
     "blocked": 10,
     "host-driven-native-operation": 9,
-    "native-body-host-fixture": 15,
-    "reference-only": 1054,
+    "native-body-host-fixture": 16,
+    "reference-only": 1053,
     "reference-skip": 2
   },
   "records": [
@@ -261,7 +261,7 @@
     {"id": "test.test_unittest.test_functiontestcase.Test_FunctionTestCase.test_run_call_order__failure_in_test", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_unittest.test_functiontestcase.Test_FunctionTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_unittest.test_functiontestcase.Test_FunctionTestCase.test_shortDescription__no_docstring", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_unittest.test_functiontestcase.Test_FunctionTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_unittest.test_functiontestcase.Test_FunctionTestCase.test_shortDescription__singleline_docstring", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_unittest.test_functiontestcase.Test_FunctionTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
-    {"id": "test.test_unittest.test_loader.Test_TestLoader.test___init__", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_unittest.test_loader.Test_TestLoader", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
+    {"id": "test.test_unittest.test_loader.Test_TestLoader.test___init__", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_unittest.test_loader.Test_TestLoader", "reference": "pass", "roles": {"body": "imre", "assertions": "imre", "operation": "imre", "fixture": "mixed"}, "evidence": {"operation": "unittest.TestLoader construction and its errors list", "fixture": "CPython module/class/instance hooks; native instance in child", "opt_level": 0, "method_sha256": "02bc9c2a481fbee576031dbbbf724cb7b8506b3ce0f384c1abb6231fc6f1adfc"}, "outcome": "pass", "classification": "native-body-host-fixture"},
     {"id": "test.test_unittest.test_loader.Test_TestLoader.test_getTestCaseNames", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_unittest.test_loader.Test_TestLoader", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_unittest.test_loader.Test_TestLoader.test_getTestCaseNames__inheritance", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_unittest.test_loader.Test_TestLoader", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_unittest.test_loader.Test_TestLoader.test_getTestCaseNames__no_tests", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_unittest.test_loader.Test_TestLoader", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
@@ -1118,8 +1118,8 @@
   "counts": {
     "blocked": 10,
     "host-driven-native-operation": 9,
-    "native-body-host-fixture": 15,
-    "reference-only": 1054,
+    "native-body-host-fixture": 16,
+    "reference-only": 1053,
     "reference-skip": 2
   },
   "records": [
@@ -1369,7 +1369,7 @@
     {"id": "test.test_unittest.test_functiontestcase.Test_FunctionTestCase.test_run_call_order__failure_in_test", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_unittest.test_functiontestcase.Test_FunctionTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_unittest.test_functiontestcase.Test_FunctionTestCase.test_shortDescription__no_docstring", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_unittest.test_functiontestcase.Test_FunctionTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_unittest.test_functiontestcase.Test_FunctionTestCase.test_shortDescription__singleline_docstring", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_unittest.test_functiontestcase.Test_FunctionTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
-    {"id": "test.test_unittest.test_loader.Test_TestLoader.test___init__", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_unittest.test_loader.Test_TestLoader", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
+    {"id": "test.test_unittest.test_loader.Test_TestLoader.test___init__", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_unittest.test_loader.Test_TestLoader", "reference": "pass", "roles": {"body": "imre", "assertions": "imre", "operation": "imre", "fixture": "mixed"}, "evidence": {"operation": "unittest.TestLoader construction and its errors list", "fixture": "CPython module/class/instance hooks; native instance in child", "opt_level": 3, "method_sha256": "02bc9c2a481fbee576031dbbbf724cb7b8506b3ce0f384c1abb6231fc6f1adfc"}, "outcome": "pass", "classification": "native-body-host-fixture"},
     {"id": "test.test_unittest.test_loader.Test_TestLoader.test_getTestCaseNames", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_unittest.test_loader.Test_TestLoader", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_unittest.test_loader.Test_TestLoader.test_getTestCaseNames__inheritance", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_unittest.test_loader.Test_TestLoader", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_unittest.test_loader.Test_TestLoader.test_getTestCaseNames__no_tests", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_unittest.test_loader.Test_TestLoader", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},

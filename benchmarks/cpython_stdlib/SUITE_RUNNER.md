@@ -4,6 +4,11 @@ Import `suite_inventory` and `suite_native` from this directory. Use the release
 test-enabled Python for discovery, shared fixtures and host assertions. Build each
 native entry at both `Toolchain(..., level=0)` and `level=3`.
 
+To discover method names in native code, pass a statically known class to
+`unittest.defaultTestLoader.getTestCaseNames`. The [verified loader example](full/unittest/NATIVE_LOADER.md)
+uses CPython's original `bar.test_bar.PassingTest` and documents which module
+and suite runner calls still fail.
+
 ## A verified upstream example
 
 This is the `test_stop` case used by [the unittest gate](full/unittest/run.py).
