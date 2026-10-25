@@ -8,6 +8,15 @@ exit status, stdout and stderr against a separate CPython subprocess. Successful
 assertions receive values decoded from the native process. CPython does not
 supply values or implement actions in that process.
 
+For source methods that expect an `add_argument` exception, the per-occurrence
+[evidence runner](evidence.py) first attempts the complete native body. If the
+body is blocked and the original method contains a supported registration
+assertion, [the registration adapter](registration_cases.py) runs the call in
+Imre. It compares the exception type and message, exit status, stdout, and
+stderr with CPython, then carries the native exception back to the original
+host assertion. The record keeps the whole-body diagnostic and credits only
+the registration operation to Imre.
+
 ```sh
 python3.14 -B benchmarks/cpython_stdlib/full/argparse/native_cases.py \
   --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang clang-18 \
