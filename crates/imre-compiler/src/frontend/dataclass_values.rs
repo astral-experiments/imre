@@ -62,7 +62,6 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::AsyncProcess(_)
         | Type::NativeModule
         | Type::ModuleNamespace
-        | Type::ModuleMember
         | Type::LogFormatter
         | Type::LogRecord
         | Type::Logger
@@ -73,7 +72,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::CsvReader
         | Type::RegexPattern
         | Type::RegexMatch
-        | Type::ExceptionField
+        | Type::ObjectValue
         | Type::TextIO
         | Type::StringIO
         | Type::BinaryIO

@@ -32,6 +32,26 @@ fn field(object: &Expr, index: usize, types: &[Type]) -> Expr {
 }
 
 impl Checker<'_> {
+    /// Evaluate the RHS and target before the has_location descriptor invokes bool().
+    pub(super) fn set_module_spec_location(
+        &mut self,
+        attr: &ast::ExprAttribute,
+        receiver: Expr,
+        value: Expr,
+    ) -> Result<Statement, String> {
+        let (rhs, object) = (self.hidden(value.ty), self.hidden(receiver.ty));
+        let (owner, field, _) = self.writable_field_value(attr, self.local(object))?;
+        let truth = self.truth_value(self.local(rhs));
+        Ok(Statement::Scope {
+            body: vec![
+                Statement::Assign(rhs, value),
+                Statement::Assign(object, receiver),
+                Statement::SetField(owner, field, truth),
+            ],
+            clear: vec![rhs, object],
+        })
+    }
+
     pub(super) fn module_spec(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let params = ["name", "loader", "origin", "loader_state", "is_package"].map(|name| {
             let required = matches!(name, "name" | "loader");

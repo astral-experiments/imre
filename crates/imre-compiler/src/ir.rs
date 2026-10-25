@@ -47,8 +47,9 @@ pub(crate) enum Type {
     Exception,
     /// An exception object known to own the given fixed payload layout.
     NamedException(usize),
-    /// A retained value projected from a structured builtin exception.
-    ExceptionField,
+    /// An owned view of a concrete Python scalar, tuple, or native module attribute.
+    ObjectValue,
+    ReadOnlyObjectMapping,
     /// A builtin ImportError (including its ModuleNotFoundError and marker subclasses).
     ImportException,
     /// A proved catch-only timeout with readonly float and nullable bytes fields.
@@ -81,7 +82,6 @@ pub(crate) enum Type {
     RegexPattern,
     NativeModule,
     ModuleNamespace,
-    ModuleMember,
     LogRecord,
     LogFormatter,
     Logger,
@@ -203,7 +203,8 @@ impl std::fmt::Display for Type {
             Self::None => "None",
             Self::Iterator => "iterator",
             Self::Exception | Self::NamedException(_) => "Exception",
-            Self::ExceptionField => "exception field",
+            Self::ObjectValue => "object value",
+            Self::ReadOnlyObjectMapping => "Mapping[str, object]",
             Self::ImportException => "ImportError",
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
             Self::StringIterable => "Iterable[str]",
@@ -230,7 +231,6 @@ impl std::fmt::Display for Type {
             Self::RegexPattern => "re.Pattern[str]",
             Self::NativeModule => "builtin module",
             Self::ModuleNamespace => "module namespace",
-            Self::ModuleMember => "module attribute",
             Self::LogFormatter => "logging.Formatter",
             Self::LogRecord => "logging.LogRecord",
             Self::Logger => "logging.Logger",
@@ -700,6 +700,8 @@ pub(crate) enum Builtin {
     ImportErrorField(u32),
     ImportErrorReset,
     ImportErrorRejectReset,
+    BoxValue,
+    MappingObjectGet,
     ExceptionTupleView,
     ExceptionFieldRepr,
     ExceptionFieldLen,
@@ -932,6 +934,7 @@ pub(crate) enum Builtin {
     RegexSearch,
     RegexSub(Vec<u8>),
     RegexGroupDict,
+    RegexFindIter,
     RegexMatchStart,
     /// A proved selector is a valid numeric index for every possible receiver.
     RegexCapture {
@@ -1396,7 +1399,6 @@ pub(crate) enum CopyOperation {
 /// Synchronous process operations cannot invoke language callbacks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ErrnoOperation {
-    BoxValue,
     DefaultLookup,
     Module,
     Namespace,
@@ -1407,9 +1409,6 @@ pub(crate) enum ErrnoOperation {
     Lookup,
     Has,
     Items,
-    ItemRepr,
-    ItemText,
-    ItemEq,
     MemberContains,
 }
 
