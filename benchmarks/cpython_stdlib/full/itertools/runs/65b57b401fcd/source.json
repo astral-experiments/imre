@@ -1,0 +1,36 @@
+{
+  "compiler_sha256": "dcf745d484b4e751b50063f2868bf8266aaffc7f125d62fc9529f897608fd977",
+  "entry": "benchmarks/cpython_stdlib/full/itertools/coverage.py",
+  "entry_sha256": "45ff4d2aaf0650dc198f070995d0a17efcd98ffc070cc8063bb716b1ad66cb29",
+  "launcher_sha256": "328b2c96f5a740a7071d212f5cf4dddf3126c5644c9bf47e6941621523f6a935",
+  "modes": {
+    "ordinary": {
+      "compiler_commands": {
+        "build-O0": 115,
+        "build-O3": 115
+      },
+      "mode_errors": [],
+      "report_sha256": "7c5801f801d363520797ff385311efeeecd17c2b7219b9b38e30404c3816a17a",
+      "runner_mode_flag": false,
+      "runner_status": 0,
+      "validation_status": 0
+    },
+    "reachable": {
+      "compiler_commands": {
+        "build-O0": 115,
+        "build-O3": 115
+      },
+      "mode_errors": [],
+      "report_sha256": "05b99948e91e277c1338e297668a173a48553075f177fa1dc103a6e64d25c68d",
+      "runner_mode_flag": false,
+      "runner_status": 0,
+      "validation_status": 0
+    }
+  },
+  "python": "3.14.5",
+  "reference_sha256": "f2b7970aac1b7bcdebb2b3b36b41ef3f789d2a8dfb416a5d62b728f0b6f4ad8b",
+  "runtime_sha256": "234df2e8d2f52c4e2aa7958e253de741f332d1b2807879e48930d0478f54a7da",
+  "suite_commit": "65b57b401fcd08fbf69413d5026218148b88a584",
+  "suite_tree": "eed6709d3d089893df9f989768d533f96e50dd6c",
+  "validator_sha256": "adda3af2cab22f2e0658f11be5a3f58bd72970e38bd40ff6bc6e4e710eb21d32"
+}
