@@ -178,6 +178,7 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
                 }
                 let mut bases = Vec::new();
                 let mut mros = Vec::new();
+                let mut inherits_layout = false;
                 for base in &arguments.args {
                     let (id, mro) = match graph.resolve(module_id, base) {
                         None => {
@@ -196,12 +197,7 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
                             let Some(&id) = ids.get(&parent) else {
                                 break;
                             };
-                            if layouts.contains(&parent) {
-                                return Err(module.error(
-                                    base,
-                                    "inheriting a user exception payload layout is unsupported",
-                                ));
-                            }
+                            inherits_layout |= layouts.contains(&parent);
                             (
                                 id,
                                 named[(id - FIRST_USER_EXCEPTION) as usize]
@@ -241,6 +237,8 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
                         ));
                     }
                     validate_layout(module, node)?;
+                }
+                if !marker(node) || inherits_layout {
                     layouts.insert(def);
                 }
                 ids.insert(def, id);

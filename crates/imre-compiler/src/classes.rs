@@ -18,6 +18,7 @@ pub(crate) use exceptions::explicit_message_initializer;
 pub(crate) use inheritance::super_init;
 
 pub(crate) const EXCEPTION_ARGS_SLOT: &str = "<exception arguments>";
+const EXCEPTION_MESSAGE_SLOT: &str = "<exception message>";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MethodKind {
@@ -74,6 +75,22 @@ pub(crate) struct Field {
     pub(crate) compare: bool,
 }
 
+impl Class {
+    /// An inherited initializer writes the same ABI slot as a concrete child;
+    /// fields declared by that child can follow the slot in the record.
+    pub(crate) fn exception_arguments_index(&self) -> usize {
+        self.fields
+            .iter()
+            .position(|field| {
+                matches!(
+                    field.name.as_str(),
+                    EXCEPTION_ARGS_SLOT | EXCEPTION_MESSAGE_SLOT
+                )
+            })
+            .expect("native exception record's base arguments")
+    }
+}
+
 impl Classes {
     pub(crate) fn instance(&self, id: usize) -> Type {
         if let Some(members) = &self.definitions[id].enum_members {
@@ -108,9 +125,16 @@ impl Classes {
                     ids.insert(definition, source_nodes.len());
                     let mut record = std::borrow::Cow::Borrowed(node);
                     if resolved.layouts.contains(&definition) {
-                        // Exception inheritance is resolved above; only the additional fixed
-                        // fields and methods take part in record layout and initialization.
-                        record.to_mut().arguments = None;
+                        // C3 above owns exception matching. The record checker
+                        // needs only the bases that actually carry a payload.
+                        let record = record.to_mut();
+                        if let Some(args) = &mut record.arguments {
+                            args.args = args.args.iter().filter(|arg| matches!(graph.resolve(module_id, arg),
+                                Some(Binding::Definition(parent)) if resolved.layouts.contains(&parent))).cloned().collect();
+                            if args.args.is_empty() {
+                                record.arguments = None;
+                            }
+                        }
                     }
                     source_nodes.push((definition, record));
                 }
@@ -121,13 +145,30 @@ impl Classes {
             .map(|(def, node)| (*def, node.as_ref()))
             .collect::<Vec<_>>();
         let mut definitions = inheritance::resolve(graph, &nodes, &ids, &resolved)?;
-        for def in &resolved.layouts {
-            let c = &mut definitions[ids[def]];
+        // Compute root offsets before inserting private fields. Keeping them
+        // separate from source layout also keeps them out of dataclass __init__.
+        let roots = resolved
+            .layouts
+            .iter()
+            .map(|def| {
+                let id = ids[def];
+                let root = *definitions[id].bases.last().unwrap_or(&id);
+                (id, root, definitions[root].fields.len())
+            })
+            .collect::<Vec<_>>();
+        let inherited: HashSet<_> = roots
+            .iter()
+            .filter(|(id, root, _)| id != root)
+            .map(|(_, root, _)| *root)
+            .collect();
+        for (id, root, offset) in roots {
+            let c = &mut definitions[id];
+            let def = c.definition;
             // This ABI slot is not a Python identifier, constructor parameter,
             // dataclass comparison field, or repr field. The frontend gives
             // the tuple slot its native exception field type during layout.
             let module = &graph.modules[def.module];
-            let tuple_args = c.methods.iter().filter(|m| matches!(m.name.as_str(), "__init__" | "__post_init__"))
+            let tuple_args = inherited.contains(&root) || c.methods.iter().filter(|m| matches!(m.name.as_str(), "__init__" | "__post_init__"))
                 .flat_map(|m| &m.body).any(|stmt| matches!(stmt, ast::Stmt::Expr(e)
                     if matches!(&*e.value, ast::Expr::Call(call) if explicit_message_initializer(module, call).is_some()
                         || super_init(call) && call.arguments.args.len() != 1)));
@@ -135,20 +176,23 @@ impl Classes {
                 .expect("static annotation")
                 .expr()
                 .clone();
-            c.fields.push(Field {
-                module: def.module,
-                name: if tuple_args {
-                    EXCEPTION_ARGS_SLOT
-                } else {
-                    "<exception message>"
-                }
-                .into(),
-                annotation,
-                default: None,
-                kw_only: false,
-                repr: false,
-                compare: false,
-            });
+            c.fields.insert(
+                offset,
+                Field {
+                    module: def.module,
+                    name: if tuple_args {
+                        EXCEPTION_ARGS_SLOT
+                    } else {
+                        EXCEPTION_MESSAGE_SLOT
+                    }
+                    .into(),
+                    annotation,
+                    default: None,
+                    kw_only: false,
+                    repr: false,
+                    compare: false,
+                },
+            );
         }
         Ok(Self {
             definitions,

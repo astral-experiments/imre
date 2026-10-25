@@ -10,6 +10,7 @@ from textwrap import dedent
 
 ACCEPTED = {
     "explicit_base": (Path(__file__).parent / "fixtures/exceptions/explicit_base.py").read_text(),
+    "inherited_payload": (Path(__file__).parent / "fixtures/exceptions/inherited_payload.py").read_text(),
     "import_error": (Path(__file__).parent / "fixtures/exceptions/import_error.py").read_text(),
     "classvar_exception_constructor": """
 from typing import ClassVar

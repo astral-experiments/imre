@@ -5479,7 +5479,8 @@ impl<'a> Checker<'a> {
                 if let Type::NamedException(class) = receiver.ty
                     && attribute.attr.as_str() == "args"
                 {
-                    let field = self.classes.fields[class].len() - 1;
+                    let field =
+                        self.classes.declarations.definitions[class].exception_arguments_index();
                     if self.classes.fields[class][field] == Type::ExceptionField {
                         return Ok(Expr {
                             ty: Type::ExceptionField,
@@ -5491,10 +5492,7 @@ impl<'a> Checker<'a> {
                     }
                     let message = Expr {
                         ty: self.types.optional(Type::Str),
-                        kind: ExprKind::Field(
-                            Box::new(Self::exception_record(receiver)),
-                            self.classes.fields[class].len() - 1,
-                        ),
+                        kind: ExprKind::Field(Box::new(Self::exception_record(receiver)), field),
                     };
                     return Ok(Expr {
                         ty: self.types.tuple(vec![Type::Str]),

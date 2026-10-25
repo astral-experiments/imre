@@ -1126,9 +1126,9 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(
                     Builtin::NamedException {
                         kind,
-                        message_field: decl.fields.len() - 1,
-                        tuple_args: self.classes.fields[class].last()
-                            == Some(&Type::ExceptionField),
+                        message_field: decl.exception_arguments_index(),
+                        tuple_args: self.classes.fields[class][decl.exception_arguments_index()]
+                            == Type::ExceptionField,
                         text,
                         repr,
                         dataclass_repr: decl.dataclass.is_some_and(|d| d.repr),
@@ -1178,7 +1178,7 @@ impl Checker<'_> {
     }
 
     fn store_exception_arguments(&self, class: usize, value: Expr) -> Expr {
-        let field = self.classes.fields[class].len() - 1;
+        let field = self.classes.declarations.definitions[class].exception_arguments_index();
         Expr {
             ty: Type::None,
             kind: ExprKind::Scope {
@@ -1215,6 +1215,7 @@ impl Checker<'_> {
 
     pub(super) fn call_super_initializer(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         if let Some(class) = self.class
+            && !matches!(self.super_initializer, Some(BaseInitializer::Record(_)))
             && self
                 .classes
                 .declarations
@@ -1225,7 +1226,8 @@ impl Checker<'_> {
                 .bindings
                 .contains_key("super")
         {
-            if self.classes.fields[class].last() == Some(&Type::ExceptionField)
+            let slot = self.classes.declarations.definitions[class].exception_arguments_index();
+            if self.classes.fields[class][slot] == Type::ExceptionField
                 && call.arguments.keywords.is_empty()
             {
                 return self.set_exception_arguments(class, &call.arguments.args);
