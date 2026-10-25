@@ -21,6 +21,7 @@ mod itertools;
 mod json;
 mod logging;
 mod mappings;
+mod os;
 mod paths;
 pub(crate) mod posixpath;
 mod processes;
@@ -63,6 +64,7 @@ enum Storage {
     Sha256(Box<sha2::Sha256>),
     CsvReader(Box<csv::Reader>),
     Exception(exceptions::Exception),
+    ExceptionField(OwnedWord),
     File(Box<files::FileState>),
     ZipFile(Box<zipfile::Archive>),
     ZipInfo(Rc<zipfile::Info>),
@@ -86,6 +88,7 @@ enum Storage {
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),
     LogRecord(Box<logging::record::Record>),
+    LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
 }
