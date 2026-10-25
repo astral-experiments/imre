@@ -32,7 +32,8 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 
 - `test_sys_exception_no_exception`: the complete method queries native handler state and compares the result to `None`. A separate program checks object identity across nested handlers, calls and handler exit.
 - `test_43581`: the complete method reads both stream attributes and executes the shared native unittest string equality assertion. CPython runs the original fixture.
-- `test_getdefaultencoding` and `test_getfilesystemencoding`: all `sys` operations and the filesystem codec lookup execute in the native driver. The original method, helper, unittest assertions and lifecycle run on CPython. Compiling the original method and helper together is currently blocked by inference of the helper’s unannotated `expected=None` parameter.
+- `test_getdefaultencoding`: both calls execute in the native driver; the original body and assertions run on CPython.
+- `test_getfilesystemencoding`: the unchanged method and its unchanged `check_fsencoding` helper run in the native binary. The helper calls native `codecs.lookup`, and its assertions run there too. The pinned CPython suite retains its original instance lifecycle and `SysModuleTest.tearDown`.
 - `test_ioencoding_nonascii`: the canonical reference and native gate both skip under the unchanged locale decorator. See the separate UTF-8-mode run below.
 
 The existing [stream and exit smoke runner](../../native_sys.py) exercises four
@@ -51,7 +52,7 @@ reference reasons even where UTF-8 mode also provides native evidence.
 
 [evidence-linux.json](evidence-linux.json) is the versioned [shared evidence
 contract](../../NATIVE_EVIDENCE.md): 97 distinct occurrences at each of O0 and O3.
-The filesystem codec rows were executed with Imre source `2da99d93a626b6b8d42a81936e86de89ee2c9ddf`; the builtins baseline including the original `-c` launch was rechecked at `1037084`. The pinned suite has no companion module. The two shorter `native-O*.json`
+The native filesystem method and helper were measured at `72e9edd38c9c58deec4d52e84b9ad1881910271c`; the codec and builtins baselines retain their measured rows, including the original `-c` launch rechecked at `1037084`. The pinned suite has no companion module. The two shorter `native-O*.json`
 files retain their original records and are not additional test occurrences.
 
 The versioned gate loads the original suite and runs its selected methods
