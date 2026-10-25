@@ -534,6 +534,7 @@ pub(crate) enum CheckedDiagnostic {
     ExcessArgument(TextRange),
     PositionalKeyword(TextRange),
     RepeatedKeyword(TextRange),
+    NonIterableSpread(TextRange),
 }
 
 impl CheckedDiagnostic {
@@ -548,7 +549,8 @@ impl CheckedDiagnostic {
             Self::BuiltinImport(range) => (range, 5),
             Self::ExcessArgument(range) => (range, 6),
             Self::PositionalKeyword(range) => (range, 7),
-            Self::RepeatedKeyword(range) => (range, 8),
+            Self::RepeatedKeyword(range) => (range, 9),
+            Self::NonIterableSpread(range) => (range, 10),
         };
         (range.start(), range.end(), kind)
     }
@@ -568,6 +570,7 @@ impl CheckedDiagnostic {
                 diagnostic == "positional-only-parameter-as-kwarg" && keyword == range
             }
             Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
+            Self::NonIterableSpread(value) => diagnostic == "not-iterable" && value == range,
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
             Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
             Self::ExcessArgument(arg) => {
