@@ -2,6 +2,7 @@ class Base:
     label: str
 
     def __init__(self, label: str) -> None:
+        super().__init__()
         self.label = label
 
 

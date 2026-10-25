@@ -35,6 +35,7 @@ REJECTED = {
     "literal_mutable_alias": 'from typing import Literal\na: list[Literal["a"]] = ["a"]\nb: list[str] = a\nb.append("b")\n',
     "literal_non_string": 'from typing import Literal\nx: Literal["a", 7] = "a"\n',
     "literal_invalidated_guard": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    if s == "a":\n        s = input()\n        return s\n    return "a"\n',
+    "root_super_wrong_arity": CELL.replace("self.value = value", "super().__init__(value)\n        self.value = value"),
     "init_alias_partial_self": CELL.replace("self.value = value", "alias = self\n        self.value = value"),
     "init_rebind_self": CELL.replace("self.value = value", "self = self\n        self.value = value"),
     "init_assert_unset_field": CELL.replace("self.value = value", "assert self.value\n        self.value = value"),

@@ -1041,6 +1041,22 @@ impl Checker<'_> {
                 },
             });
         }
+        // An initializer defined at the root of a checked record lineage finds
+        // object.__init__, including when that initializer runs on a subclass.
+        if self.initializing
+            && self.class.is_some()
+            && self.super_initializer.is_none()
+            && !self.names.contains_key("super")
+            && !self.graph.modules[self.module]
+                .bindings
+                .contains_key("super")
+            && call.arguments.is_empty()
+        {
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            });
+        }
         let base = self
             .super_initializer
             .filter(|_| {
