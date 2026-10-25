@@ -218,6 +218,13 @@ The explicit typed schema decoder and the encoder retain their 128-container lim
 Unicode scalar values. Integers retain their exact precision. The standard
 reader also recognizes `NaN`, `Infinity`, and `-Infinity`.
 
+`json.JSONDecoder()` and `json.decoder.JSONDecoder()` create a reusable decoder.
+Its `decode(s)` method accepts Unicode text; `memo` returns the same dictionary
+on each read from that instance. Keys repeated within one document share the
+same string object. Separate decodes have independent key namespaces. Like
+CPython's default decoder, scanning does not consult or clear entries that a
+caller inserts into the public `memo` dictionary.
+
 `json.dumps(value)` returns a string and `json.dump(value, stream)` writes to
 a text stream. Both accept scalar values, typed lists, tuples, dictionaries
 with string or integer keys, and parsed documents. Fresh nested list and dict

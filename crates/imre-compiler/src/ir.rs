@@ -85,6 +85,7 @@ pub(crate) enum Type {
     /// A live namespace wrapper; the interned shape describes its string-keyed backing dict.
     SimpleNamespace(usize),
     Sha256,
+    JsonDecoder,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
     ZipInfo,
@@ -221,6 +222,7 @@ impl std::fmt::Display for Type {
             Self::StrDescriptor(_) => "method_descriptor",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::Sha256 => "SHA-256 hash",
+            Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
             Self::CsvReader => "CSV reader",
@@ -793,6 +795,9 @@ pub(crate) enum Builtin {
     /// Decodes one string into a checked record, list, or string-key dictionary.
     JsonDecode(Type),
     JsonLoads,
+    JsonDecoderNew,
+    JsonDecoderMemo,
+    JsonDecoderDecode,
     JsonEmptyObject,
     ModuleCache(usize),
     /// Capture and access an individual wrapper's independently owned cache.

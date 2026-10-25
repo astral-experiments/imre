@@ -93,6 +93,7 @@ impl Type {
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
             | Self::Sha256
+            | Self::JsonDecoder
             | Self::ZipFile
             | Self::ZipInfo
             | Self::CsvReader
@@ -154,6 +155,7 @@ impl Type {
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
             | Self::Sha256
+            | Self::JsonDecoder
             | Self::ZipFile
             | Self::ZipInfo
             | Self::CsvReader
@@ -745,6 +747,7 @@ impl Emitter<'_, '_> {
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::Sha256
+            | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
@@ -3336,6 +3339,7 @@ impl Emitter<'_, '_> {
                 | Type::StrDescriptor(_)
                 | Type::PlainObject
                 | Type::Sha256
+                | Type::JsonDecoder
                 | Type::ZipFile
                 | Type::ZipInfo
                 | Type::CsvReader
@@ -4167,6 +4171,15 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::JsonDecoderNew => self.call("imre_json_decoder_new", returns, &[]),
+            Builtin::JsonDecoderMemo => {
+                self.call("imre_json_decoder_memo", returns, &[&args[0].value])
+            }
+            Builtin::JsonDecoderDecode => self.call(
+                "imre_json_decoder_decode",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::JsonSelect(path) => self.json_select(path, returns, &args),
             Builtin::JsonIndex => self.call(
                 "imre_json_index",
@@ -5685,6 +5698,7 @@ impl Emitter<'_, '_> {
                     | Type::PlainObject
                     | Type::SimpleNamespace(_)
                     | Type::Sha256
+                    | Type::JsonDecoder
                     | Type::ZipFile
                     | Type::ZipInfo
                     | Type::CsvReader
@@ -5934,6 +5948,7 @@ impl Emitter<'_, '_> {
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::Sha256
+            | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
@@ -6009,6 +6024,7 @@ impl Emitter<'_, '_> {
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::Sha256
+            | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
@@ -6597,6 +6613,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::PlainObject
         | Type::SimpleNamespace(_)
         | Type::Sha256
+        | Type::JsonDecoder
         | Type::ZipFile
         | Type::ZipInfo
         | Type::CsvReader
@@ -7018,6 +7035,9 @@ declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
 declare ptr @imre_json_loads(ptr)
+declare ptr @imre_json_decoder_new()
+declare ptr @imre_json_decoder_memo(ptr)
+declare ptr @imre_json_decoder_decode(ptr, ptr)
 declare ptr @imre_json_loads_bytes(ptr)
 declare i64 @imre_json_error_field(ptr, i32)
 declare ptr @imre_json_index(ptr, i64)
