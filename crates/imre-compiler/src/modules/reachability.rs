@@ -323,6 +323,20 @@ run()
     }
 
     #[test]
+    fn sealed_imports_without_lowering_stay_confined_to_cold_bodies() {
+        let source = "from configparser import ConfigParser as parser\ndef cold():\n    return parser()\nprint(42)\n";
+        reachable(source).unwrap();
+        assert!(compile(source, &CompileOptions::default()).is_err());
+        assert!(
+            reachable(&source.replace("print(42)", "print(cold())"))
+                .unwrap_err()
+                .contains("configparser.ConfigParser")
+        );
+        assert!(reachable(&source.replace("ConfigParser", "Missing")).is_err());
+        assert!(reachable("import this\nprint(42)\n").is_err());
+    }
+
+    #[test]
     fn retains_definition_time_side_effects() {
         let source = "def unused(value=globals()):\n    pass\nprint(42)\n";
         assert!(reachable(source).is_err());

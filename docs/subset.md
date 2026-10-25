@@ -1141,7 +1141,7 @@ python3 tests/bytes.py --compiler target/release/imre --runtime target/release/l
 
 ### Closed entry profiles
 
-`--reachable-only` checks and compiles definitions used by the entrypoint. `--entry-profile FILE` also selects particular branch bodies in named functions. The JSON file maps each qualified function name to the condition and value it requires.
+`--reachable-only` checks and compiles definitions used by the entrypoint. It can resolve selected standard-library declarations, such as `configparser.ConfigParser`, when only an unused function needs them. Using one in executable code still requires a native implementation. Unknown exports, modules with observable import effects, and first-party module initializers remain subject to normal checks. `--entry-profile FILE` also selects particular branch bodies in named functions. The JSON file maps each qualified function name to the condition and value it requires.
 
 ```json
 {"tools.report.run": {"mode": "Mode.markdown", "args.debug": "False"}}
