@@ -526,10 +526,12 @@ struct CheckedFile<'db> {
 pub(crate) enum CheckedDiagnostic {
     AbstractClassCall(TextRange),
     Decorator(TextRange),
+    OptionalLockContext(TextRange),
     Call(TextRange),
     DictDeletion(TextRange),
+    DeferredName(TextRange),
     Keyword(TextRange),
-    TupleListRead(TextRange),
+    CheckedIndexRead(TextRange),
     MissingArgument(TextRange),
     BuiltinImport(TextRange),
     ExcessArgument(TextRange),
@@ -542,15 +544,17 @@ impl CheckedDiagnostic {
         let (range, kind) = match self {
             Self::AbstractClassCall(range) => (range, 9),
             Self::Decorator(range) => (range, 0),
+            Self::OptionalLockContext(range) => (range, 7),
             Self::Call(range) => (range, 1),
             Self::Keyword(range) => (range, 2),
-            Self::TupleListRead(range) => (range, 3),
+            Self::CheckedIndexRead(range) => (range, 3),
+            Self::RepeatedKeyword(range) => (range, 11),
             Self::DictDeletion(range) => (range, 8),
             Self::MissingArgument(range) => (range, 4),
             Self::BuiltinImport(range) => (range, 5),
             Self::ExcessArgument(range) => (range, 6),
             Self::PositionalKeyword(range) => (range, 7),
-            Self::RepeatedKeyword(range) => (range, 8),
+            Self::DeferredName(range) => (range, 9),
         };
         (range.start(), range.end(), kind)
     }
@@ -563,6 +567,10 @@ impl CheckedDiagnostic {
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
+            Self::DeferredName(name) => diagnostic == "unresolved-reference" && name == range,
+            Self::OptionalLockContext(expr) => {
+                diagnostic == "invalid-context-manager" && expr == range
+            }
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
             Self::RepeatedKeyword(keyword) => {
                 diagnostic == "parameter-already-assigned" && keyword == range
@@ -570,7 +578,7 @@ impl CheckedDiagnostic {
             Self::PositionalKeyword(keyword) => {
                 diagnostic == "positional-only-parameter-as-kwarg" && keyword == range
             }
-            Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
+            Self::CheckedIndexRead(read) => diagnostic == "not-subscriptable" && read == range,
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
             Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
             Self::ExcessArgument(arg) => {
