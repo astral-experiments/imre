@@ -233,39 +233,30 @@ unsafe fn spawn(config: &LaunchConfig, words: [usize; 3]) -> Result<Popen> {
     cleanup();
     // SAFETY: settings describe the rooted command, path and integer representations.
     let args = unsafe { WordKind::new(config.arg_kind).acquire(config.args as usize) };
-    // SAFETY: the buffer size is a rooted canonical integer.
-    let bufsize = (unsafe { Int::borrow(config.bufsize) })
-        .as_small()
-        .and_then(|n| i32::try_from(n).ok())
-        .ok_or_else(|| {
-            Error::new(
-                Kind::OverflowError,
-                "Python int too large to convert to C int",
-            )
-        })?;
     let streams = config.streams | (u32::from(!config.close_fds) << 17);
-    if streams & 15 == 5 {
+    let modes = [12, 0, 4].map(|shift| (streams >> shift) & 15);
+    if modes[1] == 5 {
         return Err(Error::new(
             Kind::ValueError,
             "STDOUT can only be used for stderr",
         ));
     }
-    if (streams >> 12) & 15 == 5 {
-        return Err(errno_error(io::Error::from_raw_os_error(libc::EBADF)));
-    }
+    let c_int = |word| {
+        // SAFETY: the caller roots both integer descriptors and the buffer size.
+        unsafe { Int::borrow(word) }
+            .as_small()
+            .and_then(|n| i32::try_from(n).ok())
+            .ok_or_else(|| {
+                Error::new(
+                    Kind::OverflowError,
+                    "Python int too large to convert to C int",
+                )
+            })
+    };
     let mut descriptors = [-1; 3];
-    for (i, shift) in [12, 0, 4].into_iter().enumerate() {
-        descriptors[i] = match (streams >> shift) & 15 {
-            // SAFETY: mode 6 denotes a rooted integer in Python word representation.
-            6 => unsafe { Int::borrow(words[i]) }
-                .as_small()
-                .and_then(|n| i32::try_from(n).ok())
-                .ok_or_else(|| {
-                    Error::new(
-                        Kind::OverflowError,
-                        "Python int too large to convert to C int",
-                    )
-                })?,
+    for (i, mode) in modes.into_iter().enumerate() {
+        descriptors[i] = match mode {
+            6 => c_int(words[i])?,
             // SAFETY: mode 7 denotes a rooted native file; only its fd escapes the borrow.
             7 => unsafe {
                 object(words[i] as *const Object)
@@ -275,6 +266,12 @@ unsafe fn spawn(config: &LaunchConfig, words: [usize; 3]) -> Result<Popen> {
             _ => -1,
         };
     }
+    // Python opens the parent-side pipe wrappers after it collects the file handles.
+    let bufsize = if modes.contains(&1) {
+        c_int(config.bufsize)?
+    } else {
+        -1
+    };
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
     unsafe { launch_error::spawn(&args, config, streams, descriptors) }.map(|mut child| {
         let text = streams & (1 << 16) != 0;
