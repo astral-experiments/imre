@@ -5433,21 +5433,21 @@ impl<'a> Checker<'a> {
                 if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
                     return Ok(wrapped);
                 }
-                if receiver.ty == Type::BuiltinClass {
-                    match attribute.attr.as_str() {
-                        name @ ("__name__" | "__qualname__" | "__module__") => {
-                            return Ok(Expr {
-                                ty: Type::Str,
-                                kind: ExprKind::Builtin(
-                                    Builtin::ClassNamePart {
-                                        module: name == "__module__",
-                                    },
-                                    vec![receiver],
-                                ),
-                            });
-                        }
-                        _ => {}
-                    }
+                if receiver.ty == Type::BuiltinClass
+                    && matches!(
+                        attribute.attr.as_str(),
+                        "__name__" | "__qualname__" | "__module__"
+                    )
+                {
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::ClassNamePart {
+                                module: attribute.attr.as_str() == "__module__",
+                            },
+                            vec![receiver],
+                        ),
+                    });
                 }
                 if let Type::StrDescriptor(method) = receiver.ty {
                     return self.descriptor_attribute(receiver, method, attribute);
