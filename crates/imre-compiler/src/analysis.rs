@@ -420,8 +420,7 @@ struct CheckedFile<'db> {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
-    Call(TextRange),
-    Keyword(TextRange),
+    Exact(&'static str, TextRange),
 }
 
 impl CheckedDiagnostic {
@@ -430,8 +429,7 @@ impl CheckedDiagnostic {
             Self::Decorator(decorator) => {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }
-            Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
-            Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
+            Self::Exact(id, checked) => diagnostic == id && range == checked,
         }
     }
 }

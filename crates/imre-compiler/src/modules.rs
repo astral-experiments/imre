@@ -222,6 +222,7 @@ pub(crate) enum Intrinsic {
     GroupBy,
     Chain,
     AbstractSet,
+    MappingAbc,
     TomllibLoad,
     TomlDecodeError,
     Dedent,
@@ -484,6 +485,7 @@ impl IntrinsicModule {
             (Self::Itertools, "groupby") => Intrinsic::GroupBy,
             (Self::Itertools, "chain") => Intrinsic::Chain,
             (Self::CollectionsAbc, "Set") => Intrinsic::AbstractSet,
+            (Self::CollectionsAbc, "Mapping") => Intrinsic::MappingAbc,
             (Self::Tomllib, "load") => Intrinsic::TomllibLoad,
             (Self::Tomllib, "TOMLDecodeError") => Intrinsic::TomlDecodeError,
             (Self::Textwrap, "dedent") => Intrinsic::Dedent,
@@ -587,8 +589,7 @@ impl SourceModule {
 
 pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
-    checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
-    checked_keywords: std::cell::RefCell<Vec<Vec<TextRange>>>,
+    checked_diagnostics: std::cell::RefCell<Vec<Vec<(&'static str, TextRange)>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -714,7 +715,12 @@ impl SourceGraph {
     /// Record only this call's overload diagnostic. Nested arguments still get
     /// their own diagnostics, including calls with the same method name.
     pub(crate) fn checked_overload(&self, module: ModuleId, call: TextRange) {
-        self.checked_calls.borrow_mut()[module].push(call);
+        self.checked_diagnostic(module, "no-matching-overload", call);
+    }
+
+    /// Native lowering handled this specific diagnostic at this precise span.
+    pub(crate) fn checked_diagnostic(&self, module: ModuleId, id: &'static str, range: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module].push((id, range));
     }
 
     pub(crate) fn checked_keywords(
@@ -722,7 +728,8 @@ impl SourceGraph {
         module: ModuleId,
         keywords: impl Iterator<Item = TextRange>,
     ) {
-        self.checked_keywords.borrow_mut()[module].extend(keywords);
+        self.checked_diagnostics.borrow_mut()[module]
+            .extend(keywords.map(|range| ("unknown-argument", range)));
     }
 
     /// Source ranges where the reachable profile or native lowering handles diagnostics.
@@ -759,16 +766,13 @@ impl SourceGraph {
                         .then_some(CheckedDiagnostic::Decorator(decorator.range()))
                     })
                     .chain({
-                        let mut calls = self.checked_calls.borrow()[id].clone();
-                        calls.sort_unstable_by_key(|range| (range.start(), range.end()));
-                        calls.dedup();
-                        calls.into_iter().map(CheckedDiagnostic::Call)
-                    })
-                    .chain({
-                        let mut keywords = self.checked_keywords.borrow()[id].clone();
-                        keywords.sort_unstable_by_key(|range| (range.start(), range.end()));
-                        keywords.dedup();
-                        keywords.into_iter().map(CheckedDiagnostic::Keyword)
+                        let mut diagnostics = self.checked_diagnostics.borrow()[id].clone();
+                        diagnostics
+                            .sort_unstable_by_key(|(id, range)| (range.start(), range.end(), *id));
+                        diagnostics.dedup();
+                        diagnostics
+                            .into_iter()
+                            .map(|(id, range)| CheckedDiagnostic::Exact(id, range))
                     })
                     .collect()
             })
@@ -1113,8 +1117,7 @@ impl<'a> Loader<'a> {
         self.inputs.missing.dedup();
         let mut graph = SourceGraph {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
-            checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
-            checked_keywords: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            checked_diagnostics: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?

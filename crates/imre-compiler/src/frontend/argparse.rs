@@ -588,6 +588,7 @@ fn namespace_class(
         abstract_methods: Default::default(),
         toml_hash: false,
         abc: false,
+        mapping: false,
         dataclass: Some(DataclassOptions {
             init: false,
             eq: true,

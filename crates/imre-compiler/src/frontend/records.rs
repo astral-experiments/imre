@@ -920,6 +920,13 @@ impl Checker<'_> {
         class: usize,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
+        if attribute.attr.as_str() == "get"
+            && self.classes.declarations.definitions[class].mapping
+            && !self.classes.methods[class].contains_key("get")
+            && let Some(value) = &receiver
+        {
+            return self.mapping_get(call, value.clone());
+        }
         if call
             .arguments
             .keywords
@@ -934,6 +941,11 @@ impl Checker<'_> {
         }
         if attribute.attr.starts_with("__")
             && !matches!(attribute.attr.as_str(), "__str__" | "__post_init__")
+            && !(self.classes.declarations.definitions[class].mapping
+                && matches!(
+                    attribute.attr.as_str(),
+                    "__getitem__" | "__len__" | "__contains__"
+                ))
         {
             return Err(error(
                 self.source,
@@ -1048,6 +1060,9 @@ impl Checker<'_> {
             .abstract_methods
             .is_empty()
         {
+            if self.classes.declarations.definitions[class].mapping {
+                return self.abstract_mapping_call(class, call);
+            }
             return Err(error(
                 self.source,
                 call,

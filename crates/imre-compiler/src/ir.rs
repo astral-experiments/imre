@@ -572,6 +572,7 @@ pub(crate) enum Builtin {
     /// Python representation of a value with a fully known storage shape.
     Repr,
     Len,
+    LengthResult,
     Abs,
     /// Stable permutation of a fully typed list by precomputed scalar keys.
     SortByKeys,
