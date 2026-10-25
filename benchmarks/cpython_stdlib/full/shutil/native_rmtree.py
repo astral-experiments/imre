@@ -147,6 +147,17 @@ def executors(args, suite, folder, level, *, with_roles=False):
     calls = 0
     remove(str(restricted))
     assert calls == 1 and not restricted.exists()
+    protected = folder / "directory-with-leaf"
+    protected.mkdir()
+    (protected / "leaf").touch()
+    protected.chmod(0o500)
+    try:
+        if not os.access(protected, os.W_OK):
+            with unittest.TestCase().assertRaises(PermissionError) as raised:
+                remove(str(protected))
+            assert raised.exception.filename == str(protected)
+    finally:
+        protected.chmod(0o700)
     if callback is not None:
         def reject(*args):
             raise AssertionError("ignore_errors invoked a callback")
