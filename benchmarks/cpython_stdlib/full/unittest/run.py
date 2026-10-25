@@ -96,7 +96,7 @@ def run(args, level, root):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
-    for name in ["equality_protocol", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
+    for name in ["equality_protocol", "boolean_equality", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
                  "callable_binding", *("context_" + family for family in families)]:
         control = root / name
         control.mkdir()
@@ -142,7 +142,7 @@ def run(args, level, root):
         case_id = PREFIX + f"{module}.{owner}.{method}"
         directory = root / method
         directory.mkdir()
-        fixture = testcase_fixture("bool" if method == "test_stop" else None)
+        fixture = testcase_fixture()
         if module == "testmock.testmock":
             fixture = "from unittest.mock import Mock\n" + fixture
         try:
