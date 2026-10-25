@@ -21,6 +21,12 @@ class GeneralModuleTests(unittest.TestCase):
 # UPSTREAM_BACKLOG
 
 
+class NativeInheritance(unittest.TestCase):
+# NATIVE_BOOL_EQUALITY
+
+# UPSTREAM_INHERITANCE
+
+
 def options() -> None:
     with socket.socket(int(sys.argv[2]), int(sys.argv[3])) as endpoint:
         print("open")
@@ -43,6 +49,20 @@ def options() -> None:
 
 def main() -> None:
     role = sys.argv[1]
+    if role == "wrong-cloexec":
+        with socket.socket() as sock:
+            os.set_inheritable(sock.fileno(), True)
+            NativeInheritance().assertEqual(sock.get_inheritable(), False)
+        return
+    if role == "descriptors":
+        checks = NativeInheritance()
+        if sys.argv[2] == "test_default_inheritable":
+            checks.test_default_inheritable()
+        elif sys.argv[2] == "test_set_inheritable":
+            checks.test_set_inheritable()
+        else:
+            checks.test_dup()
+        return
     if role == "options":
         options()
         return

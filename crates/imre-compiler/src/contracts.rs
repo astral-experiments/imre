@@ -417,6 +417,7 @@ impl Builtin {
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::Bool
+            | Self::DefaultFactoryEnabled
             | Self::EnumLookup(_)
             | Self::DictSumValues
             | Self::Encode
@@ -520,6 +521,7 @@ impl Builtin {
             | Self::ChainMapGet(_)
             | Self::DictPop
             | Self::DictSetDefault
+            | Self::DefaultDictMissing
             | Self::DictTryPop(_)
             | Self::DictGatherBytesInt
             | Self::DictGatherStrInt
@@ -594,6 +596,7 @@ impl Builtin {
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
             | Self::DefaultListDict
+            | Self::DefaultFactorySet { .. }
             | Self::DequeMaxlen
             | Self::DequeIter { .. }
             | Self::CounterNew
