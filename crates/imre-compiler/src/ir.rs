@@ -706,6 +706,8 @@ pub(crate) enum Builtin {
     ExceptionRecord,
     /// A single non-string Python argument, retained for str/repr.
     ExceptionArgument(u32),
+    /// Retain a typed positional tuple for a constructed OSError or marker subclass.
+    OsErrorPositional(u32),
     ImportErrorNew {
         kind: u32,
         fields: [Option<usize>; 3],
@@ -1513,6 +1515,7 @@ pub(crate) enum ProcessOperation {
     GetCwd,
     Fd(FdOperation),
     OsErrorField(u32),
+    OsErrorArgs(Type),
     Strerror,
     DescriptorConstant(&'static str),
     Which,

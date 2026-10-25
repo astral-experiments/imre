@@ -306,6 +306,8 @@ pub(super) struct Exception {
 #[derive(Clone, Default)]
 struct ExceptionDetails {
     cause: Option<Rc<Object>>,
+    /// The original OS argument tuple, materialized once when observed.
+    os_args: Option<Rc<Object>>,
     named: Option<&'static NamedDescriptor>,
     layout: Option<Rc<NamedPayload>>,
     directories: Option<Rc<DirectoryFrame>>,
@@ -412,6 +414,7 @@ impl Exception {
         if let Some(previous) = self.details.as_deref() {
             let fresh = Rc::get_mut(&mut details).unwrap();
             fresh.cause.clone_from(&previous.cause);
+            fresh.os_args.clone_from(&previous.os_args);
             fresh.named = previous.named;
             fresh.layout.clone_from(&previous.layout);
             Rc::get_mut(fresh.directories.as_mut().unwrap())

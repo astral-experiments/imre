@@ -3,6 +3,10 @@ use super::{
     Error, Kind, Object, Payload, Result, Str, Unicode16Repr, finish, object, push_string_repr,
 };
 use crate::Bytes;
+use crate::objects::{
+    Storage, StorageCell, records,
+    words::{OwnedWord, WordKind},
+};
 use ruff_python_literal::escape::{Escape, UnicodeEscape};
 use std::ffi::OsString;
 use std::fmt::Write;
@@ -136,6 +140,119 @@ impl Error {
             cause: None,
         }
     }
+}
+
+/// Retain a typed singleton tuple for an explicit non-string OSError argument.
+///
+/// # Safety
+/// The tuple is rooted and the optional marker subtype descriptor is static.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_os_error_positional(
+    kind: u32,
+    descriptor: *const super::NamedDescriptor,
+    tuple: *const usize,
+) -> *const Object {
+    // SAFETY: the calling constructor supplies a typed immutable positional tuple.
+    let (named, args) = unsafe {
+        (
+            descriptor.as_ref(),
+            WordKind::new(6).acquire(tuple as usize),
+        )
+    };
+    let error = super::new_exception(
+        Kind::from_raw(named.map_or(kind, |d| d.base)),
+        Payload::Positional(super::imports::Positional(args)),
+    );
+    if let Some(named) = named {
+        // SAFETY: this freshly allocated exception has not escaped.
+        unsafe {
+            error.0.with_mut(|storage| {
+                let Storage::Exception(exception) = storage else {
+                    unreachable!()
+                };
+                exception.details_mut().named = Some(named);
+            });
+        }
+    }
+    Rc::into_raw(error)
+}
+
+/// Build an owning Python tuple. The filename is held separately from the args.
+unsafe fn pack_args(
+    layout: *const records::RecordDescriptor,
+    fields: &[OwnedWord],
+) -> Result<OwnedWord> {
+    // SAFETY: the caller selects the static layout for these exact fields.
+    unsafe {
+        debug_assert_eq!((*layout).length, fields.len());
+        let tuple = records::allocate_record(layout);
+        if tuple.is_null() {
+            return Err(Error::allocation());
+        }
+        for (i, field) in fields.iter().enumerate() {
+            debug_assert_eq!(*(*layout).kinds.add(i), field.kind.raw());
+            tuple.add(i).write(field.clone().into_word());
+        }
+        Ok(OwnedWord::from_owned(tuple as usize, WordKind::new(6)))
+    }
+}
+
+/// Return an owning view of a caught OS exception's original argument tuple.
+///
+/// # Safety
+/// The caller roots the exception and supplies static layouts for (), (str,),
+/// (int, str), and a tuple containing a copytree error list.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_os_error_args(
+    value: *const Object,
+    empty: *const records::RecordDescriptor,
+    message: *const records::RecordDescriptor,
+    errno: *const records::RecordDescriptor,
+    entries: *const records::RecordDescriptor,
+) -> *const Object {
+    // SAFETY: retaining native words cannot reenter. The exception remains rooted
+    // while its own tuple view is being installed.
+    let result = unsafe {
+        object(value).0.with_mut(|storage| {
+            let Storage::Exception(error) = storage else {
+                unreachable!()
+            };
+            if let Some(view) = error.details.as_deref().and_then(|d| d.os_args.as_ref()) {
+                return Ok(Rc::into_raw(Rc::clone(view)));
+            }
+            let args = match &error.payload {
+                Payload::Empty => pack_args(empty, &[])?,
+                Payload::Message(text) => {
+                    let text = WordKind::new(3).acquire(Rc::as_ptr(text) as usize);
+                    pack_args(message, &[text])?
+                }
+                Payload::Arguments(detail) => match detail.args.as_slice() {
+                    [one] if one.kind.raw() == 3 => pack_args(message, &detail.args)?,
+                    [code, text] if code.kind.raw() == 2 && text.kind.raw() == 3 => {
+                        pack_args(errno, &detail.args)?
+                    }
+                    _ => {
+                        return Err(Error::new(
+                            Kind::SystemError,
+                            "invalid native OS error arguments",
+                        ));
+                    }
+                },
+                Payload::Positional(positional) => positional.0.clone(),
+                Payload::Tree(errors) => errors.tuple(entries)?,
+                _ => {
+                    return Err(Error::new(
+                        Kind::SystemError,
+                        "invalid native OS error payload",
+                    ));
+                }
+            };
+            let view = Rc::new(Object(StorageCell::new(Storage::ObjectValue(args))));
+            error.details_mut().os_args = Some(Rc::clone(&view));
+            Ok(Rc::into_raw(view))
+        })
+    };
+    finish(result, std::ptr::null())
 }
 
 /// Return the original errno, description, or filename as an owned optional word.

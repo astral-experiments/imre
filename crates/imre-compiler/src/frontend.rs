@@ -4109,7 +4109,9 @@ impl<'a> Checker<'a> {
                         raised.kind,
                         ExprKind::Exception { .. }
                             | ExprKind::Builtin(
-                                Builtin::NamedException { .. } | Builtin::ExceptionArgument(_),
+                                Builtin::NamedException { .. }
+                                    | Builtin::ExceptionArgument(_)
+                                    | Builtin::OsErrorPositional(_),
                                 _
                             )
                     ) && !matches!(&raised.kind,ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::ExceptionView),args) if matches!(args[0].kind,ExprKind::Builtin(Builtin::NamedException{..},_)))
@@ -4310,9 +4312,18 @@ impl<'a> Checker<'a> {
                     "exception argument has no supported Python representation",
                 ));
             }
+            let (constructor, arg) = if processes::is_os_error(self.types, kind) {
+                let tuple = Expr {
+                    ty: self.types.tuple(vec![v.ty]),
+                    kind: ExprKind::Tuple(vec![v]),
+                };
+                (Builtin::OsErrorPositional(kind), tuple)
+            } else {
+                (Builtin::ExceptionArgument(kind), v)
+            };
             return Ok(Expr {
                 ty: Type::Exception,
-                kind: ExprKind::Builtin(Builtin::ExceptionArgument(kind), vec![v]),
+                kind: ExprKind::Builtin(constructor, vec![arg]),
             });
         }
         Ok(Expr {
@@ -6057,6 +6068,27 @@ impl<'a> Checker<'a> {
                             ty: self.types.tuple(vec![self.types.list(issue)]),
                             kind: ExprKind::Builtin(
                                 Builtin::Process(ir::ProcessOperation::TreeErrorArgs),
+                                vec![receiver],
+                            ),
+                        });
+                    }
+                    if attribute.attr.as_str() == "args"
+                        && receiver.ty == Type::Exception
+                        && let ExprKind::Local(slot) = receiver.kind
+                        && self
+                            .captured_process_errors
+                            .iter()
+                            .rev()
+                            .find(|field| field.slot == slot)
+                            .is_some_and(|field| field.os_error)
+                    {
+                        let tree = self
+                            .types
+                            .tuple(vec![self.types.list(self.shutil_tree_issue())]);
+                        return Ok(Expr {
+                            ty: Type::ObjectValue,
+                            kind: ExprKind::Builtin(
+                                Builtin::Process(ir::ProcessOperation::OsErrorArgs(tree)),
                                 vec![receiver],
                             ),
                         });

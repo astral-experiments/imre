@@ -79,9 +79,9 @@ impl Builtin {
             Self::BoxValue | Self::ExceptionTupleView => Contract::new(false, PreservesOwners),
             Self::ExceptionFieldRepr => Contract::new(true, PreservesOwners),
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
-            Self::ExceptionArgument(_) | Self::NamedException { .. } => {
-                Contract::new(false, PreservesLists)
-            }
+            Self::ExceptionArgument(_)
+            | Self::OsErrorPositional(_)
+            | Self::NamedException { .. } => Contract::new(false, PreservesLists),
             // Even a zero-argument call may mutate a retained native list or reenter Python.
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
@@ -264,6 +264,7 @@ impl Builtin {
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Fd(_)
                 | ProcessOperation::OsErrorField(_)
+                | ProcessOperation::OsErrorArgs(_)
                 | ProcessOperation::Strerror
                 | ProcessOperation::Which
                 | ProcessOperation::DiskUsage

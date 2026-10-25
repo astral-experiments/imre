@@ -614,7 +614,7 @@ impl Checker<'_> {
         })
     }
 
-    fn shutil_tree_issue(&self) -> Type {
+    pub(super) fn shutil_tree_issue(&self) -> Type {
         let path = self.types.union(&[Type::Str, Type::Bytes]).unwrap();
         self.types.tuple(vec![path, path, Type::Str])
     }

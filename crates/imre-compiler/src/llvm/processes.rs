@@ -911,6 +911,28 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
+            ProcessOperation::OsErrorArgs(tree) => {
+                let types = &self.module.types;
+                let layouts = [
+                    types.tuple(vec![]),
+                    types.tuple(vec![Type::Str]),
+                    types.tuple(vec![Type::Int, Type::Str]),
+                    tree,
+                ];
+                let [empty, message, errno, entries] = layouts.map(|ty| {
+                    self.output
+                        .global_ref(format!("layout_{}", record_name(ty)))
+                });
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_os_error_args(ptr {}, ptr @{empty}, ptr @{message}, ptr @{errno}, ptr @{entries})",
+                    args[0].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
             ProcessOperation::OsErrorField(field) => {
                 let word = self.checked_instruction(format!(
                     "call i64 @imre_os_error_field(ptr {}, i32 {field})",

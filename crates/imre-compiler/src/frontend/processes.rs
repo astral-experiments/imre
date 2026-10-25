@@ -119,9 +119,20 @@ fn timeout_field_type(graph: &SourceGraph) -> Option<Type> {
 pub(super) struct CapturedFields {
     pub(super) slot: usize,
     pub(super) tree_issue: Option<Type>,
+    pub(super) os_error: bool,
     argv: Option<Type>,
     capture: Option<ProcessCapture>,
     timeout: bool,
+}
+
+/// Resolve marker subclasses through their native base, as the runtime handler does.
+pub(super) fn is_os_error(types: &Types, kind: u32) -> bool {
+    let base = types
+        .exception_declarations()
+        .iter()
+        .find(|d| d.id == kind)
+        .map_or(kind, |d| d.base);
+    matches!(base, 12 | 19..=24 | 28 | 64..=66 | 100)
 }
 
 /// A timeout can carry partial raw bytes, even for a checked text capture.
@@ -262,6 +273,9 @@ pub(super) fn process_error_view(
     });
     CapturedFields {
         slot,
+        // OSError, io.UnsupportedOperation, builtin errno subclasses,
+        // gzip.BadGzipFile and shutil's OSError subclasses.
+        os_error: !kinds.is_empty() && kinds.iter().all(|&kind| is_os_error(types, kind)),
         tree_issue: if precise && !other_shutil && kinds == [64] {
             tree_issue
         } else {

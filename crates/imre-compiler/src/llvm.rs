@@ -5146,6 +5146,24 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::OsErrorPositional(kind) => {
+                let descriptor = if *kind >= 256 {
+                    format!(
+                        "@{}",
+                        self.output.global_ref(format!("exception_type_{kind}"))
+                    )
+                } else {
+                    "null".into()
+                };
+                Value {
+                    ty: Type::Exception,
+                    operand: self.instruction(format!(
+                        "call ptr @imre_os_error_positional(i32 {kind}, ptr {descriptor}, ptr {})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::ExceptionArgument(kind) => {
                 let arg = &args[0].value;
                 let word = self.word(arg);
@@ -7307,6 +7325,7 @@ declare ptr @imre_getcwd()
 declare void @imre_os_close(i64)
 declare i64 @imre_os_open(ptr, i32, i64, i64, i64)
 declare i64 @imre_os_error_field(ptr, i32)
+declare ptr @imre_os_error_args(ptr, ptr, ptr, ptr, ptr)
 declare ptr @imre_os_strerror(i64)
 @imre_os_o_rdonly = external constant i64
 @imre_os_o_wronly = external constant i64
@@ -7553,6 +7572,7 @@ declare ptr @imre_exception_field_repr(ptr)
 declare i64 @imre_exception_field_len(ptr)
 declare ptr @imre_exception_field_index(ptr, i64)
 declare ptr @imre_exception_argument(i32, ptr, i64, i32)
+declare ptr @imre_os_error_positional(i32, ptr, ptr)
 declare ptr @imre_exception_repr(ptr)
 declare ptr @imre_named_exception_record(ptr)
 declare ptr @imre_named_exception_record_new(ptr, ptr, ptr, ptr, ptr, i32)
