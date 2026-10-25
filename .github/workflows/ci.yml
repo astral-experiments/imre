@@ -60,6 +60,8 @@ jobs:
                        "tests/fixtures/classes/fixed_lineage.py", "tests/fixtures/text/ord.py",
                        "benchmarks/cpython_stdlib/full/sys/version_info.py",
                        "benchmarks/cpython_stdlib/full/sys/stream_buffer.py")
+          required += ("benchmarks/cpython_stdlib/full/unittest/mock_reset.py",
+                       "tests/fixtures/containers/dict_method_copy.py")
           optional = ("tests/fixtures/classes/initializer_hook.py",)
           for name in (*required, *(path for path in optional if (root / path).is_file())):
               source = root / name
@@ -103,11 +105,15 @@ jobs:
             python3 tests/argparse_cli.py --compiler "$RUNNER_TEMP/argparse-driver" --runtime "$base_checkout/target/debug/libimre_runtime.a" --python "$(command -v python3)" --clang /usr/bin/clang-18 --opt-levels 0 3
             python3 tests/io.py --compiler "$base_checkout/target/debug/imre" --runtime "$base_checkout/target/debug/libimre_runtime.a" --python "$(command -v python3)" --clang /usr/bin/clang-18 --opt-levels 0 3
             python3 tests/unittest_main.py --compiler "$RUNNER_TEMP/argparse-driver" --runtime "$base_checkout/target/debug/libimre_runtime.a" --python "$(command -v python3)" --clang /usr/bin/clang-18 --opt-levels 0 3
+            python3 tests/paths.py --fixture resolution --compiler "$RUNNER_TEMP/argparse-driver" --runtime "$base_checkout/target/debug/libimre_runtime.a" --python "$(command -v python3)" --clang /usr/bin/clang-18 --opt-levels 0 3
+            for level in 0 3; do
+              python3 benchmarks/cpython_stdlib/native_sys.py --imre "$RUNNER_TEMP/argparse-driver" --runtime "$base_checkout/target/debug/libimre_runtime.a" --python "$(command -v python3)" --clang /usr/bin/clang-18 --opt-level "$level"
+            done
             python3 "$RUNNER_TEMP/argparse-cross.py"
             echo "Passed: base=$base pr=$pr tree=$tree (-O0 and -O3 stdout, stderr and exit; runtime ownership)." >> "$GITHUB_STEP_SUMMARY"
             git fetch --no-tags origin refs/heads/main
             latest=$(git rev-parse FETCH_HEAD)
-            inputs=(tests/io.py tests/unittest_main.py tests/fixtures/unittest_main crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse
+            inputs=(tests/paths.py tests/files.py tests/fixtures/paths tests/fixtures/sys/streams_exit.py benchmarks/cpython_stdlib/native_sys.py benchmarks/cpython_stdlib/upstream.py benchmarks/cpython_stdlib/UPSTREAM.json benchmarks/cpython_stdlib/upstream benchmarks/cpython_stdlib/full/sys/stream_errno.py benchmarks/cpython_stdlib/full/sys/exit_payloads.py benchmarks/cpython_stdlib/full/unittest/mock_reset.py tests/fixtures/containers/dict_method_copy.py tests/io.py tests/unittest_main.py tests/fixtures/unittest_main crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse
                     tests/fixtures/paths/walking.py tests/fixtures/processes/file_redirects.py tests/fixtures/text/line_methods.py
                     benchmarks/cpython_stdlib/full/types/namespaces.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py
                     tests/fixtures/module_values/wrapper_attributes benchmarks/cpython_stdlib/full/logging/hierarchy_values.py
