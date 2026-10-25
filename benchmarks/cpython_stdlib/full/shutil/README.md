@@ -13,7 +13,7 @@ The runner verifies both the vendored and installed test blobs, discovers the fu
 
 ## Native execution
 
-[evidence-linux.json](evidence-linux.json) contains one row per occurrence at `-O0` and `-O3`, including every original skip and its source condition. At this revision, seven complete methods run their bodies and assertions in Imre under CPython fixtures; 33 use host assertions on native lookup, copying, or metadata operations. Two methods also call CPython `shutil.rmtree` from the original body. The two default-search-path assertions fail: Imre does not see the host's replacements of `os.confstr` and `os.defpath`. The remaining 129 are reference-only; none of the 50 upstream skips is counted as a native pass.
+[evidence-linux.json](evidence-linux.json) contains one row per occurrence at `-O0` and `-O3`, including every original skip and its source condition. At this revision, seven complete methods run their bodies and assertions in Imre under CPython fixtures; 33 use host assertions on native lookup, copying, or metadata operations. Two methods also call CPython `shutil.rmtree` from the original body. Both missing-PATH methods pass with mixed execution: the native child sees no PATH, asks the original host mocks for `os.confstr("CS_PATH")` and (only after ValueError) `os.defpath`, and performs the executable search. Each method makes two native lookups at each level. Together with the two cleanup methods, this gives four mixed passes and zero observed failures. The remaining 129 are reference-only; none of the 50 upstream skips is counted as a native pass.
 
 ```sh
 /path/to/cpython-3.14.5/python -B benchmarks/cpython_stdlib/full/shutil/evidence.py \

@@ -29,6 +29,7 @@ mod documents;
 mod enums;
 mod expansions;
 mod fixed_tuples;
+mod fnmatch;
 mod function_caches;
 mod functools;
 mod hashlib;
@@ -70,6 +71,7 @@ mod truthiness;
 mod unbound_locals;
 mod unions;
 mod unittest;
+mod unittest_equality;
 mod unpacking;
 mod zip_sums;
 mod zipfile;
@@ -442,13 +444,18 @@ pub(crate) fn lower_with_owners(
     for (module_id, module) in graph.modules.iter().enumerate() {
         for (name, binding) in &module.bindings {
             if reserved(name)
-                && !(name == "open"
-                    && matches!(
-                        binding,
+                && !matches!(
+                    (name.as_str(), binding),
+                    (
+                        "open",
                         Binding::Intrinsic(
                             Intrinsic::GzipOpen | Intrinsic::Fd(ir::FdOperation::Open)
                         )
-                    ))
+                    ) | (
+                        "filter",
+                        Binding::Intrinsic(Intrinsic::Fnmatch(ir::FnmatchOperation::Filter { .. }))
+                    )
+                )
             {
                 return Err(module.error(
                     module.parsed.syntax(),
@@ -4107,7 +4114,10 @@ impl<'a> Checker<'a> {
                 expressions
                     .iter()
                     .map(|target| {
-                        if let Some(kind) = self.exception_category(target) {
+                        if let Some(kind) = self
+                            .exception_category(target)
+                            .or_else(|| self.fixed_testcase_failure_kind(target))
+                        {
                             return Ok(kind);
                         }
                         Err(error(
@@ -5954,6 +5964,12 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
                 return self.configure_logging(call);
             }
+            Some(Binding::Intrinsic(Intrinsic::DictConfig)) => {
+                return self.logging_dictionary_config(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::FileConfig)) => {
+                return self.logging_file_config(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
                 return self.root_log(level, call);
             }
@@ -5998,6 +6014,9 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::Fnmatch(operation))) => {
+                return self.fnmatch_call(operation, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::RegexSub)) => return self.sub_regex(call),
             Some(Binding::Intrinsic(
                 intrinsic @ (Intrinsic::GetSysconfigPath | Intrinsic::OsPathExists),
@@ -6257,10 +6276,14 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
             }
-            if attribute.attr.as_str() == "lower"
+            if matches!(attribute.attr.as_str(), "lower" | "capitalize")
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
-                return self.text_method(Self::string_value(receiver), "lower", call);
+                return self.text_method(
+                    Self::string_value(receiver),
+                    attribute.attr.as_str(),
+                    call,
+                );
             }
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
