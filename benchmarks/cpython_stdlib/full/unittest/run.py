@@ -158,7 +158,7 @@ def run(args, level, root, fixture_root):
     ):
         path = HERE / "upstream/Lib/test/test_unittest" / (module.replace(".", "/") + ".py")
         case_id = PREFIX + f"{module}.{owner}.{method}"
-        directory = root / method
+        directory = fixture_root / f"{method}_O{level}" if module == "testmock.testpatch" else root / method
         directory.mkdir()
         if module == "testmock.testpatch" or (module == "testmock.testmock" and method in DEFAULT_MOCK_METHODS):
             blob = manifest["files"][path.relative_to(HERE / "upstream").as_posix()]
