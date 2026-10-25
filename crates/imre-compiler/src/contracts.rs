@@ -265,6 +265,8 @@ impl Builtin {
                 | ProcessOperation::Which
                 | ProcessOperation::RmTree
                 | ProcessOperation::CopyTree(_)
+                | ProcessOperation::Move(_)
+                | ProcessOperation::DestInSrc
                 | ProcessOperation::IgnorePatterns
                 | ProcessOperation::TreeErrorArgs
                 | ProcessOperation::Copy(_)
@@ -292,6 +294,7 @@ impl Builtin {
             Self::BytesGet
             | Self::WrapperAttributes(_)
             | Self::Chr
+            | Self::Ord
             | Self::IntegerPower
             | Self::ModularPower
             | Self::NegativeIntegerPower
@@ -478,6 +481,7 @@ impl Builtin {
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
+            | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::OsName
             | Self::SysOrigArgv

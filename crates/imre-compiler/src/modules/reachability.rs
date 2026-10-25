@@ -95,6 +95,29 @@ impl<'a> Visitor<'a> for References<'_> {
         }
         if let ast::Expr::Attribute(attr) = expr {
             let name = attr.attr.to_string();
+            if matches!(
+                name.as_str(),
+                "assertEqual" | "assertListEqual" | "assertRaises"
+            ) {
+                self.found.attributes.insert(format!("_bound_{name}"));
+            }
+            if name == "assertRaises" {
+                self.found
+                    .attributes
+                    .insert("_raise_missing_callable".into());
+                if let Some(module) = self
+                    .graph
+                    .modules
+                    .iter()
+                    .find(|m| m.bundled && m.name == "unittest")
+                {
+                    for symbol in ["_AssertRaisesContext", "_raise_call_type_error"] {
+                        if let Some(Binding::Definition(def)) = module.bindings.get(symbol) {
+                            self.found.definitions.insert(*def);
+                        }
+                    }
+                }
+            }
             if matches!(name.as_str(), "assertEqual" | "assertListEqual") {
                 self.found.attributes.extend(
                     [
@@ -108,17 +131,6 @@ impl<'a> Visitor<'a> for References<'_> {
                     .into_iter()
                     .map(str::to_owned),
                 );
-            }
-            if name == "assertRaises"
-                && let Some(module) = self
-                    .graph
-                    .modules
-                    .iter()
-                    .find(|m| m.bundled && m.name == "unittest")
-                && let Some(Binding::Definition(context)) =
-                    module.bindings.get("_AssertRaisesContext")
-            {
-                self.found.definitions.insert(*context);
             }
             if let Some(Binding::Definition(owner)) = self.graph.resolve(self.module, &attr.value) {
                 self.found.class_attributes.insert((owner, name.clone()));
