@@ -1,5 +1,6 @@
 //! Weak observers of fixed records. Unobserved records keep their two-word header.
 use super::{Header, RecordDescriptor, imre_record_retain};
+use std::cell::RefCell;
 use std::mem::ManuallyDrop;
 use std::rc::{Rc, Weak};
 
@@ -8,6 +9,19 @@ const ANCHOR: usize = 2;
 struct Anchor {
     layout: *const RecordDescriptor,
     payload: *const usize,
+    observers: RefCell<Vec<Weak<dyn Fn()>>>,
+}
+
+impl Drop for Anchor {
+    fn drop(&mut self) {
+        // Notify live observers newest first, after upgrading the record has
+        // become impossible. Dropping an observer before its record cancels it.
+        for observer in self.observers.get_mut().drain(..).rev() {
+            if let Some(notify) = observer.upgrade() {
+                notify();
+            }
+        }
+    }
 }
 
 /// Observe a record without extending its lifetime or exposing a reusable address.
@@ -28,7 +42,11 @@ impl WeakRecord {
             let anchor = ManuallyDrop::new(unsafe { Rc::from_raw(anchor_pointer(layout)) });
             return Self(Rc::downgrade(&anchor));
         }
-        let anchor = Rc::new(Anchor { layout, payload });
+        let anchor = Rc::new(Anchor {
+            layout,
+            payload,
+            observers: RefCell::default(),
+        });
         let observer = Self(Rc::downgrade(&anchor));
         header.descriptor.set(
             Rc::into_raw(anchor)
@@ -49,6 +67,16 @@ impl WeakRecord {
     /// Check liveness without acquiring an owner.
     pub(in crate::objects) fn is_live(&self) -> bool {
         self.0.strong_count() != 0
+    }
+
+    /// Keep a weak subscription; the caller owns the notification until it
+    /// drops the dictionary entry, including on replacement of the same key.
+    pub(in crate::objects) fn notify_on_drop(&self, notify: &Rc<dyn Fn()>) {
+        if let Some(anchor) = self.0.upgrade() {
+            let mut observers = anchor.observers.borrow_mut();
+            observers.retain(|observer| observer.strong_count() != 0);
+            observers.push(Rc::downgrade(notify));
+        }
     }
 }
 
