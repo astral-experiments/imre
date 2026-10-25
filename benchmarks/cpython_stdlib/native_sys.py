@@ -65,12 +65,12 @@ except OSError as error:
 
             recovery = Path(__file__).parent / "full/sys/stream_errno.py"
             executable = native(recovery.read_text())
-            for mode in ("stdout-write", "stderr-write", "stdout-flush", "stderr-flush"):
+            for mode in ("stdout-write", "stderr-write", "stdout-flush", "stderr-flush", "stdout-displayhook"):
                 stock, actual = [subprocess.run([*cmd, mode], capture_output=True, check=True, timeout=10)
                                  for cmd in ([args.python, recovery], [executable])]
                 if (actual.stdout, actual.stderr) != (stock.stdout, stock.stderr):
                     raise AssertionError((mode, stock, actual))
-            print("Matched errno, strerror and recovery for four standard stream failures")
+            print("Matched errno, strerror and recovery for stream and display hook failures")
 
         def command(argv):
             if len(argv) != 3 or argv[:2] != [sys.executable, "-c"]:
@@ -158,7 +158,7 @@ except OSError as error:
             source = Path(__file__).parent / "full/sys/stream_buffer.py"
             program = native(source.read_text())
             writes = [(n,) for n in ("0", "1", "8191", "8192", "8193", "17000", "131071", "131072", "131073")]
-            writes += [("65536", "65536"), ("65536", "65535", "1", "1"), ("1", "131071"),
+            writes += [("65536", "65536"), ("65536", "65535", "1", "1"), ("1", "131071"), ("2", "131071"),
                        ("8191", "122881"), ("131071", "1"), ("131071", "2"), ("131000", "71", "2"),
                        ("8191", "1", "122880"), ("65536", "65537"), ("u65536",), ("u65535", "1"),
                        ("3", "LF"), ("3", "CR"), ("17000", "LF")]

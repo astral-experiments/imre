@@ -11,6 +11,7 @@ license.workspace = true
 verify-ir = []
 
 [dependencies]
+imre-regex = { path = "../imre-regex" }
 blake3 = "1"
 notify = "8.2.0"
 rpds = "1"

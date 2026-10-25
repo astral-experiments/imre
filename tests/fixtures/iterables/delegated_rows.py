@@ -30,6 +30,44 @@ def optional(value: int) -> str | None:
     return str(value)
 
 
+cause = StopIteration("from guard")
+
+
+class GuardedRows:
+    def __iter__(self) -> Iterator[str]:
+        fail_guard()
+        yield from ["row"]
+
+
+def fail_guard() -> None:
+    raise cause
+
+
+def get_rows(fail: bool) -> GuardedRows:
+    if fail:
+        raise cause
+    return GuardedRows()
+
+
+def iterator_errors() -> None:
+    rows = get_rows(False)
+    for sorting in [False, True]:
+        try:
+            if sorting:
+                print(sorted(rows, key=lambda row: row[1:]))
+            else:
+                for row in rows:
+                    print(row)
+        except RuntimeError as error:
+            print(str(error))
+            print(error.__cause__ is cause)
+    try:
+        for row in get_rows(True):
+            print(row)
+    except StopIteration as error:
+        print(error is cause)
+
+
 def main() -> None:
     changes = Changes()
     changes.first["tie-one"] += 1
@@ -43,6 +81,7 @@ def main() -> None:
     table.append("heading")
     table.extend(rows)
     print("|".join(table))
+    iterator_errors()
 
 
 main()

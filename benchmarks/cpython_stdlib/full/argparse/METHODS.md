@@ -70,6 +70,16 @@ reproduce that split. The [collections owner](https://github.com/astral-sh/imre/
 reports that on the Mapping branch all four reach `dataclasses.Field`.
 None of these native startup checks executed a test.
 
+After [Mapping support merged](https://github.com/astral-sh/imre/pull/642#issuecomment-6400456745),
+the [startup and theme controls](startup-after-mapping-linux.json) tested
+canonical main and the exact tree merged in
+[#968](https://github.com/astral-sh/imre/pull/968). On each tree, both entry
+points at `-O0` and `-O3`, with and without `--reachable-only`, exited 1
+with empty stdout. All eight diagnostics point to `dataclasses.Field` at
+the original `Lib/_colorize.py:5`. The [hosted run](https://github.com/astral-sh/imre/actions/runs/40212060769)
+also compared the Mapping controls against CPython at both levels. The
+reference runner passed all 1,893 tests; no native whole-file test started.
+
 ### What the color theme needs at runtime
 
 The [CPython trace](color-trace-linux.json) separates import, the 1,893 original
