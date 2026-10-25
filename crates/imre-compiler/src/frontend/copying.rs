@@ -38,6 +38,11 @@ impl Checker<'_> {
             {
                 Ok(source)
             }
+            Type::Class(class) if self.classes.has_concrete_subclasses(class) => self
+                .dispatch_record(class, source, call, |checker, actual, obj| {
+                    checker.copy_method(actual, obj, call)
+                }),
+            Type::Class(class) => self.copy_method(class, source, call),
             Type::ListInt | Type::List(_) => Ok(self.list_snapshot(source)),
             Type::Dict(_) | Type::Set(_) => Ok(Expr {
                 ty,
@@ -56,6 +61,27 @@ impl Checker<'_> {
                 "copy.copy requires a supported atomic type or container",
             )),
         }
+    }
+
+    /// Resolve a class's inherited or overridden shallow copy protocol method.
+    fn copy_method(
+        &mut self,
+        class: usize,
+        receiver: Expr,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let signature = self.classes.methods[class].get("__copy__").ok_or_else(|| {
+            error(
+                self.source,
+                call,
+                "copying this class requires a supported __copy__ method",
+            )
+        })?;
+        self.calls.insert(signature.id);
+        Ok(Expr {
+            ty: signature.returns,
+            kind: ExprKind::Call(signature.id, ir::CallArgs::positional(vec![receiver])),
+        })
     }
 
     /// A full slice duplicates storage while acquiring each existing element.

@@ -26,6 +26,11 @@ try:
     os.unlink(dir_fd=descriptor(), path=filename())
 except OSError as error:
     print(str(error))
+    spelling = error.filename
+    assert isinstance(spelling, bytes)
+    assert spelling == b"\xff-missing"
+    assert error.errno is not None and error.strerror is not None
+    assert error.filename2 is None
 try:
     os.remove(b"\xff-missing")
 except FileNotFoundError as error:
@@ -36,7 +41,16 @@ try:
     os.unlink("input.txt/")
 except NotADirectoryError as error:
     print(str(error))
+    name = error.filename
+    assert isinstance(name, str)
+    assert name == "input.txt/"
 print(Path("input.txt").exists())
+try:
+    os.remove(Path("absent-path-object"))
+except FileNotFoundError as error:
+    name = error.filename
+    assert isinstance(name, str)
+    assert name == "absent-path-object"
 try:
     os.remove("tree")
 except IsADirectoryError as error:

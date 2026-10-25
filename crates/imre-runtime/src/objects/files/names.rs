@@ -1,27 +1,27 @@
 //! Preserve the original spelling and byte encoding of POSIX path arguments.
-use super::super::exceptions::{Error, push_string_repr};
-use super::super::{Bytes, Str, bytes, paths};
-use super::errno_with_paths;
+use super::super::exceptions::{Error, Filename, push_string_repr};
+use super::super::{Bytes, Str, acquire_rc, bytes, paths};
+use super::errno_with_filenames;
 use std::ffi::OsStr;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::rc::Rc;
 
-pub(in crate::objects) enum Name<'a> {
-    Text(&'a str),
-    Bytes(&'a [u8]),
+pub(in crate::objects) enum Name {
+    Text(Rc<Str>),
+    Bytes(Rc<Bytes>),
     Path(Rc<Str>),
 }
 
-impl<'a> Name<'a> {
+impl Name {
     /// The call retains all three possible handle kinds until the operation finishes.
     pub(in crate::objects) unsafe fn from_handle(value: *const (), tag: u32) -> Self {
         // SAFETY: the compiler supplies the tag for the exact live allocation.
         unsafe {
             match tag {
-                0 => Self::Text(&*value.cast::<Str>()),
-                1 => Self::Bytes(&*value.cast::<Bytes>()),
+                0 => Self::Text(acquire_rc(value as usize)),
+                1 => Self::Bytes(acquire_rc(value as usize)),
                 2 => Self::Path(Rc::from_raw(paths::imre_path_text(value.cast()))),
                 _ => unreachable!(),
             }
@@ -30,7 +30,7 @@ impl<'a> Name<'a> {
 
     pub(in crate::objects) fn path(&self) -> &Path {
         match self {
-            Self::Text(text) => Path::new(text),
+            Self::Text(text) => Path::new(text.as_str()),
             Self::Bytes(bytes) => Path::new(OsStr::from_bytes(bytes)),
             Self::Path(text) => Path::new(text.as_str()),
         }
@@ -58,9 +58,10 @@ impl<'a> Name<'a> {
     }
 
     pub(in crate::objects) fn error(&self, error: io::Error) -> Error {
-        errno_with_paths(error, |out| {
-            out.push_str(": ");
-            out.push_str(&self.repr(false));
-        })
+        let spelling = match self {
+            Self::Text(text) | Self::Path(text) => Filename::Str(Rc::clone(text)),
+            Self::Bytes(bytes) => Filename::Bytes(Rc::clone(bytes)),
+        };
+        errno_with_filenames(error, Some(spelling), None)
     }
 }

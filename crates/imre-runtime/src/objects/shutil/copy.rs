@@ -17,7 +17,7 @@ type Result<T> = std::result::Result<T, Error>;
 
 /// Match nested Python file context managers: open the source first, close the
 /// destination first, and let an explicit close error supersede the copy error.
-fn copy_data(src: &Name<'_>, dst: &Name<'_>) -> Result<()> {
+fn copy_data(src: &Name, dst: &Name) -> Result<()> {
     let mut input = File::open(src.path()).map_err(|e| src.error(e))?;
     let result = (|| {
         if input.metadata().map_err(errno_error)?.is_dir() {
@@ -43,7 +43,7 @@ fn copy_data(src: &Name<'_>, dst: &Name<'_>) -> Result<()> {
     close_file(input).map_err(errno_error).and(result)
 }
 
-fn copyfile(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<()> {
+fn copyfile(src: &Name, dst: &Name, follow: bool) -> Result<()> {
     let source = fs::metadata(src.path()).ok();
     let target = fs::metadata(dst.path()).ok();
     if let (Some(source), Some(target)) = (&source, &target)
@@ -86,7 +86,7 @@ fn copyfile(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<()> {
 }
 
 /// Keep os.path.basename's empty final component for sources ending in a slash.
-fn destination(src: &Name<'_>, dst: &Name<'_>) -> Result<std::path::PathBuf> {
+fn destination(src: &Name, dst: &Name) -> Result<std::path::PathBuf> {
     if matches!(src, Name::Bytes(_)) != matches!(dst, Name::Bytes(_)) {
         return Err(Error::new(
             Kind::TypeError,
@@ -103,27 +103,24 @@ fn destination(src: &Name<'_>, dst: &Name<'_>) -> Result<std::path::PathBuf> {
     Ok(dst.path().join(OsStr::from_bytes(name)))
 }
 
-impl Name<'_> {
-    fn joined<'a>(&self, path: &'a Path) -> Result<Name<'a>> {
+impl Name {
+    fn joined(&self, path: &Path) -> Result<Name> {
         if matches!(self, Name::Bytes(_)) {
-            Ok(Name::Bytes(path.as_os_str().as_bytes()))
+            Ok(Name::Bytes(Rc::new(path.as_os_str().as_bytes().to_vec())))
         } else {
-            path.to_str().map(Name::Text).ok_or_else(|| {
-                Error::new(
-                    Kind::UnicodeDecodeError,
-                    "filesystem path is not valid UTF-8",
-                )
-            })
+            path.to_str()
+                .map(|s| Name::Text(Rc::new(Str::from(s))))
+                .ok_or_else(|| {
+                    Error::new(
+                        Kind::UnicodeDecodeError,
+                        "filesystem path is not valid UTF-8",
+                    )
+                })
         }
     }
 }
 
-fn run(
-    op: u32,
-    src: &Name<'_>,
-    dst: &Name<'_>,
-    follow: bool,
-) -> Result<Option<std::path::PathBuf>> {
+fn run(op: u32, src: &Name, dst: &Name, follow: bool) -> Result<Option<std::path::PathBuf>> {
     if [src, dst]
         .iter()
         .any(|n| n.path().as_os_str().as_bytes().contains(&0))

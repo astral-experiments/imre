@@ -1,13 +1,14 @@
 //! POSIX descriptors are integers in the program's descriptor table. A call
 //! can observe a closed number or a number subsequently reused by the kernel.
 
-use super::Int;
 use super::exceptions::{Error, Kind, Result, finish};
 use super::files::{errno_error, names::Name};
+use super::{Int, Str};
 use num_traits::ToPrimitive;
 use std::ffi::CString;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
+use std::rc::Rc;
 
 macro_rules! open_flags {
     ($($name:ident = $flag:ident),* $(,)?) => {$(
@@ -61,7 +62,6 @@ pub unsafe extern "C" fn imre_os_open(
     )
 }
 
-// All C ints fit in the immediate representation. Heap integers cannot fit.
 /// Remove the entry itself, using the raw spelling even for trailing slashes.
 /// Validate the path before converting the optional directory descriptor.
 ///
@@ -129,6 +129,27 @@ fn checked(ret: libc::c_int) -> Result<libc::c_int> {
     } else {
         Ok(ret)
     }
+}
+
+/// Like strerror(3), describe known and unknown target errno values.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_strerror(code: usize) -> *const Str {
+    finish(
+        c_int(code).and_then(|code| {
+            // SAFETY: copy libc's terminated string before any further calls.
+            let message = unsafe { libc::strerror(code) };
+            if message.is_null() {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    "strerror() argument out of range",
+                ));
+            }
+            // SAFETY: the non-null pointer returned above remains live during this copy.
+            let text = unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy();
+            Ok(Rc::into_raw(Rc::new(Str::from(text.as_ref()))))
+        }),
+        std::ptr::null(),
+    )
 }
 
 /// Close exactly once: retrying an interrupted close can close a reused fd.

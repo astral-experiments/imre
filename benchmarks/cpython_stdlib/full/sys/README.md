@@ -49,7 +49,7 @@ reference reasons even where UTF-8 mode also provides native evidence.
 
 [evidence-linux.json](evidence-linux.json) is the versioned [shared evidence
 contract](../../NATIVE_EVIDENCE.md): 97 distinct occurrences at each of O0 and O3.
-This baseline was executed with Imre compiler/runtime source `43755cbf6e6be29a6c1e68e78a483b4ed5d837c6`. The pinned suite has no companion module. The two shorter `native-O*.json`
+This baseline was executed with Imre compiler/runtime source `c0661fd9482afb66406fb147a5c2cb10b11ff8ee`. The pinned suite has no companion module. The two shorter `native-O*.json`
 files retain their original records and are not additional test occurrences.
 
 The versioned gate loads the original suite and runs its selected methods
@@ -57,6 +57,7 @@ under their CPython fixtures. For every remaining non-skipped method it either
 tries to compile the complete definition or records the original decorator
 that requires an adapter. An unreviewed exception proposal remains a blocker.
 The actual native CLI failure for `test_orig_argv` is recorded separately.
+The unchanged `test_exit` runs under its original CPython fixture and assertions: six caught calls and five original child programs complete in Imre, including `2**128` and a pending stderr write. The next unchanged child source contains a lone U+DCFF. Its native compile failure blocks the method before the final Latin-1 check; no partial method receives pass credit.
 The unchanged locale-dependent method can pass under `-X utf8` even though
 the reference skipped it; the contract records that as a reference disagreement.
 

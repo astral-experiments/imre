@@ -651,7 +651,8 @@ impl Checker<'_> {
         } else {
             let binding = self.graph.resolve(self.module, expression);
             if let Some(Binding::Definition(definition)) = binding
-                && self.classes.declarations.ids.contains_key(&definition)
+                && (self.classes.declarations.ids.contains_key(&definition)
+                    || self.types.namedtuple(definition).is_some())
             {
                 // Static dispatch and constant folding can erase the class name from the IR.
                 self.class_reads.borrow_mut().insert(definition);
@@ -849,7 +850,10 @@ impl Checker<'_> {
         expected: Option<Type>,
     ) -> Result<Expr, String> {
         if attribute.attr.starts_with("__")
-            && !matches!(attribute.attr.as_str(), "__str__" | "__post_init__")
+            && !matches!(
+                attribute.attr.as_str(),
+                "__str__" | "__post_init__" | "__copy__"
+            )
         {
             return Err(error(
                 self.source,
@@ -933,7 +937,10 @@ impl Checker<'_> {
             ));
         }
         if attribute.attr.starts_with("__")
-            && !matches!(attribute.attr.as_str(), "__str__" | "__post_init__")
+            && !matches!(
+                attribute.attr.as_str(),
+                "__str__" | "__post_init__" | "__copy__"
+            )
         {
             return Err(error(
                 self.source,
