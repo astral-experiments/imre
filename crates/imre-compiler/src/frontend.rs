@@ -13,6 +13,7 @@ use crate::types::Types;
 
 mod annotations;
 mod argparse;
+mod assertion_syntax;
 mod assignments;
 mod asyncio;
 mod bytes;
@@ -88,6 +89,7 @@ mod regex;
 mod sequences;
 mod shutil;
 mod sign_parameters;
+mod socket;
 mod sorted_rows;
 mod stdlib;
 mod string_io;
@@ -459,6 +461,14 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "NameError" => return Some(39),
         "UnboundLocalError" => return Some(40),
         "RecursionError" => return Some(43),
+        "BlockingIOError" => return Some(44),
+        "ConnectionError" => return Some(45),
+        "BrokenPipeError" => return Some(46),
+        "ConnectionAbortedError" => return Some(47),
+        "ConnectionRefusedError" => return Some(48),
+        "ConnectionResetError" => return Some(49),
+        "InterruptedError" => return Some(50),
+        "TimeoutError" => return Some(51),
         "Warning" => return Some(80),
         "RuntimeWarning" => return Some(81),
         "DeprecationWarning" => return Some(82),
@@ -1599,6 +1609,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::JsonDecoderClass)) => return Ok(Type::JsonDecoder),
+        Some(Binding::Intrinsic(Intrinsic::Socket)) => return Ok(Type::Socket),
         Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
@@ -4267,7 +4278,10 @@ impl<'a> Checker<'a> {
                     false,
                 ));
             }
-            ast::Stmt::Assert(_) if self.graph.python_optimization() > 0 => None,
+            ast::Stmt::Assert(assertion) if self.graph.python_optimization() > 0 => {
+                assertion_syntax::validate(self.source, assertion)?;
+                None
+            }
             ast::Stmt::Assert(assert) => {
                 let test = self.condition(&assert.test)?;
                 let successful = self.local_state();
@@ -4407,18 +4421,20 @@ impl<'a> Checker<'a> {
         let stored = self.types.directory_value(manager.ty);
         let archive = manager.ty == Type::ZipFile;
         let token = matches!(manager.ty, Type::ContextToken(_));
+        let socket = manager.ty == Type::Socket;
         let popen = matches!(manager.ty, Type::Popen(..));
         if temporary.is_none()
             && stored.is_none()
             && !archive
             && !token
+            && !socket
             && !popen
             && !matches!(manager.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
         {
             return Err(error(
                 self.source,
                 &item.context_expr,
-                "with requires a supported file, ZIP archive, or directory context",
+                "with requires a supported file, socket, ZIP archive, or directory context",
             ));
         }
         let captured = self.hidden(manager.ty);
@@ -4445,7 +4461,7 @@ impl<'a> Checker<'a> {
         let (nested, falls) = self.with_items(remaining, body)?;
         protected.extend(nested);
         let mut statements = vec![Statement::Assign(captured, manager)];
-        if temporary.is_none() && stored.is_none() && !archive && !popen && !token {
+        if temporary.is_none() && stored.is_none() && !archive && !token && !socket && !popen {
             statements.push(Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::TextEnter, vec![self.local(captured)]),
@@ -4459,6 +4475,8 @@ impl<'a> Checker<'a> {
             Builtin::Process(ir::ProcessOperation::PopenExit)
         } else if token {
             Builtin::ContextVar(ir::ContextOperation::ExitToken)
+        } else if socket {
+            Builtin::Socket(ir::SocketOp::Close)
         } else if archive {
             Builtin::ZipClose
         } else {
@@ -4527,6 +4545,7 @@ impl<'a> Checker<'a> {
                     | Type::Float
                     | Type::Bytes
                     | Type::None
+                    | Type::ListInt
                     | Type::List(_)
                     | Type::Tuple(_)
                     | Type::Dict(_)
@@ -4614,6 +4633,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::BadGzipFile)) => Some(28),
             Some(Binding::Intrinsic(Intrinsic::BadZipFile)) => Some(36),
             Some(Binding::Intrinsic(Intrinsic::CsvError)) => Some(67),
+            Some(Binding::Intrinsic(Intrinsic::GaiError)) => Some(68),
             Some(Binding::Intrinsic(Intrinsic::ZlibError)) => Some(29),
             Some(Binding::Intrinsic(Intrinsic::TomlDecodeError)) => Some(30),
             Some(Binding::Intrinsic(Intrinsic::JsonDecodeError)) => Some(31),
@@ -5229,6 +5249,10 @@ impl<'a> Checker<'a> {
             if let Some(value) = self.errno_value(target, expression) {
                 return Ok(value);
             }
+        }
+        if let Some(Binding::Intrinsic(Intrinsic::SocketConstant(name))) = self.resolve(expression)
+        {
+            return Ok(socket::constant(name));
         }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level)
@@ -6022,17 +6046,67 @@ impl<'a> Checker<'a> {
                             || self.types.is_value_struct(item)
                             || matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
                     });
-                    if matches!(ty, Type::ListInt | Type::List(_)) && !comparable_list
-                        || matches!(
-                            ty,
-                            Type::ChainMap(_)
-                                | Type::StringKeys
-                                | Type::Optional(_)
-                                | Type::Union(_)
-                        )
-                        || matches!(ty, Type::Dict(_)) && !self.types.is_counter(ty)
-                        || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
-                    {
+                    let comparable = match ty {
+                        Type::List(_) => tuple_list,
+                        Type::Dict(_) => self.types.is_counter(ty),
+                        Type::Tuple(_) => self.types.hashable_key(ty),
+                        Type::ListInt
+                        | Type::ChainMap(_)
+                        | Type::StringKeys
+                        | Type::Optional(_)
+                        | Type::Union(_) => false,
+                        Type::ForwardRef(_)
+                        | Type::AnnotationValue(_)
+                        | Type::Int
+                        | Type::Float
+                        | Type::StrEnum(_)
+                        | Type::Enum(_)
+                        | Type::Str
+                        | Type::StrLiteral(_)
+                        | Type::BuiltinClass
+                        | Type::Path
+                        | Type::PurePath(_)
+                        | Type::Set(_)
+                        | Type::Deque(_)
+                        | Type::SimpleNamespace(_)
+                        | Type::Bytes
+                        | Type::Calendar(_)
+                        | Type::ClockTime
+                        | Type::Class(_)
+                        | Type::Bool
+                        | Type::None
+                        | Type::TimedFileHandler
+                        | Type::StrDescriptor(_)
+                        | Type::PlainObject
+                        | Type::PathInfo
+                        | Type::Poll
+                        | Type::Socket
+                        | Type::Sha256
+                        | Type::JsonDecoder
+                        | Type::ZipFile
+                        | Type::ZipInfo
+                        | Type::CsvReader
+                        | Type::Exception
+                        | Type::NamedException(_)
+                        | Type::ObjectValue
+                        | Type::ReadOnlyObjectMapping
+                        | Type::ImportException
+                        | Type::TimeoutExpired
+                        | Type::TextIO
+                        | Type::StringIO
+                        | Type::HandlerLock
+                        | Type::CompletedProcess(..)
+                        | Type::SourceModule
+                        | Type::BinaryIO => true,
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                expression,
+                                "unsupported comparison for these types",
+                            ));
+                        }
+                    };
+                    if !comparable {
                         return Err(error(
                             self.source,
                             expression,
@@ -7203,6 +7277,7 @@ impl<'a> Checker<'a> {
                 check_string(target, self.source)?;
                 return self.typed_expr(value);
             }
+            Some(Binding::Intrinsic(Intrinsic::Socket)) => return self.socket_constructor(call),
             Some(Binding::Intrinsic(op @ (Intrinsic::Sha256 | Intrinsic::HashNew))) => {
                 return self.sha256_constructor(call, op == Intrinsic::HashNew);
             }
@@ -7744,6 +7819,9 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::Poll {
                 return self.poll_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::Socket {
+                return self.socket_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Sha256 {
                 return self.sha256_method(receiver, attribute, call);

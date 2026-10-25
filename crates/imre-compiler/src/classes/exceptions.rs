@@ -60,7 +60,8 @@ fn builtin_mro(kind: u32) -> Vec<u32> {
         6 | 7 => 5,
         17 => 8,
         18 => 17,
-        20..=24 => 12,
+        20..=24 | 44 | 45 | 50 | 51 | 68 => 12,
+        46..=49 => 45,
         37 => 10,
         40 => 39, // UnboundLocalError derives from NameError.
         42 => 41,

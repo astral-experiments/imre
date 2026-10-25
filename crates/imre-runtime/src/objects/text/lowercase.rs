@@ -1,5 +1,5 @@
 //! Default Unicode 16 case conversion, as used by Python 3.14.
-use std::rc::Rc;
+use crate::StrOwner;
 use std::sync::LazyLock;
 
 use compact_str::ReserveError;
@@ -110,7 +110,7 @@ pub unsafe extern "C" fn imre_str_lower(value: *const Str) -> *const Str {
     let source = unsafe { &*value };
     finish(
         lowercase(source)
-            .map(|s| Rc::into_raw(Rc::new(s)))
+            .map(|s| StrOwner::into_raw(StrOwner::new(s)))
             .map_err(|_| Error::allocation()),
         std::ptr::null(),
     )
@@ -126,7 +126,7 @@ pub unsafe extern "C" fn imre_str_upper(value: *const Str) -> *const Str {
     let source = unsafe { &*value };
     finish(
         convert(source, Case::Upper)
-            .map(|s| Rc::into_raw(Rc::new(s)))
+            .map(|s| StrOwner::into_raw(StrOwner::new(s)))
             .map_err(|_| Error::allocation()),
         std::ptr::null(),
     )
@@ -142,7 +142,7 @@ pub unsafe extern "C" fn imre_str_capitalize(value: *const Str) -> *const Str {
     let source = unsafe { &*value };
     finish(
         convert(source, Case::Capitalize)
-            .map(|s| Rc::into_raw(Rc::new(s)))
+            .map(|s| StrOwner::into_raw(StrOwner::new(s)))
             .map_err(|_| Error::allocation()),
         std::ptr::null(),
     )

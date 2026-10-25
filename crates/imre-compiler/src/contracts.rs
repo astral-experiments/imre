@@ -5,9 +5,7 @@
 //! remain the responsibility of the analysis using the contract. In particular,
 //! preserving lists does not imply freedom from I/O, allocation or errors.
 
-use crate::ir::{
-    Binary, Builtin, Expr, PathOperation, PosixPathOperation, ProcessOperation, TextOperation, Type,
-};
+use crate::ir::{Binary, Builtin, Expr, PathOperation, ProcessOperation, TextOperation, Type};
 
 /// Guarantees needed by list specialization and rooted heap borrows.
 #[derive(Clone, Copy)]
@@ -131,22 +129,21 @@ impl Builtin {
                 },
                 PreservesLists,
             ),
-            Self::PosixPath(operation) => Contract::new(
-                matches!(
-                    operation,
-                    PosixPathOperation::MixedJoin { .. }
-                        | PosixPathOperation::Commonpath
-                        | PosixPathOperation::Splitext
-                        | PosixPathOperation::Normpath
-                        | PosixPathOperation::Abspath
-                ),
-                PreservesLists,
-            ),
+            Self::PosixPath(_) => Contract::new(true, PreservesLists),
             Self::DictContains
             | Self::ChainMapContains
             | Self::DictGetDefault
             | Self::DictTryGet(_)
             | Self::SetContains => Contract::new(true, PreservesLists),
+            Self::Socket(op) => Contract::new(
+                !matches!(
+                    op,
+                    crate::ir::SocketOp::Constant(_)
+                        | crate::ir::SocketOp::Fileno
+                        | crate::ir::SocketOp::GetBlocking
+                ),
+                PreservesLists,
+            ),
             Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
@@ -849,7 +846,9 @@ pub(crate) const LIST_COPY_INDEX: RuntimeCall<StatusOrError, 3> = RuntimeCall {
 /// arithmetic, ownership operations, lookup-with-default, lengths and hashing
 /// remain infallible; allocation failure and invalid ABI use are fatal.
 pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
-    name.starts_with("fn_")
+    (name.starts_with("imre_socket_")
+        && !matches!(name, "imre_socket_fileno" | "imre_socket_getblocking"))
+        || name.starts_with("fn_")
         || matches!(
             name,
             "int_floordiv"

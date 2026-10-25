@@ -10,15 +10,23 @@ use std::rc::Weak;
 
 use corosensei::{Coroutine, CoroutineResult, Yielder};
 
-use super::exceptions::{replace_pending, swap_active, take_pending};
+use super::exceptions::{replace_pending, swap_active, take_pending, wrap_stop_iteration};
 use super::records::imre_record_retain;
 use super::words::{OwnedWord, WordKind};
 use super::*;
 
-type Ready = Box<dyn Fn() -> bool>;
-type Fiber = Coroutine<(), Ready, Outcome>;
+type Ready = Rc<dyn Fn() -> bool>;
+type Fiber = Coroutine<Option<Cancellation>, Ready, Outcome>;
 type Callback = unsafe extern "C" fn(*const usize) -> usize;
 type Outcome = std::result::Result<OwnedWord, Rc<Object>>;
+
+#[derive(Clone, Copy)]
+pub(super) enum Cancellation {
+    /// Cancel through the future this task was waiting on.
+    Waiter,
+    /// Throw into the coroutine before this task has acquired a waiter.
+    Injected,
+}
 
 struct Call {
     callback: Callback,
@@ -32,18 +40,24 @@ impl Call {
         // the frame roots its borrowed parameters through the whole native call.
         let word = unsafe { (self.callback)(self.frame.word as *const usize) };
         match take_pending() {
-            Some(error) => Err(error),
+            Some(error) => Err(wrap_stop_iteration(error, "coroutine raised StopIteration")),
             // SAFETY: successful generated calls transfer an exact owned result.
             None => Ok(unsafe { OwnedWord::from_owned(word, self.kind) }),
         }
     }
 }
 
-pub(super) struct Task {
+/// Each task has its own wakeup and outcome. Independent tasks can send into
+/// the same coroutine, including after another task has exhausted its frame.
+struct CoroutineFrame {
     call: RefCell<Option<Call>>,
     fiber: RefCell<Option<Fiber>>,
-    ready: RefCell<Option<Ready>>,
     active: RefCell<Option<Rc<Object>>>,
+}
+
+pub(super) struct Task {
+    frame: Rc<CoroutineFrame>,
+    ready: RefCell<Option<Ready>>,
     context: RefCell<Option<Rc<super::contextvars::State>>>,
     outcome: RefCell<Option<Outcome>>,
     scheduled: Cell<bool>,
@@ -91,12 +105,10 @@ impl Group {
 }
 
 impl Task {
-    fn new(call: Call) -> Rc<Self> {
+    fn new(frame: Rc<CoroutineFrame>) -> Rc<Self> {
         Rc::new(Self {
-            call: RefCell::new(Some(call)),
-            fiber: RefCell::new(None),
+            frame,
             ready: RefCell::new(None),
-            active: RefCell::new(None),
             context: RefCell::new(None),
             outcome: RefCell::new(None),
             scheduled: Cell::new(false),
@@ -113,18 +125,21 @@ impl Task {
             return;
         }
         *self.context.borrow_mut() = super::contextvars::capture();
-        let call = self.call.take().expect("a new task owns its call");
-        *self.fiber.borrow_mut() = Some(Coroutine::new(move |yielder, ()| {
-            CURRENT.set(yielder);
-            let result = if CANCELLED.replace(false) {
-                cancelled();
-                Err(take_pending().expect("cancellation set an exception"))
-            } else {
-                call.run()
-            };
-            CURRENT.set(std::ptr::null());
-            result
-        }));
+        if let Some(call) = self.frame.call.take() {
+            *self.frame.fiber.borrow_mut() = Some(Coroutine::new(
+                move |yielder, cancellation: Option<Cancellation>| {
+                    CURRENT.set(yielder);
+                    let result = if cancellation.is_some() {
+                        cancelled();
+                        Err(take_pending().expect("cancellation set an exception"))
+                    } else {
+                        call.run()
+                    };
+                    CURRENT.set(std::ptr::null());
+                    result
+                },
+            ));
+        }
         let loop_ = event_loop::selected();
         *self.event_loop.borrow_mut() = Rc::downgrade(&loop_);
         loop_.queue.borrow_mut().push(self.clone());
@@ -138,19 +153,25 @@ impl Task {
         if !self.cancelled.get() && self.ready.borrow().as_ref().is_some_and(|ready| !ready()) {
             return false;
         }
-        self.ready.take();
         super::contextvars::swap_task(&mut self.context.borrow_mut());
-        swap_active(&mut self.active.borrow_mut());
-        CANCELLED.set(self.cancelled.replace(false));
+        let waiting = self.ready.take().is_some();
+        let cancellation = self.cancelled.replace(false).then_some(if waiting {
+            Cancellation::Waiter
+        } else {
+            Cancellation::Injected
+        });
+        swap_active(&mut self.frame.active.borrow_mut());
         CURRENT_TASK.replace(Rc::downgrade(self));
-        let step = self
-            .fiber
-            .borrow_mut()
-            .as_mut()
-            .expect("scheduled fiber")
-            .resume(());
+        let step = match self.frame.fiber.borrow_mut().as_mut() {
+            Some(fiber) => fiber.resume(cancellation),
+            None => CoroutineResult::Return(Err(Error::new(
+                Kind::RuntimeError,
+                "cannot reuse already awaited coroutine",
+            )
+            .into_exception())),
+        };
         CURRENT_TASK.take();
-        swap_active(&mut self.active.borrow_mut());
+        swap_active(&mut self.frame.active.borrow_mut());
         super::contextvars::swap_task(&mut self.context.borrow_mut());
         match step {
             CoroutineResult::Yield(ready) => {
@@ -167,7 +188,7 @@ impl Task {
                     loop_.failures.borrow_mut().push(Rc::downgrade(&group));
                 }
                 *self.outcome.borrow_mut() = Some(outcome);
-                self.fiber.take();
+                self.frame.fiber.take();
             }
         }
         true
@@ -191,8 +212,7 @@ impl Task {
 thread_local! {
     static CURRENT_TASK: RefCell<Weak<Task>> = const { RefCell::new(Weak::new()) };
     static FINISH_ORDER: Cell<u64> = const { Cell::new(0) };
-    static CURRENT: Cell<*const Yielder<(), Ready>> = const { Cell::new(std::ptr::null()) };
-    static CANCELLED: Cell<bool> = const { Cell::new(false) };
+    static CURRENT: Cell<*const Yielder<Option<Cancellation>, Ready>> = const { Cell::new(std::ptr::null()) };
 }
 
 fn cancelled() {
@@ -204,18 +224,24 @@ pub(super) fn in_task() -> bool {
 }
 
 /// The yielder stays on the fiber's native stack for its entire lifetime.
-pub(super) fn suspend(ready: Ready) -> bool {
-    let yielder = CURRENT.replace(std::ptr::null());
+pub(super) fn suspend(ready: Ready) -> Option<Cancellation> {
+    let yielder = CURRENT.get();
     assert!(!yielder.is_null(), "suspension outside an asyncio task");
-    // SAFETY: only the currently running fiber can reach this TLS pointer. It
-    // is cleared during suspension so a sibling cannot observe another stack.
-    unsafe { &*yielder }.suspend(ready);
-    CURRENT.set(yielder);
-    if CANCELLED.replace(false) {
-        cancelled();
-        false
-    } else {
-        true
+    loop {
+        CURRENT.set(std::ptr::null());
+        // SAFETY: this yielder remains on the suspended fiber's native stack.
+        // Sibling tasks cannot observe it through TLS while they run.
+        let cancellation = unsafe { &*yielder }.suspend(ready.clone());
+        CURRENT.set(yielder);
+        if cancellation.is_some() {
+            cancelled();
+            return cancellation;
+        }
+        // A second task can send into the same coroutine before its future
+        // wakes. Both tasks must wait on that future.
+        if ready() {
+            return None;
+        }
     }
 }
 
@@ -264,7 +290,11 @@ fn await_task(task: &Rc<Task>) -> usize {
         // Directly awaiting a cold coroutine first enters its body on this
         // task, before queued peers run, just as Python's immediate await does.
         task.scheduled.set(true);
-        let call = task.call.take().expect("cold coroutine owns its call");
+        let call = task
+            .frame
+            .call
+            .take()
+            .expect("cold coroutine owns its call");
         let outcome = call.run();
         *task.outcome.borrow_mut() = Some(outcome);
     } else if !task.done() {
@@ -277,9 +307,13 @@ fn await_task(task: &Rc<Task>) -> usize {
         }
         while !task.done() {
             let owner = task.clone();
-            if !suspend(Box::new(move || owner.done())) {
-                take_pending();
-                task.cancelled.set(true);
+            match suspend(Rc::new(move || owner.done())) {
+                None => {}
+                Some(Cancellation::Waiter) => {
+                    take_pending();
+                    task.cancelled.set(true);
+                }
+                Some(Cancellation::Injected) => return 0,
             }
         }
     }
@@ -290,9 +324,22 @@ fn task_of(object: &Object) -> Rc<Task> {
     // SAFETY: cloning a language-thread owner never reenters object storage.
     unsafe {
         object.0.with(|storage| match storage {
-            Storage::AsyncTask(task) => task.clone(),
+            Storage::AsyncCoroutine(task) | Storage::AsyncTask(task) => task.clone(),
             _ => fail("SystemError", "expected typed asyncio task"),
         })
+    }
+}
+
+/// A new submission of a raw coroutine gets its own task. Submitting a
+/// task again preserves its identity, wakeup, and cached outcome.
+fn for_scheduling(object: &Object) -> Rc<Task> {
+    let task = task_of(object);
+    // SAFETY: inspecting the rooted handle's variant runs no language code.
+    if task.scheduled.get() && unsafe { object.0.with(|s| matches!(s, Storage::AsyncCoroutine(_))) }
+    {
+        Task::new(task.frame.clone())
+    } else {
+        task
     }
 }
 
@@ -313,11 +360,18 @@ pub unsafe extern "C" fn imre_async_coroutine(
     unsafe { imre_record_retain(frame) };
     // SAFETY: kind 6 owns the fixed record retained directly above.
     let frame = unsafe { OwnedWord::from_owned(frame as usize, WordKind::new(6)) };
-    resource(Storage::AsyncTask(Task::new(Call {
+    let call = Call {
         callback,
         frame,
         kind: WordKind::new(kind),
-    })))
+    };
+    resource(Storage::AsyncCoroutine(Task::new(Rc::new(
+        CoroutineFrame {
+            call: RefCell::new(Some(call)),
+            fiber: RefCell::default(),
+            active: RefCell::default(),
+        },
+    ))))
 }
 
 /// # Safety
@@ -391,7 +445,7 @@ pub unsafe extern "C" fn imre_async_create_task(
     coroutine: *const Object,
 ) -> *const Object {
     // SAFETY: neither borrowed object is retained across a language callback.
-    let task = task_of(unsafe { object(coroutine) });
+    let task = for_scheduling(unsafe { object(coroutine) });
     if task.scheduled.get() {
         return Error::new(Kind::RuntimeError, "cannot reuse already awaited coroutine")
             .returning(std::ptr::null());
@@ -452,7 +506,7 @@ pub unsafe extern "C" fn imre_async_join(group: *const Object) {
             .filter(|task| !task.done())
             .cloned()
             .collect();
-        if !suspend(Box::new(move || remaining.iter().any(|task| task.done()))) {
+        if suspend(Rc::new(move || remaining.iter().any(|task| task.done()))).is_some() {
             body_error = take_pending();
         }
     }
@@ -577,7 +631,7 @@ pub unsafe extern "C" fn imre_async_permit(handle: *const Object, acquire: bool)
     let waiter = Rc::new(Cell::new(false));
     semaphore.waiters.borrow_mut().push_back(waiter.clone());
     let ready = waiter.clone();
-    if !suspend(Box::new(move || ready.get())) {
+    if suspend(Rc::new(move || ready.get())).is_some() {
         if waiter.get() {
             semaphore.release();
         } else {
@@ -615,11 +669,20 @@ pub unsafe extern "C" fn imre_async_gather(
     // SAFETY: acquire independent task owners before running other language code.
     let tasks: Vec<_> = unsafe {
         object(input).0.with(|storage| {
+            // gather schedules each distinct input once, including a repeated
+            // consumed coroutine whose exception appears in multiple slots.
+            let mut unique = std::collections::HashMap::new();
             storage
                 .sequence()
                 .values
                 .iter()
-                .map(|handle| task_of(object(*handle as *const Object)))
+                .map(|&handle| {
+                    Rc::clone(
+                        unique
+                            .entry(handle)
+                            .or_insert_with(|| for_scheduling(object(handle as *const Object))),
+                    )
+                })
                 .collect()
         })
     };
@@ -648,13 +711,17 @@ pub unsafe extern "C" fn imre_async_gather(
         if unfinished.is_empty() {
             break;
         }
-        if !suspend(Box::new(move || unfinished.iter().any(|task| task.done()))) {
-            cancellation = take_pending();
-            for task in &tasks {
-                if !task.done() {
-                    task.cancelled.set(true);
+        match suspend(Rc::new(move || unfinished.iter().any(|task| task.done()))) {
+            None => {}
+            Some(Cancellation::Waiter) => {
+                cancellation = take_pending();
+                for task in &tasks {
+                    if !task.done() {
+                        task.cancelled.set(true);
+                    }
                 }
             }
+            Some(Cancellation::Injected) => return std::ptr::null(),
         }
     }
     if cancellation.is_some() {
@@ -712,19 +779,23 @@ mod tests {
 
     #[test]
     fn failed_gather_append_releases_partial_output() {
-        let text = Rc::new(Str::new("owned by the partial result"));
+        let text = crate::StrOwner::new(Str::new("owned by the partial result"));
         // SAFETY: the exact list and string remain rooted until failure consumes
         // the list's only raw owner.
         unsafe {
             let output = Rc::<Object>::from_raw(imre_seq_new(3));
             assert_eq!(
-                imre_seq_append(Rc::as_ptr(&output), Rc::as_ptr(&text) as usize, 3),
+                imre_seq_append(
+                    Rc::as_ptr(&output),
+                    crate::StrOwner::as_ptr(&text) as usize,
+                    3
+                ),
                 1,
             );
-            assert_eq!(Rc::strong_count(&text), 2);
+            assert_eq!(crate::StrOwner::strong_count(&text), 2);
             let output: *const () = Rc::into_raw(output).cast();
             assert!(!finish_gather_append(output, 0));
         }
-        assert_eq!(Rc::strong_count(&text), 1);
+        assert_eq!(crate::StrOwner::strong_count(&text), 1);
     }
 }
