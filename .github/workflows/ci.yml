@@ -16,7 +16,7 @@ jobs:
         with:
           ref: 067a0f070801f2df51ca0aadb00db9908ab71374
           fetch-depth: 0
-          persist-credentials: false
+          persist-credentials: true
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
