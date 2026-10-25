@@ -40,14 +40,14 @@ argparse companion test module. The earlier [generated parse](NATIVE.md) and
 | --- | ---: | ---: |
 | Fully native, including fixtures | 0 | 0 |
 | Native body and operation with host fixtures | 4 | 4 |
-| Host body and assertions with native operations | 788 | 788 |
+| Host body and assertions with native operations | 789 | 789 |
 | Completed with no parser operation (empty input table) | 12 | 12 |
-| Blocked | 1,089 | 1,089 |
+| Blocked | 1,088 | 1,088 |
 | Mixed, reference-only, failed, skipped or excluded | 0 | 0 |
 | **Total** | **1,893** | **1,893** |
 
 The compiler and runtime come from merged main at
-`bb0e2a027bdf0b5e03a7b69c64c07d622fe4263d`. Each report accounts for all
+`71ffc22719423ad434d0389a08e6d80395aece01`. Each report accounts for all
 417 source-defined methods and all 1,476 generated methods (1,236 parsing and
 240 formatting). The four native bodies each call `parse_args` unconditionally
 and have no explicit assertion; CPython runs their fixtures.
@@ -58,16 +58,18 @@ and have no explicit assertion; CPython runs their fixtures.
 | [Option prefixes and abbreviations](https://github.com/astral-sh/imre/pull/688) | 739 | 2,965 |
 | [Usage and help formatting](https://github.com/astral-sh/imre/pull/719) | 779 | 3,005 |
 | [Optional subparsers and aliases](https://github.com/astral-sh/imre/pull/756) | 788 | 3,024 |
+| [Known arguments and ordered extras](https://github.com/astral-sh/imre/pull/818) | 789 | 3,025 |
 
-The formatting change added 40 of the 240 generated help routines. Nine more
-unchanged `TestAddSubparsers` methods exercised subcommand selection or help.
-Their original setup also constructs and checks two separate CPython parsers;
-those fixture operations earn no native credit. The full post-merge run reproduced
-every per-ID record from the subparser PR head.
+The [post-merge run](https://github.com/astral-sh/imre/actions/runs/40177794356)
+adds one complete original routine, `TestParseKnownArgs.test_optionals`.
+Its CPython body checks the namespace and the extras returned by the native
+parser. Four other `TestParseKnownArgs` bodies already run natively with host
+fixtures. Their existing classification is preserved.
 
-The 3,024 native calls at each level comprise 2,980 parses, 13 calls to
-`format_help`, 11 to `format_usage`, and 10 each to `print_help` and
-`print_usage`. The process comparison checks exit status, stdout, and stderr;
+Of the 3,025 host-driven native calls at each level, 2,980 call
+`parse_args`, one calls `parse_known_args`, 13 call `format_help`, 11 call
+`format_usage`, and 10 each call `print_help` and `print_usage`.
+The process comparison checks exit status, stdout, and stderr;
 the original assertions receive the native result. Each host-driven source
 method retains the diagnostic from attempting its whole body. A partial run
 does not earn a pass. [Whole-file startup](METHODS.md#whole-file-startup)
@@ -80,7 +82,7 @@ unchanged CPython reference before combining it with other suites.
 ```sh
 python3.14 -B benchmarks/cpython_stdlib/full/argparse/evidence.py \
   --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang clang-18 \
-  --imre-revision bb0e2a027bdf0b5e03a7b69c64c07d622fe4263d --result /tmp/argparse-evidence.json
+  --imre-revision 71ffc22719423ad434d0389a08e6d80395aece01 --result /tmp/argparse-evidence.json
 python3 benchmarks/cpython_stdlib/suite_evidence.py \
   benchmarks/cpython_stdlib/full/argparse/reference-linux.json /tmp/argparse-evidence.json
 ```
