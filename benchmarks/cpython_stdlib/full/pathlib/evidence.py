@@ -24,6 +24,8 @@ from native_components import component_adapters
 from native_walk import walk_adapters
 from native_metadata import metadata_adapters
 from native_stat import stat_adapters
+from native_segments import segment_adapters
+from native_samefile import samefile_adapters
 
 
 def skip_source(case_id, reason):
@@ -122,7 +124,8 @@ def file_adapters(tools, work):
 def main():
     cohorts = {'lexical': lexical_adapters, 'files': file_adapters, 'traversal': traversal_adapters,
                'components': component_adapters, 'walk': walk_adapters, 'basics': basic_adapters,
-               'metadata': metadata_adapters, 'stat': stat_adapters}
+               'metadata': metadata_adapters, 'stat': stat_adapters, 'segments': segment_adapters,
+               'samefile': samefile_adapters}
     parser = argparse.ArgumentParser(description=__doc__)
     for option in ('imre', 'runtime', 'clang', 'result'):
         parser.add_argument('--' + option, required=True, type=Path)

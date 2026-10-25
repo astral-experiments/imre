@@ -3,6 +3,67 @@
 use super::*;
 
 impl Checker<'_> {
+    /// Evaluate the receiver, source, and keyword arguments before updating any entry.
+    pub(super) fn dict_update(
+        &mut self,
+        call: &ast::ExprCall,
+        receiver: Expr,
+        key: Type,
+        value: Type,
+    ) -> Result<Expr, String> {
+        let mapping = self.types.dict(key, value);
+        let mut args = vec![receiver];
+        match call.arguments.args.as_ref() {
+            [] => {}
+            [source] => args.push(self.expr_expected(source, mapping)?),
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "dict.update expects at most one positional mapping",
+                ));
+            }
+        }
+        if !call.arguments.keywords.is_empty() {
+            if key != Type::Str {
+                return Err(error(
+                    self.source,
+                    call,
+                    "dict.update keyword entries require string keys",
+                ));
+            }
+            let mut entries = Vec::new();
+            for kw in &call.arguments.keywords {
+                let Some(name) = &kw.arg else {
+                    return Err(error(
+                        self.source,
+                        kw,
+                        "dict.update keyword unpacking is unsupported",
+                    ));
+                };
+                entries.push((
+                    Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str(name.to_string()),
+                    },
+                    self.expr_expected(&kw.value, value)?,
+                ));
+            }
+            args.push(Expr {
+                ty: mapping,
+                kind: ExprKind::Dict {
+                    key,
+                    value,
+                    entries,
+                },
+            });
+        }
+        Ok(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::DictUpdate, args),
+        })
+    }
+
     /// Capture ordinary fields and expanded elements in source order. Keeping
     /// each reference also preserves identity if a later field mutates it.
     pub(super) fn expanded_tuple(
@@ -162,24 +223,40 @@ impl Checker<'_> {
         let mut body = vec![Statement::Assign(destination, receiver)];
         // CPython reserves space on acquiring an iterator with no length hint,
         // even when its first pull stops or raises. A reentrant sort observes it.
-        let unhinted = match &input {
-            Iteration::Prepared(_) => !matches!(source, ast::Expr::Call(call)
-                if matches!(&*call.func, ast::Expr::Name(name) if name.id == "reversed")),
-            Iteration::Container { iterable, .. } => {
-                matches!(
+        let reserve = Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::ListExtendUnhinted, vec![self.local(destination)]),
+        });
+        let before = match &input {
+            Iteration::Prepared(prepared) if let Some(list) = prepared.eager_list_at(source) => {
+                let mut eager = Vec::new();
+                if self.locals[list.value] == self.locals[destination] {
+                    eager.push(Statement::Assign(
+                        list.value,
+                        self.list_snapshot(self.local(list.value)),
+                    ));
+                }
+                vec![Statement::If(
+                    self.local(list.selected),
+                    eager,
+                    vec![reserve],
+                )]
+            }
+            Iteration::Prepared(_)
+                if !matches!(source, ast::Expr::Call(call)
+                if matches!(&*call.func, ast::Expr::Name(name) if name.id == "reversed")) =>
+            {
+                vec![reserve]
+            }
+            Iteration::Container { iterable, .. }
+                if matches!(
                     iterable.ty,
                     Type::TextIO | Type::StringIO | Type::BinaryIO | Type::CsvReader
-                )
+                ) =>
+            {
+                vec![reserve]
             }
-            Iteration::Range(_) => false,
-        };
-        let before = if unhinted {
-            vec![Statement::Expr(Expr {
-                ty: Type::None,
-                kind: ExprKind::Builtin(Builtin::ListExtendUnhinted, vec![self.local(destination)]),
-            })]
-        } else {
-            Vec::new()
+            _ => Vec::new(),
         };
         body.extend(
             self.expand_items_after(input, node, before, |checker, value| {
@@ -291,14 +368,8 @@ impl Checker<'_> {
             }
             if let ast::Expr::Attribute(attribute) = &*call.func
                 && attribute.attr.as_str() == "items"
+                && self.class_reference(&attribute.value).is_none()
             {
-                if self.class_reference(&attribute.value).is_some() {
-                    return Ok(Iteration::Container {
-                        iterable: self.call(call)?,
-                        items: false,
-                        start: None,
-                    });
-                }
                 let fields =
                     element.and_then(|ty| self.types.fields(self.types.payload(ty).unwrap_or(ty)));
                 let hint = fields.as_deref().and_then(|fields| match fields {
@@ -309,11 +380,8 @@ impl Checker<'_> {
                 });
                 let iterable = self.boolean_operand(&attribute.value, hint)?;
                 if let Type::Class(class) = iterable.ty {
-                    return Ok(Iteration::Container {
-                        iterable: self.class_method_call(call, attribute, class, Some(iterable))?,
-                        items: false,
-                        start: None,
-                    });
+                    let iterable = self.iteration_method_call(call, attribute, class, iterable)?;
+                    return self.iteration_value(iterable, false, call);
                 }
                 let iterable = if matches!(iterable.ty, Type::Document(_)) {
                     self.document_map(iterable)
@@ -339,14 +407,7 @@ impl Checker<'_> {
         }
         let hint = element.and_then(|element| self.expansion_hint(expression, element));
         let iterable = self.iteration_expression(expression, hint)?;
-        if let Some(prepared) = self.record_iteration(&iterable, expression)? {
-            return Ok(Iteration::Prepared(prepared));
-        }
-        Ok(Iteration::Container {
-            iterable,
-            items: false,
-            start: None,
-        })
+        self.iteration_value(iterable, false, expression)
     }
 
     /// Fixed tuples copy directly from rooted fields. Other sources share the
