@@ -43,6 +43,7 @@ messages. The bound operation executes in a native child, which returns the
 actual assertion failure and its message. The original helper checks those
 messages on the host. These eight are host-driven native operations.
 
-At each of O0 and O3: 2 native bodies, 8 host-driven native operations (32
-calls), 1,078 reference-only and 2 reference skips. No mixed executions or
-additional exclusions are claimed. See [native evidence](native-linux.json).
+At each of O0 and O3: 0 fully native passes, 2 native bodies with host class
+fixtures, 8 host-driven native operations (32 calls), 1,078 reference-only and
+2 reference skips. The [versioned evidence reports](native-linux.json) retain
+all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
