@@ -24,6 +24,7 @@ mod dispatch;
 mod documents;
 mod enums;
 mod expansions;
+mod functools;
 mod hashlib;
 mod inference;
 mod iterables;
@@ -5330,6 +5331,7 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.async_builtin(kind, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
                 let [ast::Expr::StringLiteral(target), value] = call.arguments.args.as_ref() else {
