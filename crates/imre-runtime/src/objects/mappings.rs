@@ -999,14 +999,23 @@ impl Mapping {
         if self.missing == Missing::Zero {
             output.write_str("Counter(")?;
             if self.tables.len() != 0 {
-                let mut entries = Vec::with_capacity(self.tables.len());
+                let mut entries = Vec::new();
+                entries
+                    .try_reserve_exact(self.tables.len())
+                    .map_err(|_| std::fmt::Error)?;
                 self.tables.all(|key, count| {
                     entries.push((key, count));
                     true
                 });
-                // Stable sorting preserves first appearance for ties.
                 // SAFETY: the immutable table roots both exact integer counts.
-                entries.sort_by(|a, b| unsafe { crate::imre_int_compare(b.1, a.1) }.cmp(&0));
+                let descending = |a: &(usize, usize), b: &(usize, usize)| unsafe {
+                    super::stdlib::compare_int(b.1, a.1)
+                };
+                // Already ranked counters need no sort scratch. Otherwise stable sorting
+                // preserves first appearance for equal counts.
+                if !entries.is_sorted_by(|a, b| descending(a, b).is_le()) {
+                    super::stdlib::stable_sort(&mut entries, descending);
+                }
                 output.write_char('{')?;
                 for (index, (key, count)) in entries.into_iter().enumerate() {
                     if index != 0 {
