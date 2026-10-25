@@ -272,23 +272,51 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
                 let env =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[3].value.operand));
-                let arg_kind = representation_kind(args[0].value.ty, &self.module.types);
-                let spawn = format!(
-                    "ptr {}, i32 {arg_kind}, ptr {cwd}, ptr {env}, i32 {streams}, i64 {}, i1 {}",
-                    args[0].value.operand, args[1].value.operand, args[9].value.operand
-                );
+                let executable =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[10].value.operand));
+                let kind = |index: usize| {
+                    representation_kind(
+                        self.module
+                            .types
+                            .payload(args[index].value.ty)
+                            .unwrap_or(args[index].value.ty),
+                        &self.module.types,
+                    )
+                };
+                let fields = [
+                    ("ptr", args[0].value.operand.clone()),
+                    ("ptr", cwd),
+                    ("ptr", env),
+                    ("ptr", executable),
+                    ("i64", args[1].value.operand.clone()),
+                    ("i32", kind(0).to_string()),
+                    ("i32", kind(2).to_string()),
+                    ("i32", kind(10).to_string()),
+                    ("i32", streams.to_string()),
+                    ("i1", args[9].value.operand.clone()),
+                    ("i1", args[11].value.operand.clone()),
+                ];
+                let layout = "{ptr, ptr, ptr, ptr, i64, i32, i32, i32, i32, i1, i1}";
+                let config = self.entry_alloca(layout);
+                let mut aggregate = "poison".to_owned();
+                for (i, (ty, value)) in fields.iter().enumerate() {
+                    aggregate = self.instruction(format!(
+                        "insertvalue {layout} {aggregate}, {ty} {value}, {i}"
+                    ));
+                }
+                self.line(format!("store {layout} {aggregate}, ptr {config}"));
                 if let ProcessOperation::Call { check, .. } = operation {
-                    let timeout = &args[10].value;
+                    let timeout = &args[12].value;
                     let kind = if timeout.ty == Type::Int { 2 } else { 7 };
                     let word = self.checked_instruction(format!(
-                        "call i64 @imre_call_command({spawn}, i32 {kind}, i64 {}, i1 {})",
+                        "call i64 @imre_call_config(ptr {config}, i32 {kind}, i64 {}, i1 {})",
                         timeout.operand,
                         u8::from(check)
                     ));
                     return self.unpack_word(word, returns);
                 }
                 let operand =
-                    self.checked_instruction(format!("call ptr @imre_popen_command({spawn})"));
+                    self.checked_instruction(format!("call ptr @imre_popen_config(ptr {config})"));
                 self.owned(Value {
                     ty: returns,
                     operand,
@@ -460,7 +488,7 @@ impl Emitter<'_, '_> {
             ProcessOperation::OpenFlag(name) => self.os_open_flag(name),
             ProcessOperation::Fd(operation) => self.os_descriptor(operation, args, returns),
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
-            ProcessOperation::CopyFile => {
+            ProcessOperation::Copy(op) => {
                 let tag = |ty| match ty {
                     Type::Str => 0,
                     Type::Bytes => 1,
@@ -472,17 +500,14 @@ impl Emitter<'_, '_> {
                 };
                 let follow = self.instruction(format!("zext i1 {} to i32", follow.value.operand));
                 let operand = self.checked_instruction(format!(
-                    "call ptr @imre_shutil_copyfile(ptr {}, i32 {}, ptr {}, i32 {}, i32 {follow})",
+                    "call i64 @imre_shutil_copy(i32 {}, ptr {}, i32 {}, ptr {}, i32 {}, i32 {follow})",
+                    op as u32,
                     src.value.operand,
                     tag(src.value.ty),
                     dst.value.operand,
                     tag(dst.value.ty)
                 ));
-                self.owned(Value {
-                    ty: returns,
-                    operand,
-                    small_integer: false,
-                })
+                self.unpack_word(operand, returns)
             }
             ProcessOperation::Which => {
                 let path =
@@ -490,7 +515,7 @@ impl Emitter<'_, '_> {
                 let bytes = u8::from(args[0].value.ty == Type::Bytes);
                 let path_bytes =
                     u8::from(self.module.types.payload(args[2].value.ty) == Some(Type::Bytes));
-                let pointer = self.checked_instruction(format!("call ptr @imre_shutil_which(ptr {}, i64 {}, ptr {path}, i32 {bytes}, i32 {path_bytes})", args[0].value.operand, args[1].value.operand));
+                let pointer = self.checked_instruction(format!("call ptr @imre_shutil_which(ptr {}, i64 {}, ptr {path}, i32 {bytes}, i32 {path_bytes}, ptr @imre_shutil_confstr_cs_path, ptr @imre_shutil_os_defpath)", args[0].value.operand, args[1].value.operand));
                 let operand = self.instruction(format!("ptrtoint ptr {pointer} to i64"));
                 self.owned(Value {
                     ty: returns,
@@ -512,6 +537,24 @@ impl Emitter<'_, '_> {
                     args[0].value.operand
                 ));
                 none()
+            }
+            ProcessOperation::OsErrorField(field) => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_os_error_field(ptr {}, i32 {field})",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            ProcessOperation::Strerror => {
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_os_strerror(i64 {})",
+                    args[0].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
             }
             ProcessOperation::ErrorField(field) => {
                 let tagged = matches!(

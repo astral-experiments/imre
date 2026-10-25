@@ -31,9 +31,9 @@ pub(crate) struct Classes {
     pub(crate) ids: HashMap<DefinitionId, usize>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) enum ExceptionAlias {
-    Builtin(u32),
+    Builtin { kind: u32, name: String },
     Named(DefinitionId),
 }
 
@@ -386,7 +386,10 @@ fn collect_class(
                     ));
                 }
                 if name.starts_with("__")
-                    && !matches!(name, "__init__" | "__str__" | "__bool__" | "__iter__")
+                    && !matches!(
+                        name,
+                        "__init__" | "__str__" | "__bool__" | "__iter__" | "__copy__"
+                    )
                     && !(mapping && matches!(name, "__getitem__" | "__len__" | "__contains__"))
                     && !(name == "__post_init__" && dataclass.is_some())
                     && !(name == "__repr__" && exception_layout)
@@ -426,7 +429,13 @@ fn collect_class(
                 }
                 if matches!(
                     name,
-                    "__str__" | "__repr__" | "__post_init__" | "__bool__" | "__iter__" | "__len__"
+                    "__str__"
+                        | "__repr__"
+                        | "__post_init__"
+                        | "__bool__"
+                        | "__iter__"
+                        | "__copy__"
+                        | "__len__"
                 ) && (kind != MethodKind::Instance
                     || method.parameters.len() != 1
                     || first.is_none_or(|parameter| parameter.default.is_some()))

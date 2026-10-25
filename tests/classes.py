@@ -28,6 +28,8 @@ CELL = """class Cell:
 
 
 REJECTED = {
+    "copy_hook_wrong_arity": 'import copy\nclass C:\n    def __copy__(self, extra: int) -> int: return extra\ncopy.copy(C())\n',
+    "copy_no_hook": 'import copy\nclass C:\n    pass\ncopy.copy(C())\n',
     "overridden_static_binding": "import hashlib\nclass Base:\n    make = staticmethod(hashlib.sha256)\nclass Child(Base):\n    def make(self, x: int) -> int:\n        return x\n",
     "literal_unknown_value": 'from typing import Literal\ndef f(s: Literal["a", "b"]) -> str:\n    return s\nf("c")\n',
     "literal_unproven_string": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    return s\n',
@@ -214,7 +216,7 @@ def main() -> None:
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "mapping_abc.py"]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "instance_layout.py", "shallow_copy_protocol.py", "implicit_copy.py", "mapping_abc.py"]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)
@@ -224,6 +226,8 @@ def main() -> None:
                 command = [compiler, "build", str(source), "-o", str(executable),
                            "--runtime", runtime, "--clang", clang, "--opt-level", level]
                 command += build_flags
+                if relative == "implicit_copy.py":
+                    command.append("--reachable-only")
                 if args.sanitize:
                     command.append("--sanitize")
                 require_success(run(command, temporary))

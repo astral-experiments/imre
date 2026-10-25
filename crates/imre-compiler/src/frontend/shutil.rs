@@ -3,7 +3,11 @@
 use super::*;
 
 impl Checker<'_> {
-    pub(super) fn shutil_copyfile(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+    pub(super) fn shutil_copy(
+        &mut self,
+        op: ir::CopyOperation,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let params = [
             ("src", Type::Str, ParameterKind::PositionalOrKeyword, None),
@@ -40,9 +44,18 @@ impl Checker<'_> {
                 ))
             }
         })?;
-        let result = args.values[args.order[1]].ty;
+        let dst = args.values[args.order[1]].ty;
+        let result = match op {
+            ir::CopyOperation::Mode | ir::CopyOperation::Stat | ir::CopyOperation::Xattr => {
+                Type::None
+            }
+            ir::CopyOperation::Copy | ir::CopyOperation::Copy2 if dst == Type::Path => {
+                self.types.union(&[Type::Str, Type::Path]).unwrap()
+            }
+            _ => dst,
+        };
         Ok(self.ordered_builtin(
-            Builtin::Process(ir::ProcessOperation::CopyFile),
+            Builtin::Process(ir::ProcessOperation::Copy(op)),
             result,
             args,
         ))
