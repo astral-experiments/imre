@@ -28,6 +28,43 @@ fn ordered_indices(
     Some(indices)
 }
 
+/// Tuple comparison may run out of traversal space. Merge indices in scratch
+/// storage so an error can leave the caller's list and all its owners untouched.
+unsafe fn tuple_key_order(words: &[usize], reverse: bool) -> Option<SmallVec<[usize; 4]>> {
+    let mut order = SmallVec::<[usize; 4]>::new();
+    order.try_reserve_exact(words.len()).ok()?;
+    order.extend(0..words.len());
+    let mut scratch = SmallVec::<[usize; 4]>::new();
+    scratch.try_reserve_exact(words.len()).ok()?;
+    scratch.resize(words.len(), 0);
+    let mut width = 1;
+    while width < words.len() {
+        for (input, output) in order.chunks(2 * width).zip(scratch.chunks_mut(2 * width)) {
+            let (mut left, mut right) = input.split_at(width.min(input.len()));
+            let mut slots = output.iter_mut();
+            while let (Some(&a), Some(&b)) = (left.first(), right.first()) {
+                // SAFETY: the key list roots all tuples of this exact ordered shape.
+                let cmp = unsafe {
+                    super::values::tuple_order(words[a] as *const usize, words[b] as *const usize)
+                }?;
+                let first = if (if reverse { cmp.reverse() } else { cmp }).is_le() {
+                    &mut left
+                } else {
+                    &mut right
+                };
+                *slots.next().unwrap() = first[0];
+                *first = &first[1..];
+            }
+            slots
+                .into_slice()
+                .copy_from_slice(if left.is_empty() { right } else { left });
+        }
+        std::mem::swap(&mut order, &mut scratch);
+        width *= 2;
+    }
+    Some(order)
+}
+
 /// Walks each cycle with owner-preserving swaps, marking visited indices in the permutation.
 fn permute<T>(values: &mut [T], order: &mut [usize]) {
     permute_with(values.len(), order, |a, b| values.swap(a, b));
@@ -195,13 +232,15 @@ unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> Option<SmallVe
         object(keys.cast()).0.with(|storage| {
             let values = storage.sequence();
             values.check_kind(kind);
+            if kind == 6 {
+                return tuple_key_order(&values.values, reverse);
+            }
             ordered_indices(values.values.len(), reverse, |left, right| {
                 let (left, right) = (values.values[left], values.values[right]);
                 match kind {
                     1 => left.cmp(&right),
                     10 => super::string_enums::compare(left, right),
                     3 => (&*(left as *const Str)).cmp(&*(right as *const Str)),
-                    6 => super::values::tuple_order(left as *const usize, right as *const usize),
                     8 => (&*(left as *const Bytes)).cmp(&*(right as *const Bytes)),
                     _ => fail("SystemError", "unsupported sort key representation"),
                 }

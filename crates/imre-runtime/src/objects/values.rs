@@ -19,22 +19,24 @@ const TUPLE: u32 = 1;
 const MODULE_SPEC: u32 = 2;
 
 /// Compares an exact immutable tuple lexicographically. The checker excludes
-/// nullable and float fields, so comparison is total and cannot invoke Python
-/// protocols or raise an exception partway through a native sort.
+/// nullable and float fields. Comparison can fail when reserving traversal frames.
 ///
 /// # Safety
 /// Both pointers root initialized tuples of the same exact ordered type.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_tuple_compare(left: *const usize, right: *const usize) -> i32 {
     // SAFETY: the caller proves the identical static ordered tuple shape.
-    unsafe { tuple_order(left, right) as i32 }
+    unsafe { tuple_order(left, right) }.map_or_else(
+        || super::exceptions::Error::allocation().returning(0),
+        |order| order as i32,
+    )
 }
 
 /// # Safety
 /// Both rooted tuples share a descriptor containing only ordered scalar/tuple fields.
-pub(super) unsafe fn tuple_order(left: *const usize, right: *const usize) -> Ordering {
+pub(super) unsafe fn tuple_order(left: *const usize, right: *const usize) -> Option<Ordering> {
     if left == right {
-        return Ordering::Equal;
+        return Some(Ordering::Equal);
     }
     let mut pending = Vec::new();
     let mut current = (left, right, 0);
@@ -59,6 +61,7 @@ pub(super) unsafe fn tuple_order(left: *const usize, right: *const usize) -> Ord
                     6 => {
                         // Resume the siblings only if this child compares equal.
                         if index + 1 < layout.length {
+                            pending.try_reserve(1).ok()?;
                             pending.push((left_tuple, right_tuple, index + 1));
                         }
                         current = (left as *const usize, right as *const usize, 0);
@@ -69,11 +72,11 @@ pub(super) unsafe fn tuple_order(left: *const usize, right: *const usize) -> Ord
                 }
             };
             if order != Ordering::Equal {
-                return order;
+                return Some(order);
             }
         }
         let Some(next) = pending.pop() else {
-            return Ordering::Equal;
+            return Some(Ordering::Equal);
         };
         current = next;
     }
@@ -855,12 +858,12 @@ mod tests {
                 }
             }
             let [left, right] = roots;
-            assert_eq!(tuple_order(left, right), Ordering::Equal);
+            assert_eq!(tuple_order(left, right), Some(Ordering::Equal));
             right.add(1).write(Int::small(0).unwrap().0);
-            assert_eq!(tuple_order(left, right), Ordering::Greater);
+            assert_eq!(tuple_order(left, right), Some(Ordering::Greater));
             right_leaf.write(Int::small(2).unwrap().0);
-            assert_eq!(tuple_order(left, right), Ordering::Less);
-            assert_eq!(tuple_order(right, left), Ordering::Greater);
+            assert_eq!(tuple_order(left, right), Some(Ordering::Less));
+            assert_eq!(tuple_order(right, left), Some(Ordering::Greater));
             imre_record_release(left);
             imre_record_release(right);
         }
