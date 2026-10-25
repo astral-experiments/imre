@@ -680,10 +680,12 @@ pub unsafe extern "C" fn imre_argparse_text(
 /// The compiler roots the inputs. `layout` and each descriptor in `children`
 /// match the inferred fields for that parser. The child table contains one
 /// descriptor per declared subcommand in order, or is null for a flat parser.
+/// For parse_known_args, `pair_layout` describes (namespace, list[str]); otherwise it is null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_argparse_parse(
     layout: *const RecordDescriptor,
     children: *const *const RecordDescriptor,
+    pair_layout: *const RecordDescriptor,
     schema: *const Str,
     description: *const Str,
     argv: *const Object,
@@ -711,7 +713,7 @@ pub unsafe extern "C" fn imre_argparse_parse(
         .map(|value| value.as_str())
         .collect::<Vec<_>>();
     let parsed = match parser.parse(&args).and_then(|parsed| {
-        if parsed.extras.is_empty() {
+        if !pair_layout.is_null() || parsed.extras.is_empty() {
             Ok(parsed)
         } else {
             Err(Stop::Error(
@@ -781,6 +783,21 @@ pub unsafe extern "C" fn imre_argparse_parse(
                 _ => dest.write(word),
             }
         }
-        result
+        if pair_layout.is_null() {
+            return result;
+        }
+        let mut extras = Words::new(3);
+        extras.values.extend(
+            parsed
+                .extras
+                .iter()
+                .map(|value| Rc::into_raw(Rc::new(Str::new(value))) as usize),
+        );
+        let pair = imre_record_new(pair_layout);
+        pair.cast::<*mut usize>().write(result);
+        pair.add(1)
+            .cast::<*const Object>()
+            .write(Rc::into_raw(extras.into_object()));
+        pair
     }
 }
