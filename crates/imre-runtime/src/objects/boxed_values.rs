@@ -67,6 +67,15 @@ pub(super) unsafe fn checked_text(kind: WordKind, word: usize, repr: bool) -> *c
         std::sync::LazyLock::new(|| num_bigint::BigUint::from(10u8).pow(4300));
     // SAFETY: all descendants stay rooted in the original immutable boxed value.
     unsafe {
+        if !repr
+            && kind.raw() == 5
+            && object(word as *const Object)
+                .0
+                .with(|s| matches!(s, Storage::Exception(_)))
+        {
+            // The storage borrow ends before a user-defined __str__ can be called.
+            return super::exceptions::imre_exception_message(word as *const Object);
+        }
         // A sibling cursor per ancestor keeps scratch space proportional to depth.
         let mut pending = smallvec::SmallVec::<[(WordKind, usize, usize, usize); 4]>::new();
         let mut next = (kind, word);
@@ -135,6 +144,21 @@ pub(super) fn length(kind: WordKind, word: usize) -> Option<usize> {
             _ => None,
         }
     }
+}
+
+/// Observable Python length, including containers whose members are not sequence indices.
+pub(super) fn python_length(kind: WordKind, word: usize) -> Option<usize> {
+    length(kind, word).or_else(|| {
+        if kind.raw() != 5 {
+            return None;
+        }
+        // SAFETY: this rooted object stays live for the brief storage read.
+        unsafe {
+            object(word as *const Object)
+                .0
+                .with(Storage::mapping_or_set_len)
+        }
+    })
 }
 
 /// # Safety

@@ -42,6 +42,23 @@ async def ordinary() -> None:
         saved = failures.args
         print(isinstance(saved[1], list))
         print(isinstance(saved[1], dict))
+        member = saved[1][0]
+        print(len(saved[1]))
+        print(str(member))
+        print(repr(member))
+        print(bool(member))
+        print(isinstance(member, Exception))
+        print(isinstance(member, ValueError))
+        print(isinstance(member, (str, TypeError)))
+        print(isinstance(member, (str, BaseException)))
+        try:
+            len(member)
+        except TypeError as error:
+            print(str(error))
+        try:
+            member[0]
+        except TypeError as error:
+            print(str(error))
         try:
             raise failures.exceptions[0] from failures
         except ValueError as child:

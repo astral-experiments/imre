@@ -28,6 +28,12 @@ class Marker(ValueError):
     pass
 
 
+class Reordered(ValueError):
+    def __init__(self, code: int, text: str) -> None:
+        self.code = code
+        super().__init__(text, code)
+
+
 def escape(items: list[str]) -> object:
     try:
         raise ValueError(items)
@@ -46,6 +52,10 @@ with case.assertRaises((TypeError, Marker)) as caught:
     raise Marker("We expect")
 print(caught.exception.args[0] == "We expect")
 show(caught.exception)
+try:
+    raise Reordered(7, "reordered")
+except Exception as caught_base:
+    show(caught_base)
 show(ValueError())
 show(ValueError(""))
 show(TypeError(None))
@@ -120,6 +130,55 @@ items.append("new")
 print(repr(saved))
 assert isinstance(saved, tuple)
 print(repr(saved[0]))
+print(len(saved[0]))
+print(repr(saved[0][-1]))
+print(saved[0] is items)
+
+for bad in [ValueError(1.25), ValueError(True)]:
+    scalar = bad.args[0]
+    try:
+        len(scalar)
+    except TypeError as error:
+        print(str(error))
+    try:
+        scalar[0]
+    except TypeError as error:
+        print(str(error))
+
+mapping = {3: "value"}
+mapped = ValueError(mapping).args[0]
+print(isinstance(mapped, dict))
+print(isinstance(mapped, list))
+print(bool(mapped))
+print(len(mapped))
+print(repr(mapped[3]))
+print(mapped == mapping)
+mapping.clear()
+print(len(mapped))
+print(bool(mapped))
+print(mapped == mapping)
+try:
+    mapped[3]
+except KeyError as error:
+    print(repr(error.args))
+try:
+    ValueError({"3": "different key"}).args[0][3]
+except KeyError as error:
+    print(repr(error.args))
+
+members = {3}
+held = ValueError(members).args[0]
+print(isinstance(held, set))
+print(isinstance(held, list))
+print(len(held))
+print(bool(held))
+members.discard(3)
+print(len(held))
+print(bool(held))
+try:
+    held[0]
+except TypeError as error:
+    print(str(error))
 
 imp = ImportError("old")
 prior = arguments(imp)

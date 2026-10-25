@@ -1321,6 +1321,7 @@ pub unsafe extern "C" fn imre_system_exit_code_kind(value: *const Object) -> u32
             return object(word as *const Object).0.with(|s| match s {
                 Storage::Sequence(_) => 4,
                 Storage::Dictionary(_) => 5,
+                Storage::Set(_) => 12,
                 _ => 15,
             });
         }
@@ -1392,7 +1393,10 @@ pub unsafe extern "C" fn imre_system_exit_code_equal(
             return super::errno::imre_errno_member_equal(value, other, payload);
         }
         if kind == 17 {
-            return 0;
+            return u32::from(super::boxed_values::equal(
+                exit_word(value),
+                (WordKind::new(5), word),
+            ));
         }
         if kind == 5
             && super::errno::with_nonscalar_member(object(word as *const Object), |_| ()).is_some()
@@ -1439,7 +1443,7 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
         2 => word != 1, // tagged zero
         // SAFETY: the immutable exit code owns this string.
         3 => !unsafe { &*(word as *const Str) }.is_empty(),
-        4 | 5 => super::boxed_values::length(kind, word).is_some_and(|n| n != 0),
+        4 | 5 => super::boxed_values::python_length(kind, word) != Some(0),
         7 => f64::from_bits(word as u64) != 0.0,
         // SAFETY: the view owns this exact byte buffer.
         8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),
@@ -1804,6 +1808,29 @@ pub unsafe extern "C" fn imre_exception_matches(value: *const Object, expected_k
             }
             u32::from(expected_kind < 256 && e.kind.matches(Kind::from_raw(expected_kind)))
         })
+    }
+}
+
+/// Match an exception contained in an erased field, including a task group's original member.
+///
+/// # Safety
+/// The caller roots a boxed Python value; the expected category is compiler-validated.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_field_matches(
+    value: *const Object,
+    expected_kind: u32,
+) -> u32 {
+    // SAFETY: both the view and any projected exception remain rooted across these reads.
+    unsafe {
+        let Some((kind, word)) = object(value).0.with(projected_word) else {
+            return 0;
+        };
+        let child = word as *const Object;
+        if kind.raw() == 5 && object(child).0.with(|s| matches!(s, Storage::Exception(_))) {
+            imre_exception_matches(child, expected_kind)
+        } else {
+            0
+        }
     }
 }
 

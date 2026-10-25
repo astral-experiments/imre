@@ -124,7 +124,7 @@ pub(super) fn brace_item(value: &OwnedWord, key: &str) -> Result<OwnedWord> {
         return unsafe {
             object(value.word as *const Object)
                 .0
-                .with_mut(|s| s.dictionary_mut().logging_item(&key))
+                .with_mut(|s| s.dictionary_mut().subscript_value(&key))
         }?
         .ok_or_else(|| {
             Error::new(

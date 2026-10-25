@@ -150,6 +150,7 @@ impl Emitter<'_, '_> {
                 (6, Type::Tuple(0)),
                 (7, Type::Float),
                 (8, Type::Bytes),
+                (12, Type::Set(0)),
             ]
             .iter()
             .filter(|(_, ty)| classes.iter().any(|class| class.accepts(*ty)))
@@ -160,7 +161,18 @@ impl Emitter<'_, '_> {
             ));
             let bit = self.instruction(format!("shl i32 1, {kind}"));
             let matched = self.instruction(format!("and i32 {bit}, {mask}"));
-            return self.instruction(format!("icmp ne i32 {matched}, 0"));
+            let mut matched = self.instruction(format!("icmp ne i32 {matched}, 0"));
+            for class in classes {
+                if let InstanceType::Exception(kind) = class {
+                    let child = self.instruction(format!(
+                        "call i32 @imre_exception_field_matches(ptr {}, i32 {kind})",
+                        value.operand
+                    ));
+                    let child = self.instruction(format!("icmp ne i32 {child}, 0"));
+                    matched = self.instruction(format!("or i1 {matched}, {child}"));
+                }
+            }
+            return matched;
         }
         let mut result = "false".to_owned();
         for &class in classes {

@@ -323,7 +323,19 @@ fn type_name(kind: WordKind, word: usize) -> std::borrow::Cow<'static, str> {
         1 => "bool",
         2 => "int",
         3 => "str",
-        4 | 5 => "list",
+        4 => "list",
+        5 => {
+            // SAFETY: the caller retains this concrete object's allocation.
+            return unsafe {
+                object(word as *const Object).0.with(|s| match s {
+                    Storage::Sequence(_) => "list".into(),
+                    Storage::Dictionary(_) => "dict".into(),
+                    Storage::Set(_) => "set".into(),
+                    Storage::Exception(e) => e.name().to_owned().into(),
+                    _ => "object".into(),
+                })
+            };
+        }
         6 => {
             // SAFETY: the rooted public tuple owns a descriptor with immutable UTF-8 names.
             unsafe {
@@ -354,7 +366,7 @@ pub unsafe extern "C" fn imre_exception_field_len(value: *const Object) -> usize
     }
     // SAFETY: the view retains the original value.
     let (kind, word) = unsafe { exit_word(value) };
-    match length(kind, word) {
+    match super::super::boxed_values::python_length(kind, word) {
         Some(n) => Int::from_usize(n).into_raw(),
         None => Error::new(
             Kind::TypeError,
@@ -382,6 +394,16 @@ pub unsafe extern "C" fn imre_exception_field_index(
     // SAFETY: the field and integer stay live throughout indexing.
     unsafe {
         let (kind, word) = exit_word(value);
+        if kind.raw() == 5
+            && let Some(item) = object(word as *const Object)
+                .0
+                .with_mut(|s| s.integer_subscript(index))
+        {
+            return finish(
+                item.map(|owned| view(owned.kind, owned.word)),
+                std::ptr::null(),
+            );
+        }
         let Some(len) = length(kind, word) else {
             return Error::new(
                 Kind::TypeError,
