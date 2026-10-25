@@ -62,13 +62,13 @@ pub unsafe extern "C" fn imre_codec_writer_new(
         )
     };
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::CodecWriter(
-        Writer {
+        Box::new(Writer {
             class,
             stream,
             errors: RefCell::new(errors),
             encoding: RefCell::default(),
             first: Cell::new(true),
-        },
+        }),
     )))))
 }
 

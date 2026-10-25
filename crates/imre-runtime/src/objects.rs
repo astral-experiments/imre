@@ -93,7 +93,7 @@ enum Storage {
     CsvReader(Box<csv::Reader>),
     CodecInfo(codecs::Codec),
     CodecWriterClass(codecs::writer::WriterClass),
-    CodecWriter(codecs::writer::Writer),
+    CodecWriter(Box<codecs::writer::Writer>),
     Exception(exceptions::Exception),
     ValueView(OwnedWord),
     File(Box<files::FileState>),
