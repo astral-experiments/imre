@@ -228,7 +228,12 @@ impl PartialEq for StrOwner {
 impl Eq for StrOwner {}
 
 impl WeakStr {
-    #[cfg(test)]
+    /// Compare identity without borrowing or reviving the string.
+    pub(crate) fn as_ptr(&self) -> *const Str {
+        self.0
+            .map_or(std::ptr::null(), |p| p.cast::<Str>().as_ptr())
+    }
+
     pub(crate) fn strong_count(&self) -> usize {
         // SAFETY: a live weak observer roots the counters.
         self.0.map_or(0, |p| unsafe { p.as_ref() }.strong.get())

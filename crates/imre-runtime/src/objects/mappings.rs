@@ -1964,12 +1964,21 @@ pub unsafe extern "C" fn imre_dict_len(value: *const Object) -> usize {
 /// Both inputs are rooted and `key` has the dictionary's exact key representation.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_dict_contains(value: *const Object, key: usize) -> u32 {
+    // SAFETY: the caller roots the dictionary and its exact-kind key.
+    crate::finish(unsafe { contains_key(value, key) }.map(u32::from), 0)
+}
+
+/// Test membership without invoking a missing-key policy or suppressing a key error.
+pub(super) unsafe fn contains_key(value: *const Object, key: usize) -> Result<bool, Error> {
     // SAFETY: hashing/equality cannot call user code.
-    u32::from(unsafe {
-        object(value)
-            .0
-            .with(|s| s.dictionary().tables.lookup(key).is_some())
-    })
+    unsafe {
+        object(value).0.with(|s| {
+            s.dictionary()
+                .tables
+                .try_lookup(key)
+                .map(|found| found.is_some())
+        })
+    }
 }
 unsafe fn try_lookup(value: *const Object, key: usize) -> Result<Option<OwnedWord>, Error> {
     // SAFETY: only an independently acquired value leaves storage.
@@ -1998,20 +2007,28 @@ unsafe fn missing_key(value: *const Object, key: usize) -> Error {
 /// before interpreting zero, which is also a valid nullable/scalar value.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_dict_get(value: *const Object, key: usize) -> usize {
+    // SAFETY: a missing key without a factory becomes KeyError at this boundary.
+    match unsafe { subscript(value, key) } {
+        Ok(Some(owned)) => owned.into_word(),
+        Err(error) => error.returning(0),
+        // SAFETY: both roots outlive the lookup and the error's acquisition.
+        Ok(None) => unsafe { missing_key(value, key) }.returning(0),
+    }
+}
+
+/// Follow the dictionary's missing-key policy. Only a plain missing entry
+/// returns None, allowing ChainMap to continue without constructing a KeyError.
+pub(super) unsafe fn subscript(
+    value: *const Object,
+    key: usize,
+) -> Result<Option<OwnedWord>, Error> {
     // SAFETY: this native subscription only hashes immutable keys and constructs
     // an empty builtin list, so no storage borrow crosses a user callback.
-    let owned = unsafe {
+    unsafe {
         object(value)
             .0
             .with_mut(|storage| storage.dictionary_mut().subscript(key))
-    };
-    match owned {
-        Ok(Some(owned)) => return owned.into_word(),
-        Err(error) => return error.returning(0),
-        Ok(None) => {}
     }
-    // SAFETY: input roots remain live after storage access ends.
-    unsafe { missing_key(value, key) }.returning(0)
 }
 
 /// Gathers a dictionary's integer values in Unicode code-point order without
@@ -2555,26 +2572,25 @@ unsafe fn key_filter(
                 _ => unreachable!("expected dictionary keys or set"),
             };
             let result = Rc::from_raw(imre_set_new(kind));
-            let mut inserted = Ok(());
             object(right).0.with(|right| {
-                let mut select = |key| {
+                let select = |key| {
                     let present = match right {
-                        Storage::Dictionary(dict) => dict.tables.lookup(key).is_some(),
-                        Storage::Set(set) => set.tables.lookup(key).is_some(),
+                        Storage::Dictionary(dict) => dict.tables.try_lookup(key)?.is_some(),
+                        Storage::Set(set) => set.tables.try_lookup(key)?.is_some(),
                         _ => unreachable!("expected dictionary keys or set"),
                     };
                     if present == keep_present {
-                        inserted = set_add(Rc::as_ptr(&result), key);
+                        set_add(Rc::as_ptr(&result), key)?;
                     }
-                    inserted.is_ok()
+                    Ok(())
                 };
                 match left {
-                    Storage::Dictionary(dict) => dict.tables.all(|key, _| select(key)),
-                    Storage::Set(set) => set.tables.all(|key, ()| select(key)),
+                    Storage::Dictionary(dict) => dict.tables.try_for_each(|key, _| select(key)),
+                    Storage::Set(set) => set.tables.try_for_each(|key, ()| select(key)),
                     _ => unreachable!(),
-                };
-            });
-            inserted.map(|()| Rc::into_raw(result))
+                }
+            })?;
+            Ok(Rc::into_raw(result))
         })
     };
     crate::finish(result, std::ptr::null())

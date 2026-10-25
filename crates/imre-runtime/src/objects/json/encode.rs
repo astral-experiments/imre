@@ -15,8 +15,8 @@ const PATH: u32 = 14;
 const JSON_VIEW: u32 = 15;
 const DOCUMENT: u32 = 16;
 
-type Separator<T> = Result<T, &'static str>;
-type Separators<T> = (Separator<T>, Separator<T>);
+type Separator<'a, T> = Result<T, &'a str>;
+type Separators<'a, T> = (Separator<'a, T>, Separator<'a, T>);
 
 #[derive(Clone, Copy)]
 enum Indent<'a> {
@@ -25,10 +25,10 @@ enum Indent<'a> {
 }
 
 #[derive(Default)]
-struct StandardOptions {
+struct StandardOptions<'a> {
     allow_nan: bool,
     sort_keys: bool,
-    separators: Option<Separators<StrOwner>>,
+    separators: Option<Separators<'a, StrOwner>>,
 }
 
 fn length(size: usize) -> Result<(), Error> {
@@ -47,7 +47,10 @@ fn length(size: usize) -> Result<(), Error> {
 
 /// Read both separators once. Taking string references here keeps a caller's
 /// list alive only long enough to snapshot its entries.
-unsafe fn separators(word: usize, schema: &Schema) -> Result<Option<Separators<StrOwner>>, Error> {
+unsafe fn separators(
+    word: usize,
+    schema: &Schema,
+) -> Result<Option<Separators<'_, StrOwner>>, Error> {
     fn typename(kind: u32) -> &'static str {
         match kind {
             NONE => "NoneType",
@@ -63,23 +66,45 @@ unsafe fn separators(word: usize, schema: &Schema) -> Result<Option<Separators<S
             _ => "object",
         }
     }
-    fn field(word: usize, schema: &Schema) -> (usize, u32) {
-        let kind = if schema.kind == OPTIONAL {
-            if word == 0 { NONE } else { schema.child().kind }
-        } else {
-            schema.kind
-        };
-        (word, kind)
+    fn name(schema: &Schema) -> &str {
+        if schema.kind == RECORD {
+            // SAFETY: a record schema references immutable compiler metadata. Internal
+            // records may omit the class name.
+            unsafe {
+                if let Some(info) = schema.record.as_ref().and_then(|r| r.semantics.as_ref())
+                    && info.name_len != 0
+                {
+                    return std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                        info.name,
+                        info.name_len,
+                    ));
+                }
+            }
+        }
+        typename(schema.kind)
     }
-    let part = |(word, kind)| {
+    fn part(word: usize, kind: u32) -> Separator<'static, crate::StrOwner> {
         if kind == STRING {
             // SAFETY: the descriptor identifies a string rooted by the container.
             Ok(unsafe { StrOwner::acquire_word(word) })
         } else {
             Err(typename(kind))
         }
-    };
-    let pair = |first, second| Ok(Some((part(first), part(second))));
+    }
+    fn field(word: usize, schema: &Schema) -> Separator<'_, crate::StrOwner> {
+        if schema.kind == OPTIONAL {
+            if word == 0 {
+                return Err("NoneType");
+            }
+            return field(word, schema.child());
+        }
+        if schema.kind == RECORD {
+            Err(name(schema))
+        } else {
+            part(word, schema.kind)
+        }
+    }
+    let pair = |first, second| Ok(Some((first, second)));
     // SAFETY: the caller supplies an initialized word with this exact immutable schema.
     unsafe {
         match schema.kind {
@@ -100,7 +125,7 @@ unsafe fn separators(word: usize, schema: &Schema) -> Result<Option<Separators<S
             }
             BYTES => {
                 length((&*(word as *const crate::Bytes)).len())?;
-                pair((0, INTEGER), (0, INTEGER))
+                pair(part(0, INTEGER), part(0, INTEGER))
             }
             DICTIONARY | INTEGER_DICTIONARY | SET => object(word as *const Object).0.with(|s| {
                 let (size, kind, [a, b]) = s.first_two_keys();
@@ -113,7 +138,7 @@ unsafe fn separators(word: usize, schema: &Schema) -> Result<Option<Separators<S
                     8 => BYTES,
                     _ => unreachable!("checked key storage"),
                 };
-                pair((a, kind), (b, kind))
+                pair(part(a, kind), part(b, kind))
             }),
             TUPLE => {
                 let fields = schema.fields();
@@ -136,6 +161,14 @@ unsafe fn separators(word: usize, schema: &Schema) -> Result<Option<Separators<S
                 )
             }),
             LIST => object(word as *const Object).0.with(|s| {
+                if let Some(rows) = s.sequence_storage().rows() {
+                    length(rows.len())?;
+                    // The rows stay rooted while we classify the two separators.
+                    let child = schema.child();
+                    debug_assert_eq!(child.kind, RECORD);
+                    let item = |i| field(rows.row(i).as_ptr() as usize, child);
+                    return pair(item(0), item(1));
+                }
                 let words = &s.sequence().values;
                 length(words.len())?;
                 pair(
@@ -143,13 +176,14 @@ unsafe fn separators(word: usize, schema: &Schema) -> Result<Option<Separators<S
                     field(words[1], schema.child()),
                 )
             }),
-            _ => Err(Error::new(
-                Kind::TypeError,
-                format!(
-                    "cannot unpack non-iterable {} object",
-                    typename(schema.kind)
-                ),
-            )),
+            _ => {
+                let ty = name(schema);
+                let ty = &ty[..ty.floor_char_boundary(200)];
+                Err(Error::new(
+                    Kind::TypeError,
+                    format!("cannot unpack non-iterable {ty} object"),
+                ))
+            }
         }
     }
 }
@@ -160,9 +194,9 @@ struct Encoder<'a> {
     indent: Option<Indent<'a>>,
     ensure_ascii: bool,
     sort_keys: bool,
-    separators: Option<Separators<&'a str>>,
+    separators: Option<Separators<'a, &'a str>>,
     /// A compact list combines the separator with a primitive only after rendering it.
-    pending_item_error: Option<&'static str>,
+    pending_item_error: Option<&'a str>,
     /// The first-party schema encoder rejects all non-finite numbers.
     allow_nan: Option<bool>,
     stream: Option<&'a mut FileState>,
@@ -752,7 +786,7 @@ unsafe fn encode(
     indent: usize,
     indent_text: bool,
     ensure_ascii: u32,
-    options: Option<StandardOptions>,
+    options: Option<StandardOptions<'_>>,
     stream: Option<&mut FileState>,
 ) -> Result<String, Error> {
     if options.is_some() && stream.is_none()
@@ -794,7 +828,7 @@ unsafe fn encode(
         .as_ref()
         .and_then(|o| o.separators.as_ref())
         .map(|(item, key)| {
-            fn text(value: &Separator<StrOwner>) -> Separator<&str> {
+            fn text<'a>(value: &'a Separator<'_, StrOwner>) -> Separator<'a, &'a str> {
                 value.as_ref().map(|s| s.as_str()).map_err(|&ty| ty)
             }
             (text(item), text(key))
@@ -805,10 +839,17 @@ unsafe fn encode(
         // The in-memory encoder checks the key separator first, after converting indent.
         for (field, separator) in [(5, key), (6, item)] {
             if let Err(ty) = separator {
-                return Err(Error::new(
-                    Kind::TypeError,
-                    format!("make_encoder() argument {field} must be str, not {ty}"),
-                ));
+                // The C argument parser formats at most 50 bytes of the type name
+                // and decodes the complete diagnostic as UTF-8.
+                let mut message =
+                    format!("make_encoder() argument {field} must be str, not ").into_bytes();
+                message.extend_from_slice(&ty.as_bytes()[..ty.len().min(50)]);
+                return Err(match String::from_utf8(message) {
+                    Ok(text) => Error::new(Kind::TypeError, text),
+                    Err(error) => {
+                        crate::objects::bytes::decode_error(error.as_bytes(), error.utf8_error())
+                    }
+                });
             }
         }
     }

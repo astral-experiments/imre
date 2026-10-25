@@ -341,8 +341,9 @@ pub(super) fn os_error(error: io::Error) -> Error {
     {
         return Error::new(gzip.0, gzip.to_string());
     }
+    // Read::read_to_end reports a failed Vec reservation without an OS errno.
     if error.kind() == io::ErrorKind::OutOfMemory && error.raw_os_error().is_none() {
-        return Error::allocation();
+        return Error::memory_error();
     }
     Error::new(os_error_kind(error.kind()), error.to_string())
 }
@@ -800,6 +801,23 @@ mod tests {
         imre_exception_message, imre_exception_new,
     };
     use super::super::{imre_object_release, imre_seq_append, imre_seq_new};
+
+    #[test]
+    fn buffer_allocation_failure_is_distinct_from_os_enomem() {
+        Error::memory_error().raise();
+        let empty = imre_error_take();
+        os_error(io::Error::from(io::ErrorKind::OutOfMemory)).raise();
+        let error = imre_error_take();
+        // A failed reservation must use the preallocated, argument-free exception.
+        assert_eq!(error, empty);
+        // SAFETY: each take transferred one owner of the same exception.
+        unsafe {
+            imre_object_release(error);
+            imre_object_release(empty);
+        }
+        os_error(io::Error::from_raw_os_error(libc::ENOMEM)).raise();
+        take_error(Kind::OSError);
+    }
 
     struct Directory(PathBuf);
 

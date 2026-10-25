@@ -346,13 +346,13 @@ impl Checker<'_> {
             match key {
                 "expected_exception" => {
                     if expected.is_some() {
-                        duplicate = Some(key);
+                        duplicate.get_or_insert(key);
                     }
                     expected = Some(self.unittest_expected(&keyword.value, &mut body, this)?);
                 }
                 "expected_regex" if regex => {
                     if pattern.is_some() {
-                        duplicate = Some(key);
+                        duplicate.get_or_insert(key);
                     }
                     pattern = Some(self.unittest_pattern(&keyword.value, &mut body, &mut clear)?);
                 }

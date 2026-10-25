@@ -150,10 +150,10 @@ pub(in crate::objects) struct Handler {
 }
 
 impl Handler {
-    /// The return value adjusts the ordinary interval to the next civil boundary.
+    /// Keep the daily and weekday delays separate so each float addition rounds as in Python.
     /// An omitted time means the *end* of the chosen day. Explicit 00:00 means
     /// its start, which can select a different week.
-    fn calendar_offset(&self, now: i64) -> Result<(i64, bool)> {
+    fn calendar_delays(&self, now: i64) -> Result<(i64, i64, bool)> {
         let t = civil(now, self.utc)?;
         let at = self.clock.as_ref().map_or(DAY, |clock| {
             // SAFETY: the handler retains this exact immutable time.
@@ -170,10 +170,11 @@ impl Handler {
             until += DAY;
             day = (day + 1) % 7;
         }
-        if let Period::Week(target) = self.period {
-            until += DAY * i64::from((target - day).rem_euclid(7));
-        }
-        Ok((until - self.period.seconds(), t.tm_isdst > 0))
+        let weekday_delay = match self.period {
+            Period::Week(target) => DAY * i64::from((target - day).rem_euclid(7)),
+            _ => 0,
+        };
+        Ok((until, weekday_delay, t.tm_isdst > 0))
     }
 
     fn dst_adjust(&self, dst_now: bool, target: i64) -> Result<i64> {
@@ -192,8 +193,9 @@ impl Handler {
     fn compute_int(&self, now: &Int) -> Result<Int> {
         let mut result = now.big().as_ref() + self.interval.big().as_ref();
         if matches!(self.period, Period::Midnight | Period::Week(_)) {
-            let (shift, dst) = self.calendar_offset(now.big().to_i64().ok_or_else(overflow)?)?;
-            result += shift;
+            let (until, weekday_delay, dst) =
+                self.calendar_delays(now.big().to_i64().ok_or_else(overflow)?)?;
+            result += until + weekday_delay - self.period.seconds();
             if !self.utc {
                 result += self.dst_adjust(dst, result.to_i64().ok_or_else(overflow)?)?;
             }
@@ -210,9 +212,10 @@ impl Handler {
             .ok_or_else(|| Error::new(Kind::OverflowError, "int too large to convert to float"))?;
         let mut result = now + interval;
         if matches!(self.period, Period::Midnight | Period::Week(_)) {
-            let (shift, dst) = self.calendar_offset(float_seconds(now)?)?;
-            result = (now + (shift + self.period.seconds()) as f64)
-                + (interval - self.period.seconds() as f64);
+            let (until, weekday_delay, dst) = self.calendar_delays(float_seconds(now)?)?;
+            let extra = Int::new(self.interval.big().as_ref() - self.period.seconds());
+            result =
+                (now + until as f64) + weekday_delay as f64 + crate::floats::int_to_float(&extra)?;
             if !self.utc {
                 result += self.dst_adjust(dst, float_seconds(result)?)? as f64;
             }
@@ -634,4 +637,35 @@ pub unsafe extern "C" fn imre_log_file_roll(handler: *const Object) {
         unsafe { object(handler).0.with_mut(|s| s.timed_mut().roll()) },
         (),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calendar_rollover_preserves_float_rounding() {
+        let mut handler = Handler {
+            filename: crate::StrOwner::new(Str::default()),
+            stream: None,
+            when: crate::StrOwner::new(Str::default()),
+            period: Period::Week(0),
+            interval: Int::new(BigInt::from(7 * DAY)),
+            backups: Int::small(0).unwrap(),
+            rollover_at: Int::small(0).unwrap(),
+            utc: true,
+            delay: true,
+            clock: None,
+        };
+        assert_eq!(
+            handler.compute_float(3.001332515850663e-11).ok(),
+            Some(432000.0)
+        );
+        handler.period = Period::Midnight;
+        handler.interval = Int::new(BigInt::from(17_592_186_044_387_i64) * DAY);
+        assert_eq!(
+            handler.compute_float(-1.5).ok(),
+            Some(1.5199648742349504e18)
+        );
+    }
 }

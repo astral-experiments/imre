@@ -4,6 +4,7 @@ mod config;
 mod handler;
 mod hierarchy;
 mod levels;
+pub(super) mod locks;
 pub(super) mod timed;
 
 pub(super) mod formatter;

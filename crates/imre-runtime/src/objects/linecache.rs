@@ -252,10 +252,39 @@ pub unsafe extern "C" fn imre_linecache_lines(
     update: u32,
     layout: *const records::RecordDescriptor,
 ) -> *const Object {
-    // SAFETY: cache and both strings live while the entry/lines acquire independent roots.
-    let result = CACHE.with(|cache| unsafe {
-        let name = &*name;
-        if update == 0
+    // SAFETY: cache and strings live while the entry/lines acquire independent roots.
+    let result = unsafe {
+        cached_lines(
+            &*name,
+            globals.as_ref(),
+            (&*root).as_str(),
+            &*newline,
+            env != 0,
+            update != 0,
+            layout,
+        )
+    };
+    finish(result.map(Rc::into_raw), std::ptr::null())
+}
+
+/// Read the real public cache, including mutations to its entries and source lists.
+///
+/// # Safety
+/// The immutable layout describes the standard four-field cache entry. The
+/// borrowed name and newline belong to live native Rc strings: cache misses
+/// retain those exact objects when creating a new entry.
+pub(super) unsafe fn cached_lines(
+    name: &Str,
+    globals: Option<&Object>,
+    root: &str,
+    newline: &Str,
+    env: bool,
+    update: bool,
+    layout: *const records::RecordDescriptor,
+) -> Result<Rc<Object>> {
+    // SAFETY: the typed mapping roots the entry and source list during the lookup.
+    CACHE.with(|cache| unsafe {
+        if !update
             && let Some(entry) =
                 mappings::lookup(Rc::as_ptr(cache), std::ptr::from_ref(name) as usize)
         {
@@ -265,20 +294,19 @@ pub unsafe extern "C" fn imre_linecache_lines(
         match load(
             cache,
             &crate::StrOwner::acquire_word(std::ptr::from_ref(name) as usize),
-            globals.as_ref(),
-            (&*root).as_str(),
-            &crate::StrOwner::acquire_word(newline as usize),
-            env != 0,
+            globals,
+            root,
+            &crate::StrOwner::acquire_word(std::ptr::from_ref(newline) as usize),
+            env,
             layout,
         ) {
-            Err(e) if update == 0 && e.is_kind(Kind::MemoryError) => {
+            Err(e) if !update && e.is_kind(Kind::MemoryError) => {
                 mappings::imre_dict_clear(Rc::as_ptr(cache));
                 Ok(empty())
             }
             result => result,
         }
-    });
-    finish(result.map(Rc::into_raw), std::ptr::null())
+    })
 }
 
 fn entry_field(entry: &OwnedWord, i: usize, kind: u32) -> usize {
@@ -343,9 +371,18 @@ pub unsafe extern "C" fn imre_linecache_line_int(
     n: usize,
     missing: *const Str,
 ) -> *const Str {
-    // SAFETY: input owners survive the immutable access and the return acquires its own.
-    let string = unsafe {
-        super::object(lines).0.with(|s| {
+    // SAFETY: input owners survive lookup; a missing row acquires the caller's pooled empty string.
+    StrOwner::into_raw(unsafe {
+        line_at(super::object(lines), n).unwrap_or_else(|| StrOwner::acquire_word(missing as usize))
+    })
+}
+
+/// # Safety
+/// The caller roots an exact str list and a tagged Python integer.
+pub(super) unsafe fn line_at(lines: &Object, n: usize) -> Option<crate::StrOwner> {
+    // SAFETY: the borrowed list roots each selected string until acquired.
+    unsafe {
+        lines.0.with(|s| {
             Int::borrow(n)
                 .as_small()
                 .and_then(|i| usize::try_from(i).ok()?.checked_sub(1))
@@ -353,9 +390,6 @@ pub unsafe extern "C" fn imre_linecache_line_int(
                 .map(|&word| crate::StrOwner::acquire_word(word))
         })
     }
-    // SAFETY: the caller roots the empty-string literal while a result is acquired.
-    .unwrap_or_else(|| unsafe { crate::StrOwner::acquire_word(missing as usize) });
-    StrOwner::into_raw(string)
 }
 
 /// # Safety

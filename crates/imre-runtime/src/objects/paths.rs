@@ -460,7 +460,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
         next.push_str(&part);
         // Validate at the actual lookup, so an earlier strict filesystem error
         // still precedes a later component containing a NUL.
-        check_nul(&next)?;
+        check_nul(&next, "lstat: embedded null character in path")?;
         let component_error = |error| files::errno_with_filename(error, Some(&next));
         let metadata = match fs::symlink_metadata(next.as_str()) {
             Ok(metadata) => metadata,
@@ -918,9 +918,9 @@ pub unsafe extern "C" fn imre_path_write_bytes(path: *const Object, data: *const
     finish(result, 0)
 }
 
-fn check_nul(path: &str) -> Result<()> {
+fn check_nul(path: &str, message: &'static str) -> Result<()> {
     if path.contains('\0') {
-        Err(Error::new(Kind::ValueError, "embedded null byte"))
+        Err(Error::new(Kind::ValueError, message))
     } else {
         Ok(())
     }
@@ -998,7 +998,7 @@ pub unsafe extern "C" fn imre_path_mkdir(
     let result = unsafe {
         object(path).0.with(|storage| {
             let path = storage.path();
-            check_nul(path)?;
+            check_nul(path, "mkdir: embedded null character in path")?;
             let mode = Int::borrow(mode).big().to_i32().ok_or_else(|| {
                 Error::new(
                     Kind::OverflowError,
@@ -1019,7 +1019,7 @@ pub unsafe extern "C" fn imre_path_unlink(path: *const Object, missing_ok: u32) 
     // SAFETY: unlink has no language callbacks and the immutable path stays live.
     let result = unsafe {
         object(path).0.with(|storage| {
-            check_nul(storage.path())?;
+            check_nul(storage.path(), "unlink: embedded null character in path")?;
             match fs::remove_file(storage.path()) {
                 Err(error) if missing_ok != 0 && error.kind() == io::ErrorKind::NotFound => Ok(()),
                 result => result.map_err(files::os_error),
@@ -1037,7 +1037,7 @@ pub unsafe extern "C" fn imre_path_rmdir(path: *const Object) {
     // SAFETY: the rooted spelling is borrowed only for synchronous I/O.
     let result = unsafe {
         object(path).0.with(|storage| {
-            check_nul(storage.path())?;
+            check_nul(storage.path(), "rmdir: embedded null character in path")?;
             fs::remove_dir(storage.path()).map_err(files::os_error)
         })
     };
@@ -1056,8 +1056,8 @@ pub unsafe extern "C" fn imre_path_replace(
     // SAFETY: the roots remain live throughout rename and target normalization.
     let result = unsafe {
         object(path).0.with(|storage| {
-            check_nul(storage.path())?;
-            check_nul(&*target)?;
+            check_nul(storage.path(), "replace: embedded null character in src")?;
+            check_nul(&*target, "replace: embedded null character in dst")?;
             fs::rename(storage.path(), (&*target).as_str()).map_err(files::os_error)?;
             Ok(new_path(normalize(&*target)))
         })
