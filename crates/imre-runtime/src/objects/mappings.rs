@@ -7,6 +7,7 @@
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 use std::sync::LazyLock;
 
+mod counters;
 mod record_hash;
 mod sorted_rows;
 
@@ -509,6 +510,13 @@ macro_rules! table {
 }
 
 impl<V: Copy> Tables<V> {
+    fn try_for_each(
+        &self,
+        mut visit: impl FnMut(usize, V) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        table!(self, table => table.entries.iter().flatten().try_for_each(|entry| visit(entry.key.word(), entry.value)))
+    }
+
     /// Visits borrowed key/value words in insertion order without acquiring keys.
     /// The predicate may inspect other immutable acyclic containers, not mutate
     /// this table or retain a storage reference after the visit.
@@ -770,13 +778,17 @@ impl Mapping {
         keys
     }
 
-    /// Borrowed document values stay rooted by the unmodified mapping.
-    pub(super) fn document_values(&self) -> impl Iterator<Item = usize> + '_ {
+    /// Borrowed document entries stay rooted by the unmodified mapping.
+    pub(super) fn document_entries(&self) -> impl Iterator<Item = (&Str, usize)> + '_ {
         assert_eq!(self.value_kind.raw(), 5);
         let Tables::Str(table) = &self.tables else {
             unreachable!("expected a string-keyed document");
         };
-        table.entries.iter().flatten().map(|entry| entry.value)
+        table
+            .entries
+            .iter()
+            .flatten()
+            .map(|entry| (entry.key.as_ref(), entry.value))
     }
 
     pub(super) fn document_pairs(&self) -> Vec<(Rc<Str>, Rc<Object>)> {
