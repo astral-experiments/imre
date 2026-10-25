@@ -6,6 +6,7 @@ use crate::finish;
 use crate::objects::mappings::imre_dict_new;
 use crate::objects::{Object, Storage, StorageCell, Str, acquire_rc, object};
 
+/// Construct a default decoder with a fresh Python-visible memo dictionary.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_json_decoder_new() -> *const Object {
     // SAFETY: a fresh string/string dictionary transfers its sole owner to this instance.
@@ -37,6 +38,8 @@ pub unsafe extern "C" fn imre_json_decoder_decode(
     _decoder: *const Object,
     text: *const Str,
 ) -> *const Object {
+    // The default decoder interns keys within each scan. A caller can retain
+    // or mutate its public memo without changing the parser's key owners.
     // JSONDecoder.decode treats U+FEFF as an ordinary invalid token. Only the
     // module-level loads entry checks for it before scanning a Unicode input.
     // SAFETY: the caller roots the text; only an exception needs another owner.
