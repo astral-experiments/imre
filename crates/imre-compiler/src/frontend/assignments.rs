@@ -521,6 +521,8 @@ impl Checker<'_> {
     /// or helper functions before their actual source evaluation point.
     pub(super) fn assignment_context(&self, target: &ast::Expr) -> Option<Type> {
         let helpers = Helpers::new(0);
+        let omitted_locals = self.omitted_assert_locals.clone();
+        let omitted_free = self.omitted_assert_free.clone();
         let mut probe = Checker::new(
             self.graph,
             self.module,
@@ -530,6 +532,8 @@ impl Checker<'_> {
             &helpers,
             self.globals,
         );
+        probe.omitted_assert_locals = omitted_locals;
+        probe.omitted_assert_free = omitted_free;
         probe.returns = self.returns;
         probe.class = self.class;
         probe.class_receiver = self.class_receiver.clone();

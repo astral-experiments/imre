@@ -9,6 +9,9 @@ use super::{Object, fail, words::WordKind};
 pub(super) mod strings;
 pub(super) mod weak;
 
+// Keep the first queue block available even when destruction cannot allocate.
+type ReleaseQueue = RefCell<smallvec::SmallVec<[Release; 4]>>;
+
 enum Release {
     Fields(*const usize, usize),
     Record(*const usize),
@@ -20,7 +23,7 @@ enum Release {
 thread_local! {
     // The outer release owns the queue on its stack. This slot has no TLS
     // destructor, so records can also be released during thread teardown.
-    static PENDING_RELEASES: Cell<*const RefCell<Vec<Release>>> = const { Cell::new(std::ptr::null()) };
+    static PENDING_RELEASES: Cell<*const ReleaseQueue> = const { Cell::new(std::ptr::null()) };
 }
 
 /// Compiler-emitted immutable metadata; every field occupies one eight-byte word.
@@ -503,7 +506,7 @@ fn release(owner: Release) {
         {
             return;
         }
-        let pending = RefCell::new(Vec::new());
+        let pending = ReleaseQueue::default();
         slot.set(&pending);
         let mut current = owner;
         loop {
@@ -545,7 +548,7 @@ fn release(owner: Release) {
 
 /// # Safety
 /// The caller transfers one live record owner on its execution thread.
-unsafe fn release_record_owner(payload: *const usize, pending: &RefCell<Vec<Release>>) {
+unsafe fn release_record_owner(payload: *const usize, pending: &ReleaseQueue) {
     // SAFETY: the payload follows its live header, and this thread owns access.
     let header = unsafe { &*payload.cast::<Header>().sub(1) };
     let count = header.references.get();
@@ -576,11 +579,20 @@ unsafe fn release_standalone_fields(
     payload: *const usize,
     descriptor: &RecordDescriptor,
     mut next: usize,
-    pending: &RefCell<Vec<Release>>,
+    pending: &ReleaseQueue,
 ) {
-    let siblings = pending.borrow().len();
+    let (siblings, room) = {
+        let queue = pending.borrow();
+        (queue.len(), queue.capacity() - queue.len())
+    };
     while next < descriptor.length {
-        let end = (next + 32).min(descriptor.length);
+        // Leave room for the continuation when this batch cannot finish the record.
+        let batch = if descriptor.length - next <= room {
+            room
+        } else {
+            room.saturating_sub(1)
+        };
+        let end = (next + batch.clamp(1, 32)).min(descriptor.length);
         // SAFETY: this frame owns the untouched fields starting at next.
         unsafe { release_fields::<false>(payload, descriptor, next..end) };
         next = end;
