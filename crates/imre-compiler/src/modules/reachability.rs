@@ -13,6 +13,8 @@ pub(super) struct Reachable {
     pub(super) definitions: HashSet<DefinitionId>,
     pub(super) methods: HashSet<(ModuleId, TextSize)>,
     pub(super) skipped: Vec<Vec<TextRange>>,
+    pub(super) unused_literals: HashSet<DefinitionId>,
+    value_reads: HashSet<DefinitionId>,
     attributes: HashSet<String>,
     properties: HashSet<String>,
     class_attributes: HashSet<(DefinitionId, String)>,
@@ -38,6 +40,11 @@ impl<'a> Visitor<'a> for References<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        if !matches!(expr, ast::Expr::Name(n) if n.ctx == ast::ExprContext::Store)
+            && let Some(Binding::Value(id)) = self.graph.resolve(self.module, expr)
+        {
+            self.found.value_reads.insert(id);
+        }
         if let Some(Binding::Definition(id)) = self.graph.resolve_type(self.module, expr) {
             self.found.definitions.insert(id);
         }
@@ -162,6 +169,18 @@ impl Reachable {
             let mut skipped = graph.entry_profile.ranges(module).collect::<Vec<_>>();
             for (statement, node) in source.parsed.syntax().body.iter().enumerate() {
                 let id = DefinitionId { module, statement };
+                if module != graph.entry
+                    && !found.value_reads.contains(&id)
+                    && super::value_name(node)
+                        .is_some_and(|name| source.bindings.get(name) == Some(&Binding::Value(id)))
+                    && super::module_value(node).is_some_and(inert_literal)
+                    && (!matches!(node, ast::Stmt::AnnAssign(a) if
+                        !super::type_aliases::static_type(&graph.modules, module, &a.annotation)))
+                {
+                    found.unused_literals.insert(id);
+                    skipped.push(node.range());
+                    continue;
+                }
                 match node {
                     ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)
                         if !found.definitions.contains(&id) =>
@@ -186,6 +205,21 @@ impl Reachable {
     }
 }
 
+/// Building these literals only allocates builtin storage. A dict or set still
+/// hashes every key at import time: a nested list/dict/set there must not be elided.
+fn inert_literal(expr: &ast::Expr) -> bool {
+    match expr {
+        ast::Expr::Tuple(t) => t.elts.iter().all(inert_literal),
+        ast::Expr::List(l) => l.elts.iter().all(inert_literal),
+        ast::Expr::Set(s) => s.elts.iter().all(literal),
+        ast::Expr::Dict(d) => d
+            .items
+            .iter()
+            .all(|i| i.key.as_ref().is_some_and(literal) && inert_literal(&i.value)),
+        _ => literal(expr),
+    }
+}
+
 fn known_decorator(graph: &SourceGraph, module: ModuleId, expr: &ast::Expr) -> bool {
     let callee = if let ast::Expr::Call(call) = expr {
         &*call.func
@@ -200,6 +234,7 @@ fn known_decorator(graph: &SourceGraph, module: ModuleId, expr: &ast::Expr) -> b
                 | Intrinsic::ContextManager
                 | Intrinsic::CachedProperty
                 | Intrinsic::FunctionCache
+                | Intrinsic::LruCache
         ))
     ) || matches!(expr, ast::Expr::Name(name) if matches!(name.id.as_str(), "property" | "classmethod" | "staticmethod") && graph.resolve(module, expr).is_none())
 }
@@ -473,6 +508,33 @@ run()
         assert!(
             reachable(&source.replace("print(Used().value())", "print(Used().unused())")).is_err()
         );
+    }
+
+    #[test]
+    fn only_unread_literal_module_storage_can_be_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("main.py");
+        let library = dir.path().join("library.py");
+        let check = |program: &str, body: &str| {
+            std::fs::write(&entry, program).unwrap();
+            std::fs::write(&library, body).unwrap();
+            crate::check_file_with_options(
+                &entry,
+                None,
+                &CompileOptions {
+                    reachable_only: true,
+                    ..Default::default()
+                },
+            )
+        };
+        let body = "from collections.abc import Mapping\nTABLE: Mapping[tuple[str, str], str] = {('a','b'): 'value'}\n";
+        check("import library\nprint(1)\n", body).unwrap();
+        // A read even through an import alias keeps its initialization and type check.
+        assert!(check("from library import TABLE as x\nprint(len(x))\n", body).is_err());
+        // Both produce an observable error despite their result never being read.
+        assert!(check("import library\n", "TABLE = {([],): 'value'}\n").is_err());
+        assert!(check("import library\n", "TABLE = [globals()]\n").is_err());
+        assert!(check("import library\n", "TABLE: missing() = []\n").is_err());
     }
 
     #[test]

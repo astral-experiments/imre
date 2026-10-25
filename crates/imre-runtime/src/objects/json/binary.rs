@@ -1,8 +1,12 @@
 //! Detect the encoding of binary JSON before handing text to the standard reader.
 
 use std::borrow::Cow;
+use std::rc::Rc;
 
-use crate::objects::{Object, bytes::decode_error};
+use crate::objects::{
+    Object, acquire_rc,
+    bytes::{decode_error, decode_owned_error},
+};
 use crate::{Bytes, Error, Kind, finish};
 
 #[derive(Clone, Copy)]
@@ -30,14 +34,18 @@ impl Encoding {
     }
 }
 
-fn decode(bytes: &[u8]) -> Result<Cow<'_, str>, Error> {
+fn decode(bytes: &Rc<Bytes>) -> Result<Cow<'_, str>, Error> {
     let (encoding, mut pos) = Encoding::detect(bytes);
     let (width, little, codec) = match encoding {
         Encoding::Utf8 => {
             let data = &bytes[pos..];
-            return std::str::from_utf8(data)
-                .map(Cow::Borrowed)
-                .map_err(|err| decode_error(data, err));
+            return std::str::from_utf8(data).map(Cow::Borrowed).map_err(|err| {
+                if pos == 0 {
+                    decode_owned_error(Rc::clone(bytes), err)
+                } else {
+                    decode_error(data, err)
+                }
+            });
         }
         Encoding::Utf16(little) => (2, little, if little { "utf-16-le" } else { "utf-16-be" }),
         Encoding::Utf32(little) => (4, little, if little { "utf-32-le" } else { "utf-32-be" }),
@@ -111,8 +119,23 @@ fn decode(bytes: &[u8]) -> Result<Cow<'_, str>, Error> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_json_loads_bytes(bytes: *const Bytes) -> *const Object {
     // SAFETY: the caller supplies live immutable bytes until the parse completes.
-    let result = decode(unsafe { &*bytes }).and_then(|text| {
-        super::readonly::loads(&text, || std::rc::Rc::new(crate::Str::from(text.as_ref())))
+    let bytes = unsafe { acquire_rc::<Bytes>(bytes as usize) };
+    let result = decode(&bytes).and_then(|text| {
+        super::readonly::loads(&text, || Rc::new(crate::Str::from(text.as_ref())))
     });
     finish(result, std::ptr::null())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_utf8_retains_the_original_bytes() {
+        let bytes = Rc::new(vec![0xff]);
+        let error = decode(&bytes).unwrap_err();
+        assert_eq!(Rc::strong_count(&bytes), 2);
+        drop(error);
+        assert_eq!(Rc::strong_count(&bytes), 1);
+    }
 }
