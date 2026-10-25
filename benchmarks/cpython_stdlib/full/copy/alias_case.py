@@ -123,7 +123,7 @@ def memo_case(tools, work, method):
                 fresh.run(result)
             if result.errors or len(result.failures) != 1 or expected not in result.failures[0][1]:
                 raise AssertionError(f"{case.id()}: {label} did not fail {expected}")
-            rejected[label] = expected
+            rejected[label] = {"assertion": expected, "failure": result.failures[0][1].splitlines()[-1]}
 
         # The upstream leaves are empty: check nonempty values and later
         # mutation separately, without counting another upstream occurrence.
