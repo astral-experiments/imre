@@ -62,6 +62,7 @@ pub(crate) enum Type {
     Sha256,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
+    ZipInfo,
     RegexMatch,
     /// Immutable selections from decoded JSON. Only the object form has a source annotation.
     JsonRoot,
@@ -151,6 +152,7 @@ impl std::fmt::Display for Type {
             Self::Logger => "logging.Logger",
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
+            Self::ZipInfo => "zipfile.ZipInfo",
             Self::RegexMatch => "re.Match[str]",
             Self::JsonRoot => "JSON document",
             Self::JsonValue => "JSON value",
@@ -407,6 +409,18 @@ pub(crate) enum Compare {
     GreaterEqual,
 }
 
+/// Public ZIP entry metadata read from the central directory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ZipField {
+    Name,
+    Size,
+    CompressedSize,
+    Crc,
+    Method,
+    ExternalAttr,
+    IsDir,
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     DirectoryContextView,
@@ -545,6 +559,18 @@ pub(crate) enum Builtin {
         hex: bool,
     },
     Sha256Copy,
+    BytesIo,
+    BinarySeek,
+    BinaryTell,
+    ZipOpenFile,
+    ZipGetInfo,
+    ZipInfoList,
+    ZipMember,
+    ZipRead,
+    ZipTest,
+    ZipFilename,
+    ZipMinReadSize,
+    ZipField(ZipField),
     ZipOpen,
     ZipNamelist,
     ZipClose,
@@ -652,6 +678,7 @@ pub(crate) enum Builtin {
     KeyUnion,
     KeySet,
     KeyIntersection,
+    KeyDifference,
     /// Produces sorted unique string keys from a small union of local dictionaries.
     SortedStringKeys,
     /// Each generated field reads the sorted key (0) or one input dictionary (1-based).
@@ -772,6 +799,9 @@ pub(crate) enum PathOperation {
     OsExists,
     New,
     Join,
+    Match {
+        full: bool,
+    },
     WithName,
     Text,
     Name,
@@ -811,6 +841,7 @@ pub(crate) enum PathOperation {
 pub(crate) enum PosixPathOperation {
     Join,
     MixedJoin { path_in_tail: bool },
+    Commonpath,
     Basename,
     Dirname,
     Splitext,

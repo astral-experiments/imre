@@ -42,7 +42,6 @@ REJECTED = {
     "numeric_string_conversion": 'print(f"{1!s:.2f}")\n',
     "numeric_string_field": "print(f\"{'text':.2f}\")\n",
     "dict_field": 'values = {1: 2}\nprint(f"{values}")\n',
-    "set_field": 'values = {1}\nprint(f"{values}")\n',
     "tuple_field": 'print(f"{(1, 2)}")\n',
     "optional_integer_field": 'def render(value: int | None) -> str:\n    return f"{value}"\nprint(render(1))\n',
     "builtin_rebinding": 'def render() -> None:\n    str = 101\n    print(f"{str!s}")\nrender()\n',

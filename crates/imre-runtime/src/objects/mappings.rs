@@ -1145,6 +1145,9 @@ pub unsafe extern "C" fn imre_counter_subset(
     right: *const Object,
     strict: u32,
 ) -> u32 {
+    if left == right {
+        return u32::from(strict == 0);
+    }
     // SAFETY: immutable visits borrow only rooted keys and integer counts.
     u32::from(unsafe {
         object(left).0.with(|a| {
@@ -1598,6 +1601,28 @@ pub unsafe extern "C" fn imre_key_intersection(
     left: *const Object,
     right: *const Object,
 ) -> *const Object {
+    // SAFETY: both checked inputs remain rooted across the filter.
+    unsafe { key_filter(left, right, true) }
+}
+
+/// Returns keys in the left set or dictionary view that the right does not contain.
+///
+/// # Safety
+/// Both operands must remain rooted and share the same immutable key type.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_key_difference(
+    left: *const Object,
+    right: *const Object,
+) -> *const Object {
+    // SAFETY: both checked inputs remain rooted across the filter.
+    unsafe { key_filter(left, right, false) }
+}
+
+unsafe fn key_filter(
+    left: *const Object,
+    right: *const Object,
+    keep_present: bool,
+) -> *const Object {
     // SAFETY: the operands are immutably borrowed. All inserts target the fresh
     // result, and exact scalar key hashing cannot reenter user code.
     unsafe {
@@ -1615,7 +1640,7 @@ pub unsafe extern "C" fn imre_key_intersection(
                         Storage::Set(set) => set.tables.lookup(key).is_some(),
                         _ => unreachable!("expected dictionary keys or set"),
                     };
-                    if present {
+                    if present == keep_present {
                         imre_set_add(result, key);
                     }
                     true

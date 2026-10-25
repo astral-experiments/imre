@@ -77,6 +77,7 @@ impl Type {
             | Self::Logger
             | Self::Sha256
             | Self::ZipFile
+            | Self::ZipInfo
             | Self::RegexPattern
             | Self::JsonRoot
             | Self::JsonValue
@@ -122,6 +123,7 @@ impl Type {
             | Self::Logger
             | Self::Sha256
             | Self::ZipFile
+            | Self::ZipInfo
             | Self::RegexPattern
             | Self::JsonRoot
             | Self::JsonValue
@@ -694,6 +696,7 @@ impl Emitter<'_, '_> {
             | Type::Logger
             | Type::Sha256
             | Type::ZipFile
+            | Type::ZipInfo
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -2550,8 +2553,9 @@ impl Emitter<'_, '_> {
             )
         });
         let (scratch, count, owners) = self.concat_parts(expressions[1..].to_vec());
-        let left = self.take_slot(slot);
-        self.forget(&left);
+        // Each append consumes the slot's reference only on success. A failed
+        // reserve leaves the original owner available to handlers and cleanup.
+        let left = self.borrow_slot(slot);
         let instruction = if let [_, suffix] = expressions.as_slice()
             && let ExprKind::Str(value) = &suffix.kind
             && value.len() > INLINE_CONCAT_LITERAL
@@ -2584,16 +2588,11 @@ impl Emitter<'_, '_> {
                 left.operand
             )
         };
-        let value = Value {
-            ty: Type::Str,
-            operand: self.instruction(instruction),
-            small_integer: false,
-        };
-        let value = self.owned(value);
+        let result = self.checked_pointer(instruction);
+        self.line(format!("store ptr {result}, ptr %local{slot}"));
         for owner in &owners {
             self.release_operand(owner);
         }
-        self.store(slot, &value);
         true
     }
 
@@ -2601,8 +2600,7 @@ impl Emitter<'_, '_> {
     /// source order and computed values stay owned across later mutation/errors;
     /// literal spans need no runtime string owner. Exact str(Int) conversions
     /// still run at their source position, using stack bytes or an owned BigInt
-    /// string. Allocation failure is fatal, so removed allocations cannot raise
-    /// a caught error.
+    /// string. The completed result is published only after allocation succeeds.
     /// Unique entry-block scratch avoids loop stack growth and nested overwrite.
     fn concat(&mut self, expression: &Expr) -> Value {
         let expressions = concat_leaves(expression);
@@ -2625,7 +2623,7 @@ impl Emitter<'_, '_> {
         let (scratch, count, owners) = self.concat_parts(expressions);
         let value = Value {
             ty: Type::Str,
-            operand: self.instruction(format!(
+            operand: self.checked_pointer(format!(
                 "call ptr @imre_str_concat_parts(ptr {scratch}, i64 {count})"
             )),
             small_integer: false,
@@ -3193,7 +3191,7 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {result}, 0"))
                 }
-                Type::Path | Type::List(_) | Type::Dict(_) => {
+                Type::Path | Type::List(_) | Type::Dict(_) | Type::Set(_) => {
                     let operation = if left.ty == Type::Path {
                         "path"
                     } else {
@@ -3260,6 +3258,7 @@ impl Emitter<'_, '_> {
                 | Type::Class(_)
                 | Type::Sha256
                 | Type::ZipFile
+                | Type::ZipInfo
                 | Type::Exception
                 | Type::ExitCode
                 | Type::TimeoutExpired
@@ -3272,7 +3271,6 @@ impl Emitter<'_, '_> {
                     right.operand
                 )),
                 Type::ListInt
-                | Type::Set(_)
                 | Type::StringKeys
                 | Type::Iterator
                 | Type::ByteOutput
@@ -4062,6 +4060,81 @@ impl Emitter<'_, '_> {
                 self.call(symbol, returns, &[&args[0].value])
             }
             Builtin::Sha256Copy => self.call("imre_sha256_copy", Type::Sha256, &[&args[0].value]),
+            Builtin::BytesIo => self.call("imre_bytes_io", returns, &[&args[0].value]),
+            Builtin::BinarySeek => self.call(
+                "imre_binary_seek",
+                returns,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
+            Builtin::BinaryTell => self.call("imre_binary_tell", returns, &[&args[0].value]),
+            Builtin::ZipOpenFile => self.call("imre_zip_open_file", returns, &[&args[0].value]),
+            Builtin::ZipGetInfo => self.call(
+                "imre_zip_getinfo",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::ZipInfoList => self.call("imre_zip_infolist", returns, &[&args[0].value]),
+            Builtin::ZipMember | Builtin::ZipRead => {
+                let name = if matches!(builtin, Builtin::ZipMember) {
+                    "imre_zip_member"
+                } else {
+                    "imre_zip_read"
+                };
+                let is_info = u8::from(args[1].value.ty == Type::ZipInfo);
+                let operand = self.checked_instruction(format!(
+                    "call ptr @{name}(ptr {}, ptr {}, i32 {is_info})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
+            Builtin::ZipTest | Builtin::ZipFilename => {
+                let name = if matches!(builtin, Builtin::ZipTest) {
+                    "imre_zip_test"
+                } else {
+                    "imre_zip_filename"
+                };
+                // A null pointer represents a successful None; inspect the pending error separately.
+                let raw = self.checked_instruction(format!(
+                    "call ptr @{name}(ptr {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!("ptrtoint ptr {raw} to i64")),
+                    small_integer: false,
+                }
+            }
+            Builtin::ZipMinReadSize => {
+                self.void_call("imre_zip_min_read_size", &[&args[1].value, &args[0].value]);
+                none()
+            }
+            Builtin::ZipField(field) => {
+                use crate::ir::ZipField::*;
+                let name = match field {
+                    Name => "imre_zip_info_name",
+                    Size => "imre_zip_info_size",
+                    CompressedSize => "imre_zip_info_compress_size",
+                    Crc => "imre_zip_info_crc",
+                    Method => "imre_zip_info_method",
+                    ExternalAttr => "imre_zip_info_external_attr",
+                    IsDir => "imre_zip_info_is_dir",
+                };
+                if matches!(field, IsDir) {
+                    let word = self
+                        .instruction(format!("call i32 @{name}(ptr {})", args[0].value.operand));
+                    Value {
+                        ty: returns,
+                        operand: self.instruction(format!("icmp ne i32 {word}, 0")),
+                        small_integer: false,
+                    }
+                } else {
+                    self.call(name, returns, &[&args[0].value])
+                }
+            }
             Builtin::ZipOpen => self.call("imre_zip_open", returns, &[&args[0].value]),
             Builtin::ZipNamelist => self.call("imre_zip_namelist", returns, &[&args[0].value]),
             Builtin::ZipClose => {
@@ -4459,11 +4532,14 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_counter_update", &[&args[0].value, &args[1].value]);
                 none()
             }
-            Builtin::KeyUnion | Builtin::KeySet | Builtin::KeyIntersection => {
-                let function = if matches!(builtin, Builtin::KeyIntersection) {
-                    "imre_key_intersection"
-                } else {
-                    "imre_key_union"
+            Builtin::KeyUnion
+            | Builtin::KeySet
+            | Builtin::KeyIntersection
+            | Builtin::KeyDifference => {
+                let function = match builtin {
+                    Builtin::KeyDifference => "imre_key_difference",
+                    Builtin::KeyIntersection => "imre_key_intersection",
+                    _ => "imre_key_union",
                 };
                 self.call(
                     function,
@@ -4727,6 +4803,7 @@ impl Emitter<'_, '_> {
                     | Type::Logger
                     | Type::Sha256
                     | Type::ZipFile
+                    | Type::ZipInfo
                     | Type::RegexPattern
                     | Type::JsonRoot
                     | Type::JsonValue
@@ -4947,6 +5024,7 @@ impl Emitter<'_, '_> {
             | Type::Logger
             | Type::Sha256
             | Type::ZipFile
+            | Type::ZipInfo
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -5003,6 +5081,7 @@ impl Emitter<'_, '_> {
             | Type::Logger
             | Type::Sha256
             | Type::ZipFile
+            | Type::ZipInfo
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -5469,7 +5548,16 @@ const INLINE_CONCAT_LITERAL: usize = 3 * size_of::<usize>();
 fn concat_leaves(expression: &Expr) -> Vec<&Expr> {
     fn visit<'a>(expression: &'a Expr, output: &mut Vec<&'a Expr>) {
         if let ExprKind::Binary(Binary::Concat, left, right) = &expression.kind {
-            visit(left, output);
+            // A completed left addition can raise before the right operand runs.
+            // Only move its allocation past an immutable read or a literal.
+            if matches!(
+                right.kind,
+                ExprKind::Str(_) | ExprKind::Local(_) | ExprKind::Builtin(Builtin::GlobalGet(_), _)
+            ) {
+                visit(left, output);
+            } else {
+                output.push(left);
+            }
             visit(right, output);
         } else {
             debug_assert_eq!(expression.ty, Type::Str);
@@ -5549,6 +5637,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Logger
         | Type::Sha256
         | Type::ZipFile
+        | Type::ZipInfo
         | Type::RegexPattern
         | Type::JsonRoot
         | Type::JsonValue
@@ -5732,6 +5821,7 @@ declare ptr @imre_posix_join_error(i32)
 declare ptr @imre_posix_component(ptr, i32, i32)
 declare void @imre_posix_splitext(ptr, i32, ptr)
 declare ptr @imre_posix_normalize(ptr, i32, i32)
+declare i64 @imre_posix_commonpath(ptr, i32)
 declare i32 @imre_path_is_absolute(ptr)
 declare ptr @imre_path_absolute(ptr)
 declare ptr @imre_path_resolve(ptr, i32)
@@ -5746,6 +5836,7 @@ declare ptr @imre_sysconfig_scripts()
 declare i32 @imre_path_text_exists(ptr)
 declare i32 @imre_path_exists(ptr)
 declare i32 @imre_path_is_file(ptr)
+declare i32 @imre_path_match(ptr, ptr, i64, i32)
 declare i32 @imre_path_is_dir(ptr)
 declare i32 @imre_path_equal(ptr, ptr)
 declare ptr @imre_path_read_bytes(ptr)
@@ -5800,6 +5891,24 @@ declare void @imre_sha256_update(ptr, ptr)
 declare ptr @imre_sha256_digest(ptr)
 declare ptr @imre_sha256_hexdigest(ptr)
 declare ptr @imre_sha256_copy(ptr)
+declare ptr @imre_bytes_io(ptr)
+declare i64 @imre_binary_seek(ptr, i64, i64)
+declare i64 @imre_binary_tell(ptr)
+declare ptr @imre_zip_open_file(ptr)
+declare ptr @imre_zip_getinfo(ptr, ptr)
+declare ptr @imre_zip_infolist(ptr)
+declare ptr @imre_zip_member(ptr, ptr, i32)
+declare ptr @imre_zip_read(ptr, ptr, i32)
+declare ptr @imre_zip_test(ptr)
+declare ptr @imre_zip_filename(ptr)
+declare void @imre_zip_min_read_size(ptr, i64)
+declare ptr @imre_zip_info_name(ptr)
+declare i64 @imre_zip_info_size(ptr)
+declare i64 @imre_zip_info_compress_size(ptr)
+declare i64 @imre_zip_info_crc(ptr)
+declare i64 @imre_zip_info_method(ptr)
+declare i64 @imre_zip_info_external_attr(ptr)
+declare i32 @imre_zip_info_is_dir(ptr)
 declare ptr @imre_zip_open(ptr)
 declare ptr @imre_zip_namelist(ptr)
 declare void @imre_zip_close(ptr)
@@ -5930,6 +6039,7 @@ declare i64 @imre_dict_sum_values(ptr, i64)
 declare i64 @imre_counter_total(ptr)
 declare i32 @imre_counter_subset(ptr, ptr, i32)
 declare ptr @imre_key_union(ptr, ptr)
+declare ptr @imre_key_difference(ptr, ptr)
 declare ptr @imre_key_intersection(ptr, ptr)
 declare ptr @imre_sorted_string_keys(ptr, i64)
 declare ptr @imre_sorted_record_rows(ptr, i64, ptr, ptr)
@@ -6473,6 +6583,23 @@ mod tests {
         assert_eq!(llvm.matches("call i64 @imre_int_literal(").count(), 1);
         assert!(llvm.contains("call void @imre_bytes_release(ptr %literal_"));
         assert!(llvm.contains("call void @imre_int_release(i64 %literal_"));
+    }
+
+    #[test]
+    fn string_allocation_precedes_later_addition_operands() {
+        let body = |expression: &str| {
+            function_body(&format!(
+                "def join(a: str, b: str) -> str:\n    return {expression}\ndef later() -> str:\n    print(1)\n    return 'end'\nprint(join('a', 'b'))\n"
+            ))
+        };
+        let addition = body("a + b + later()");
+        let (prefix, _) = addition.split_once("call ptr @fn_1(").unwrap();
+        assert!(prefix.contains("call ptr @imre_str_concat("));
+        assert!(prefix.contains("call i32 @imre_error_pending()"));
+
+        let formatted = body("f'{a}{b}{later()}'");
+        let (_, suffix) = formatted.split_once("call ptr @fn_1(").unwrap();
+        assert!(suffix.contains("call ptr @imre_str_concat_parts("));
     }
 
     #[test]
