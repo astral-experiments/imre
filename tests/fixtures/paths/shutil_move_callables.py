@@ -17,7 +17,8 @@ source = Path('source')
 target = Path('target')
 source.write_bytes(b'payload')
 move_path(shutil.move, source, target)
-print(target.read_bytes(), source.exists())
+print(repr(target.read_bytes()))
+print(source.exists())
 rename: Callable[[str, str], str | None] = shutil.move
 print(repr(rename('target', 'renamed')))
 inside: Callable[[str, str], bool] = shutil._destinsrc
