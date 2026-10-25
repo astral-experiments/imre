@@ -13,6 +13,7 @@ use crate::types::Types;
 
 mod annotations;
 mod argparse;
+mod assertion_syntax;
 mod assignments;
 mod asyncio;
 mod bytes;
@@ -4252,7 +4253,10 @@ impl<'a> Checker<'a> {
                     false,
                 ));
             }
-            ast::Stmt::Assert(_) if self.graph.python_optimization() > 0 => None,
+            ast::Stmt::Assert(assertion) if self.graph.python_optimization() > 0 => {
+                assertion_syntax::validate(self.source, assertion)?;
+                None
+            }
             ast::Stmt::Assert(assert) => {
                 let test = self.condition(&assert.test)?;
                 let successful = self.local_state();
