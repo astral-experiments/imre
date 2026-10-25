@@ -144,3 +144,11 @@ The [default-fixture audit](DEFAULT_FIXTURE_AUDIT.md) records what happens when
 the shared entry attempts every original occurrence with the full CPython test
 package available. Each record identifies the native outcome or the first
 fixture or compiler blocker for that entry.
+
+`assertIsNone(obj, msg=None)` and `assertIsNotNone(obj, msg=None)` test
+identity with `None`. False, zero, empty strings and the string `"None"` are
+distinct from it. The ordinary native failure path preserves `longMessage`
+and the case's `failureException`. The [control](none_assertions.py) also
+checks optional values, bytes, tuples, and argument evaluation order.
+Native values that cannot bind to the compiler's `object` parameter, such as
+a list, currently produce a compiler diagnostic.

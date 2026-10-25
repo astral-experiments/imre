@@ -16,6 +16,16 @@ try:
     elif operation == "assertRaises":
         with case.assertRaises(TypeError, msg=msg):
             pass
+    elif operation == "assertIsNone" or operation == "assertIsNotNone":
+        obj: str | None = None
+        if argv[5] == "str":
+            obj = argv[6]
+        elif argv[5] != "none":
+            raise ValueError("unknown None assertion operand")
+        if operation == "assertIsNone":
+            case.assertIsNone(obj, msg)
+        else:
+            case.assertIsNotNone(obj, msg)
     else:
         first = int(argv[5])
         second = int(argv[6])
