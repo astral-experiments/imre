@@ -12,17 +12,17 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ec0d2f98d43544d8370ec588fa80a2cc7570e4fd
+          ref: 63d44a9302bca0d03a43ad9ed3dab5f89bd881b4
           fetch-depth: 0
       - name: Prepare and identify the prospective merge source
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/evidence"
-          test "$(git rev-parse HEAD)" = ec0d2f98d43544d8370ec588fa80a2cc7570e4fd
+          test "$(git rev-parse HEAD)" = 63d44a9302bca0d03a43ad9ed3dab5f89bd881b4
           test "$(git rev-parse HEAD^1)" = 20be271ed7e04490a3728c576f563f706e78b049
-          test "$(git rev-parse HEAD^2)" = 2fabdcd9617810563fdf0ace628cc253d170016e
-          test "$(git write-tree)" = dd34874f5d1a6e6ddc5e154478fa20534050fef8
-          jq -n --arg base 2fabdcd9617810563fdf0ace628cc253d170016e --arg head 20be271ed7e04490a3728c576f563f706e78b049 --arg candidate ec0d2f98d43544d8370ec588fa80a2cc7570e4fd --arg tree dd34874f5d1a6e6ddc5e154478fa20534050fef8 '{base:$base,head:$head,candidate:$candidate,tree:$tree}' | tee "$RUNNER_TEMP/evidence/source.json"
+          test "$(git rev-parse HEAD^2)" = 8db1900498bb628fc6112d1c16d1fbcea1592faf
+          test "$(git write-tree)" = b5507b5c5027dc0f9e1626ff337a8617f1765ef4
+          jq -n --arg base 8db1900498bb628fc6112d1c16d1fbcea1592faf --arg head 20be271ed7e04490a3728c576f563f706e78b049 --arg candidate 63d44a9302bca0d03a43ad9ed3dab5f89bd881b4 --arg tree b5507b5c5027dc0f9e1626ff337a8617f1765ef4 '{base:$base,head:$head,candidate:$candidate,tree:$tree}' | tee "$RUNNER_TEMP/evidence/source.json"
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
@@ -46,16 +46,17 @@ jobs:
         if: always() && hashFiles('target/debug/imre') != ''
         run: |
           python -B benchmarks/cpython_stdlib/full/shutil/random_consumer.py --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/evidence/random-consumer-linux.json"
-      - name: Check I/O and crossed exceptions on the same source
+      - name: Check crossed CSV/shutil handlers and real failed symlink copies
+        if: always() && hashFiles('target/debug/imre') != ''
         run: |
           set -euo pipefail
           args=(--imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18)
-          python -B tests/io.py --compiler target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 | tee "$RUNNER_TEMP/evidence/io.log"
           for control in check_csv_handlers copy_error_controls; do
             python -B "benchmarks/cpython_stdlib/full/shutil/$control.py" "${args[@]}" | tee "$RUNNER_TEMP/evidence/$control.log"
           done
           sha256sum target/debug/imre target/debug/libimre_runtime.a > "$RUNNER_TEMP/evidence/binaries.sha256"
       - name: Check iterator and packed values against CPython on this compiler
+        if: always() && hashFiles('target/debug/imre') != ''
         run: |
           out="$RUNNER_TEMP/evidence"
           set -euo pipefail
@@ -81,6 +82,7 @@ jobs:
           done
           test "$(wc -l < "$out/effects-fixtures.tsv")" -eq 8
       - name: Run original text and bytes missing-PATH fixtures on this source
+        if: always() && hashFiles('target/debug/imre') != ''
         run: |
           set -euo pipefail
           python -B - target/debug/imre target/debug/libimre_runtime.a /usr/bin/clang-18 "$RUNNER_TEMP/evidence/missing-path.json" <<'PY'
@@ -105,10 +107,12 @@ jobs:
           print([(level,len(values)) for level,values in rows.items()])
           PY
       - name: Check native POSIX poll/select with its descriptor and upstream controls
+        if: always() && hashFiles('target/debug/imre') != ''
         run: |
           set -euo pipefail
           PYTHONPATH="$PWD/.cpython/Lib" python -B tests/posix_readiness.py --compiler target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --host-original | tee "$RUNNER_TEMP/evidence/posix-readiness.log"
       - name: Check the compiler features merged in the same batch
+        if: always() && hashFiles('target/debug/imre') != ''
         run: |
           out="$RUNNER_TEMP/evidence"
           set -euo pipefail
@@ -162,6 +166,11 @@ jobs:
           assert len(rows) == 2 and any(s.startswith('| `random` | Yes |') for s in rows)
           print(*rows, sep='\n')
           PY
+      - name: Run the unchanged shared I/O checks and retain any canonical failure
+        if: always() && hashFiles('target/debug/imre') != ''
+        run: |
+          set -euo pipefail
+          python -B tests/io.py --compiler target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 | tee "$RUNNER_TEMP/evidence/io.log"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
