@@ -527,6 +527,10 @@ pub(crate) enum Builtin {
     LiteralStringView,
     StringListContains,
     StringContains,
+    /// Immutable byte subsequence; operands are evaluated needle first.
+    BytesContains,
+    /// Integer byte membership validates 0..=255 before searching.
+    BytesContainsInt,
     /// Reads an initialized module binding with an independent owned reference.
     GlobalGet(usize),
     /// Publishes one fixed module binding after its initializer succeeds.

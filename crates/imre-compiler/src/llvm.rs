@@ -3669,14 +3669,25 @@ impl Emitter<'_, '_> {
             | Builtin::DirectoryContextView => {
                 unreachable!("representation-preserving views transfer the operand owner directly")
             }
-            Builtin::StringContains | Builtin::ExceptionMatchesAny => {
-                let name = if matches!(builtin, Builtin::ExceptionMatchesAny) {
-                    "imre_exception_matches_any"
-                } else {
-                    "imre_str_contains"
+            Builtin::StringContains | Builtin::BytesContains | Builtin::ExceptionMatchesAny => {
+                let name = match builtin {
+                    Builtin::BytesContains => "imre_bytes_contains",
+                    Builtin::ExceptionMatchesAny => "imre_exception_matches_any",
+                    _ => "imre_str_contains",
                 };
                 let found = self.instruction(format!(
                     "call i32 @{name}(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {found}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::BytesContainsInt => {
+                let found = self.checked_instruction(format!(
+                    "call i32 @imre_bytes_contains_int(i64 {}, ptr {})",
                     args[0].value.operand, args[1].value.operand
                 ));
                 Value {
@@ -6826,6 +6837,8 @@ declare ptr @imre_bytes_str(ptr)
 declare void @imre_print_bytes(ptr)
 declare i64 @imre_bytes_len(ptr)
 declare i32 @imre_bytes_compare(ptr, ptr)
+declare i32 @imre_bytes_contains(ptr, ptr)
+declare i32 @imre_bytes_contains_int(i64, ptr)
 declare i64 @imre_bytes_get(ptr, i64)
 declare i64 @imre_bytes_get_index(ptr, i64)
 declare ptr @imre_bytes_slice(ptr, i64, i64, i64)
