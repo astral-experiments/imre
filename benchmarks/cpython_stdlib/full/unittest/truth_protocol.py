@@ -20,7 +20,7 @@ def check(case: TestCase, value: object) -> None:
                 case.assertTrue(value)
             else:
                 case.assertFalse(value)
-            print("pass", expected)
+            print("pass " + str(expected))
         except AssertionError as failed:
             print(str(failed))
 
@@ -34,7 +34,7 @@ events = [0]
 
 
 def operand() -> int:
-    print("operand", events[0])
+    print("operand " + str(events[0]))
     return events[0]
 
 
