@@ -91,7 +91,7 @@ impl Checker<'_> {
             && !matches!(
                 value.kind,
                 ExprKind::Builtin(
-                    Builtin::RegexCompile(_) | Builtin::RegexSearch | Builtin::RegexMatchStart,
+                    Builtin::RegexCompile { .. } | Builtin::RegexSearch | Builtin::RegexMatchStart,
                     _
                 )
             )
@@ -238,7 +238,7 @@ impl Checker<'_> {
         }
     }
 
-    fn fixed_regex(&self, pattern: &ast::Expr, verbose: bool) -> Result<Expr, String> {
+    pub(super) fn fixed_regex(&self, pattern: &ast::Expr, verbose: bool) -> Result<Expr, String> {
         let ast::Expr::StringLiteral(literal) = pattern else {
             return Err(error(
                 self.source,
@@ -256,7 +256,13 @@ impl Checker<'_> {
             .or_insert_with(|| pattern.groups.into());
         Ok(Expr {
             ty: Type::RegexPattern,
-            kind: ExprKind::Builtin(Builtin::RegexCompile(pattern.source), Vec::new()),
+            kind: ExprKind::Builtin(
+                Builtin::RegexCompile {
+                    source: pattern.source,
+                    spelling: literal.value.to_str().to_owned(),
+                },
+                Vec::new(),
+            ),
         })
     }
 
@@ -299,7 +305,13 @@ impl Checker<'_> {
             .map_err(|msg| error(self.source, replacement, msg))?;
         let pattern = Expr {
             ty: Type::RegexPattern,
-            kind: ExprKind::Builtin(Builtin::RegexCompile(fixed.source), vec![]),
+            kind: ExprKind::Builtin(
+                Builtin::RegexCompile {
+                    source: fixed.source,
+                    spelling: pattern.value.to_str().to_owned(),
+                },
+                vec![],
+            ),
         };
         Ok(Expr {
             ty: Type::Str,

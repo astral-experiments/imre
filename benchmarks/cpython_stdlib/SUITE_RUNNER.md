@@ -207,3 +207,21 @@ For example, the original `TestTemplate.test_invalid_placeholders` saves
 s.substitute, ...)`. Its source prefix is `"from string import Template\n" +
 testcase_fixture()`. Pass `operation=("imre", "string.Template.substitute")` to
 `native_method`; the original class and module lifecycle remain host-assisted.
+
+### Matching an exception message
+
+`with case.assertRaisesRegex(ErrorType, pattern) as caught` first checks the
+exception class, then searches `str(caught.exception)` using the native regex
+engine. The pattern can match anywhere. Use `^` and `$` to anchor it. A
+different exception escapes unchanged. The context retains a matching exception
+even when its message fails the regex; that failure prints the original pattern
+spelling and the exception text, subject to the case's `msg`, `longMessage`
+and `failureException` settings.
+
+Literals, runtime strings and already compiled native str patterns use the same
+supported grammar. A compiled pattern retains its flags when passed through a
+function. Unsupported runtime syntax raises an explicit native boundary error;
+bytes patterns and the callable overload remain separate compiler boundaries.
+The [exception regex control](full/unittest/context_regex.py) covers search,
+Unicode whitespace, compiled patterns, missing and wrong exceptions, mismatched
+messages, and exception identity.

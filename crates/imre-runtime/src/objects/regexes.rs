@@ -18,6 +18,7 @@ use super::{
 };
 
 pub(super) struct Pattern {
+    spelling: Rc<Str>,
     regex: Regex,
     cache: meta::Cache,
     slots: Vec<Option<NonMaxUsize>>,
@@ -57,7 +58,12 @@ fn leading_literal(hir: &Hir) -> Option<&[u8]> {
 }
 
 impl Pattern {
+    #[cfg(test)]
     fn new(source: &str) -> Self {
+        Self::with_spelling(source, source)
+    }
+
+    fn with_spelling(source: &str, spelling: &str) -> Self {
         let hir = regex_syntax::Parser::new()
             .parse(source)
             .expect("validated fixed regex");
@@ -117,6 +123,7 @@ impl Pattern {
             })
             .collect();
         Self {
+            spelling: Rc::new(Str::from(spelling.to_owned())),
             regex,
             cache,
             slots,
@@ -337,16 +344,76 @@ fn handle(storage: Storage) -> *const Object {
 /// Instantiates a literal already validated by the compiler with this regex engine.
 ///
 /// # Safety
-/// `data` holds the `len` UTF-8 bytes of the translated pattern, or is empty.
+/// `data` holds a translated UTF-8 pattern (the original ABI), or 0xff,
+/// its eight-byte little-endian Python spelling length, the original spelling
+/// and the translated pattern. Both strings are validated UTF-8.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_regex_compile(data: *const u8, len: usize) -> *const Object {
-    let source = if len == 0 {
-        ""
+    let bytes = if len == 0 {
+        &[][..]
     } else {
-        // SAFETY: the compiler emits initialized static UTF-8 bytes of this exact length.
-        unsafe { str::from_utf8_unchecked(std::slice::from_raw_parts(data, len)) }
+        // SAFETY: the compiler emits initialized static bytes of this length.
+        unsafe { std::slice::from_raw_parts(data, len) }
     };
-    handle(Storage::RegexPattern(Box::new(Pattern::new(source))))
+    let (spelling, translated) = if let Some(record) = bytes.strip_prefix(&[0xff]) {
+        let (length, strings) = record.split_at(8);
+        let length = u64::from_le_bytes(length.try_into().unwrap()) as usize;
+        strings.split_at(length)
+    } else {
+        (bytes, bytes)
+    };
+    // SAFETY: both slices come from complete Rust strings emitted by the compiler.
+    let (spelling, source) = unsafe {
+        (
+            str::from_utf8_unchecked(spelling),
+            str::from_utf8_unchecked(translated),
+        )
+    };
+    handle(Storage::RegexPattern(Box::new(Pattern::with_spelling(
+        source, spelling,
+    ))))
+}
+
+/// Return the original Python spelling even when the native engine expanded an escape.
+///
+/// # Safety
+/// `pattern` must be a rooted compiled pattern.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_spelling(pattern: *const Object) -> *const Str {
+    // SAFETY: the caller keeps the pattern alive throughout the borrow.
+    unsafe {
+        object(pattern).0.with(|storage| {
+            let Storage::RegexPattern(pattern) = storage else {
+                unreachable!()
+            };
+            Rc::into_raw(pattern.spelling.clone())
+        })
+    }
+}
+
+/// Compile an exception assertion's runtime string with the same translator as
+/// fixed literals. Never reinterpret an unsupported pattern as literal text.
+///
+/// # Safety
+/// `spelling` must point to a rooted Python string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_unittest_compile_pattern(spelling: *const Str) -> *const Object {
+    // SAFETY: the caller retains its string for this call.
+    let spelling = unsafe { &*spelling };
+    match imre_regex::translate(spelling, false) {
+        Ok(pattern) => handle(Storage::RegexPattern(Box::new(Pattern::with_spelling(
+            &pattern.source,
+            spelling,
+        )))),
+        Err(reason) => {
+            Error::new(
+                Kind::NotImplementedError,
+                format!("unsupported native exception regex: {reason}"),
+            )
+            .raise();
+            ptr::null()
+        }
+    }
 }
 
 /// Substitute all matches; a miss retains the original string.

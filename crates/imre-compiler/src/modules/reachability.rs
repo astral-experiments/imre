@@ -189,7 +189,7 @@ impl<'a> Visitor<'a> for References<'_> {
             ) {
                 self.found.attributes.insert(format!("_bound_{name}"));
             }
-            if name == "assertRaises" {
+            if matches!(name.as_str(), "assertRaises" | "assertRaisesRegex") {
                 self.found
                     .attributes
                     .insert("_raise_missing_callable".into());
@@ -400,7 +400,7 @@ impl Reachable {
                             let assertion_exit = source.bundled
                                 && source.name == "unittest"
                                 && class.name.as_str() == "_AssertRaisesContext"
-                                && name == "_missing";
+                                && matches!(name, "_missing" | "_check_regex");
                             let unittest_method = refs.found.unittest_classes.contains(&id)
                                 && (name.starts_with("test")
                                     || matches!(
