@@ -3,6 +3,20 @@ use super::Intrinsic;
 use crate::ir::FdOperation;
 
 pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
+    if cfg!(unix) {
+        let common = [
+            "getuid", "geteuid", "getgid", "getegid", "setuid", "seteuid", "setgid", "setegid",
+            "setreuid", "setregid",
+        ];
+        let saved = ["getresuid", "getresgid", "setresuid", "setresgid"];
+        if let Some(known) = common
+            .into_iter()
+            .chain(saved.into_iter().filter(|_| cfg!(target_os = "linux")))
+            .find(|known| *known == name)
+        {
+            return Some(Intrinsic::Credential(known));
+        }
+    }
     Some(match name {
         "strerror" => Intrinsic::Strerror,
         "close" => Intrinsic::Fd(FdOperation::Close),
