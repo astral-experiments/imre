@@ -324,6 +324,9 @@ pub(super) fn os_error(error: io::Error) -> Error {
     {
         return Error::new(gzip.0, gzip.to_string());
     }
+    if error.kind() == io::ErrorKind::OutOfMemory && error.raw_os_error().is_none() {
+        return Error::allocation();
+    }
     Error::new(os_error_kind(error.kind()), error.to_string())
 }
 
@@ -1219,6 +1222,10 @@ mod tests {
             assert!(unsafe { imre_text_open(&Str::from(path), 0) }.is_null());
             take_error(kind);
         }
+        os_error(io::ErrorKind::OutOfMemory.into()).raise();
+        take_error(Kind::MemoryError);
+        os_error(io::Error::from_raw_os_error(libc::ENOMEM)).raise();
+        take_error(Kind::OSError);
         let denied = os_error(io::Error::from(io::ErrorKind::PermissionDenied));
         denied.raise();
         take_error(Kind::PermissionError);

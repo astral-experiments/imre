@@ -11,6 +11,7 @@ use crate::modules::{Binding, DefinitionId, Intrinsic, ModuleId, SourceGraph};
 use crate::narrowing;
 use crate::types::Types;
 
+mod annotations;
 mod argparse;
 mod assignments;
 mod asyncio;
@@ -28,6 +29,7 @@ mod documents;
 mod enums;
 mod expansions;
 mod fixed_tuples;
+mod fnmatch;
 mod function_caches;
 mod functools;
 mod hashlib;
@@ -69,6 +71,7 @@ mod truthiness;
 mod unbound_locals;
 mod unions;
 mod unittest;
+mod unittest_equality;
 mod unpacking;
 mod zip_sums;
 mod zipfile;
@@ -441,13 +444,18 @@ pub(crate) fn lower_with_owners(
     for (module_id, module) in graph.modules.iter().enumerate() {
         for (name, binding) in &module.bindings {
             if reserved(name)
-                && !(name == "open"
-                    && matches!(
-                        binding,
+                && !matches!(
+                    (name.as_str(), binding),
+                    (
+                        "open",
                         Binding::Intrinsic(
                             Intrinsic::GzipOpen | Intrinsic::Fd(ir::FdOperation::Open)
                         )
-                    ))
+                    ) | (
+                        "filter",
+                        Binding::Intrinsic(Intrinsic::Fnmatch(ir::FnmatchOperation::Filter { .. }))
+                    )
+                )
             {
                 return Err(module.error(
                     module.parsed.syntax(),
@@ -4086,7 +4094,10 @@ impl<'a> Checker<'a> {
                 expressions
                     .iter()
                     .map(|target| {
-                        if let Some(kind) = self.exception_category(target) {
+                        if let Some(kind) = self
+                            .exception_category(target)
+                            .or_else(|| self.fixed_testcase_failure_kind(target))
+                        {
                             return Ok(kind);
                         }
                         Err(error(
@@ -4522,6 +4533,21 @@ impl<'a> Checker<'a> {
     }
 
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let ast::Expr::Attribute(attr) = expression
+            && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) =
+                self.resolve(&attr.value)
+        {
+            match attr.attr.as_str() {
+                "value" => return Ok(pipelines::integer(number)),
+                "name" => {
+                    return Ok(unpacking::string(
+                        ["VALUE", "VALUE_WITH_FAKE_GLOBALS", "FORWARDREF", "STRING"]
+                            [(number - 1) as usize],
+                    ));
+                }
+                _ => {}
+            }
+        }
         if let Some(Binding::Intrinsic(Intrinsic::Declaration(symbol))) = self.resolve(expression) {
             return Err(error(
                 self.source,
@@ -4530,7 +4556,9 @@ impl<'a> Checker<'a> {
             ));
         }
         if let Some(Binding::Intrinsic(
-            Intrinsic::LogLevel(level) | Intrinsic::SignalNumber(level),
+            Intrinsic::LogLevel(level)
+            | Intrinsic::SignalNumber(level)
+            | Intrinsic::AnnotationFormat(level),
         )) = self.resolve(expression)
         {
             return Ok(Expr {
@@ -4687,6 +4715,12 @@ impl<'a> Checker<'a> {
                 (Type::Str, ExprKind::Str(name.to_owned()))
             }
             ast::Expr::Name(name) => {
+                if !self.names.contains_key(name.id.as_str())
+                    && self.resolve(expression).is_none()
+                    && let Some(value) = annotations::builtin_type(name.id.as_str())
+                {
+                    return Ok(value);
+                }
                 if self.comprehension_targets.contains(name.id.as_str())
                     && !self.names.contains_key(name.id.as_str())
                 {
@@ -4942,7 +4976,8 @@ impl<'a> Checker<'a> {
                 }
                 if let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
                     && let [left, right] = values.as_slice()
-                    && (matches!(left.ty, Type::Enum(_)) || matches!(right.ty, Type::Enum(_)))
+                    && (matches!(left.ty, Type::Enum(_) | Type::BuiltinClass)
+                        || matches!(right.ty, Type::Enum(_) | Type::BuiltinClass))
                     && left.ty != right.ty
                     && [left.ty, right.ty].into_iter().all(|ty| {
                         self.types.payload(ty).is_none() && self.types.members(ty).is_none()
@@ -5108,6 +5143,15 @@ impl<'a> Checker<'a> {
                     }
                 }
                 let list = Self::enum_text(self.expr(&subscript.value)?);
+                if list.ty == Type::BuiltinClass {
+                    // Python evaluates type arguments before invoking __class_getitem__.
+                    self.expr(&subscript.slice)?;
+                    return Err(error(
+                        self.source,
+                        subscript,
+                        "runtime generic aliases of builtin classes are unsupported",
+                    ));
+                }
                 if list.ty == Type::ExceptionField {
                     let index = self.expr_expected(&subscript.slice, Type::Int)?;
                     return Ok(Expr {
@@ -5289,6 +5333,22 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::BuiltinClass {
+                    match attribute.attr.as_str() {
+                        "__name__" | "__qualname__" => return Ok(annotations::type_name(receiver)),
+                        "__module__" => {
+                            return Ok(Expr {
+                                ty: Type::Str,
+                                kind: ExprKind::Scope {
+                                    body: vec![Statement::Expr(receiver)],
+                                    value: Box::new(unpacking::string("builtins")),
+                                    clear: vec![],
+                                },
+                            });
+                        }
+                        _ => {}
+                    }
+                }
                 if let Some(definition) = self.types.namedtuple_definition(receiver.ty) {
                     return self.namedtuple_instance_attribute(attribute, receiver, definition);
                 }
@@ -5776,6 +5836,12 @@ impl<'a> Checker<'a> {
             return self.counter(call, None, Some(ty));
         }
         match self.resolve(&call.func) {
+            Some(Binding::Intrinsic(Intrinsic::GetAnnotations)) => {
+                return self.get_annotations(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::AnnotationTypeRepr)) => {
+                return self.annotation_type_repr(call);
+            }
             Some(Binding::Intrinsic(
                 kind @ (Intrinsic::RunLoop
                 | Intrinsic::NewLoop
@@ -5917,6 +5983,12 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
                 return self.configure_logging(call);
             }
+            Some(Binding::Intrinsic(Intrinsic::DictConfig)) => {
+                return self.logging_dictionary_config(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::FileConfig)) => {
+                return self.logging_file_config(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
                 return self.root_log(level, call);
             }
@@ -5961,6 +6033,9 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::Fnmatch(operation))) => {
+                return self.fnmatch_call(operation, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::RegexSub)) => return self.sub_regex(call),
             Some(Binding::Intrinsic(
                 intrinsic @ (Intrinsic::GetSysconfigPath | Intrinsic::OsPathExists),
@@ -6217,10 +6292,14 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
             }
-            if attribute.attr.as_str() == "lower"
+            if matches!(attribute.attr.as_str(), "lower" | "capitalize")
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
-                return self.text_method(Self::string_value(receiver), "lower", call);
+                return self.text_method(
+                    Self::string_value(receiver),
+                    attribute.attr.as_str(),
+                    call,
+                );
             }
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
@@ -6669,12 +6748,17 @@ impl<'a> Checker<'a> {
             });
         }
         if args.len() == 1
-            && matches!(args[0].ty, Type::Enum(_))
+            && matches!(args[0].ty, Type::Enum(_) | Type::BuiltinClass)
             && matches!(name.id.as_str(), "str" | "print")
         {
+            let builtin = if args[0].ty == Type::BuiltinClass {
+                Builtin::Repr
+            } else {
+                Builtin::EnumString
+            };
             let text = Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::EnumString, args),
+                kind: ExprKind::Builtin(builtin, args),
             };
             return Ok(if name.id == "str" {
                 text
@@ -6829,9 +6913,11 @@ impl<'a> Checker<'a> {
             if matches!(name.id.as_str(), "str" | "print")
                 && (matches!(
                     args[0].ty,
-                    Type::Class(_) | Type::CompletedProcess(_) | Type::StringIterable
-                ) || self.types.is_counter(args[0].ty)
-                    || (name.id == "print" && self.types.element(args[0].ty).is_some()))
+                    Type::Class(_)
+                        | Type::CompletedProcess(_)
+                        | Type::Dict(_)
+                        | Type::StringIterable
+                ) || (name.id == "print" && self.types.element(args[0].ty).is_some()))
             {
                 let text = self.record_text(args.into_iter().next().unwrap(), call)?;
                 return Ok(if name.id == "str" {

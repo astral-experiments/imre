@@ -21,6 +21,10 @@ def choose(reverse: bool) -> Callable[[int, int], int]:
     return make(3)
 
 
+def wrap(fn: Callable[[int, int], int]) -> Callable[[int, int], int]:
+    return partial(fn)
+
+
 class Counter:
     value: int
 
@@ -41,11 +45,15 @@ def main() -> None:
     f = make(2)
     print(f(3, 4))
     print(f(4, 3))
-    print(partial(combine, 1, Placeholder, noted(3))(7))
+    print(partial(combine, 1, Placeholder, noted(3))(noted(7)))
+    left = partial(combine, Placeholder, 2, 3)
+    print(partial(left, 7)())
     print(partial(combine, 9, 8, 7)())
     for flag in [True, False]:
         print(partial(choose(flag), 6)(9))
     counter = Counter(5)
+    wrapped = wrap(counter.increase)
+    print(wrapped(1, 2))
     inc = partial(counter.increase, 2)
     print(inc(3))
     print(inc(4))
