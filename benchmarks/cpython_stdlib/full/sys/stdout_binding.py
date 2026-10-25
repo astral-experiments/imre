@@ -10,8 +10,10 @@ def change_during_argument() -> str:
 
 def main() -> None:
     saved = sys.stdout
+    print(saved.fileno())
     with open(sys.argv[1], "w", encoding="utf-8") as target:
         sys.stdout = target
+        saved.write(str(sys.stdout.fileno() == target.fileno()) + "\n")
         print("redirected")
         sys.__displayhook__("é")
         imported.write("original\n")

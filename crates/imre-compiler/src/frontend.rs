@@ -3437,6 +3437,11 @@ impl<'a> Checker<'a> {
     }
 
     fn statement(&mut self, statement: &ast::Stmt) -> Result<(Vec<Statement>, bool), String> {
+        if let ast::Stmt::ImportFrom(import) = statement
+            && let Some(bindings) = self.local_sys_import(import)?
+        {
+            return Ok((bindings, true));
+        }
         if self.module_scope && local_functions::type_variable(self.graph, self.module, statement) {
             return Ok((Vec::new(), true));
         }
@@ -4722,7 +4727,7 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
-                Intrinsic::Stdout => return Ok(self.stdout_value(false)),
+                Intrinsic::Stdout => return Ok(self.stdout_value()),
                 Intrinsic::OriginalStdout | Intrinsic::Stderr => {
                     return Ok(Expr {
                         ty: Type::TextIO,
@@ -5493,7 +5498,7 @@ impl<'a> Checker<'a> {
                 if attribute.attr.as_str() == "encoding"
                     && self.resolve(&attribute.value) == Some(Binding::Intrinsic(Intrinsic::Stdout))
                 {
-                    let receiver = self.stdout_value(false);
+                    let receiver = self.stdout_value();
                     let checked = self.optional_stream(receiver, "encoding");
                     return Ok(Expr {
                         ty: Type::Str,

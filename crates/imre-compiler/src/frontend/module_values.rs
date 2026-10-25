@@ -64,16 +64,8 @@ impl Checker<'_> {
         definition: DefinitionId,
     ) -> Result<Statement, String> {
         let value = match statement {
-            ast::Stmt::ImportFrom(_) => {
-                match self.graph.modules[self.module].snapshots[&definition.statement] {
-                    Intrinsic::Stdout => self.stdout_value(true),
-                    Intrinsic::BuiltinsLast => Expr {
-                        ty: Type::ValueView,
-                        kind: ExprKind::Builtin(Builtin::BuiltinsImportLast, vec![]),
-                    },
-                    _ => unreachable!(),
-                }
-            }
+            ast::Stmt::ImportFrom(_) => self
+                .import_sys_value(self.graph.modules[self.module].snapshots[&definition.statement]),
             ast::Stmt::Assign(assignment) => self.expr(&assignment.value)?,
             ast::Stmt::AnnAssign(assignment) => {
                 let value = assignment.value.as_deref().ok_or_else(|| {

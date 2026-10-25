@@ -2,9 +2,10 @@
 from pathlib import Path
 import subprocess
 import sys
+import textwrap
 
 
-def check_import_snapshots(args, work, build):
+def check_import_snapshots(toolchain, work):
     scenarios = {
         "retain": {
             "prime": "import builtins\nbuiltins._ = [1, 2]\n",
@@ -22,14 +23,45 @@ def check_import_snapshots(args, work, build):
             "discard": "import sys\ndel sys.stdout\n",
             "entry": "import discard\nfrom sys import stdout as saved\n",
         },
+        "caught": {"entry": textwrap.dedent("""\
+            import builtins
+            import sys
+
+            def report(error: ImportError) -> None:
+                print(repr(error.args))
+                print(repr(error.msg))
+                print(repr(error.name))
+                print(repr(error.path))
+                print(repr(error.name_from))
+
+            def check() -> None:
+                try:
+                    from builtins import _ as saved
+                    print(repr(saved))
+                except ImportError as error:
+                    report(error)
+                builtins._ = None
+                from builtins import _ as restored
+                print(restored is None)
+                original = sys.__stdout__
+                del sys.stdout
+                try:
+                    from sys import stdout as absent
+                    original.write(str(absent is None))
+                except ImportError as error:
+                    sys.stdout = original
+                    report(error)
+
+            check()
+        """)},
     }
     for name, files in scenarios.items():
         folder = Path(work) / name
         folder.mkdir()
         for module, source in files.items():
             (folder / f"{module}.py").write_text(source)
-        entry, binary = folder / "entry.py", folder / "entry"
-        build(args, entry, binary)
+        entry = folder / "entry.py"
+        binary = toolchain.build(entry.read_bytes(), folder)
         # Explicit module root also works with a host that enables PYTHONSAFEPATH.
         script = "import runpy,sys;sys.path.insert(0,sys.argv[1]);runpy.run_path(sys.argv[2])"
         outputs = [subprocess.run(command, capture_output=True, timeout=15)

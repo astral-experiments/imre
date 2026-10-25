@@ -30,6 +30,7 @@ done
 python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverage.json
 ```
 
+- `test_original_displayhook`: the original CPython body, assertions, and capture fixture observe ten operations in one native process, including stdout deletion/restoration and `builtins._` mutation.
 - `test_sys_exception_no_exception`: the complete method queries native handler state and compares the result to `None`. A separate program checks object identity across nested handlers, calls and handler exit.
 - `test_43581`: the complete method reads both stream attributes and executes the shared native unittest string equality assertion. CPython runs the original fixture.
 - `test_getdefaultencoding` and `test_getfilesystemencoding`: all `sys` operations execute in the native driver. The original unittest assertions, codec lookup and transport run on CPython.

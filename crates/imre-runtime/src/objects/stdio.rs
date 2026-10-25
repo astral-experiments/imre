@@ -45,15 +45,15 @@ pub extern "C" fn imre_sys_original_output(stderr: u32) -> *const Object {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn imre_sys_stdout(importing: u32) -> *const Object {
+pub extern "C" fn imre_sys_has_stdout() -> u32 {
+    STDOUT.with_borrow(|b| u32::from(!matches!(b, Binding::Missing)))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_sys_stdout() -> *const Object {
     match file(binding()) {
         Ok(Some(value)) => Rc::into_raw(value),
         Ok(None) => std::ptr::null(),
-        Err(_) if importing != 0 => Error::new(
-            Kind::ImportError,
-            "cannot import name 'stdout' from 'sys' (unknown location)",
-        )
-        .returning(std::ptr::null()),
         Err(error) => error.returning(std::ptr::null()),
     }
 }

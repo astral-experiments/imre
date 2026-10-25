@@ -29,8 +29,9 @@ test packages and child-program strings:
 | unittest | `test_unittest/test_discovery.py:878,911`, `test_unittest/testmock/testmock.py:263` | Patch the actual import function for discovery and patch open for mock. |
 
 A qualified native `_` lookup reads its current value. A from-import executes
-its lookup once in module initialization and retains that object. A missing
-from-import raises ImportError; a qualified read raises AttributeError. The
+its lookup once at the import statement and retains the object. A missing
+from-import raises ImportError with the original message and the module and
+export names; a qualified read raises AttributeError. The
 other callable bindings above also remain unsupported. Mapping their names to
 the default native operations would bypass changes to the namespace.
 

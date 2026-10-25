@@ -1,15 +1,24 @@
 """Transport native sys/builtins operations into the original CPython fixture."""
 import ast
 from contextlib import ExitStack
+from functools import partial
+import hashlib
 from pathlib import Path
 import selectors
 import subprocess
 import sys
-import unittest
 from unittest.mock import patch
+from suite_evidence import roles
+from suite_native import method_bytes
+
+CASE_ID = "test.test_sys.DisplayHookTest.test_original_displayhook"
 
 
-def run_display_case(test_sys, executable, work):
+def display_observer(test_sys, executable, work, level):
+    return partial(observe_display, test_sys, executable, work, level)
+
+
+def observe_display(test_sys, executable, work, level, case, original):
     # The child writes through its real stdout binding. Feed only the newly written bytes
     # into the upstream capture context; replies to namespace operations travel via stderr.
     path = Path(work) / "display.stdout"
@@ -80,17 +89,23 @@ def run_display_case(test_sys, executable, work):
                 invoke("restore-stdout")
 
         saved_handle = object()
-        case = test_sys.DisplayHookTest("test_original_displayhook")
         with patch.object(test_sys, "sys", NativeSys()), patch.object(test_sys, "builtins", NativeBuiltins()):
-            result = unittest.TestResult()
-            case.run(result)
-        if result.errors or result.failures or result.skipped:
-            raise AssertionError((case.id(), result.errors, result.failures, result.skipped))
+            original()
         child.stdin.write(b"stop\n")
         child.stdin.flush()
         if child.wait(10) or child.stderr.read() or reader.read():
             raise AssertionError("unexpected native stream output on shutdown")
-        return {"execution": "host-driven-native-operation", "status": "pass", "calls": calls,
-                "fixture": "original CPython unittest and support.captured_stdout contexts",
-                "operation": "one native process retains the displayed object, deletes builtins._, "
-                             "and deletes and restores its actual sys.stdout binding"}
+        if len(calls) != 10:
+            raise AssertionError((case.id(), calls))
+        operation = ("one Imre process displays the object, reads and deletes builtins._, "
+                     "and deletes and restores its actual sys.stdout")
+        fixture = "original CPython unittest fixture and support.captured_stdout contexts"
+        return {"execution": "host-driven-native", "body": "CPython", "assertions": "CPython",
+                "fixture_execution": fixture, "calls": calls,
+                "fixture": fixture, "operation": operation, "observation": {
+                    "roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
+                    "evidence": {"operation": operation, "fixture": fixture,
+                                 "assertions": "unchanged CPython TestCase assertions on native output, values and errors",
+                                 "method_sha256": hashlib.sha256(method_bytes(Path(test_sys.__file__),
+                                     "DisplayHookTest", case._testMethodName)).hexdigest(),
+                                 "native_calls": len(calls), "calls": calls, "opt_level": level}}}

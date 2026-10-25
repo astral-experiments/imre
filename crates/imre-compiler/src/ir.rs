@@ -552,16 +552,14 @@ pub(crate) enum Builtin {
     Islice,
     Tee,
     Cycle,
-    SysStdout {
-        importing: bool,
-    },
+    SysStdout,
+    SysHasStdout,
     SysOriginalOutput {
         stderr: bool,
     },
     SysStdoutSet,
     SysStdoutDelete,
     TextOptionalReceiver,
-    BuiltinsImportLast,
     SysDisplayHook,
     BuiltinsLast,
     BuiltinsHasLast,

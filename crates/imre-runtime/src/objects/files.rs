@@ -434,6 +434,11 @@ pub unsafe extern "C" fn imre_gzip_open(path: *const Str, binary: u32) -> *const
 pub(super) fn standard_stream(stderr: bool) -> Rc<Object> {
     Rc::new(Object(StorageCell::new(Storage::File(Box::new(
         FileState {
+            fd: Some(if stderr {
+                io::stderr().as_raw_fd()
+            } else {
+                io::stdout().as_raw_fd()
+            }),
             stream: Some(Stream::Standard(stderr)),
             kind: FileKind::Text,
             name: Some(Rc::new(Str::new(if stderr {

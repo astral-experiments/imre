@@ -441,12 +441,12 @@ impl Builtin {
             | Self::Print
             | Self::SortRestore
             | Self::StderrLine
-            | Self::SysStdout { .. }
+            | Self::SysStdout
             | Self::SysOriginalOutput { .. }
             | Self::SysStdoutSet
             | Self::SysStdoutDelete
             | Self::TextOptionalReceiver
-            | Self::BuiltinsImportLast
+            | Self::SysHasStdout
             | Self::BuiltinsLast
             | Self::BuiltinsHasLast
             | Self::BuiltinsSetLast
@@ -829,7 +829,6 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_bool"
                 | "imre_print_none"
                 | "imre_input"
-                | "imre_builtins_import_last"
                 | "imre_sys_stdout"
                 | "imre_sys_stdout_del"
                 | "imre_text_optional_receiver"

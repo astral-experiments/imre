@@ -835,6 +835,11 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
     }
 
+    /// The native import at this exact alias performs its own missing-name lookup.
+    pub(crate) fn checked_builtin_import(&self, module: ModuleId, alias: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::BuiltinImport(alias));
+    }
+
     /// Mark the precise call where lowering raises Python's missing-argument TypeError.
     pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
