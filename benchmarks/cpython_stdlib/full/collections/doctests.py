@@ -52,6 +52,7 @@ def main():
     for name in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--opt-level", type=int, choices=(0, 3), required=True)
+    parser.add_argument("--compiler-revision")
     args = parser.parse_args()
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5):
         parser.error("use the pinned test-enabled CPython 3.14.5")
@@ -98,6 +99,8 @@ def main():
                 outcomes[test.name]["diagnostic"] = diagnostic.rstrip()
             print(status, test.name, flush=True)
     report = {"cpython_commit": manifest["commit"], "opt_level": args.opt_level, "tests": outcomes}
+    if args.compiler_revision:
+        report["compiler_revision"] = args.compiler_revision
     args.result.write_text(json.dumps(report, indent=2) + "\n")
     return int(any(row["status"] != "native-body/host-output-check" for row in outcomes.values()))
 

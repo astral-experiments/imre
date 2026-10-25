@@ -72,7 +72,8 @@ impl Builtin {
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
                 match operation {
-                    TextOperation::Split(_)
+                    TextOperation::Lower
+                    | TextOperation::Split(_)
                     | TextOperation::Partition
                     | TextOperation::Unquote
                     | TextOperation::ShlexSplit => true,
@@ -105,6 +106,8 @@ impl Builtin {
                     | PathOperation::Match { .. }
                     | PathOperation::Resolve
                     | PathOperation::WriteText
+                    | PathOperation::WriteUnion { .. }
+                    | PathOperation::WriteTypeError
                     | PathOperation::WriteBytes
                     | PathOperation::Mkdir
                     | PathOperation::Unlink
@@ -155,6 +158,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
                 matches!(
                     operation,
@@ -182,9 +186,11 @@ impl Builtin {
                 | ProcessOperation::Run { .. }
                 | ProcessOperation::Popen { .. }
                 | ProcessOperation::PopenPid
+                | ProcessOperation::PopenPipe(_)
                 | ProcessOperation::PopenArgs
                 | ProcessOperation::PopenStatus { .. }
                 | ProcessOperation::PopenExit
+                | ProcessOperation::PopenCommunicate { .. }
                 | ProcessOperation::PopenWait
                 | ProcessOperation::PopenSignal
                 | ProcessOperation::AsyncSpawn { .. }
@@ -215,6 +221,7 @@ impl Builtin {
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Which
+                | ProcessOperation::CopyFile
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)
@@ -239,6 +246,8 @@ impl Builtin {
             Self::BytesGet
             | Self::Chr
             | Self::Decode
+            | Self::DecodeAscii
+            | Self::UrlsafeB64encode
             | Self::HashNew
             | Self::DecodeSplitLines
             | Self::SplitLines
@@ -253,6 +262,7 @@ impl Builtin {
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
             | Self::JsonLoads
+            | Self::JsonErrorField(_)
             | Self::HashRecord
             | Self::JsonGet { .. }
             | Self::JsonGetReceiver
@@ -378,6 +388,7 @@ impl Builtin {
             | Self::SysPlatform
             | Self::OsName
             | Self::SysArgv
+            | Self::FileFileno
             | Self::TextClose
             | Self::TextEnter
             | Self::TextFlush
@@ -388,6 +399,7 @@ impl Builtin {
             Self::Repeat
             | Self::CursorLengthHint
             | Self::Progression { .. }
+            | Self::Tee
             | Self::Islice
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
@@ -650,6 +662,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_deletions"
                 | "imre_log_file_should_roll"
                 | "imre_log_file_roll"
+                | "imre_logrecord_message"
                 | "imre_log_config"
                 | "imre_log_config_named"
                 | "imre_log_check_level"
@@ -678,6 +691,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_decode_splitlines"
                 | "imre_str_splitlines"
                 | "imre_bytes_decode"
+                | "imre_bytes_decode_ascii"
+                | "imre_urlsafe_b64encode"
                 | "imre_hash_new"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
@@ -694,6 +709,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_path_read_bytes"
                 | "imre_path_read_text"
                 | "imre_path_write_text"
+                | "imre_path_read_text_options"
+                | "imre_path_write_text_options"
+                | "imre_path_write_type_error"
+                | "imre_path_write_bytes_union"
+                | "imre_path_write_text_union"
                 | "imre_path_write_bytes"
                 | "imre_path_mkdir"
                 | "imre_path_unlink"
@@ -737,6 +757,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_list_slice"
                 | "imre_list_slice_sum"
                 | "imre_str_get"
+                | "imre_str_lower"
                 | "imre_str_slice"
                 | "imre_str_int_list"
                 | "imre_seq_get"

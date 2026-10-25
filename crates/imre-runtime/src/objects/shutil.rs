@@ -1,4 +1,6 @@
 //! POSIX executable lookup shares the caller's credentials and current working directory.
+mod copy;
+
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::ffi::OsString;
