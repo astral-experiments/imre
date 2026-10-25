@@ -2506,19 +2506,8 @@ impl<'a> Checker<'a> {
             checker.apply_facts(&value.test, truth);
             let expression = if truth { &*value.body } else { &*value.orelse };
             let guards = checker.namespace_guards.len();
-            let mut condition = &*value.test;
-            let mut present = truth;
-            while let ast::Expr::UnaryOp(unary) = condition
-                && unary.op == ast::UnaryOp::Not
-            {
-                present = !present;
-                condition = &unary.operand;
-            }
-            if present
-                && narrowing::expression_assignments(expression).is_empty()
-                && let Some(field) = checker.namespace_guard(condition, &[])
-            {
-                checker.namespace_guards.push(field);
+            if narrowing::expression_assignments(expression).is_empty() {
+                checker.enter_namespace_guards(&value.test, truth, &[]);
             }
             let result = check(checker, expression);
             checker.namespace_guards.truncate(guards);
@@ -4437,7 +4426,7 @@ impl<'a> Checker<'a> {
                 self.regex_guards.push(guard);
             }
             let namespace_depth = self.namespace_guards.len();
-            self.enter_namespace_guards(test, body);
+            self.enter_namespace_guards(test, true, body);
             // In a reachable-only profile, an impossible compatibility guard's
             // expression-only body contains no local declarations to preserve.
             let (yes, yes_falls) = if self.graph.reachable_only()
@@ -4464,7 +4453,16 @@ impl<'a> Checker<'a> {
             arms.push((condition, yes));
         }
         let (mut no, no_falls) = if let Some(tail) = clauses.last().filter(|c| c.test.is_none()) {
-            self.block(&tail.body)?
+            let guards = self.namespace_guards.len();
+            let last_test = clauses
+                .iter()
+                .rev()
+                .find_map(|clause| clause.test.as_ref())
+                .unwrap_or(&branch.test);
+            self.enter_namespace_guards(last_test, false, &tail.body);
+            let result = self.block(&tail.body);
+            self.namespace_guards.truncate(guards);
+            result?
         } else {
             (Vec::new(), true)
         };
@@ -6035,7 +6033,8 @@ impl<'a> Checker<'a> {
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "clear"
-            && (self.unshadowed_builtin(&method.value, "dict")
+            && (self.unshadowed_builtin(&method.value, "list")
+                || self.unshadowed_builtin(&method.value, "dict")
                 || matches!(
                     self.resolve(&method.value),
                     Some(Binding::Intrinsic(
@@ -6048,10 +6047,20 @@ impl<'a> Checker<'a> {
                 return Err(error(
                     self.source,
                     call,
-                    "unbound dict.clear requires one dictionary",
+                    "unbound clear requires one receiver",
                 ));
             };
             let receiver = self.expr(owner)?;
+            if self.unshadowed_builtin(&method.value, "list") {
+                let receiver = self.json_mutation_receiver(receiver, owner)?;
+                if self.types.element(receiver.ty).is_none() {
+                    return Err(error(self.source, owner, "list.clear requires a list"));
+                }
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::ListClear, vec![receiver]),
+                });
+            }
             if self.types.mapping(receiver.ty).is_none() {
                 return Err(error(
                     self.source,
@@ -6604,7 +6613,7 @@ impl<'a> Checker<'a> {
             }
             let receiver = if matches!(
                 attribute.attr.as_str(),
-                "append" | "pop" | "extend" | "sort"
+                "append" | "pop" | "extend" | "sort" | "clear"
             ) {
                 self.json_mutation_receiver(receiver, call)?
             } else {
@@ -6940,11 +6949,12 @@ impl<'a> Checker<'a> {
                     (Builtin::Append, Type::None)
                 }
                 "pop" if call.arguments.args.is_empty() => (Builtin::Pop, element),
+                "clear" if call.arguments.args.is_empty() => (Builtin::ListClear, Type::None),
                 _ => {
                     return Err(error(
                         self.source,
                         call,
-                        "supported list methods are append(value), extend(iterable), and pop()",
+                        "supported list methods are append(value), extend(iterable), pop(), and clear()",
                     ));
                 }
             };
