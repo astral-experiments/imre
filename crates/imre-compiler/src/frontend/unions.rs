@@ -123,6 +123,31 @@ impl Checker<'_> {
         Expr { ty, kind }
     }
 
+    /// Compare numeric values without changing the stored member used by repr or identity.
+    pub(super) fn numeric_union_comparison(&self, values: Vec<Expr>) -> Vec<Expr> {
+        if !values.iter().any(|v| self.types.is_bool_or_int(v.ty))
+            || !values
+                .iter()
+                .all(|v| matches!(v.ty, Type::Int | Type::Bool) || self.types.is_bool_or_int(v.ty))
+        {
+            return values;
+        }
+        values
+            .into_iter()
+            .map(|value| {
+                let cast = match value.ty {
+                    Type::Int => return value,
+                    Type::Bool => Builtin::Int,
+                    _ => Builtin::UnionProject,
+                };
+                Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(cast, vec![value]),
+                }
+            })
+            .collect()
+    }
+
     /// Class arguments are static builtin/nominal classes or tuples of them;
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
