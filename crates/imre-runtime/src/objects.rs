@@ -11,6 +11,7 @@ mod args;
 mod asyncio;
 mod bytes;
 mod contexts;
+mod copying;
 mod deferred_diff;
 mod difflib;
 pub(crate) mod exceptions;

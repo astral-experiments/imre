@@ -4661,6 +4661,14 @@ impl Emitter<'_, '_> {
                 returns,
                 &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
             ),
+            Builtin::DeepCopy => {
+                let source = self.word(&args[0].value);
+                let kind = representation_kind(returns, &self.module.types);
+                let result = self.checked_instruction(format!(
+                    "call i64 @imre_deep_copy(i64 {source}, i32 {kind})"
+                ));
+                self.decode_word(result, returns)
+            }
             Builtin::DictCopy => self.call("imre_dict_copy", returns, &[&args[0].value]),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
             Builtin::CounterNew => {
@@ -6255,6 +6263,7 @@ define internal i64 @imre_seq_borrow_index_proven_fast(ptr %sequence, i64 %index
 declare ptr @imre_seq_repeat(ptr, i64)
 declare ptr @imre_dict_new(i32, i32)
 declare ptr @imre_dict_copy(ptr)
+declare i64 @imre_deep_copy(i64, i32)
 declare ptr @imre_default_list_dict_new(i32, i32)
 declare ptr @imre_counter_new(i32)
 declare void @imre_counter_update(ptr, ptr)

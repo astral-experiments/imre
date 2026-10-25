@@ -628,6 +628,24 @@ pub(super) struct Set {
 }
 
 impl Mapping {
+    /// Copies entries in insertion order, retains immutable keys, and lets the
+    /// caller choose whether each value is shared or copied through a memo.
+    pub(super) fn copy_values(
+        &self,
+        mut value_copy: impl FnMut(OwnedWord) -> Result<OwnedWord, Error>,
+    ) -> Result<Self, Error> {
+        let mut copy = Self::new(self.tables.key_kind(), self.value_kind.raw());
+        copy.missing = self.missing;
+        let mut position = 0;
+        while let Some((next, key, value)) = self.tables.next(position) {
+            // SAFETY: the source mapping roots this value of the exact kind.
+            let value = value_copy(unsafe { self.value_kind.acquire(value) })?;
+            copy.insert(key, value)?;
+            position = next;
+        }
+        Ok(copy)
+    }
+
     /// Borrows entries in Python insertion order. The caller must keep the
     /// enclosing storage borrow live and cannot mutate or invoke user code.
     pub(super) fn string_entries(&self) -> impl Iterator<Item = (&Str, usize)> {
@@ -870,6 +888,13 @@ impl Mapping {
 }
 
 impl Set {
+    /// Deep-copy admission proves each set member is unchanged by deepcopy.
+    pub(super) fn copy_keys(&self) -> Result<Self, Error> {
+        let mut tables = Tables::new(self.tables.key_kind());
+        self.tables.copy_keys(&mut tables)?;
+        Ok(Self { tables })
+    }
+
     /// # Safety
     /// Both sets remain rooted and immutable for the entire comparison.
     pub(super) unsafe fn equal(&self, other: &Self) -> bool {
@@ -1096,17 +1121,9 @@ pub unsafe extern "C" fn imre_dict_copy(value: *const Object) -> *const Object {
     // SAFETY: the source owns every copied word; insertion in the fresh table
     // hashes only closed immutable keys and cannot reenter the source.
     let result = unsafe {
-        object(value).0.with(|storage| {
-            let source = storage.dictionary();
-            let mut copy = Mapping::new(source.tables.key_kind(), source.value_kind.raw());
-            copy.missing = source.missing;
-            let mut position = 0;
-            while let Some((next, key, value)) = source.tables.next(position) {
-                copy.insert(key, source.value_kind.acquire(value))?;
-                position = next;
-            }
-            Ok(copy)
-        })
+        object(value)
+            .0
+            .with(|storage| storage.dictionary().copy_values(Ok))
     };
     super::exceptions::finish(
         result.map(|copy| {

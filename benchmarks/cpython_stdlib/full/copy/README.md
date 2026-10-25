@@ -17,9 +17,16 @@ a test-enabled build of the pinned release:
 
 ## Native coverage
 
-Four complete upstream methods execute at both O0 and O3: `test_copy_basic`,
-`test_copy_list`, `test_copy_dict`, and `test_copy_set`. Their 13 original
-assertions run in native executables with typed equality and identity checks.
-The [native report](native-linux.json) retains all 81 IDs; the other 77 have
-reference evidence only. A separate differential fixture exercises shared
-children, independent outer containers, and Counter/defaultdict missing keys.
+Six complete upstream methods execute at both O0 and O3: shallow copy of an
+integer, list, dict and set; deep copy of an integer and the empty tuple.
+Their 15 original assertions run in native executables. The [native report](native-linux.json)
+retains all 81 IDs. The other 75 have reference evidence only.
+
+Separate differential fixtures exercise shared children, independent outer
+containers, Counter/defaultdict missing keys, a tuple pointing into the same
+graph as a dictionary, and an optional list. Runtime tests create a list/dict
+cycle and a tuple/list cycle directly, check that their back edges point to
+the copies, and explicitly break the cycles. The compiler still rejects cyclic
+heap types in Python source, so these runtime checks do not count the upstream
+reflexive-container tests as native. Caller-supplied memo dictionaries and
+custom copy/pickle protocols require separate support.

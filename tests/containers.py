@@ -287,6 +287,9 @@ main()
 # Every rejected program must reach the checker. Cycle cases additionally require
 # the ownership-graph diagnostic, rather than an unsupported-annotation rejection.
 REJECTED = {
+    "deepcopy_explicit_memo": "from copy import deepcopy\nx = [1]\nmemo: dict[int, list[int]] = {}\ny = deepcopy(x, memo)\n",
+    "deepcopy_live_resource": "from copy import deepcopy\nwith open('input.txt') as f:\n    x = deepcopy([f])\n",
+    "deepcopy_unproved_cycle": "from copy import deepcopy\nx = []\nx.append(x)\ny = deepcopy(x)\n",
     "counter_wrong_key": "from collections import Counter\nc = Counter[int]()\nc.update(['str'])",
     "counter_wrong_count": "from collections import Counter\nc = Counter({'key': 'not an int'})",
     "counter_wrong_generic": "from collections import Counter\nc = Counter[bytes]()",

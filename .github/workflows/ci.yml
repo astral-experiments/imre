@@ -142,7 +142,7 @@ jobs:
           for suite in build_cache module_objects link_cache build_output; do
             env -i HOME="$RUNNER_TEMP" PATH=/usr/bin:/bin python3 "tests/$suite.py" --compiler target/release/imre
           done
-      - name: Run complete upstream shallow-copy methods in native Imre
+      - name: Run complete upstream copy methods in native Imre
         run: |
           python3 benchmarks/cpython_stdlib/full/copy/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/copy-native.json"
           cmp benchmarks/cpython_stdlib/full/copy/native-linux.json "$RUNNER_TEMP/copy-native.json"

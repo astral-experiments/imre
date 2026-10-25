@@ -17,6 +17,8 @@ from suite_native import NativeCompileError, Toolchain, compile_blocker, method_
 # and str -> int dicts the specialized assertions compare lengths and all entries.
 CASES = {
     "test_copy_basic": ("int", "assert left == right", 1),
+    "test_deepcopy_basic": ("int", "assert left == right", 1),
+    "test_deepcopy_empty_tuple": ("tuple[()]", "assert left is right", 1),
     "test_copy_list": ("list[int]", "assert len(left) == len(right)\n"
                        "        for i in range(len(left)):\n            assert left[i] == right[i]", 4),
     "test_copy_dict": ("dict[str, int]", "assert len(left) == len(right)\n"
@@ -37,7 +39,9 @@ class Case:
         {equal}
         self.checks += 1
 """
-    if ty != "int":
+    if ty == "tuple[()]":
+        header = header.replace("def assertEqual", "def assertIs")
+    elif ty != "int":
         header += f"""    def assertIsNot(self, left: {ty}, right: {ty}) -> None:
         assert left is not right
         self.checks += 1
@@ -49,7 +53,7 @@ class Case:
         if run.returncode or run.stderr or run.stdout != "completed\n":
             raise AssertionError((run.returncode, run.stdout, run.stderr))
         return {"roles": roles(body="imre", assertions="imre", operation="imre", fixture="imre"),
-                "evidence": {"operation": "copy.copy", "opt_level": tools.level,
+                "evidence": {"operation": "copy.deepcopy" if name.startswith("test_deepcopy") else "copy.copy", "opt_level": tools.level,
                              "method_sha256": hashlib.sha256(method).hexdigest(),
                              "assertions": f"{checks} native TestCase assertions completed.",
                              "fixture": "The original method creates its own objects in the native process."}}

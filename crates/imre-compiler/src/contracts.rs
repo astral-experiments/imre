@@ -248,6 +248,7 @@ impl Builtin {
             | Self::RegexGroupDict
             | Self::DictGet
             | Self::DictCopy
+            | Self::DeepCopy
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
             | Self::JsonLoads

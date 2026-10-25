@@ -5447,6 +5447,7 @@ impl<'a> Checker<'a> {
                 return self.cursor_length_hint(call);
             }
             Some(Binding::Intrinsic(Intrinsic::ShallowCopy)) => return self.shallow_copy(call),
+            Some(Binding::Intrinsic(Intrinsic::DeepCopy)) => return self.deep_copy(call),
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
                 return Err(error(
