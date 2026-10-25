@@ -802,6 +802,7 @@ pub(crate) enum Builtin {
     DefaultListDict,
     CounterNew,
     CounterTotal,
+    CounterMostCommon,
     CounterUpdate,
     CounterMath {
         op: CounterOp,
@@ -1194,6 +1195,8 @@ pub(crate) enum ProcessOperation {
     EnvironGet,
     GetCwd,
     Fd(FdOperation),
+    OsErrorField(u32),
+    Strerror,
     OpenFlag(&'static str),
     Which,
     Copy(CopyOperation),
