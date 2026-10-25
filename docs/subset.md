@@ -997,6 +997,14 @@ source was a Counter or defaultdict.
 
 Unary `+` and `-` select positive counts and negated negative counts. Binary `+`, `-`, `|` and `&` return a fresh Counter with positive counts, preserving the surviving left keys followed by new right keys in insertion order. Augmented assignment to a Counter local mutates the existing object, including when the right operand aliases it.
 
+`collections.OrderedDict[K, V]` accepts the same typed mappings, pairs and
+keyword entries as `dict`. Replacing a value preserves its position; deleting
+and reinserting the key moves it to the end. Two ordered dictionaries compare
+both their keys' order and their values. When one operand is a plain dictionary
+of the same key and value types, equality ignores order. The bound `copy()`
+retains the concrete mapping type and shares its values. Changing keys during
+iteration raises `RuntimeError` if another key remained to be yielded.
+
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.
 
 Direct `mapping.keys()` operands and sets of the same key type support `|`, including chained unions. Each union reads the two key sources after evaluating both operands, and returns an independent set. Stored key-view objects and arbitrary iterables as union operands are outside the supported subset.

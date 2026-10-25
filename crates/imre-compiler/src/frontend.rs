@@ -1583,8 +1583,12 @@ fn annotation_with_aliases(
             }
             receiver
                 if matches!(receiver, ast::Expr::Name(name) if name.id == "dict")
-                    || graph.resolve_type(module, receiver)
-                        == Some(Binding::Intrinsic(Intrinsic::DefaultDict)) =>
+                    || matches!(
+                        graph.resolve_type(module, receiver),
+                        Some(Binding::Intrinsic(
+                            Intrinsic::DefaultDict | Intrinsic::OrderedDict
+                        ))
+                    ) =>
             {
                 let ast::Expr::Tuple(arguments) = &*value.slice else {
                     return Err(error(
@@ -1630,6 +1634,10 @@ fn annotation_with_aliases(
                         ));
                     }
                     Ok(types.default_list_dict(key_type, value_type))
+                } else if graph.resolve_type(module, receiver)
+                    == Some(Binding::Intrinsic(Intrinsic::OrderedDict))
+                {
+                    Ok(types.ordered_dict(key_type, value_type))
                 } else {
                     Ok(types.dict(key_type, value_type))
                 }
@@ -2036,9 +2044,12 @@ impl<'a> Checker<'a> {
         {
             return Ok(json::select(value, expected, None, None));
         }
-        if (self.types.is_default_list_dict(value.ty) || self.types.is_counter(value.ty))
+        if (self.types.is_default_list_dict(value.ty)
+            || self.types.is_counter(value.ty)
+            || self.types.is_ordered_dict(value.ty))
             && !self.types.is_default_list_dict(expected)
             && !self.types.is_counter(expected)
+            && !self.types.is_ordered_dict(expected)
             && self.types.mapping(value.ty) == self.types.mapping(expected)
         {
             return Ok(Expr {
@@ -2260,6 +2271,11 @@ impl<'a> Checker<'a> {
                     && self.types.mapping(concrete).is_some() =>
             {
                 self.counter(call, None, self.types.mapping(concrete).map(|(key, _)| key))?
+            }
+            ast::Expr::Call(call)
+                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::OrderedDict)) =>
+            {
+                self.ordered_dict_constructor(call, self.types.mapping(concrete))?
             }
             ast::Expr::Call(call)
                 if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::DefaultDict)) =>
@@ -5174,6 +5190,17 @@ impl<'a> Checker<'a> {
                         ops.push(order);
                         continue;
                     }
+                    if (self.types.is_ordered_dict(ty) || self.types.is_ordered_dict(right))
+                        && self.types.mapping(ty) == self.types.mapping(right)
+                        && matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
+                    {
+                        ops.push(if op == ast::CmpOp::Eq {
+                            Compare::Equal
+                        } else {
+                            Compare::NotEqual
+                        });
+                        continue;
+                    }
                     let numeric = matches!(ty, Type::Int | Type::Float)
                         && matches!(right, Type::Int | Type::Float);
                     let records = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
@@ -5811,6 +5838,9 @@ impl<'a> Checker<'a> {
         if self.unshadowed_builtin(&call.func, "dict") {
             return self.dict_constructor(call, None);
         }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::OrderedDict)) {
+            return self.ordered_dict_constructor(call, None);
+        }
         if let Some(Binding::Intrinsic(
             kind @ (Intrinsic::TomliLoads
             | Intrinsic::TomliLoad
@@ -5885,7 +5915,7 @@ impl<'a> Checker<'a> {
                 || matches!(
                     self.resolve(&method.value),
                     Some(Binding::Intrinsic(
-                        Intrinsic::Counter | Intrinsic::DefaultDict
+                        Intrinsic::Counter | Intrinsic::DefaultDict | Intrinsic::OrderedDict
                     ))
                 ))
         {

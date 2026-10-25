@@ -46,6 +46,20 @@ impl Checker<'_> {
         }))
     }
 
+    /// Only the freshly constructed mapping receives OrderedDict identity.
+    pub(super) fn ordered_dict_constructor(
+        &mut self,
+        call: &ast::ExprCall,
+        shape: Option<(Type, Type)>,
+    ) -> Result<Expr, String> {
+        let mapping = self.dict_constructor(call, shape)?;
+        let (key, value) = self.types.mapping(mapping.ty).expect("fresh dictionary");
+        Ok(Expr {
+            ty: self.types.ordered_dict(key, value),
+            kind: ExprKind::Builtin(Builtin::OrderedDict, vec![mapping]),
+        })
+    }
+
     /// Copy stored entries into a fresh plain dictionary. A Counter's zero
     /// and a defaultdict's factory belong to the source rather than its copy.
     pub(super) fn dict_constructor(
