@@ -35,6 +35,8 @@ For the eleven host-driven methods, compiled Imre code shares the host process's
 
 Run `native_descriptors.py` and `host_descriptors.py` here with the pinned reference interpreter. Both accept `--imre`, `--runtime`, `--clang`, `--opt-level 0|3`, `--result`, and an optional `--cpython-source`. Each run uses temporary fixtures. Host-driven calls expose only explicitly routed operations. An absent bridge operation fails the test.
 
+The two [Linux pipe2 methods](PIPE2.md) are separate from the 23 descriptor methods above.
+
 ## Structured OS errors
 
 For a failed descriptor operation, the compiled entry returns the caught OS exception subclass, errno and strerror. The host checks the class before it raises the transported error for the upstream assertions. File errors retain the original str or bytes object; the runtime ownership test covers a second filename and a bytes path containing 0xff.
@@ -77,10 +79,9 @@ occurrences outstanding after #506. Later successful executions take precedence 
 the earlier diagnostics in the versioned reports. Each build takes the complete verified definition, its
 actual imported names, and the shared native TestCase fixture. Eight generated
 invalid-descriptor methods receive the operation name from their original closure.
-Two outer methods now compile: the unchanged subprocess requests for
-`os.setregid(-1, -1)` and `os.setreuid(-1, -1)`. The [child runner](credential_children.py)
-executes both methods and verifies each child’s exact `-c` source. The [OS calls](credential-children-linux.json)
-still run in CPython after Imre rejects the inner program. These are host operations.
+The first preflight found two compilable outer methods: the unchanged subprocess requests for
+`os.setregid(-1, -1)` and `os.setreuid(-1, -1)`. Both now run the original child source in Imre;
+the [credential results](CREDENTIALS.md) distinguish these executions from the earlier CPython children.
 For the remaining methods, the first compiler diagnostic, source line, method hash, Imre revision and
 compiler binary hash are recorded. No process or filesystem operation in an
 unreviewed test is executed during these builds.
@@ -91,13 +92,13 @@ work](https://github.com/astral-sh/imre/pull/587#issuecomment-6392803799) covers
 that fixture requirement. Other first errors belong to upstream case helpers,
 such as `WalkTests.walk`, or to a product import such as `posix`. A compiler
 diagnostic describes the first failed build step, not the result of running the
-method. The [canonical rollup](../native_report.py) counts 15 native bodies with
-host fixtures, 12 host-driven native operations, one mixed body, two host operations, 453 blockers,
+method. The [canonical rollup](../native_report.py) counts 27 native bodies with
+host fixtures, 15 host-driven native operations, two mixed bodies, 439 blockers,
 five private reference-only cases, and 91 upstream skips at each level.
 
 To refresh these diagnostics, run `method_preflight.py` twice with the same
 `--imre`, `--runtime`, `--clang` and `--cpython-source`, once with each
 `--opt-level 0|3` and a distinct `--result`. Pass both files to
 `evidence.py --method-results O0.json O3.json --compiler-commit FULL_SHA`.
-CI independently reruns the 30 exercised methods at both levels and
+CI independently reruns the 44 exercised methods at both levels and
 compares their results with the denominator reports.

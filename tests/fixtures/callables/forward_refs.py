@@ -16,6 +16,11 @@ def main() -> None:
     print(named.__forward_is_argument__)
     print(named.__forward_is_class__)
     print(f.__owner__ is None)
+    previous = f
+    for _ in range(2):
+        current = ForwardRef("T")
+        print(previous is not current)
+        previous = current
     print(isinstance(f, ForwardRef))
     print(isinstance("T", ForwardRef))
     for kind in [bool, int, str]:

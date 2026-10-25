@@ -14,7 +14,7 @@ pub(super) fn inert_body(function: &ast::StmtFunctionDef) -> bool {
 }
 
 /// Builtin classes form a closed nominal domain, independent of the values they construct.
-pub(super) fn builtin_type(name: &str) -> Option<Expr> {
+pub(super) fn is_builtin_type(name: &str) -> bool {
     matches!(
         name,
         "bool"
@@ -35,7 +35,10 @@ pub(super) fn builtin_type(name: &str) -> Option<Expr> {
             | "tuple"
             | "type"
     )
-    .then(|| Expr {
+}
+
+pub(super) fn builtin_type(name: &str) -> Option<Expr> {
+    (is_builtin_type(name) || super::warnings::is_warning_class(name)).then(|| Expr {
         ty: Type::BuiltinClass,
         kind: ExprKind::Builtin(Builtin::ClassNameView, vec![unpacking::string(name)]),
     })
@@ -160,6 +163,14 @@ fn symbolic(value: &ast::Expr) -> bool {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AnnotationScope {
+    Namespace,
+    ModuleFunction,
+    LocalFunction,
+    UnavailableLocal,
+}
+
 impl Checker<'_> {
     pub(super) fn annotation_type_repr(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
@@ -251,40 +262,61 @@ impl Checker<'_> {
         }
         let obj =
             obj.ok_or_else(|| error(self.source, call, "get_annotations requires an object"))?;
-        let dict = |types: &Types, value: Type, entries| Expr {
-            ty: types.dict(Type::Str, value),
-            kind: ExprKind::Dict {
-                key: Type::Str,
-                value,
-                entries,
-            },
-        };
-        let error_ty = self.types.dict(Type::Str, Type::Str);
-        let raise = |kind: &str, message: String| Expr {
-            ty: error_ty,
-            kind: ExprKind::Builtin(
-                Builtin::RaiseException,
-                vec![Expr {
-                    ty: Type::Exception,
-                    kind: ExprKind::Exception {
-                        kind: exception_kind(kind).unwrap(),
-                        message: Some(Box::new(unpacking::string(message))),
-                    },
-                }],
-            ),
-        };
         // Source references below are ordinary loads; do not elide an effectful
         // object expression just because the selected format will raise.
+        let binding = self.resolve(obj);
+        let wrapped = if !matches!(binding, Some(Binding::Definition(_) | Binding::Module(_)))
+            && self.local_function_binding(obj).is_none()
+        {
+            let target = self.expr(obj)?;
+            let layout = self.types.cached_function(target.ty).ok_or_else(|| error(self.source, obj,
+                "get_annotations requires a known native function, class, module, or cache wrapper"))?;
+            let origin = layout.annotations.ok_or_else(|| {
+                error(
+                    self.source,
+                    obj,
+                    "the cached callback's annotation declaration is not statically known",
+                )
+            })?;
+            Some((self.hidden(target.ty), target, origin))
+        } else {
+            None
+        };
+        let wrapped_local =
+            if let Some((_, _, crate::types::AnnotationOrigin::Local(id))) = &wrapped {
+                self.helpers.local_annotations.borrow().get(id).cloned()
+            } else {
+                None
+            };
         let local_owner = self
             .local_function_binding(obj)
             .and_then(|b| b.value_slot)
             .map(|slot| self.local(slot));
-        let lexical = local_owner.is_some();
         let named_function = match self.resolve(obj) {
             Some(Binding::Definition(d)) if self.functions.contains_key(&d) => Some(d),
             _ => None,
         };
-        let owner = if let Some(d) = named_function
+        let scope = if let Some((_, _, crate::types::AnnotationOrigin::Local(id))) = &wrapped {
+            if wrapped_local.as_ref().is_some_and(|(_, f)| {
+                self.local_functions
+                    .get(f.name.as_str())
+                    .and_then(|b| b.target(self.source, obj).ok())
+                    .is_some_and(|f| f.signature.id == *id)
+            }) {
+                AnnotationScope::LocalFunction
+            } else {
+                AnnotationScope::UnavailableLocal
+            }
+        } else if local_owner.is_some() {
+            AnnotationScope::LocalFunction
+        } else if named_function.is_some() || wrapped.is_some() {
+            AnnotationScope::ModuleFunction
+        } else {
+            AnnotationScope::Namespace
+        };
+        let owner = if let Some((slot, _, _)) = &wrapped {
+            Some(self.local(*slot))
+        } else if let Some(d) = named_function
             && format == 3
             && let ast::Stmt::FunctionDef(f) = &self.graph.modules[d.module].parsed.syntax().body[d.statement]
             && function_entries(f).into_iter().any(|(_, a)| matches!(a, ast::Expr::Name(n)
@@ -293,7 +325,13 @@ impl Checker<'_> {
         } else {
             local_owner
         };
-        let (id, entries) = match self.resolve(obj) {
+        let declaration = match &wrapped {
+            Some((_, _, crate::types::AnnotationOrigin::Module(d))) => {
+                Some(Binding::Definition(*d))
+            }
+            _ => binding,
+        };
+        let (id, entries) = match declaration {
             Some(Binding::Definition(d)) => {
                 let m = &self.graph.modules[d.module];
                 let entries = match &m.parsed.syntax().body[d.statement] {
@@ -313,6 +351,7 @@ impl Checker<'_> {
                 id,
                 field_entries(&self.graph.modules[id].parsed.syntax().body),
             ),
+            _ if let Some((id, function)) = &wrapped_local => (*id, function_entries(function)),
             _ => {
                 let binding = self.local_function_binding(obj).ok_or_else(|| {
                     error(
@@ -339,6 +378,55 @@ impl Checker<'_> {
                     })?;
                 (self.module, function_entries(f))
             }
+        };
+        let result =
+            self.declared_annotations(obj, id, entries, (format, eval_str), scope, owner)?;
+        Ok(if let Some((slot, target, _)) = wrapped {
+            Expr {
+                ty: result.ty,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Assign(slot, target)],
+                    value: Box::new(result),
+                    clear: vec![slot],
+                },
+            }
+        } else {
+            result
+        })
+    }
+
+    fn declared_annotations(
+        &self,
+        obj: &ast::Expr,
+        id: ModuleId,
+        entries: Vec<(&str, &ast::Expr)>,
+        options: (i64, bool),
+        scope: AnnotationScope,
+        owner: Option<Expr>,
+    ) -> Result<Expr, String> {
+        let (format, eval_str) = options;
+        let dict = |types: &Types, value: Type, entries| Expr {
+            ty: types.dict(Type::Str, value),
+            kind: ExprKind::Dict {
+                key: Type::Str,
+                value,
+                entries,
+            },
+        };
+        let error_ty = self.types.dict(Type::Str, Type::Str);
+
+        let raise = |kind: &str, message: String| Expr {
+            ty: error_ty,
+            kind: ExprKind::Builtin(
+                Builtin::RaiseException,
+                vec![Expr {
+                    ty: Type::Exception,
+                    kind: ExprKind::Exception {
+                        kind: exception_kind(kind).unwrap(),
+                        message: Some(Box::new(unpacking::string(message))),
+                    },
+                }],
+            ),
         };
         if eval_str && format != 1 {
             return Ok(raise(
@@ -401,9 +489,16 @@ impl Checker<'_> {
                     ast::Expr::Name(n)
                         if !module.bindings.contains_key(n.id.as_str())
                             && potential_forward_name(n.id.as_str())
-                            && (lexical || named_function.is_some()) =>
+                            && scope != AnnotationScope::Namespace =>
                     {
-                        if lexical
+                        if scope == AnnotationScope::UnavailableLocal {
+                            return Err(error(
+                                &module.source,
+                                a,
+                                "deferred annotation requires the original enclosing scope",
+                            ));
+                        }
+                        if scope == AnnotationScope::LocalFunction
                             && let Some(&slot) = self.names.get(n.id.as_str())
                             && self.assigned.contains(&slot)
                         {

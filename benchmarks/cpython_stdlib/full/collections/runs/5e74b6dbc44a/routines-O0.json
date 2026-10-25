@@ -1,0 +1,120 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_revision": "5e74b6dbc44a75899ed8af50558b0350fc7f6dc9",
+  "opt_level": 0,
+  "reference_denominator": 659,
+  "routines": {
+    "test.test_collections.TestChainMap.test_basics": {
+      "source": "Lib/test/test_collections.py:90",
+      "variant": "test.test_collections.TestChainMap",
+      "result": "compile-blocked",
+      "location": "fixture:2:1",
+      "reason": "Imre: standard-library imports and shadowing are unsupported: \"pickle\""
+    },
+    "test.test_collections.TestChainMap.test_bool": {
+      "source": "Lib/test/test_collections.py:168",
+      "variant": "test.test_collections.TestChainMap",
+      "result": "ran-pending-operation-audit",
+      "execution": [
+        {
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "f3ffcf9a3eb2700207b46386f1ad82e1e72658da8da9a3600f6c9fe0c0d1f111",
+          "observation": {
+            "roles": {
+              "body": "imre",
+              "assertions": "imre",
+              "operation": "imre",
+              "fixture": "mixed"
+            },
+            "evidence": {
+              "operation": "Test the truth of ChainMaps with empty and nonempty dictionaries",
+              "fixture": "CPython module/class/instance hooks; native instance in child",
+              "opt_level": 0,
+              "method_sha256": "f3ffcf9a3eb2700207b46386f1ad82e1e72658da8da9a3600f6c9fe0c0d1f111"
+            }
+          }
+        }
+      ]
+    },
+    "test.test_collections.TestChainMap.test_constructor": {
+      "source": "Lib/test/test_collections.py:164",
+      "variant": "test.test_collections.TestChainMap",
+      "result": "ran-pending-operation-audit",
+      "execution": [
+        {
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "cf17343fb93afd419d9b794756622304d09757f81ee8383ba5eefabed31fb9de",
+          "observation": {
+            "roles": {
+              "body": "imre",
+              "assertions": "imre",
+              "operation": "imre",
+              "fixture": "mixed"
+            },
+            "evidence": {
+              "operation": "Construct native ChainMaps and inspect the public mapping list",
+              "fixture": "CPython module/class/instance hooks; native instance in child",
+              "opt_level": 0,
+              "method_sha256": "cf17343fb93afd419d9b794756622304d09757f81ee8383ba5eefabed31fb9de"
+            }
+          }
+        }
+      ]
+    },
+    "test.test_collections.TestChainMap.test_dict_coercion": {
+      "source": "Lib/test/test_collections.py:224",
+      "variant": "test.test_collections.TestChainMap",
+      "result": "compile-blocked",
+      "location": "upstream:226:26",
+      "reason": "Imre: unknown function or unsupported builtin arguments"
+    },
+    "test.test_collections.TestChainMap.test_iter_not_calling_getitem_on_maps": {
+      "source": "Lib/test/test_collections.py:208",
+      "variant": "test.test_collections.TestChainMap",
+      "result": "compile-blocked",
+      "location": "fixture:1:1",
+      "reason": "Imre: unsupported sealed standard-library export collections.UserDict"
+    },
+    "test.test_collections.TestChainMap.test_missing": {
+      "source": "Lib/test/test_collections.py:174",
+      "variant": "test.test_collections.TestChainMap",
+      "result": "compile-blocked",
+      "location": "upstream:175:9",
+      "reason": "Imre: unsupported statement in the Imre subset"
+    },
+    "test.test_collections.TestChainMap.test_new_child": {
+      "source": "Lib/test/test_collections.py:229",
+      "variant": "test.test_collections.TestChainMap",
+      "result": "compile-blocked",
+      "location": "upstream:235:13",
+      "reason": "Imre: supported value methods are typed-list append/pop, dict.get, set.add/discard, and str.split()"
+    },
+    "test.test_collections.TestChainMap.test_order_preservation": {
+      "source": "Lib/test/test_collections.py:191",
+      "variant": "test.test_collections.TestChainMap",
+      "result": "compile-blocked",
+      "location": "fixture:1:1",
+      "reason": "Imre: unsupported sealed standard-library export collections.OrderedDict"
+    },
+    "test.test_collections.TestChainMap.test_ordering": {
+      "source": "Lib/test/test_collections.py:150",
+      "variant": "test.test_collections.TestChainMap",
+      "result": "compile-blocked",
+      "location": "upstream:160:9",
+      "reason": "Imre: supported dictionary methods are clear(), copy() on a plain dictionary, get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
+    },
+    "test.test_collections.TestChainMap.test_union_operators": {
+      "source": "Lib/test/test_collections.py:265",
+      "variant": "test.test_collections.TestChainMap",
+      "result": "compile-blocked",
+      "location": "upstream:268:15",
+      "reason": "Imre: supported value methods are typed-list append/pop, dict.get, set.add/discard, and str.split()"
+    }
+  }
+}

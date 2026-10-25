@@ -1,5 +1,6 @@
 //! Closed unions use three alignment bits of their exact Rc payload.
 //! Zero is reserved for absent optionals and partially initialized storage.
+//! Words one and two represent the bool singletons; other nonzero words carry a member tag.
 
 use super::words::WordKind;
 use super::{Bytes, Int, Object, Str, object};
@@ -16,6 +17,11 @@ const _: () = assert!(
 
 /// Recovers the original address and the runtime descriptor for its owner.
 pub(super) fn member(value: usize) -> (usize, WordKind) {
+    // No live allocation has a null address. These otherwise unused tagged
+    // words encode Python's two bool singletons, just like nullable bool.
+    if matches!(value, 1 | 2) {
+        return (value - 1, WordKind::new(1));
+    }
     let kind = match value & 7 {
         0 => 3,                                      // str
         1 => 8,                                      // bytes
@@ -48,10 +54,13 @@ pub unsafe extern "C" fn imre_union_from_int(word: usize) -> usize {
 }
 
 /// # Safety
-/// Takes ownership of a present integer member; restores the canonical
+/// Takes ownership of a present bool or integer member; restores the canonical
 /// immediate representation before it is used as an integer or dictionary key.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_union_into_int(word: usize) -> usize {
+    if matches!(word, 1 | 2) {
+        return Int::small(i64::from(word == 2)).unwrap().into_raw();
+    }
     let value = Int(word & !7);
     value
         .big()
@@ -83,8 +92,8 @@ pub unsafe extern "C" fn imre_union_release(value: usize) {
 /// Borrows the exact rooted union member. Zero is false.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_union_truthy(value: usize) -> u32 {
-    if value == 0 {
-        return 0;
+    if value <= 2 {
+        return u32::from(value == 2);
     }
     let (word, _) = member(value);
     // SAFETY: the caller roots the selected member and no user code runs here.
@@ -148,26 +157,26 @@ pub unsafe extern "C" fn imre_string_iterable_list(value: usize) -> *const Objec
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::rc::Rc;
+    use crate::StrOwner;
 
     #[test]
     fn tagged_members_keep_exact_owners_and_truth_values() {
-        let text = Rc::new(Str::from("text"));
-        let bytes = Rc::new(Bytes::new());
-        let text_word = Rc::as_ptr(&text) as usize;
-        let bytes_word = Rc::as_ptr(&bytes) as usize | 1;
+        let text = StrOwner::new(Str::from("text"));
+        let bytes = crate::BytesOwner::new(Bytes::new());
+        let text_word = StrOwner::as_ptr(&text) as usize;
+        let bytes_word = crate::BytesOwner::as_ptr(&bytes) as usize | 1;
         // SAFETY: both locals root their exact tagged payloads throughout.
         unsafe {
             assert_eq!(imre_union_truthy(text_word), 1);
             assert_eq!(imre_union_truthy(bytes_word), 0);
             let text_owner = WordKind::new(9).acquire(text_word);
             let bytes_owner = WordKind::new(9).acquire(bytes_word);
-            assert_eq!(Rc::strong_count(&text), 2);
-            assert_eq!(Rc::strong_count(&bytes), 2);
+            assert_eq!(StrOwner::strong_count(&text), 2);
+            assert_eq!(crate::BytesOwner::strong_count(&bytes), 2);
             drop(text_owner);
             drop(bytes_owner);
-            assert_eq!(Rc::strong_count(&text), 1);
-            assert_eq!(Rc::strong_count(&bytes), 1);
+            assert_eq!(StrOwner::strong_count(&text), 1);
+            assert_eq!(crate::BytesOwner::strong_count(&bytes), 1);
             drop(WordKind::new(256 | 9).acquire(0));
         }
     }

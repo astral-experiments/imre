@@ -8,8 +8,8 @@
     "denominator": 54,
     "distinct_ids": 54,
     "counts": {
-      "fully-native": 2,
-      "reference-only": 52
+      "fully-native": 15,
+      "reference-only": 39
     },
     "records": [
       {
@@ -285,16 +285,23 @@
         "id": "test.test_string.test_string.TestTemplate.test_SafeTemplate",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_SafeTemplate against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "4db5d171fdb5b6b489f1858cd9d79c208539075d8386ae2fbd43d8d229d341e5",
+          "source_assertions": 5,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_braced_override",
@@ -345,16 +352,23 @@
         "id": "test.test_string.test_string.TestTemplate.test_escapes",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_escapes against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "a8d773dbfb158d1210dc9e3cbe2a3da05ae2640dbb05fa297f958f863f56e2fc",
+          "source_assertions": 2,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_flags_override",
@@ -435,16 +449,23 @@
         "id": "test.test_string.test_string.TestTemplate.test_invalid_placeholders",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native unittest.TestCase callbacks",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_invalid_placeholders against the bundled string module",
+          "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+          "method_sha256": "208eebccafa73f9ed7e3609cf501593962e99597142a6ce0691a1b1c35cd811d",
+          "source_assertions": 5,
+          "negative_control": "ValueError not raised by substitute"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_invalid_with_no_lines",
@@ -480,31 +501,45 @@
         "id": "test.test_string.test_string.TestTemplate.test_keyword_arguments",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_keyword_arguments against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "eb87298c5afc2c0f6e5bbafdbd85b83efd43fbce1408b154241df478cfb68b30",
+          "source_assertions": 6,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_keyword_arguments_safe",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native unittest.TestCase callbacks",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_keyword_arguments_safe against the bundled string module",
+          "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+          "method_sha256": "5b89c62856baa0b950d127d8a683aeaab0955b49cfacfc99690a41af6bcdef8c",
+          "source_assertions": 8,
+          "negative_control": "TypeError not raised by substitute"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_pattern_override",
@@ -525,121 +560,177 @@
         "id": "test.test_string.test_string.TestTemplate.test_percents",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_percents against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "7cb2ddd1371634e78476e01cb2840f0376ff8ce64921c509580d979821b39821",
+          "source_assertions": 2,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_regular_templates",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native unittest.TestCase callbacks",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_regular_templates against the bundled string module",
+          "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+          "method_sha256": "db161b9aaf460af58744612fa309984dbbdc534a25b0ac5aef9ebb9bd392fe4d",
+          "source_assertions": 3,
+          "negative_control": "KeyError not raised by substitute"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_regular_templates_with_braces",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native unittest.TestCase callbacks",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_regular_templates_with_braces against the bundled string module",
+          "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+          "method_sha256": "d71b3864d9bc265c2d644668acd384b709773ea8bd9d4dd4ae937f47c673d926",
+          "source_assertions": 2,
+          "negative_control": "KeyError not raised by substitute"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_regular_templates_with_non_letters",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_regular_templates_with_non_letters against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "7d3788dbb33348c140a4cf988b630967aa84961f843e3899f73c9c7f105a39c3",
+          "source_assertions": 1,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_regular_templates_with_upper_case",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_regular_templates_with_upper_case against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "379954ce224c620061574d8aad36f0b6075defab6be8b8f92a29468f64e814be",
+          "source_assertions": 1,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_stringification",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_stringification against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "91641a1ab990a7df3889c4174e6e82a02de75a050b9390979e17a9edcfb9c66e",
+          "source_assertions": 3,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_tupleargs",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_tupleargs against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "cab957ec29391c59f08ae0560a3ff2a4179e9ef524028e285509a20cebdbe0b0",
+          "source_assertions": 2,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_unicode_values",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_unicode_values against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "6ab57f2900dfe80d19ba275a64863f34e17e5df378ad8e9599178dc5ca2dfa02",
+          "source_assertions": 1,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_templatelib.TemplateIterTests.test_abc",
@@ -847,8 +938,8 @@
     "denominator": 54,
     "distinct_ids": 54,
     "counts": {
-      "fully-native": 2,
-      "reference-only": 52
+      "fully-native": 15,
+      "reference-only": 39
     },
     "records": [
       {
@@ -1124,16 +1215,23 @@
         "id": "test.test_string.test_string.TestTemplate.test_SafeTemplate",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_SafeTemplate against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "4db5d171fdb5b6b489f1858cd9d79c208539075d8386ae2fbd43d8d229d341e5",
+          "source_assertions": 5,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_braced_override",
@@ -1184,16 +1282,23 @@
         "id": "test.test_string.test_string.TestTemplate.test_escapes",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_escapes against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "a8d773dbfb158d1210dc9e3cbe2a3da05ae2640dbb05fa297f958f863f56e2fc",
+          "source_assertions": 2,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_flags_override",
@@ -1274,16 +1379,23 @@
         "id": "test.test_string.test_string.TestTemplate.test_invalid_placeholders",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native unittest.TestCase callbacks",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_invalid_placeholders against the bundled string module",
+          "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+          "method_sha256": "208eebccafa73f9ed7e3609cf501593962e99597142a6ce0691a1b1c35cd811d",
+          "source_assertions": 5,
+          "negative_control": "ValueError not raised by substitute"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_invalid_with_no_lines",
@@ -1319,31 +1431,45 @@
         "id": "test.test_string.test_string.TestTemplate.test_keyword_arguments",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_keyword_arguments against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "eb87298c5afc2c0f6e5bbafdbd85b83efd43fbce1408b154241df478cfb68b30",
+          "source_assertions": 6,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_keyword_arguments_safe",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native unittest.TestCase callbacks",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_keyword_arguments_safe against the bundled string module",
+          "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+          "method_sha256": "5b89c62856baa0b950d127d8a683aeaab0955b49cfacfc99690a41af6bcdef8c",
+          "source_assertions": 8,
+          "negative_control": "TypeError not raised by substitute"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_pattern_override",
@@ -1364,121 +1490,177 @@
         "id": "test.test_string.test_string.TestTemplate.test_percents",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_percents against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "7cb2ddd1371634e78476e01cb2840f0376ff8ce64921c509580d979821b39821",
+          "source_assertions": 2,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_regular_templates",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native unittest.TestCase callbacks",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_regular_templates against the bundled string module",
+          "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+          "method_sha256": "db161b9aaf460af58744612fa309984dbbdc534a25b0ac5aef9ebb9bd392fe4d",
+          "source_assertions": 3,
+          "negative_control": "KeyError not raised by substitute"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_regular_templates_with_braces",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native unittest.TestCase callbacks",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_regular_templates_with_braces against the bundled string module",
+          "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+          "method_sha256": "d71b3864d9bc265c2d644668acd384b709773ea8bd9d4dd4ae937f47c673d926",
+          "source_assertions": 2,
+          "negative_control": "KeyError not raised by substitute"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_regular_templates_with_non_letters",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_regular_templates_with_non_letters against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "7d3788dbb33348c140a4cf988b630967aa84961f843e3899f73c9c7f105a39c3",
+          "source_assertions": 1,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_regular_templates_with_upper_case",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_regular_templates_with_upper_case against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "379954ce224c620061574d8aad36f0b6075defab6be8b8f92a29468f64e814be",
+          "source_assertions": 1,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_stringification",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_stringification against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "91641a1ab990a7df3889c4174e6e82a02de75a050b9390979e17a9edcfb9c66e",
+          "source_assertions": 3,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_tupleargs",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_tupleargs against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "cab957ec29391c59f08ae0560a3ff2a4179e9ef524028e285509a20cebdbe0b0",
+          "source_assertions": 2,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_unicode_values",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native str assertEqual",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_unicode_values against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "6ab57f2900dfe80d19ba275a64863f34e17e5df378ad8e9599178dc5ca2dfa02",
+          "source_assertions": 1,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_templatelib.TemplateIterTests.test_abc",

@@ -1,6 +1,7 @@
 //! Mutable TOML/JSON views reuse native ordered dictionaries and list storage.
 //! A subscript or shallow spread retains the same nested container owner.
 
+use crate::StrOwner;
 use ::toml::de::{DeTable, DeValue};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -19,14 +20,14 @@ pub(in crate::objects) enum Value {
     Bool(bool),
     Integer(Int),
     Float(f64),
-    String(Rc<Str>),
+    String(StrOwner),
     Datetime(Str),
     Array(Rc<Object>),
     Table(Rc<Object>),
 }
 
 impl Value {
-    fn object(self) -> Rc<Object> {
+    pub(in crate::objects) fn object(self) -> Rc<Object> {
         Rc::new(Object(StorageCell::new(Storage::Document(self))))
     }
     fn word(self) -> usize {
@@ -46,7 +47,7 @@ impl Value {
         Ok(Self::Array(storage.into_object()))
     }
     fn table(
-        pairs: impl Iterator<Item = Result<(Rc<Str>, Rc<Object>), Error>>,
+        pairs: impl Iterator<Item = Result<(StrOwner, Rc<Object>), Error>>,
     ) -> Result<Self, Error> {
         // SAFETY: a fresh string/object dictionary transfers one owner.
         let dict = unsafe { Rc::from_raw(imre_dict_new(3, 5)) };
@@ -56,14 +57,14 @@ impl Value {
             unsafe {
                 dict_set(
                     Rc::as_ptr(&dict),
-                    Rc::as_ptr(&key) as usize,
+                    StrOwner::as_ptr(&key) as usize,
                     Rc::as_ptr(&value) as usize,
                 )?
             };
         }
         Ok(Self::Table(dict))
     }
-    pub(in crate::objects) fn items(source: &Object) -> Vec<(Rc<Str>, Rc<Object>)> {
+    pub(in crate::objects) fn items(source: &Object) -> Vec<(StrOwner, Rc<Object>)> {
         // SAFETY: this operation copies all owners before traversing child values.
         unsafe { source.0.with(|v| v.dictionary().document_pairs()) }
     }
@@ -201,8 +202,13 @@ impl Value {
         })
     }
     fn from_toml(node: &DeValue<'_>) -> Result<Self, Error> {
+        fn string(value: &str) -> Result<StrOwner, Error> {
+            let text = Str::try_new(value).map_err(|_| Error::allocation())?;
+            StrOwner::try_new(text).map_err(|_| Error::allocation())
+        }
+
         Ok(match node {
-            DeValue::String(value) => Self::String(Rc::new(Str::new(value.as_ref()))),
+            DeValue::String(value) => Self::String(string(value.as_ref())?),
             DeValue::Integer(value) => Self::Integer(Int::new(
                 num_bigint::BigInt::parse_bytes(value.as_str().as_bytes(), value.radix())
                     .ok_or_else(|| Error::new(Kind::TomlDecodeError, "invalid integer"))?,
@@ -245,12 +251,11 @@ impl Value {
                     .iter()
                     .map(|v| Self::from_toml(v.get_ref()).map(Self::object)),
             )?,
-            DeValue::Table(table) => Self::table(table.iter().map(|(k, v)| {
-                Ok((
-                    Rc::new(Str::new(k.get_ref())),
-                    Self::from_toml(v.get_ref())?.object(),
-                ))
-            }))?,
+            DeValue::Table(table) => {
+                Self::table(table.iter().map(|(k, v)| {
+                    Ok((string(k.get_ref())?, Self::from_toml(v.get_ref())?.object()))
+                }))?
+            }
         })
     }
     pub(in crate::objects) fn read(obj: &Object) -> Self {
@@ -359,7 +364,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
             0 => Value::Null.word(),
             1 => Value::table(std::iter::empty())?.word(),
             2 => Value::array(std::iter::empty())?.word(),
-            3 => Value::String(acquire_rc(a)).word(),
+            3 => Value::String(crate::StrOwner::acquire_word(a)).word(),
             4 => Value::Bool(a != 0).word(),
             5 => Value::Integer((*Int::borrow(a)).clone()).word(),
             6 => Value::Float(f64::from_bits(a as u64)).word(),
@@ -377,7 +382,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 let Value::String(s) = doc(a) else {
                     return Err(Error::new(Kind::TypeError, "expected a document string"));
                 };
-                Rc::into_raw(s) as usize
+                StrOwner::into_raw(s) as usize
             }
             13 | 14 => {
                 if op == 13 {
@@ -394,7 +399,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
             19 => {
                 let mut repr = String::new();
                 doc(a).view()?.write_repr(&mut repr);
-                Rc::into_raw(Rc::new(Str::new(repr))) as usize
+                StrOwner::into_raw(StrOwner::new(Str::new(repr))) as usize
             }
             20 => usize::from(doc(a).truth()),
             21 => {
@@ -414,7 +419,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 }
                 result?;
                 if op == 22 {
-                    Rc::into_raw(Rc::new(Str::new(text))) as usize
+                    StrOwner::into_raw(StrOwner::new(Str::new(text))) as usize
                 } else {
                     0
                 }
@@ -425,7 +430,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 for (key, val) in Value::items(&source) {
                     dict_set(
                         Rc::as_ptr(&target),
-                        Rc::as_ptr(&key) as usize,
+                        StrOwner::as_ptr(&key) as usize,
                         Rc::as_ptr(&val) as usize,
                     )?;
                 }
@@ -558,7 +563,7 @@ mod tests {
         }
         assert!(value.view().is_ok());
         let too_deep = Value::table(std::iter::once(Ok((
-            Rc::new(Str::new("child")),
+            StrOwner::new(Str::new("child")),
             value.object(),
         ))))
         .ok()
