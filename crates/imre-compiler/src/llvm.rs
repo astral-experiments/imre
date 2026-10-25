@@ -70,6 +70,7 @@ impl Type {
             | Self::Iterator
             | Self::Cursor(_)
             | Self::ByteOutput
+            | Self::TupleBuffer
             | Self::Exception
             | Self::NamedException(_)
             | Self::ObjectValue
@@ -112,6 +113,7 @@ impl Type {
             | Self::JsonObject
             | Self::RegexMatch
             | Self::BinaryIO
+            | Self::VarTuple(_)
             | Self::Tuple(_) => "ptr",
             Self::None => "i8",
         }
@@ -140,6 +142,7 @@ impl Type {
             | Self::Iterator
             | Self::Cursor(_)
             | Self::ByteOutput
+            | Self::TupleBuffer
             | Self::Exception
             | Self::NamedException(_)
             | Self::ObjectValue
@@ -182,6 +185,7 @@ impl Type {
             | Self::JsonObject
             | Self::RegexMatch
             | Self::BinaryIO
+            | Self::VarTuple(_)
             | Self::Tuple(_) => "null",
             Self::Bool
             | Self::None
@@ -754,6 +758,7 @@ impl Emitter<'_, '_> {
             | Type::Tuple(_)
             | Type::Callable(_)
             | Type::ForwardRef(_)
+            | Type::VarTuple(_)
             | Type::CompletedProcess(..) => "record",
             Type::List(_)
             | Type::Dict(_)
@@ -764,6 +769,7 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::Cursor(_)
             | Type::ByteOutput
+            | Type::TupleBuffer
             | Type::Exception
             | Type::NamedException(_)
             | Type::ObjectValue
@@ -3454,7 +3460,7 @@ impl Emitter<'_, '_> {
                     };
                     self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
                 }
-                Type::Tuple(_) => {
+                Type::Tuple(_) | Type::VarTuple(_) => {
                     if matches!(op, Compare::Equal | Compare::NotEqual) {
                         let equal = self.instruction(format!(
                             "call i32 @imre_record_equal(ptr {}, ptr {})",
@@ -3510,6 +3516,7 @@ impl Emitter<'_, '_> {
                 | Type::Iterator
                 | Type::Cursor(_)
                 | Type::ByteOutput
+                | Type::TupleBuffer
                 | Type::Callable(_)
                 | Type::EventLoop
                 | Type::Coroutine(_)
@@ -5458,6 +5465,7 @@ impl Emitter<'_, '_> {
                         match args[0].value.ty {
                             Type::Str => "imre_str_len",
                             Type::Bytes => "imre_bytes_len",
+                            Type::VarTuple(_) => "imre_tuple_len",
                             Type::ListInt => "imre_list_len",
                             Type::List(_) => "imre_seq_len_fast",
                             Type::Dict(_) | Type::ReadOnlyObjectMapping => "imre_dict_len",
@@ -5710,6 +5718,36 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::TupleIndex => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_tuple_get(ptr {}, i64 {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            Builtin::TupleBufferNew => self.call("imre_tuple_buffer_new", returns, &[]),
+            Builtin::TupleBufferPush => {
+                let value = &args[1].value;
+                let kind = representation_kind(value.ty, &self.module.types);
+                let word = self.word(value);
+                self.checked_instruction(format!(
+                    "call i32 @imre_tuple_buffer_push(ptr {}, i32 {kind}, i64 {word})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::None,
+                    operand: "0".into(),
+                    small_integer: false,
+                }
+            }
+            Builtin::TupleBufferFinish => Value {
+                ty: returns,
+                operand: self.checked_pointer(format!(
+                    "call ptr @imre_tuple_buffer_finish(ptr {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
             Builtin::Islice | Builtin::Cycle => {
                 let source = &args[0].value;
                 let mode = iterable_mode(source.ty);
@@ -6327,6 +6365,7 @@ impl Emitter<'_, '_> {
                     | Type::Iterator
                     | Type::Cursor(_)
                     | Type::ByteOutput
+                    | Type::TupleBuffer
                     | Type::Exception
                     | Type::NamedException(_)
                     | Type::ObjectValue
@@ -6372,6 +6411,7 @@ impl Emitter<'_, '_> {
                     | Type::BinaryIO
                     | Type::CompletedProcess(..)
                     | Type::Tuple(_)
+                    | Type::VarTuple(_)
                     | Type::Optional(_)
                     | Type::Callable(_)
                     | Type::Union(_)
@@ -6591,6 +6631,7 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::Cursor(_)
             | Type::ByteOutput
+            | Type::TupleBuffer
             | Type::Exception
             | Type::NamedException(_)
             | Type::ObjectValue
@@ -6635,6 +6676,7 @@ impl Emitter<'_, '_> {
             | Type::JsonObject
             | Type::RegexMatch
             | Type::CompletedProcess(..)
+            | Type::VarTuple(_)
             | Type::Tuple(_) => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
         }
     }
@@ -6675,6 +6717,7 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::Cursor(_)
             | Type::ByteOutput
+            | Type::TupleBuffer
             | Type::Exception
             | Type::NamedException(_)
             | Type::ObjectValue
@@ -6719,6 +6762,7 @@ impl Emitter<'_, '_> {
             | Type::JsonObject
             | Type::RegexMatch
             | Type::CompletedProcess(..)
+            | Type::VarTuple(_)
             | Type::Tuple(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
         };
         Value {
@@ -7265,7 +7309,11 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Bytes => 8,
         Type::Union(_) | Type::StringIterable => 9,
         Type::ListInt => 4,
-        Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(..) => 6,
+        Type::Class(_)
+        | Type::VarTuple(_)
+        | Type::Tuple(_)
+        | Type::Callable(_)
+        | Type::CompletedProcess(..) => 6,
         Type::List(_)
         | Type::Dict(_)
         | Type::ChainMap(_)
@@ -7275,6 +7323,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Iterator
         | Type::Cursor(_)
         | Type::ByteOutput
+        | Type::TupleBuffer
         | Type::Exception
         | Type::NamedException(_)
         | Type::ObjectValue
@@ -8165,6 +8214,11 @@ declare ptr @imre_float_count(double, i32, i64)
 declare ptr @imre_progression(i64, i64, i64)
 declare ptr @imre_tee(i32, i64, ptr)
 declare ptr @imre_islice(i32, i64, i64, i64, i64)
+declare i64 @imre_tuple_len(ptr)
+declare i64 @imre_tuple_get(ptr, i64)
+declare ptr @imre_tuple_buffer_new()
+declare i32 @imre_tuple_buffer_push(ptr, i32, i64)
+declare ptr @imre_tuple_buffer_finish(ptr)
 declare ptr @imre_cycle(i32, i64)
 declare i64 @imre_cursor_length_hint(ptr, i64)
 declare ptr @imre_repeat(i32, i64, i64)
