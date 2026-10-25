@@ -5053,6 +5053,34 @@ impl<'a> Checker<'a> {
         if let Some(copy) = self.dataclass_copy(call)? {
             return Ok(copy);
         }
+        if calls::starred(call) {
+            if let Some(Binding::Definition(definition)) = self.resolve(&call.func)
+                && let Some(signature) = self.functions.get(&definition)
+            {
+                return self.source_call(call, &signature.clone(), None, 0);
+            }
+            if let ast::Expr::Attribute(method) = &*call.func
+                && self.resolve(&call.func).is_none()
+            {
+                if let Some(class) = self.class_reference(&method.value) {
+                    return self.class_method_call(call, method, class, None);
+                }
+                let object = match receiver {
+                    Some(value) => value,
+                    None => self.expr(&method.value)?,
+                };
+                if let Type::Class(class) | Type::StrEnum(class) | Type::Enum(class) = object.ty
+                    && self.classes.methods[class].contains_key(method.attr.as_str())
+                {
+                    return self.class_method_call(call, method, class, Some(object));
+                }
+            }
+            return Err(error(
+                self.source,
+                call,
+                "argument unpacking requires a source-defined function or method",
+            ));
+        }
         calls::reject_unpacking(call, self.source)?;
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "set")
             && let [input] = call.arguments.args.as_ref()
@@ -5319,20 +5347,7 @@ impl<'a> Checker<'a> {
                 .get(&definition)
                 .ok_or_else(|| error(self.source, call, "definition is not a callable function"))?
                 .clone();
-            if self.classes.cached.contains(&signature.id) && !call.arguments.keywords.is_empty() {
-                return Err(error(
-                    self.source,
-                    call,
-                    "cached calls currently require a positional key",
-                ));
-            }
-            if self.inference.is_some() {
-                let (ty, args) = self.infer_call(call, &signature, None, 0)?;
-                return Ok(self.call_value(&signature, ty, args));
-            }
-            let args = self.arguments(call, &signature.params, None)?;
-            self.calls.insert(signature.id);
-            return Ok(self.call_value(&signature, signature.returns, args));
+            return self.source_call(call, &signature, None, 0);
         }
         if matches!(&*call.func, ast::Expr::Name(name) if self.names.contains_key(name.id.as_str()))
             || !matches!(&*call.func, ast::Expr::Name(_) | ast::Expr::Attribute(_))
