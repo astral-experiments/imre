@@ -533,6 +533,7 @@ impl Builtin {
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::OsName
+            | Self::OptionalStrConcat
             | Self::SysOrigArgv
             | Self::DocCaptureStart
             | Self::DocCaptureTake
@@ -888,6 +889,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_get"
                 | "imre_bytes_get_index"
                 | "imre_bytes_slice"
+                | "imre_optional_str_concat"
                 | "imre_str_concat"
                 | "imre_bytes_concat"
                 | "imre_bytes_repeat"
