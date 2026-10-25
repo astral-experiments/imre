@@ -606,6 +606,15 @@ impl Encoder<'_> {
                 }
                 LIST => {
                     object(word as *const Object).0.with(|storage| {
+                        if let Some(rows) = storage.sequence_storage().rows() {
+                            // RECORD reads fields through the schema; a row needs no object header.
+                            let child = schema.child();
+                            debug_assert_eq!(child.kind, RECORD);
+                            return self.array(
+                                (0..rows.len()).map(|i| (rows.row(i).as_ptr() as usize, child)),
+                                depth,
+                            );
+                        }
                         self.array(
                             storage
                                 .sequence()
