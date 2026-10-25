@@ -8,9 +8,9 @@
     "denominator": 353,
     "distinct_ids": 353,
     "counts": {
-      "blocked": 178,
+      "blocked": 177,
       "failed": 15,
-      "host-driven-native-operation": 74,
+      "host-driven-native-operation": 75,
       "host-operation": 6,
       "mixed": 9,
       "native-body-host-fixture": 30,
@@ -330,19 +330,23 @@
         "opt_level": 0,
         "fixture_variant": "MiscTests",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "Unsupported: subprocess.getoutput",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:11:26: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "opt_level": 0,
+          "imre_revision": "31cca90475de8d6fb53ed6416821b7eea197044e",
+          "tested_tree": "e48bd67c8875adc91aaeefb7932de415d44c6940",
+          "source": "shell-output-linux.json",
+          "operation": "Imre launches all three original shell commands, drains the same pipe written by the shell on stdout or cat on stderr and reaps statuses 0, 0 and 1.",
+          "fixture": "CPython runs the unchanged method, assertions and temporary directory cleanup. Replacing the observed status 1 with zero fails its original assertion.",
+          "native_body_diagnostic": "<case>/case.py:12:26: Imre: expected int, got tuple[int, str]; annotations are enforced contracts"
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.MiscTests.test_run_keyboardinterrupt_no_kill",
@@ -8542,9 +8546,9 @@
     "denominator": 353,
     "distinct_ids": 353,
     "counts": {
-      "blocked": 178,
+      "blocked": 177,
       "failed": 15,
-      "host-driven-native-operation": 74,
+      "host-driven-native-operation": 75,
       "host-operation": 6,
       "mixed": 9,
       "native-body-host-fixture": 30,
@@ -8864,19 +8868,23 @@
         "opt_level": 3,
         "fixture_variant": "MiscTests",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "Unsupported: subprocess.getoutput",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:11:26: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "opt_level": 3,
+          "imre_revision": "31cca90475de8d6fb53ed6416821b7eea197044e",
+          "tested_tree": "e48bd67c8875adc91aaeefb7932de415d44c6940",
+          "source": "shell-output-linux.json",
+          "operation": "Imre launches all three original shell commands, drains the same pipe written by the shell on stdout or cat on stderr and reaps statuses 0, 0 and 1.",
+          "fixture": "CPython runs the unchanged method, assertions and temporary directory cleanup. Replacing the observed status 1 with zero fails its original assertion.",
+          "native_body_diagnostic": "<case>/case.py:12:26: Imre: expected int, got tuple[int, str]; annotations are enforced contracts"
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.MiscTests.test_run_keyboardinterrupt_no_kill",
