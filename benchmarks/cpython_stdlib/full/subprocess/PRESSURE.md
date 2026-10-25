@@ -22,7 +22,15 @@ with main `fce4734`; these counts do not imply fully native fixtures.
 The [repeat on the later selector compiler](pressure-replay-linux.json)
 checks all 15 leak-free launches in each variant again and attempts each full
 method at O0 and O3. The raw result includes its compiler diagnostic alongside
-the observed native operation. The two rows are applied to main `0e602ec`, preserving #825's stopped-child observation. This replay uses #682 at `12a645f` (tree `3d7be7793cd60f833814e5fb0ebdb7e23d2f4c26`). The [preceding selector replay](pressure-earlier-selector-linux.json) retains its original toolchain.
+the observed native operation. The native ordinary parent made 47 poll calls at
+O0 and 45 at O3; each NoPoll parent made 46 pselect6 calls. These counts vary
+with scheduling. All four parents reaped every child and preserved the fd table
+after each communication. The two records change from failed to host-driven
+native operations on main `41ea878`; the other 351 records are unchanged.
+The measured source was #682 at `12a645f` (tree
+`3d7be7793cd60f833814e5fb0ebdb7e23d2f4c26`). The
+[preceding selector replay](pressure-earlier-selector-linux.json) retains its
+original toolchain.
 
 Run the pinned interpreter with `pressure_fixture.py --imre ... --runtime ...
 --clang ... --opt-level 0 --result ...`, then repeat at O3 on Linux with

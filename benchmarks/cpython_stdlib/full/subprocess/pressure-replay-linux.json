@@ -22,7 +22,7 @@
               "fixture": "cpython"
             },
             "fixture_selector": "PollSelector",
-            "native_parent_sha256": "b8ecf2805cf5de592ad91d1c42cc18683a1d39efbee480cfe283a860acb7f084",
+            "native_parent_sha256": "35d90f62bdf84f71942ab6f7a32b6b3c2f38efba380aa88ee574e1404f96f668",
             "native_parents": 1,
             "open_file_limit": 1024,
             "free_slots": 10,
@@ -33,7 +33,7 @@
             "native_reaps": 15,
             "data_child": "CPython stdin/stdout echo",
             "selector_calls": {
-              "poll": 46
+              "poll": 47
             },
             "body_attempt": {
               "status": "blocked",
@@ -50,7 +50,7 @@
               "fixture": "cpython"
             },
             "fixture_selector": "SelectSelector",
-            "native_parent_sha256": "fd0e24f388e7dc139ddaed5072fb0652f31a23067cac3e333cc5625c48fc294d",
+            "native_parent_sha256": "17071ba27c2ff7c935e057480d260bd151fea6677aa4db9587845bacb12383c6",
             "native_parents": 1,
             "open_file_limit": 1024,
             "free_slots": 10,
@@ -89,7 +89,7 @@
               "fixture": "cpython"
             },
             "fixture_selector": "PollSelector",
-            "native_parent_sha256": "9d0166d0e3fa52867ca2265ce8b7fdef8fafafe46fd059d39ae98c94fadd2fca",
+            "native_parent_sha256": "8cf2a2305ba24d6bb0069829fd63b4d6b8944105147563638ca133cbe07ef541",
             "native_parents": 1,
             "open_file_limit": 1024,
             "free_slots": 10,
@@ -117,7 +117,7 @@
               "fixture": "cpython"
             },
             "fixture_selector": "SelectSelector",
-            "native_parent_sha256": "85665801ea00ce93810bb157fc4303d115a750097ffc25a19a4d9cfa58281e33",
+            "native_parent_sha256": "92489b56d5b354ec41e583893ef8fa1df2dfc6f42c26ec39d02bdcb0e2720490",
             "native_parents": 1,
             "open_file_limit": 1024,
             "free_slots": 10,
@@ -128,7 +128,7 @@
             "native_reaps": 15,
             "data_child": "CPython stdin/stdout echo",
             "selector_calls": {
-              "pselect6": 45
+              "pselect6": 46
             },
             "body_attempt": {
               "status": "blocked",
