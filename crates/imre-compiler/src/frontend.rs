@@ -24,6 +24,7 @@ mod dispatch;
 mod documents;
 mod enums;
 mod expansions;
+mod fixed_tuples;
 mod hashlib;
 mod inference;
 mod iterables;
@@ -1589,6 +1590,7 @@ struct Checker<'a> {
     /// A later local assignment shadows builtin iter throughout a function.
     local_iter: bool,
     context_method: bool,
+    fixed_tuple: Option<fixed_tuples::Call>,
     asynchronous: bool,
     /// Capture only the outer sum of an assignment with a neighboring sum.
     zip_sum_rhs: Option<TextRange>,
@@ -1648,6 +1650,7 @@ impl<'a> Checker<'a> {
             zip_sum_rhs: None,
             asynchronous: false,
             context_method: false,
+            fixed_tuple: None,
             zip_sums: HashMap::new(),
             source: &graph.modules[module].source,
             graph,
@@ -3132,6 +3135,7 @@ impl<'a> Checker<'a> {
         let reachable = self.reachable;
         let enclosing_sum = self.zip_sum_rhs;
         let mut previous_sum = false;
+        let mut length_guard = None;
         for (index, statement) in statements.iter().enumerate() {
             if let ast::Stmt::Assign(assignment) = statement
                 && let [ast::Expr::Name(name)] = assignment.targets.as_slice()
@@ -3181,7 +3185,13 @@ impl<'a> Checker<'a> {
                     && (previous_sum || statements.get(index + 1).and_then(zip_sums::rhs).is_some())
             });
             previous_sum = sum.is_some();
+            let tuple = length_guard.and_then(|guard| self.guarded_tuple(statement, guard));
+            let enclosing_tuple = std::mem::replace(&mut self.fixed_tuple, tuple);
             let (mut lowered, continues) = self.statement(statement)?;
+            self.fixed_tuple = enclosing_tuple;
+            length_guard = self
+                .list_length_guard(statement)
+                .or_else(|| length_guard.filter(|guard| fixed_tuples::preserves(*guard, &lowered)));
             self.remember_regex_assignment(statement, &mut lowered, &statements[index + 1..]);
             body.extend(lowered);
             falls_through &= continues;
@@ -5142,6 +5152,9 @@ impl<'a> Checker<'a> {
     }
 
     fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
+        if let Some(tuple) = self.fixed_tuple.filter(|proof| proof.at == call.range()) {
+            return Ok(self.materialize_fixed_tuple(tuple));
+        }
         if let Some(value) = self.sys_call(call)? {
             return Ok(value);
         }
