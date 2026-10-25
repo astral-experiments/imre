@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import sys
 import tempfile
@@ -16,6 +17,7 @@ from unittest.mock import patch
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1])]
 from host_popen import Harness, verify
+from selector_fixture import selected_entry, verify_binding
 from suite_inventory import load_suite
 from suite_native import (
     NativeCompileError,
@@ -129,7 +131,7 @@ class Trace:
             "-e",
             "signal=none",
             "-e",
-            "trace=execve," + ",".join(SELECTORS),
+            "trace=execve,clone,clone3,fork,vfork,wait4," + ",".join(SELECTORS),
             "-o",
             str(self.work / "syscalls"),
             "--",
@@ -150,9 +152,27 @@ class Trace:
                     for line in lines
                     if line.startswith(tuple(s + "(" for s in SELECTORS))
                 )
-                matches.append((path.suffix, dict(syscalls)))
+                matches.append((int(path.suffix[1:]), dict(syscalls)))
         [result] = matches
         return result
+
+    def child_reaped(self, parent, child):
+        lines = (self.work / f"syscalls.{parent}").read_text().splitlines()
+        created = [
+            i
+            for i, line in enumerate(lines)
+            if re.match(r"(clone3?|fork|vfork)\(", line) and line.endswith(f"= {child}")
+        ]
+        reaped = [
+            i
+            for i, line in enumerate(lines)
+            if line.startswith(f"wait4({child},") and line.endswith(f"= {child}")
+        ]
+        assert len(created) == len(reaped) == 1 and created[0] < reaped[0], (
+            parent,
+            child,
+            lines,
+        )
 
 
 def exercise(args, tc, work, cls, method_name):
@@ -162,19 +182,26 @@ def exercise(args, tc, work, cls, method_name):
     method = method_bytes(SOURCE, "ProcessTestCase", method_name)
     router, binaries, stages = build_router(tc, work, method_name, method)
     trace = Trace(work)
+    no_poll = cls == "ProcessTestCaseNoPoll"
 
     class TracedToolchain:
         def build(self, source, directory):
+            if no_poll:
+                source = selected_entry(source)
             return trace.wrap(tc.build(source, directory))
 
     class TracedHarness(Harness):
         def actor(self, keywords, layout):
-            return trace.wrap(super().actor(keywords, layout))
+            return trace.wrap(super().actor(keywords, layout, select_backend=no_poll))
 
     harness = TracedHarness(args, work)
+
+    def transfer_fixture():
+        verify_binding(upstream.subprocess, no_poll)
+
     diagnostic = None
     try:
-        execute = native_method(
+        native_execute = native_method(
             TracedToolchain(),
             work,
             SOURCE,
@@ -184,13 +211,19 @@ def exercise(args, tc, work, cls, method_name):
             operation=("imre", "outer Popen and inner subprocess operation"),
         )
         body = "imre"
+
+        def execute(case, original):
+            transfer_fixture()
+            return native_execute(case, original)
     except NativeCompileError as exc:
         diagnostic = str(exc).splitlines()[-1].replace(str(work), "<case>")
         body = "cpython"
 
         def execute(case, original):
-            with patch.object(upstream, "subprocess", harness), patch.object(
-                upstream, "sys", SimpleNamespace(executable=str(router))
+            transfer_fixture()
+            with (
+                patch.object(upstream, "subprocess", harness),
+                patch.object(upstream, "sys", SimpleNamespace(executable=str(router))),
             ):
                 original()
             return {"calls": harness.calls}
@@ -214,17 +247,23 @@ def exercise(args, tc, work, cls, method_name):
         "engine": "imre",
         "binary_sha256": hashlib.sha256(trace.parent.read_bytes()).hexdigest(),
     }
-    pids = set()
+    pids = {}
     for stage, binary in binaries.items():
-        pid, selectors = trace.pid_and_selectors(binary)
-        if pid in pids:
+        pid, counts = trace.pid_and_selectors(binary)
+        if pid in pids.values():
             raise AssertionError("one PID cannot prove two generations of subprocesses")
-        pids.add(pid)
+        pids[stage] = pid
         stages[stage]["observed_execve"] = True
-        stages[stage]["selector_syscalls"] = selectors
-    wrong_selector = cls == "ProcessTestCaseNoPoll" and any(
-        op in stages["outer"]["selector_syscalls"] for op in ("poll", "ppoll")
-    )
+        stages[stage]["selector_syscalls"] = counts
+    for parent, child in (("outer", "middle"), ("middle", "data_child")):
+        trace.child_reaped(pids[parent], pids[child])
+        stages[parent]["created_and_reaped"] = child
+    observed = stages["outer"]["selector_syscalls"]
+    if no_poll:
+        assert not ({"poll", "ppoll"} & observed.keys()), (key, observed)
+        assert {"select", "pselect6"} & observed.keys(), (key, observed)
+    else:
+        assert {"poll", "ppoll"} & observed.keys(), (key, observed)
     return {
         "method_sha256": hashlib.sha256(method).hexdigest(),
         "body_diagnostic": diagnostic,
@@ -237,12 +276,8 @@ def exercise(args, tc, work, cls, method_name):
             "fixture": "cpython",
             "operation": "imre",
         },
-        "outcome": "blocked" if wrong_selector else "pass",
-        "reason": (
-            "host fixture selected SelectSelector but the native outer parent used poll"
-            if wrong_selector
-            else None
-        ),
+        "outcome": "pass",
+        "fixture_selector": ("SelectSelector" if no_poll else "PollSelector"),
     }
 
 
@@ -259,9 +294,11 @@ def main():
         for cls in ("ProcessTestCase", "ProcessTestCaseNoPoll"):
             for method in NAMES:
                 key = f"test.test_subprocess.{cls}.{method}"
-                work = Path(tmp, key)
-                work.mkdir()
-                rows[key] = exercise(args, tc, work, cls, method)
+                with tempfile.TemporaryDirectory(dir=tmp) as work:
+                    with patch.dict(
+                        os.environ, IMRE_CACHE_DIR=str(Path(work, "cache"))
+                    ):
+                        rows[key] = exercise(args, tc, Path(work), cls, method)
     args.result.write_text(
         json.dumps(
             {
