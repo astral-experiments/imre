@@ -581,7 +581,7 @@ fn collect_class(
             _ => {
                 return Err(module.error(
                     statement,
-                    "class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass",
+                    "class bodies support field declarations, plain data assignments, methods, pass, and docstrings; annotated field defaults require @dataclass",
                 ));
             }
         }
