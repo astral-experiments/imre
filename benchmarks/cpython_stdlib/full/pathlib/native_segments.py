@@ -11,6 +11,16 @@ from suite_evidence import roles
 from suite_native import NativeCompileError, method_bytes, native_method
 
 
+BYTE_CALLS = {'b': 1, 'bs': 1, 'sb': 1}
+BYTE_ASSERTIONS = {'assertRaisesRegex': 3}
+SEGMENT_IDS = {
+    PREFIX + ctor + 'Test.' + name
+    for name, ctors in [('test_passing_kwargs_errors', ('Path', 'PosixPath')),
+                        ('test_bytes_exc_message', ('Path', 'PosixPath', 'PurePath', 'PurePosixPath', 'PureWindowsPath'))]
+    for ctor in ctors
+}
+
+
 def segment_adapters(tools, work):
     def run(case, original):
         ctor, name = case.cls.__name__, case._testMethodName
@@ -76,7 +86,7 @@ class NativeCase(unittest.TestCase):
             sys.setprofile(previous)
             del case.cls
             bridge.close()
-        if forbidden or bridge.calls != {'b': 1, 'bs': 1, 'sb': 1} or host != {'assertRaisesRegex': 3}:
+        if forbidden or bridge.calls != BYTE_CALLS or host != BYTE_ASSERTIONS:
             raise AssertionError((case.id(), forbidden, bridge.calls, host))
         body = method_bytes(MODULE, 'PurePathTest', name)
         return {'roles': roles(body='cpython', assertions='cpython', operation='imre', fixture='cpython'),
@@ -85,6 +95,4 @@ class NativeCase(unittest.TestCase):
                              'method_sha256': hashlib.sha256(body).hexdigest(), 'whole_body_blocker': reason,
                              'opt_level': tools.level}}
 
-    return {**{PREFIX + ctor + 'Test.test_passing_kwargs_errors': run for ctor in ('Path', 'PosixPath')},
-            **{PREFIX + ctor + 'Test.test_bytes_exc_message': run
-               for ctor in ('Path', 'PosixPath', 'PurePath', 'PurePosixPath', 'PureWindowsPath')}}
+    return dict.fromkeys(SEGMENT_IDS, run)

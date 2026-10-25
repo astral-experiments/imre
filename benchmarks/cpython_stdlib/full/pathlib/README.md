@@ -104,6 +104,14 @@ CPython runs the body and its eleven assertions; Imre constructs three paths,
 joins them, calls stat three times and reads 19 integer fields. The adapter
 rejects any host pathlib, `os.stat` or `os.lstat` call in those bodies.
 
+The constructor cohort (`--cohort segments`) measures seven original methods
+on `e6fda91`. The two concrete classes run their complete unexpected-keyword
+method and its assertion in Imre under the CPython fixture. On the five core
+pure and concrete classes, CPython drives the three `assertRaisesRegex`
+checks in `test_bytes_exc_message`; Imre constructs the paths and raises each
+`TypeError`, including for `PureWindowsPath` on Linux. Verify the role and
+call counts with `metadata_receipt.py --segments /tmp/pathlib-segments.json`.
+
 The [link](../../../../tests/fixtures/paths/links.py) and
 [protocol](../../../../tests/fixtures/paths/link_protocols.py) fixtures separately
 compare string and byte error filenames, NUL validation order, stored relative
