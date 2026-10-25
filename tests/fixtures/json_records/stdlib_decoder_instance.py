@@ -26,3 +26,18 @@ try:
 except json.JSONDecodeError as exc:
     print(exc.msg)
 print(repr(decoder.decode("false")))
+
+# Compare the live string objects from two calls on the same decoder.
+text = '[{"a_key":1,"b_é":2},{"a_key":3,"b_\\u00e9":4}]'
+names: list[str] = []
+for source in [text, text]:
+    for row in decoder.decode(source):
+        for key in row:
+            name: str = key
+            names.append(name)
+print(names[0] is names[2])
+print(names[1] is names[3])
+print(names[4] is names[6])
+print(names[5] is names[7])
+print(names[0] == names[4] and names[0] is not names[4])
+print(names[1] == names[5] and names[1] is not names[5])

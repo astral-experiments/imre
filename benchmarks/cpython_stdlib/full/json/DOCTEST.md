@@ -27,4 +27,11 @@ These are two source cases and four occurrences of the 216, including when the r
 
 The [shared doctest implementation](https://github.com/astral-sh/imre/pull/646) discovers the same cases from the original docstrings. Its direct native runs reached the missing `io.StringIO` export in the root case and the missing `json.encoder.JSONEncoder` class in the encoder case. Neither direct run completed the corresponding package fixture.
 
-With the shared doctest and annotationlib implementations present, the [four intact-package checks](doctest-startup-linux.json) reach `Lib/test/support/__init__.py:9`, `import inspect`. Both import and runner entry points stop there, with and without `--reachable-only`. Staging the full pinned Git tree produced the same four diagnostics as the verified vendored fixtures. No tests execute on this path. Reproduce with `python3 benchmarks/cpython_stdlib/full/check_suite_startup.py --compiler /path/to/imre test.test_json`; add `--cpython-git /path/to/cpython.git` to stage the pinned Git tree.
+With native doctest, annotationlib, and inspect present, the [four intact-package checks](doctest-startup-linux.json) reach `Lib/test/support/__init__.py:11`, `import _opcode`. Both import and runner entry points stop there, with and without `--reachable-only`. The vendored and full pinned Git fixture trees produce the same diagnostics. No tests execute on this path. In the release source, `test.support` reads `_opcode.ENABLE_SPECIALIZATION` and `_opcode.ENABLE_SPECIALIZATION_FT` in two specialization decorators. The JSON package uses neither decorator.
+
+Reproduce using the shared checker on both sources:
+
+```sh
+python -B benchmarks/cpython_stdlib/full/json/startup.py --compiler /path/to/imre \
+    --cpython-git /path/to/cpython.git --result /tmp/json-startup.json
+```

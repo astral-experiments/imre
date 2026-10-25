@@ -1,9 +1,8 @@
 {
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
-  "compiler_sha256": "48c8130eb5ea9149821ec4d3cebdb66c7658024dd7953e37d8653f245b6e36cd",
+  "compiler_sha256": "3d6402f7e59e87d6fea2c313af9f62fc9aa16534cc40f761f7068f4355b042ad",
   "operation": "check",
   "tests_executed": 0,
-  "source": "vendored",
   "support_files": [],
   "checks": [
     {
@@ -11,28 +10,32 @@
       "entry": "import",
       "reachable_only": false,
       "exit": 1,
-      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under <staged>/Lib; external and namespace-package imports are unsupported"
     },
     {
       "suite": "test.test_json",
       "entry": "import",
       "reachable_only": true,
       "exit": 1,
-      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under <staged>/Lib; external and namespace-package imports are unsupported"
     },
     {
       "suite": "test.test_json",
       "entry": "runner",
       "reachable_only": false,
       "exit": 1,
-      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under <staged>/Lib; external and namespace-package imports are unsupported"
     },
     {
       "suite": "test.test_json",
       "entry": "runner",
       "reachable_only": true,
       "exit": 1,
-      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under <staged>/Lib; external and namespace-package imports are unsupported"
     }
+  ],
+  "sources": [
+    "vendored",
+    "git"
   ]
 }
