@@ -14,6 +14,7 @@ CASES = {
         ["-i", "0" * 4301], ["-i", "\x1c34\x1f"],
         ["-i", "bad", "-i", "1"], ["-i", "bad", "--help"], ["--help", "-i", "bad"],
         ["--scale=-0.0"], ["--scale", "1e-1000"], ["--scale=inf"], ["--scale=nan"],
+        ["--scale=\U00011de0"],
         ["--scale", "1", "--scale", "bad"],
         ["--ids", "-02", "0_4"], ["--ids", "3", "bad"], ["--ids", "3", "2"],
         ["--choice=0.0"], ["--choice=2"], ["--maybe"], ["--maybe=01"], ["--maybe=42"],
