@@ -222,6 +222,27 @@ pub unsafe extern "C" fn imre_popen_config(config: *const LaunchConfig) -> *cons
     finish(result, std::ptr::null())
 }
 
+/// Popen acquires these handles before opening a parent stream with bufsize.
+fn check_buffer_error_handles(modes: [u32; 3]) -> io::Result<()> {
+    let mut pipes = [const { None }; 3];
+    let mut devnull = None;
+    for (pipe, mode) in pipes.iter_mut().zip(modes) {
+        match mode {
+            1 => *pipe = Some(io::pipe()?),
+            2 if devnull.is_none() => {
+                devnull = Some(
+                    fs::OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .open("/dev/null")?,
+                );
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// Create a native child with independently owned pipe ends and the original argv owner.
 ///
 /// # Safety
@@ -264,7 +285,12 @@ unsafe fn spawn(config: &LaunchConfig, words: [usize; 3]) -> Result<Popen> {
     }
     // Python opens the parent-side pipe wrappers after it collects the file handles.
     let bufsize = if modes.contains(&1) {
-        c_int(config.bufsize)?
+        c_int(config.bufsize).or_else(|overflow| {
+            // Command normally sets up the pipes during spawn. On a buffer error
+            // no child is launched, but a prior handle error still takes precedence.
+            check_buffer_error_handles(modes).map_err(errno_error)?;
+            Err(overflow)
+        })?
     } else {
         -1
     };
