@@ -12,7 +12,10 @@ async def shared() -> int:
     before = binding.get()
     binding.set(70)
     inner = await asyncio.gather(read())
-    print("inside", before, inner[0], binding.get())
+    print("inside")
+    print(before)
+    print(inner[0])
+    print(binding.get())
     return binding.get()
 
 
@@ -28,12 +31,15 @@ async def main() -> None:
             second.cancel()
         for task in [first, second]:
             try:
-                print("result", await task)
+                result = await task
+                print("result")
+                print(result)
             except asyncio.CancelledError:
                 print("cancelled")
             except RuntimeError as error:
                 print(str(error))
-        print("parent", binding.get())
+        print("parent")
+        print(binding.get())
 
 
 asyncio.run(main())
