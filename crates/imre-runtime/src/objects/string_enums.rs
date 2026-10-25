@@ -7,6 +7,7 @@ use super::{Str, exceptions::string_repr};
 
 // Class name, member name and member value each point to a pooled string root.
 type Member = [*const *const Str; 3];
+thread_local! { static PLAIN: Cell<*const u8> = const { Cell::new(ptr::null()) }; }
 thread_local! { static MEMBERS: Cell<(*const Member, usize)> = const { Cell::new((ptr::null(), 0)) }; }
 
 /// Installs one module's read-only member table after its string pool is initialized.
@@ -17,6 +18,36 @@ thread_local! { static MEMBERS: Cell<(*const Member, usize)> = const { Cell::new
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_enum_table(members: *const Member, length: usize) {
     MEMBERS.set((members, length));
+    PLAIN.set(ptr::null());
+}
+
+/// Register whether each canonical member uses Enum or StrEnum for its display.
+///
+/// # Safety
+/// The member table has the same lifetime as in `imre_str_enum_table`; `plain`
+/// names a static byte for each member in that same order.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_enum_display_table(
+    members: *const Member,
+    length: usize,
+    plain: *const u8,
+) {
+    // SAFETY: both tables have length entries and remain live together.
+    unsafe { imre_str_enum_table(members, length) };
+    PLAIN.set(plain);
+}
+
+/// Format a retained member without losing its nominal identity or representation.
+pub(super) fn display(tag: usize) -> String {
+    with_member(tag, |[class, name, value]| {
+        let plain = PLAIN.get();
+        // SAFETY: with_member checked this tag against the registered table length.
+        if !plain.is_null() && unsafe { *plain.add(tag - 1) } != 0 {
+            format!("{class}.{name}")
+        } else {
+            value.to_string()
+        }
+    })
 }
 
 fn with_member<R>(tag: usize, f: impl FnOnce([&Str; 3]) -> R) -> R {

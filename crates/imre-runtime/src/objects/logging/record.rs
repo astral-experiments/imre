@@ -37,6 +37,21 @@ pub(super) fn display(v: &OwnedWord, repr: bool) -> String {
         // SAFETY: v owns this exact string.
         return unsafe { &*(v.word as *const Str) }.to_string();
     }
+    if !repr && v.kind.raw() & !NULLABLE == 10 && v.word != 0 {
+        return super::super::string_enums::display(v.word);
+    }
+    if !repr && v.kind.raw() & !NULLABLE == 5 && v.word != 0 {
+        // SAFETY: kind five owns a live object; copy its spelling within the borrow.
+        let path = unsafe {
+            object(v.word as *const Object).0.with(|s| {
+                matches!(s, Storage::Path { .. } | Storage::PurePath(_))
+                    .then(|| s.path().to_owned())
+            })
+        };
+        if let Some(path) = path {
+            return path;
+        }
+    }
     let mut out = String::new();
     // SAFETY: v keeps the full value graph alive until formatting returns.
     unsafe { values::write_repr(&mut out, v.word, v.kind) };

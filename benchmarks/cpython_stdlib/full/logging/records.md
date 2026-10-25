@@ -22,3 +22,13 @@ The driver does not create Python logging records on the host. The separate
 record, copied extra fields, retained arguments, and formatting errors. It contributes
 no additional upstream ID. The asyncio task-name and multiprocessing child-process
 tests still require their respective runtime contexts; neither is excluded.
+
+## Records delivered by loggers
+
+The [recording handler comparison](record_delivery.py)
+retains a record in two handlers on the same hierarchy and compares both streams with
+pinned CPython at O0 and O3. It checks that the original format and mutable argument
+mapping survive delivery, that formatting errors wait for `getMessage()`, and that the
+caller, paths and both enum display styles use their original Python values. A disabled
+logger still evaluates its arguments; the last-resort handler only renders eligible events.
+These direct comparisons are outside the 272 original occurrences.

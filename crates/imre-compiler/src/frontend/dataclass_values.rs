@@ -168,6 +168,10 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
         .enumerate()
         .map(|(id, class)| ir::ClassMetadata {
             name: class.name.clone(),
+            plain_enum: class
+                .enum_members
+                .as_ref()
+                .is_some_and(|members| members.plain),
             enum_members: class
                 .enum_members
                 .as_ref()
