@@ -5997,28 +5997,20 @@ impl<'a> Checker<'a> {
                     return Ok(self.string_join_value(None, attribute));
                 }
                 if attribute.attr.as_str() == "encoding"
-                    && matches!(
-                        self.resolve(&attribute.value),
-                        Some(Binding::Intrinsic(
-                            Intrinsic::Stdin | Intrinsic::OriginalStdout | Intrinsic::Stderr
-                        ))
-                    )
+                    && let Some(Binding::Intrinsic(stream)) = self.resolve(&attribute.value)
                 {
-                    return Ok(unpacking::string("utf-8"));
-                }
-                if attribute.attr.as_str() == "encoding"
-                    && self.resolve(&attribute.value) == Some(Binding::Intrinsic(Intrinsic::Stdout))
-                {
-                    let receiver = self.stdout_value();
-                    let checked = self.optional_stream(receiver, "encoding");
-                    return Ok(Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Scope {
-                            body: vec![Statement::Expr(checked)],
-                            value: Box::new(unpacking::string("utf-8")),
-                            clear: vec![],
-                        },
-                    });
+                    if matches!(stream, Intrinsic::OriginalStdout | Intrinsic::Stderr) {
+                        return Ok(Expr {
+                            ty: Type::Str,
+                            kind: ExprKind::Builtin(
+                                Builtin::TextEncoding,
+                                vec![self.expr(&attribute.value)?],
+                            ),
+                        });
+                    }
+                    if stream == Intrinsic::Stdin {
+                        return Ok(unpacking::string("utf-8"));
+                    }
                 }
                 if let Some(class) = self.class_reference(&attribute.value) {
                     if let Some(member) = self.enum_member(class, attribute.attr.as_str()) {
@@ -6270,6 +6262,18 @@ impl<'a> Checker<'a> {
                         self.string_io_attribute(&receiver, attribute.attr.as_str())
                 {
                     return Ok(value);
+                }
+                if attribute.attr.as_str() == "encoding"
+                    && (receiver.ty == Type::TextIO
+                        || self.types.payload(receiver.ty) == Some(Type::TextIO))
+                {
+                    return Ok(Expr {
+                        ty: self.types.optional(Type::Str),
+                        kind: ExprKind::Builtin(
+                            Builtin::TextEncoding,
+                            vec![self.optional_stream(receiver, "encoding")],
+                        ),
+                    });
                 }
                 if matches!(receiver.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
                     && attribute.attr.as_str() == "closed"
@@ -8265,6 +8269,7 @@ impl<'a> Checker<'a> {
                 )
             })?,
         };
+        let mut args = vec![path];
         if ty == Type::BinaryIO {
             self.reject_builtin_keywords(call)?;
         } else if gzip {
@@ -8275,6 +8280,7 @@ impl<'a> Checker<'a> {
                 match keyword.arg.as_deref() {
                     Some("encoding") if !encoding => {
                         self.utf8_encoding_keyword(keyword)?;
+                        args.push(self.expr(&keyword.value)?);
                         encoding = true;
                     }
                     Some("newline") if !newline => {
@@ -8293,7 +8299,7 @@ impl<'a> Checker<'a> {
         }
         Ok(Expr {
             ty,
-            kind: ExprKind::Builtin(builtin, vec![path]),
+            kind: ExprKind::Builtin(builtin, args),
         })
     }
 

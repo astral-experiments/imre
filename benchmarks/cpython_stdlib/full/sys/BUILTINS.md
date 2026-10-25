@@ -79,3 +79,12 @@ and the display hook to a real disk file and a native `io.StringIO`. It checks
 Unicode text, the repr of bytes, a float, writes through an old alias, and the
 error raised by closing the replacement stream. Its output is compared to
 CPython at O0 and O3; it adds no upstream test ID.
+
+The [wrapper metadata control](stdout_metadata.py) reads `sys.stdout.encoding`
+after redirecting stdout to a disk file or to `StringIO`. It checks the saved
+wrapper and string identities, the spelling preserved by an explicit UTF-8 open,
+reads after close, and distinct errors for a missing binding and a binding set
+to `None`. Both native levels compare the process streams and the redirected
+file bytes with pinned CPython. The disk default here is the suite's C.UTF-8
+locale with UTF-8 mode off; the file implementation in this branch supports
+UTF-8. This control adds no occurrence or change of execution role.

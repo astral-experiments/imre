@@ -4538,6 +4538,21 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::TextEncoding => {
+                let raw = self.instruction(format!(
+                    "call ptr @imre_text_encoding(ptr {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: returns,
+                    operand: if returns == Type::Str {
+                        raw
+                    } else {
+                        self.instruction(format!("ptrtoint ptr {raw} to i64"))
+                    },
+                    small_integer: false,
+                }
+            }
             Builtin::BuiltinsLast => self.call("imre_builtins_last", returns, &[]),
             Builtin::BuiltinsHasLast | Builtin::SysHasStdout => {
                 let symbol = if matches!(builtin, Builtin::BuiltinsHasLast) {
@@ -4751,8 +4766,9 @@ impl Emitter<'_, '_> {
             Builtin::TextOpen(mode) => Value {
                 ty: Type::TextIO,
                 operand: self.checked_instruction(format!(
-                    "call ptr @imre_text_open(ptr {}, i32 {mode})",
-                    args[0].value.operand
+                    "call ptr @imre_text_open(ptr {}, i32 {mode}, ptr {})",
+                    args[0].value.operand,
+                    args.get(1).map_or("null", |enc| enc.value.operand.as_str()),
                 )),
                 small_integer: false,
             },
@@ -7909,7 +7925,8 @@ declare double @llvm.fabs.f64(double)
 declare ptr @imre_int_str(i64)
 declare ptr @imre_bool_str(i32)
 declare ptr @imre_none_str()
-declare ptr @imre_text_open(ptr, i32)
+declare ptr @imre_text_open(ptr, i32, ptr)
+declare ptr @imre_text_encoding(ptr)
 declare i32 @imre_text_enter(ptr)
 declare ptr @imre_text_read(ptr)
 declare ptr @imre_text_readline(ptr)

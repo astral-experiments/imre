@@ -499,6 +499,7 @@ impl Builtin {
             | Self::SysStdoutSet
             | Self::SysStdoutDelete
             | Self::TextOptionalReceiver
+            | Self::TextEncoding
             | Self::SysHasStdout
             | Self::BuiltinsLast
             | Self::BuiltinsHasLast
