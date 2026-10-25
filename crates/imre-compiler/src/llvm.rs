@@ -1737,8 +1737,8 @@ impl Emitter<'_, '_> {
             if self.uses_sys_argv {
                 self.line("call void @imre_args_clear()");
             }
-            self.void_call("imre_flush_stdout", &[]);
-            self.line("ret i32 0");
+            let status = self.instruction("call i32 @imre_finish_stdio()");
+            self.line(format!("ret i32 {status}"));
         } else {
             let value = self.instruction(format!(
                 "load {}, ptr %function_return",
@@ -6949,7 +6949,7 @@ declare ptr @imre_exception_current()
 declare ptr @imre_exception_swap_active(ptr)
 declare void @imre_exception_raise(ptr)
 declare void @imre_exception_reraise()
-declare void @imre_flush_stdout()
+declare i32 @imre_finish_stdio()
 declare void @imre_record_error_init()
 declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
