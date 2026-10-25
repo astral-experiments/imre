@@ -148,6 +148,15 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
+        if let (Type::Class(a), Type::Class(b)) = (left.ty, right.ty)
+            && self.native_mock(a)
+            && self.native_mock(b)
+        {
+            return Ok(Self::identity_result(
+                vec![self.mock_node(left, a), self.mock_node(right, b)],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
         if types.contains(&Type::StringIterable) && types == [left.ty, right.ty] {
             // Both operands must reach identity with the same pointer tag.

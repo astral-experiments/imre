@@ -379,6 +379,11 @@ impl Checker<'_> {
 
     /// Callable types contain positional types, not parameter names or defaults.
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
+        if let Type::Class(class) = callable.ty
+            && self.native_mock(class)
+        {
+            return self.mock_arguments(call, class, callable, "_record");
+        }
         let (params, returns) = self.types.signature(callable.ty).ok_or_else(|| {
             error(
                 self.source,

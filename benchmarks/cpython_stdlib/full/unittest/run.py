@@ -86,7 +86,7 @@ def run(args, level, root):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
-    for name in ["equality_protocol", *("context_" + family for family in families)]:
+    for name in ["equality_protocol", "mock_protocol", *("context_" + family for family in families)]:
         control = root / name
         control.mkdir()
         program = HERE / (name + ".py")
@@ -114,12 +114,17 @@ def run(args, level, root):
                          "testAssertEqualMultipleLinesMissingNewlineTerminator",
                          "testAssertEqualMultipleLinesMismatchedNewlinesTerminators",
                          "testAssertMultiLineEqual", *EQUALITY_BLOCKERS)),
+        ("testmock.testmock", "MockTest", "test_assert_not_called", "unittest.mock.Mock.assert_not_called"),
+        ("testmock.testmock", "MockTest", "test_assert_called", "unittest.mock.Mock.assert_called"),
+        ("testmock.testmock", "MockTest", "test_assert_called_once", "unittest.mock.Mock.assert_called_once"),
     ):
-        path = HERE / f"upstream/Lib/test/test_unittest/{module}.py"
+        path = HERE / "upstream/Lib/test/test_unittest" / (module.replace(".", "/") + ".py")
         case_id = PREFIX + f"{module}.{owner}.{method}"
         directory = root / method
         directory.mkdir()
         fixture = testcase_fixture("bool" if method == "test_stop" else None)
+        if module == "testmock.testmock":
+            fixture = "from unittest.mock import Mock\n" + fixture
         try:
             executions[case_id] = native_method(lang, directory, path, owner, case_id, fixture,
                                                 operation=("imre", operation))

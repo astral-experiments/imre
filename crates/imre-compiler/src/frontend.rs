@@ -70,6 +70,7 @@ mod unbound_locals;
 mod unions;
 mod unittest;
 mod unittest_equality;
+mod unittest_mock;
 mod unpacking;
 mod zip_sums;
 mod zipfile;
@@ -1918,6 +1919,28 @@ impl<'a> Checker<'a> {
         attribute: &ast::ExprAttribute,
         receiver: Expr,
     ) -> Result<(Expr, usize, Type), String> {
+        if let Type::Class(class) = receiver.ty
+            && self.native_mock(class)
+            && self.module
+                != self.classes.declarations.definitions[class]
+                    .definition
+                    .module
+            && matches!(attribute.attr.as_str(), "_node" | "_nodes")
+        {
+            return Err(error(
+                self.source,
+                attribute,
+                "private native mock storage is not a Python attribute",
+            ));
+        }
+        let receiver = if let Type::Class(class) = receiver.ty
+            && self.native_mock(class)
+            && Self::mock_state_member(attribute.attr.as_str())
+        {
+            self.mock_node(receiver, class)
+        } else {
+            receiver
+        };
         let Type::Class(class) = receiver.ty else {
             return Err(error(
                 self.source,
@@ -4936,6 +4959,19 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                if compare
+                    .ops
+                    .iter()
+                    .all(|op| matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq))
+                {
+                    for value in &mut values {
+                        if let Type::Class(class) = value.ty
+                            && self.native_mock(class)
+                        {
+                            *value = self.mock_node(value.clone(), class);
+                        }
+                    }
+                }
                 if values.iter().any(|value| {
                     matches!(
                         value.ty,
@@ -5457,6 +5493,16 @@ impl<'a> Checker<'a> {
                     && self.classes.methods[class].contains_key(attribute.attr.as_str())
                 {
                     return self.class_attribute(attribute, class, Some(receiver), None);
+                }
+                if let Type::Class(class) = receiver.ty
+                    && self.native_mock(class)
+                    && !Self::mock_state_member(attribute.attr.as_str())
+                    && !self.classes.declarations.definitions[class]
+                        .fields
+                        .iter()
+                        .any(|field| field.name == attribute.attr.as_str())
+                {
+                    return self.mock_child(class, receiver, attribute);
                 }
                 let (receiver, field, ty) = self.field_value(attribute, receiver)?;
                 if let Some(name) = attribute.value.as_name_expr()

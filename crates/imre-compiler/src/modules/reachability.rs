@@ -167,8 +167,19 @@ impl Reachable {
                                 && source.name == "unittest"
                                 && class.name.as_str() == "_AssertRaisesContext"
                                 && name == "_missing";
+                            let mock_dispatch = source.bundled
+                                && source.name == "unittest.mock"
+                                && class.name.as_str() == "Mock"
+                                && matches!(
+                                    name,
+                                    "_child"
+                                        | "_record"
+                                        | "_assert_called_with"
+                                        | "_assert_called_once_with"
+                                );
                             if (property
                                 || assertion_exit
+                                || mock_dispatch
                                 || refs.found.attributes.contains(name)
                                 || matches!(
                                     name,
