@@ -555,7 +555,10 @@ fn build(source: Source<'_>) -> Result<*const Object, serde_json::Error> {
     .into_handle())
 }
 
-pub(super) fn loads(text: &str, owner: impl FnOnce() -> Rc<Str>) -> Result<*const Object, Error> {
+pub(super) fn loads(
+    text: &str,
+    owner: impl FnOnce() -> Option<Rc<Str>>,
+) -> Result<*const Object, Error> {
     check_depth(text).map_err(|message| Error::new(Kind::ValueError, message))?;
     build(Source {
         text,
@@ -594,7 +597,7 @@ pub unsafe extern "C" fn imre_json_loads(text: *const Str) -> *const Object {
             "Unexpected UTF-8 BOM (decode using utf-8-sig)",
         ))
     } else {
-        loads(source, owner)
+        loads(source, || Some(owner()))
     };
     finish(result, std::ptr::null())
 }
