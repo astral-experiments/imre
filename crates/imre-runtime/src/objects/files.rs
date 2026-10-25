@@ -15,6 +15,7 @@ mod buffered;
 mod gzip;
 mod path_text;
 mod seekable;
+mod text_memory;
 use seekable::Memory;
 pub(super) use seekable::disk_offset;
 
@@ -34,6 +35,7 @@ enum FileKind {
     BinaryRead,
     GzipBinaryRead,
     Memory,
+    TextMemory,
     Member,
     BinaryWrite,
 }
@@ -42,6 +44,7 @@ enum Stream {
     Read(Input),
     Write(Output),
     Memory(Memory),
+    TextMemory(text_memory::TextMemory),
     Member(Box<super::zipfile::Member>),
 }
 
@@ -52,7 +55,7 @@ impl Stream {
         let (file, flushed) = match self {
             Self::Read(input) => (input.into_file(), Ok(())),
             Self::Write(writer) => writer.finish(),
-            Self::Memory(_) | Self::Member(_) => return Ok(()),
+            Self::Memory(_) | Self::TextMemory(_) | Self::Member(_) => return Ok(()),
         };
         close_file(file).and(flushed)
     }
@@ -129,6 +132,7 @@ impl FileState {
         let stream = if read {
             Stream::Read(Input::pipe(file, !text, capacity))
         } else {
+            crate::initialize_io();
             Stream::Write(Output::pipe(file, capacity, text && bufsize == 1))
         };
         let kind = if text {
@@ -153,10 +157,16 @@ impl FileState {
     }
 
     pub(super) fn read(&mut self) -> Result<Str> {
+        if self.kind == FileKind::TextMemory {
+            return self.text_memory()?.read(None, false);
+        }
         self.input()?.read_text()
     }
 
     pub(super) fn readline(&mut self) -> Result<Str> {
+        if self.kind == FileKind::TextMemory {
+            return self.text_memory()?.read(None, true);
+        }
         self.input()?.text_line()
     }
 
@@ -257,15 +267,23 @@ impl FileState {
     }
 
     pub(super) fn write(&mut self, text: &str) -> Result<()> {
+        if self.kind == FileKind::TextMemory {
+            return self.text_memory()?.write(text);
+        }
         self.write_bytes(text.as_bytes())
     }
 
     pub(super) fn flush(&mut self) -> Result<()> {
+        if self.kind == FileKind::TextMemory {
+            return Ok(());
+        }
         if self.kind == FileKind::BinaryWrite && self.stream.is_none() {
             return Err(Error::new(Kind::ValueError, "flush of closed file"));
         }
         match self.stream()? {
-            Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) => Ok(()),
+            Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) | Stream::TextMemory(_) => {
+                Ok(())
+            }
             Stream::Write(writer) => writer.flush().map_err(os_error),
         }
     }
@@ -343,7 +361,7 @@ fn os_error_kind(kind: io::ErrorKind) -> Kind {
 }
 
 /// Format a POSIX errno without a filename, as in OSError(errno, strerror).
-pub(super) fn errno_error(error: io::Error) -> Error {
+pub(crate) fn errno_error(error: io::Error) -> Error {
     errno_with_filename(error, None)
 }
 
@@ -362,15 +380,6 @@ pub(super) fn errno_with_filenames(
 ) -> Error {
     with_errno_description(error, |kind, errno, description| {
         Error::from_errno(kind, errno, description, first, second)
-    })
-}
-
-/// A caller which supplies a printable suffix retains the same errno and args.
-pub(super) fn errno_with_paths(error: io::Error, paths: impl FnOnce(&mut String)) -> Error {
-    with_errno_description(error, |kind, errno, description| {
-        let mut message = format!("[Errno {errno}] {description}");
-        paths(&mut message);
-        Error::from_errno_message(kind, errno, description, message)
     })
 }
 
@@ -440,7 +449,7 @@ pub(super) fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*c
 fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
     let (file, metadata) = open_file(path, mode)?;
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
-    let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
+    let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
     let fd = file.as_raw_fd();
     let stream = match mode {
         0 | 4 => {

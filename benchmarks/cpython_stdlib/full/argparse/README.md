@@ -5,6 +5,10 @@ The denominator is **1,893 distinct unittest IDs** from CPython 3.14.5
 `test_argparse.py` module. Its metaclasses generate test methods, so counting
 source definitions would miss cases. The vendored files include the translation
 snapshot used by `TestTranslations.test_translations` and the upstream license.
+That test runs CPython's own `Tools/i18n/pygettext.py` on `argparse.py`.
+When staging the reference interpreter, include both `Lib` and `Tools/i18n`
+from the pinned CPython checkout. [UPSTREAM.json](UPSTREAM.json) records the
+original blobs for the tool and the two test helpers that invoke it.
 
 The test-enabled release interpreter on Linux passed all 1,893 IDs with no skips.
 `reference-linux.json` records one result per ID; reference success is not native
@@ -36,22 +40,43 @@ argparse companion test module. The earlier [generated parse](NATIVE.md) and
 | --- | ---: | ---: |
 | Fully native, including fixtures | 0 | 0 |
 | Native body and operation with host fixtures | 4 | 4 |
-| Host body and assertions with native operations | 739 | 739 |
+| Host body and assertions with native operations | 900 | 900 |
 | Completed with no parser operation (empty input table) | 12 | 12 |
-| Blocked | 1,138 | 1,138 |
-| Failed, skipped or excluded | 0 | 0 |
+| Blocked | 977 | 977 |
+| Mixed, reference-only, failed, skipped or excluded | 0 | 0 |
 | **Total** | **1,893** | **1,893** |
 
-The compiler and runtime for this report both come from
-`4c7aead929fbfd5cd95c1ece51fa59354edf3c2f`. All 417 source-defined
-methods and all 1,476 generated methods (1,236 parsing and 240 formatting)
-have an observation; no test or fixture was excluded. Each of the four native bodies unconditionally calls
-`parse_args` with no explicit assertion; CPython runs the enclosing fixtures.
-[Native numeric conversion](https://github.com/astral-sh/imre/pull/647) brought the host-driven count from 463 to 571. [Option prefix and abbreviation matching](https://github.com/astral-sh/imre/pull/688) added 168, bringing it to 739. Those methods made 2,965 native parser calls at each level. Rerunning on the merged compiler and runtime reproduced all classifications from the PR head.
-The independent process oracle compares exit status, stdout, and stderr; the
-original assertions receive the native result. A host-driven source method
-retains the whole-body compiler diagnostic in its evidence. An unsupported
-fixture or partial run does not earn a pass.
+The compiler and runtime come from merged main at
+`4568c9ddf08b7666251cc718f8c7e9e74d72a57c`. Each report accounts for all
+417 source-defined methods and all 1,476 generated methods (1,236 parsing and
+240 formatting). The four native bodies each call `parse_args` unconditionally
+and have no explicit assertion; CPython runs their fixtures.
+
+| Native operations driven by complete CPython routines | Routines per level | Calls per level |
+| --- | ---: | ---: |
+| [Numeric conversion](https://github.com/astral-sh/imre/pull/647) | 571 | 2,101 |
+| [Option prefixes and abbreviations](https://github.com/astral-sh/imre/pull/688) | 739 | 2,965 |
+| [Usage and help formatting](https://github.com/astral-sh/imre/pull/719) | 779 | 3,005 |
+| [Optional subparsers and aliases](https://github.com/astral-sh/imre/pull/756) | 788 | 3,024 |
+| [Known arguments and ordered extras](https://github.com/astral-sh/imre/pull/818) | 789 | 3,025 |
+| [Flag constants and counts](https://github.com/astral-sh/imre/pull/873) | 888 | 3,605 |
+| [Builtin classes as constants and defaults](https://github.com/astral-sh/imre/pull/895) | 900 | 3,623 |
+
+The [run on merged #895](https://github.com/astral-sh/imre/actions/runs/40185282359)
+adds all 12 `TestOptionalsActionStoreConst` routines to the
+[#873 results](https://github.com/astral-sh/imre/actions/runs/40180770414).
+Their original argument tables store and compare builtin class objects.
+The test bodies, assertions, and fixtures run on CPython; their 18 additional
+`parse_args` calls run on Imre at each level. No other ID changed classification.
+
+Of the 3,623 host-driven native calls at each level, 3,562 call
+`parse_args`, 16 call `parse_known_args`, 14 call `format_help`, 11 call
+`format_usage`, and 10 each call `print_help` and `print_usage`.
+The process comparison checks exit status, stdout, and stderr;
+the original assertions receive the native result. Each host-driven source
+method retains the diagnostic from attempting its whole body. A partial run
+does not earn a pass. [Whole-file startup](METHODS.md#whole-file-startup)
+and per-method execution have separate results.
 
 Run the following with the test-enabled release interpreter, the recorded
 compiler, and its matching runtime library. Validate the output against the
@@ -60,7 +85,7 @@ unchanged CPython reference before combining it with other suites.
 ```sh
 python3.14 -B benchmarks/cpython_stdlib/full/argparse/evidence.py \
   --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang clang-18 \
-  --imre-revision 4c7aead929fbfd5cd95c1ece51fa59354edf3c2f --result /tmp/argparse-evidence.json
+  --imre-revision 4568c9ddf08b7666251cc718f8c7e9e74d72a57c --result /tmp/argparse-evidence.json
 python3 benchmarks/cpython_stdlib/suite_evidence.py \
   benchmarks/cpython_stdlib/full/argparse/reference-linux.json /tmp/argparse-evidence.json
 ```

@@ -1,0 +1,328 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "operation": "imre check of the complete pinned Lib/test sources; no test methods executed",
+  "before": {
+    "tree": "e434eea8a97214f0f57023f5a23a28ab6cf2b858",
+    "compiler_sha256": "92e5f0b13ddb977cd43cbe10d9de3bebc47dee35f4fe93385751c1a663404397",
+    "basis": "main with stat, inspect static lookup, and _opcode specialization flags"
+  },
+  "after": {
+    "tree": "003f443bf9522cf37d2d7869c6545d19672b0112",
+    "compiler_sha256": "00aa45fbaf85d0862144adc59d0e81393d0396566aa0430f9c466a87948f4915",
+    "basis": "before plus only the types.SimpleNamespace implementation"
+  },
+  "checks_per_compiler": 84,
+  "first_diagnostic_changed": 32,
+  "first_diagnostic_unchanged": 52,
+  "all_exit_statuses": 1,
+  "tests_executed": 0,
+  "path_normalization": "<module-root> replaces only the per-run temporary Lib directory",
+  "suites": {
+    "test.test_unittest": [
+      {
+        "modes": [
+          "import full",
+          "runner full"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_unittest/__init__.py:2:1: Imre: Lib/test/support/__init__.py:19:1: Imre: standard-library imports and shadowing are unsupported: \"types\"",
+        "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_unittest/__init__.py:2:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+      },
+      {
+        "modes": [
+          "import reachable",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_unittest/__init__.py:2:1: Imre: Lib/test/support/__init__.py:19:1: Imre: standard-library imports and shadowing are unsupported: \"types\"",
+        "after": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      }
+    ],
+    "test.test_sys": [
+      {
+        "modes": [
+          "import full",
+          "import reachable",
+          "runner full",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_sys.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\"",
+        "after_same_as_before": true
+      }
+    ],
+    "test.test_json": [
+      {
+        "modes": [
+          "import full",
+          "import reachable",
+          "runner full",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"doctest\"",
+        "after_same_as_before": true
+      }
+    ],
+    "test.test_os": [
+      {
+        "modes": [
+          "import full",
+          "import reachable",
+          "runner full",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_os.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"codecs\"",
+        "after_same_as_before": true
+      }
+    ],
+    "test.test_pathlib": [
+      {
+        "modes": [
+          "import full",
+          "runner full"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:19:1: Imre: standard-library imports and shadowing are unsupported: \"types\"",
+        "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+      },
+      {
+        "modes": [
+          "import reachable",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:19:1: Imre: standard-library imports and shadowing are unsupported: \"types\"",
+        "after": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      }
+    ],
+    "test.test_subprocess": [
+      {
+        "modes": [
+          "import full",
+          "import reachable",
+          "runner full",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_subprocess.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "after_same_as_before": true
+      }
+    ],
+    "test.test_shutil": [
+      {
+        "modes": [
+          "import full",
+          "import reachable",
+          "runner full",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:4:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "after_same_as_before": true
+      }
+    ],
+    "test.test_collections": [
+      {
+        "modes": [
+          "import full",
+          "import reachable",
+          "runner full",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_collections.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"array\"",
+        "after_same_as_before": true
+      }
+    ],
+    "test.test_logging": [
+      {
+        "modes": [
+          "import full",
+          "import reachable",
+          "runner full",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_logging.py:26:1: Imre: standard-library imports and shadowing are unsupported: \"codecs\"",
+        "after_same_as_before": true
+      }
+    ],
+    "test.test_itertools": [
+      {
+        "modes": [
+          "import full",
+          "import reachable",
+          "runner full",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"doctest\"",
+        "after_same_as_before": true
+      }
+    ],
+    "test.test_functools": [
+      {
+        "modes": [
+          "import full",
+          "import reachable",
+          "runner full",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_functools.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\"",
+        "after_same_as_before": true
+      }
+    ],
+    "test.test_argparse": [
+      {
+        "modes": [
+          "import full",
+          "import reachable",
+          "runner full",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_argparse.py:3:1: Imre: cannot resolve first-party module \"_colorize\" under <module-root>; external and namespace-package imports are unsupported",
+        "after_same_as_before": true
+      }
+    ],
+    "test.test_annotationlib": [
+      {
+        "modes": [
+          "import full",
+          "import reachable",
+          "runner full",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_annotationlib.py:186:26: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
+        "after_same_as_before": true
+      }
+    ],
+    "test.test_unittest.test_assertions": [
+      {
+        "modes": [
+          "import full",
+          "runner full"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_unittest/__init__.py:2:1: Imre: Lib/test/support/__init__.py:19:1: Imre: standard-library imports and shadowing are unsupported: \"types\"",
+        "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_unittest/__init__.py:2:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+      },
+      {
+        "modes": [
+          "import reachable",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_unittest/__init__.py:2:1: Imre: Lib/test/support/__init__.py:19:1: Imre: standard-library imports and shadowing are unsupported: \"types\"",
+        "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_unittest/test_assertions.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"weakref\""
+      }
+    ],
+    "test.test_pathlib.test_pathlib": [
+      {
+        "modes": [
+          "import full",
+          "runner full"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:19:1: Imre: standard-library imports and shadowing are unsupported: \"types\"",
+        "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+      },
+      {
+        "modes": [
+          "import reachable",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:19:1: Imre: standard-library imports and shadowing are unsupported: \"types\"",
+        "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_pathlib/test_pathlib.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+      }
+    ],
+    "test.test_inspect": [
+      {
+        "modes": [
+          "import full",
+          "runner full"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:19:1: Imre: standard-library imports and shadowing are unsupported: \"types\"",
+        "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+      },
+      {
+        "modes": [
+          "import reachable",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:19:1: Imre: standard-library imports and shadowing are unsupported: \"types\"",
+        "after": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      }
+    ],
+    "test.test_inspect.test_inspect": [
+      {
+        "modes": [
+          "import full",
+          "runner full"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:19:1: Imre: standard-library imports and shadowing are unsupported: \"types\"",
+        "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+      },
+      {
+        "modes": [
+          "import reachable",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:19:1: Imre: standard-library imports and shadowing are unsupported: \"types\"",
+        "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/test_inspect.py:1:1: Imre: unsupported sealed standard-library export annotationlib.ForwardRef"
+      }
+    ],
+    "test.test_string": [
+      {
+        "modes": [
+          "import full",
+          "runner full"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_string/__init__.py:2:1: Imre: Lib/test/support/__init__.py:19:1: Imre: standard-library imports and shadowing are unsupported: \"types\"",
+        "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_string/__init__.py:2:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+      },
+      {
+        "modes": [
+          "import reachable",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_string/__init__.py:2:1: Imre: Lib/test/support/__init__.py:19:1: Imre: standard-library imports and shadowing are unsupported: \"types\"",
+        "after": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      }
+    ],
+    "test.test_shlex": [
+      {
+        "modes": [
+          "import full",
+          "runner full"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shlex.py:6:1: Imre: Lib/test/support/__init__.py:19:1: Imre: standard-library imports and shadowing are unsupported: \"types\"",
+        "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shlex.py:6:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+      },
+      {
+        "modes": [
+          "import reachable",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shlex.py:6:1: Imre: Lib/test/support/__init__.py:19:1: Imre: standard-library imports and shadowing are unsupported: \"types\"",
+        "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shlex.py:7:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+      }
+    ],
+    "test.test_fnmatch": [
+      {
+        "modes": [
+          "import full",
+          "runner full"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_fnmatch.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "after_same_as_before": true
+      },
+      {
+        "modes": [
+          "import reachable",
+          "runner reachable"
+        ],
+        "before": "Lib/test/test_fnmatch.py:16:68: Imre: defaults must be int, float, bool, str, bytes, or None literals; numbers may have one sign",
+        "after_same_as_before": true
+      }
+    ],
+    "test.test_types": [
+      {
+        "modes": [
+          "import full",
+          "import reachable",
+          "runner full",
+          "runner reachable"
+        ],
+        "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_types.py:873:19: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
+        "after_same_as_before": true
+      }
+    ]
+  }
+}

@@ -47,6 +47,25 @@ impl Emitter<'_, '_> {
     ) -> Value {
         let source = &args[0].value.operand;
         let operand = match operation {
+            TextOperation::IsSpace | TextOperation::IsUpper => {
+                let symbol = if matches!(operation, TextOperation::IsUpper) {
+                    "imre_str_is_upper"
+                } else {
+                    "imre_str_isspace"
+                };
+                let bit = self.instruction(format!("call i32 @{symbol}(ptr {source})"));
+                self.instruction(format!("icmp ne i32 {bit}, 0"))
+            }
+            TextOperation::SplitLineEnds => {
+                let keep = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                self.checked_instruction(format!(
+                    "call ptr @imre_str_splitlines_options(ptr {source}, i32 {keep})"
+                ))
+            }
+            TextOperation::ExpandTabs => self.checked_instruction(format!(
+                "call ptr @imre_str_expandtabs(ptr {source}, i64 {})",
+                args[1].value.operand,
+            )),
             TextOperation::Lower => {
                 self.checked_instruction(format!("call ptr @imre_str_lower(ptr {source})"))
             }
@@ -91,6 +110,10 @@ impl Emitter<'_, '_> {
                 ));
                 return result;
             }
+            TextOperation::Translate => self.checked_instruction(format!(
+                "call ptr @imre_str_translate(ptr {source}, ptr {})",
+                args[1].value.operand
+            )),
             TextOperation::Dedent => {
                 self.instruction(format!("call ptr @imre_str_dedent(ptr {source})"))
             }
@@ -98,7 +121,16 @@ impl Emitter<'_, '_> {
                 self.checked_pointer(format!("call ptr @imre_str_unquote(ptr {source})"))
             }
             TextOperation::ShlexSplit => {
-                self.checked_instruction(format!("call ptr @imre_shlex_split(ptr {source})"))
+                let source = self.instruction(format!("inttoptr i64 {source} to ptr"));
+                let comments =
+                    self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                let posix = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
+                self.checked_instruction(format!(
+                    "call ptr @imre_shlex_split_options(ptr {source}, i32 {comments}, i32 {posix})"
+                ))
+            }
+            TextOperation::ShlexQuote => {
+                self.checked_instruction(format!("call ptr @imre_shlex_quote(ptr {source})"))
             }
         };
         self.owned(Value {

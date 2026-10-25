@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use super::{Node, View};
+use super::{Node, View, deep_values};
 use crate::objects::exceptions::push_string_repr;
 
 impl View {
@@ -21,10 +21,14 @@ impl View {
         let right_root = right.snapshot_root();
         let left = left_root.as_ref().unwrap_or(self);
         let right = right_root.as_ref().unwrap_or(right);
-        left.equal_at(left.index, right, right.index)
+        if left.nodes.deep() || right.nodes.deep() {
+            deep_values::equal(left, right)
+        } else {
+            left.equal_at(left.index, right, right.index)
+        }
     }
 
-    fn equal_at(&self, a: usize, other: &Self, b: usize) -> bool {
+    pub(super) fn equal_at(&self, a: usize, other: &Self, b: usize) -> bool {
         if let Node::Deferred(array) = &self.nodes[a] {
             let v = array.view();
             return v.equal_at(v.index, other, b);
@@ -58,11 +62,11 @@ impl View {
                 a.len() == b.len() && a.iter().zip(b).all(|(&a, &b)| self.equal_at(a, other, b))
             }
             (Node::Object(a), Node::Object(b)) => {
-                // Only the last value for a repeated JSON key participates in comparison.
-                a.iter().all(|(key, _)| {
-                    right
-                        .lookup(key)
-                        .is_some_and(|b| self.equal_at(left.lookup(key).unwrap(), other, b))
+                a.iter().enumerate().all(|(i, (key, value))| {
+                    a.is_shadowed(i)
+                        || right
+                            .lookup(key)
+                            .is_some_and(|b| self.equal_at(*value, other, b))
                 }) && b.iter().all(|(key, _)| left.lookup(key).is_some())
             }
             _ => false,
@@ -79,12 +83,14 @@ impl View {
                     crate::objects::words::WordKind::new(5),
                 )
             };
+        } else if self.nodes.deep() {
+            deep_values::write_repr(self, output);
         } else {
             self.write_at(self.index, output);
         }
     }
 
-    fn write_at(&self, i: usize, output: &mut String) {
+    pub(super) fn write_at(&self, i: usize, output: &mut String) {
         let node = &self.nodes[i];
         match node {
             Node::Null => output.push_str("None"),

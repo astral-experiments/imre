@@ -335,12 +335,24 @@ impl Checker<'_> {
                 "str.join requires one string iterable",
             ));
         };
-        let input = self.expansion_input(source, Some(Type::Str))?;
+        self.join_parts(receiver, source, call, false)
+    }
+
+    /// For shlex.join, quote each yielded item before requesting the next one.
+    pub(super) fn join_parts(
+        &mut self,
+        receiver: Expr,
+        source: &ast::Expr,
+        call: &ast::ExprCall,
+        shell_quote: bool,
+    ) -> Result<Expr, String> {
+        let input = self.expansion_input(source, (!shell_quote).then_some(Type::Str))?;
         if let Iteration::Container {
             iterable,
             items: false,
             start: None,
         } = &input
+            && !shell_quote
             && matches!(
                 self.types.element(iterable.ty),
                 Some(Type::Str | Type::StrLiteral(_))
@@ -367,7 +379,11 @@ impl Checker<'_> {
             ),
         ];
         body.extend(self.expand_items(input, call, |checker, value| {
-            let value = checker.coerce(value, Type::Str, call)?;
+            let value = if shell_quote {
+                checker.shlex_quote_value(value, call)?
+            } else {
+                checker.coerce(value, Type::Str, call)?
+            };
             Ok(vec![Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::Append, vec![checker.local(parts), value]),
@@ -457,6 +473,43 @@ impl Checker<'_> {
             ty: Type::Str,
             kind: ExprKind::Builtin(Builtin::StringReplace, vec![receiver, old, new]),
         })
+    }
+
+    /// Keep the argument evaluated once; only literal text and %% surround one %s slot.
+    pub(super) fn percent_string(&self, pattern: &str, argument: Expr) -> Option<Expr> {
+        let mut prefix = String::new();
+        let mut suffix = String::new();
+        let mut slot = false;
+        let mut chars = pattern.chars();
+        while let Some(c) = chars.next() {
+            let out = if slot { &mut suffix } else { &mut prefix };
+            if c != '%' {
+                out.push(c);
+                continue;
+            }
+            match chars.next()? {
+                '%' => out.push('%'),
+                's' if !slot => slot = true,
+                _ => return None,
+            }
+        }
+        if !slot {
+            return None;
+        }
+        let arg = Self::string_value(argument);
+        let add = |a: Expr, b: Expr| Expr {
+            ty: Type::Str,
+            kind: ExprKind::Binary(Binary::Concat, Box::new(a), Box::new(b)),
+        };
+        let mut result = if prefix.is_empty() {
+            arg
+        } else {
+            add(unpacking::string(&prefix), arg)
+        };
+        if !suffix.is_empty() {
+            result = add(result, unpacking::string(&suffix));
+        }
+        Some(result)
     }
 
     pub(super) fn abs_call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -636,7 +689,7 @@ impl Checker<'_> {
             });
         }
         if field.conversion != ast::ConversionFlag::Repr
-            && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(_))
+            && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(..))
         {
             return self.record_text(value, field);
         }

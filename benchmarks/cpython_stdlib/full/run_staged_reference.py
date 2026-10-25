@@ -10,6 +10,7 @@ import sys
 import sysconfig
 import tempfile
 import unittest
+from xml.etree.ElementTree import ParseError
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -54,7 +55,17 @@ def run_group(mod, primary, pin, out):
         env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
         proc = subprocess.run(command, cwd=work, stdout=log, stderr=subprocess.STDOUT,
                               env={**env, "PYTHONHOME": sys.prefix})
-    actual = reference_results(xml, Counter({k: len(v) for k, v in expected.items() if k not in early})) | early
+    return compare_group(xml, expected, early, proc.returncode)
+
+
+def compare_group(xml, expected, early, returncode):
+    """Only a complete set of identified test occurrences can supply a module's counts."""
+    try:
+        actual = reference_results(xml, Counter({k: len(v) for k, v in expected.items() if k not in early})) | early
+    except (FileNotFoundError, ParseError, ValueError) as exc:
+        return {"exit": returncode, "expected_instances": sum(map(len, expected.values())),
+                "instances": None, "outcomes": {}, "installed_only_passes": [], "differences": {},
+                "incomplete": f"{xml.name}: {exc}; see {xml.with_suffix('.log').name}"}
     counts = Counter()
     differences = {}
     installed_passes = []
@@ -69,7 +80,7 @@ def run_group(mod, primary, pin, out):
             installed_passes.append(name)
         else:
             differences[name] = {"expected": expected[name], "observed": outcomes}
-    return {"exit": proc.returncode, "instances": counts.total(), "outcomes": dict(counts),
+    return {"exit": returncode, "instances": counts.total(), "outcomes": dict(counts),
             "installed_only_passes": sorted(installed_passes), "differences": differences}
 
 
@@ -97,12 +108,15 @@ def main():
     results = {}
     for mod in modules:
         result = results[mod] = run_group(mod, wave[mod], release["commit"], out)
-        print(f"{mod}: {result['outcomes']}; {len(result['differences'])} unexpected differences", flush=True)
+        if "incomplete" in result:
+            print(f"{mod}: incomplete reference: {result['incomplete']}", flush=True)
+        else:
+            print(f"{mod}: {result['outcomes']}; {len(result['differences'])} unexpected differences", flush=True)
     (out / "summary.json").write_text(json.dumps({"cpython_commit": release["commit"],
         "platform": sys.platform, "interpreter": "CPython", "configuration": configuration(),
         "verified_fixture_files": count,
         "modules": results}, indent=2) + "\n")
-    return int(any(r["exit"] or r["differences"] for r in results.values()))
+    return int(any(r["exit"] or r["differences"] or "incomplete" in r for r in results.values()))
 
 
 if __name__ == "__main__":
