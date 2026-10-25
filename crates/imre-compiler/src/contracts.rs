@@ -76,14 +76,17 @@ impl Builtin {
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex
             | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
-            Self::MappingObjectGet | Self::ExceptionFieldRepr => {
-                Contract::new(true, PreservesOwners)
+            Self::MappingObjectGet => Contract::new(true, PreservesOwners),
+            Self::BoxValue | Self::ExceptionTupleView => Contract::new(false, PreservesOwners),
+            Self::ExceptionKeywordSuggestion | Self::ExceptionRecordFields => {
+                Contract::new(false, PreservesOwners)
             }
-            Self::BoxValue
-            | Self::ExceptionTupleView
-            | Self::ExceptionKeywordSuggestion
-            | Self::ExceptionRecordFields => Contract::new(false, PreservesOwners),
-            Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
+            Self::ExceptionFieldRepr => Contract::new(true, PreservesOwners),
+            Self::ExceptionRepr
+            | Self::ExceptionMessage
+            | Self::Logging(crate::ir::LogOperation::PrintActiveException) => {
+                Contract::new(true, Unknown)
+            }
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {
                 Contract::new(false, PreservesLists)
             }
@@ -338,6 +341,7 @@ impl Builtin {
             | Self::RecordCopy
             | Self::JsonDecode(_)
             | Self::CsvReader { .. }
+            | Self::FormatCursor { .. }
             | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads

@@ -2,6 +2,21 @@
 
 use super::*;
 
+/// Evaluate the supplied call operands in order, then raise the checked TypeError.
+pub(super) fn type_error(ty: Type, mut values: Vec<Expr>, message: String) -> Expr {
+    values.push(Expr {
+        ty: Type::Exception,
+        kind: ExprKind::Exception {
+            kind: exception_kind("TypeError").unwrap(),
+            message: Some(Box::new(unpacking::string(message))),
+        },
+    });
+    Expr {
+        ty,
+        kind: ExprKind::Builtin(Builtin::RaiseException, values),
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum ParameterKind {
     PositionalOnly,
@@ -228,6 +243,77 @@ pub(super) fn reject_unpacking(call: &ast::ExprCall, source: &str) -> Result<(),
 }
 
 impl Checker<'_> {
+    /// Evaluate the supplied arguments before raising a positional arity or
+    /// keyword error. Only the spans belonging to this exact call are proved.
+    pub(super) fn one_positional_error(
+        &mut self,
+        call: &ast::ExprCall,
+        name: &str,
+        parameter: &str,
+        returns: Type,
+    ) -> Result<Expr, String> {
+        let args = &call.arguments;
+        self.graph
+            .checked_missing_argument(self.module, call.range());
+        for kw in &args.keywords {
+            if kw.arg.as_deref() == Some(parameter) {
+                self.graph
+                    .checked_positional_keyword(self.module, kw.range());
+            }
+        }
+        self.graph
+            .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
+        for argument in args.args.iter().skip(1) {
+            self.graph
+                .checked_excess_argument(self.module, argument.range());
+        }
+        let mut values = Vec::new();
+        for argument in &args.args {
+            values.push(self.expr(argument)?);
+        }
+        for kw in &args.keywords {
+            values.push(self.expr(&kw.value)?);
+        }
+        let message = if args.keywords.is_empty() {
+            format!(
+                "{name}() takes exactly one argument ({} given)",
+                args.args.len()
+            )
+        } else {
+            format!("{name}() takes no keyword arguments")
+        };
+        Ok(type_error(returns, values, message))
+    }
+
+    /// Return a Python class name only when the concrete receiver type is known.
+    pub(super) fn exact_argument_type_name(&self, ty: Type) -> Option<&str> {
+        Some(match ty {
+            Type::None => "NoneType",
+            Type::Int => "int",
+            Type::Bool => "bool",
+            Type::Float => "float",
+            Type::Bytes => "bytes",
+            Type::PlainObject => "object",
+            Type::List(_) | Type::ListInt | Type::ByteOutput => "list",
+            Type::Set(_) => "set",
+            Type::Dict(_) if !self.types.is_counter(ty) && !self.types.is_default_list_dict(ty) => {
+                "dict"
+            }
+            Type::Tuple(_) if self.types.namedtuple_definition(ty).is_none() => "tuple",
+            Type::Class(id)
+                if self
+                    .types
+                    .concrete_subclasses(id)
+                    .iter()
+                    .all(|child| *child == Type::Class(id)) =>
+            {
+                &self.classes.declarations.definitions[id].name
+            }
+            Type::Enum(id) => &self.classes.declarations.definitions[id].name,
+            _ => return None,
+        })
+    }
+
     /// The receiver and supplied expressions stay in source order. The separate
     /// permutation binds each parameter only after every supplied value exists.
     /// Literal defaults follow supplied expressions and cannot run user code.

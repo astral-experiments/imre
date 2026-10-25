@@ -39,6 +39,7 @@ mod expandtabs;
 mod expansions;
 mod fixed_tuples;
 mod fnmatch;
+mod format_cursors;
 mod fromkeys;
 mod fspath;
 mod function_caches;
@@ -3305,6 +3306,19 @@ impl<'a> Checker<'a> {
         else {
             unreachable!("range iteration returned above")
         };
+        if !items
+            && start.is_none()
+            && let Some(element) = self.types.cursor_element(iterable.ty)
+        {
+            let cursor = self.prepare_cursor(iterable, element);
+            return self.lower_prepared_iteration(
+                target,
+                cursor,
+                orelse,
+                before_iteration,
+                lower_body,
+            );
+        }
         if matches!(
             iterable.ty,
             Type::TextIO | Type::StringIO | Type::BinaryIO | Type::CsvReader
@@ -6842,9 +6856,11 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return self.log_formatter(call),
             Some(Binding::Intrinsic(
-                op @ (Intrinsic::HandlerRename | Intrinsic::HandlerLookup),
+                op @ (Intrinsic::HandlerRename
+                | Intrinsic::HandlerLookup
+                | Intrinsic::PrintActiveException),
             )) => {
-                return self.named_handler(op, call);
+                return self.handler_operation(op, call);
             }
             Some(Binding::Intrinsic(Intrinsic::MakeLogRecord)) => {
                 return self.make_log_record(call);
@@ -6884,6 +6900,12 @@ impl<'a> Checker<'a> {
                 return self.static_attribute(call);
             }
             Some(Binding::Intrinsic(Intrinsic::CsvReader)) => return self.csv_reader(call),
+            Some(Binding::Intrinsic(Intrinsic::FormatterParser)) => {
+                return self.format_cursor(call, false);
+            }
+            Some(Binding::Intrinsic(Intrinsic::FormatterFieldNameSplit)) => {
+                return self.format_cursor(call, true);
+            }
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
             Some(Binding::Intrinsic(Intrinsic::WarningFilter { simple })) => {
                 return self.warning_filter(call, simple);
