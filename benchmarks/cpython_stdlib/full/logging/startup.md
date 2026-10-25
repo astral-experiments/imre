@@ -11,6 +11,7 @@ Both are checked with and without `--reachable-only`, with CPython's unmodified
 | Main `76d74f9` | `test_logging.py`: starred elements in tuple displays are unsupported. |
 | Main `0ea6595` plus bounded display lowering | Line 22, `import logging.handlers`. |
 | Main `e2c5130` (includes [#523](https://github.com/astral-sh/imre/pull/523)) plus bounded display lowering | Line 23, `import logging.config`: standard-library imports and shadowing are unsupported: `"logging"`. |
+| Main `32d0289` plus [#588](https://github.com/astral-sh/imre/pull/588) at `5b8ed5b` | Line 23, `import logging.config`, in all four checks. This replay uses main's checked keyword diagnostics and adds only the exact tuple-list subscript diagnostic proved by lowering. |
 
 There is one starred tuple **display** in the pinned test:
 [`ConfigDictTest.test_config_queue_handler`, line 3990](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_logging.py#L3990).
