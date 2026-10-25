@@ -14,6 +14,7 @@ use crate::types::Types;
 mod argparse;
 mod assignments;
 mod asyncio;
+mod cached_properties;
 mod callables;
 mod calls;
 mod comprehensions;
@@ -74,6 +75,7 @@ struct ClassInfo {
     methods: Vec<HashMap<String, Signature>>,
     keyword_copies: HashSet<usize>,
     cached: HashSet<usize>,
+    cached_properties: cached_properties::Slots,
     generators: HashSet<usize>,
     contexts: HashSet<usize>,
 }
@@ -165,6 +167,7 @@ impl ClassInfo {
                 ));
             }
         }
+        let cached_properties = cached_properties::slots(graph, types, &declarations, &mut fields)?;
         // Reference counting is sufficient only while no accepted field graph can
         // close a cycle. This concerns storage types, not method signatures.
         if let Some(id) = Self::cyclic_field_root(&fields, types) {
@@ -244,6 +247,7 @@ impl ClassInfo {
             methods: vec![HashMap::new(); fields.len()],
             keyword_copies: HashSet::new(),
             cached: HashSet::new(),
+            cached_properties,
             generators: HashSet::new(),
             contexts: HashSet::new(),
             declarations,

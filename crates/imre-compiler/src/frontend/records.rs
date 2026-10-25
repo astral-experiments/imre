@@ -762,6 +762,13 @@ impl Checker<'_> {
                         .map_err(|message| error(self.source, attribute, message))?;
                 }
                 self.calls.insert(signature.id);
+                if let Some(&(ready, value)) = self
+                    .classes
+                    .cached_properties
+                    .get(&(class, signature.method.unwrap().index))
+                {
+                    return Ok(self.cached_property(receiver, &signature, ready, value));
+                }
                 Ok(Expr {
                     ty: signature.returns,
                     kind: ExprKind::Call(signature.id, ir::CallArgs::positional(vec![receiver])),

@@ -532,6 +532,12 @@ fn method_kind(
         };
     };
     if graph.resolve(module_id, &decorator.expression)
+        == Some(Binding::Intrinsic(Intrinsic::CachedProperty))
+        && !method.is_async
+    {
+        return Ok(MethodKind::Property);
+    }
+    if graph.resolve(module_id, &decorator.expression)
         == Some(Binding::Intrinsic(Intrinsic::ContextManager))
         && !method.is_async
     {
