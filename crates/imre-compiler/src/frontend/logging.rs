@@ -56,6 +56,50 @@ fn required(name: &str, ty: Type) -> Parameter {
 }
 
 impl Checker<'_> {
+    /// A configuration literal can contain differently typed values. Give each
+    /// nested map and list its ordered, mutable document layout at construction.
+    pub(super) fn logging_dictionary_config(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let parameters = [required("config", documents::MAP)];
+        let args = self.arguments(call, &parameters, None)?;
+        Ok(self.ordered_builtin(Builtin::Logging(Log::DictConfig), Type::None, args))
+    }
+
+    /// Read the configuration path only after evaluating all call arguments.
+    pub(super) fn logging_file_config(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let parameters = [
+            required("fname", Type::Str),
+            parameter(
+                "defaults",
+                Type::None,
+                ParameterKind::PositionalOrKeyword,
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                },
+            ),
+            parameter(
+                "disable_existing_loggers",
+                Type::Bool,
+                ParameterKind::PositionalOrKeyword,
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(true),
+                },
+            ),
+            parameter(
+                "encoding",
+                self.types.optional(Type::Str),
+                ParameterKind::PositionalOrKeyword,
+                absent(self.types.optional(Type::Str)),
+            ),
+        ];
+        let args = self.arguments(call, &parameters, None)?;
+        Ok(self.ordered_builtin(Builtin::Logging(Log::FileConfig), Type::None, args))
+    }
+
     pub(super) fn logging_level_map(&self, names: bool) -> Expr {
         let (op, key, value) = if names {
             (Log::Names, Type::Str, Type::Int)
@@ -181,6 +225,8 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         match attribute.attr.as_str() {
+            "disabled" => Ok(operation(Log::Disabled, Type::Bool, vec![logger])),
+            "propagate" => Ok(operation(Log::Propagate, Type::Bool, vec![logger])),
             "root" => Ok(operation(Log::Root, Type::Logger, vec![logger])),
             "parent" => Ok(operation(
                 Log::Parent,

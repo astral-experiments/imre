@@ -64,6 +64,7 @@ pub(crate) enum IntrinsicModule {
     Dataclasses,
     Difflib,
     Logging,
+    LoggingConfig,
     LoggingHandlers,
     Datetime,
     Abc,
@@ -125,6 +126,8 @@ pub(crate) enum Intrinsic {
     ClockConverter(bool),
     LogRecordFlag(u8),
     BasicConfig,
+    DictConfig,
+    FileConfig,
     LogLevel(i64),
     Abc,
     AbstractMethod,
@@ -275,6 +278,7 @@ impl IntrinsicModule {
         match name {
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
+            "logging.config" => Some(Self::LoggingConfig),
             "logging.handlers" => Some(Self::LoggingHandlers),
             "datetime" => Some(Self::Datetime),
             "abc" => Some(Self::Abc),
@@ -328,6 +332,9 @@ impl IntrinsicModule {
         if self == Self::Logging && name == "handlers" {
             return Some(Binding::IntrinsicModule(Self::LoggingHandlers));
         }
+        if self == Self::Logging && name == "config" {
+            return Some(Binding::IntrinsicModule(Self::LoggingConfig));
+        }
         if self == Self::Os {
             if name == "path" {
                 return Some(Binding::IntrinsicModule(Self::PosixPath));
@@ -366,6 +373,8 @@ impl IntrinsicModule {
             (Self::Logging, "_nameToLevel") => Intrinsic::LevelMap { names: true },
             (Self::Logging, "_levelToName") => Intrinsic::LevelMap { names: false },
             (Self::Logging, "basicConfig") => Intrinsic::BasicConfig,
+            (Self::LoggingConfig, "dictConfig") => Intrinsic::DictConfig,
+            (Self::LoggingConfig, "fileConfig") => Intrinsic::FileConfig,
             (Self::Logging, "DEBUG") => Intrinsic::LogLevel(10),
             (Self::Logging, "INFO") => Intrinsic::LogLevel(20),
             (Self::Abc, "ABC") => Intrinsic::Abc,

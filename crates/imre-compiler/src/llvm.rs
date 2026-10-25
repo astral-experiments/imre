@@ -3828,14 +3828,18 @@ impl Emitter<'_, '_> {
                     NamesCopy => "imre_log_names_copy",
                     Configure => "imre_log_config",
                     ConfigureName => "imre_log_config_named",
+                    DictConfig => "imre_log_dict_config",
+                    FileConfig => "imre_log_file_config",
+                    Disabled => "imre_log_disabled",
+                    Propagate => "imre_log_propagate",
                     Name => "imre_log_name",
                     Parent => "imre_log_parent",
                     Root => "imre_log_root",
                     Level => "imre_log_level",
                     EffectiveLevel => "imre_log_effective_level",
                     SetLevel => "imre_log_set_level",
-                    Enabled => "imre_log_enabled",
-                    Emit => "imre_log_emit",
+                    Enabled => "imre_log_is_enabled",
+                    Emit => "imre_log_routed_emit",
                 };
                 let values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
                 if returns == Type::None {
@@ -6926,6 +6930,12 @@ declare void @imre_log_config_named(ptr, i64, i64, i1)
 declare i64 @imre_union_from_int(i64)
 declare i64 @imre_union_into_int(i64)
 declare void @imre_log_config(i64, i64, i64, i1)
+declare void @imre_log_dict_config(ptr)
+declare void @imre_log_file_config(ptr, i8, i1, i64)
+declare i1 @imre_log_disabled(ptr)
+declare i1 @imre_log_propagate(ptr)
+declare i1 @imre_log_is_enabled(ptr, i64)
+declare void @imre_log_routed_emit(ptr, i64, ptr)
 declare ptr @imre_log_name(ptr)
 declare i64 @imre_log_parent(ptr)
 declare ptr @imre_log_root(ptr)
