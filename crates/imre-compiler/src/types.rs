@@ -162,6 +162,7 @@ impl Types {
             | Type::PlainObject
             | Type::PathInfo
             | Type::Sha256
+            | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
@@ -543,6 +544,7 @@ impl Types {
             | Type::PlainObject
             | Type::PathInfo
             | Type::Sha256
+            | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
