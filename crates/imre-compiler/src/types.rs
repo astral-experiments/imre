@@ -174,6 +174,7 @@ impl Types {
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
+            | Type::LogManager
             | Type::TimedFileHandler
             | Type::ClockTime
             | Type::StrDescriptor(_)
@@ -358,6 +359,7 @@ impl Types {
                 | Type::Enum(_)
                 | Type::Bytes
                 | Type::Logger
+                | Type::LogManager
                 | Type::Path
                 | Type::PurePath(_)
         ) || matches!(ty, Type::Tuple(_) | Type::Class(_)) && self.immutable_key_field(ty)
@@ -378,6 +380,7 @@ impl Types {
             | Type::Path
             | Type::PurePath(_)
             | Type::Logger
+            | Type::LogManager
             | Type::None => true,
             Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
             Type::Tuple(_) => self
@@ -580,6 +583,7 @@ impl Types {
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
+            | Type::LogManager
             | Type::TimedFileHandler
             | Type::ClockTime
             | Type::StrDescriptor(_)

@@ -31,8 +31,8 @@ impl EnabledCache {
 pub unsafe extern "C" fn imre_log_disable(level: usize) {
     // SAFETY: the borrowed integer is cloned before returning to the caller.
     let value = (*unsafe { Int::borrow(level) }).clone();
-    LOGGERS.with_borrow_mut(|logs| {
-        logs.disable = value;
+    LOGGERS.with_borrow(|logs| {
+        logs.manager.disable.replace(value);
         logs.clear_enabled();
     });
 }

@@ -81,7 +81,7 @@ def main():
         raise ValueError("loaded test_logging differs from the verified source")
     controls = {name: subprocess.run([sys.executable, "-I", "-B", HERE / name],
                                      capture_output=True, check=True)
-                for name in ("standalone_handlers.py", "instance_disabled.py")}
+                for name in ("standalone_handlers.py", "instance_disabled.py", "manager_values.py")}
     report = {"cpython_commit": manifest["commit"], "denominator": 272, "test_id": CASE, "levels": {}}
     for level in (0, 3):
         tools = Toolchain(args.imre, args.runtime, args.clang, level)

@@ -133,6 +133,7 @@ enum Storage {
     PathIterator(Box<paths::PathIterator>),
     RegexPattern(Box<regexes::Pattern>),
     Logger(Rc<logging::Logger>),
+    LogManager(Rc<logging::manager::Manager>),
     HandlerLock(std::sync::Arc<logging::locks::HandlerLock>),
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),

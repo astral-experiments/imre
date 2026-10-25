@@ -303,6 +303,7 @@ impl Checker<'_> {
                     .iter()
                     .any(|ty| self.types.struct_sequence_fields(*ty).is_some()))
             || types == [Type::Logger; 2]
+            || types == [Type::LogManager; 2]
             || types == [Type::StringIO; 2]
             || types == [Type::HandlerLock; 2]
             || types == [Type::TimedFileHandler; 2]

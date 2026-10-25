@@ -6,6 +6,7 @@ mod handler;
 mod hierarchy;
 mod levels;
 pub(super) mod locks;
+pub(super) mod manager;
 pub(super) mod timed;
 
 pub(super) mod formatter;
@@ -67,7 +68,8 @@ impl Entry {
 }
 
 struct Registry {
-    disable: Int,
+    manager: Rc<manager::Manager>,
+    manager_handle: Rc<Object>,
     entries: HashMap<String, Entry>,
     format: Option<Vec<Field>>,
     datefmt: Option<String>,
@@ -75,9 +77,12 @@ struct Registry {
 
 impl Registry {
     fn new() -> Self {
+        let root = Entry::new("root", 30, 0);
+        let manager = manager::Manager::new(Some(root.handle.clone()));
         Self {
-            disable: Int::small(0).unwrap(),
-            entries: HashMap::from([("root".into(), Entry::new("root", 30, 0))]),
+            manager_handle: manager.handle(),
+            manager,
+            entries: HashMap::from([("root".into(), root)]),
             format: None,
             datefmt: None,
         }
@@ -388,13 +393,10 @@ pub unsafe extern "C" fn imre_log_enabled(logger: *const Object, level: usize) -
             return Ok(enabled);
         }
         let threshold = logs.effective(&logger);
-        let enabled = match (
-            value.as_small(),
-            logs.disable.as_small(),
-            threshold.as_small(),
-        ) {
+        let disable = logs.manager.disable.borrow();
+        let enabled = match (value.as_small(), disable.as_small(), threshold.as_small()) {
             (Some(level), Some(disable), Some(threshold)) => level > disable && level >= threshold,
-            _ => value.big() > logs.disable.big() && value.big() >= threshold.big(),
+            _ => value.big() > disable.big() && value.big() >= threshold.big(),
         };
         logger.enabled.insert(key, enabled)?;
         Ok(enabled)
