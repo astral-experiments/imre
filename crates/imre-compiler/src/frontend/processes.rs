@@ -117,7 +117,8 @@ fn timeout_field_type(graph: &SourceGraph) -> Option<Type> {
 
 /// The handler slot and any argument or capture layout shared by its producers.
 pub(super) struct CapturedFields {
-    slot: usize,
+    pub(super) slot: usize,
+    pub(super) tree_issue: Option<Type>,
     argv: Option<Type>,
     capture: Option<ProcessCapture>,
     timeout: bool,
@@ -159,8 +160,21 @@ pub(super) fn process_error_view(
     let mut argv = HashSet::new();
     let mut precise = !raises.0;
     let mut timed = false;
+    let mut tree_issue = None;
+    let mut other_shutil = false;
     ir::walk_expressions(body, &mut |value| {
         let (origin, command) = match &value.kind {
+            ExprKind::Builtin(Builtin::Process(ProcessOperation::CopyTree(issue)), _) => {
+                tree_issue = Some(*issue);
+                return;
+            }
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::Copy(_) | ProcessOperation::Move(_)),
+                _,
+            ) => {
+                other_shutil = true;
+                return;
+            }
             ExprKind::Call(..)
             | ExprKind::Invoke { .. }
             | ExprKind::Construct { .. }
@@ -248,6 +262,11 @@ pub(super) fn process_error_view(
     });
     CapturedFields {
         slot,
+        tree_issue: if precise && !other_shutil && kinds == [64] {
+            tree_issue
+        } else {
+            None
+        },
         argv: (precise && argv.len() == 1).then(|| *argv.iter().next().unwrap()),
         capture: (precise && captures.len() == 1).then(|| *captures.iter().next().unwrap()),
         // These exception categories include TimeoutExpired.
@@ -931,7 +950,7 @@ impl Checker<'_> {
                     // dynamic -1 would create a pipe and change the returned type.
                     if (index == 5 && api == LaunchApi::CheckOutput)
                         || validation != 0
-                        || matches!(value.ty, Type::TextIO | Type::BinaryIO)
+                        || matches!(value.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
                         || integer_deadline(arg)
                         || matches!(&value.kind, ExprKind::Builtin(Builtin::FileFileno, _))
                     {
@@ -954,7 +973,7 @@ impl Checker<'_> {
             if (streams >> shift) & 15 == 6
                 && matches!(
                     args.values[args.order[param]].ty,
-                    Type::BinaryIO | Type::TextIO
+                    Type::BinaryIO | Type::TextIO | Type::StringIO
                 )
             {
                 streams |= 1 << shift;

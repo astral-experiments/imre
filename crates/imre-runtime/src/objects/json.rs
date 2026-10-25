@@ -19,6 +19,7 @@ use super::words::{OwnedWord, WordKind, Words};
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish};
 
 mod binary;
+mod decoder;
 mod encode;
 pub(super) mod readonly;
 mod syntax;
@@ -367,7 +368,7 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
                 }
             }
             let pointer = Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
-                Box::new(mapping),
+                crate::objects::mappings::TableOwner::new(mapping),
             ))))) as usize;
             // SAFETY: the new dictionary owns every successfully decoded entry.
             return Ok(unsafe { OwnedWord::from_owned(pointer, self.0.storage()) });

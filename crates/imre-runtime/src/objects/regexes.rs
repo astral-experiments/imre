@@ -215,6 +215,18 @@ impl Pattern {
             .is_some()
     }
 
+    /// Hide the matcher's synthetic final-newline group and restore Python's visible endpoint.
+    fn visible_spans(&mut self, text_len: usize) -> Spans {
+        let mut visible = self.slots.len();
+        if let Some(slot) = self.final_newline_slot {
+            if let Some(start) = self.slots[slot] {
+                self.slots[1] = Some(start);
+            }
+            visible = slot;
+        }
+        Spans::new(&self.slots[..visible], text_len)
+    }
+
     fn search(&mut self, text: &str) -> bool {
         let bytes = text.as_bytes();
         if !self.could_match(bytes, false) {
@@ -423,20 +435,75 @@ unsafe fn match_text(pattern: *const Object, text: *const Str, anchored: bool) -
             if !found {
                 return ptr::null();
             }
-            let mut visible = compiled.slots.len();
-            if let Some(slot) = compiled.final_newline_slot {
-                if let Some(start) = compiled.slots[slot] {
-                    compiled.slots[1] = Some(start);
-                }
-                visible = slot;
-            }
+            let spans = compiled.visible_spans((&*text).len());
             handle(Storage::RegexMatch(Match {
                 pattern: acquire_rc(pattern as usize),
                 text: acquire_rc(text as usize),
-                spans: Spans::new(&compiled.slots[..visible], (&*text).len()),
+                spans,
             }))
         })
     }
+}
+
+/// A one-shot cursor over a statically nonempty pattern; each match snapshots
+/// the group spans and retains the original text independently of the cursor.
+pub(super) struct FindIter {
+    pattern: Rc<Object>,
+    text: Rc<Str>,
+    offset: Option<usize>,
+}
+
+impl FindIter {
+    pub(super) fn next(&mut self) -> Option<(super::OwnedWord, Option<super::OwnedWord>)> {
+        let offset = self.offset.take()?;
+        // SAFETY: this cursor owns a distinct pattern; a search cannot reenter or mutate the cursor.
+        unsafe {
+            self.pattern.0.with_mut(|storage| {
+                let Storage::RegexPattern(compiled) = storage else {
+                    unreachable!()
+                };
+                let input = Input::new(self.text.as_str()).span(offset..self.text.len());
+                compiled.regex.search_slots_with(
+                    &mut compiled.cache,
+                    &input,
+                    &mut compiled.slots,
+                )?;
+                let spans = compiled.visible_spans(self.text.len());
+                let start = compiled.slots[0].unwrap().get();
+                let end = compiled.slots[1].unwrap().get();
+                debug_assert!(start < end);
+                self.offset = (end < self.text.len()).then_some(end);
+                let found = handle(Storage::RegexMatch(Match {
+                    pattern: Rc::clone(&self.pattern),
+                    text: Rc::clone(&self.text),
+                    spans,
+                }));
+                // SAFETY: the match transfers one object owner to the shared cursor ABI.
+                Some((
+                    super::OwnedWord::from_owned(found as usize, super::words::WordKind::new(5)),
+                    None,
+                ))
+            })
+        }
+    }
+}
+
+/// Iterate a proved nonempty pattern without materializing the matches.
+///
+/// # Safety
+/// Both pointers must be rooted native objects of the indicated types.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_finditer(
+    pattern: *const Object,
+    text: *const Str,
+) -> *const Object {
+    handle(Storage::RegexIterator(FindIter {
+        // SAFETY: each input remains rooted until the cursor retains its own owners.
+        pattern: unsafe { acquire_rc(pattern as usize) },
+        // SAFETY: the original text is live through this acquisition.
+        text: unsafe { acquire_rc(text as usize) },
+        offset: Some(0),
+    }))
 }
 
 impl Match {
@@ -548,7 +615,11 @@ pub unsafe extern "C" fn imre_regex_groupdict(value: *const Object) -> *const Ob
         })
     };
     crate::finish(
-        inserted.map(|()| handle(Storage::Dictionary(Box::new(entries)))),
+        inserted.map(|()| {
+            handle(Storage::Dictionary(
+                crate::objects::mappings::TableOwner::new(entries),
+            ))
+        }),
         std::ptr::null(),
     )
 }
