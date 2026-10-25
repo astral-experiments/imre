@@ -1013,26 +1013,13 @@ fn parse_decimal_int(original: &str) -> Option<Int> {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_input() -> *const Str {
     // A preceding print must be visible before waiting for the next input line.
-    if flush_stdout().is_err() {
-        return Error::new(Kind::OSError, "could not write standard output")
-            .returning(std::ptr::null());
+    if let Err(error) = flush_stdout() {
+        return objects::errno_error(error).returning(std::ptr::null());
     }
-    let mut line = String::new();
-    match io::stdin().read_line(&mut line) {
-        Ok(0) => {
-            return Error::new(Kind::EOFError, "EOF when reading a line")
-                .returning(std::ptr::null());
-        }
-        Ok(_) => {}
-        Err(_) => {
-            return Error::new(Kind::OSError, "could not read standard input")
-                .returning(std::ptr::null());
-        }
-    }
-    if line.ends_with('\n') {
-        line.pop();
-    }
-    Rc::into_raw(Rc::new(Str::from(line)))
+    finish(
+        sys::read_input_line().map(|line| Rc::into_raw(Rc::new(Str::from(line)))),
+        std::ptr::null(),
+    )
 }
 
 #[unsafe(no_mangle)]

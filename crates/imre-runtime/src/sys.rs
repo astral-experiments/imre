@@ -3,6 +3,8 @@ use super::{Int, LazyLock, Mutex, OUTPUT, Output, Rc, Str, flush_stdout, initial
 use crate::objects::{Codec, errno_error};
 use std::io::{self, Write};
 mod encoding;
+mod input;
+pub(super) use input::read_input_line;
 
 pub(super) fn initialize_encoding(isolated: bool, utf8: Option<bool>) {
     encoding::settings(isolated, utf8);
@@ -50,24 +52,38 @@ static STDERR: LazyLock<Mutex<StderrOutput>> = LazyLock::new(|| {
     })
 });
 
-/// Return the canonical Python codec name captured at native program startup.
+/// Each standard stream retains its own metadata. Single-character names share the
+/// same Latin-1 owners as other Python strings.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_sys_stream_text(descriptor: u32, errors: u32) -> *const Str {
+    thread_local! {
+        static FIELDS: [(Rc<Str>, Rc<Str>); 3] = {
+            let settings = encoding::settings(false, None);
+            let name = settings.codec.name_owner();
+            std::array::from_fn(|fd| {
+                let errors = if fd == 2 { "backslashreplace" } else { settings.errors.as_ref() };
+                (crate::objects::literal_string(&name), crate::objects::literal_string(errors))
+            })
+        };
+    }
+    FIELDS.with(|fields| {
+        let (name, handler) = &fields[descriptor as usize];
+        Rc::into_raw(Rc::clone(if errors != 0 { handler } else { name }))
+    })
+}
+
+// Preserve the ABI of earlier generated stream accesses.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_stream_encoding() -> *const Str {
-    Rc::into_raw(encoding::settings(false, None).codec.name_owner())
+    imre_sys_stream_text(1, 0)
 }
-
-// Preserve the ABI of existing native stderr callers.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_stderr_encoding() -> *const Str {
-    imre_sys_stream_encoding()
+    imre_sys_stream_text(2, 0)
 }
-
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_stdout_errors() -> *const Str {
-    thread_local! {
-        static ERRORS: Rc<Str> = Rc::new(Str::new(encoding::settings(false, None).errors.as_ref()));
-    }
-    ERRORS.with(|errors| Rc::into_raw(errors.clone()))
+    imre_sys_stream_text(1, 1)
 }
 
 fn stdout_chunk(out: &mut Output, text: &str) -> super::Result<()> {
