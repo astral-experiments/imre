@@ -934,6 +934,9 @@ pub(crate) fn lower_with_owners(
                     "not every path returns the declared type",
                 ));
             }
+            if classes.generators.contains(&signature.id) {
+                body = checker.generator_body(body);
+            }
             Ok((
                 ir::Function {
                     params,
@@ -3029,14 +3032,12 @@ impl<'a> Checker<'a> {
         if let ast::Expr::Call(call) = expression
             && let ast::Expr::Attribute(attribute) = &*call.func
             && attribute.attr.as_str() == "items"
+            && self.class_reference(&attribute.value).is_none()
         {
-            if self.class_reference(&attribute.value).is_some() {
-                return Ok((self.call(call)?, false));
-            }
             let receiver = self.expr(&attribute.value)?;
             if let Type::Class(class) = receiver.ty {
                 return Ok((
-                    self.class_method_call(call, attribute, class, Some(receiver))?,
+                    self.iteration_method_call(call, attribute, class, receiver)?,
                     false,
                 ));
             }
@@ -3092,7 +3093,17 @@ impl<'a> Checker<'a> {
             return Ok(Iteration::Range(args));
         }
         let (iterable, items) = self.iteration_source(expression)?;
-        if let Some(prepared) = self.record_iteration(&iterable, expression)? {
+        self.iteration_value(iterable, items, expression)
+    }
+
+    /// Prepare cursors and generators for pulling while preserving concrete container iteration.
+    fn iteration_value(
+        &mut self,
+        iterable: Expr,
+        items: bool,
+        node: &impl Ranged,
+    ) -> Result<Iteration, String> {
+        if let Some(prepared) = self.record_iteration(&iterable, node)? {
             return Ok(Iteration::Prepared(prepared));
         }
         Ok(Iteration::Container {
@@ -4885,11 +4896,11 @@ impl<'a> Checker<'a> {
     ) -> Result<Expr, String> {
         if op == ast::Operator::Mod
             && left.ty == Type::Str
-            && matches!(right.ty, Type::Int | Type::Str)
+            && (matches!(right.ty, Type::Int | Type::Str) || self.types.percent_tuple(right.ty))
         {
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::PercentScalar, vec![left, right]),
+                kind: ExprKind::Builtin(Builtin::PercentFormat, vec![left, right]),
             });
         }
         if op == ast::Operator::Pow {
@@ -6576,6 +6587,10 @@ impl<'a> Checker<'a> {
             return Ok(copy);
         }
         if calls::starred(call) {
+            if let Some(Binding::Intrinsic(Intrinsic::Credential(name))) = self.resolve(&call.func)
+            {
+                return self.credential_call(call, name);
+            }
             if let Some(Binding::Definition(definition)) = self.resolve(&call.func)
                 && let Some(signature) = self.functions.get(&definition)
             {
@@ -6846,6 +6861,9 @@ impl<'a> Checker<'a> {
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::Fd(op))) => return self.fd_call(call, op),
+            Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
+                return self.credential_call(call, name);
+            }
             Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
                 self.arguments(call, &[], None)?;
                 return Ok(Expr {
@@ -7297,7 +7315,7 @@ impl<'a> Checker<'a> {
             }
             if matches!(
                 attribute.attr.as_str(),
-                "splitlines" | "isspace" | "isupper"
+                "splitlines" | "isalnum" | "isspace" | "isupper"
             ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
                 return self.splitlines_or_predicate(
