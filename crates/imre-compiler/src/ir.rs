@@ -767,6 +767,7 @@ pub(crate) enum Builtin {
     SysOrigArgv,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
+        namespace: usize,
         children: Vec<usize>,
         process_argv: bool,
     },
@@ -1213,6 +1214,8 @@ pub(crate) enum LogOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
     Open,
+    Unlink,
+    Remove,
     Seek,
     Pipe,
     Dup2,
