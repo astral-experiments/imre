@@ -60,6 +60,7 @@ mod posixpath;
 mod powers;
 mod processes;
 mod projected_equality;
+mod properties;
 mod record_inputs;
 mod records;
 mod regex;
@@ -100,6 +101,7 @@ struct ClassInfo {
     declarations: Classes,
     fields: Vec<Vec<Type>>,
     methods: Vec<HashMap<String, Signature>>,
+    setters: Vec<HashMap<String, Signature>>,
     keyword_copies: HashSet<usize>,
     cached: HashMap<usize, function_caches::Policy>,
     cached_properties: cached_properties::Slots,
@@ -290,6 +292,7 @@ impl ClassInfo {
         Ok(Self {
             parsers,
             methods: vec![HashMap::new(); fields.len()],
+            setters: vec![HashMap::new(); fields.len()],
             keyword_copies: HashSet::new(),
             cached: HashMap::new(),
             cached_properties,
@@ -585,6 +588,7 @@ pub(crate) fn lower_with_owners(
                     .map_err(|error| format!("{}:{error}", module.path.display()))?;
             }
         }
+        let mut instance_signatures = HashMap::<_, Signature>::new();
         for (index, method) in class.methods.iter().enumerate() {
             let module_id = class.method_origins[index].module;
             let module = &graph.modules[module_id];
@@ -592,6 +596,25 @@ pub(crate) fn lower_with_owners(
                 class: class_id,
                 index,
             };
+            let origin = (class.method_origins[index], method.range());
+            let kind = class.method_kinds[index];
+            // property(get, set) retains the original functions. Both spellings
+            // must infer one signature even if only the property is used.
+            if matches!(
+                kind,
+                crate::classes::MethodKind::Property | crate::classes::MethodKind::PropertySetter
+            ) && let Some(original) = instance_signatures.get(&origin)
+            {
+                let mut alias = original.clone();
+                alias.method = Some(context);
+                let table = if kind == crate::classes::MethodKind::PropertySetter {
+                    &mut classes.setters[class_id]
+                } else {
+                    &mut classes.methods[class_id]
+                };
+                table.insert(method.name.to_string(), alias);
+                continue;
+            }
             let mut method =
                 records::executable_method(method, context, &classes.declarations, graph, &types)?;
             let keyword_copy =
@@ -642,7 +665,15 @@ pub(crate) fn lower_with_owners(
             if keyword_copy {
                 classes.keyword_copies.insert(signature.id);
             }
-            classes.methods[class_id].insert(method.name.to_string(), signature.clone());
+            if kind == crate::classes::MethodKind::Instance {
+                instance_signatures.insert(origin, signature.clone());
+            }
+            let table = if class.method_kinds[index] == crate::classes::MethodKind::PropertySetter {
+                &mut classes.setters[class_id]
+            } else {
+                &mut classes.methods[class_id]
+            };
+            table.insert(method.name.to_string(), signature.clone());
             if contexts::decorated(&class.methods[index], graph, module_id) {
                 if !contexts::single_yield(&method) {
                     return Err(module.error(&method, "a context manager requires one bare yield on each successful path and an optional finally suite"));
@@ -1046,7 +1077,9 @@ fn signature(
         .filter(|context| {
             matches!(
                 context.kind(classes),
-                crate::classes::MethodKind::Instance | crate::classes::MethodKind::Property
+                crate::classes::MethodKind::Instance
+                    | crate::classes::MethodKind::Property
+                    | crate::classes::MethodKind::PropertySetter
             )
         })
         .map(|context| classes.instance(context.class));
@@ -1923,12 +1956,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Resolves a fixed field without evaluating its receiver more than once.
-    fn field(&mut self, attribute: &ast::ExprAttribute) -> Result<(Expr, usize, Type), String> {
-        let receiver = self.expr(&attribute.value)?;
-        self.writable_field_value(attribute, receiver)
-    }
-
     fn writable_field_value(
         &self,
         attribute: &ast::ExprAttribute,
@@ -2004,6 +2031,12 @@ impl<'a> Checker<'a> {
         }
         if value.ty == expected {
             return Ok(value);
+        }
+        if self.types.cache_signature(value.ty) == Some(expected) {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            });
         }
         if expected == Type::StringIterable
             && (self.types.element(value.ty) == Some(Type::Str)
@@ -3538,7 +3571,30 @@ impl<'a> Checker<'a> {
                     self.expect(element, result, statement)?;
                     Some(Statement::AugmentItem(list, index, op, value))
                 } else if let ast::Expr::Attribute(target) = &*assign.target {
-                    let (receiver, field, ty) = self.field(target)?;
+                    let receiver = self.expr(&target.value)?;
+                    if let Some(class) = self.writable_property(receiver.ty, target) {
+                        let slot = self.hidden(receiver.ty);
+                        let old =
+                            self.class_attribute(target, class, Some(self.local(slot)), None)?;
+                        let rhs = self.expr(&assign.value)?;
+                        let combined = self.binary_expr(assign.op, old, rhs, statement)?;
+                        if self.types.element(combined.ty).is_some() {
+                            return Err(error(
+                                self.source,
+                                target,
+                                "in-place list operations are unsupported",
+                            ));
+                        }
+                        let put = self.set_property(class, target, self.local(slot), combined)?;
+                        return Ok((
+                            vec![Statement::Scope {
+                                body: vec![Statement::Assign(slot, receiver), put],
+                                clear: vec![slot],
+                            }],
+                            true,
+                        ));
+                    }
+                    let (receiver, field, ty) = self.writable_field_value(target, receiver)?;
                     if !matches!(ty, Type::Int | Type::Float) {
                         return Err(error(
                             self.source,
@@ -6545,6 +6601,15 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
             }
+            if matches!(attribute.attr.as_str(), "splitlines" | "isspace")
+                && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            {
+                return self.line_method(
+                    Self::string_value(receiver),
+                    attribute.attr.as_str(),
+                    call,
+                );
+            }
             if matches!(attribute.attr.as_str(), "lower" | "capitalize")
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
@@ -6708,20 +6773,6 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(builtin, vec![receiver]),
                     });
                 }
-            }
-            if receiver.ty == Type::Str
-                && attribute.attr.as_str() == "splitlines"
-                && call.arguments.args.is_empty()
-            {
-                return Ok(Expr {
-                    ty: self.types.list(Type::Str),
-                    kind: match receiver.kind {
-                        ExprKind::Builtin(Builtin::Decode, bytes) => {
-                            ExprKind::Builtin(Builtin::DecodeSplitLines, bytes)
-                        }
-                        _ => ExprKind::Builtin(Builtin::SplitLines, vec![receiver]),
-                    },
-                });
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
                 if attribute.attr.as_str() == "clear"
