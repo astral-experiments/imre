@@ -1860,10 +1860,19 @@ impl<'a> Loader<'a> {
                 "unittest/__init__.py",
                 include_str!("../stdlib/unittest/__init__.py"),
             )),
+            "unittest.mock" => Some((
+                "unittest/mock.py",
+                include_str!("../stdlib/unittest/mock.py"),
+            )),
             _ => None,
         };
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
+            let parent = if let Some((parent, child)) = name.rsplit_once('.') {
+                Some((self.load_module(parent)?, child))
+            } else {
+                None
+            };
             // ty resolves this immutable source at its Python import path in the
             // in-memory project. It is part of the compiler, not a disk input.
             let path = self.root.join(filename);
@@ -1876,6 +1885,7 @@ impl<'a> Loader<'a> {
             )?;
             self.modules[id].bundled = true;
             self.scan(id)?;
+            self.bind_child(name, id, parent)?;
             return Ok(id);
         }
         if name == "stat" {
@@ -2035,6 +2045,16 @@ impl<'a> Loader<'a> {
         self.modules[id].root_index = root_index;
         self.modules[id].archive = archive;
         self.scan(id)?;
+        self.bind_child(name, id, parent)?;
+        Ok(id)
+    }
+
+    fn bind_child(
+        &mut self,
+        name: &str,
+        id: ModuleId,
+        parent: Option<(ModuleId, &str)>,
+    ) -> Result<(), String> {
         if let Some((parent, child)) = parent {
             let binding = Binding::Module(id);
             if let Some(previous) = self.modules[parent].bindings.get(child)
@@ -2048,7 +2068,7 @@ impl<'a> Loader<'a> {
                 .bindings
                 .insert(child.to_owned(), binding);
         }
-        Ok(id)
+        Ok(())
     }
 }
 
