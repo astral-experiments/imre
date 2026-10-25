@@ -1183,7 +1183,7 @@ fn recursive_call_root(graph: &[HashSet<usize>]) -> Option<usize> {
     None
 }
 
-fn error(source: &str, node: &impl Ranged, message: &str) -> String {
+pub(crate) fn error(source: &str, node: &impl Ranged, message: &str) -> String {
     let offset = usize::from(node.start());
     let prefix = &source[..offset];
     let line = prefix.bytes().filter(|&byte| byte == b'\n').count() + 1;
@@ -2277,6 +2277,14 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Tuple(tuple) if self.types.fields(concrete).is_some() => {
                 let fields = self.types.fields(concrete).unwrap();
+                if tuple
+                    .elts
+                    .iter()
+                    .any(|v| matches!(v, ast::Expr::Starred(_)))
+                {
+                    let value = self.expanded_tuple(tuple, Some(&fields))?;
+                    return self.coerce(value, expected, expression);
+                }
                 if tuple.elts.len() != fields.len() {
                     return Err(error(
                         self.source,
@@ -4657,6 +4665,13 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Set(set) => return self.set_literal(set, None),
             ast::Expr::Tuple(tuple) => {
+                if tuple
+                    .elts
+                    .iter()
+                    .any(|v| matches!(v, ast::Expr::Starred(_)))
+                {
+                    return self.expanded_tuple(tuple, None);
+                }
                 let values = tuple
                     .elts
                     .iter()
@@ -5186,6 +5201,12 @@ impl<'a> Checker<'a> {
                 })?;
                 let index = self.expr(&subscript.slice)?;
                 self.expect(Type::Int, index.ty, expression)?;
+                if let ExprKind::Field(tuple, _) = &list.kind
+                    && self.types.fields(tuple.ty).is_some()
+                {
+                    self.graph
+                        .checked_tuple_list_read(self.module, subscript.range());
+                }
                 (
                     element,
                     ExprKind::Builtin(Builtin::ListGet, vec![list, index]),

@@ -610,6 +610,7 @@ pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
     checked_keywords: std::cell::RefCell<Vec<Vec<TextRange>>>,
+    checked_tuple_reads: std::cell::RefCell<Vec<Vec<TextRange>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -746,6 +747,14 @@ impl SourceGraph {
         self.checked_keywords.borrow_mut()[module].extend(keywords);
     }
 
+    /// Record the exact list read proved by lowering a fixed-width tuple spread.
+    /// Other diagnostics at this index or inside the receiver remain visible.
+    pub(crate) fn checked_tuple_list_read(&self, module: ModuleId, read: TextRange) {
+        if self.session.has_tuple_spreads(module) {
+            self.checked_tuple_reads.borrow_mut()[module].push(read);
+        }
+    }
+
     /// Source ranges where the reachable profile or native lowering handles diagnostics.
     pub(crate) fn diagnostic_scopes(
         &self,
@@ -790,6 +799,12 @@ impl SourceGraph {
                         keywords.sort_unstable_by_key(|range| (range.start(), range.end()));
                         keywords.dedup();
                         keywords.into_iter().map(CheckedDiagnostic::Keyword)
+                    })
+                    .chain({
+                        let mut reads = self.checked_tuple_reads.borrow()[id].clone();
+                        reads.sort_unstable_by_key(|range| (range.start(), range.end()));
+                        reads.dedup();
+                        reads.into_iter().map(CheckedDiagnostic::TupleListRead)
                     })
                     .collect()
             })
@@ -1136,6 +1151,7 @@ impl<'a> Loader<'a> {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             checked_keywords: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            checked_tuple_reads: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?

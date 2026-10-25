@@ -53,6 +53,9 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py \
   benchmarks/cpython_stdlib/full/logging/reference-linux.json /tmp/logging-evidence.json
 ```
 
+[Whole-suite startup](startup.md) records the first diagnostic for both native
+entry points and isolates the queue configuration test's starred tuple.
+
 Reference execution does not count as Imre coverage. The existing
 [native runner](../../native_logging.py) compiles whole methods in fresh
 executables: three hierarchy tests delegate output comparison to the upstream
