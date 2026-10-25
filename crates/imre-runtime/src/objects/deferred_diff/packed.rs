@@ -1,4 +1,5 @@
-use super::{Rc, Str, Words};
+use super::{Str, Words};
+use crate::StrOwner;
 use std::cmp::Ordering;
 
 /// Each UTF-8 row stores its common byte prefix with the previous row and its
@@ -144,7 +145,7 @@ impl Packed {
         right.values.reserve(self.counts.1);
         let mut decoded = Vec::new();
         let mut row = Vec::new();
-        let mut string = Rc::new(Str::new(""));
+        let mut string = StrOwner::new(Str::new(""));
         for block in &self.blocks {
             let mut data = block.bytes(&mut decoded);
             while let Some((&side, rest)) = data.split_first() {
@@ -157,15 +158,18 @@ impl Packed {
                 if prefix != row.len() || len != 0 {
                     row.truncate(prefix);
                     row.extend_from_slice(suffix);
-                    string = Rc::new(Str::new(
+                    string = StrOwner::new(Str::new(
                         std::str::from_utf8(&row).expect("complete UTF-8 row"),
                     ));
                 }
                 if side & 1 != 0 {
-                    left.values.push(Rc::into_raw(Rc::clone(&string)) as usize);
+                    left.values
+                        .push(StrOwner::into_raw(StrOwner::clone(&string)) as usize);
                 }
                 if side & 2 != 0 {
-                    right.values.push(Rc::into_raw(Rc::clone(&string)) as usize);
+                    right
+                        .values
+                        .push(StrOwner::into_raw(StrOwner::clone(&string)) as usize);
                 }
             }
         }

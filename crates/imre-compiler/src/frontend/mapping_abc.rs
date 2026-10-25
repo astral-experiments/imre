@@ -127,61 +127,6 @@ impl Checker<'_> {
             .then_some(id)
     }
 
-    /// Invoke the concrete slot, including overrides on a fixed-layout subclass.
-    pub(super) fn mapping_primitive(
-        &mut self,
-        receiver: Expr,
-        name: &str,
-        arguments: &[Expr],
-        at: &impl Ranged,
-    ) -> Result<Expr, String> {
-        let class = self.mapping_class(receiver.ty).unwrap();
-        let direct = |checker: &mut Self, class: usize, receiver: Expr| {
-            checker.mapping_slot(class, receiver, name, arguments, at)
-        };
-        if self.classes.has_concrete_subclasses(class) {
-            self.dispatch_record(class, receiver, at, direct)
-        } else {
-            direct(self, class, receiver)
-        }
-    }
-
-    fn mapping_slot(
-        &mut self,
-        class: usize,
-        receiver: Expr,
-        name: &str,
-        arguments: &[Expr],
-        at: &impl Ranged,
-    ) -> Result<Expr, String> {
-        let method = self.classes.methods[class]
-            .get(name)
-            .ok_or_else(|| error(self.source, at, "missing Mapping primitive"))?
-            .clone();
-        if method.params.len() != arguments.len() + 1 {
-            return Err(error(
-                self.source,
-                at,
-                "unsupported Mapping primitive signature",
-            ));
-        }
-        let mut inputs = vec![receiver];
-        for (index, (argument, param)) in arguments.iter().zip(&method.params[1..]).enumerate() {
-            let ty = if let Some(inference) = self.inference {
-                inference.learn_parameter(method.id, index + 1, argument.ty);
-                inference.parameter(method.id, index + 1).unwrap()
-            } else {
-                param.ty
-            };
-            inputs.push(self.coerce(argument.clone(), ty, at)?);
-        }
-        self.calls.insert(method.id);
-        Ok(Expr {
-            ty: method.returns,
-            kind: ExprKind::Call(method.id, ir::CallArgs::positional(inputs)),
-        })
-    }
-
     fn checked_mapping_size(&self, size: Expr, at: &impl Ranged) -> Result<Expr, String> {
         let size = if size.ty == Type::Bool {
             Expr {
@@ -203,7 +148,7 @@ impl Checker<'_> {
         receiver: Expr,
         at: &impl Ranged,
     ) -> Result<Expr, String> {
-        let size = self.mapping_primitive(receiver, "__len__", &[], at)?;
+        let size = self.record_primitive(receiver, "__len__", &[], at)?;
         self.checked_mapping_size(size, at)
     }
 
@@ -216,9 +161,9 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let direct = |checker: &mut Self, class: usize, receiver: Expr| {
             if checker.classes.methods[class].contains_key("__bool__") {
-                checker.mapping_slot(class, receiver, "__bool__", &[], at)
+                checker.record_slot(class, receiver, "__bool__", &[], at)
             } else {
-                let size = checker.mapping_slot(class, receiver, "__len__", &[], at)?;
+                let size = checker.record_slot(class, receiver, "__len__", &[], at)?;
                 Ok(Expr {
                     ty: Type::Bool,
                     kind: ExprKind::Builtin(
@@ -245,7 +190,7 @@ impl Checker<'_> {
         at: &impl Ranged,
     ) -> Result<Expr, String> {
         let class = self.mapping_class(receiver.ty).unwrap();
-        let lookup = self.mapping_slot(class, receiver, "__getitem__", &[key], at)?;
+        let lookup = self.record_slot(class, receiver, "__getitem__", &[key], at)?;
         let (result, found, missing) = if let Some(default) = default {
             let common = self.types.join(lookup.ty, default.ty).ok_or_else(|| {
                 error(
@@ -309,7 +254,7 @@ impl Checker<'_> {
         let class = self.mapping_class(owner.ty).unwrap();
         let direct = |checker: &mut Self, class: usize, receiver: Expr| {
             if checker.classes.methods[class].contains_key("__contains__") {
-                let found = checker.mapping_slot(
+                let found = checker.record_slot(
                     class,
                     receiver,
                     "__contains__",

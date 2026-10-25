@@ -1,0 +1,54 @@
+{
+  "classes/mapping_abc.py": {
+    "lines": 33,
+    "stdout_sha256": "38637d1d0aecd6e2289971902dffd8a5ccc50c6362b42fe6765e9cfc5e867a78"
+  },
+  "text/line_methods.py": {
+    "lines": 100,
+    "stdout_sha256": "dfcb4ac3271244bea493a6939eac3bc37116ad8098096ccb6ea72b753bda6308"
+  },
+  "containers/namedtuple.py": {
+    "lines": 23,
+    "stdout_sha256": "4645b7fdead47d6b82b3ad876375228205673a0946643044b5ed81dde427ba4a"
+  },
+  "module_values/namedtuple/main.py": {
+    "lines": 3,
+    "stdout_sha256": "e30189274b7cb9fe119fb71c37300682aeb8e8c90d953ea7e22bc15631ebbb40"
+  },
+  "bytes/membership.py": {
+    "lines": 128,
+    "stdout_sha256": "ac56aaa1bfea77bb514b0f27e6e600b9c330460dba650264b8d2e2488543d7a2"
+  },
+  "text/percent_scalar.py": {
+    "lines": 132,
+    "stdout_sha256": "018a9b6c9605932033612327366271bfb6f558fe6c5cc6be04ab6688e59361b0"
+  },
+  "processes/file_redirects.py": {
+    "lines": 35,
+    "stdout_sha256": "b845254efdc75b74f592c3e1adea1efbfd41aa1e16d73da7e271a0b55548c48a"
+  },
+  "json_records/stdlib_deep_decode.py": {
+    "lines": 18,
+    "stdout_sha256": "0dc983649b99f10acc1d5b2dd57c864619dd1d53088b1f54e1d2ec6ed1c27f92"
+  },
+  "classes/constant_strings.py": {
+    "lines": 19,
+    "stdout_sha256": "deaa32214fa9c373c0618fb8c4be02cfc07f833f01dcc931a63ea2f7f57bac5e"
+  },
+  "classes/property_setters.py": {
+    "lines": 37,
+    "stdout_sha256": "2e2e43b5eaad7a03f1a73237d7d9f78a444e97047627bf04b1b8488aadcd787c"
+  },
+  "text/expandtabs.py": {
+    "lines": 304,
+    "stdout_sha256": "d5e2674519c054970b1f89006d0a192a414eacede6d207f8982a72e2faa2e6d6"
+  },
+  "text/translate.py": {
+    "lines": 77,
+    "stdout_sha256": "ee24d8609ec7dc4c6b55e87e27dfa4ada51f1ff056a33371ff2a970d1a582a8b"
+  },
+  "callables/forward_refs.py": {
+    "lines": 30,
+    "stdout_sha256": "0dc84b3b19d104d2eb25f087f56b08c66a3e5ecdb82a1b0bbef64e8bf3a0ca42"
+  }
+}

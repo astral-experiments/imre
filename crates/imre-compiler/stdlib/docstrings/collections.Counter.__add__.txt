@@ -1,0 +1,5 @@
+Add counts from two counters.
+
+>>> Counter('abbb') + Counter('bcc')
+Counter({'b': 4, 'c': 2, 'a': 1})
+

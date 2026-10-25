@@ -52,6 +52,31 @@ fn marker(node: &ast::StmtClassDef) -> bool {
     })
 }
 
+/// The native record store cannot call a descriptor inherited from a builtin base.
+pub(super) fn inherited_descriptor(name: &str, mro: &[u32]) -> bool {
+    let inherits =
+        |base| crate::frontend::exception_kind(base).is_some_and(|kind| mro.contains(&kind));
+    match name {
+        "args"
+        | "__cause__"
+        | "__context__"
+        | "__traceback__"
+        | "__suppress_context__"
+        | "__dict__"
+        | "__class__"
+        | "__weakref__" => true,
+        "value" => inherits("StopIteration"),
+        "name" => inherits("NameError") || inherits("AttributeError") || inherits("ImportError"),
+        "obj" => inherits("AttributeError"),
+        "errno" | "strerror" | "filename" | "filename2" | "characters_written" => {
+            inherits("OSError")
+        }
+        "msg" | "path" | "name_from" => inherits("ImportError"),
+        "encoding" | "object" | "start" | "end" | "reason" => inherits("UnicodeEncodeError"),
+        _ => false,
+    }
+}
+
 fn builtin_mro(kind: u32) -> Vec<u32> {
     let parent = match kind {
         0 => return vec![0],
@@ -60,11 +85,12 @@ fn builtin_mro(kind: u32) -> Vec<u32> {
         6 | 7 => 5,
         17 => 8,
         18 => 17,
-        20..=24 => 12,
+        20..=24 | 44 | 45 | 50 | 51 | 68 => 12,
+        46..=49 => 45,
         37 => 10,
         40 => 39, // UnboundLocalError derives from NameError.
         42 => 41,
-        81 => 80, // RuntimeWarning derives from Warning.
+        81 | 82 => 80, // RuntimeWarning and DeprecationWarning derive from Warning.
         _ => 1,
     };
     let mut out = vec![kind];
@@ -152,11 +178,15 @@ pub(super) struct Declarations {
     pub ids: HashMap<DefinitionId, u32>,
     pub named: Vec<NamedException>,
     pub layouts: HashSet<DefinitionId>,
+    /// A concrete descendant shares one compatible record prefix with its parent.
+    pub storage_parent: HashMap<DefinitionId, DefinitionId>,
 }
 pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
     let mut ids: HashMap<DefinitionId, u32> = HashMap::new();
     let mut named: Vec<NamedException> = Vec::new();
     let mut layouts = HashSet::new();
+    let mut storage_parent = HashMap::new();
+    let mut implementation = HashMap::<DefinitionId, DefinitionId>::new();
     loop {
         let before = ids.len();
         for (module_id, module) in graph.modules.iter().enumerate() {
@@ -179,6 +209,7 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
                 }
                 let mut bases = Vec::new();
                 let mut mros = Vec::new();
+                let mut storage = None;
                 for base in &arguments.args {
                     let (id, mro) = match graph.resolve(module_id, base) {
                         None => {
@@ -198,10 +229,16 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
                                 break;
                             };
                             if layouts.contains(&parent) {
-                                return Err(module.error(
-                                    base,
-                                    "inheriting a user exception payload layout is unsupported",
-                                ));
+                                match storage {
+                                    None => storage = Some(parent),
+                                    // Two pass-only branches can share exactly the same layout and methods.
+                                    Some(earlier) if implementation[&earlier] == implementation[&parent] => {}
+                                    Some(earlier) if named[(ids[&earlier] - FIRST_USER_EXCEPTION) as usize]
+                                        .ancestors.contains(&id) => {}
+                                    Some(earlier) if named[(id - FIRST_USER_EXCEPTION) as usize]
+                                        .ancestors.contains(&ids[&earlier]) => storage = Some(parent),
+                                    Some(_) => return Err(module.error(base, "multiple independent exception payload layouts are unsupported")),
+                                }
                             }
                             (
                                 id,
@@ -241,8 +278,23 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
                             "custom import exception payload layouts are unsupported",
                         ));
                     }
-                    validate_layout(module, node)?;
+                    if storage.is_none()
+                        || node
+                            .body
+                            .iter()
+                            .filter_map(ast::Stmt::as_function_def_stmt)
+                            .any(|f| matches!(f.name.as_str(), "__init__" | "__post_init__"))
+                    {
+                        validate_layout(module, node)?;
+                    }
                     layouts.insert(def);
+                    implementation.insert(def, def);
+                }
+                if let Some(parent) = storage {
+                    storage_parent.insert(def, parent);
+                    layouts.insert(def);
+                    let origin = implementation[&parent];
+                    implementation.entry(def).or_insert(origin);
                 }
                 ids.insert(def, id);
                 named.push(NamedException {
@@ -261,5 +313,35 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
         ids,
         named,
         layouts,
+        storage_parent,
     })
+}
+
+/// Reserve the base exception arguments in the common prefix of every concrete descendant.
+pub(super) fn install_argument_slot(c: &mut Class, module: &SourceModule) {
+    // This ABI slot is not a Python identifier, constructor parameter,
+    // dataclass comparison field, or repr field. The frontend gives
+    // the tuple slot its native exception field type during layout.
+    let tuple_args = c.forwarder.is_some() || c.methods.iter().filter(|m| matches!(m.name.as_str(), "__init__" | "__post_init__"))
+                .flat_map(|m| &m.body).any(|stmt| matches!(stmt, ast::Stmt::Expr(e)
+                    if matches!(&*e.value, ast::Expr::Call(call) if explicit_message_initializer(module, call).is_some()
+                        || super_init(call) && call.arguments.args.len() != 1)));
+    let annotation = ruff_python_parser::parse_expression("str | None")
+        .expect("static annotation")
+        .expr()
+        .clone();
+    c.fields.push(Field {
+        module: c.definition.module,
+        name: if tuple_args {
+            EXCEPTION_ARGS_SLOT
+        } else {
+            "<exception message>"
+        }
+        .into(),
+        annotation,
+        default: None,
+        kw_only: false,
+        repr: false,
+        compare: false,
+    });
 }

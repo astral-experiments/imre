@@ -1,0 +1,89 @@
+{
+  "compiler_revision": "1c5267aa983b6cc2617faf2dfec9d2dce9e7f6b7",
+  "controls": {
+    "public-alias": {
+      "source": "from collections import _count_elements as tally\nd: dict[str, int] = {}\ntally(d, 'aba')\nprint(d)\n",
+      "modes": {
+        "O0-reachable-0": {
+          "outcome": "matched",
+          "stdout": "{'a': 2, 'b': 1}\n"
+        },
+        "O0-reachable-1": {
+          "outcome": "matched",
+          "stdout": "{'a': 2, 'b': 1}\n"
+        },
+        "O3-reachable-0": {
+          "outcome": "matched",
+          "stdout": "{'a': 2, 'b': 1}\n"
+        },
+        "O3-reachable-1": {
+          "outcome": "matched",
+          "stdout": "{'a': 2, 'b': 1}\n"
+        }
+      }
+    },
+    "private-counter": {
+      "source": "from _collections import Counter\nprint(Counter('a'))\n",
+      "modes": {
+        "O0-reachable-0": {
+          "outcome": "diagnosed",
+          "diagnostic": "Compiling <work>/entry.py (-O0)\n<work>/entry.py:1:1: Imre: unsupported sealed standard-library export _collections.Counter"
+        },
+        "O0-reachable-1": {
+          "outcome": "diagnosed",
+          "diagnostic": "Compiling <work>/entry.py (-O0)\n<work>/entry.py:1:1: Imre: unsupported sealed standard-library export _collections.Counter"
+        },
+        "O3-reachable-0": {
+          "outcome": "diagnosed",
+          "diagnostic": "Compiling <work>/entry.py (-O3)\n<work>/entry.py:1:1: Imre: unsupported sealed standard-library export _collections.Counter"
+        },
+        "O3-reachable-1": {
+          "outcome": "diagnosed",
+          "diagnostic": "Compiling <work>/entry.py (-O3)\n<work>/entry.py:1:1: Imre: unsupported sealed standard-library export _collections.Counter"
+        }
+      }
+    },
+    "adjacent-import": {
+      "source": "from collections import _count_elements, no_such_collection\n",
+      "modes": {
+        "O0-reachable-0": {
+          "outcome": "diagnosed",
+          "diagnostic": "Compiling <work>/entry.py (-O0)\n<work>/entry.py:1:1: Imre: unsupported sealed standard-library export collections.no_such_collection"
+        },
+        "O0-reachable-1": {
+          "outcome": "diagnosed",
+          "diagnostic": "Compiling <work>/entry.py (-O0)\n<work>/entry.py:1:1: Imre: unsupported sealed standard-library export collections.no_such_collection"
+        },
+        "O3-reachable-0": {
+          "outcome": "diagnosed",
+          "diagnostic": "Compiling <work>/entry.py (-O3)\n<work>/entry.py:1:1: Imre: unsupported sealed standard-library export collections.no_such_collection"
+        },
+        "O3-reachable-1": {
+          "outcome": "diagnosed",
+          "diagnostic": "Compiling <work>/entry.py (-O3)\n<work>/entry.py:1:1: Imre: unsupported sealed standard-library export collections.no_such_collection"
+        }
+      }
+    },
+    "adjacent-attribute": {
+      "source": "import collections\nd: dict[str, int] = {}\ncollections._count_elements(d, 'a')\ncollections.no_such_collection(d, 'a')\n",
+      "modes": {
+        "O0-reachable-0": {
+          "outcome": "diagnosed",
+          "diagnostic": "Compiling <work>/entry.py (-O0)\n<work>/entry.py:4:1: Imre: name is not a local value; globals and first-class functions are unsupported"
+        },
+        "O0-reachable-1": {
+          "outcome": "diagnosed",
+          "diagnostic": "Compiling <work>/entry.py (-O0)\n<work>/entry.py:4:1: Imre: name is not a local value; globals and first-class functions are unsupported"
+        },
+        "O3-reachable-0": {
+          "outcome": "diagnosed",
+          "diagnostic": "Compiling <work>/entry.py (-O3)\n<work>/entry.py:4:1: Imre: name is not a local value; globals and first-class functions are unsupported"
+        },
+        "O3-reachable-1": {
+          "outcome": "diagnosed",
+          "diagnostic": "Compiling <work>/entry.py (-O3)\n<work>/entry.py:4:1: Imre: name is not a local value; globals and first-class functions are unsupported"
+        }
+      }
+    }
+  }
+}

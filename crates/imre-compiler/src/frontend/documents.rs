@@ -5,8 +5,36 @@ use super::*;
 use crate::ir::{DocumentOp as Op, DocumentShape as Shape};
 
 pub(super) const ANY: Type = Type::Document(Shape::Any);
+pub(super) const SCALAR: Type = Type::Document(Shape::Scalar);
 pub(super) const MAP: Type = Type::Document(Shape::Map);
 pub(super) const LIST: Type = Type::Document(Shape::List);
+
+/// A string-keyed display with different literal value types needs a tag on each
+/// value. Homogeneous displays keep their ordinary unboxed storage.
+pub(super) fn mixed_scalar_fields(dict: &ast::ExprDict) -> bool {
+    let mut first = None;
+    let mut mixed = false;
+    for item in &dict.items {
+        if !matches!(item.key, Some(ast::Expr::StringLiteral(_))) {
+            return false;
+        }
+        let kind = match &item.value {
+            ast::Expr::BooleanLiteral(_) => Type::Bool,
+            ast::Expr::NoneLiteral(_) => Type::None,
+            ast::Expr::StringLiteral(_) => Type::Str,
+            ast::Expr::NumberLiteral(n) if matches!(n.value, ast::Number::Int(_)) => Type::Int,
+            ast::Expr::UnaryOp(n)
+                if matches!(n.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
+                    && matches!(&*n.operand, ast::Expr::NumberLiteral(n) if matches!(n.value, ast::Number::Int(_))) =>
+            {
+                Type::Int
+            }
+            _ => return false,
+        };
+        mixed |= *first.get_or_insert(kind) != kind;
+    }
+    mixed
+}
 
 /// A read-only object can own these fresh literals without severing an external alias.
 pub(super) fn constant(expr: &ast::Expr) -> bool {
@@ -78,6 +106,23 @@ impl Checker<'_> {
             return Ok(value);
         }
         let actual = value.ty;
+        if expected == SCALAR {
+            if !matches!(
+                actual,
+                Type::None | Type::Bool | Type::Int | Type::Str | Type::StrLiteral(_)
+            ) {
+                return Err(error(
+                    self.source,
+                    site,
+                    "this dictionary holds None, bool, int or str values",
+                ));
+            }
+            let tagged = self.document_coerce(value, ANY, site)?;
+            return Ok(Expr {
+                ty: SCALAR,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![tagged]),
+            });
+        }
         match (actual, expected) {
             (Type::Document(_), ANY) => Ok(Expr {
                 ty: ANY,

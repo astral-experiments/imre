@@ -28,6 +28,51 @@ struct References<'a> {
     found: &'a mut Reachable,
 }
 
+impl References<'_> {
+    /// Root an implicit index method only if argument binding can reach conversion.
+    fn invokes_index(&self, call: &ast::ExprCall) -> bool {
+        let arity = match self.graph.resolve(self.module, &call.func) {
+            Some(Binding::Intrinsic(
+                intrinsic @ (Intrinsic::SysSetRecursionLimit | Intrinsic::SysGetFrameModuleName),
+            )) => {
+                return match (
+                    call.arguments.args.as_ref(),
+                    call.arguments.keywords.as_ref(),
+                ) {
+                    ([arg], []) => !matches!(arg, ast::Expr::Starred(_)),
+                    ([], [kw]) => {
+                        intrinsic == Intrinsic::SysGetFrameModuleName
+                            && kw.arg.as_deref() == Some("depth")
+                    }
+                    _ => false,
+                };
+            }
+            Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
+                Some(super::credential_arity(name))
+            }
+            Some(Binding::Intrinsic(Intrinsic::Fd(crate::ir::FdOperation::Pipe2))) => Some(1),
+            _ => None,
+        };
+        if let Some(arity) = arity {
+            return arity != 0
+                && call.arguments.keywords.is_empty()
+                && (call.arguments.args.len() == arity
+                    || call
+                        .arguments
+                        .args
+                        .iter()
+                        .any(|arg| matches!(arg, ast::Expr::Starred(_))));
+        }
+        matches!(call.func.as_ref(), ast::Expr::Attribute(attr) if attr.attr.as_str() == "expandtabs")
+            && call.arguments.args.len() + call.arguments.keywords.len() == 1
+            && call
+                .arguments
+                .keywords
+                .first()
+                .is_none_or(|kw| kw.arg.as_deref() == Some("tabsize"))
+    }
+}
+
 impl<'a> Visitor<'a> for References<'_> {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         if !self
@@ -40,7 +85,48 @@ impl<'a> Visitor<'a> for References<'_> {
         }
     }
 
+    fn visit_f_string(&mut self, string: &'a ast::FString) {
+        if string
+            .elements
+            .iter()
+            .any(|element| matches!(element, ast::InterpolatedStringElement::Interpolation(field) if !literal(&field.expression)))
+        {
+            self.found.attributes.insert("__repr__".into());
+            self.found.instance_attributes.insert("__repr__".into());
+        }
+        ruff_python_ast::visitor::walk_f_string(self, string);
+    }
+
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        if let ast::Expr::Call(call) = expr
+            && (self.graph.resolve(self.module, &call.func)
+                == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii))
+                || (matches!(call.func.as_ref(), ast::Expr::Name(name) if matches!(name.id.as_str(), "ascii" | "repr" | "str" | "print"))
+                    && self.graph.resolve(self.module, &call.func).is_none()))
+            && let [argument] = call.arguments.args.as_ref()
+            && !literal(argument)
+            && call.arguments.keywords.is_empty()
+        {
+            self.found.attributes.insert("__repr__".into());
+            self.found.instance_attributes.insert("__repr__".into());
+        }
+        if let ast::Expr::Call(call) = expr
+            && self.graph.resolve(self.module, &call.func)
+                == Some(Binding::Intrinsic(Intrinsic::CountElements))
+            && call.arguments.args.len() == 2
+            && call.arguments.keywords.is_empty()
+        {
+            for method in ["get", "__setitem__"] {
+                self.found.attributes.insert(method.to_owned());
+                self.found.instance_attributes.insert(method.to_owned());
+            }
+        }
+        if matches!(expr, ast::Expr::Subscript(s) if s.ctx == ast::ExprContext::Store) {
+            self.found.attributes.insert("__setitem__".to_owned());
+            self.found
+                .instance_attributes
+                .insert("__setitem__".to_owned());
+        }
         if let ast::Expr::Call(call) = expr
             && self.graph.resolve(self.module, &call.func)
                 == Some(Binding::Intrinsic(Intrinsic::ShallowCopy))
@@ -48,16 +134,8 @@ impl<'a> Visitor<'a> for References<'_> {
             self.found.attributes.insert("__copy__".to_owned());
             self.found.instance_attributes.insert("__copy__".to_owned());
         }
-        // Only a supplied, successfully bound width can invoke __index__.
         if let ast::Expr::Call(call) = expr
-            && let ast::Expr::Attribute(attr) = call.func.as_ref()
-            && attr.attr.as_str() == "expandtabs"
-            && call.arguments.args.len() + call.arguments.keywords.len() == 1
-            && call
-                .arguments
-                .keywords
-                .first()
-                .is_none_or(|kw| kw.arg.as_deref() == Some("tabsize"))
+            && self.invokes_index(call)
         {
             self.found.attributes.insert("__index__".to_owned());
             self.found
@@ -75,8 +153,19 @@ impl<'a> Visitor<'a> for References<'_> {
         {
             self.found.root_unittest(self.graph, id.module);
         }
-        if let ast::Expr::Attribute(attr) = expr {
+        // Literal text has its exact builtin class, even if a source class defines
+        // the same method name. The call visitor still follows its arguments and
+        // implicit callbacks, such as the __index__ used by str.expandtabs.
+        if let ast::Expr::Attribute(attr) = expr
+            && !matches!(
+                attr.value.as_ref(),
+                ast::Expr::StringLiteral(_) | ast::Expr::BytesLiteral(_)
+            )
+        {
             let name = attr.attr.to_string();
+            if name == "getTestCaseNames" {
+                self.found.attributes.insert("_getTestCaseNames".into());
+            }
             if matches!(
                 name.as_str(),
                 "assertEqual" | "assertListEqual" | "assertRaises"
@@ -100,7 +189,23 @@ impl<'a> Visitor<'a> for References<'_> {
                     }
                 }
             }
+            if matches!(name.as_str(), "assertIn" | "assertNotIn") {
+                self.found.attributes.extend(
+                    [
+                        "_assertTextMembership",
+                        "_assertTextListMembership",
+                        "_assertIntListMembership",
+                        "_assertTextDictMembership",
+                        "_assertIntKeyMembership",
+                    ]
+                    .into_iter()
+                    .map(str::to_owned),
+                );
+            }
             if matches!(name.as_str(), "assertEqual" | "assertListEqual") {
+                if name == "assertEqual" {
+                    self.found.attributes.insert("assertDictEqual".into());
+                }
                 self.found.attributes.extend(
                     [
                         "_baseAssertEqual",
@@ -307,12 +412,17 @@ impl Reachable {
                                             | "_assert_called_once_with"
                                     ),
                                     "_Call" => matches!(name, "_represent" | "_represent_list"),
+                                    "_PatchFactory" => name == "_dictionary",
+                                    "_DictionaryPatch" => matches!(name, "_enter" | "_exit"),
                                     _ => false,
                                 };
                             if (property
                                 || unittest_method
                                 || assertion_exit
                                 || mock_dispatch
+                                || (source.is_bundled("selectors")
+                                    && class.name.as_str() == "PollSelector"
+                                    && name == "close")
                                 || refs.found.attributes.contains(name)
                                 || matches!(
                                     name,
@@ -747,6 +857,98 @@ run()
         let source = "from pathlib import Path\nclass Local:\n    def __init__(self) -> None:\n        pass\n    def exists(self):\n        return globals()\nlocal = Local()\nprint(Path('.').exists())\n";
         reachable(source).unwrap();
         assert!(reachable(&source.replace("Path('.').exists()", "local.exists()")).is_err());
+    }
+
+    #[test]
+    fn sys_index_protocol_follows_argument_binding() {
+        let source = r#"
+from sys import setrecursionlimit as set_limit, _getframemodulename as frame_name
+class Indexed:
+    def __index__(self) -> int:
+        return 12
+"#;
+        for (call, expected) in [
+            ("set_limit(Indexed())", true),
+            ("frame_name(Indexed())", true),
+            ("frame_name(depth=Indexed())", true),
+            ("set_limit(limit=Indexed())", false),
+            ("set_limit(Indexed(), Indexed())", false),
+            ("frame_name()", false),
+            ("frame_name(other=Indexed())", false),
+            ("frame_name(Indexed(), depth=Indexed())", false),
+        ] {
+            let source = format!("{source}\n{call}\n");
+            let graph = super::SourceGraph::single_with_mode(&source, true).unwrap();
+            let super::ast::Stmt::ClassDef(class) =
+                &graph.modules[graph.entry].parsed.syntax().body[1]
+            else {
+                panic!("expected Indexed");
+            };
+            let super::ast::Stmt::FunctionDef(index) = &class.body[0] else {
+                panic!("expected __index__");
+            };
+            assert_eq!(
+                graph.includes_method(graph.entry, index),
+                expected,
+                "{call}"
+            );
+        }
+    }
+
+    #[test]
+    fn literal_text_methods_do_not_root_unrelated_source_methods() {
+        let source = r#"
+class Token:
+    def strip(self, *args):
+        return args
+    def decode(self, *args):
+        return args
+    def expandtabs(self, *args):
+        return args
+    def __index__(self) -> int:
+        return 3
+    def clean(self):
+        return " padded ".strip() + b"!".decode() + "x\ty".expandtabs(self)
+print(Token().clean())
+"#;
+        let assert_rooted = |source: &str, expected: Option<&str>| {
+            let graph = super::SourceGraph::single_with_mode(source, true).unwrap();
+            let super::ast::Stmt::ClassDef(token) =
+                &graph.modules[graph.entry].parsed.syntax().body[0]
+            else {
+                panic!("expected the Token class");
+            };
+            for statement in &token.body {
+                if let super::ast::Stmt::FunctionDef(method) = statement {
+                    let name = method.name.as_str();
+                    if matches!(name, "strip" | "decode" | "expandtabs") {
+                        assert_eq!(
+                            graph.includes_method(graph.entry, method),
+                            Some(name) == expected,
+                            "{name}"
+                        );
+                    }
+                }
+            }
+        };
+        reachable(source).unwrap();
+        assert_rooted(source, None);
+        for (before, after, method) in [
+            (r#"" padded ".strip()"#, "self.strip()", "strip"),
+            (r#"b"!".decode()"#, "self.decode()", "decode"),
+            (
+                r#""x\ty".expandtabs(self)"#,
+                "self.expandtabs()",
+                "expandtabs",
+            ),
+            (
+                r#"" padded ".strip()"#,
+                r#"" padded ".strip(self.strip())"#,
+                "strip",
+            ),
+        ] {
+            assert_rooted(&source.replace(before, after), Some(method));
+        }
     }
 
     #[test]

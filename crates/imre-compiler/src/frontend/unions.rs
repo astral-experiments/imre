@@ -63,6 +63,23 @@ impl Checker<'_> {
         if ty == value.ty {
             return value;
         }
+        if matches!(value.ty, Type::AnnotationValue(_)) {
+            let Type::Tuple(layout) = self.types.tuple(vec![ty]) else {
+                unreachable!()
+            };
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::AnnotationMember(layout), vec![value]),
+            };
+        }
+        if value.ty == Type::ObjectValue
+            && let Type::Class(class) = ty
+        {
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::ObjectRecordProject(class), vec![value]),
+            };
+        }
         if matches!(value.ty, Type::Document(_)) {
             return if ty == Type::Str {
                 documents::op(ir::DocumentOp::AsStr, Type::Str, vec![value])
@@ -73,7 +90,9 @@ impl Checker<'_> {
                 }
             };
         }
-        if matches!((value.ty, ty), (Type::Class(parent), Type::Class(child)) if self.classes.parsers.child_of(child, parent))
+        if matches!((value.ty, ty), (Type::Class(parent), Type::Class(child))
+            if self.classes.parsers.child_of(child, parent)
+                || self.classes.declarations.definitions[child].bases.contains(&parent))
         {
             return Expr {
                 ty,
@@ -170,6 +189,18 @@ impl Checker<'_> {
             return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
         }
         match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::Context)) => {
+                return Ok(vec![InstanceType::Exact(Type::Context)]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ContextVar)) => {
+                return Ok(vec![InstanceType::ContextVar]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ContextToken)) => {
+                return Ok(vec![InstanceType::ContextToken]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ModuleSpec)) => {
+                return Ok(vec![InstanceType::ModuleSpec]);
+            }
             Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => {
                 return Ok(vec![InstanceType::ForwardRef]);
             }
@@ -203,6 +234,12 @@ impl Checker<'_> {
                     .map(|(id, _)| InstanceType::Exact(Type::Class(id))),
             );
             return Ok(classes);
+        }
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::CodecInfoClass)) {
+            return Ok(vec![InstanceType::Exact(Type::CodecInfo)]);
+        }
+        if let Some(Binding::Intrinsic(Intrinsic::IoBase(base))) = self.resolve(expression) {
+            return Ok(vec![InstanceType::IoBase(base)]);
         }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StrEnum)) {
             return Ok(vec![InstanceType::StrEnum]);
@@ -248,6 +285,7 @@ impl Checker<'_> {
         if let ast::Expr::Name(name) = expression {
             let ty = match name.id.as_str() {
                 "str" => InstanceType::Exact(Type::Str),
+                "type" => InstanceType::Exact(Type::BuiltinClass),
                 "bytes" => InstanceType::Exact(Type::Bytes),
                 "int" => InstanceType::Exact(Type::Int),
                 "bool" => InstanceType::Exact(Type::Bool),
@@ -390,6 +428,9 @@ impl Checker<'_> {
     }
 
     fn instance_members(&self, ty: Type) -> Vec<Type> {
+        if matches!(ty, Type::AnnotationValue(_)) {
+            return self.types.children(ty);
+        }
         let concrete = self.types.payload(ty).unwrap_or(ty);
         let mut members = self
             .types
@@ -409,6 +450,14 @@ impl Checker<'_> {
         }
         let mut unknown = false;
         for &class in classes {
+            if let InstanceType::IoBase(base) = class {
+                match base.matches(ty) {
+                    Some(true) => return Some(true),
+                    Some(false) => {}
+                    None => unknown = true,
+                }
+                continue;
+            }
             if let (Type::Class(base), InstanceType::Exact(Type::Class(derived))) = (ty, class)
                 && self.classes.declarations.definitions[derived]
                     .bases
@@ -536,6 +585,23 @@ impl Checker<'_> {
         }
     }
 
+    /// A successful test proves a derived layout only if every matching class
+    /// has that layout. A tuple of siblings cannot expose either's fields.
+    fn tested_subclass(&self, base: usize, classes: &[InstanceType]) -> Option<usize> {
+        let definitions = &self.classes.declarations.definitions;
+        classes.iter().find_map(|class| {
+            let InstanceType::Exact(Type::Class(child)) = *class else {
+                return None;
+            };
+            (definitions[child].bases.contains(&base)
+                && classes.iter().all(|class| {
+                    matches!(*class, InstanceType::Exact(Type::Class(id))
+                    if id == child || definitions[id].bases.contains(&child))
+                }))
+            .then_some(child)
+        })
+    }
+
     pub(super) fn apply_instance_facts(&mut self, test: &ast::Expr, truth: bool) {
         for (name, constraints) in self.instance_facts(test, truth) {
             let Some(&slot) = self.names.get(&name) else {
@@ -546,6 +612,26 @@ impl Checker<'_> {
                 .get(&slot)
                 .copied()
                 .unwrap_or(self.locals[slot]);
+            if current == Type::ObjectValue {
+                for (classes, truth) in &constraints {
+                    if *truth
+                        && let [InstanceType::Exact(Type::Class(class))] = classes.as_slice()
+                        && self.boxed_dataclass(*class)
+                    {
+                        self.narrowed.insert_mut(slot, Type::Class(*class));
+                    }
+                }
+                continue;
+            }
+            if let (Type::Class(_), Type::Class(mut base)) = (self.locals[slot], current) {
+                for (classes, positive) in &constraints {
+                    if *positive && let Some(child) = self.tested_subclass(base, classes) {
+                        base = child;
+                    }
+                }
+                self.narrowed.insert_mut(slot, Type::Class(base));
+                continue;
+            }
             if matches!(current, Type::Document(_)) {
                 for (classes, truth) in &constraints {
                     if !*truth {

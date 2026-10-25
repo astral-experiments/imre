@@ -8,10 +8,13 @@ use super::*;
 use crate::classes::{Class, DataclassOptions, Field};
 use crate::modules::SourceModule;
 
+mod registration;
+
 #[derive(Default)]
 pub(super) struct Parsers {
     declarations: HashSet<(ModuleId, TextSize)>,
     calls: HashMap<(ModuleId, TextSize), Parser>,
+    registration_errors: HashMap<(ModuleId, TextSize), Expr>,
     namespaces: HashSet<usize>,
     /// Child layouts share the complete parent prefix and add their own options.
     commands: HashMap<usize, CommandVariants>,
@@ -329,18 +332,9 @@ fn option(
         };
         required = value.value;
     }
-    let is_boolean_action = |expr: &ast::Expr| {
-        let mut root = expr;
-        while let ast::Expr::Attribute(attr) = root {
-            root = &attr.value;
-        }
-        root.as_name_expr()
-            .is_some_and(|name| !locals.contains(name.id.as_str()))
-            && graph.resolve(id, expr) == Some(Binding::Intrinsic(Intrinsic::BooleanOptionalAction))
-    };
     let action = match kw.get("action").copied() {
         None => "store",
-        Some(expr) if is_boolean_action(expr) => "boolean_optional",
+        Some(expr) if registration::boolean_action(expr, graph, id, locals) => "boolean_optional",
         Some(expr) => {
             let action = literal(expr, module)?;
             if action == "boolean_optional" {
@@ -672,12 +666,18 @@ fn option(
     })
 }
 
+#[derive(Default)]
+struct RegisteredArguments {
+    options: Vec<OptionField>,
+    groups: Vec<Value>,
+    mutex_required: Vec<bool>,
+}
+
 struct Subcommand {
     name: String,
     aliases: Vec<String>,
     help: Option<String>,
-    options: Vec<OptionField>,
-    groups: Vec<Value>,
+    arguments: RegisteredArguments,
 }
 
 impl Subcommand {
@@ -728,8 +728,7 @@ impl Subcommand {
             name: name.into(),
             aliases: aliases.into_iter().map(str::to_owned).collect(),
             help: help.map(str::to_owned),
-            options: Vec::new(),
-            groups: Vec::new(),
+            arguments: RegisteredArguments::default(),
         })
     }
 }
@@ -791,7 +790,9 @@ fn namespace_class(
     let class = classes.definitions.len();
     layouts.push(fields.iter().map(|field| field.ty).collect());
     classes.definitions.push(Class {
+        forwarder: None,
         init_hooks: Default::default(),
+        init_exposes_self: false,
         exception_aliases: Default::default(),
         static_bindings: Default::default(),
         name: "Namespace".into(),
@@ -826,6 +827,7 @@ fn namespace_class(
         abc: false,
         mapping: false,
         dataclass: Some(DataclassOptions {
+            value_struct: false,
             slots: false,
             init: false,
             eq: true,
@@ -845,13 +847,22 @@ fn assigned_call<'a>(
     receiver: &str,
     operation: &str,
 ) -> Option<(&'a ast::ExprName, &'a ast::ExprCall)> {
-    let ast::Stmt::Assign(assign) = statement? else {
+    let (name, owner, call) = assigned_method(statement?, operation)?;
+    (owner == receiver).then_some((name, call))
+}
+
+fn assigned_method<'a>(
+    statement: &'a ast::Stmt,
+    operation: &str,
+) -> Option<(&'a ast::ExprName, &'a str, &'a ast::ExprCall)> {
+    let ast::Stmt::Assign(assign) = statement else {
         return None;
     };
     let [ast::Expr::Name(name)] = assign.targets.as_slice() else {
         return None;
     };
-    Some((name, method(&assign.value, receiver, operation)?))
+    let (owner, call) = method_receiver(&assign.value, operation)?;
+    Some((name, owner, call))
 }
 
 /// A literal builder may be read repeatedly through its parser operations. Any
@@ -859,6 +870,7 @@ fn assigned_call<'a>(
 struct Uses<'a> {
     builder: &'a str,
     operations: Vec<TextSize>,
+    registration_errors: &'a HashMap<TextSize, Expr>,
     escaped: bool,
     allow_calls: bool,
 }
@@ -880,6 +892,10 @@ impl<'ast> Visitor<'ast> for Uses<'_> {
             )
         {
             self.operations.push(call.start());
+            self.visit_arguments(&call.arguments);
+        } else if let ast::Expr::Call(call) = node
+            && self.registration_errors.contains_key(&call.start())
+        {
             self.visit_arguments(&call.arguments);
         } else {
             self.escaped |= names(node, self.builder);
@@ -1048,25 +1064,75 @@ impl Parsers {
                             .iter_non_variadic_params()
                             .map(|p| p.name().to_string()),
                     );
-                    let read_options =
+                    let mut registration_errors = HashMap::new();
+                    let mut read_options =
                         |builder: &str,
                          flags: &Flags,
                          index: &mut usize,
                          mut names: HashSet<String>,
                          builders: &mut Vec<String>|
-                         -> Result<(Vec<OptionField>, Vec<Value>), String> {
-                            let mut options: Vec<OptionField> = Vec::new();
+                         -> Result<RegisteredArguments, String> {
+                            let failures = |owner, from| {
+                                registration::failures(
+                                    &function.body[from..],
+                                    owner,
+                                    graph,
+                                    module_id,
+                                    &locals,
+                                    flags.prefixes,
+                                )
+                            };
+                            registration_errors.extend(failures(builder, *index));
+                            let mut args = RegisteredArguments::default();
                             let mut spellings = HashSet::new();
-                            let mut groups = Vec::new();
                             let mut group_names = HashMap::new();
+                            let mut mutex_names = HashMap::new();
                             while let Some(stmt) = function.body.get(*index) {
                                 if let Some((group, call)) =
                                     assigned_call(Some(stmt), builder, "add_argument_group")
                                 {
                                     register(group, builders)?;
                                     builders.push(group.id.to_string());
-                                    group_names.insert(group.id.as_str(), groups.len());
-                                    groups.push(argument_group(call, module)?);
+                                    registration_errors
+                                        .extend(failures(group.id.as_str(), *index + 1));
+                                    group_names.insert(group.id.as_str(), args.groups.len());
+                                    args.groups.push(argument_group(call, module)?);
+                                    *index += 1;
+                                    continue;
+                                }
+                                if let Some((group, owner, call)) =
+                                    assigned_method(stmt, "add_mutually_exclusive_group")
+                                    && (owner == builder || group_names.contains_key(owner))
+                                {
+                                    register(group, builders)?;
+                                    let kw = keywords(call, &["required"], module)?;
+                                    if !call.arguments.args.is_empty() {
+                                        return Err(module.error(
+                                            call,
+                                            "mutually exclusive groups require named arguments",
+                                        ));
+                                    }
+                                    let required = match kw.get("required") {
+                                        None | Some(ast::Expr::NoneLiteral(_)) => false,
+                                        Some(ast::Expr::BooleanLiteral(value)) => value.value,
+                                        Some(expr) => {
+                                            return Err(module.error(
+                                                *expr,
+                                                "group required must be a literal bool or None",
+                                            ));
+                                        }
+                                    };
+                                    builders.push(group.id.to_string());
+                                    registration_errors
+                                        .extend(failures(group.id.as_str(), *index + 1));
+                                    mutex_names.insert(
+                                        group.id.as_str(),
+                                        (
+                                            args.mutex_required.len(),
+                                            group_names.get(owner).copied(),
+                                        ),
+                                    );
+                                    args.mutex_required.push(required);
                                     *index += 1;
                                     continue;
                                 }
@@ -1076,20 +1142,34 @@ impl Parsers {
                                 else {
                                     break;
                                 };
-                                let group = group_names.get(owner);
-                                if owner != builder && group.is_none() {
+                                let mutex = mutex_names.get(owner).copied();
+                                let group = group_names.get(owner).copied().or_else(|| mutex?.1);
+                                if owner != builder && group.is_none() && mutex.is_none() {
                                     break;
+                                }
+                                if registration_errors.contains_key(&add.start()) {
+                                    *index += 1;
+                                    continue;
                                 }
                                 let mut field =
                                     option(add, graph, module_id, types, classes, flags, &locals)?;
                                 if let Some(group) = group {
                                     field.option["group"] = json!(group);
                                 }
+                                if let Some((id, _)) = mutex {
+                                    if field.option["required"] == true {
+                                        return Err(module.error(
+                                            add,
+                                            "mutually exclusive arguments must be optional",
+                                        ));
+                                    }
+                                    field.option["mutex"] = json!(id);
+                                }
                                 for value in std::iter::once(&field.option["flag"])
                                     .chain(field.option["aliases"].as_array().unwrap())
                                 {
-                                    let name = value.as_str().unwrap();
-                                    if !spellings.insert(name.to_owned()) {
+                                    let spelling = value.as_str().unwrap();
+                                    if !spellings.insert(spelling.to_owned()) {
                                         return Err(module.error(
                                             add,
                                             "argparse option spellings must be unique",
@@ -1102,14 +1182,17 @@ impl Parsers {
                                         "argparse arguments require unique destination fields",
                                     ));
                                 }
-                                options.push(field);
+                                args.options.push(field);
                                 *index += 1;
                             }
-                            Ok((options, groups))
+                            Ok(args)
                         };
                     let mut index = start + 1;
-                    let (options, groups) =
-                        read_options(builder, &flags, &mut index, HashSet::new(), &mut builders)?;
+                    let RegisteredArguments {
+                        options,
+                        groups,
+                        mutex_required,
+                    } = read_options(builder, &flags, &mut index, HashSet::new(), &mut builders)?;
                     let mut root_names = options
                         .iter()
                         .map(|field| field.name.clone())
@@ -1220,7 +1303,7 @@ impl Parsers {
                                 let mut subcommand = Subcommand::new(call, module, &mut spellings)?;
                                 index += 1;
                                 if let Some(child) = child {
-                                    (subcommand.options, subcommand.groups) = read_options(
+                                    subcommand.arguments = read_options(
                                         child.id.as_str(),
                                         &Flags::new("-", true, true),
                                         &mut index,
@@ -1257,6 +1340,7 @@ impl Parsers {
                         let mut uses = Uses {
                             builder: declared,
                             operations: Vec::new(),
+                            registration_errors: &registration_errors,
                             escaped: false,
                             allow_calls: false,
                         };
@@ -1271,7 +1355,7 @@ impl Parsers {
                         }
                         operations.extend(uses.operations);
                     }
-                    if operations.is_empty() {
+                    if operations.is_empty() && registration_errors.is_empty() {
                         return Err(module.error(
                             ctor,
                             "argparse declarations must be followed by a parser operation",
@@ -1291,7 +1375,7 @@ impl Parsers {
                         let fields = root
                             .iter()
                             .copied()
-                            .chain(&child.options)
+                            .chain(&child.arguments.options)
                             .collect::<Vec<_>>();
                         let variant =
                             namespace_class(classes, layouts, definition, ctor.range(), &fields);
@@ -1302,8 +1386,8 @@ impl Parsers {
                         child_schemas.push(json!({
                             "name": child.name, "aliases": child.aliases, "help": child.help,
                             "raw": false, "prefixes": "-", "help_flags":["-h","--help"], "abbrev":true,
-                            "options": child.options.iter().map(|f| &f.option).collect::<Vec<_>>(),
-                            "groups": child.groups,
+                            "options": child.arguments.options.iter().map(|f| &f.option).collect::<Vec<_>>(),
+                            "groups": child.arguments.groups, "mutex_required": child.arguments.mutex_required,
                         }));
                     }
                     let subcommands = command_config.map(|mut config| {
@@ -1319,13 +1403,22 @@ impl Parsers {
                         config
                     });
                     for stmt in &function.body[start..index] {
-                        parsers.declarations.insert((module_id, stmt.start()));
+                        if !matches!(stmt, ast::Stmt::Expr(stmt)
+                            if registration_errors.contains_key(&stmt.value.start()))
+                        {
+                            parsers.declarations.insert((module_id, stmt.start()));
+                        }
                     }
+                    parsers.registration_errors.extend(
+                        registration_errors
+                            .into_iter()
+                            .map(|(pos, error)| ((module_id, pos), error)),
+                    );
                     let options = options
                         .into_iter()
                         .map(|field| field.option)
                         .collect::<Vec<_>>();
-                    let schema = json!({"prog": prog, "raw": raw, "prefixes": flags.prefixes, "help_flags": flags.help, "abbrev": flags.abbrev, "options": options, "groups": groups, "subcommands": subcommands}).to_string();
+                    let schema = json!({"prog": prog, "raw": raw, "prefixes": flags.prefixes, "help_flags": flags.help, "abbrev": flags.abbrev, "options": options, "groups": groups, "mutex_required": mutex_required, "subcommands": subcommands}).to_string();
                     let parser = Parser {
                         class,
                         children: child_classes,
@@ -1344,6 +1437,14 @@ impl Parsers {
 
 impl Checker<'_> {
     pub(super) fn parse_args(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+        if let Some(error) = self
+            .classes
+            .parsers
+            .registration_errors
+            .get(&(self.module, call.start()))
+        {
+            return registration::at_call(self, call, error.clone()).map(Some);
+        }
         let Some(parser) = self.classes.parsers.calls.get(&(self.module, call.start())) else {
             return Ok(None);
         };

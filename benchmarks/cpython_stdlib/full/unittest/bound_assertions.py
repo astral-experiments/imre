@@ -11,6 +11,11 @@ class Subject(unittest.TestCase):
     failureException = MyFailure
 
 
+class ReturningFail(Subject):
+    def fail(self, msg: str | None = None) -> None:
+        print("fail hook")
+
+
 def receiver(case: unittest.TestCase) -> unittest.TestCase:
     print("bind")
     return case
@@ -74,5 +79,20 @@ def saved_raises() -> None:
         print(str(e))
 
 
+def equality_failure_dispatch() -> None:
+    case = ReturningFail()
+    equal = case.assertEqual
+    with case.assertRaises(MyFailure):
+        equal(1, 2)
+    with case.assertRaises(MyFailure):
+        case.assertNotEqual(1, 1)
+    case._diffThreshold = 2
+    with case.assertRaises(MyFailure):
+        equal("ab", "abc")
+    equal("ab", "ac")
+    case.assertLess(2, 1)
+
+
 saved_equal()
 saved_raises()
+equality_failure_dispatch()

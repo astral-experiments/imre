@@ -1,7 +1,6 @@
 //! Class metadata and subclass checks for the closed set of native class values.
 
-use super::Str;
-use std::rc::Rc;
+use super::{Str, StrOwner};
 
 /// # Safety
 /// `class` points to a rooted, fully qualified native class name. Names from
@@ -11,7 +10,11 @@ pub unsafe extern "C" fn imre_class_name_part(class: *const Str, module: u32) ->
     // SAFETY: the caller retains the name until the new string is owned.
     let name = unsafe { &*class }.as_str();
     let (prefix, short) = name.rsplit_once('.').unwrap_or(("builtins", name));
-    Rc::into_raw(Rc::new(Str::new(if module != 0 { prefix } else { short })))
+    StrOwner::into_raw(StrOwner::new(Str::new(if module != 0 {
+        prefix
+    } else {
+        short
+    })))
 }
 
 /// # Safety

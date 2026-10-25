@@ -99,6 +99,19 @@ impl Loader<'_> {
         let [ast::Expr::Name(name)] = assign.targets.as_slice() else {
             return Ok(false);
         };
+        // A fixed class has one definition. Public aliases such as
+        // selectors.DefaultSelector must construct that very same class.
+        if matches!(&*assign.value, ast::Expr::Name(_))
+            && let Some(binding @ Binding::Definition(def)) =
+                resolve_binding(&self.modules, module, &assign.value)
+            && matches!(
+                &self.modules[def.module].parsed.syntax().body[def.statement],
+                ast::Stmt::ClassDef(_)
+            )
+        {
+            self.bind(module, name.id.as_str(), binding, name)?;
+            return Ok(true);
+        }
         let (value, constructor) = match &*assign.value {
             ast::Expr::Call(call)
                 if resolve_binding(&self.modules, module, &call.func)

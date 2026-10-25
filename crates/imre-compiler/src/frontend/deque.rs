@@ -2,6 +2,20 @@
 
 use super::*;
 
+/// Allocate a ring, or clear the receiver and replace its bound before taking new items.
+fn initialize(ty: Type, receiver: Option<Expr>, bound: Expr) -> Expr {
+    match receiver {
+        Some(receiver) => Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::DequeReset, vec![receiver, bound]),
+        },
+        None => Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::DequeNew, vec![bound]),
+        },
+    }
+}
+
 impl Checker<'_> {
     /// A saved method owns the receiver that was evaluated at attribute access.
     /// Its adapter has the same typed arguments as the corresponding direct call.
@@ -35,45 +49,14 @@ impl Checker<'_> {
                 element,
             ),
             "clear" => (Builtin::DequeClear, vec![], Type::None),
+            "reverse" => (Builtin::DequeReverse, vec![], Type::None),
+            "__getitem__" => (Builtin::DequeGet, vec![Type::Int], element),
+            "__setitem__" => (Builtin::DequeSet, vec![Type::Int, element], Type::None),
+            "__delitem__" => (Builtin::DequeDelete, vec![Type::Int], Type::None),
             "copy" | "__copy__" => (Builtin::DequeCopy, vec![], receiver.ty),
             _ => return Err(error(self.source, attribute, "unsupported deque attribute")),
         };
-        let mut locals = vec![receiver.ty];
-        locals.extend(&parameters);
-        let arguments = locals
-            .iter()
-            .enumerate()
-            .map(|(slot, &ty)| Expr {
-                ty,
-                kind: ExprKind::Local(slot),
-            })
-            .collect();
-        let id = self.helpers.reserve();
-        self.helpers.finish(
-            id,
-            comprehensions::Helper {
-                module: self.module,
-                function: ir::Function {
-                    params: (0..locals.len()).collect(),
-                    returns,
-                    locals,
-                    body: vec![Statement::Return(Expr {
-                        ty: returns,
-                        kind: ExprKind::Builtin(builtin, arguments),
-                    })],
-                },
-                calls: HashSet::new(),
-                class_reads: HashSet::new(),
-                recursion_error: error(self.source, attribute, "recursive deque method adapter"),
-            },
-        );
-        Ok(Expr {
-            ty: self.types.callable(parameters, returns),
-            kind: ExprKind::Callable {
-                function: id,
-                receiver: Some(Box::new(receiver)),
-            },
-        })
+        Ok(self.bound_builtin(attribute, receiver, builtin, parameters, returns))
     }
 
     pub(super) fn deque_new(
@@ -81,12 +64,29 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         hint: Option<Type>,
     ) -> Result<Expr, String> {
-        if call.arguments.args.len() > 2 {
-            return Err(error(
-                self.source,
+        self.deque_initialize(call, hint, None)
+    }
+
+    fn deque_initialize(
+        &mut self,
+        call: &ast::ExprCall,
+        hint: Option<Type>,
+        receiver: Option<Expr>,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let result = if receiver.is_some() {
+            Type::None
+        } else {
+            self.types.deque(hint.unwrap_or(Type::Int))
+        };
+        let count = call.arguments.args.len() + call.arguments.keywords.len();
+        if count > 2 {
+            return self.deque_binding_error(
                 call,
-                "deque takes at most two arguments",
-            ));
+                receiver,
+                result,
+                format!("deque() takes at most 2 arguments ({count} given)"),
+            );
         }
         let mut source = call.arguments.args.first();
         let mut limit = call.arguments.args.get(1);
@@ -94,15 +94,67 @@ impl Checker<'_> {
             let destination = match keyword.arg.as_deref() {
                 Some("iterable") => &mut source,
                 Some("maxlen") => &mut limit,
-                _ => return Err(error(self.source, keyword, "expected iterable or maxlen")),
+                Some(name) => {
+                    return self.deque_binding_error(
+                        call,
+                        receiver,
+                        result,
+                        format!("deque() got an unexpected keyword argument '{name}'"),
+                    );
+                }
+                None => unreachable!("keyword unpacking was rejected"),
             };
             if destination.replace(&keyword.value).is_some() {
-                return Err(error(self.source, keyword, "duplicate deque argument"));
+                let name = keyword.arg.as_deref().unwrap();
+                let position = if name == "iterable" { 1 } else { 2 };
+                return self.deque_binding_error(
+                    call,
+                    receiver,
+                    result,
+                    format!(
+                        "argument for deque() given by name ('{name}') and position ({position})"
+                    ),
+                );
             }
         }
         let optional = self.types.optional(Type::Int);
         let bound = if let Some(limit) = limit {
-            self.expr_expected(limit, optional)?
+            let mut value = self.evaluated_argument(limit)?;
+            if value.ty == Type::Bool {
+                value = Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                };
+            }
+            if !matches!(value.ty, Type::None | Type::Int) && value.ty != optional {
+                if !matches!(
+                    value.ty,
+                    Type::Float
+                        | Type::Str
+                        | Type::StrLiteral(_)
+                        | Type::Bytes
+                        | Type::Tuple(_)
+                        | Type::ListInt
+                        | Type::List(_)
+                        | Type::Set(_)
+                        | Type::Dict(_)
+                        | Type::Deque(_)
+                        | Type::PlainObject
+                ) {
+                    return Err(error(
+                        self.source,
+                        limit,
+                        "deque maxlen requires a known integer or None",
+                    ));
+                }
+                return self.deque_binding_error(
+                    call,
+                    receiver,
+                    result,
+                    "an integer is required".to_owned(),
+                );
+            }
+            self.coerce(value, optional, limit)?
         } else {
             Expr {
                 ty: Type::None,
@@ -110,10 +162,11 @@ impl Checker<'_> {
             }
         };
         let Some(source) = source else {
-            return Ok(Expr {
-                ty: self.types.deque(hint.unwrap_or(Type::Int)),
-                kind: ExprKind::Builtin(Builtin::DequeNew, vec![bound]),
-            });
+            return Ok(initialize(
+                self.types.deque(hint.unwrap_or(Type::Int)),
+                receiver,
+                bound,
+            ));
         };
         let mut input = self.expansion_input(
             source,
@@ -121,10 +174,37 @@ impl Checker<'_> {
                 matches!(source, ast::Expr::List(list) if list.elts.is_empty()).then_some(Type::Int)
             }),
         )?;
-        if let Iteration::Container { iterable, .. } = &mut input
-            && matches!(iterable.ty, Type::StrLiteral(_))
-        {
-            *iterable = Self::string_value(iterable.clone());
+        let limit_first = limit.is_some_and(|limit| limit.start() < source.start());
+        if let Iteration::Container { iterable, .. } = &mut input {
+            if matches!(
+                iterable.ty,
+                Type::None | Type::Bool | Type::Int | Type::Float | Type::PlainObject
+            ) {
+                let name = match iterable.ty {
+                    Type::None => "NoneType".to_owned(),
+                    Type::PlainObject => "object".to_owned(),
+                    ty => self.type_name(ty),
+                };
+                let mut scope = calls::ArgumentScope::default();
+                let receiver = receiver.map(|r| scope.hold(self, r));
+                let bound = if limit_first {
+                    let bound = scope.hold(self, bound);
+                    scope.hold(self, iterable.clone());
+                    bound
+                } else {
+                    scope.hold(self, iterable.clone());
+                    scope.hold(self, bound)
+                };
+                let init = initialize(self.types.deque(hint.unwrap_or(Type::Int)), receiver, bound);
+                return Ok(scope.finish(calls::type_error(
+                    result,
+                    vec![init],
+                    format!("'{name}' object is not iterable"),
+                )));
+            }
+            if matches!(iterable.ty, Type::StrLiteral(_)) {
+                *iterable = Self::string_value(iterable.clone());
+            }
         }
         let mut input = self.prepare_iteration(input, source, false)?;
         self.hint_empty_iteration(&input, Some(hint.unwrap_or(Type::Int)));
@@ -133,27 +213,68 @@ impl Checker<'_> {
         let target = self.hidden(ty);
         let limit_slot = self.hidden(bound.ty);
         let bound = Statement::Assign(limit_slot, bound);
-        if limit.is_some_and(|limit| limit.start() < source.start()) {
+        if limit_first {
             input.evaluate.insert(0, bound);
         } else {
             input.evaluate.push(bound);
         }
-        input.evaluate.push(Statement::Assign(
-            target,
-            Expr {
+        let bound = self.local(limit_slot);
+        let result = if let Some(receiver) = receiver {
+            input
+                .evaluate
+                .insert(0, Statement::Assign(target, receiver));
+            input.evaluate.push(Statement::Expr(initialize(
                 ty,
-                kind: ExprKind::Builtin(Builtin::DequeNew, vec![self.local(limit_slot)]),
-            },
-        ));
+                Some(self.local(target)),
+                bound,
+            )));
+            Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            }
+        } else {
+            input
+                .evaluate
+                .push(Statement::Assign(target, initialize(ty, None, bound)));
+            self.local(target)
+        };
         let body = self.deque_fill(target, element, Iteration::Prepared(input), false, call)?;
         Ok(Expr {
-            ty,
+            ty: result.ty,
             kind: ExprKind::Scope {
                 body,
-                value: Box::new(self.local(target)),
+                value: Box::new(result),
                 clear: vec![target, limit_slot],
             },
         })
+    }
+
+    /// A rejection still evaluates the receiver and every argument before raising.
+    fn deque_binding_error(
+        &mut self,
+        call: &ast::ExprCall,
+        receiver: Option<Expr>,
+        result: Type,
+        message: String,
+    ) -> Result<Expr, String> {
+        self.graph.checked_overload(self.module, call.range());
+        self.graph.checked_keywords(
+            self.module,
+            call.arguments.keywords.iter().map(Ranged::range),
+        );
+        for arg in call.arguments.args.iter().skip(2) {
+            self.graph.checked_excess_argument(self.module, arg.range());
+        }
+        let mut values: Vec<_> = receiver.into_iter().collect();
+        for arg in call
+            .arguments
+            .args
+            .iter()
+            .chain(call.arguments.keywords.iter().map(|k| &k.value))
+        {
+            values.push(self.evaluated_argument(arg)?);
+        }
+        Ok(calls::type_error(result, values, message))
     }
 
     fn deque_fill(
@@ -186,8 +307,14 @@ impl Checker<'_> {
         receiver: Expr,
         element: Type,
     ) -> Result<Expr, String> {
-        self.reject_builtin_keywords(call)?;
         let name = attribute.attr.as_str();
+        if name == "__init__" {
+            return self.deque_initialize(call, Some(element), Some(receiver));
+        }
+        if name == "reverse" {
+            return self.sequence_reverse(stdlib::ReverseSequence::Deque, Some(receiver), call);
+        }
+        self.reject_builtin_keywords(call)?;
         let mut args = vec![receiver];
         let (builtin, ty) = match (name, call.arguments.args.as_ref()) {
             ("append" | "appendleft", [value]) => {
@@ -207,6 +334,19 @@ impl Checker<'_> {
                 element,
             ),
             ("clear", []) => (Builtin::DequeClear, Type::None),
+            ("__getitem__" | "__delitem__", [index]) => {
+                args.push(self.integer_index(index)?);
+                if name == "__getitem__" {
+                    (Builtin::DequeGet, element)
+                } else {
+                    (Builtin::DequeDelete, Type::None)
+                }
+            }
+            ("__setitem__", [index, value]) => {
+                args.push(self.integer_index(index)?);
+                args.push(self.expr_expected(value, element)?);
+                (Builtin::DequeSet, Type::None)
+            }
             ("copy" | "__copy__", []) => (Builtin::DequeCopy, args[0].ty),
             ("extend" | "extendleft", [source]) => {
                 let receiver = args.pop().unwrap();

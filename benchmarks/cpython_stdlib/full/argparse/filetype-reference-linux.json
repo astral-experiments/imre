@@ -1,0 +1,731 @@
+{
+  "execution": "CPython reference only",
+  "native_test_occurrences": 0,
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "source_blobs": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/test/test_argparse.py": "627e395c49b194f67566bbaa7bba9a567b71edd9",
+    "Lib/test/translationdata/argparse/msgids.txt": "ae89ac74726ecfc702d0d24f23e96901f1ea2158",
+    "Lib/_colorize.py": "d6673f6692f76151b3b226ebe4d7976456a257e5",
+    "Lib/argparse.py": "24f4740562d015927fe41430a17b18646a3fee65",
+    "Lib/dataclasses.py": "f9c1113b1e367f47cd710367c1a2ec3619a94df3",
+    "Lib/test/support/i18n_helper.py": "2e304f29e8ba7fdf07c0725ce762ae3118685fe3",
+    "Lib/test/test_tools/__init__.py": "c4395c7c0ad0c986d9af82143207f94a35d636a6",
+    "Tools/i18n/pygettext.py": "ddf4474d2bce55f7edd0ddd5db132ddea86ba88c"
+  },
+  "denominator": 1893,
+  "suite_reference_passes": 1893,
+  "selected": 93,
+  "reference_passes": 93,
+  "counts_during_test_occurrences": {
+    "RFile.__eq__": 72,
+    "RFile.close": 72,
+    "RFile.read": 72,
+    "StdStreamComparer.__eq__": 72,
+    "WFile.__eq__": 90,
+    "WFile.close": 90,
+    "WFile.write": 90,
+    "__call__": 282,
+    "__init__": 12,
+    "__repr__": 5,
+    "mode:b": 1,
+    "mode:r": 66,
+    "mode:rb": 43,
+    "mode:w": 57,
+    "mode:wb": 43,
+    "mode:x": 36,
+    "mode:xb": 36,
+    "outcome:_io.BufferedReader": 30,
+    "outcome:_io.BufferedWriter": 42,
+    "outcome:_io.TextIOWrapper": 90,
+    "outcome:raise ArgumentTypeError": 42,
+    "outcome:raise ValueError": 1,
+    "outcome:stdin": 12,
+    "outcome:stdin.buffer": 12,
+    "outcome:stdout": 24,
+    "outcome:stdout.buffer": 24,
+    "outcome:unittest.mock.MagicMock": 5,
+    "raised:ArgumentTypeError": 42,
+    "raised:FileExistsError": 24,
+    "raised:FileNotFoundError": 12,
+    "raised:PermissionError": 6,
+    "raised:ValueError": 1
+  },
+  "observations_in_other_occurrences": {},
+  "counts_outside_test_occurrences": {
+    "module import": {
+      "__init__": 13
+    }
+  },
+  "occurrences": {
+    "test.test_argparse.TestFileTypeDefaults.test_failures_many_groups_listargs": {
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:FileNotFoundError": 1
+    },
+    "test.test_argparse.TestFileTypeDefaults.test_failures_many_groups_sysargs": {
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:FileNotFoundError": 1
+    },
+    "test.test_argparse.TestFileTypeDefaults.test_failures_no_groups_listargs": {
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:FileNotFoundError": 1
+    },
+    "test.test_argparse.TestFileTypeDefaults.test_failures_no_groups_sysargs": {
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:FileNotFoundError": 1
+    },
+    "test.test_argparse.TestFileTypeDefaults.test_failures_one_group_listargs": {
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:FileNotFoundError": 1
+    },
+    "test.test_argparse.TestFileTypeDefaults.test_failures_one_group_sysargs": {
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:FileNotFoundError": 1
+    },
+    "test.test_argparse.TestFileTypeDefaults.test_successes_many_groups_listargs": {
+      "RFile.__eq__": 1,
+      "RFile.close": 1,
+      "RFile.read": 1,
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:_io.TextIOWrapper": 1
+    },
+    "test.test_argparse.TestFileTypeDefaults.test_successes_many_groups_sysargs": {
+      "RFile.__eq__": 1,
+      "RFile.close": 1,
+      "RFile.read": 1,
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:_io.TextIOWrapper": 1
+    },
+    "test.test_argparse.TestFileTypeDefaults.test_successes_no_groups_listargs": {
+      "RFile.__eq__": 1,
+      "RFile.close": 1,
+      "RFile.read": 1,
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:_io.TextIOWrapper": 1
+    },
+    "test.test_argparse.TestFileTypeDefaults.test_successes_no_groups_sysargs": {
+      "RFile.__eq__": 1,
+      "RFile.close": 1,
+      "RFile.read": 1,
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:_io.TextIOWrapper": 1
+    },
+    "test.test_argparse.TestFileTypeDefaults.test_successes_one_group_listargs": {
+      "RFile.__eq__": 1,
+      "RFile.close": 1,
+      "RFile.read": 1,
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:_io.TextIOWrapper": 1
+    },
+    "test.test_argparse.TestFileTypeDefaults.test_successes_one_group_sysargs": {
+      "RFile.__eq__": 1,
+      "RFile.close": 1,
+      "RFile.read": 1,
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:_io.TextIOWrapper": 1
+    },
+    "test.test_argparse.TestFileTypeDeprecation.test": {
+      "__init__": 1
+    },
+    "test.test_argparse.TestFileTypeMissingInitialization.test": {},
+    "test.test_argparse.TestFileTypeOpenArgs.test_invalid_file_type": {
+      "__call__": 1,
+      "__init__": 1,
+      "mode:b": 1,
+      "outcome:raise ValueError": 1,
+      "raised:ValueError": 1
+    },
+    "test.test_argparse.TestFileTypeOpenArgs.test_open_args": {
+      "__call__": 5,
+      "__init__": 5,
+      "mode:rb": 1,
+      "mode:w": 3,
+      "mode:wb": 1,
+      "outcome:unittest.mock.MagicMock": 5
+    },
+    "test.test_argparse.TestFileTypeR.test_failures_many_groups_listargs": {
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:FileNotFoundError": 1
+    },
+    "test.test_argparse.TestFileTypeR.test_failures_many_groups_sysargs": {
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:FileNotFoundError": 1
+    },
+    "test.test_argparse.TestFileTypeR.test_failures_no_groups_listargs": {
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:FileNotFoundError": 1
+    },
+    "test.test_argparse.TestFileTypeR.test_failures_no_groups_sysargs": {
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:FileNotFoundError": 1
+    },
+    "test.test_argparse.TestFileTypeR.test_failures_one_group_listargs": {
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:FileNotFoundError": 1
+    },
+    "test.test_argparse.TestFileTypeR.test_failures_one_group_sysargs": {
+      "__call__": 1,
+      "mode:r": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:FileNotFoundError": 1
+    },
+    "test.test_argparse.TestFileTypeR.test_successes_many_groups_listargs": {
+      "RFile.__eq__": 6,
+      "RFile.close": 6,
+      "RFile.read": 6,
+      "StdStreamComparer.__eq__": 2,
+      "__call__": 8,
+      "mode:r": 8,
+      "outcome:_io.TextIOWrapper": 6,
+      "outcome:stdin": 2
+    },
+    "test.test_argparse.TestFileTypeR.test_successes_many_groups_sysargs": {
+      "RFile.__eq__": 6,
+      "RFile.close": 6,
+      "RFile.read": 6,
+      "StdStreamComparer.__eq__": 2,
+      "__call__": 8,
+      "mode:r": 8,
+      "outcome:_io.TextIOWrapper": 6,
+      "outcome:stdin": 2
+    },
+    "test.test_argparse.TestFileTypeR.test_successes_no_groups_listargs": {
+      "RFile.__eq__": 6,
+      "RFile.close": 6,
+      "RFile.read": 6,
+      "StdStreamComparer.__eq__": 2,
+      "__call__": 8,
+      "mode:r": 8,
+      "outcome:_io.TextIOWrapper": 6,
+      "outcome:stdin": 2
+    },
+    "test.test_argparse.TestFileTypeR.test_successes_no_groups_sysargs": {
+      "RFile.__eq__": 6,
+      "RFile.close": 6,
+      "RFile.read": 6,
+      "StdStreamComparer.__eq__": 2,
+      "__call__": 8,
+      "mode:r": 8,
+      "outcome:_io.TextIOWrapper": 6,
+      "outcome:stdin": 2
+    },
+    "test.test_argparse.TestFileTypeR.test_successes_one_group_listargs": {
+      "RFile.__eq__": 6,
+      "RFile.close": 6,
+      "RFile.read": 6,
+      "StdStreamComparer.__eq__": 2,
+      "__call__": 8,
+      "mode:r": 8,
+      "outcome:_io.TextIOWrapper": 6,
+      "outcome:stdin": 2
+    },
+    "test.test_argparse.TestFileTypeR.test_successes_one_group_sysargs": {
+      "RFile.__eq__": 6,
+      "RFile.close": 6,
+      "RFile.read": 6,
+      "StdStreamComparer.__eq__": 2,
+      "__call__": 8,
+      "mode:r": 8,
+      "outcome:_io.TextIOWrapper": 6,
+      "outcome:stdin": 2
+    },
+    "test.test_argparse.TestFileTypeRB.test_failures_many_groups_listargs": {},
+    "test.test_argparse.TestFileTypeRB.test_failures_many_groups_sysargs": {},
+    "test.test_argparse.TestFileTypeRB.test_failures_no_groups_listargs": {},
+    "test.test_argparse.TestFileTypeRB.test_failures_no_groups_sysargs": {},
+    "test.test_argparse.TestFileTypeRB.test_failures_one_group_listargs": {},
+    "test.test_argparse.TestFileTypeRB.test_failures_one_group_sysargs": {},
+    "test.test_argparse.TestFileTypeRB.test_successes_many_groups_listargs": {
+      "RFile.__eq__": 5,
+      "RFile.close": 5,
+      "RFile.read": 5,
+      "StdStreamComparer.__eq__": 2,
+      "__call__": 7,
+      "mode:rb": 7,
+      "outcome:_io.BufferedReader": 5,
+      "outcome:stdin.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeRB.test_successes_many_groups_sysargs": {
+      "RFile.__eq__": 5,
+      "RFile.close": 5,
+      "RFile.read": 5,
+      "StdStreamComparer.__eq__": 2,
+      "__call__": 7,
+      "mode:rb": 7,
+      "outcome:_io.BufferedReader": 5,
+      "outcome:stdin.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeRB.test_successes_no_groups_listargs": {
+      "RFile.__eq__": 5,
+      "RFile.close": 5,
+      "RFile.read": 5,
+      "StdStreamComparer.__eq__": 2,
+      "__call__": 7,
+      "mode:rb": 7,
+      "outcome:_io.BufferedReader": 5,
+      "outcome:stdin.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeRB.test_successes_no_groups_sysargs": {
+      "RFile.__eq__": 5,
+      "RFile.close": 5,
+      "RFile.read": 5,
+      "StdStreamComparer.__eq__": 2,
+      "__call__": 7,
+      "mode:rb": 7,
+      "outcome:_io.BufferedReader": 5,
+      "outcome:stdin.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeRB.test_successes_one_group_listargs": {
+      "RFile.__eq__": 5,
+      "RFile.close": 5,
+      "RFile.read": 5,
+      "StdStreamComparer.__eq__": 2,
+      "__call__": 7,
+      "mode:rb": 7,
+      "outcome:_io.BufferedReader": 5,
+      "outcome:stdin.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeRB.test_successes_one_group_sysargs": {
+      "RFile.__eq__": 5,
+      "RFile.close": 5,
+      "RFile.read": 5,
+      "StdStreamComparer.__eq__": 2,
+      "__call__": 7,
+      "mode:rb": 7,
+      "outcome:_io.BufferedReader": 5,
+      "outcome:stdin.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeRepr.test_r": {
+      "__init__": 1,
+      "__repr__": 1
+    },
+    "test.test_argparse.TestFileTypeRepr.test_r_1_replace": {
+      "__init__": 1,
+      "__repr__": 1
+    },
+    "test.test_argparse.TestFileTypeRepr.test_r_latin": {
+      "__init__": 1,
+      "__repr__": 1
+    },
+    "test.test_argparse.TestFileTypeRepr.test_w_big5_ignore": {
+      "__init__": 1,
+      "__repr__": 1
+    },
+    "test.test_argparse.TestFileTypeRepr.test_wb_1": {
+      "__init__": 1,
+      "__repr__": 1
+    },
+    "test.test_argparse.TestFileTypeW.test_failures_many_groups_listargs": {
+      "__call__": 1,
+      "mode:w": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:PermissionError": 1
+    },
+    "test.test_argparse.TestFileTypeW.test_failures_many_groups_sysargs": {
+      "__call__": 1,
+      "mode:w": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:PermissionError": 1
+    },
+    "test.test_argparse.TestFileTypeW.test_failures_no_groups_listargs": {
+      "__call__": 1,
+      "mode:w": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:PermissionError": 1
+    },
+    "test.test_argparse.TestFileTypeW.test_failures_no_groups_sysargs": {
+      "__call__": 1,
+      "mode:w": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:PermissionError": 1
+    },
+    "test.test_argparse.TestFileTypeW.test_failures_one_group_listargs": {
+      "__call__": 1,
+      "mode:w": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:PermissionError": 1
+    },
+    "test.test_argparse.TestFileTypeW.test_failures_one_group_sysargs": {
+      "__call__": 1,
+      "mode:w": 1,
+      "outcome:raise ArgumentTypeError": 1,
+      "raised:ArgumentTypeError": 1,
+      "raised:PermissionError": 1
+    },
+    "test.test_argparse.TestFileTypeW.test_successes_many_groups_listargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 6,
+      "WFile.close": 6,
+      "WFile.write": 6,
+      "__call__": 8,
+      "mode:w": 8,
+      "outcome:_io.TextIOWrapper": 6,
+      "outcome:stdout": 2
+    },
+    "test.test_argparse.TestFileTypeW.test_successes_many_groups_sysargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 6,
+      "WFile.close": 6,
+      "WFile.write": 6,
+      "__call__": 8,
+      "mode:w": 8,
+      "outcome:_io.TextIOWrapper": 6,
+      "outcome:stdout": 2
+    },
+    "test.test_argparse.TestFileTypeW.test_successes_no_groups_listargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 6,
+      "WFile.close": 6,
+      "WFile.write": 6,
+      "__call__": 8,
+      "mode:w": 8,
+      "outcome:_io.TextIOWrapper": 6,
+      "outcome:stdout": 2
+    },
+    "test.test_argparse.TestFileTypeW.test_successes_no_groups_sysargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 6,
+      "WFile.close": 6,
+      "WFile.write": 6,
+      "__call__": 8,
+      "mode:w": 8,
+      "outcome:_io.TextIOWrapper": 6,
+      "outcome:stdout": 2
+    },
+    "test.test_argparse.TestFileTypeW.test_successes_one_group_listargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 6,
+      "WFile.close": 6,
+      "WFile.write": 6,
+      "__call__": 8,
+      "mode:w": 8,
+      "outcome:_io.TextIOWrapper": 6,
+      "outcome:stdout": 2
+    },
+    "test.test_argparse.TestFileTypeW.test_successes_one_group_sysargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 6,
+      "WFile.close": 6,
+      "WFile.write": 6,
+      "__call__": 8,
+      "mode:w": 8,
+      "outcome:_io.TextIOWrapper": 6,
+      "outcome:stdout": 2
+    },
+    "test.test_argparse.TestFileTypeWB.test_failures_many_groups_listargs": {},
+    "test.test_argparse.TestFileTypeWB.test_failures_many_groups_sysargs": {},
+    "test.test_argparse.TestFileTypeWB.test_failures_no_groups_listargs": {},
+    "test.test_argparse.TestFileTypeWB.test_failures_no_groups_sysargs": {},
+    "test.test_argparse.TestFileTypeWB.test_failures_one_group_listargs": {},
+    "test.test_argparse.TestFileTypeWB.test_failures_one_group_sysargs": {},
+    "test.test_argparse.TestFileTypeWB.test_successes_many_groups_listargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 5,
+      "WFile.close": 5,
+      "WFile.write": 5,
+      "__call__": 7,
+      "mode:wb": 7,
+      "outcome:_io.BufferedWriter": 5,
+      "outcome:stdout.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeWB.test_successes_many_groups_sysargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 5,
+      "WFile.close": 5,
+      "WFile.write": 5,
+      "__call__": 7,
+      "mode:wb": 7,
+      "outcome:_io.BufferedWriter": 5,
+      "outcome:stdout.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeWB.test_successes_no_groups_listargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 5,
+      "WFile.close": 5,
+      "WFile.write": 5,
+      "__call__": 7,
+      "mode:wb": 7,
+      "outcome:_io.BufferedWriter": 5,
+      "outcome:stdout.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeWB.test_successes_no_groups_sysargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 5,
+      "WFile.close": 5,
+      "WFile.write": 5,
+      "__call__": 7,
+      "mode:wb": 7,
+      "outcome:_io.BufferedWriter": 5,
+      "outcome:stdout.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeWB.test_successes_one_group_listargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 5,
+      "WFile.close": 5,
+      "WFile.write": 5,
+      "__call__": 7,
+      "mode:wb": 7,
+      "outcome:_io.BufferedWriter": 5,
+      "outcome:stdout.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeWB.test_successes_one_group_sysargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 5,
+      "WFile.close": 5,
+      "WFile.write": 5,
+      "__call__": 7,
+      "mode:wb": 7,
+      "outcome:_io.BufferedWriter": 5,
+      "outcome:stdout.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeX.test_failures_many_groups_listargs": {
+      "__call__": 2,
+      "mode:x": 2,
+      "outcome:raise ArgumentTypeError": 2,
+      "raised:ArgumentTypeError": 2,
+      "raised:FileExistsError": 2
+    },
+    "test.test_argparse.TestFileTypeX.test_failures_many_groups_sysargs": {
+      "__call__": 2,
+      "mode:x": 2,
+      "outcome:raise ArgumentTypeError": 2,
+      "raised:ArgumentTypeError": 2,
+      "raised:FileExistsError": 2
+    },
+    "test.test_argparse.TestFileTypeX.test_failures_no_groups_listargs": {
+      "__call__": 2,
+      "mode:x": 2,
+      "outcome:raise ArgumentTypeError": 2,
+      "raised:ArgumentTypeError": 2,
+      "raised:FileExistsError": 2
+    },
+    "test.test_argparse.TestFileTypeX.test_failures_no_groups_sysargs": {
+      "__call__": 2,
+      "mode:x": 2,
+      "outcome:raise ArgumentTypeError": 2,
+      "raised:ArgumentTypeError": 2,
+      "raised:FileExistsError": 2
+    },
+    "test.test_argparse.TestFileTypeX.test_failures_one_group_listargs": {
+      "__call__": 2,
+      "mode:x": 2,
+      "outcome:raise ArgumentTypeError": 2,
+      "raised:ArgumentTypeError": 2,
+      "raised:FileExistsError": 2
+    },
+    "test.test_argparse.TestFileTypeX.test_failures_one_group_sysargs": {
+      "__call__": 2,
+      "mode:x": 2,
+      "outcome:raise ArgumentTypeError": 2,
+      "raised:ArgumentTypeError": 2,
+      "raised:FileExistsError": 2
+    },
+    "test.test_argparse.TestFileTypeX.test_successes_many_groups_listargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 2,
+      "WFile.close": 2,
+      "WFile.write": 2,
+      "__call__": 4,
+      "mode:x": 4,
+      "outcome:_io.TextIOWrapper": 2,
+      "outcome:stdout": 2
+    },
+    "test.test_argparse.TestFileTypeX.test_successes_many_groups_sysargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 2,
+      "WFile.close": 2,
+      "WFile.write": 2,
+      "__call__": 4,
+      "mode:x": 4,
+      "outcome:_io.TextIOWrapper": 2,
+      "outcome:stdout": 2
+    },
+    "test.test_argparse.TestFileTypeX.test_successes_no_groups_listargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 2,
+      "WFile.close": 2,
+      "WFile.write": 2,
+      "__call__": 4,
+      "mode:x": 4,
+      "outcome:_io.TextIOWrapper": 2,
+      "outcome:stdout": 2
+    },
+    "test.test_argparse.TestFileTypeX.test_successes_no_groups_sysargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 2,
+      "WFile.close": 2,
+      "WFile.write": 2,
+      "__call__": 4,
+      "mode:x": 4,
+      "outcome:_io.TextIOWrapper": 2,
+      "outcome:stdout": 2
+    },
+    "test.test_argparse.TestFileTypeX.test_successes_one_group_listargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 2,
+      "WFile.close": 2,
+      "WFile.write": 2,
+      "__call__": 4,
+      "mode:x": 4,
+      "outcome:_io.TextIOWrapper": 2,
+      "outcome:stdout": 2
+    },
+    "test.test_argparse.TestFileTypeX.test_successes_one_group_sysargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 2,
+      "WFile.close": 2,
+      "WFile.write": 2,
+      "__call__": 4,
+      "mode:x": 4,
+      "outcome:_io.TextIOWrapper": 2,
+      "outcome:stdout": 2
+    },
+    "test.test_argparse.TestFileTypeXB.test_failures_many_groups_listargs": {
+      "__call__": 2,
+      "mode:xb": 2,
+      "outcome:raise ArgumentTypeError": 2,
+      "raised:ArgumentTypeError": 2,
+      "raised:FileExistsError": 2
+    },
+    "test.test_argparse.TestFileTypeXB.test_failures_many_groups_sysargs": {
+      "__call__": 2,
+      "mode:xb": 2,
+      "outcome:raise ArgumentTypeError": 2,
+      "raised:ArgumentTypeError": 2,
+      "raised:FileExistsError": 2
+    },
+    "test.test_argparse.TestFileTypeXB.test_failures_no_groups_listargs": {
+      "__call__": 2,
+      "mode:xb": 2,
+      "outcome:raise ArgumentTypeError": 2,
+      "raised:ArgumentTypeError": 2,
+      "raised:FileExistsError": 2
+    },
+    "test.test_argparse.TestFileTypeXB.test_failures_no_groups_sysargs": {
+      "__call__": 2,
+      "mode:xb": 2,
+      "outcome:raise ArgumentTypeError": 2,
+      "raised:ArgumentTypeError": 2,
+      "raised:FileExistsError": 2
+    },
+    "test.test_argparse.TestFileTypeXB.test_failures_one_group_listargs": {
+      "__call__": 2,
+      "mode:xb": 2,
+      "outcome:raise ArgumentTypeError": 2,
+      "raised:ArgumentTypeError": 2,
+      "raised:FileExistsError": 2
+    },
+    "test.test_argparse.TestFileTypeXB.test_failures_one_group_sysargs": {
+      "__call__": 2,
+      "mode:xb": 2,
+      "outcome:raise ArgumentTypeError": 2,
+      "raised:ArgumentTypeError": 2,
+      "raised:FileExistsError": 2
+    },
+    "test.test_argparse.TestFileTypeXB.test_successes_many_groups_listargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 2,
+      "WFile.close": 2,
+      "WFile.write": 2,
+      "__call__": 4,
+      "mode:xb": 4,
+      "outcome:_io.BufferedWriter": 2,
+      "outcome:stdout.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeXB.test_successes_many_groups_sysargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 2,
+      "WFile.close": 2,
+      "WFile.write": 2,
+      "__call__": 4,
+      "mode:xb": 4,
+      "outcome:_io.BufferedWriter": 2,
+      "outcome:stdout.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeXB.test_successes_no_groups_listargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 2,
+      "WFile.close": 2,
+      "WFile.write": 2,
+      "__call__": 4,
+      "mode:xb": 4,
+      "outcome:_io.BufferedWriter": 2,
+      "outcome:stdout.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeXB.test_successes_no_groups_sysargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 2,
+      "WFile.close": 2,
+      "WFile.write": 2,
+      "__call__": 4,
+      "mode:xb": 4,
+      "outcome:_io.BufferedWriter": 2,
+      "outcome:stdout.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeXB.test_successes_one_group_listargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 2,
+      "WFile.close": 2,
+      "WFile.write": 2,
+      "__call__": 4,
+      "mode:xb": 4,
+      "outcome:_io.BufferedWriter": 2,
+      "outcome:stdout.buffer": 2
+    },
+    "test.test_argparse.TestFileTypeXB.test_successes_one_group_sysargs": {
+      "StdStreamComparer.__eq__": 2,
+      "WFile.__eq__": 2,
+      "WFile.close": 2,
+      "WFile.write": 2,
+      "__call__": 4,
+      "mode:xb": 4,
+      "outcome:_io.BufferedWriter": 2,
+      "outcome:stdout.buffer": 2
+    }
+  }
+}

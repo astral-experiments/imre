@@ -1,9 +1,10 @@
 //! Independent member cursors with incremental CRC. Compressed and inflated
 //! buffers are each bounded even when the caller requests the entire member.
-use std::io::SeekFrom;
-use std::rc::Rc;
-
+use crate::StrOwner;
 use flate2::{Crc, Decompress, FlushDecompress, Status};
+use num_bigint::Sign;
+use num_traits::ToPrimitive;
+use std::io::SeekFrom;
 
 use super::super::{
     Bytes, Str, bytes,
@@ -14,6 +15,7 @@ use super::{
     directory::{bad, grow, name, u16_at},
     source::Source,
 };
+use crate::Int;
 
 const BLOCK: usize = 64 * 1024;
 
@@ -26,7 +28,7 @@ fn deflate_error(message: &str) -> Error {
 
 pub(in crate::objects) struct Member {
     source: Source,
-    info: Rc<Info>,
+    info: crate::Shared<Info>,
     start: u64,
     packed_at: u64,
     packed_left: u64,
@@ -44,7 +46,7 @@ pub(in crate::objects) struct Member {
 impl Member {
     pub(super) fn open(
         source: Source,
-        info: Rc<Info>,
+        info: crate::Shared<Info>,
         encrypted_name: impl FnOnce() -> Str,
     ) -> Result<Self> {
         let at = source.absolute_offset(info.offset)?;
@@ -139,7 +141,7 @@ impl Member {
         })
     }
 
-    pub(in crate::objects) fn name(&self) -> &Rc<Str> {
+    pub(in crate::objects) fn name(&self) -> &StrOwner {
         &self.info.filename
     }
 
@@ -398,6 +400,33 @@ impl Member {
         self.info.file_size - self.left - (self.buffer.len() - self.pos) as u64
     }
 
+    /// Resolve a Python seek relative to the member before clamping its position.
+    pub(in crate::objects) fn seek_offset(&mut self, offset: &Int, whence: i64) -> Result<u64> {
+        let base = match whence {
+            0 => 0,
+            1 => self.tell(),
+            2 => self.info.file_size,
+            _ => {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    "whence must be os.SEEK_SET (0), os.SEEK_CUR (1), or os.SEEK_END (2)",
+                ));
+            }
+        };
+        let target = if let Some(delta) = offset.as_small() {
+            base.saturating_add_signed(delta)
+        } else {
+            let delta = offset.big();
+            let magnitude = delta.magnitude().to_u64().unwrap_or(u64::MAX);
+            if delta.sign() == Sign::Minus {
+                base.saturating_sub(magnitude)
+            } else {
+                base.saturating_add(magnitude)
+            }
+        };
+        self.seek(SeekFrom::Start(target))
+    }
+
     pub(in crate::objects) fn seek(&mut self, at: SeekFrom) -> Result<u64> {
         let now = self.tell();
         let to = match at {
@@ -465,13 +494,19 @@ mod tests {
     fn stored_zip64_seek_checks_the_absolute_offset() {
         // A one-byte stored member declares u64::MAX uncompressed bytes.
         let bytes = b"PK\x03\x04\x14\x00\x00\x00\x00\x00\x00\x00!\x00K6\xb2\xb7\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x0c\x00x\x01\x00\x08\x00\xff\xff\xff\xff\xff\xff\xff\xffXPK\x01\x02\x14\x03\x14\x00\x00\x00\x00\x00\x00\x00!\x00K6\xb2\xb7\x01\x00\x00\x00\xff\xff\xff\xff\x01\x00\x0c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x80\x01\x00\x00\x00\x00x\x01\x00\x08\x00\xff\xff\xff\xff\xff\xff\xff\xffPK\x05\x06\x00\x00\x00\x00\x01\x00\x01\x00;\x00\x00\x00,\x00\x00\x00\x00\x00";
-        let input = Source::Borrowed(FileState::memory(Rc::new(bytes.to_vec())));
+        let input = Source::Borrowed(FileState::memory(crate::BytesOwner::new(bytes.to_vec())));
         let archive = Archive::open(input, None).ok().unwrap();
         let mut member = archive.member_by_name(&Str::new("x")).ok().unwrap();
 
         let error = member.seek(SeekFrom::End(0)).unwrap_err();
         assert!(error.is_kind(Kind::OverflowError));
         assert_eq!(member.tell(), 0);
+        let almost_size = Int::new((1 - i128::from(u64::MAX)).into());
+        assert_eq!(member.seek_offset(&almost_size, 2).ok(), Some(1));
+        assert_eq!(
+            member.seek_offset(&Int::new(i128::MIN.into()), 2).ok(),
+            Some(0)
+        );
         assert_eq!(member.read(Some(1)).ok().unwrap(), b"X");
     }
 
@@ -479,7 +514,7 @@ mod tests {
     fn invalid_deflate_block_consumes_input_without_advancing_member_position() {
         let mut raw = FIXTURE.to_vec();
         raw[31] = 7; // Reserved DEFLATE block type in the first payload byte.
-        let input = Source::Borrowed(FileState::memory(Rc::new(raw)));
+        let input = Source::Borrowed(FileState::memory(crate::BytesOwner::new(raw)));
         let archive = Archive::open(input, None).ok().unwrap();
         let mut member = archive.member_by_name(&Str::new("p")).ok().unwrap();
         member.min_read = 1;
@@ -496,7 +531,7 @@ mod tests {
         let mut raw = FIXTURE.to_vec();
         let central = memchr::memmem::find(&raw, b"PK\x01\x02").unwrap();
         raw[central + 16] ^= 1;
-        let input = Source::Borrowed(FileState::memory(Rc::new(raw)));
+        let input = Source::Borrowed(FileState::memory(crate::BytesOwner::new(raw)));
         let archive = Archive::open(input, None).ok().unwrap();
         let mut member = archive.member_by_name(&Str::new("p")).ok().unwrap();
         member.min_read = 2;
@@ -513,7 +548,7 @@ mod tests {
 
     #[test]
     fn independent_members_survive_archive_close_and_rewind() {
-        let input = Source::Borrowed(FileState::memory(Rc::new(FIXTURE.to_vec())));
+        let input = Source::Borrowed(FileState::memory(crate::BytesOwner::new(FIXTURE.to_vec())));
         let mut archive = Archive::open(input, None).ok().unwrap();
         let mut left = archive.member_by_name(&Str::new("p")).ok().unwrap();
         let mut right = archive.member_by_name(&Str::new("p")).ok().unwrap();

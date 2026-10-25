@@ -1,0 +1,34 @@
+{
+  "containers/deque.py": {
+    "lines": 65,
+    "stdout_sha256": "b88aa43b03cd99b60044b7917dc9d668d86c9f03c42835ac9442f3a2ac1112a8"
+  },
+  "containers/deque_index.py": {
+    "lines": 38,
+    "stdout_sha256": "39e57f5c9a3f2f5816cbe6a7d092e2d931b3c1c01fa32fa024ab14fd4bd9bd60"
+  },
+  "containers/namedtuple.py": {
+    "lines": 23,
+    "stdout_sha256": "4645b7fdead47d6b82b3ad876375228205673a0946643044b5ed81dde427ba4a"
+  },
+  "module_values/namedtuple/main.py": {
+    "lines": 3,
+    "stdout_sha256": "e30189274b7cb9fe119fb71c37300682aeb8e8c90d953ea7e22bc15631ebbb40"
+  },
+  "bytes/membership.py": {
+    "lines": 128,
+    "stdout_sha256": "ac56aaa1bfea77bb514b0f27e6e600b9c330460dba650264b8d2e2488543d7a2"
+  },
+  "text/percent_scalar.py": {
+    "lines": 121,
+    "stdout_sha256": "1e65ddc70db4253d0f99e3ec2b575c1b93602bb9ec11d0845524d8161ed36403"
+  },
+  "processes/file_redirects.py": {
+    "lines": 28,
+    "stdout_sha256": "8ab9a962ae299bb7ddbb30ee19efb2982ab0b5f278bee62761016c2e83fa881c"
+  },
+  "json_records/stdlib_deep_decode.py": {
+    "lines": 18,
+    "stdout_sha256": "0dc983649b99f10acc1d5b2dd57c864619dd1d53088b1f54e1d2ec6ed1c27f92"
+  }
+}

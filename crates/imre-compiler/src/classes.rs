@@ -11,12 +11,14 @@ use crate::modules::{Binding, DefinitionId, Intrinsic, SourceGraph, SourceModule
 mod constants;
 mod dataclasses;
 mod enums;
+mod exception_forwarders;
 mod exceptions;
 mod inheritance;
 mod init_hooks;
 mod record_hash;
 pub(crate) use constants::ClassValue;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
+pub(crate) use exception_forwarders::ForwardingInitializer;
 pub(crate) use exceptions::explicit_message_initializer;
 pub(crate) use inheritance::{super_init, super_method};
 
@@ -33,6 +35,8 @@ pub(crate) enum MethodKind {
 
 pub(crate) struct Classes {
     pub(crate) definitions: Vec<Class>,
+    /// Data members only need rebindable storage when some source writes that attribute.
+    pub(crate) attribute_writes: HashMap<String, HashSet<Type>>,
     pub(crate) exceptions: HashMap<DefinitionId, u32>,
     pub(crate) exception_declarations: Vec<crate::types::NamedException>,
     pub(crate) ids: HashMap<DefinitionId, usize>,
@@ -51,7 +55,9 @@ pub(crate) struct Class {
     pub(crate) fields: Vec<Field>,
     pub(crate) methods: Vec<ast::StmtFunctionDef>,
     /// Field writes required of every override called during construction.
-    pub(crate) init_hooks: HashMap<String, Vec<String>>,
+    pub(crate) init_hooks: init_hooks::Hooks,
+    /// A base initializer that passes self to Python needs the entire derived layout ready.
+    pub(crate) init_exposes_self: bool,
     pub(crate) method_kinds: Vec<MethodKind>,
     /// Declaring class for the corresponding method's imports and lexical super.
     pub(crate) method_origins: Vec<DefinitionId>,
@@ -65,10 +71,26 @@ pub(crate) struct Class {
     pub(crate) dataclass: Option<DataclassOptions>,
     pub(crate) enum_members: Option<enums::Members>,
     pub(crate) exception_aliases: HashMap<String, ExceptionAlias>,
+    pub(crate) forwarder: Option<ForwardingInitializer>,
     pub(crate) static_bindings: HashMap<String, ClassValue>,
     pub(crate) generated_initializer: bool,
     /// Index into `methods`, including the initializer itself.
     pub(crate) initializer: Option<usize>,
+}
+
+impl Class {
+    /// The ABI slot stays in the root layout when a subclass adds Python fields.
+    pub(crate) fn exception_argument_slot(&self) -> usize {
+        self.fields
+            .iter()
+            .position(|field| {
+                matches!(
+                    field.name.as_str(),
+                    EXCEPTION_ARGS_SLOT | "<exception message>"
+                )
+            })
+            .expect("exception storage owns an argument slot")
+    }
 }
 
 #[derive(Clone)]
@@ -83,11 +105,12 @@ pub(crate) struct Field {
 }
 
 impl Classes {
-    /// Even an entry module with no ordinary globals must initialize its owned class tuples.
-    pub(crate) fn owns_class_tuples(&self, module: usize) -> bool {
+    /// The entry module may need to execute class bodies even without module globals.
+    pub(crate) fn has_class_values(&self, module: usize) -> bool {
         self.definitions.iter().any(|class| {
             class.definition.module == module && class.static_bindings.values().any(|value| {
-                matches!(value, ClassValue::Strings { owner, .. } if *owner == class.definition)
+                matches!(value, ClassValue::Runtime { .. })
+                    || matches!(value, ClassValue::Strings { owner, .. } if *owner == class.definition)
             })
         })
     }
@@ -127,7 +150,21 @@ impl Classes {
                     if resolved.layouts.contains(&definition) {
                         // Exception inheritance is resolved above; only the additional fixed
                         // fields and methods take part in record layout and initialization.
-                        record.to_mut().arguments = None;
+                        if let Some(parent) = resolved.storage_parent.get(&definition) {
+                            let arguments = record.to_mut().arguments.as_mut().unwrap();
+                            let base = arguments
+                                .args
+                                .iter()
+                                .find(|base| {
+                                    graph.resolve(module_id, base)
+                                        == Some(Binding::Definition(*parent))
+                                })
+                                .unwrap()
+                                .clone();
+                            arguments.args = std::iter::once(base).collect();
+                        } else {
+                            record.to_mut().arguments = None;
+                        }
                     }
                     source_nodes.push((definition, record));
                 }
@@ -137,38 +174,19 @@ impl Classes {
             .iter()
             .map(|(def, node)| (*def, node.as_ref()))
             .collect::<Vec<_>>();
-        let mut definitions = inheritance::resolve(graph, &nodes, &ids, &resolved)?;
-        for def in &resolved.layouts {
-            let c = &mut definitions[ids[def]];
-            // This ABI slot is not a Python identifier, constructor parameter,
-            // dataclass comparison field, or repr field. The frontend gives
-            // the tuple slot its native exception field type during layout.
-            let module = &graph.modules[def.module];
-            let tuple_args = c.methods.iter().filter(|m| matches!(m.name.as_str(), "__init__" | "__post_init__"))
-                .flat_map(|m| &m.body).any(|stmt| matches!(stmt, ast::Stmt::Expr(e)
-                    if matches!(&*e.value, ast::Expr::Call(call) if explicit_message_initializer(module, call).is_some()
-                        || super_init(call) && call.arguments.args.len() != 1)));
-            let annotation = ruff_python_parser::parse_expression("str | None")
-                .expect("static annotation")
-                .expr()
-                .clone();
-            c.fields.push(Field {
-                module: def.module,
-                name: if tuple_args {
-                    EXCEPTION_ARGS_SLOT
-                } else {
-                    "<exception message>"
-                }
-                .into(),
-                annotation,
-                default: None,
-                kw_only: false,
-                repr: false,
-                compare: false,
-            });
-        }
+        let definitions = inheritance::resolve(graph, &nodes, &ids, &resolved)?;
+        let data_names: HashSet<_> = definitions
+            .iter()
+            .flat_map(|class| {
+                class.static_bindings.iter().filter_map(|(name, value)| {
+                    matches!(value, ClassValue::Runtime { .. }).then_some(name.as_str())
+                })
+            })
+            .collect();
+        let attribute_writes = constants::attribute_writes(graph, &data_names);
         Ok(Self {
             definitions,
+            attribute_writes,
             ids,
             exceptions: resolved.ids,
             exception_declarations: resolved.named,
@@ -250,6 +268,38 @@ fn collect_class(
             == Some(Binding::Intrinsic(Intrinsic::StandardEnum));
     }
     let dataclass = dataclasses::options(graph, definition.module, node)?;
+    let value_struct = dataclass.is_some_and(|options| options.value_struct);
+    if base.is_some_and(|(_, parent)| parent.dataclass.is_some_and(|options| options.value_struct))
+        || value_struct && node.arguments.as_ref().is_some_and(|args| !args.is_empty())
+    {
+        return Err(module.error(node, "an imre.struct is final and cannot inherit fields"));
+    }
+    if value_struct {
+        for statement in &node.body {
+            match statement {
+                ast::Stmt::AnnAssign(field) if field.value.is_none() => {}
+                ast::Stmt::FunctionDef(method)
+                    if !method.name.starts_with("__") && method.decorator_list.is_empty() => {}
+                ast::Stmt::Pass(_) => {}
+                ast::Stmt::Expr(stmt) if matches!(&*stmt.value, ast::Expr::StringLiteral(_)) => {}
+                _ => {
+                    return Err(module.error(
+                        statement,
+                        "imre.struct supports required fields and ordinary instance methods",
+                    ));
+                }
+            }
+        }
+    }
+    let forwarder = exception_layout
+        .then(|| ForwardingInitializer::collect(definition, node, base.map(|(_, c)| c), module))
+        .flatten();
+    if base.is_some_and(|(_, c)| c.forwarder.is_some()) && forwarder.is_none() {
+        return Err(module.error(
+            node,
+            "a subclass of a variadic exception must forward a fixed set of constructor parameters",
+        ));
+    }
     let mut names = HashSet::new();
     let mut class_bindings = HashSet::new();
     let mut abstract_methods = base
@@ -295,9 +345,15 @@ fn collect_class(
                 .map(|n| n.id.as_str()),
             _ => None,
         };
-        if member
-            .is_some_and(|name| base.is_some_and(|(_, b)| b.static_bindings.contains_key(name)))
-        {
+        if member.is_some_and(|name| {
+            base.and_then(|(_, b)| b.static_bindings.get(name))
+                .is_some_and(|binding| {
+                    !matches!(
+                        (binding, statement),
+                        (ClassValue::Runtime { .. }, ast::Stmt::Assign(_))
+                    )
+                })
+        }) {
             return Err(module.error(statement, "overriding a fixed class binding is unsupported"));
         }
         match statement {
@@ -419,20 +475,33 @@ fn collect_class(
                 }
                 let unary_protocol = matches!(
                     name,
-                    "__str__" | "__bool__" | "__index__" | "__iter__" | "__copy__" | "__fspath__"
+                    "__str__" | "__repr__" | "__bool__" | "__index__" | "__iter__" | "__copy__"
                 ) || (mapping && name == "__len__");
+                let selector_context = module.is_bundled("selectors")
+                    && node.name.as_str() == "PollSelector"
+                    && matches!(name, "__enter__" | "__exit__");
                 if name.starts_with("__")
-                    && name != "__init__"
+                    && !matches!(name, "__init__" | "__fspath__" | "__setitem__")
                     && !unary_protocol
+                    && !selector_context
                     && !(mapping && matches!(name, "__getitem__" | "__contains__"))
                     && !(name == "__post_init__" && dataclass.is_some())
-                    && !(name == "__repr__" && exception_layout)
+                    && !(module.is_bundled("socketserver")
+                        && node.name.as_str() == "TCPServer"
+                        && matches!(name, "__enter__" | "__exit__"))
                 {
                     return Err(
                         module.error(method, "unsupported special method on a fixed-layout class")
                     );
                 }
                 let kind = method_kind(graph, definition.module, method, &class_bindings)?;
+                if name == "__setitem__"
+                    && (kind != MethodKind::Instance
+                        || method.parameters.len() != 3
+                        || method.parameters.posonlyargs.len() + method.parameters.args.len() != 3)
+                {
+                    return Err(module.error(method, "__setitem__ requires self, key and value"));
+                }
                 if kind == MethodKind::PropertySetter {
                     let mut accessors = methods
                         .iter()
@@ -459,6 +528,11 @@ fn collect_class(
                     .first()
                     .or_else(|| method.parameters.args.first());
                 let receiver = match kind {
+                    MethodKind::Instance
+                        if method.name.as_str() == "__init__" && forwarder.is_some() =>
+                    {
+                        forwarder.as_ref().map(|plan| plan.receiver.as_str())
+                    }
                     MethodKind::Instance | MethodKind::Property | MethodKind::PropertySetter => {
                         Some("self")
                     }
@@ -488,7 +562,7 @@ fn collect_class(
                         module.error(method, "a property setter must take self and a value")
                     );
                 }
-                if (unary_protocol || matches!(name, "__repr__" | "__post_init__"))
+                if (unary_protocol || name == "__post_init__")
                     && (kind != MethodKind::Instance
                         || method.parameters.len() != 1
                         || first.is_none_or(|parameter| parameter.default.is_some()))
@@ -504,7 +578,11 @@ fn collect_class(
                     }
                     initializer = Some(methods.len());
                 }
-                methods.push(method.clone());
+                let mut method = method.clone();
+                if forwarder.is_some() {
+                    exception_forwarders::mangle_fields(node.name.as_str(), &mut method);
+                }
+                methods.push(method);
                 method_kinds.push(kind);
                 class_bindings.insert(name.to_owned());
             }
@@ -557,7 +635,23 @@ fn collect_class(
                         &assign.value,
                         &class_bindings,
                         &static_bindings,
-                    )? =>
+                    )?
+                    .or_else(|| {
+                        (dataclass.is_none()
+                            && !exception_layout
+                            && constants::runtime_expression(&assign.value)
+                            && exceptions::alias(
+                                graph,
+                                definition.module,
+                                &assign.value,
+                                exceptions,
+                            )
+                            .is_none())
+                        .then_some(ClassValue::Runtime {
+                            owner: definition,
+                            ordinal,
+                        })
+                    }) =>
             {
                 if !names.insert(name.id.to_string())
                     || name.id.starts_with("__")
@@ -590,7 +684,7 @@ fn collect_class(
             _ => {
                 return Err(module.error(
                     statement,
-                    "class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass",
+                    "class bodies support field declarations, plain data assignments, methods, pass, and docstrings; annotated field defaults require @dataclass",
                 ));
             }
         }
@@ -605,12 +699,38 @@ fn collect_class(
         ));
     }
     let inherited_fields = base.map_or(&[][..], |(_, base)| base.fields.as_slice());
+    if let Some(plan) = &forwarder {
+        let annotation = ruff_python_parser::parse_expression("object")
+            .expect("static annotation")
+            .expr()
+            .clone();
+        for (name, _) in &plan.stores {
+            if !fields.iter().any(|field| &field.name == name) {
+                fields.push(Field {
+                    module: definition.module,
+                    name: name.clone(),
+                    annotation: annotation.clone(),
+                    default: None,
+                    kw_only: false,
+                    repr: true,
+                    compare: true,
+                });
+            }
+        }
+    }
     if !is_enum
         && dataclass.is_none()
         && fields.len() == inherited_fields.len()
         && let Some(init) = initializer
     {
         inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields)?;
+        // A write to inherited or local class data creates an instance shadow.
+        fields.retain(|f| {
+            !matches!(
+                static_bindings.get(&f.name),
+                Some(ClassValue::Runtime { .. })
+            )
+        });
     }
     if fields
         .iter()
@@ -620,6 +740,9 @@ fn collect_class(
             node,
             "an instance field cannot shadow a fixed class binding",
         ));
+    }
+    if value_struct && fields.is_empty() {
+        return Err(module.error(node, "imre.struct needs at least one field"));
     }
     let generated_initializer =
         initializer.is_none() && dataclass.is_some_and(|options| options.init);
@@ -682,11 +805,20 @@ fn collect_class(
     let mut init_hooks = base
         .map(|(_, parent)| parent.init_hooks.clone())
         .unwrap_or_default();
+    let hook_writes = |name: &str, inherited: Option<&init_hooks::Hook>| {
+        init_hooks::method_writes(
+            graph,
+            &methods,
+            &method_kinds,
+            &method_origins,
+            name,
+            inherited,
+        )
+    };
     for (name, expected) in &init_hooks {
         if names.contains(name) {
-            let actual =
-                init_hooks::method_writes(graph, &methods, &method_kinds, &method_origins, name);
-            if actual.transpose()?.as_ref() != Some(expected) {
+            let actual = hook_writes(name, Some(expected));
+            if actual.transpose()?.as_ref() != Some(&expected.writes) {
                 return Err(module.error(
                     node,
                     "an initializer hook override must initialize the same fields",
@@ -694,27 +826,37 @@ fn collect_class(
             }
         }
     }
+    let base_exposes_self = base.is_some_and(|(_, parent)| parent.init_exposes_self);
+    let mut init_exposes_self = base_exposes_self;
     if let Some(initializer) = initializer
         && method_origins[initializer] == definition
+        // A proven forwarding exception constructor writes each field through its plan.
+        && forwarder.is_none()
     {
-        check_initializer(
+        init_exposes_self |= check_initializer(
             module,
             &methods[initializer],
-            &fields,
-            if generated_initializer {
-                &[]
-            } else {
-                inherited_fields
+            InitializerFields {
+                declared: &fields,
+                bindings: &static_bindings,
+                inherited: if generated_initializer {
+                    &[]
+                } else {
+                    inherited_fields
+                },
+                exposes_self: base_exposes_self,
             },
             exception_layout,
             &mut init_hooks,
-            |name| init_hooks::method_writes(graph, &methods, &method_kinds, &method_origins, name),
+            |name| hook_writes(name, None),
         )?;
     }
     Ok(Class {
         definition,
+        forwarder,
         name: node.name.as_str().to_owned(),
         init_hooks,
+        init_exposes_self,
         node: node.clone(),
         fields,
         toml_hash: hash.is_some(),
@@ -821,7 +963,7 @@ fn class_static_binding(
 }
 
 /// Only these sealed descriptors affect binding; arbitrary decorators still cannot run.
-fn method_kind(
+pub(crate) fn method_kind(
     graph: &SourceGraph,
     module_id: usize,
     method: &ast::StmtFunctionDef,
@@ -872,17 +1014,29 @@ fn method_kind(
     ))
 }
 
-/// Initializes each field once before `self` can be read or passed to another operation.
-/// This permits allocation before argument assignment without exposing a partial object.
+struct InitializerFields<'a> {
+    declared: &'a [Field],
+    exposes_self: bool,
+    inherited: &'a [Field],
+    bindings: &'a HashMap<String, ClassValue>,
+}
+
+/// Checks that a constructor initializes the layout before user code can see it,
+/// and reports whether the initialized instance escapes to a callback.
 fn check_initializer(
     module: &SourceModule,
     initializer: &ast::StmtFunctionDef,
-    fields: &[Field],
-    inherited: &[Field],
+    layout: InitializerFields<'_>,
     exception_layout: bool,
     hooks: &mut init_hooks::Hooks,
     lookup: impl Fn(&str) -> Option<Result<Vec<String>, String>>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
+    let InitializerFields {
+        declared: fields,
+        exposes_self: base_exposes_self,
+        inherited,
+        bindings,
+    } = layout;
     let receiver = initializer
         .parameters
         .iter_non_variadic_params()
@@ -894,10 +1048,32 @@ fn check_initializer(
         .iter()
         .map(|field| field.name.as_str())
         .collect::<HashSet<_>>();
-    let mut initialized = HashSet::new();
+    // Plain class values are available even while the instance is under construction.
+    // A write shadows them; it does not initialize a mandatory physical field.
+    let mut initialized: HashSet<&str> = bindings
+        .iter()
+        .filter_map(|(n, v)| matches!(v, ClassValue::Runtime { .. }).then_some(n.as_str()))
+        .collect();
     let mut called_super = false;
     let mut called_exception_base = false;
-    for statement in &initializer.body {
+    for (index, statement) in initializer.body.iter().enumerate() {
+        if index + 1 == initializer.body.len()
+            && (inherited.is_empty() || called_super)
+            && let ast::Stmt::Expr(s) = statement
+            && let ast::Expr::Call(call) = &*s.value
+            && matches!(&*call.func, ast::Expr::Name(_))
+            && matches!(call.arguments.args.first(), Some(ast::Expr::Name(n)) if n.id == receiver)
+        {
+            // Initialized also contains readable class attributes, which cannot
+            // stand in for a missing field when Python receives the instance.
+            if !declared.is_subset(&initialized) {
+                return Err(module.error(
+                    statement,
+                    "initialize all instance fields before passing self to a callback",
+                ));
+            }
+            return Ok(true);
+        }
         if exception_layout
             && let ast::Stmt::Expr(stmt) = statement
             && let ast::Expr::Call(call) = &*stmt.value
@@ -923,7 +1099,13 @@ fn check_initializer(
             && let Some(writes) = lookup(name)
         {
             let writes = writes?;
+            let before = initialized.iter().copied().map(str::to_owned).collect();
             for field in &writes {
+                // The checked hook may also create an ordinary instance shadow.
+                // That write does not satisfy any of the required physical fields.
+                if matches!(bindings.get(field), Some(ClassValue::Runtime { .. })) {
+                    continue;
+                }
                 let Some(&declared_field) = declared.get(field.as_str()) else {
                     return Err(
                         module.error(statement, "initializer hook writes an undeclared field")
@@ -936,7 +1118,13 @@ fn check_initializer(
                     ));
                 }
             }
-            hooks.insert(name.to_owned(), writes);
+            hooks.insert(
+                name.to_owned(),
+                init_hooks::Hook {
+                    initialized: before,
+                    writes,
+                },
+            );
             continue;
         }
         let assignment = match statement {
@@ -956,6 +1144,14 @@ fn check_initializer(
                     return Err(
                         module.error(call, "base initializer fields may only be initialized once")
                     );
+                }
+                if base_exposes_self
+                    && fields
+                        .iter()
+                        .skip(inherited.len())
+                        .any(|f| !initialized.contains(f.name.as_str()))
+                {
+                    return Err(module.error(call, "initialize subclass fields before calling a base initializer that exposes self"));
                 }
                 for argument in call
                     .arguments
@@ -1023,6 +1219,9 @@ fn check_initializer(
                 return Err(module.error(target, "__init__ must assign a declared self.field"));
             }
             let name = attribute.attr.as_str();
+            if matches!(bindings.get(name), Some(ClassValue::Runtime { .. })) {
+                continue;
+            }
             if !declared.contains(name) {
                 return Err(module.error(
                     target,
@@ -1054,7 +1253,7 @@ fn check_initializer(
             ),
         ));
     }
-    Ok(())
+    Ok(false)
 }
 
 /// Chained and nested assignments must still initialize only declared fields.

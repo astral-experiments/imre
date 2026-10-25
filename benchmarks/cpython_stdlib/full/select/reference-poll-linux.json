@@ -1,0 +1,17 @@
+{
+  "module": "test.test_poll",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 7,
+  "reference": {
+    "test.test_poll.PollTests.test_poll1": "pass",
+    "test.test_poll.PollTests.test_poll2": {
+      "skipped": "resource 'walltime' is not enabled"
+    },
+    "test.test_poll.PollTests.test_poll3": "pass",
+    "test.test_poll.PollTests.test_poll_blocks_with_negative_ms": "pass",
+    "test.test_poll.PollTests.test_poll_c_limits": "pass",
+    "test.test_poll.PollTests.test_poll_unit_tests": "pass",
+    "test.test_poll.PollTests.test_threaded_poll": "pass"
+  }
+}

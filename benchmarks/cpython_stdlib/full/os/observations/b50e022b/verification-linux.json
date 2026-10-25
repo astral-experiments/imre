@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "test_os_git_blob": "555c85f4857c2d7e69dda2f390847c7f02123cb5",
+  "prospective_tree": "b50e022baa065470041419629c9eb725e3c04fba",
+  "main": "86c86d3d913b6f08cfa8aa3c6e0dc63c18957515",
+  "pr_head": "81ee8c860a83db7c0d52438dd36f67a8860c01b1",
+  "compiler_sha256": "e7a0f9088f4c47a5fb4ac1fe4f104321158a2a4187ceb384899dfc26c7f32da4",
+  "runtime_sha256": "d6c56690e4b353bcf9cd8dd05481bca0310bf3a5636dfd0b5b4c520c711556e7",
+  "scope": "Four public CI drivers; each distinct occurrence has one role. The six complete native OS methods still have host fixtures. This receipt does not run all 579 occurrences.",
+  "method_sha256": {
+    "test_setuid": "d34dc587a38d77ad8c1b432618e2da9e4ae7703f6bc1ab7f6e0d20df3f16285f",
+    "test_setgid": "96ad851f7ff5c3cb4d934549040e76608ce8108776d853698f99de3ca0ea190a",
+    "test_seteuid": "d4d8dd1ad6f9e7c5fa3a54adae9d5f2539da44b0902e6809d3cd31abfe2374e3",
+    "test_setegid": "5573186966c8e6cef7ee35ea2d1d44fa36eacadd21beb86bdc4452fd8fa57c08",
+    "test_setreuid": "d9e18128d16e5364f661906d960ea39e50ab8bd85cd73fd4d3441989bf82f2db",
+    "test_setregid": "024b622e42e70fcc5d8226dc6ee5c1dcab8bfdcc15f29affda4c8c92f1945659"
+  },
+  "levels": {
+    "O0": {
+      "value_cases": {
+        "driver_sha256": "969097c3485c12389661ff61637559f6c077629a490466795dda844f8dc2d63f",
+        "output_sha256": "f967866beee71d7d359131e9da063f7524c0f1da5c24e0f506a7b44eda9330f3",
+        "occurrences": 5,
+        "status_counts": {
+          "host_driven_native": 1,
+          "mixed": 1,
+          "native_body_host_fixture": 3
+        }
+      },
+      "native_descriptors": {
+        "driver_sha256": "a107e6471ce491e2bc5d178f643a007966f0f3bcfaabfce745d83c9288872a10",
+        "output_sha256": "3480f21dcd1b37c4ec08d4fcaa483142aac9bd7f8966728d2bf010da0e2b8adb",
+        "occurrences": 12,
+        "status_counts": {
+          "native_body_host_fixture": 12
+        }
+      },
+      "host_descriptors": {
+        "driver_sha256": "9da8754cd62356800ab37c08eb8828cddc5806acfb79f9b6237331a751788608",
+        "output_sha256": "9000c7212d67e067c004d447d88991fd38a0abf904922d8dc3664fe536a2fb93",
+        "occurrences": 11,
+        "status_counts": {
+          "host_driven_native": 11
+        }
+      },
+      "credential_children": {
+        "driver_sha256": "3945ca1104904809cd5ab1b9d0399fc3314762e4ac04f2bbf6a41df8f0f87e80",
+        "output_sha256": "b46aa83004d581b9da2130d2c45abe9464aecb03519b47c4e7245cb7f3c50603",
+        "occurrences": 14,
+        "status_counts": {
+          "host_driven_native": 2,
+          "native_body_host_fixture": 12
+        }
+      }
+    },
+    "O3": {
+      "value_cases": {
+        "driver_sha256": "969097c3485c12389661ff61637559f6c077629a490466795dda844f8dc2d63f",
+        "output_sha256": "b553fae08d3b63e4c9036de58456809ee199e315378a48916c84e115adbf9dc6",
+        "occurrences": 5,
+        "status_counts": {
+          "host_driven_native": 1,
+          "mixed": 1,
+          "native_body_host_fixture": 3
+        }
+      },
+      "native_descriptors": {
+        "driver_sha256": "a107e6471ce491e2bc5d178f643a007966f0f3bcfaabfce745d83c9288872a10",
+        "output_sha256": "1a1d95e45153aad9e1ebd1fd6896a0c533933bbe551d9105979950c2d98e967d",
+        "occurrences": 12,
+        "status_counts": {
+          "native_body_host_fixture": 12
+        }
+      },
+      "host_descriptors": {
+        "driver_sha256": "9da8754cd62356800ab37c08eb8828cddc5806acfb79f9b6237331a751788608",
+        "output_sha256": "b746664b225c5951df1454e7dbb9657b6da5d70a711b03bd22aa910204110633",
+        "occurrences": 11,
+        "status_counts": {
+          "host_driven_native": 11
+        }
+      },
+      "credential_children": {
+        "driver_sha256": "3945ca1104904809cd5ab1b9d0399fc3314762e4ac04f2bbf6a41df8f0f87e80",
+        "output_sha256": "1d240d75140d960ccb86df20ea1908cc4730ba9bde8c23fe29f6b8a12746225f",
+        "occurrences": 14,
+        "status_counts": {
+          "host_driven_native": 2,
+          "native_body_host_fixture": 12
+        }
+      }
+    }
+  }
+}

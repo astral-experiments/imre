@@ -1,4 +1,4 @@
-"""Time Ruff's original ecosystem check on the same cached revisions as CPython."""
+"""Time Ruff's original ecosystem CLI on the same cached revisions as CPython."""
 
 import argparse
 import hashlib
@@ -52,15 +52,27 @@ def main():
     p.add_argument("--cache", type=Path, required=True)
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--cpython-only", action="store_true")
+    p.add_argument("--command", choices=["check", "format"], default="check")
+    p.add_argument("--capture-format", type=Path, help="freeze the first CPython format run for replay")
     p.add_argument("--force-preview", action="store_true", help="use Ruff preview rules on every project")
     p.add_argument("--rounds", type=int, default=1)
     p.add_argument("--cpu", type=int, help="Linux CPU for a deterministic Ruff file walk")
     args = p.parse_args()
     if args.rounds < 1:
         p.error("--rounds must be at least one")
+    if args.capture_format and args.command != "format":
+        p.error("--capture-format requires --command format")
     out = args.output_dir.resolve()
     out.mkdir(parents=True, exist_ok=True)
     cache, revisions = freeze(args.cache.resolve(), out)
+    (out / "revisions.json").write_text(json.dumps(revisions, indent=2) + "\n")
+    if args.command == "format":
+        # Ruff sets this identity when it creates a clone. These disposable
+        # clones already exist, so its clone path won't configure them.
+        for name in revisions:
+            git(cache / name, "config", "user.name", "Ecosystem Bot")
+            git(cache / name, "config", "user.email", "ecosystem@astral.sh")
+            git(cache / name, "config", "commit.gpgSign", "false")
     if args.cpu is not None:
         if not hasattr(os, "sched_getaffinity") or args.cpu not in os.sched_getaffinity(0):
             p.error("--cpu must select an available Linux CPU")
@@ -70,7 +82,7 @@ def main():
     command = ["-v", "--cache", cache]
     if args.force_preview:
         command.append("--force-preview")
-    command.extend(["check", args.old_ruff.resolve(), args.new_ruff.resolve()])
+    command.extend([args.command, args.old_ruff.resolve(), args.new_ruff.resolve()])
     arms = {"cpython": [args.python.absolute(), "-B", "-m", "ruff_ecosystem"]}
     if not args.cpython_only:
         if args.imre is None:
@@ -81,9 +93,13 @@ def main():
         outputs = {}
         for arm in list(arms)[::1 if round_ % 2 == 0 else -1]:
             report = out / f"{arm}-{round_ + 1}.md"
+            launch = arms[arm]
+            if args.capture_format and arm == "cpython" and round_ == 0:
+                launch = [args.python.absolute(), "-B", Path(__file__).with_name("ruff_ecosystem_format_capture.py"),
+                          args.capture_format.resolve(), out / "revisions.json"]
             with report.open("wb") as stdout, (out / f"{arm}-{round_ + 1}.stderr").open("wb") as stderr:
                 started = time.perf_counter()
-                subprocess.run([*arms[arm], *command], stdout=stdout, stderr=stderr, check=True, env=env)
+                subprocess.run([*launch, *command], stdout=stdout, stderr=stderr, check=True, env=env)
                 seconds = time.perf_counter() - started
             data = outputs[arm] = report.read_bytes()
             sample = {"wall_seconds": seconds, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
@@ -94,7 +110,7 @@ def main():
                     raise ValueError(f"{project} moved during {arm}")
         if "imre" in outputs and outputs["imre"] != outputs["cpython"]:
             raise ValueError(f"live reports differ in round {round_ + 1}; reports and stderr were saved to {out}")
-    evidence = {"cpu": args.cpu, "force_preview": args.force_preview, "samples": samples, "revisions": revisions, "ruff": [
+    evidence = {"command": args.command, "cpu": args.cpu, "force_preview": args.force_preview, "samples": samples, "revisions": revisions, "ruff": [
         subprocess.check_output([exe, "--version"], text=True).strip()
         for exe in (args.old_ruff, args.new_ruff)
     ]}

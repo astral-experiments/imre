@@ -132,6 +132,7 @@ impl Checker<'_> {
         let key = self.declare(key.id.as_str(), key_type, key)?;
         let next_key = self.hidden(key_type);
         let group_key = self.hidden(key_type);
+        let have_group = self.hidden(Type::Bool);
         let list_type = self.types.list(item_type);
         let accumulating = self.hidden(list_type);
         let ready = input.ready;
@@ -141,16 +142,56 @@ impl Checker<'_> {
             vec![Statement::Assign(next_key, key_value)],
             Vec::new(),
         ));
+        // Both next(groupby) and list(group) interpret StopIteration from a
+        // pull as exhaustion. A later call can still advance the same source.
+        let mut pull = vec![Statement::Try {
+            body: pull,
+            handlers: vec![ir::ExceptHandler {
+                kinds: vec![exception_kind("StopIteration").unwrap()],
+                name: None,
+                body: vec![Statement::Assign(ready, boolean(false))],
+            }],
+            orelse: Vec::new(),
+            finalbody: Vec::new(),
+        }];
         input.acquire.push(Statement::Assign(ready, boolean(false)));
-        // Reuse the keyed item at the boundary. After exhausting a group, the
-        // outer iterator attempts another pull, just like next(groupby).
+        input
+            .acquire
+            .push(Statement::Assign(have_group, boolean(false)));
+        let boundary = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Boolean(
+                false,
+                vec![
+                    not(self.local(ready)),
+                    compare(
+                        Compare::NotEqual,
+                        self.local(group_key),
+                        self.local(next_key),
+                    ),
+                ],
+            ),
+        };
+        // When a group ended without lookahead, its remaining equal keys
+        // belong to the previous group and must be skipped by the outer pull.
+        let mut seek = pull.clone();
+        seek.push(Statement::If(
+            Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Boolean(false, vec![not(self.local(have_group)), boundary.clone()]),
+            },
+            vec![Statement::Break],
+            Vec::new(),
+        ));
         input.next = vec![Statement::If(
             not(self.local(ready)),
-            pull.clone(),
+            vec![Statement::While(boolean(true), seek, Vec::new())],
             Vec::new(),
         )];
         input.value = next_key;
-        input.clear.extend([next_key, group_key, accumulating]);
+        input
+            .clear
+            .extend([next_key, group_key, have_group, accumulating]);
         self.invalidate_loop_facts(&loop_.body, Some((&input, &loop_.iter)))?;
         self.lower_prepared_iteration(key_target, input, &loop_.orelse, Vec::new(), |checker| {
             let output = checker.declare(members.id.as_str(), list_type, members)?;
@@ -164,26 +205,13 @@ impl Checker<'_> {
                 ),
             })];
             drain.append(&mut pull);
-            let boundary = Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Boolean(
-                    false,
-                    vec![
-                        not(checker.local(ready)),
-                        compare(
-                            Compare::NotEqual,
-                            checker.local(group_key),
-                            checker.local(next_key),
-                        ),
-                    ],
-                ),
-            };
             drain.push(Statement::If(boundary, vec![Statement::Break], Vec::new()));
             let mut body = Vec::new();
             if let Some(callback) = retained_callback {
                 body.push(Statement::Assign(grouper, checker.local(callback)));
             }
             body.extend([
+                Statement::Assign(have_group, boolean(true)),
                 Statement::Assign(group_key, checker.local(key)),
                 Statement::Assign(
                     accumulating,

@@ -1,0 +1,7 @@
+Inplace subtract counter, but keep only results with positive counts.
+
+>>> c = Counter('abbbc')
+>>> c -= Counter('bccd')
+>>> c
+Counter({'b': 2, 'a': 1})
+

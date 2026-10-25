@@ -65,12 +65,12 @@ except OSError as error:
 
             recovery = Path(__file__).parent / "full/sys/stream_errno.py"
             executable = native(recovery.read_text())
-            for mode in ("stdout-write", "stderr-write", "stdout-flush", "stderr-flush"):
+            for mode in ("stdout-write", "stderr-write", "stdout-flush", "stderr-flush", "stdout-displayhook"):
                 stock, actual = [subprocess.run([*cmd, mode], capture_output=True, check=True, timeout=10)
                                  for cmd in ([args.python, recovery], [executable])]
                 if (actual.stdout, actual.stderr) != (stock.stdout, stock.stderr):
                     raise AssertionError((mode, stock, actual))
-            print("Matched errno, strerror and recovery for four standard stream failures")
+            print("Matched errno, strerror and recovery for stream and display hook failures")
 
         def command(argv):
             if len(argv) != 3 or argv[:2] != [sys.executable, "-c"]:

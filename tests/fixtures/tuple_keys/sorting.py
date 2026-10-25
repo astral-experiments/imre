@@ -10,7 +10,10 @@ def failing(row: tuple[int, str, int]) -> tuple[int, str]:
 
 
 def main() -> None:
-    rows = [(1, "b", 0), (1, "a", 1), (1, "a", 2), (0, "z", 3)]
+    rows = [
+        (1, "b", 0), (1, "a", 1), (1, "a", 2), (0, "z", 3),
+        (2, "a", 4), (1, "a", 5), (0, "z", 6), (1, "b", 7), (0, "z", 8),
+    ]
     for row in sorted(rows, key=key, reverse=True):
         print(row[2])
     try:

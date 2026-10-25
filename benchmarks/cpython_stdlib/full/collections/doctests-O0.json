@@ -5,7 +5,7 @@
     "collections.Counter": {
       "examples": 18,
       "status": "compile-blocked",
-      "diagnostic": "case.py:5:1: Imre: supported dictionary methods are get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
+      "diagnostic": "case.py:17:16: Imre: supported dictionary methods are clear(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
     },
     "collections.Counter.__add__": {
       "examples": 1,
@@ -50,8 +50,7 @@
     },
     "collections.Counter.most_common": {
       "examples": 1,
-      "status": "compile-blocked",
-      "diagnostic": "case.py:3:1: Imre: supported dictionary methods are get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
+      "status": "native-body/host-output-check"
     },
     "collections.Counter.subtract": {
       "examples": 5,
@@ -64,12 +63,13 @@
     "collections.namedtuple": {
       "examples": 11,
       "status": "compile-blocked",
-      "diagnostic": "case.py:1:1: Imre: unsupported sealed standard-library export collections.namedtuple"
+      "diagnostic": "case.py:5:1: Imre: unsupported namedtuple class attribute"
     },
     "test.test_deque.__test__.libreftest": {
       "examples": 32,
       "status": "compile-blocked",
-      "diagnostic": "case.py:1:1: Imre: unsupported sealed standard-library export collections.deque"
+      "diagnostic": "case.py:137:1: Imre: definitions must precede executable module statements"
     }
-  }
+  },
+  "compiler_revision": "8bed1fe034374b90860cfde5fe7f6324dfebb4de"
 }

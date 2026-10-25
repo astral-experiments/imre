@@ -1,6 +1,6 @@
 //! POSIX shell patterns treat path separators and leading dots as ordinary characters.
+use crate::StrOwner;
 use std::borrow::Cow;
-use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, finish};
 use super::paths::{Pattern, class_characters, class_end};
@@ -93,7 +93,7 @@ pub unsafe extern "C" fn imre_fnmatch_filter(
                     .push(unsafe { source.kind.acquire(word) }.into_word());
             }
         }
-        Ok(Rc::into_raw(output.into_object()))
+        Ok(crate::ObjectOwner::into_raw(output.into_object()))
     };
     // SAFETY: names remains rooted; the scan does not call back into Python.
     let result = unsafe { object(names).0.with(filter) };
@@ -183,7 +183,7 @@ pub unsafe extern "C" fn imre_fnmatch_translate(pat: *const Str) -> *const Str {
     let regex = translate(unsafe { &*pat }.as_str());
     finish(
         Str::try_new(&regex)
-            .map(|s| Rc::into_raw(Rc::new(s)))
+            .map(|s| StrOwner::into_raw(StrOwner::new(s)))
             .map_err(|_| Error::allocation()),
         std::ptr::null(),
     )
@@ -196,7 +196,7 @@ pub unsafe extern "C" fn imre_fnmatch_translate(pat: *const Str) -> *const Str {
 pub unsafe extern "C" fn imre_fnmatch_translate_bytes(pat: *const Bytes) -> *const Str {
     // SAFETY: the caller keeps the exact bytes allocation alive for this check.
     if unsafe { &*pat }.is_empty() {
-        return Rc::into_raw(super::text::owned_string("(?s:)\\z"));
+        return StrOwner::into_raw(super::text::owned_string("(?s:)\\z"));
     }
     Error::new(
         Kind::TypeError,
@@ -221,12 +221,12 @@ pub unsafe extern "C" fn imre_fnmatch_parts(
     for part in parts {
         words
             .values
-            .push(Rc::into_raw(Rc::new(Str::from(part))) as usize);
+            .push(StrOwner::into_raw(StrOwner::new(Str::from(part))) as usize);
     }
     let indices = crate::new_list(stars.into_iter().map(crate::Int::from_usize).collect());
     // SAFETY: both slots in the fresh tuple now receive their independent owners.
     unsafe {
-        out.write(Rc::into_raw(words.into_object()).cast());
+        out.write(crate::ObjectOwner::into_raw(words.into_object()).cast());
         out.add(1).write(indices.cast());
     }
 }

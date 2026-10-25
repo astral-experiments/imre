@@ -3,6 +3,18 @@
 Each observation uses the [shared per-occurrence contract](../../SUITE_RUNNER.md)
 and includes every upstream ID at both optimization levels.
 
+## Latest complete Linux measurement
+
+[Compiler and binary hashes](observations/8656b43/source.json) identify the exact
+source used for both optimization levels. The unchanged `TestSingleDispatch.test_simple_overloads` now registers and calls native implementations for a string, integer, and list and makes its three assertions in Imre. CPython runs the module, class,
+and instance hooks; the compiled child creates its own native test instance.
+Compare the [parent measurement](observations/308a1e8/evidence-linux.json) to check which individual occurrences changed.
+
+| Unchanged suite | Occurrences | Fully native | Native body, host fixture | Host-driven native operation | Mixed | Failed | Blocked |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| [Primary](observations/8656b43/evidence-linux.json) | 325 | 0 | 9 | 17 | 9 | 0 | 290 |
+| [Free-threading](observations/8656b43/evidence-free-threading-linux.json) | 4 | 0 | 0 | 0 | 0 | 4 |
+
 ## Canonical main at `56731b6`
 
 The [Linux job](https://github.com/astral-sh/imre/actions/runs/40179400348/job/121127002553)
@@ -143,3 +155,46 @@ $PYT ../../suite_evidence.py reference-free-threading-linux.json evidence-free-t
 The reduce runner writes each individual result and returns nonzero on a
 test failure. The companion gate rejects a GIL-enabled
 interpreter instead of treating the package-level skip as four executions.
+
+## Development branches: the live `builtins.len` binding
+
+The two Linux builds reproduced the pinned CPython 3.14.5 references byte for byte. Each row applies to both `-O0` and `-O3`.
+
+| Tested source | Original suite | Reference passes | Native bodies with host fixtures | Host-driven native operations | Mixed | Failed | Blocked |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| [`8e8ce2b`](https://github.com/astral-sh/imre/actions/runs/40188541388/job/121154397915) | [test.test_functools](observations/8e8ce2b/evidence-linux.json) | 325 | 2 | 13 | 15 | 0 | 295 |
+| [`8e8ce2b`](https://github.com/astral-sh/imre/actions/runs/40188541388/job/121154397915) | [test.test_free_threading.test_functools](observations/8e8ce2b/evidence-free-threading-linux.json) | 4 | 0 | 0 | 0 | 0 | 4 |
+| [`af565ad`](https://github.com/astral-sh/imre/actions/runs/40189824549/job/121158245589) | [test.test_functools](observations/af565ad/evidence-linux.json) | 325 | 4 | 13 | 13 | 0 | 295 |
+| [`af565ad`](https://github.com/astral-sh/imre/actions/runs/40189824549/job/121158245589) | [test.test_free_threading.test_functools](observations/af565ad/evidence-free-threading-linux.json) | 4 | 0 | 0 | 0 | 0 | 4 |
+
+On the [fixture attribution branch](https://github.com/astral-sh/imre/pull/939), both `test_lru_reentrancy_with_len` occurrences replaced the real CPython builtin, made 13 lookups in the native cache, and invoked CPython’s original `len` on 10 misses. The supplemental cache snapshot was `(3, 10, 4, 4)` and the original binding was restored by identity. The host ran the method and its assertions.
+
+On the [native binding branch](https://github.com/astral-sh/imre/pull/949), the same two unchanged methods saved, replaced, called and restored Imre’s live `builtins.len`. The method bodies, assertions, cache and length operations all ran in Imre; the original unittest hooks ran on CPython. Neither source ran either suite with native fixtures, and both companion runs stopped at `random` before any native worker started. These source-specific observations do not replace the canonical reports.
+
+## Dispatch arguments and the #726 annotation integration
+
+Each build reproduced both pinned CPython references byte for byte. Counts apply independently at `-O0` and `-O3`.
+
+| Compiler and report | Native bodies with host fixtures | Host-driven native operations | Mixed | Blocked |
+| --- | ---: | ---: | ---: | ---: |
+| [270129b](https://github.com/astral-sh/imre/actions/runs/40193095109/job/121168103466) [primary, 325](observations/270129b/evidence-linux.json) | 5 | 15 | 13 | 292 |
+| [270129b](https://github.com/astral-sh/imre/actions/runs/40193095109/job/121168103466) [free-threading, 4](observations/270129b/evidence-free-threading-linux.json) | 0 | 0 | 0 | 4 |
+| [581e518](https://github.com/astral-sh/imre/actions/runs/40193838962/job/121170327420) [primary, 325](observations/581e518/evidence-linux.json) | 4 | 13 | 15 | 293 |
+| [581e518](https://github.com/astral-sh/imre/actions/runs/40193838962/job/121170327420) [free-threading, 4](observations/581e518/evidence-free-threading-linux.json) | 0 | 0 | 0 | 4 |
+
+On `270129b`, the unchanged registration method compiles its formatting and stops at `self.assertIs` on upstream line 2297. `test_simple_overloads` runs its native body and assertions under host fixtures. On `581e518`, the four native bodies are the C and Python variants of `test_argument_checking` and `test_with_bound_and_unbound_methods`. Both LRU reentrancy methods remain mixed on that source. Neither build starts a free-threaded native worker.
+
+## Local full-suite reruns
+
+Each source ran with the original CPython 3.14.5 fixtures. The reports list every occurrence at O0 and O3. Counts match between levels.
+
+| Source and suite | Native bodies with host fixtures | Host-driven native operations | Mixed | Blocked |
+| --- | ---: | ---: | ---: | ---: |
+| [b54496f](https://github.com/astral-sh/imre/commit/b54496f44e7e38498b6202afa518b2cd57e27dfe) [primary, 325](observations/b54496f/evidence-linux.json) | 4 | 13 | 15 | 293 |
+| [b54496f](https://github.com/astral-sh/imre/commit/b54496f44e7e38498b6202afa518b2cd57e27dfe) [free-threading, 4](observations/b54496f/evidence-free-threading-linux.json) | 0 | 0 | 0 | 4 |
+| [bc9c98c](https://github.com/astral-sh/imre/commit/bc9c98c23318e56493bfb6ca8e08e33847787c05) [primary, 325](observations/bc9c98c/evidence-linux.json) | 5 | 15 | 13 | 292 |
+| [bc9c98c](https://github.com/astral-sh/imre/commit/bc9c98c23318e56493bfb6ca8e08e33847787c05) [free-threading, 4](observations/bc9c98c/evidence-free-threading-linux.json) | 0 | 0 | 0 | 4 |
+| [ecf60bc](https://github.com/astral-sh/imre/commit/ecf60bcde79ee43463177a53fbe9ddf0b865fe81) [primary, 325](observations/ecf60bc/evidence-linux.json) | 6 | 15 | 13 | 291 |
+| [ecf60bc](https://github.com/astral-sh/imre/commit/ecf60bcde79ee43463177a53fbe9ddf0b865fe81) [free-threading, 4](observations/ecf60bc/evidence-free-threading-linux.json) | 0 | 0 | 0 | 4 |
+
+On `b54496f`, keyword-rest parsing and deferred annotation names coexist after the canonical I/O repairs. On `bc9c98c`, `TestSingleDispatch.test_wrapping_attributes` stops at `sys.flags.optimize`. On `ecf60bc`, the unchanged body and both assertions run in Imre under the original host fixtures using the actual optimization level, wrapper name, and nullable docstring. The four companion cases on each source stop before native worker execution.
