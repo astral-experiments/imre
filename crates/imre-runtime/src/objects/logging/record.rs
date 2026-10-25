@@ -1,6 +1,7 @@
 //! A log record owns one native Python value per attribute, including user-supplied extras.
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 thread_local! {static FLAGS:Cell<u8> = const {Cell::new(15)};}
 use num_traits::ToPrimitive;
 use std::rc::Rc;
@@ -263,9 +264,9 @@ fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
     let mut out = String::new();
     let mut input = msg;
     while let Some((literal, rest)) = input.split_once('%') {
-        out.push_str(literal);
+        append(&mut out, literal)?;
         if let Some(rest) = rest.strip_prefix('%') {
-            out.push('%');
+            append(&mut out, "%")?;
             input = rest;
             continue;
         }
@@ -281,7 +282,11 @@ fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
         } else {
             percent_value_in(rest, &mut positional, Some(msg))?
         };
-        out.push_str(&piece);
+        if out.is_empty() {
+            out = piece;
+        } else {
+            append(&mut out, &piece)?;
+        }
         input = tail;
     }
     if !is_dict(args) && positional.len() != 0 {
@@ -290,8 +295,49 @@ fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
             "not all arguments converted during string formatting",
         ));
     }
-    out.push_str(input);
+    append(&mut out, input)?;
     Ok(out)
+}
+
+fn append(out: &mut String, text: &str) -> Result<()> {
+    values::ReprWriter(out)
+        .write_str(text)
+        .map_err(|_| Error::allocation())
+}
+
+fn percent_text(value: &OwnedWord, conversion: char, precision: Option<usize>) -> Result<String> {
+    let end = |s: &str| {
+        precision
+            .and_then(|n| s.char_indices().nth(n))
+            .map_or(s.len(), |(i, _)| i)
+    };
+    let mut text = String::new();
+    if conversion == 's' && value.kind.raw() & !NULLABLE == 3 && value.word != 0 {
+        // SAFETY: the exact string stays rooted by the format argument.
+        let s = unsafe { &*(value.word as *const Str) }.as_str();
+        append(&mut text, &s[..end(s)])?;
+        return Ok(text);
+    }
+    // SAFETY: the argument roots its value graph throughout representation.
+    unsafe { values::try_write_repr(&mut values::ReprWriter(&mut text), value.word, value.kind) }
+        .map_err(|_| Error::allocation())?;
+    if conversion == 'a' && !text.is_ascii() {
+        let mut ascii = String::new();
+        let mut out = values::ReprWriter(&mut ascii);
+        for ch in text.chars() {
+            let code = ch as u32;
+            match code {
+                0..=127 => out.write_char(ch),
+                128..=255 => write!(out, "\\x{code:02x}"),
+                256..=65535 => write!(out, "\\u{code:04x}"),
+                _ => write!(out, "\\U{code:08x}"),
+            }
+            .map_err(|_| Error::allocation())?;
+        }
+        text = ascii;
+    }
+    text.truncate(end(&text));
+    Ok(text)
 }
 
 /// Find the closing delimiter after "%(", allowing balanced parentheses in the key.
@@ -409,29 +455,7 @@ fn percent_value_in<'a>(
         .ok_or_else(|| Error::new(Kind::ValueError, "incomplete format"))?;
     let value = &next_argument(args)?;
     let mut text = match c {
-        's' | 'r' | 'a' => {
-            let mut s = display(value, c != 's');
-            if c == 'a' {
-                s = s
-                    .chars()
-                    .map(|c| {
-                        if c.is_ascii() {
-                            c.to_string()
-                        } else if c as u32 <= 255 {
-                            format!("\\x{:02x}", c as u32)
-                        } else if c as u32 <= 65535 {
-                            format!("\\u{:04x}", c as u32)
-                        } else {
-                            format!("\\U{:08x}", c as u32)
-                        }
-                    })
-                    .collect();
-            }
-            if let Some(n) = precision {
-                s = s.chars().take(n).collect();
-            }
-            s
-        }
+        's' | 'r' | 'a' => percent_text(value, c, precision)?,
         'd' | 'i' | 'u' | 'x' | 'X' | 'o' => {
             let n = match value.kind.raw() {
                 1 => num_bigint::BigInt::from(value.word),
@@ -575,11 +599,12 @@ fn percent_value_in<'a>(
     };
     let padding = width.saturating_sub(text.chars().count());
     if padding > 0 {
-        let spaces = self::padding(padding, ' ')?;
+        let mut spaces = self::padding(padding, ' ')?;
         if flags.contains('-') {
-            text.push_str(&spaces);
+            append(&mut text, &spaces)?;
         } else {
-            text.insert_str(0, &spaces);
+            append(&mut spaces, &text)?;
+            text = spaces;
         }
     }
     Ok((text, &fmt[i + c.len_utf8()..]))
@@ -739,7 +764,7 @@ pub unsafe extern "C" fn imre_logrecord_message(record: *const Object) -> *const
     // SAFETY: this only reads owned values from the live record.
     let result = unsafe { with_record(record, Record::message) };
     finish(
-        result.map(|s| Rc::into_raw(Rc::new(Str::from(s.as_str())))),
+        result.map(|s| Rc::into_raw(Rc::new(Str::from(s)))),
         std::ptr::null(),
     )
 }
