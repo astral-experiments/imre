@@ -524,6 +524,7 @@ struct CheckedFile<'db> {
 /// Only exclude the exact ty diagnostic already checked by native lowering.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum CheckedDiagnostic {
+    AbstractClassCall(TextRange),
     Decorator(TextRange),
     Call(TextRange),
     DictDeletion(TextRange),
@@ -533,11 +534,13 @@ pub(crate) enum CheckedDiagnostic {
     BuiltinImport(TextRange),
     ExcessArgument(TextRange),
     PositionalKeyword(TextRange),
+    RepeatedKeyword(TextRange),
 }
 
 impl CheckedDiagnostic {
     pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
         let (range, kind) = match self {
+            Self::AbstractClassCall(range) => (range, 9),
             Self::Decorator(range) => (range, 0),
             Self::Call(range) => (range, 1),
             Self::Keyword(range) => (range, 2),
@@ -547,18 +550,23 @@ impl CheckedDiagnostic {
             Self::BuiltinImport(range) => (range, 5),
             Self::ExcessArgument(range) => (range, 6),
             Self::PositionalKeyword(range) => (range, 7),
+            Self::RepeatedKeyword(range) => (range, 8),
         };
         (range.start(), range.end(), kind)
     }
 
     fn covers(self, diagnostic: &str, range: TextRange) -> bool {
         match self {
+            Self::AbstractClassCall(call) => diagnostic == "call-non-callable" && call == range,
             Self::Decorator(decorator) => {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
+            Self::RepeatedKeyword(keyword) => {
+                diagnostic == "parameter-already-assigned" && keyword == range
+            }
             Self::PositionalKeyword(keyword) => {
                 diagnostic == "positional-only-parameter-as-kwarg" && keyword == range
             }

@@ -10,6 +10,7 @@ use std::io;
 use std::rc::Rc;
 
 pub(super) mod links;
+pub(super) mod stat_result;
 
 /// Query the same POSIX metadata for Path views, fresh predicates, and metadata copies.
 pub(super) fn metadata(
