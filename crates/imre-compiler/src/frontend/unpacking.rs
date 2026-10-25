@@ -208,6 +208,19 @@ impl Checker<'_> {
                         ),
                     }));
                 }
+                if let Type::Class(class) = receiver.ty
+                    && self.classes.methods[class].contains_key("__setitem__")
+                {
+                    // Python evaluates the RHS, the receiver, then the index.
+                    let mut scope = calls::ArgumentScope::default();
+                    let value = scope.hold(self, value);
+                    let receiver = scope.hold(self, receiver);
+                    let key = self.expr(&subscript.slice)?;
+                    let key = scope.hold(self, key);
+                    let assigned =
+                        self.record_primitive(receiver, "__setitem__", &[key, value], target)?;
+                    return Ok(Statement::Expr(scope.finish(assigned)));
+                }
                 if matches!(receiver.ty, Type::Document(_)) {
                     if let ast::Expr::Slice(slice) = &*subscript.slice {
                         if slice.lower.is_some() || slice.upper.is_some() || slice.step.is_some() {
@@ -290,6 +303,13 @@ impl Checker<'_> {
                         vec![logging::number(mask), value],
                     )));
                 }
+                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen)) {
+                    let value = self.coerce(value, self.builtin_len().ty, target)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::BuiltinsSetLen, vec![value]),
+                    }));
+                }
                 if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
                     if !sys::displayable(value.ty) {
                         return Err(error(
@@ -341,6 +361,25 @@ impl Checker<'_> {
                         ),
                     }));
                 }
+                if matches!(receiver.ty, Type::CodecWriterClass | Type::CodecWriter) {
+                    let op = match (receiver.ty, attribute.attr.as_str()) {
+                        (_, "encoding") => ir::WriterOperation::SetEncoding,
+                        (Type::CodecWriter, "errors") => ir::WriterOperation::SetErrors,
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                target,
+                                "unsupported stream writer assignment",
+                            ));
+                        }
+                    };
+                    let value = self.coerce(value, Type::Str, target)?;
+                    return Ok(Statement::Expr(codecs::writer(
+                        op,
+                        Type::None,
+                        vec![value, receiver],
+                    )));
+                }
                 if receiver.ty == Type::Logger && attribute.attr.as_str() == "propagate" {
                     let value = self.coerce(value, Type::Bool, target)?;
                     // The RHS precedes evaluation of the assignment target.
@@ -354,6 +393,13 @@ impl Checker<'_> {
                 }
                 if receiver.ty == Type::LogFormatter {
                     return self.formatter_set(receiver, attribute, value);
+                }
+                if let Type::CmpKey(frame, true) = receiver.ty
+                    && attribute.attr.as_str() == "obj"
+                {
+                    let cell = self.cmp_field(receiver, frame, 1);
+                    let value = self.coerce(value, self.types.element(cell.ty).unwrap(), target)?;
+                    return Ok(Statement::SetItem(cell, pipelines::integer(0), value));
                 }
                 if let Type::SimpleNamespace(id) = receiver.ty {
                     let name = self.namespace_attr_name(attribute)?;

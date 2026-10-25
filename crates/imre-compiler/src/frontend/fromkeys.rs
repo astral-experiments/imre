@@ -139,10 +139,10 @@ impl Checker<'_> {
         if let Some(key) = hint {
             self.expect(key, key_type, source)?;
         }
-        let ty = self.types.dict(key_type, value.ty);
+        let result = self.fromkeys_target(receiver, key_type, value.ty);
+        let ty = result.ty;
         let kept = self.hidden(value.ty);
         let target = self.hidden(ty);
-        let result = self.fromkeys_target(receiver, key_type, value.ty);
         // Evaluate the iterable expression and the value before asking for the
         // iterator. A generator expression acquires its own outer iterator earlier.
         input.evaluate.push(Statement::Assign(kept, value));
@@ -176,7 +176,11 @@ impl Checker<'_> {
         };
         match receiver {
             Some(owner) => Expr {
-                ty,
+                ty: if self.types.is_ordered_dict(owner.ty) {
+                    self.types.ordered_dict(key, value)
+                } else {
+                    ty
+                },
                 kind: ExprKind::Builtin(Builtin::DictFromKeysTarget, vec![owner, empty]),
             },
             None => empty,

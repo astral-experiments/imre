@@ -5,6 +5,7 @@
 //! that the table can adjust when it removes vacant entries.
 
 use crate::StrOwner;
+use std::fmt::{self, Write};
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 use std::sync::LazyLock;
 
@@ -23,6 +24,19 @@ use super::words::{NULLABLE, OwnedWord, WordKind};
 use super::{Bytes, Int, List, Object, Storage, StorageCell, Str, fail, object};
 
 pub(super) type StringPairs = Vec<(StrOwner, StrOwner)>;
+
+struct CounterOutput<'a>(&'a mut String);
+
+impl fmt::Write for CounterOutput<'_> {
+    fn write_str(&mut self, value: &str) -> fmt::Result {
+        self.0
+            .try_reserve(value.len())
+            .or_else(|_| self.0.try_reserve_exact(value.len()))
+            .map_err(|_| fmt::Error)?;
+        self.0.push_str(value);
+        Ok(())
+    }
+}
 
 #[derive(Clone)]
 pub(super) struct IntKey(pub(super) Int);
@@ -151,7 +165,7 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) -> Result<()
                     5 => ObjectKey::borrow(word).hash(state),
                     6 => {
                         if index + 1 < layout.length {
-                            pending.try_reserve(1).map_err(|_| Error::allocation())?;
+                            pending.try_reserve(1).map_err(|_| Error::memory_error())?;
                             pending.push((value, index + 1));
                         }
                         current = (word as *const usize, 0);
@@ -1186,45 +1200,17 @@ impl Mapping {
         &self,
         output: &mut String,
         position: usize,
-    ) -> Option<super::values::ReprEntry> {
+    ) -> Result<Option<super::values::ReprEntry>, fmt::Error> {
         if self.missing == Missing::Zero {
-            output.push_str("Counter(");
-            if self.tables.len() != 0 {
-                let mut entries = Vec::with_capacity(self.tables.len());
-                self.tables.all(|key, count| {
-                    entries.push((key, count));
-                    true
-                });
-                // Stable sorting preserves first appearance for ties.
-                // SAFETY: the immutable table roots both exact integer counts.
-                entries.sort_by(|a, b| unsafe { crate::imre_int_compare(b.1, a.1) }.cmp(&0));
-                output.push('{');
-                for (index, (key, count)) in entries.into_iter().enumerate() {
-                    if index != 0 {
-                        output.push_str(", ");
-                    }
-                    // SAFETY: only immutable scalar keys and integer counts are supported.
-                    unsafe {
-                        super::values::write_repr(
-                            output,
-                            key,
-                            WordKind::new(self.tables.key_kind()),
-                        );
-                        output.push_str(": ");
-                        super::values::write_repr(output, count, self.value_kind);
-                    }
-                }
-                output.push('}');
-            }
-            output.push(')');
-            return None;
+            self.write_counter_repr(&mut CounterOutput(output))?;
+            return Ok(None);
         }
         if position == 0 {
             if self.order_version.is_some() {
                 output.push_str("OrderedDict(");
                 if self.tables.len() == 0 {
                     output.push(')');
-                    return None;
+                    return Ok(None);
                 }
             }
             match self.missing {
@@ -1241,16 +1227,54 @@ impl Mapping {
             {
                 output.push(')');
             }
-            return None;
+            return Ok(None);
         };
         if position != 0 {
             output.push_str(", ");
         }
-        Some(super::values::ReprEntry {
+        Ok(Some(super::values::ReprEntry {
             next,
             key: (key.word, key.kind),
             value: Some((value, self.value_kind)),
-        })
+        }))
+    }
+
+    fn write_counter_repr(&self, output: &mut impl Write) -> fmt::Result {
+        if self.tables.len() == 0 {
+            return output.write_str("Counter()");
+        }
+        let mut entries = Vec::new();
+        entries
+            .try_reserve_exact(self.tables.len())
+            .map_err(|_| fmt::Error)?;
+        self.tables.all(|key, count| {
+            entries.push((key, count, entries.len()));
+            true
+        });
+        // The ordinal preserves insertion order for ties without allocating sort scratch.
+        entries.sort_unstable_by(|a, b| {
+            // SAFETY: the immutable table roots both exact integer counts.
+            unsafe { crate::imre_int_compare(b.1, a.1) }
+                .cmp(&0)
+                .then_with(|| a.2.cmp(&b.2))
+        });
+        output.write_str("Counter({")?;
+        for (index, (key, count, _)) in entries.into_iter().enumerate() {
+            if index != 0 {
+                output.write_str(", ")?;
+            }
+            // SAFETY: a Counter roots its exact integer or string keys and integer counts.
+            unsafe {
+                if self.tables.key_kind() == 2 {
+                    super::values::write_int_repr(output, key)?;
+                } else {
+                    super::exceptions::write_string_repr(&*(key as *const Str), output)?;
+                }
+                output.write_str(": ")?;
+                super::values::write_int_repr(output, count)?;
+            }
+        }
+        output.write_str("})")
     }
 
     pub(super) fn new(key_kind: u32, value_kind: u32) -> Self {
@@ -1851,8 +1875,13 @@ pub unsafe extern "C" fn imre_dict_fromkeys_target(
     owner: *const Object,
     fresh: *const Object,
 ) -> *const Object {
-    // SAFETY: only the missing-key policy is copied out of the receiver's borrow.
-    let policy = unsafe { object(owner).0.with(|s| s.dictionary().missing) };
+    // SAFETY: only the receiver's class and missing-key policy leave its borrow.
+    let (policy, ordered) = unsafe {
+        object(owner).0.with(|storage| {
+            let source = storage.dictionary();
+            (source.missing, source.order_version.is_some())
+        })
+    };
     let missing = match policy {
         Missing::Zero => {
             return Error::new(
@@ -1866,9 +1895,11 @@ pub unsafe extern "C" fn imre_dict_fromkeys_target(
     };
     // SAFETY: the target is still private; the result needs its own strong reference.
     unsafe {
-        object(fresh)
-            .0
-            .with_mut(|s| s.dictionary_mut().missing = missing);
+        object(fresh).0.with_mut(|storage| {
+            let target = storage.dictionary_mut();
+            target.missing = missing;
+            target.order_version = ordered.then_some(0);
+        });
         crate::ObjectOwner::increment_strong_count(fresh);
     }
     fresh
@@ -2390,6 +2421,7 @@ pub unsafe extern "C" fn imre_dict_setdefault(
             if inserted {
                 mapping.value_kind.acquire(word).into_word();
                 mapping.update_ascii_int(key, word);
+                mapping.keys_changed();
             }
             Ok(mapping.value_kind.acquire(word).into_word())
         })
@@ -2906,6 +2938,43 @@ mod tests {
 
     fn integer(value: i64) -> usize {
         Int::small(value).unwrap().into_raw()
+    }
+
+    #[test]
+    fn counter_repr_propagates_writer_failures_and_preserves_ties() {
+        struct Budget(usize);
+        impl Write for Budget {
+            fn write_str(&mut self, text: &str) -> fmt::Result {
+                self.0 = self.0.checked_sub(text.len()).ok_or(fmt::Error)?;
+                Ok(())
+            }
+        }
+
+        // SAFETY: the counter owns its table; all keys and counts are immediate integers.
+        let counter = unsafe { crate::ObjectOwner::from_raw(imre_counter_new(2)) };
+        for (key, count) in [(2, 7), (-8, -4), (1, 7)] {
+            // SAFETY: the live counter owns exact immediate integer keys and counts.
+            unsafe {
+                imre_dict_set(
+                    crate::ObjectOwner::as_ptr(&counter),
+                    integer(key),
+                    integer(count),
+                )
+            };
+        }
+        // SAFETY: this shared borrow does not mutate the rooted counter.
+        unsafe {
+            counter.0.with(|storage| {
+                let mapping = storage.dictionary();
+                let expected = "Counter({2: 7, 1: 7, -8: -4})";
+                for budget in 0..expected.len() {
+                    assert!(mapping.write_counter_repr(&mut Budget(budget)).is_err());
+                }
+                let mut text = String::new();
+                mapping.write_counter_repr(&mut text).unwrap();
+                assert_eq!(text, expected);
+            })
+        };
     }
 
     #[test]

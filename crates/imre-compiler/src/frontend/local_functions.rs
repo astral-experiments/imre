@@ -70,6 +70,48 @@ fn reads_function_value(body: &[ast::Stmt], name: &str) -> bool {
     read.1
 }
 
+/// The parameter may have different layouts at different calls only if its body
+/// cannot observe the representation, including through a nested function.
+fn unread_parameter(def: &ast::StmtFunctionDef) -> bool {
+    let mut params = def.parameters.iter_non_variadic_params();
+    let Some(param) = params.next() else {
+        return false;
+    };
+    if def.is_async
+        || params.next().is_some()
+        || !def.parameters.kwonlyargs.is_empty()
+        || def.parameters.vararg.is_some()
+        || def.parameters.kwarg.is_some()
+        || param.annotation().is_some()
+        || param.default.is_some()
+    {
+        return false;
+    }
+    struct Use<'n>(&'n str, bool);
+    impl<'a> Visitor<'a> for Use<'_> {
+        fn visit_expr(&mut self, expr: &'a ast::Expr) {
+            match expr {
+                ast::Expr::Name(n)
+                    if n.id == self.0
+                        || matches!(n.id.as_str(), "locals" | "vars" | "eval" | "exec") =>
+                {
+                    self.1 = true
+                }
+                ast::Expr::Attribute(a)
+                    if matches!(a.attr.as_str(), "_getframe" | "currentframe" | "f_locals") =>
+                {
+                    self.1 = true
+                }
+                _ if !self.1 => walk_expr(self, expr),
+                _ => (),
+            }
+        }
+    }
+    let mut used = Use(param.name().as_str(), false);
+    used.visit_body(&def.body);
+    !used.1
+}
+
 impl Binding {
     /// A direct call reads its captured slots at call time. A generic local
     /// function can acquire its capture list when a later call specializes it.
@@ -262,10 +304,12 @@ impl Checker<'_> {
         } else {
             definition
         };
-        if definition
-            .parameters
-            .iter_non_variadic_params()
-            .any(|p| p.annotation().is_none())
+        let unread = unread_parameter(definition);
+        if !unread
+            && definition
+                .parameters
+                .iter_non_variadic_params()
+                .any(|p| p.annotation().is_none())
         {
             return Err(error(
                 self.source,
@@ -303,7 +347,7 @@ impl Checker<'_> {
         } else {
             definition
         };
-        let signature = signature(
+        let mut signature = signature(
             signature_def,
             self.graph,
             keyword_forwarding::Defaults::local(self.module),
@@ -312,6 +356,9 @@ impl Checker<'_> {
             None,
             &inference::Inference::default(),
         )?;
+        if unread {
+            signature.params[0].ty = self.types.unread_argument();
+        }
         let function = self.lift_local(
             if wraps.is_some() {
                 signature_def
@@ -592,6 +639,7 @@ impl Checker<'_> {
                 },
                 calls: helper.calls,
                 class_reads: helper.class_reads.into_inner(),
+                source_frame: true,
                 recursion_error: self.graph.modules[self.module]
                     .error(definition, "recursive local function calls are unsupported"),
             },

@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 use std::collections::VecDeque;
-use std::fmt::Write;
+use std::fmt::{self, Write};
 use std::io::IsTerminal;
 
 use icu_properties::props::{EnumeratedProperty, GeneralCategory, GeneralCategoryGroup};
@@ -259,39 +259,40 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
-fn usage_lines(
-    parts: &[(usize, impl AsRef<str>)],
-    indent: usize,
-    initial: usize,
-    width: usize,
-) -> String {
-    let mut output = String::new();
-    write_usage_lines(&mut output, parts, indent, initial, width, true);
-    output
-}
-
 fn write_usage_lines(
-    output: &mut String,
+    output: &mut impl Write,
     parts: &[(usize, impl AsRef<str>)],
     indent: usize,
     mut initial: usize,
     width: usize,
     mut first: bool,
-) {
+) -> fmt::Result {
     for &(length, ref part) in parts {
         if !first && initial + 1 + length > width {
-            output.push('\n');
-            output.extend(std::iter::repeat_n(' ', indent));
+            writeln!(output)?;
+            write!(output, "{:indent$}", "")?;
             initial = indent;
             first = true;
         }
         if !first {
             initial += 1;
-            output.push(' ');
+            output.write_char(' ')?;
         }
-        output.push_str(part.as_ref());
+        output.write_str(part.as_ref())?;
         initial += length;
         first = false;
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct ProgramPrefix(String);
+
+impl Write for ProgramPrefix {
+    fn write_str(&mut self, value: &str) -> fmt::Result {
+        self.0.try_reserve(value.len()).map_err(|_| fmt::Error)?;
+        self.0.push_str(value);
+        Ok(())
     }
 }
 
@@ -431,16 +432,20 @@ impl Parser {
         let width = width();
         let prog = if parts.len() == 1 {
             Cow::Borrowed(self.prog.as_str())
-        } else if parts.iter().map(|(length, _)| length + 1).sum::<usize>() - 1 > width
-            && len(&self.prog) * 4 > width.saturating_mul(3)
-        {
-            Cow::Owned(format!(
-                "{}\n{}",
-                self.prog,
-                usage_lines(&parts[1..], 0, 0, width)
-            ))
         } else {
-            Cow::Owned(usage_lines(&parts, len(&self.prog) + 1, 0, width))
+            let mut prefix = ProgramPrefix::default();
+            let (parts, indent) = if parts.iter().map(|(length, _)| length + 1).sum::<usize>() - 1
+                > width
+                && len(&self.prog) * 4 > width.saturating_mul(3)
+            {
+                writeln!(prefix, "{}", self.prog).map_err(|_| Error::allocation())?;
+                (&parts[1..], 0)
+            } else {
+                (&parts[..], len(&self.prog) + 1)
+            };
+            write_usage_lines(&mut prefix, parts, indent, 0, width, true)
+                .map_err(|_| Error::allocation())?;
+            Cow::Owned(prefix.0)
         };
         let prog = prog.trim_matches(python_whitespace);
         for child in &mut commands.choices {
@@ -517,19 +522,19 @@ impl Parser {
             let short_prog = prog_end * 4 <= 3 * width;
             let indent = if short_prog { prog_end + 1 } else { prefix };
             if short_prog {
-                write_usage_lines(&mut text, &parts, indent, prog_end, width, false);
+                write_usage_lines(&mut text, &parts, indent, prog_end, width, false).unwrap();
             } else {
                 text.push('\n');
                 text.extend(std::iter::repeat_n(' ', indent));
                 if prefix + width_of(&parts) + width_of(&positional) - 1 <= width {
                     parts.append(&mut positional);
                 }
-                write_usage_lines(&mut text, &parts, indent, indent, width, true);
+                write_usage_lines(&mut text, &parts, indent, indent, width, true).unwrap();
             }
             if !positional.is_empty() {
                 text.push('\n');
                 text.extend(std::iter::repeat_n(' ', indent));
-                write_usage_lines(&mut text, &positional, indent, indent, width, true);
+                write_usage_lines(&mut text, &positional, indent, indent, width, true).unwrap();
             }
         }
         text.push('\n');

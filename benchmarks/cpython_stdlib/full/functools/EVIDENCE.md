@@ -5,15 +5,15 @@ and includes every upstream ID at both optimization levels.
 
 ## Latest complete Linux measurement
 
-[Compiler and binary hashes](observations/737d2cb/source.json) identify the exact
-source used for both optimization levels. The C and Python variants of `test_lru_cache_parameters` now execute both parameter dictionary assertions in Imre. CPython runs the module, class,
+[Compiler and binary hashes](observations/8656b43/source.json) identify the exact
+source used for both optimization levels. The unchanged `TestSingleDispatch.test_simple_overloads` now registers and calls native implementations for a string, integer, and list and makes its three assertions in Imre. CPython runs the module, class,
 and instance hooks; the compiled child creates its own native test instance.
-Compare the [parent measurement](observations/a181ffc/evidence-linux.json) to check which individual occurrences changed.
+Compare the [parent measurement](observations/308a1e8/evidence-linux.json) to check which individual occurrences changed.
 
 | Unchanged suite | Occurrences | Fully native | Native body, host fixture | Host-driven native operation | Mixed | Failed | Blocked |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| [Primary](observations/737d2cb/evidence-linux.json) | 325 | 0 | 8 | 17 | 9 | 0 | 291 |
-| [Free-threading](observations/737d2cb/evidence-free-threading-linux.json) | 4 | 0 | 0 | 0 | 0 | 4 |
+| [Primary](observations/8656b43/evidence-linux.json) | 325 | 0 | 9 | 17 | 9 | 0 | 290 |
+| [Free-threading](observations/8656b43/evidence-free-threading-linux.json) | 4 | 0 | 0 | 0 | 0 | 4 |
 
 ## Canonical main at `56731b6`
 

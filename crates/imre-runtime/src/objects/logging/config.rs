@@ -444,16 +444,19 @@ fn ini<'a>(source: &'a str, filename: &str) -> Result<Sections<'a>> {
             .map(|(h, _)| h)
         {
             if sections.contains_key(header) {
-                return Err(ini_error(format_args!(
-                    "{filename} is invalid: While reading from {} [line {:2}]: section {} already exists",
-                    Quoted(filename),
-                    i + 1,
-                    Quoted(header)
-                )));
+                if header != "DEFAULT" {
+                    return Err(ini_error(format_args!(
+                        "{filename} is invalid: While reading from {} [line {:2}]: section {} already exists",
+                        Quoted(filename),
+                        i + 1,
+                        Quoted(header)
+                    )));
+                }
+            } else {
+                sections.try_reserve(1).map_err(|_| Error::allocation())?;
+                sections.insert(header, HashMap::new());
             }
-            sections.try_reserve(1).map_err(|_| Error::allocation())?;
             section = header;
-            sections.insert(section, HashMap::new());
             last = None;
             continue;
         }
@@ -668,4 +671,14 @@ fn ini_preserves_empty_lines_inside_multiline_values() {
     )
     .unwrap_or_else(|_| panic!("valid INI fixture should parse"));
     assert_eq!(sections["logger"]["name"].as_str(), "alpha\n\n\nbeta");
+}
+
+#[test]
+fn ini_allows_repeated_default_sections_with_distinct_options() {
+    let sections = ini("[DEFAULT]\nfirst=1\n[DEFAULT]\nsecond=2\n", "test.ini")
+        .unwrap_or_else(|_| panic!("valid INI fixture should parse"));
+    assert_eq!(sections["DEFAULT"]["first"].as_str(), "1");
+    assert_eq!(sections["DEFAULT"]["second"].as_str(), "2");
+    assert!(ini("[DEFAULT]\nkey=1\n[DEFAULT]\nkey=2\n", "test.ini").is_err());
+    assert!(ini("[logger]\n[logger]\n", "test.ini").is_err());
 }

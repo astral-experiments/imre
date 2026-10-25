@@ -52,6 +52,8 @@ pub(super) struct Helper {
     pub calls: HashSet<usize>,
     pub class_reads: HashSet<DefinitionId>,
     pub recursion_error: String,
+    /// Local functions and lambdas own frames; implementation helpers run in the caller.
+    pub source_frame: bool,
 }
 
 /// Source functions reserve the leading IDs; nested displays reserve an ID before
@@ -737,6 +739,7 @@ impl Checker<'_> {
                 },
                 calls: helper.calls,
                 class_reads: helper.class_reads.into_inner(),
+                source_frame: false,
                 recursion_error: self.graph.modules[self.module].error(
                     expression,
                     "recursive calls are unsupported in this prototype",

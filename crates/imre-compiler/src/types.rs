@@ -31,6 +31,9 @@ enum Shape {
     ModuleSpec(Vec<Type>),
     NamedTuple(TupleOrigin, Vec<Type>),
     PartialFrame(Vec<Type>),
+    LenFrame(Vec<Type>),
+    /// Only the class-name prefix is visible. The concrete record owns the argument.
+    UnreadArgument,
     VarTuple(Type),
     /// Display segments are fixed fields or repetitions of an item of known type.
     DisplayTuple(Vec<(Type, bool)>),
@@ -71,6 +74,7 @@ pub(crate) struct DispatchFunction {
     pub callable: Type,
     pub frame: Type,
     pub registry: Type,
+    pub metadata: Type,
 }
 
 /// A cache delegates annotation evaluation to the captured declaration.
@@ -188,8 +192,17 @@ impl Types {
             Type::Deque(id) => matches!(storage.shapes.get(id), Some(Shape::Deque(_))),
             Type::Tuple(id) => matches!(
                 storage.shapes.get(id),
-                Some(Shape::Tuple(_) | Shape::NamedTuple(..) | Shape::PartialFrame(_))
+                Some(
+                    Shape::Tuple(_)
+                        | Shape::NamedTuple(..)
+                        | Shape::PartialFrame(_)
+                        | Shape::LenFrame(_)
+                        | Shape::UnreadArgument
+                )
             ),
+            Type::CmpKey(id, bound) => {
+                matches!(storage.shapes.get(id), Some(Shape::PartialFrame(fields)) if fields.len() == if bound { 2 } else { 1 })
+            }
             Type::ForwardRef(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::Tuple(fields)) if fields.len() == 5)
             }
@@ -279,6 +292,8 @@ impl Types {
             | Type::CodecInfo
             | Type::Poll
             | Type::Socket
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -305,6 +320,8 @@ impl Types {
         for (id, shape) in storage.shapes.iter().enumerate() {
             let children: Vec<Type> = match shape {
                 Shape::StringLiterals(_) => Vec::new(),
+                Shape::LenFrame(prefix) => prefix.clone(),
+                Shape::UnreadArgument => vec![Type::Str],
                 Shape::DisplayTuple(parts) => parts.iter().map(|&(ty, _)| ty).collect(),
                 Shape::VarTuple(ty)
                 | Shape::Cursor(ty)
@@ -512,6 +529,9 @@ impl Types {
     }
 
     pub(crate) fn immutable_key_field(&self, ty: Type) -> bool {
+        if self.is_len_argument(ty) {
+            return false;
+        }
         if let Some(payload) = self.payload(ty) {
             return self.immutable_key_field(payload);
         }
@@ -529,6 +549,7 @@ impl Types {
             | Type::Socket
             | Type::None => true,
             Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
+            Type::Tuple(_) if self.is_unread_argument(ty) => false,
             Type::Tuple(_) => self
                 .fields(ty)
                 .unwrap()
@@ -741,6 +762,8 @@ impl Types {
             | Type::CodecInfo
             | Type::Poll
             | Type::Socket
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -865,8 +888,43 @@ impl Types {
         }
     }
 
+    /// A live len argument owns its concrete value after its class and hash diagnostic.
+    pub(crate) fn len_argument(&self) -> Type {
+        Type::Tuple(self.intern(Shape::LenFrame(vec![Type::Str, Type::Str, self.len_key()])))
+    }
+
+    /// The private immutable key starts with the class; its normalized value follows.
+    pub(crate) fn len_key(&self) -> Type {
+        Type::Tuple(self.intern(Shape::LenFrame(vec![Type::Str])))
+    }
+
+    pub(crate) fn is_len_argument(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(&self.0.borrow().shapes[id], Shape::LenFrame(prefix) if prefix.len() == 3))
+    }
+
+    /// Return only Python sequence fields; private callable frames expose ABI prefixes.
+    pub(crate) fn len_tuple_fields(&self, ty: Type) -> Option<Vec<Type>> {
+        let Type::Tuple(id) = ty else { return None };
+        match &self.0.borrow().shapes[id] {
+            Shape::Tuple(fields)
+            | Shape::NamedTuple(
+                TupleOrigin::StructSequence(..) | TupleOrigin::LibraryNamedTuple(..),
+                fields,
+            ) => Some(fields.clone()),
+            _ => None,
+        }
+    }
+
     pub(crate) fn tuple(&self, elements: Vec<Type>) -> Type {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
+    }
+
+    pub(crate) fn unread_argument(&self) -> Type {
+        Type::Tuple(self.intern(Shape::UnreadArgument))
+    }
+
+    pub(crate) fn is_unread_argument(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::UnreadArgument))
     }
 
     pub(crate) fn module_spec(&self, fields: Vec<Type>) -> Type {
@@ -1209,11 +1267,13 @@ impl Types {
     /// Only the dispatcher constructs this registry; source dictionaries cannot store callables.
     pub(crate) fn dispatch_callable(&self, callable: Type) -> Type {
         let registry = Type::Dict(self.intern(Shape::DispatchRegistry(callable)));
-        let frame = self.partial_frame(vec![callable, registry]);
+        let metadata = self.optional(self.tuple(vec![Type::Str, self.optional(Type::Str)]));
+        let frame = self.partial_frame(vec![callable, registry, metadata]);
         Type::Callable(self.intern(Shape::DispatchCallable(DispatchFunction {
             callable,
             frame,
             registry,
+            metadata,
         })))
     }
 
@@ -1350,6 +1410,8 @@ impl Types {
             return None;
         };
         match &self.0.borrow().shapes[id] {
+            Shape::LenFrame(prefix) => Some(prefix.clone()),
+            Shape::UnreadArgument => Some(vec![Type::Str]),
             Shape::Tuple(fields) | Shape::NamedTuple(_, fields) | Shape::PartialFrame(fields) => {
                 Some(fields.clone())
             }
@@ -1386,6 +1448,8 @@ impl Types {
             .iter()
             .enumerate()
             .filter_map(|(id, shape)| match shape {
+                Shape::LenFrame(prefix) => Some((Type::Tuple(id), prefix.clone())),
+                Shape::UnreadArgument => Some((Type::Tuple(id), vec![Type::Str])),
                 Shape::Tuple(fields)
                 | Shape::NamedTuple(_, fields)
                 | Shape::PartialFrame(fields) => Some((Type::Tuple(id), fields.clone())),
@@ -1433,6 +1497,8 @@ impl Types {
                 continue;
             }
             match ty {
+                // The opaque payload may own an observable resource through a container.
+                Type::Tuple(_) if self.is_unread_argument(ty) => return true,
                 Type::Cursor(_)
                 | Type::TextIO
                 | Type::StringIO
@@ -1466,7 +1532,7 @@ impl Types {
 
     /// Enumerates stored types for the class-field acyclicity check.
     pub(crate) fn children(&self, ty: Type) -> Vec<Type> {
-        if let Type::ForwardRef(id) | Type::AnnotationValue(id) = ty {
+        if let Type::ForwardRef(id) | Type::AnnotationValue(id) | Type::CmpKey(id, _) = ty {
             return self.fields(Type::Tuple(id)).unwrap();
         }
         if let Type::ModuleSpec(id) = ty {
@@ -1578,6 +1644,14 @@ impl TypeDescription<'_> {
                     write!(self, "{value:?}")?;
                 }
             }
+            Shape::LenFrame(prefix) => {
+                return self.write_str(if prefix.len() == 3 {
+                    "len argument"
+                } else {
+                    "len cache key"
+                });
+            }
+            Shape::UnreadArgument => return self.write_str("object"),
             Shape::ModuleSpec(_) => return self.write_str("importlib.machinery.ModuleSpec"),
             Shape::DeclaredCache(callable, _) => return self.write_type(*callable),
             Shape::ContextValue(value) => {
