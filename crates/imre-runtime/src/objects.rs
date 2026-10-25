@@ -72,6 +72,7 @@ enum Storage {
         text: paths::PathText,
         name: std::cell::OnceCell<Rc<Str>>,
     },
+    PurePath(Box<paths::PurePath>),
     PathIterator(Box<paths::PathIterator>),
     RegexPattern(Box<regexes::Pattern>),
     Logger(Rc<Str>),

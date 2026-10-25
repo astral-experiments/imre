@@ -601,7 +601,7 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::Repr, vec![value]),
             });
         }
-        if value.ty == Type::Path {
+        if value.ty.is_path() {
             return Ok(paths::operation(
                 ir::PathOperation::Text,
                 Type::Str,
