@@ -48,12 +48,12 @@ def controls(args, level, work, compile_run):
         cls = next(n for n in ast.parse(source).body if isinstance(n, ast.ClassDef) and n.name == "StringTemplateStyle")
         original = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "validate")
         assert b"".join(source.splitlines(keepends=True)[original.lineno-1:original.end_lineno]) == method
-    cases = (HERE / "template_differential.py").read_bytes()
-    expected = oracle(args, cases, work)
-    assert compile_run(args, level, cases, work) == expected, "Template behavior differs from CPython"
-    module = (HERE / "template_object_values.py").read_bytes()
-    module_expected = oracle(args, module, work)
-    assert compile_run(args, level, module, work) == module_expected, "shared Python object values differ"
+    observations = 0
+    for name in ("template_differential.py", "template_object_values.py", "template_exception_values.py"):
+        source = (HERE / name).read_bytes()
+        expected = oracle(args, source, work)
+        assert compile_run(args, level, source, work) == expected, f"{name} differs from CPython"
+        observations += len(expected.splitlines())
     logging = oracle(args, b"from logging import StringTemplateStyle as Style\n" + CHECK, work)
     assert compile_run(args, level, STYLE_FIXTURE + method + CHECK, work) == logging, "upstream logging validator differs"
     for name, (source, expected_error) in DIAGNOSTICS.items():
@@ -61,4 +61,4 @@ def controls(args, level, work, compile_run):
         path.write_text(source + "\n")
         r = subprocess.run([args.imre.resolve(), "check", path], capture_output=True, text=True, cwd=work)
         assert r.returncode and expected_error in r.stderr, (name, r.returncode, r.stderr)
-    return len(expected.splitlines()) + len(module_expected.splitlines()), len(logging.splitlines())
+    return observations, len(logging.splitlines())
