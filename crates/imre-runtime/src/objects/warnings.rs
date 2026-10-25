@@ -1,5 +1,6 @@
 //! Native warning filters for resource finalizers. Display and filtering do
 //! not run Python or interfere with the exception already being unwound.
+mod display;
 use super::{Error, Int, Kind, Str, exceptions, finish};
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive};

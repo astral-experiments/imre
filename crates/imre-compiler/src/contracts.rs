@@ -188,6 +188,8 @@ impl Builtin {
             Self::TimeSleep
             | Self::PercentScalar
             | Self::WarningFilter { .. }
+            | Self::WarningFormat { .. }
+            | Self::WarningWrite { .. }
             | Self::WarningReset => Contract::new(true, PreservesLists),
             Self::Formatter(_) => Contract::new(true, PreservesLists),
             Self::LogRecord(_) => Contract::new(true, PreservesLists),

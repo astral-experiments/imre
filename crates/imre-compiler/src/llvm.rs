@@ -1108,8 +1108,11 @@ impl Emitter<'_, '_> {
         self.instruction(format!("load i64, ptr {element}"))
     }
 
-    fn directory_pointer(&mut self, value: &Value) -> String {
-        if self.module.types.payload(value.ty).is_some() {
+    /// Convert an admitted optional object or literal None to a nullable runtime pointer.
+    fn optional_object_pointer(&mut self, value: &Value) -> String {
+        if value.ty == Type::None {
+            "null".into()
+        } else if self.module.types.payload(value.ty).is_some() {
             self.instruction(format!("inttoptr i64 {} to ptr", value.operand))
         } else {
             value.operand.clone()
@@ -1121,7 +1124,7 @@ impl Emitter<'_, '_> {
             self.module.types.payload(value.ty).unwrap_or(value.ty),
             Type::DirectoryContext(_)
         ) {
-            let pointer = self.directory_pointer(value);
+            let pointer = self.optional_object_pointer(value);
             let frame = self.instruction("load ptr, ptr %directory_frame");
             let prepared = self.instruction(format!(
                 "call ptr @imre_prepare_directory_frame(ptr {frame}, ptr {pointer}, i64 {})",
@@ -1787,7 +1790,7 @@ impl Emitter<'_, '_> {
         self.with_directory_frame(|out, frame| {
             for &slot in &directory_slots {
                 let value = out.borrow_slot(slot);
-                let pointer = out.directory_pointer(&value);
+                let pointer = out.optional_object_pointer(&value);
                 out.line(format!(
                     "call void @imre_error_frame_keep_directory(ptr {frame}, ptr {pointer})"
                 ));
@@ -4106,6 +4109,35 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
+            Builtin::WarningFormat { entry, environment } => {
+                let line = self.optional_object_pointer(&args[5].value);
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(*entry)));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_warning_format(ptr {}, ptr {}, ptr {}, ptr {}, i64 {}, ptr {line}, ptr {}, ptr {}, i32 {}, ptr @{layout})",
+                    args[0].value.operand, args[1].value.operand, args[2].value.operand,
+                    args[3].value.operand, args[4].value.operand, args[6].value.operand,
+                    args[7].value.operand, u32::from(*environment)));
+                Value {
+                    ty: Type::Str,
+                    operand,
+                    small_integer: false,
+                }
+            }
+            Builtin::WarningWrite { stdout } => {
+                let file = self.optional_object_pointer(&args[0].value);
+                self.checked_line(format!(
+                    "call void @imre_warning_write(ptr {file}, ptr {}, i32 {})",
+                    args[1].value.operand,
+                    u32::from(*stdout)
+                ));
+                Value {
+                    ty: Type::None,
+                    operand: "0".into(),
+                    small_integer: false,
+                }
+            }
             Builtin::WarningFilter { category, invalid } => {
                 let append = self.instruction(format!("zext i1 {} to i32", args[6].value.operand));
                 self.checked_line(format!(
@@ -7208,6 +7240,8 @@ declare i32 @imre_async_cancel(ptr)
 declare double @imre_wall_time()
 declare void @imre_warning_filter(ptr, ptr, ptr, ptr, ptr, i64, i32, i32, i32)
 declare void @imre_warning_reset()
+declare ptr @imre_warning_format(ptr, ptr, ptr, ptr, i64, ptr, ptr, ptr, i32, ptr)
+declare void @imre_warning_write(ptr, ptr, i32)
 declare void @imre_time_sleep(double)
 declare ptr @imre_str_percent_int(ptr,i64)
 declare ptr @imre_str_percent_text(ptr,ptr)
