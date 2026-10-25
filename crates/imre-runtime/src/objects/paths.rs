@@ -24,6 +24,12 @@ pub(super) use walking::Walker;
 #[derive(Clone)]
 pub(super) enum PathText {
     Flat(Rc<Str>),
+    /// Like pathlib's _from_parsed_string: str and filesystem calls keep the
+    /// supplied spelling, while name, parent and joins use parsed components.
+    Parsed {
+        spelling: Rc<Str>,
+        components: Rc<Str>,
+    },
     WithParent {
         text: Rc<Str>,
         parent: Weak<Str>,
@@ -49,7 +55,30 @@ enum Prefix {
 }
 
 impl PathText {
+    fn from_parsed_string(spelling: Str) -> Self {
+        if spelling.is_empty() {
+            Self::Flat(Rc::new(Str::from(".")))
+        } else if is_normalized(&spelling) {
+            Self::Flat(Rc::new(spelling))
+        } else {
+            Self::Parsed {
+                components: Rc::new(normalize(&spelling)),
+                spelling: Rc::new(spelling),
+            }
+        }
+    }
+
+    fn components(&self) -> &Rc<Str> {
+        match self {
+            Self::Parsed { components, .. } => components,
+            _ => self.spelling(),
+        }
+    }
+
     fn parent(&mut self) -> Rc<Str> {
+        if let Self::Parsed { components, .. } = self {
+            return Rc::new(Str::from(parent(components)));
+        }
         if let Self::WithParent { parent, .. } = self
             && let Some(shared) = parent.upgrade()
         {
@@ -71,6 +100,7 @@ impl PathText {
     fn cached(&self) -> Option<&Rc<Str>> {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => Some(text),
+            Self::Parsed { components, .. } => Some(components),
             Self::Joined { spelling, .. } => spelling.get(),
         }
     }
@@ -78,6 +108,7 @@ impl PathText {
     fn prefix(&self) -> Prefix {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => Prefix::Flat(Rc::clone(text)),
+            Self::Parsed { components, .. } => Prefix::Flat(Rc::clone(components)),
             Self::Joined { parts, spelling } => match spelling.get() {
                 Some(text) => Prefix::Flat(Rc::clone(text)),
                 None => Prefix::Joined(Rc::new(parts.clone())),
@@ -88,6 +119,7 @@ impl PathText {
     fn is_absolute(&self) -> bool {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => text.starts_with('/'),
+            Self::Parsed { components, .. } => components.starts_with('/'),
             Self::Joined { parts, .. } => parts.absolute,
         }
     }
@@ -95,6 +127,7 @@ impl PathText {
     fn spelling(&self) -> &Rc<Str> {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => text,
+            Self::Parsed { spelling, .. } => spelling,
             Self::Joined { parts, spelling } => spelling.get_or_init(|| parts.render()),
         }
     }
@@ -158,7 +191,7 @@ impl Storage {
     fn basename(&self) -> &str {
         match self {
             Self::PurePath(p) => p.basename(),
-            _ => name(self.path()),
+            _ => name(self.path_value().components()),
         }
     }
 
@@ -170,7 +203,7 @@ impl Storage {
             fail("SystemError", "expected a path object");
         };
         cached.get_or_init(|| {
-            let text = self.path_text();
+            let text = self.path_value().components();
             let component = name(text);
             if component.len() == text.len() {
                 Rc::clone(text)
@@ -184,6 +217,13 @@ impl Storage {
         match self {
             Self::PurePath(p) => &p.text,
             _ => self.path_value().spelling(),
+        }
+    }
+
+    fn component_text(&self) -> &Rc<Str> {
+        match self {
+            Self::PurePath(p) => &p.text,
+            _ => self.path_value().components(),
         }
     }
 
@@ -469,6 +509,9 @@ pub unsafe extern "C" fn imre_path_join(path: *const Object, child: *const Str) 
             let parent = storage.path_value();
             let child_text = &*child;
             if matches!(child_text.as_str(), "" | ".") {
+                if let PathText::Parsed { components, .. } = parent {
+                    return new_path(Rc::clone(components));
+                }
                 return path_with_text(parent.clone());
             }
             if let Some(base) = parent.cached()
@@ -523,7 +566,7 @@ pub unsafe extern "C" fn imre_path_count_part(path: *const Object, part: *const 
             if let Storage::PurePath(p) = storage {
                 return p.count_part(part);
             }
-            let path = storage.path();
+            let path = storage.component_text();
             let tail = path.trim_start_matches('/');
             let anchor = &path[..path.len() - tail.len()];
             usize::from(!anchor.is_empty() && part == anchor)
@@ -982,7 +1025,7 @@ impl PathIterator {
             IterationState::Exhausted => Ok(None),
         };
         match next {
-            Ok(Some(path)) => Ok(new_path(path)),
+            Ok(Some(path)) => Ok(path_with_text(PathText::from_parsed_string(path))),
             result => {
                 self.state = IterationState::Exhausted;
                 result.map(|_| std::ptr::null())

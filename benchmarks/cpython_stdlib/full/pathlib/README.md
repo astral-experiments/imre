@@ -84,6 +84,10 @@ drives the native cursors in the depth-limit and 100-open-cursor methods. The
 top-down and pruning methods also mutate or sort yielded name lists in CPython;
 the driver applies directory edits to the retained native list before resuming.
 These two are mixed. The callback-after-rename method is still reference only.
+The separate [walking matrix](walk_matrix.py) compares 216 combinations at each
+level, including edits that insert duplicate, absolute, empty, and dotted names.
+It checks each yielded path's spelling, logical parent, basename and equality,
+along with the order and contents of both yielded lists.
 
 | Execution at each of O0 and O3 | Occurrences |
 | --- | ---: |

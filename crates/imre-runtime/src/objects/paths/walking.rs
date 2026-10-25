@@ -7,7 +7,8 @@ use std::path::Path;
 use std::rc::Rc;
 
 use super::{
-    Error, Kind, Object, Result, Str, check_directory_path, directory_entries, new_path, object,
+    Error, Kind, Object, PathText, Result, Str, check_directory_path, directory_entries, object,
+    path_with_text,
 };
 use crate::objects::{OwnedWord, Words, itertools, records, words::WordKind};
 
@@ -140,7 +141,7 @@ impl Walker {
             if fields.is_null() {
                 return Err(Error::allocation());
             }
-            fields.write(new_path(path) as usize);
+            fields.write(path_with_text(PathText::from_parsed_string(path)) as usize);
             fields.add(1).write(Rc::into_raw(row.dirs) as usize);
             fields.add(2).write(Rc::into_raw(row.files) as usize);
             Ok(OwnedWord::from_owned(fields as usize, WordKind::new(6)))

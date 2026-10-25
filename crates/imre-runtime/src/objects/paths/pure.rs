@@ -353,7 +353,7 @@ impl Storage {
         match self {
             Self::PurePath(p) => (&p.drive, &p.root),
             _ => {
-                let p = self.path();
+                let p = self.component_text();
                 ("", &p[..p.len() - p.trim_start_matches('/').len()])
             }
         }

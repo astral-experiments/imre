@@ -62,3 +62,22 @@ held[1].append('b')
 print(str(next(source)[0]))
 print('|'.join(next(one)[1]))
 print(len(list(source)))
+
+raw_walk = root.walk()
+base, live, files = next(raw_walk)
+while live:
+    live.pop()
+live.append('a//.')
+live.append('')
+for here, dirs, files in raw_walk:
+    print(str(here))
+    print(here.name)
+    print(str(here.parent))
+    print(here == Path(str(here)))
+    print(str(here.joinpath()))
+    print(str(here / 'extra'))
+    print(str(here.with_name('other')))
+    print(here.match('a'))
+    print(here.full_match('walktree/a'))
+    while dirs:
+        dirs.pop()
