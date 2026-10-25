@@ -336,6 +336,12 @@ impl Builtin {
                 | ProcessOperation::IgnorePatterns
                 | ProcessOperation::TreeErrorArgs
                 | ProcessOperation::Copy(_)
+                | ProcessOperation::MakeArchive
+                | ProcessOperation::UnpackArchive
+                | ProcessOperation::ArchiveFormats { .. }
+                | ProcessOperation::UnregisterArchive(_)
+                | ProcessOperation::SetArchiveRoot(_)
+                | ProcessOperation::RegisterArchive { .. }
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)

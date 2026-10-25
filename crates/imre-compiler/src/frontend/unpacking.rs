@@ -293,6 +293,26 @@ impl Checker<'_> {
                         vec![value],
                     )));
                 }
+                if attribute.attr.as_str() == "supports_root_dir"
+                    && let Some(Binding::Definition(id)) = self.resolve(&attribute.value)
+                    && self.functions.contains_key(&id)
+                {
+                    if value.ty != Type::Bool {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "archive callback supports_root_dir requires a bool",
+                        ));
+                    }
+                    return Ok(Statement::Expr(builtin(
+                        Type::None,
+                        Builtin::Process(ir::ProcessOperation::SetArchiveRoot((
+                            id.module,
+                            id.statement,
+                        ))),
+                        vec![value],
+                    )));
+                }
                 if let Some(Binding::Intrinsic(Intrinsic::LogRecordFlag(mask))) =
                     self.resolve(target)
                 {

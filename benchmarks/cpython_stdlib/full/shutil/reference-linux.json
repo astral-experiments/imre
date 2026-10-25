@@ -29,9 +29,7 @@
     "test.test_shutil.TestArchives.test_unpack_archive_xztar": "pass",
     "test.test_shutil.TestArchives.test_unpack_archive_zip": "pass",
     "test.test_shutil.TestArchives.test_unpack_archive_zip_badpaths": "pass",
-    "test.test_shutil.TestArchives.test_unpack_archive_zstdtar": {
-      "skipped": "requires zstd"
-    },
+    "test.test_shutil.TestArchives.test_unpack_archive_zstdtar": "pass",
     "test.test_shutil.TestArchives.test_unpack_registry": "pass",
     "test.test_shutil.TestArchives.test_unzip_zipfile": "pass",
     "test.test_shutil.TestArchives.test_zipfile_vs_zip": "pass",

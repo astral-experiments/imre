@@ -399,6 +399,7 @@ fn emit_program(
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
+        archive_root_flags: std::collections::BTreeSet::new(),
         enum_members: Vec::new(),
         literal_globals: literal_globals(module),
         next_value: 0,
@@ -466,6 +467,15 @@ fn emit_program(
             .output
             .common()
             .push_str("declare ptr @imre_str_percent_tuple(ptr,ptr)\n");
+    }
+    for name in &emitter.archive_root_flags {
+        writeln!(
+            emitter
+                .output
+                .global(emitter.output.entry, name, "global", "i8"),
+            "0, align 1"
+        )
+        .unwrap();
     }
     if !extension_modules.is_empty() {
         let output = emitter.output.common();
@@ -605,6 +615,7 @@ struct Emitter<'a, 'module> {
     regex_literals: BTreeMap<Vec<u8>, usize>,
     bytes_literals: BTreeMap<Vec<u8>, usize>,
     integer_literals: BTreeMap<Vec<u8>, usize>,
+    archive_root_flags: std::collections::BTreeSet<String>,
     enum_members: Vec<[usize; 3]>,
     literal_globals: Vec<Option<String>>,
     next_value: usize,
@@ -8523,6 +8534,12 @@ declare i32 @imre_shutil_destinsrc(ptr, i32, ptr, i32)
 declare i8 @imre_shutil_noncallable(ptr, ptr, ptr)
 declare ptr @imre_shutil_tree_error_args(ptr, ptr)
 declare ptr @imre_shutil_ignore_patterns_call(ptr, ptr, ptr)
+declare ptr @imre_shutil_make_archive(ptr, i32, ptr, i64, i64, i64, i32, i64, i64)
+declare void @imre_shutil_unpack_archive(ptr, i64, i64, i64)
+declare ptr @imre_shutil_archive_formats(i32, ptr)
+declare void @imre_shutil_unregister_archive(ptr, i32)
+declare void @imre_shutil_register_unpack(ptr, ptr, ptr, i64, i32, ptr, ptr, ptr, ptr, i32, i32)
+declare void @imre_shutil_register_pack(ptr, i64, i32, i64, i32, ptr, ptr, ptr, ptr, ptr, i32, i32)
 declare void @imre_os_unlink(ptr, i32, i64, i32)
 declare void @imre_subprocess_check(ptr)
 declare i64 @imre_subprocess_error_field(ptr, i32)

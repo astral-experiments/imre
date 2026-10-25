@@ -108,6 +108,14 @@ pub(crate) enum Kind {
     Warning = 80,
     RuntimeWarning = 81,
     DeprecationWarning = 82,
+    ShutilReadError = 100,
+    ShutilRegistryError = 101,
+    TarError = 102,
+    TarFilterError = 103,
+    TarOutsideDestinationError = 104,
+    TarSpecialFileError = 105,
+    TarAbsoluteLinkError = 106,
+    TarLinkOutsideDestinationError = 107,
 }
 
 impl Kind {
@@ -178,6 +186,14 @@ impl Kind {
             80 => Self::Warning,
             81 => Self::RuntimeWarning,
             82 => Self::DeprecationWarning,
+            100 => Self::ShutilReadError,
+            101 => Self::ShutilRegistryError,
+            102 => Self::TarError,
+            103 => Self::TarFilterError,
+            104 => Self::TarOutsideDestinationError,
+            105 => Self::TarSpecialFileError,
+            106 => Self::TarAbsoluteLinkError,
+            107 => Self::TarLinkOutsideDestinationError,
             _ => return None,
         })
     }
@@ -245,6 +261,14 @@ impl Kind {
             Self::RuntimeWarning => "RuntimeWarning",
             Self::DeprecationWarning => "DeprecationWarning",
             Self::UnidiffParseError => "UnidiffParseError",
+            Self::ShutilReadError => "ReadError",
+            Self::ShutilRegistryError => "RegistryError",
+            Self::TarError => "TarError",
+            Self::TarFilterError => "FilterError",
+            Self::TarOutsideDestinationError => "OutsideDestinationError",
+            Self::TarSpecialFileError => "SpecialFileError",
+            Self::TarAbsoluteLinkError => "AbsoluteLinkError",
+            Self::TarLinkOutsideDestinationError => "LinkOutsideDestinationError",
         }
     }
 
@@ -301,6 +325,15 @@ impl Kind {
                     | Self::ConnectionRefusedError
                     | Self::ConnectionResetError
             ),
+            Self::TarError => self == Self::TarError || self.matches(Self::TarFilterError),
+            Self::TarFilterError => matches!(
+                self,
+                Self::TarFilterError
+                    | Self::TarOutsideDestinationError
+                    | Self::TarSpecialFileError
+                    | Self::TarAbsoluteLinkError
+                    | Self::TarLinkOutsideDestinationError
+            ),
             Self::OSError => matches!(
                 self,
                 Self::OSError
@@ -323,6 +356,7 @@ impl Kind {
                     | Self::ShutilError
                     | Self::SameFileError
                     | Self::SpecialFileError
+                    | Self::ShutilReadError
             ),
             _ => self == expected,
         }

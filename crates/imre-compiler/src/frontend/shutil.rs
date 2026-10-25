@@ -2,7 +2,138 @@
 
 use super::*;
 
+mod registry;
+
 impl Checker<'_> {
+    pub(super) fn shutil_archive_formats(
+        &mut self,
+        call: &ast::ExprCall,
+        unpack: bool,
+    ) -> Result<Expr, String> {
+        self.arguments(call, &[], None)?;
+        let mut fields = vec![Type::Str];
+        if unpack {
+            fields.push(self.types.list(Type::Str));
+        }
+        fields.push(Type::Str);
+        let row = self.types.tuple(fields);
+        Ok(Expr {
+            ty: self.types.list(row),
+            kind: ExprKind::Builtin(
+                Builtin::Process(ir::ProcessOperation::ArchiveFormats { unpack, row }),
+                vec![],
+            ),
+        })
+    }
+
+    /// Preserve argument evaluation order before the archive library opens any path.
+    pub(super) fn shutil_archive(
+        &mut self,
+        call: &ast::ExprCall,
+        create: bool,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let opt = self.types.optional(Type::Str);
+        let none = Expr {
+            ty: Type::None,
+            kind: ExprKind::None,
+        };
+        let absent = self.coerce(none.clone(), opt, call)?;
+        let zero = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Int("0".into()),
+        };
+        let (operation, returns, specs) = if create {
+            (
+                ir::ProcessOperation::MakeArchive,
+                Type::Str,
+                vec![
+                    ("base_name", Type::Str, None),
+                    ("format", Type::Str, None),
+                    ("root_dir", opt, Some(absent.clone())),
+                    ("base_dir", opt, Some(absent.clone())),
+                    ("verbose", Type::Int, Some(zero.clone())),
+                    ("dry_run", Type::Int, Some(zero)),
+                    ("owner", opt, Some(absent.clone())),
+                    ("group", opt, Some(absent)),
+                    ("logger", Type::None, Some(none)),
+                ],
+            )
+        } else {
+            (
+                ir::ProcessOperation::UnpackArchive,
+                Type::None,
+                vec![
+                    ("filename", Type::Str, None),
+                    ("extract_dir", opt, Some(absent.clone())),
+                    ("format", opt, Some(absent.clone())),
+                    ("filter", opt, Some(absent)),
+                ],
+            )
+        };
+        let params: Vec<_> = specs
+            .into_iter()
+            .map(|(name, ty, default)| Parameter {
+                name: name.into(),
+                ty,
+                default,
+                sign_only: false,
+                kind: if name == "filter" {
+                    ParameterKind::KeywordOnly
+                } else {
+                    ParameterKind::PositionalOrKeyword
+                },
+            })
+            .collect();
+        let args = self.arguments_with(call, &params, None, |checker, i, expr| {
+            if i == 0 && create {
+                let v = checker.expr(expr)?;
+                if matches!(v.ty, Type::Path | Type::PurePath(_)) {
+                    return Ok(v);
+                }
+                return checker.path_text(v, expr);
+            }
+            if i == 0 {
+                let v = checker.expr(expr)?;
+                return checker.path_text(v, expr);
+            }
+            if (create && matches!(i, 2 | 3)) || (!create && i == 1) {
+                let v = checker.expr(expr)?;
+                if create && i == 2 {
+                    let ty = checker.types.payload(v.ty).unwrap_or(v.ty);
+                    if ty.is_path()
+                        || checker.types.members(ty).is_some_and(|members| {
+                            members
+                                .iter()
+                                .all(|ty| matches!(ty, Type::Str | Type::Path))
+                        })
+                    {
+                        return Ok(v);
+                    }
+                }
+                let v = if v.ty == Type::None || v.ty == opt {
+                    v
+                } else {
+                    checker.path_text(v, expr)?
+                };
+                return checker.coerce(v, opt, expr);
+            }
+            if create && i == 5 {
+                let value = checker.expr(expr)?;
+                if matches!(value.ty, Type::Int | Type::Bool) {
+                    return Ok(value);
+                }
+                return Err(error(
+                    checker.source,
+                    expr,
+                    "make_archive dry_run requires a native integer or boolean",
+                ));
+            }
+            checker.expr_expected(expr, params[i].ty)
+        })?;
+        Ok(self.ordered_builtin(Builtin::Process(operation), returns, args))
+    }
+
     /// Emit a native function value with the same ownership and indirect-call ABI as a def.
     fn shutil_helper(
         &mut self,

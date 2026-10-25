@@ -16,6 +16,13 @@ fn shutil_tag(ty: Type) -> u32 {
 }
 
 impl Emitter<'_, '_> {
+    /// A declaration and all its registrations refer to the same live flag across codegen units.
+    fn archive_root_ref(&mut self, (module, statement): (usize, usize)) -> String {
+        let name = format!("archive_root_{module}_{statement}");
+        self.archive_root_flags.insert(name.clone());
+        self.output.global_ref(name)
+    }
+
     /// Keep the callee, bound context, return ownership, and parameter ABI together.
     fn shutil_copier(&mut self, copy: &Operand) -> (String, String, String, u32, u32) {
         if copy.value.ty == Type::Str {
@@ -726,6 +733,128 @@ impl Emitter<'_, '_> {
                 }
             }
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
+            ProcessOperation::ArchiveFormats { unpack, row } => {
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(row)));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_shutil_archive_formats(i32 {}, ptr @{layout})",
+                    u32::from(unpack)
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::UnregisterArchive(unpack) => {
+                self.checked_line(format!(
+                    "call void @imre_shutil_unregister_archive(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(unpack)
+                ));
+                none()
+            }
+            ProcessOperation::SetArchiveRoot(id) => {
+                let flag = self.archive_root_ref(id);
+                let value = self.instruction(format!("zext i1 {} to i8", args[0].value.operand));
+                self.line(format!(
+                    "store atomic i8 {value}, ptr @{flag} monotonic, align 1"
+                ));
+                none()
+            }
+            ProcessOperation::RegisterArchive {
+                unpack,
+                frame,
+                keyword_value,
+                variadic_value,
+                root_flag,
+            } => {
+                let positional_kind = variadic_value
+                    .map_or(u32::MAX, |ty| representation_kind(ty, &self.module.types));
+                let rest_kind = keyword_value
+                    .map_or(u32::MAX, |ty| representation_kind(ty, &self.module.types));
+                let [name, exts, function, extras, description, adapter, metadata] = args else {
+                    unreachable!()
+                };
+                let (target, function, layout, metadata) = if let Some(frame) = frame {
+                    let target =
+                        self.instruction(format!("load ptr, ptr {}", adapter.value.operand));
+                    let layout = self
+                        .output
+                        .global_ref(format!("layout_{}", record_name(frame)));
+                    (
+                        target,
+                        function.value.operand.as_str(),
+                        format!("@{layout}"),
+                        metadata.value.operand.as_str(),
+                    )
+                } else {
+                    ("null".into(), "null", "null".into(), "null")
+                };
+                let word = self.word(&extras.value);
+                let kind = representation_kind(extras.value.ty, &self.module.types)
+                    | if self
+                        .module
+                        .types
+                        .mapping(extras.value.ty)
+                        .is_some_and(|(key, _)| key != Type::Str)
+                    {
+                        0x10000
+                    } else {
+                        0
+                    };
+                if unpack {
+                    self.checked_line(format!("call void @imre_shutil_register_unpack(ptr {}, ptr {}, ptr {function}, i64 {word}, i32 {kind}, ptr {}, ptr {target}, ptr {layout}, ptr {metadata}, i32 {rest_kind}, i32 {positional_kind})", name.value.operand, exts.value.operand, description.value.operand));
+                } else {
+                    let func = &args[2].value;
+                    let func_kind = representation_kind(func.ty, &self.module.types);
+                    let func_word = self.word(func);
+                    let root = root_flag.map_or_else(
+                        || "null".to_owned(),
+                        |id| format!("@{}", self.archive_root_ref(id)),
+                    );
+                    self.checked_line(format!("call void @imre_shutil_register_pack(ptr {}, i64 {func_word}, i32 {func_kind}, i64 {word}, i32 {kind}, ptr {}, ptr {target}, ptr {layout}, ptr {metadata}, ptr {root}, i32 {rest_kind}, i32 {positional_kind})",name.value.operand,description.value.operand));
+                }
+                none()
+            }
+            ProcessOperation::MakeArchive => {
+                let root_ty = self
+                    .module
+                    .types
+                    .payload(args[2].value.ty)
+                    .unwrap_or(args[2].value.ty);
+                let root_kind = if root_ty.is_path() {
+                    1
+                } else if matches!(root_ty, Type::Union(_)) {
+                    2
+                } else {
+                    0
+                };
+                let flags = u8::from(args[0].value.ty != Type::Str) | (root_kind << 1);
+                let root = self.word(&args[2].value);
+                let val = |i: usize| &args[i].value.operand;
+                let dry_value = &args[5].value;
+                let dry = self.word(dry_value);
+                let dry_kind = representation_kind(dry_value.ty, &self.module.types);
+                let operand = self.checked_instruction(format!("call ptr @imre_shutil_make_archive(ptr {}, i32 {flags}, ptr {}, i64 {root}, i64 {}, i64 {dry}, i32 {dry_kind}, i64 {}, i64 {})", val(0), val(1), val(3), val(6), val(7)));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::UnpackArchive => {
+                let val = |i: usize| &args[i].value.operand;
+                self.checked_line(format!(
+                    "call void @imre_shutil_unpack_archive(ptr {}, i64 {}, i64 {}, i64 {})",
+                    val(0),
+                    val(1),
+                    val(2),
+                    val(3)
+                ));
+                none()
+            }
             ProcessOperation::RmTree => {
                 let [path, ignore, _, _, fd] = args else {
                     unreachable!()

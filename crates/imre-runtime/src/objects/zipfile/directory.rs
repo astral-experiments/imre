@@ -95,7 +95,7 @@ fn directory_bounds(
 }
 
 /// Read the usual fixed trailer first. With a comment, search at most its 64 KiB limit.
-fn find_directory(reader: &mut (impl Read + Seek)) -> Result<(u64, u64, i128)> {
+pub(super) fn find_directory(reader: &mut (impl Read + Seek)) -> Result<(u64, u64, i128)> {
     let length = reader.seek(SeekFrom::End(0)).map_err(|_| not_zip())?;
     let position = length.checked_sub(22).ok_or_else(not_zip)?;
     let mut end = [0; 22];

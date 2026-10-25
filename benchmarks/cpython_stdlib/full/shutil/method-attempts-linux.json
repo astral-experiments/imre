@@ -1,8 +1,8 @@
 {
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
-  "compiler_sha256": "453b92d988a996ddc9c4e956174bdad8ca9e3c84b0066cd43a920b25f794b3e9",
-  "compiler_tree": "aeb787b3d67616a86cfc3a4e7ff2524614381187",
-  "runtime_sha256": "167ab5e7b460b45ef69e9c1cc37d11eccb62326f01107bb0680446e44be9f358",
+  "compiler_sha256": "0aa584a9b0d17f1c82963c3754d9a005c89db6494d2297625ef1c9ff18b5ad04",
+  "compiler_tree": "aa9cdee42fa02f88f14dcebbdbe06f972bdeb660",
+  "runtime_sha256": "c8ba14a4e6f24784970b5ddef0680524c39c31d7bda2ec93218292935da718fb",
   "fixture_manifest_sha256": "eb43d0c33580d4a45ffa369afd186b3243f9bf38b15f80fbee02b50254f4bdd9",
   "schema": "imre.shutil-method-attempts.v1",
   "denominator": 223,
@@ -16,7 +16,7 @@
         "decorated_sha256": "1778d18891bc9eabfaa04a6820e896672ddf2765fe960a8ca5457dfbbf54d1c4",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:8:9: Imre: unknown class method",
+        "reason": "case.py:8:28: Imre: name is not a local value; globals and first-class functions are unsupported",
         "opt_levels": [
           0,
           3
@@ -30,8 +30,8 @@
         "method_sha256": "2eca05a3f702f40069ff5eae04b355157beae6a7b1f5008ae3b77f2f3e5220d3",
         "decorated_sha256": "2eca05a3f702f40069ff5eae04b355157beae6a7b1f5008ae3b77f2f3e5220d3",
         "decorators": [],
-        "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "status": "body-completed",
+        "fixture": "original CPython module, class and instance fixtures; native child",
         "opt_levels": [
           0,
           3
@@ -46,7 +46,7 @@
         "decorated_sha256": "262cc11ec324c881183575fe2b52a325647d8302cde33f371718d52ff28c26aa",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -61,7 +61,7 @@
         "decorated_sha256": "ac7e5c6435938403b746bba7767d7ef4a6c3a51973f966ded5391c840aa15f62",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:7:12: Imre: name is not a local value; globals and first-class functions are unsupported",
         "opt_levels": [
           0,
           3
@@ -76,7 +76,7 @@
         "decorated_sha256": "e474716fb289109620631d62740f32228cad36e87ad903f2283f1d8157948159",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:4:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -93,7 +93,7 @@
           "support.requires_zlib()"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -110,7 +110,7 @@
           "support.requires_zlib()"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:4:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -125,7 +125,7 @@
         "decorated_sha256": "06ad77f4c34efb7202198e08917dcc5a84d59fb7357d4af5a74918c65fc5cad1",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:4:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -140,7 +140,7 @@
         "decorated_sha256": "426a75b2674c841ac71fec02618b3692fa1461b32e1d15ed5bbeb75d80e86864",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -155,7 +155,7 @@
         "decorated_sha256": "97c672ef70edc4e9fbcc02efdcb050976f4d0f8463871e687affb8056aaa1a95",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:4:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -172,7 +172,7 @@
           "support.requires_zlib()"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:4:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -189,7 +189,7 @@
           "support.requires_zlib()"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:4:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -206,7 +206,7 @@
           "support.requires_zlib()"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:4:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -223,7 +223,7 @@
           "support.requires_zlib()"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -240,7 +240,7 @@
           "support.requires_zlib()"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:4:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -257,7 +257,7 @@
           "support.requires_zlib()"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:4:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -272,7 +272,7 @@
         "decorated_sha256": "883209aa283874017b2b167dab97a7f1070881adaa8bb1e539023bb3555a70e2",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: unsupported sealed standard-library export shutil.register_archive_format",
+        "reason": "case.py:11:78: Imre: name is not a local value; globals and first-class functions are unsupported",
         "opt_levels": [
           0,
           3
@@ -290,7 +290,7 @@
           "unittest.skipUnless(UID_GID_SUPPORT, 'Requires grp and pwd support')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:4:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -308,7 +308,7 @@
           "unittest.skipUnless(shutil.which('tar'), 'Need the tar command to run')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:4:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -325,7 +325,7 @@
           "support.requires_bz2()"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -342,7 +342,7 @@
           "support.requires_zlib()"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -357,7 +357,7 @@
         "decorated_sha256": "99076c28a28e7402ea3191e55b97edc24c2d5325baded48df73e582ba51fdd0f",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -375,7 +375,7 @@
           "unittest.skipIf(AIX and (not _maxdataOK()), 'AIX MAXDATA must be 0x20000000 or larger')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -392,7 +392,7 @@
           "support.requires_zlib()"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -407,7 +407,7 @@
         "decorated_sha256": "c53458c3f724c8fd60baa83c1b6fe5c7279df3589f9376ee941dc4e26dcc2a5d",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -432,7 +432,7 @@
         "decorated_sha256": "ea2962d207e971d5e6b8d76c5375eeb8298742ef723f75fa812ea52563a14ad5",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: unsupported sealed standard-library export shutil.get_unpack_formats",
+        "reason": "case.py:14:9: Imre: local functions require annotated parameters and return types",
         "opt_levels": [
           0,
           3
@@ -450,7 +450,7 @@
           "unittest.skipUnless(shutil.which('unzip'), 'Need the unzip command to run')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:4:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -468,7 +468,7 @@
           "unittest.skipUnless(shutil.which('zip'), 'Need the zip command to run')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:4:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -483,7 +483,7 @@
         "decorated_sha256": "5f9b2d555cfa3b45d519c801e6048a5c5c7933b1235e992f9087e439030b87e8",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -500,7 +500,7 @@
           "unittest.skipUnless(hasattr(os, 'utime'), 'requires os.utime')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -532,7 +532,7 @@
           "os_helper.skip_unless_symlink"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -589,7 +589,7 @@
           "os_helper.skip_unless_symlink"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -640,7 +640,7 @@
           "unittest.skipIf(AIX, 'Not valid on AIX, see gh-92670')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -669,8 +669,8 @@
         "method_sha256": "d36c4fda6ce4f21002e063a668eb4cfb8fcdb46cf46ce601ceea208449c8837f",
         "decorated_sha256": "d36c4fda6ce4f21002e063a668eb4cfb8fcdb46cf46ce601ceea208449c8837f",
         "decorators": [],
-        "status": "compile-blocked",
-        "reason": "case.py:30:9: Imre: unknown class method",
+        "status": "body-completed",
+        "fixture": "original CPython module, class and instance fixtures; native child",
         "opt_levels": [
           0,
           3
@@ -687,7 +687,7 @@
           "os_helper.skip_unless_symlink"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -704,7 +704,7 @@
           "os_helper.skip_unless_symlink"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -732,7 +732,7 @@
           "os_helper.skip_unless_symlink"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -759,7 +759,7 @@
           "os_helper.skip_unless_symlink"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -813,7 +813,7 @@
           "os_helper.skip_unless_symlink"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -830,7 +830,7 @@
           "unittest.skipIf(MACOS, 'skipped on macOS')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported",
         "opt_levels": [
           0,
           3
@@ -847,7 +847,7 @@
           "unittest.skipIf(MACOS, 'skipped on macOS')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported",
         "opt_levels": [
           0,
           3
@@ -864,7 +864,7 @@
           "unittest.skipIf(MACOS, 'skipped on macOS')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported",
         "opt_levels": [
           0,
           3
@@ -879,7 +879,7 @@
         "decorated_sha256": "846ea9f6122bc28b6073e2fed5469ae446f4c27ce49d878dcc79c947a8b8e790",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported",
         "opt_levels": [
           0,
           3
@@ -949,7 +949,7 @@
         "decorated_sha256": "4cd749bf988c669e8940d6fff2a669a07fcf4f240bfc6cab576b77ab7d8583b1",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -964,7 +964,7 @@
         "decorated_sha256": "199df0df5fed05e6df5256e00b9f95886c2062adc265d54690bf88cc33a20d5b",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -981,7 +981,7 @@
           "os_helper.skip_unless_symlink"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -996,7 +996,7 @@
         "decorated_sha256": "f270ab7a3ee1da5b17023ff19c1a984ec659721393904ac261472b758bec5c15",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1015,7 +1015,7 @@
           "unittest.skipIf(sys.platform == 'vxworks', 'fifo requires special path on VxWorks')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1030,7 +1030,7 @@
         "decorated_sha256": "8f216dbbb18a619293f06127e5ca7c434f2a882d2d6f2ea275f4e66abc881d2f",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1060,7 +1060,7 @@
         "decorated_sha256": "db3b1a30939bc476836d849ed3d2f2562f9179ec4c2fb5bf0c4863227f1d8b50",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1075,7 +1075,7 @@
         "decorated_sha256": "a416e9ed1269ea51ea183653b156c18b99ca159257f7496b8164ae81ecebc6a4",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1107,7 +1107,7 @@
           "os_helper.skip_unless_symlink"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1124,7 +1124,7 @@
           "os_helper.skip_unless_symlink"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1141,7 +1141,7 @@
           "unittest.mock.patch('os.chmod')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:4:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1156,7 +1156,7 @@
         "decorated_sha256": "6942b2d1c323ab50798bc987a6d03155eef1de678d8a637d35b9e81f63c98532",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1171,7 +1171,7 @@
         "decorated_sha256": "8b256f2cbdb5ae01623239937ec7ee916f4720f6876dc16e374fb6944c9c0d23",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1203,7 +1203,7 @@
           "unittest.skipIf(support.is_wasi, 'WASI has no /dev/null')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1218,7 +1218,7 @@
         "decorated_sha256": "46edc670e7e0f6f13ca6e214f33845cc2e1ccaee6380bf41f0d3edf6d9c164f2",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1246,7 +1246,7 @@
           "unittest.skipUnless(hasattr(os, 'chown'), 'requires os.chown')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1278,7 +1278,7 @@
         "decorated_sha256": "f6184f9424a7a6260dd1d27869917181bcbd790baeaa40834c06ab963cbd3e86",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1293,7 +1293,7 @@
         "decorated_sha256": "fd110d8299763a4bfc8e312dd8124e203f1fee51eef85e94d62284bc34d756d1",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1307,8 +1307,8 @@
         "method_sha256": "1820efba7e67dd94e659da8a4402d72b11cf513b4204c5482f913b0c572e7e5f",
         "decorated_sha256": "1820efba7e67dd94e659da8a4402d72b11cf513b4204c5482f913b0c572e7e5f",
         "decorators": [],
-        "status": "compile-blocked",
-        "reason": "case.py:14:9: Imre: unknown class method",
+        "status": "body-completed",
+        "fixture": "original CPython module, class and instance fixtures; native child",
         "opt_levels": [
           0,
           3
@@ -1356,7 +1356,7 @@
           "mock_rename"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "reason": "case.py:5:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1371,7 +1371,7 @@
         "decorated_sha256": "cd584f230be0e6a9731e20997c017165d954fc70f0f20939ba33dfc0891f6a8f",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:5:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:5:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1396,7 +1396,7 @@
         "decorated_sha256": "402cf28089aa26aa0d854fb50c3266c8b293cc357aba8c45ec5f248289197dd1",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1413,7 +1413,7 @@
           "mock_rename"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "reason": "case.py:7:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1455,7 +1455,7 @@
           "mock_rename"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "reason": "case.py:5:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1473,7 +1473,7 @@
           "mock_rename"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "reason": "case.py:5:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1505,7 +1505,7 @@
           "mock_rename"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "reason": "case.py:41:5: Imre: unsupported method decorator on a fixed-layout class",
         "opt_levels": [
           0,
           3
@@ -1537,7 +1537,7 @@
           "mock_rename"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "reason": "case.py:42:5: Imre: unsupported method decorator on a fixed-layout class",
         "opt_levels": [
           0,
           3
@@ -1554,7 +1554,7 @@
           "mock_rename"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "reason": "case.py:30:5: Imre: unsupported method decorator on a fixed-layout class",
         "opt_levels": [
           0,
           3
@@ -1572,7 +1572,7 @@
           "mock_rename"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "reason": "case.py:5:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1590,7 +1590,7 @@
           "mock_rename"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "reason": "case.py:5:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1622,7 +1622,7 @@
           "mock_rename"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "reason": "case.py:44:5: Imre: unsupported method decorator on a fixed-layout class",
         "opt_levels": [
           0,
           3
@@ -1637,7 +1637,7 @@
         "decorated_sha256": "4aae11c33b0a852fd18ce8479bfe3a6c1d0d16db03aab5a8b5e742672a4024bc",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1652,7 +1652,7 @@
         "decorated_sha256": "e5d0d0dd8cb969b9046782094f947fb4f85b46d1697e0cd727207ef842914016",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1684,7 +1684,7 @@
           "os_helper.skip_unless_symlink"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1701,7 +1701,7 @@
           "os_helper.skip_unless_symlink"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1720,7 +1720,7 @@
           "os_helper.skip_unless_working_chmod"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1739,7 +1739,7 @@
           "os_helper.skip_unless_working_chmod"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1758,7 +1758,7 @@
           "os_helper.skip_unless_working_chmod"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1773,7 +1773,7 @@
         "decorated_sha256": "5ffcdc176dbc928698b9e7f185d910b3053fc1df83339e3e47472685bba1dee8",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported",
         "opt_levels": [
           0,
           3
@@ -1792,7 +1792,7 @@
           "os_helper.skip_unless_working_chmod"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1822,7 +1822,7 @@
         "decorated_sha256": "6bcbbd9e0bf9403ca0150ab65071eba3f6ab51ac0f973412fa4c2ac41cd419c8",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:5:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:5:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1837,7 +1837,7 @@
         "decorated_sha256": "706c15bc99c18f298a5a4e2c61b000700fea36fb6cb7903c0d8560464ccc4273",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1852,7 +1852,7 @@
         "decorated_sha256": "5d69f37da525b7871b95bc5a080b61feb52c0356ae762bd3ba527be850f15ea1",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1867,7 +1867,7 @@
         "decorated_sha256": "3365a2b0a8e928458f1506d66d23fb941a10cad6c54f4d7167ce1cf0332c9d06",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1884,7 +1884,7 @@
           "unittest.skipUnless(shutil.rmtree.avoids_symlink_attacks, 'requires safe rmtree')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1921,7 +1921,7 @@
           "os_helper.skip_unless_symlink"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1938,7 +1938,7 @@
           "os_helper.skip_unless_symlink"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1983,7 +1983,7 @@
           "os_helper.skip_unless_symlink"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -1998,7 +1998,7 @@
         "decorated_sha256": "518daa56dd1872e07c34cae544f2a825a17ce8bed9ed2a17ed9643cae4e70134",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2015,7 +2015,7 @@
           "unittest.skipUnless(shutil.rmtree.avoids_symlink_attacks, 'dir_fd is not supported')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2040,7 +2040,7 @@
         "decorated_sha256": "15f79c53229e58ce44e9b79c8c56143d2c95d60a7538b7ef1d946e3b910b264f",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2067,7 +2067,7 @@
           "os_helper.skip_unless_symlink"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2114,7 +2114,7 @@
           "unittest.skipUnless(sys.platform != 'win32', 'test is for non win32')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2169,7 +2169,7 @@
         "decorated_sha256": "8eff010fecd48b05c22ae9d113ea63621f2094868b4548783311535796a5c6b6",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2184,7 +2184,7 @@
         "decorated_sha256": "4f29ccd17765bad815ef2be7d29a0ba22dc85825bd89e93d3b94cb4889e46063",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2199,7 +2199,7 @@
         "decorated_sha256": "94f8eecbf33283f08b3e7bf3a8a871a71b53016ba583426e44b48485f0446747",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2214,7 +2214,7 @@
         "decorated_sha256": "1b40b36069b7e36a713fb344f9b763e5c66e9272a38543826433839959c1dc66",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:5:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2229,7 +2229,7 @@
         "decorated_sha256": "29604c706f7a48270ae37090584ab8b3a23563939842f0763be5609520a22fca",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2244,7 +2244,7 @@
         "decorated_sha256": "9476fa7d51c78a6d2b51df8387032f2be5994bfbc2fea3e46da2f9b9efbcb065",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2261,7 +2261,7 @@
           "os_helper.skip_if_dac_override"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2361,7 +2361,7 @@
         "decorated_sha256": "51dbc04cfb4f65d71e4e2e1ec783c7eb8a4118df959a42dede28564dd9ea86fb",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2376,7 +2376,7 @@
         "decorated_sha256": "ec532133b8550c3b89f6ba2df56a353f841b967b703c0369d0e2c64aedca61aa",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2453,7 +2453,7 @@
           "unittest.skipUnless(sys.platform != 'win32', 'test is for non win32')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2508,7 +2508,7 @@
         "decorated_sha256": "8eff010fecd48b05c22ae9d113ea63621f2094868b4548783311535796a5c6b6",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2523,7 +2523,7 @@
         "decorated_sha256": "4f29ccd17765bad815ef2be7d29a0ba22dc85825bd89e93d3b94cb4889e46063",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2538,7 +2538,7 @@
         "decorated_sha256": "94f8eecbf33283f08b3e7bf3a8a871a71b53016ba583426e44b48485f0446747",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2553,7 +2553,7 @@
         "decorated_sha256": "1b40b36069b7e36a713fb344f9b763e5c66e9272a38543826433839959c1dc66",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:5:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2568,7 +2568,7 @@
         "decorated_sha256": "29604c706f7a48270ae37090584ab8b3a23563939842f0763be5609520a22fca",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2583,7 +2583,7 @@
         "decorated_sha256": "9476fa7d51c78a6d2b51df8387032f2be5994bfbc2fea3e46da2f9b9efbcb065",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2600,7 +2600,7 @@
           "os_helper.skip_if_dac_override"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2700,7 +2700,7 @@
         "decorated_sha256": "51dbc04cfb4f65d71e4e2e1ec783c7eb8a4118df959a42dede28564dd9ea86fb",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2715,7 +2715,7 @@
         "decorated_sha256": "ec532133b8550c3b89f6ba2df56a353f841b967b703c0369d0e2c64aedca61aa",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2760,7 +2760,7 @@
         "decorated_sha256": "be69c4df0698665c03ac3f5a71fdca1272380f2a2b5bc18c79199b5153930e1c",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:24:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
         "opt_levels": [
           0,
           3
@@ -2775,7 +2775,7 @@
         "decorated_sha256": "c6057fefd5dda4b6d7cfae28cec4e7ea46ddf10f3cf8b9ce70d6937a1edd95d7",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:5:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2790,7 +2790,7 @@
         "decorated_sha256": "d5761430e55db0638776b794c2e679b710dd570f7bf5755dfc69ae9a5e859afd",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:24:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
         "opt_levels": [
           0,
           3
@@ -2805,7 +2805,7 @@
         "decorated_sha256": "9e2edf218c17c87ef576869e66b133bbf408f66e3ee61da00425e50a3f132e2a",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:3:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2820,7 +2820,7 @@
         "decorated_sha256": "ecc0ebfb8c2910170c21c61a745d045199ca767bc8a8b6fbb76f140650d5f457",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:4:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
         "opt_levels": [
           0,
           3
@@ -2835,7 +2835,7 @@
         "decorated_sha256": "28ce62783a35930d42ffe2b533ae046706184dfb2141cd392de695aafc6b24de",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:10:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
         "opt_levels": [
           0,
           3
@@ -2850,7 +2850,7 @@
         "decorated_sha256": "cbf2029a8a88014fbd8e900dbe8389fee0ff68a03d9d8ef1f949f1c935bd7882",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:10:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
         "opt_levels": [
           0,
           3
@@ -2910,7 +2910,7 @@
         "decorated_sha256": "52f0da554ddeeecd0fc87c8bff1161c3b1ecbf0795d0ea6cffb418ff7a42e91b",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:24:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
         "opt_levels": [
           0,
           3
@@ -2925,7 +2925,7 @@
         "decorated_sha256": "98ba91a9725e6158db6a5b086ceb7229c70c9ab883e82c4c847fd77050f333a9",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -2940,7 +2940,7 @@
         "decorated_sha256": "9a0d774317a5b34e2098750e10763783535423d773d75ec92d8e8800e7e853d8",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:24:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
         "opt_levels": [
           0,
           3
@@ -2955,7 +2955,7 @@
         "decorated_sha256": "0fb7606ba40bceb12a4124eb334f90f047e77f2e3693e6c2388b778365e4e58c",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:10:14: Imre: name is not a local value; globals and first-class functions are unsupported",
         "opt_levels": [
           0,
           3
@@ -3040,7 +3040,7 @@
         "decorated_sha256": "be69c4df0698665c03ac3f5a71fdca1272380f2a2b5bc18c79199b5153930e1c",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:24:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
         "opt_levels": [
           0,
           3
@@ -3055,7 +3055,7 @@
         "decorated_sha256": "c6057fefd5dda4b6d7cfae28cec4e7ea46ddf10f3cf8b9ce70d6937a1edd95d7",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:5:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -3070,7 +3070,7 @@
         "decorated_sha256": "d5761430e55db0638776b794c2e679b710dd570f7bf5755dfc69ae9a5e859afd",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:24:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
         "opt_levels": [
           0,
           3
@@ -3085,7 +3085,7 @@
         "decorated_sha256": "6b38e9d04e67634dd3c563117daf7fb5395bec193dbfb4ef96f757f6cdca2e28",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:4:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -3100,7 +3100,7 @@
         "decorated_sha256": "ecc0ebfb8c2910170c21c61a745d045199ca767bc8a8b6fbb76f140650d5f457",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:4:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
         "opt_levels": [
           0,
           3
@@ -3115,7 +3115,7 @@
         "decorated_sha256": "28ce62783a35930d42ffe2b533ae046706184dfb2141cd392de695aafc6b24de",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:10:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
         "opt_levels": [
           0,
           3
@@ -3130,7 +3130,7 @@
         "decorated_sha256": "65f0f1dac8d11a30b059c37651b018300da766ad1acd13ed35431aa847965540",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:5:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
         "opt_levels": [
           0,
           3
@@ -3145,7 +3145,7 @@
         "decorated_sha256": "cbf2029a8a88014fbd8e900dbe8389fee0ff68a03d9d8ef1f949f1c935bd7882",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:10:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
         "opt_levels": [
           0,
           3
@@ -3205,7 +3205,7 @@
         "decorated_sha256": "52f0da554ddeeecd0fc87c8bff1161c3b1ecbf0795d0ea6cffb418ff7a42e91b",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:24:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
         "opt_levels": [
           0,
           3
@@ -3220,7 +3220,7 @@
         "decorated_sha256": "98ba91a9725e6158db6a5b086ceb7229c70c9ab883e82c4c847fd77050f333a9",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "reason": "case.py:2:1: Imre: test/support/os_helper.py:778:28: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
         "opt_levels": [
           0,
           3
@@ -3235,7 +3235,7 @@
         "decorated_sha256": "9a0d774317a5b34e2098750e10763783535423d773d75ec92d8e8800e7e853d8",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:24:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
         "opt_levels": [
           0,
           3
@@ -3250,7 +3250,7 @@
         "decorated_sha256": "0fb7606ba40bceb12a4124eb334f90f047e77f2e3693e6c2388b778365e4e58c",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\"",
+        "reason": "case.py:10:14: Imre: name is not a local value; globals and first-class functions are unsupported",
         "opt_levels": [
           0,
           3
