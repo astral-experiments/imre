@@ -21,9 +21,24 @@ struct Site {
     later_writes: HashSet<String>,
 }
 
+impl Site {
+    fn new(function: &ast::StmtFunctionDef, following: &[ast::Stmt]) -> Self {
+        Self {
+            range: function.range,
+            value_read: reads_function_value(following, function.name.as_str()),
+            later_writes: if function.is_async {
+                narrowing::assigned_names(following)
+            } else {
+                HashSet::new()
+            },
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct Binding {
     sites: VecDeque<Site>,
+    pub(super) overload_stub: bool,
     function: Option<Function>,
     pub(super) generic: Option<Rc<ast::StmtFunctionDef>>,
     instances: HashMap<Type, Function>,
@@ -133,11 +148,12 @@ impl Function {
         node: &impl Ranged,
     ) -> Result<Expr, String> {
         if !self.captures.is_empty()
-            || self
-                .signature
-                .params
-                .iter()
-                .any(|p| p.kind == ParameterKind::KeywordOnly)
+            || self.signature.params.iter().any(|p| {
+                matches!(
+                    p.kind,
+                    ParameterKind::KeywordOnly | ParameterKind::KeywordRest
+                )
+            })
         {
             return Err(error(
                 source,
@@ -190,49 +206,71 @@ impl Checker<'_> {
 
     /// Only an unconditional definition in the enclosing function's suite can
     /// introduce a fixed call target. Reserve its spelling throughout the suite.
-    pub(super) fn collect_local_functions(&mut self, stmts: &[ast::Stmt]) -> Result<(), String> {
-        let mut sites: HashMap<String, VecDeque<Site>> = HashMap::new();
+    pub(super) fn collect_local_definitions(&mut self, stmts: &[ast::Stmt]) -> Result<(), String> {
+        self.collect_suite_definitions(stmts, true)
+    }
+
+    pub(super) fn collect_suite_definitions(
+        &mut self,
+        stmts: &[ast::Stmt],
+        include_classes: bool,
+    ) -> Result<(), String> {
+        let mut suite_functions = HashSet::new();
         for (index, statement) in stmts.iter().enumerate() {
-            let Some(function) = statement.as_function_def_stmt() else {
-                continue;
+            let name = match statement {
+                ast::Stmt::ClassDef(class) if include_classes => class.name.as_str(),
+                ast::Stmt::FunctionDef(function) => function.name.as_str(),
+                _ => continue,
             };
-            let name = function.name.as_str();
+            if let ast::Stmt::FunctionDef(function) = statement
+                && !suite_functions.insert(name)
+            {
+                let binding = self.local_functions.get_mut(name).unwrap();
+                binding
+                    .sites
+                    .push_back(Site::new(function, &stmts[index + 1..]));
+                continue;
+            }
             if reserved(name)
                 || self.names.contains_key(name)
                 || self.graph.modules[self.module].bindings.contains_key(name)
                 || self.class_receiver.as_deref() == Some(name)
                 || self.local_functions.contains_key(name)
+                || self.local_classes.contains_key(name)
             {
                 return Err(error(
                     self.source,
-                    function,
-                    "local functions require a unique unshadowed name",
+                    statement,
+                    if statement.is_class_def_stmt() {
+                        "local classes require a unique unshadowed name"
+                    } else {
+                        "local functions require a unique unshadowed name"
+                    },
                 ));
             }
-            sites.entry(name.to_owned()).or_default().push_back(Site {
-                range: function.range,
-                value_read: reads_function_value(&stmts[index + 1..], name),
-                later_writes: if function.is_async {
-                    narrowing::assigned_names(&stmts[index + 1..])
-                } else {
-                    HashSet::new()
-                },
-            });
-        }
-        self.local_functions
-            .extend(sites.into_iter().map(|(name, sites)| {
-                (
-                    name,
-                    Binding {
-                        sites,
-                        function: None,
-                        generic: None,
-                        value_slot: None,
-                        instances: HashMap::new(),
-                        later_writes: HashSet::new(),
+            let Some(function) = statement.as_function_def_stmt() else {
+                self.local_classes.insert(
+                    name.to_owned(),
+                    local_classes::Binding {
+                        site: statement.range(),
+                        value: None,
                     },
-                )
-            }));
+                );
+                continue;
+            };
+            self.local_functions.insert(
+                name.to_owned(),
+                Binding {
+                    sites: VecDeque::from([Site::new(function, &stmts[index + 1..])]),
+                    overload_stub: false,
+                    function: None,
+                    generic: None,
+                    value_slot: None,
+                    instances: HashMap::new(),
+                    later_writes: HashSet::new(),
+                },
+            );
+        }
         Ok(())
     }
 
@@ -241,10 +279,16 @@ impl Checker<'_> {
         definition: &ast::StmtFunctionDef,
     ) -> Result<Option<Statement>, String> {
         let name = definition.name.as_str();
-        let Some(binding) = self
+        let Some(site) = self
             .local_functions
             .get_mut(name)
-            .filter(|b| b.sites.front().is_some_and(|s| s.range == definition.range))
+            .filter(|binding| {
+                binding
+                    .sites
+                    .front()
+                    .is_some_and(|s| s.range == definition.range)
+            })
+            .and_then(|binding| binding.sites.pop_front())
         else {
             return Err(error(
                 self.source,
@@ -252,12 +296,18 @@ impl Checker<'_> {
                 "local definitions must appear directly in the enclosing function's suite",
             ));
         };
-        let site = binding.sites.pop_front().unwrap();
-        binding.function = None;
-        binding.generic = None;
-        binding.instances.clear();
-        binding.value_slot = None;
-        binding.later_writes = site.later_writes;
+        let overload = matches!(definition.decorator_list.as_slice(),[d] if self.resolve(&d.expression) == Some(crate::modules::Binding::Intrinsic(Intrinsic::Overload)));
+        let plain;
+        let definition = if overload {
+            plain = {
+                let mut def = definition.clone();
+                typing::strip_overload(&mut def);
+                def
+            };
+            &plain
+        } else {
+            definition
+        };
         let boxed = callback_parameter(definition);
         if !boxed
             && definition
@@ -270,6 +320,15 @@ impl Checker<'_> {
                 definition,
                 "local functions require annotated parameters and return types",
             ));
+        }
+        {
+            let old = self.local_functions.get_mut(name).unwrap();
+            old.function = None;
+            old.generic = None;
+            old.instances.clear();
+            old.value_slot = None;
+            old.overload_stub = overload;
+            old.later_writes = site.later_writes;
         }
         if self.generic_awaitable_wrapper(definition) {
             self.local_functions.get_mut(name).unwrap().generic = Some(Rc::new(definition.clone()));
@@ -288,7 +347,7 @@ impl Checker<'_> {
         let mut signature = signature(
             signature_def,
             self.graph,
-            self.module,
+            keyword_forwarding::Defaults::local(self.module),
             &self.classes.declarations,
             self.types,
             None,
@@ -305,8 +364,23 @@ impl Checker<'_> {
         } else if let Some(decorator) = decorator {
             let target = function.callback(self.types, self.source, definition)?;
             Some(self.decorate_dispatch(decorator, target, definition)?)
-        } else if site.value_read {
-            function.callback(self.types, self.source, definition).ok()
+        } else if site.value_read || overload {
+            function
+                .callback(self.types, self.source, definition)
+                .ok()
+                .map(|value| {
+                    if overload {
+                        Expr {
+                            ty: Type::OverloadStub,
+                            kind: ExprKind::Builtin(
+                                Builtin::Typing(ir::TypingOperation::Register),
+                                vec![value],
+                            ),
+                        }
+                    } else {
+                        value
+                    }
+                })
         } else {
             None
         };
@@ -316,6 +390,17 @@ impl Checker<'_> {
             self.calls.insert(function.signature.id);
             (slot, value)
         });
+        if overload {
+            self.graph
+                .runtime_overload(self.module, definition.name.range());
+        }
+        if overload && object.is_none() {
+            return Err(error(
+                self.source,
+                definition,
+                "overloaded local functions must be plain noncapturing declarations",
+            ));
+        }
         let binding = self.local_functions.get_mut(name).unwrap();
         binding.function = Some(function);
         binding.value_slot = object.as_ref().map(|(slot, _)| *slot);
@@ -405,6 +490,12 @@ impl Checker<'_> {
         mut signature: Signature,
     ) -> Result<Function, String> {
         signature.id = self.helpers.reserve();
+        self.types.bind_function_site(
+            self.module,
+            definition.name.range().start().to_u32(),
+            signature.id,
+        );
+        let omitted_free = self.unbound_assert_captures();
         let mut helper = Checker::new(
             self.graph,
             self.module,
@@ -414,15 +505,14 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.returns = signature.returns;
         helper.inferred_returns =
             (definition.returns.is_none() && !annotations::inert_body(definition)).then(Vec::new);
         helper.asynchronous = signature.asynchronous;
         let mut params = Vec::new();
-        for (parameter, ty) in definition
-            .parameters
-            .iter_non_variadic_params()
+        for (parameter, ty) in closed_calls::parameters(&definition.parameters)
             .zip(signature.params.iter().map(|p| p.ty))
         {
             let slot = helper.declare(parameter.name().as_str(), ty, parameter)?;
@@ -551,8 +641,9 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         function: &Function,
     ) -> Result<Expr, String> {
-        let args = self.arguments(call, &function.signature.params, None)?;
-        self.call_local_args(call, function, args)
+        let mut scope = calls::ArgumentScope::default();
+        let args = self.held_arguments(call, &function.signature.params, None, &mut scope)?;
+        Ok(scope.finish(self.call_local_args(call, function, args)?))
     }
 
     fn call_local_args(

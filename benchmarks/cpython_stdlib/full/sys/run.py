@@ -14,27 +14,19 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path[:0] = [str(HERE), str(STDLIB)]
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
-from suite_native import Toolchain, native_method, run_evidence, run_in_fixtures
+from suite_native import NativeCompileError, Toolchain, native_method, run_evidence, run_in_fixtures, testcase_fixture
 from suite_evidence import roles
 from occurrences import blocked_methods, reference_skips
 import argv_case
 import jit_case
 import locale_case
+import thread_case
 
 MODULE = "test.test_sys"
 SYS = MODULE + ".SysModuleTest."
 EXCEPTION = MODULE + ".ActiveExceptionTests."
 
-# The native TestCase currently accepts ints for assertEqual. These are the
-# operand types of the original assertions; the upstream definitions stay intact.
-STRING_EQUAL = """import sys
-
-class NativeCase:
-    def assertEqual(self, actual: str, expected: str) -> None:
-        if actual != expected:
-            raise AssertionError("strings differ")
-"""
-
+# The shared TestCase cannot yet compare an optional exception with None.
 EXCEPTION_EQUAL = """import sys
 
 class NativeCase:
@@ -67,19 +59,53 @@ def select(toolchain, work, source, module):
     executions = {}
     pinned_methods = method_hashes(source)
     for cls, method, fixture, operation in [
-        ("SysModuleTest", "test_43581", STRING_EQUAL, "sys.__stdout__.encoding and sys.__stderr__.encoding"),
+        ("SysModuleTest", "test_43581", "import sys\n" + testcase_fixture(), "sys.__stdout__.encoding and sys.__stderr__.encoding"),
         ("ActiveExceptionTests", "test_sys_exception_no_exception", EXCEPTION_EQUAL, "sys.exception() outside a handler"),
     ]:
         case_id = f"{MODULE}.{cls}.{method}"
         executions[case_id] = native_method(toolchain, directory(work, method),
                                              source, cls, case_id, fixture, operation=("imre", operation))
 
-    # Independent object-identity regression; never counts as an upstream ID.
-    exercise = HERE / "active_exception.py"
-    ref = subprocess.run([sys.executable, exercise], capture_output=True, check=True, timeout=15)
-    binary = toolchain.build(exercise.read_bytes(), directory(work, "exception-identity"))
+    thread = toolchain.build((HERE / "thread_info.py").read_bytes(), directory(work, "thread-info"))
+    thread_case.check_record(thread, toolchain.clang)
+    executions[SYS + "test_thread_info"] = thread_case.observer(
+        module, thread, pinned_methods["SysModuleTest", "test_thread_info"], toolchain.level)
+
+    # Both implementations check internal consistency using their own language version.
+    metadata = HERE / "version_info.py"
+    version_work = directory(work, "language-version")
+    owner = HERE / "version_info_owner.py"
+    (version_work / owner.name).write_bytes(owner.read_bytes())
+    program = toolchain.build(metadata.read_bytes(), version_work)
+    reference = subprocess.run([sys.executable, "-E", "-B", version_work / "case.py"],
+                               capture_output=True, check=True, timeout=15)
+    if (reference.stdout, reference.stderr) != (b"", b"") or output(program) != (b"", b""):
+        raise AssertionError("unexpected output from language version checks")
+
+    # Process regressions use the real hooks and retained objects; neither is an additional test ID.
+    for filename in ("active_exception.py", "display_values.py"):
+        exercise = HERE / filename
+        ref = subprocess.run([sys.executable, exercise], capture_output=True, check=True, timeout=15)
+        binary = toolchain.build(exercise.read_bytes(), directory(work, exercise.stem))
+        if output(binary) != (ref.stdout, ref.stderr):
+            raise AssertionError(f"{filename}: native output differs from CPython")
+
+    exercise = HERE / "intern_values.py"
+    ref = subprocess.run([sys.executable, "-B", exercise], capture_output=True, check=True, timeout=15)
+    binary = toolchain.build(exercise.read_bytes(), directory(work, "intern-values"))
     if output(binary) != (ref.stdout, ref.stderr):
-        raise AssertionError("native exception identity differs from CPython")
+        raise AssertionError("native string interning differs from CPython")
+
+    invalid = HERE / "intern-binder/intern-nested-invalid.py"
+    folder = directory(work, "intern-nested-invalid")
+    try:
+        toolchain.build(invalid.read_bytes(), folder)
+    except NativeCompileError as error:
+        expected = f'{folder}/case.py:6:23: Imre: parameter "value" is positional-only'
+        if str(error).splitlines()[-1] != expected:
+            raise AssertionError(("nested sys.intern diagnostic", str(error))) from error
+    else:
+        raise AssertionError("sys.intern accepted a bad call inside its argument")
 
     encoding = toolchain.build((HERE / "encoding_driver.py").read_bytes(), directory(work, "encoding"))
 

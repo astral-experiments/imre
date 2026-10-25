@@ -5,6 +5,21 @@ use std::collections::{HashMap, HashSet};
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{Visitor, walk_except_handler, walk_expr, walk_pattern, walk_stmt};
 
+/// Return the other operand of a single identity test with None and whether it is present.
+pub(crate) fn none_identity(compare: &ast::ExprCompare, truth: bool) -> Option<(&ast::Expr, bool)> {
+    let present = match compare.ops.as_ref() {
+        [ast::CmpOp::Is] => !truth,
+        [ast::CmpOp::IsNot] => truth,
+        _ => return None,
+    };
+    match compare.operands.as_ref() {
+        [value, ast::Expr::NoneLiteral(_)] | [ast::Expr::NoneLiteral(_), value] => {
+            Some((value, present))
+        }
+        _ => None,
+    }
+}
+
 /// Returns facts guaranteed when `test` has the requested truth value.
 /// A true fact means non-None. Only local names are eligible: attribute and
 /// subscript values can change through aliases without rebinding the receiver.
@@ -29,15 +44,9 @@ pub(crate) fn facts(
         {
             facts(&call.arguments.args[0], truth, always_truthy)
         }
-        ast::Expr::Compare(compare) if compare.ops.len() == 1 => {
-            let present = match compare.ops[0] {
-                ast::CmpOp::Is => !truth,
-                ast::CmpOp::IsNot => truth,
-                _ => return HashMap::new(),
-            };
-            let value = match compare.operands.as_ref() {
-                [value, ast::Expr::NoneLiteral(_)] | [ast::Expr::NoneLiteral(_), value] => value,
-                _ => return HashMap::new(),
+        ast::Expr::Compare(compare) => {
+            let Some((value, present)) = none_identity(compare, truth) else {
+                return HashMap::new();
             };
             let name = match value {
                 ast::Expr::Name(name) => Some(name),

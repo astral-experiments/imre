@@ -6,14 +6,16 @@ use ruff_python_ast::visitor::{Visitor, walk_stmt};
 
 use super::*;
 
-/// Only a standalone append in this lexical scope supplies a list layout hint.
+/// A direct element insertion in this lexical scope can supply a container layout hint.
 /// The ordinary checker still checks its operand and every other use of the list.
-pub(super) fn first_append<'ast>(
+pub(super) fn first_insertion<'ast>(
     name: &str,
+    method: &str,
     statements: &'ast [ast::Stmt],
 ) -> Option<&'ast ast::Expr> {
     struct Appends<'name, 'ast> {
         name: &'name str,
+        method: &'name str,
         value: Option<&'ast ast::Expr>,
     }
 
@@ -27,7 +29,7 @@ pub(super) fn first_append<'ast>(
             if let ast::Stmt::Expr(stmt) = stmt
                 && let ast::Expr::Call(call) = &*stmt.value
                 && let ast::Expr::Attribute(method) = &*call.func
-                && method.attr.as_str() == "append"
+                && method.attr.as_str() == self.method
                 && matches!(&*method.value, ast::Expr::Name(name) if name.id == self.name)
                 && let [value] = call.arguments.args.as_ref()
                 && call.arguments.keywords.is_empty()
@@ -41,12 +43,67 @@ pub(super) fn first_append<'ast>(
         fn visit_expr(&mut self, _: &'ast ast::Expr) {}
     }
 
-    let mut appends = Appends { name, value: None };
+    let mut appends = Appends {
+        name,
+        method,
+        value: None,
+    };
     appends.visit_body(statements);
     appends.value
 }
 
 impl Checker<'_> {
+    /// In a truthy branch, an immediately repeated native dict lookup is present
+    /// until the first possible effect. An exact local list/set receiver and
+    /// a literal string key cannot execute Python code before reading the argument.
+    pub(super) fn immediate_present_subscript(
+        &self,
+        test: &ast::Expr,
+        body: &[ast::Stmt],
+    ) -> Option<ruff_text_size::TextRange> {
+        fn literal_lookup(expression: &ast::Expr) -> Option<(&str, &str)> {
+            let ast::Expr::Subscript(sub) = expression else {
+                return None;
+            };
+            let ast::Expr::Name(name) = &*sub.value else {
+                return None;
+            };
+            let ast::Expr::StringLiteral(key) = &*sub.slice else {
+                return None;
+            };
+            Some((name.id.as_str(), key.value.to_str()))
+        }
+        let (name, key) = literal_lookup(test)?;
+        let &dict = self.names.get(name)?;
+        let (key_type, value_type) = self.types.mapping(self.locals[dict])?;
+        if key_type != Type::Str || self.types.payload(value_type).is_none() {
+            return None;
+        }
+        let ast::Stmt::Expr(stmt) = body.first()? else {
+            return None;
+        };
+        let ast::Expr::Call(call) = &*stmt.value else {
+            return None;
+        };
+        let ast::Expr::Attribute(method) = &*call.func else {
+            return None;
+        };
+        let ast::Expr::Name(receiver) = &*method.value else {
+            return None;
+        };
+        let &owner = self.names.get(receiver.id.as_str())?;
+        let ty = self.locals[owner];
+        let intrinsic = (method.attr.as_str() == "add" && self.types.set_element(ty).is_some())
+            || (method.attr.as_str() == "append" && self.types.element(ty).is_some());
+        let [argument] = call.arguments.args.as_ref() else {
+            return None;
+        };
+        (intrinsic
+            && call.arguments.keywords.is_empty()
+            && literal_lookup(argument) == Some((name, key)))
+        .then(|| argument.range())
+    }
+
     /// Join direct assignments across an exhaustive conditional before its first
     /// suite fixes a local's storage. This supplies a layout for empty-list arms
     /// and nullable scalar arms while retaining normal definite-assignment checks.
@@ -177,6 +234,24 @@ impl Inference {
         }
     }
 
+    /// Discover the actual input type of closed keyword calls even when all
+    /// written signatures have annotations. Python annotations do not reject None.
+    pub(super) fn discover_packed_arguments(&self) {
+        self.widened.set(true);
+    }
+
+    fn widen_keyword(&self, id: usize, index: usize, ty: Type) {
+        let mut pending = self.pending.borrow_mut();
+        pending[id].params[index] = Some(ty);
+        for function in &mut *pending {
+            if function.infer_return {
+                function.returns = None;
+            }
+        }
+        self.widened.set(true);
+        self.revision.set(self.revision.get() + 1);
+    }
+
     /// A later call from a different subcommand replaces a child layout with
     /// its stable parent prefix. Revisit helpers whose result may pass it on.
     fn widen_namespace(&self, id: usize, index: usize, parent: Type, parsers: &argparse::Parsers) {
@@ -250,11 +325,13 @@ impl Inference {
                 }
             }
             let before = self.revision.get();
-            let helpers = Helpers::new(definitions.len() + graph.initializers().count());
+            let class_globals = classes.declarations.has_class_values(graph.entry);
+            let helpers =
+                Helpers::new(definitions.len() + graph.initializers(class_globals).count());
             let globals = ModuleValues::default();
             let mut available = HashSet::new();
             let mut errors = Vec::new();
-            for (module, range) in graph.initializers() {
+            for (module, range) in graph.initializers(class_globals) {
                 let mut checker = Checker::new(
                     graph, module, signatures, classes, types, &helpers, &globals,
                 );
@@ -294,16 +371,20 @@ impl Inference {
                 checker.generator_item = classes.producer_items.get(&signature.id).copied();
                 checker.inferred_returns = infer_return.then(Vec::new);
                 let result = (|| {
-                    for (parameter, signature) in function
-                        .parameters
-                        .iter_non_variadic_params()
-                        .zip(&signature.params)
+                    for (parameter, signature) in
+                        closed_calls::parameters(&function.parameters).zip(&signature.params)
                     {
                         let slot =
                             checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
                         checker.assigned.insert(slot);
                     }
-                    checker.collect_local_functions(&function.body)?;
+                    if let Some(keyword) = &function.parameters.kwarg {
+                        let parameter = signature.params.last().expect("keyword-rest signature");
+                        let slot =
+                            checker.declare(keyword.name.as_str(), parameter.ty, &**keyword)?;
+                        checker.assigned.insert(slot);
+                    }
+                    checker.collect_local_definitions(&function.body)?;
                     let (_, falls_through) = checker.block(&function.body)?;
                     if let Some(mut returns) = checker.inferred_returns.take() {
                         if falls_through || returns.is_empty() {
@@ -429,7 +510,11 @@ impl Checker<'_> {
             signature,
             receiver,
             skip,
-            calls::starred(call).then_some(&mut scope),
+            (calls::starred(call)
+                || signature.params.iter().any(|p| {
+                    matches!(p.kind, ParameterKind::Variadic | ParameterKind::KeywordRest)
+                }))
+            .then_some(&mut scope),
         )?;
         Ok(scope.finish(self.call_value(signature, ty, args)))
     }
@@ -447,15 +532,27 @@ impl Checker<'_> {
         // as 0 or 1; ordinary annotated Python functions retain their own types.
         let stat_mode = matches!(self.resolve(&call.func), Some(Binding::Definition(id))
             if self.graph.modules[id.module].is_bundled("stat"));
+        let selector_wait = signature.method.is_some_and(|method| {
+            let class = &self.classes.declarations.definitions[method.class];
+            self.graph.modules[class.definition.module].is_bundled("selectors")
+                && class.methods[method.index].name.as_str() == "select"
+        });
         let inference = self.inference;
         let args = self.bind_supplied(
             call,
             &signature.params[skip..],
             receiver,
             scope,
+            Some((signature.id, skip)),
             |checker, index, argument| {
                 let index = index + skip;
                 let parameter = &signature.params[index];
+                if selector_wait && parameter.name == "timeout" {
+                    let node = argument.site();
+                    let value = argument.value(checker)?;
+                    let value = checker.selector_seconds(value);
+                    return checker.coerce(value, parameter.ty, node);
+                }
                 if stat_mode && parameter.ty == Type::Int {
                     let node = argument.site();
                     let value = argument.value(checker)?;
@@ -473,6 +570,29 @@ impl Checker<'_> {
                 };
                 let node = argument.site();
                 let value = if let Some(ty) = inference.parameter(signature.id, index) {
+                    // Normalized inline keywords carry the value range; source names have their own.
+                    if closed_calls::keyword_field(node)
+                        || call.arguments.keywords.iter().any(|kw| {
+                            kw.arg.as_ref().is_some_and(|name| {
+                                name.range() == node.range() && kw.value.range() == node.range()
+                            })
+                        })
+                    {
+                        let supplied = argument.value(checker)?;
+                        if supplied.ty == Type::None
+                            && ty != Type::None
+                            && checker.types.payload(ty).is_none()
+                        {
+                            let expected = checker.types.optional(ty);
+                            inference.widen_keyword(signature.id, index, expected);
+                            return checker.coerce(supplied, expected, node);
+                        }
+                        if checker.types.payload(supplied.ty) == Some(ty) {
+                            inference.widen_keyword(signature.id, index, supplied.ty);
+                            return Ok(supplied);
+                        }
+                        return checker.direct_value(supplied, node, ty, parameter.sign_only);
+                    }
                     if matches!(ty, Type::Class(class) if checker.classes.parsers.namespace(class))
                     {
                         let value = argument.value(checker)?;

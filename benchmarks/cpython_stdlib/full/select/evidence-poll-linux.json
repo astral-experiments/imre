@@ -1,0 +1,304 @@
+[
+  {
+    "schema": "imre.cpython-stdlib.native-evidence/v1",
+    "suite": "test.test_poll",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "platform": "linux",
+    "opt_level": 0,
+    "denominator": 7,
+    "distinct_ids": 7,
+    "counts": {
+      "host-driven-native-operation": 3,
+      "native-body-host-fixture": 1,
+      "reference-only": 2,
+      "reference-skip": 1
+    },
+    "records": [
+      {
+        "id": "test.test_poll.PollTests.test_poll1",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "native poll(2) waits on inherited descriptors; registration state is replayed into each child",
+          "fixture": "CPython runs unchanged test_poll1, including random choices, pipe I/O, assertions and the original unittest lifecycle; dropping writable events fails it"
+        },
+        "classification": "host-driven-native-operation"
+      },
+      {
+        "id": "test.test_poll.PollTests.test_poll2",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "resource 'walltime' is not enabled"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "resource 'walltime' is not enabled",
+          "reason": "resource 'walltime' is not enabled",
+          "source": "Lib/test/test_poll.py:test_poll2",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_poll.PollTests.test_poll3",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "original method body calls the native integer-fd readiness API",
+          "fixture": "host extracts the unchanged body and checks the applicable platform guard; native TestCase with callable assertRaises",
+          "method_sha256": "3d7f322fc10cb6533ec4dd08d8b394605714b9034b622ebec4d21212b44551cc",
+          "negative_control": "ValueError not raised"
+        },
+        "classification": "native-body-host-fixture"
+      },
+      {
+        "id": "test.test_poll.PollTests.test_poll_blocks_with_negative_ms",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "native poll with None, integer and float negative timeouts",
+          "fixture": "CPython owns the thread, pipe writes and timing assertions; forcing zero fails the original test"
+        },
+        "classification": "host-driven-native-operation"
+      },
+      {
+        "id": "test.test_poll.PollTests.test_poll_c_limits",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "native register, modify and poll validate actual C bounds",
+          "fixture": "CPython imports _testcapi, translates native exceptions and runs assertRaises; suppressing overflow fails the original test"
+        },
+        "classification": "host-driven-native-operation"
+      },
+      {
+        "id": "test.test_poll.PollTests.test_poll_unit_tests",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_poll.PollTests.test_threaded_poll",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      }
+    ]
+  },
+  {
+    "schema": "imre.cpython-stdlib.native-evidence/v1",
+    "suite": "test.test_poll",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "platform": "linux",
+    "opt_level": 3,
+    "denominator": 7,
+    "distinct_ids": 7,
+    "counts": {
+      "host-driven-native-operation": 3,
+      "native-body-host-fixture": 1,
+      "reference-only": 2,
+      "reference-skip": 1
+    },
+    "records": [
+      {
+        "id": "test.test_poll.PollTests.test_poll1",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "native poll(2) waits on inherited descriptors; registration state is replayed into each child",
+          "fixture": "CPython runs unchanged test_poll1, including random choices, pipe I/O, assertions and the original unittest lifecycle; dropping writable events fails it"
+        },
+        "classification": "host-driven-native-operation"
+      },
+      {
+        "id": "test.test_poll.PollTests.test_poll2",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "resource 'walltime' is not enabled"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "resource 'walltime' is not enabled",
+          "reason": "resource 'walltime' is not enabled",
+          "source": "Lib/test/test_poll.py:test_poll2",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_poll.PollTests.test_poll3",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "original method body calls the native integer-fd readiness API",
+          "fixture": "host extracts the unchanged body and checks the applicable platform guard; native TestCase with callable assertRaises",
+          "method_sha256": "3d7f322fc10cb6533ec4dd08d8b394605714b9034b622ebec4d21212b44551cc",
+          "negative_control": "ValueError not raised"
+        },
+        "classification": "native-body-host-fixture"
+      },
+      {
+        "id": "test.test_poll.PollTests.test_poll_blocks_with_negative_ms",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "native poll with None, integer and float negative timeouts",
+          "fixture": "CPython owns the thread, pipe writes and timing assertions; forcing zero fails the original test"
+        },
+        "classification": "host-driven-native-operation"
+      },
+      {
+        "id": "test.test_poll.PollTests.test_poll_c_limits",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "native register, modify and poll validate actual C bounds",
+          "fixture": "CPython imports _testcapi, translates native exceptions and runs assertRaises; suppressing overflow fails the original test"
+        },
+        "classification": "host-driven-native-operation"
+      },
+      {
+        "id": "test.test_poll.PollTests.test_poll_unit_tests",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_poll.PollTests.test_threaded_poll",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      }
+    ]
+  }
+]
