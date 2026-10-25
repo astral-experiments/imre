@@ -418,7 +418,9 @@ fn collect_class(
                     || name.id.starts_with("__")
                     || base.is_some_and(|(_, b)| {
                         b.fields.iter().any(|f| f.name == name.id.as_str())
-                            || b.methods.iter().any(|m| m.name.as_str() == name.id.as_str())
+                            || b.methods
+                                .iter()
+                                .any(|m| m.name.as_str() == name.id.as_str())
                             || b.exception_aliases.contains_key(name.id.as_str())
                     })
                 {
