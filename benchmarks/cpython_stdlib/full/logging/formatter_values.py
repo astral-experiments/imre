@@ -3,6 +3,17 @@ import logging
 import time
 
 
+def show_seconds(f: logging.Formatter, r: logging.LogRecord) -> None:
+    try:
+        print(f.formatTime(r, "%S"))
+    except ValueError as error:
+        print("ValueError " + str(error))
+    except OverflowError as error:
+        print("OverflowError " + str(error))
+    except OSError as error:
+        print("OSError " + repr(error.errno))
+
+
 def main() -> None:
     defaults = {"route": "initial"}
     f = logging.Formatter("{route}:{message}", style="{", defaults=defaults)
@@ -30,6 +41,12 @@ def main() -> None:
     print(f.formatTime(r))
     f.default_msec_format = "%s.%03d"
     print(f.formatTime(r))
+    for seconds in [2**53 + 1, 2**63 - 1, -(2**63) - 1, 67767976233532800]:
+        show_seconds(f, logging.makeLogRecord({"created": seconds}))
+    for stamp in [float("nan"), float("inf"), float(2**57), -0.1]:
+        show_seconds(f, logging.makeLogRecord({"created": stamp}))
+    show_seconds(f, logging.makeLogRecord({"created": True}))
+    print(f.formatTime(logging.makeLogRecord({"created": None}), "literal"))
     print("value=%+06d" % (-13))
     try:
         time.sleep(-0.25)

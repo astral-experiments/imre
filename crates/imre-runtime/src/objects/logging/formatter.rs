@@ -311,24 +311,28 @@ impl Formatter {
     }
 
     fn time(&self, r: &Record, date: Option<&str>) -> Result<String> {
-        let created = number(&self.get(r, "created")?)?;
-        if !created.is_finite()
-            || created < libc::time_t::MIN as f64
-            || created >= libc::time_t::MAX as f64
-        {
-            return Err(Error::new(
-                Kind::OverflowError,
-                "timestamp out of range for platform time_t",
-            ));
+        use num_traits::ToPrimitive;
+        let created = self.get(r, "created")?;
+        let seconds = match created.kind.raw() {
+            // SAFETY: a null destination asks time() to return the current epoch seconds.
+            0 => unsafe { libc::time(std::ptr::null_mut()) },
+            1 => i64::from(created.word != 0),
+            // SAFETY: the record field owns this exact integer.
+            2 => unsafe { Int::borrow(created.word) }
+                .big()
+                .to_i64()
+                .ok_or_else(super::timed::overflow)?,
+            7 => super::timed::float_seconds(f64::from_bits(created.word as u64))?,
+            _ => return Err(Error::new(Kind::TypeError, "expected a number")),
+        };
+        let clock = super::timed::civil(seconds, self.utc)?;
+        // Python passes a full C-int year from struct_time back to strftime.
+        if clock.tm_year.checked_add(1900).is_none() {
+            return Err(Error::new(Kind::OverflowError, "year out of range"));
         }
         let custom = date.filter(|s| !s.is_empty());
         let pattern = custom.unwrap_or(self.default_time.as_str());
-        let timestamp = super::timestamp_at(
-            Some(pattern),
-            created.floor() as libc::time_t,
-            Duration::ZERO,
-            self.utc,
-        );
+        let timestamp = super::format_timestamp(Some(pattern), &clock, Duration::ZERO);
         let Some(msec) = self
             .default_msec
             .as_ref()
