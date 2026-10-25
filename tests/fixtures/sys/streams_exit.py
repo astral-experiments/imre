@@ -34,6 +34,7 @@ def main() -> None:
         stderr.write("part")
         stdout.flush()
         stderr.write("-end\n")
+        print(file=sys.stderr)
         stderr.flush()
         return
     if sys.argv[1] == "catch":

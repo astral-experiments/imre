@@ -62,92 +62,133 @@ fn bytes(output: &mut String, name: &str, value: &str) {
 /// Names and field flags are shared constants. Record allocation size, field
 /// offsets, and ownership operations do not depend on generated value behavior.
 pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut String) -> String {
+    let named = module.types.tuple_metadata(ty);
     let (kind, flags, class_name, qualified_name, fields) = match ty {
-        Type::Class(_) | Type::CompletedProcess(_) => {
-            let process;
-            let metadata = if let Type::Class(class) = ty {
-                let Some(metadata) = module.class_metadata.get(class) else {
-                    return "null".to_owned();
-                };
-                metadata
-            } else {
-                let Type::CompletedProcess(capture) = ty else {
-                    unreachable!()
-                };
-                process = crate::ir::ClassMetadata {
-                    enum_members: Vec::new(),
-                    name: "CompletedProcess".to_owned(),
-                    qualified_name: "subprocess.CompletedProcess".to_owned(),
-                    frozen_initializer: None,
-                    dataclass_eq: false,
-                    dataclass_repr: true,
-                    toml_hash: false,
-                    fields: ["args", "returncode", "stdout", "stderr"]
-                        .into_iter()
-                        .map(|name| crate::ir::ClassFieldMetadata {
-                            name: name.to_owned(),
-                            compare: false,
-                            repr: match name {
-                                "stdout" => capture.stdout,
-                                "stderr" => capture.stderr,
-                                _ => true,
-                            },
-                        })
-                        .collect(),
-                };
-                &process
+        Type::Class(class) => {
+            let Some(metadata) = module.class_metadata.get(class) else {
+                return "null".to_owned();
             };
-            bytes(output, &format!("repr_name_{name}"), &metadata.name);
-            bytes(
-                output,
-                &format!("repr_qualified_{name}"),
-                &metadata.qualified_name,
-            );
-            let mut fields = Vec::new();
-            for (index, field) in metadata.fields.iter().enumerate() {
-                let field_name = format!("repr_field_{name}_{index}");
-                bytes(output, &field_name, &field.name);
-                let flags = u32::from(field.compare) | (u32::from(field.repr) << 1);
-                fields.push(format!(
-                    "{{ ptr, i64, i32 }} {{ ptr @{field_name}, i64 {}, i32 {flags} }}",
-                    field.name.len()
-                ));
-            }
-            writeln!(
-                output,
-                "@repr_fields_{name} = private constant [{} x {{ ptr, i64, i32 }}] [{}]",
-                fields.len(),
-                fields.join(", ")
-            )
-            .unwrap();
+            let flags = u32::from(metadata.dataclass_eq)
+                | (u32::from(metadata.dataclass_repr) << 1)
+                | (u32::from(metadata.toml_hash) << 2)
+                | (u32::from(metadata.value_struct) << 3);
+            // The runtime walks the physical layout. Hidden cache and shadow fields
+            // own their payloads, but have no public name, equality, or repr role.
+            let layout = (0..module.class_fields[class].len()).map(|index| {
+                metadata.fields.get(index).map_or(("", 0), |field| {
+                    (
+                        field.name.as_str(),
+                        u32::from(field.compare) | (u32::from(field.repr) << 1),
+                    )
+                })
+            });
             (
                 0,
-                u32::from(metadata.dataclass_eq)
-                    | (u32::from(metadata.dataclass_repr) << 1)
-                    | (u32::from(metadata.toml_hash) << 2),
-                format!("ptr @repr_name_{name}, i64 {}", metadata.name.len()),
-                format!(
-                    "ptr @repr_qualified_{name}, i64 {}",
-                    metadata.qualified_name.len()
-                ),
-                format!("@repr_fields_{name}"),
+                flags,
+                metadata.name.as_str(),
+                metadata.qualified_name.as_str(),
+                field_metadata(output, name, layout),
             )
         }
-        Type::Tuple(_) => (
-            1,
-            3,
-            "ptr null, i64 0".to_owned(),
-            "ptr null, i64 0".to_owned(),
-            "null".to_owned(),
-        ),
+        Type::ModuleSpec(_) => {
+            let layout = [
+                ("name", 2),
+                ("loader", 2),
+                ("origin", 2),
+                ("loader_state", 0),
+                ("submodule_search_locations", 2),
+                ("_uninitialized_submodules", 0),
+                ("_set_fileattr", 0),
+                ("_cached", 0),
+            ];
+            (
+                2,
+                2,
+                "ModuleSpec",
+                "_frozen_importlib.ModuleSpec",
+                field_metadata(output, name, layout.into_iter()),
+            )
+        }
+        Type::CompletedProcess(capture, _) => {
+            let layout = [
+                ("args", true),
+                ("returncode", true),
+                ("stdout", capture.stdout),
+                ("stderr", capture.stderr),
+            ]
+            .into_iter()
+            .map(|(field, repr)| (field, u32::from(repr) << 1));
+            (
+                0,
+                2,
+                "CompletedProcess",
+                "subprocess.CompletedProcess",
+                field_metadata(output, name, layout),
+            )
+        }
+        Type::Tuple(_) if named.is_some() => {
+            let declaration = named.as_ref().unwrap();
+            // stat_result appends raw numeric attributes after the visible tuple.
+            let flags = 3 | (u32::from(module.types.is_stat_result(ty)) << 3);
+            (
+                1,
+                flags,
+                declaration.name.as_str(),
+                declaration.name.as_str(),
+                field_metadata(
+                    output,
+                    name,
+                    declaration.fields.iter().map(|field| (field.as_str(), 3)),
+                ),
+            )
+        }
+        Type::Tuple(_) => (1, 3, "", "", "null".to_owned()),
         _ => unreachable!("only public record layouts have value behavior"),
     };
+    let names = |output: &mut String, prefix: &str, value: &str| {
+        if value.is_empty() {
+            return "ptr null, i64 0".to_owned();
+        }
+        let symbol = format!("repr_{prefix}_{name}");
+        bytes(output, &symbol, value);
+        format!("ptr @{symbol}, i64 {}", value.len())
+    };
+    let class_name = names(output, "name", class_name);
+    let qualified_name = names(output, "qualified", qualified_name);
     writeln!(
         output,
         "@semantics_{name} = private constant {{ i32, i32, ptr, i64, ptr, i64, ptr }} {{ i32 {kind}, i32 {flags}, {class_name}, {qualified_name}, ptr {fields} }}"
     )
     .unwrap();
     format!("@semantics_{name}")
+}
+
+fn field_metadata<'a>(
+    output: &mut String,
+    name: &str,
+    layout: impl Iterator<Item = (&'a str, u32)>,
+) -> String {
+    let mut fields = Vec::new();
+    for (index, (field, flags)) in layout.enumerate() {
+        if field.is_empty() {
+            fields.push("{ ptr, i64, i32 } zeroinitializer".to_owned());
+            continue;
+        }
+        let symbol = format!("repr_field_{name}_{index}");
+        bytes(output, &symbol, field);
+        fields.push(format!(
+            "{{ ptr, i64, i32 }} {{ ptr @{symbol}, i64 {}, i32 {flags} }}",
+            field.len()
+        ));
+    }
+    writeln!(
+        output,
+        "@repr_fields_{name} = private constant [{} x {{ ptr, i64, i32 }}] [{}]",
+        fields.len(),
+        fields.join(", ")
+    )
+    .unwrap();
+    format!("@repr_fields_{name}")
 }
 
 impl Emitter<'_, '_> {
@@ -159,6 +200,7 @@ impl Emitter<'_, '_> {
             "call ptr @imre_value_repr(i64 {word}, i32 {})",
             representation_kind(value.ty, &self.module.types)
         ));
+        self.check_error();
         self.owned(Value {
             ty: Type::Str,
             operand,

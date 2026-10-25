@@ -227,17 +227,10 @@ impl Checker<'_> {
         };
         let mut source = self.expr(&call.arguments.args[0])?;
         if let Type::Class(class) = source.ty {
-            let Some(method) = self.classes.methods[class].get("__iter__") else {
-                return Ok(None);
-            };
-            if self.types.element(method.returns) != Some(Type::Str) {
+            if !self.classes.has_record_iterator(class) {
                 return Ok(None);
             }
-            self.calls.insert(method.id);
-            source = Expr {
-                ty: method.returns,
-                kind: ExprKind::Call(method.id, ir::CallArgs::positional(vec![source])),
-            };
+            source = self.record_primitive(source, "__iter__", &[], call)?;
         }
         if self.types.element(source.ty) != Some(Type::Str) {
             return Ok(None);

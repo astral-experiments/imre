@@ -2,6 +2,7 @@ import os.path
 import shutil
 import sys
 import sysconfig
+from os import name as os_name
 from pathlib import Path
 
 
@@ -17,6 +18,8 @@ def mixed(tail: str | Path) -> None:
 
 
 print(sys.platform)
+print(os.name)
+print(os_name == os.name)
 print(Path(sysconfig.get_path("scripts")).name)
 for first in ["", ".", "/", "//", "./a//"]:
     for tail in ["", ".", "/absolute", "relative//tail"]:

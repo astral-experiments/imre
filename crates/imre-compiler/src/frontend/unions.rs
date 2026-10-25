@@ -4,6 +4,49 @@ use super::*;
 use crate::ir::InstanceType;
 
 impl Checker<'_> {
+    /// Store a protocol operand once, then provide the test and exact values for
+    /// its two possible layouts. The caller assigns the operand to the returned slot.
+    pub(super) fn protocol_alternatives(&mut self, ty: Type) -> Option<(usize, Expr, Expr, Expr)> {
+        if self.types.payload(ty).is_none() && self.types.members(ty).is_none() {
+            return None;
+        }
+        let slot = self.hidden(ty);
+        let (test, first, second) = if let Some(payload) = self.types.payload(ty) {
+            (
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::IsNone, vec![self.local(slot)]),
+                },
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                },
+                Expr {
+                    ty: payload,
+                    kind: ExprKind::Unwrap(Box::new(self.local(slot))),
+                },
+            )
+        } else {
+            let members = self.types.members(ty).unwrap();
+            let project = |ty| Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::UnionProject, vec![self.local(slot)]),
+            };
+            (
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(
+                        Builtin::IsInstance(vec![ir::InstanceType::Exact(members[0])]),
+                        vec![self.local(slot)],
+                    ),
+                },
+                project(members[0]),
+                project(members[1]),
+            )
+        };
+        Some((slot, test, first, second))
+    }
+
     /// Reads a proved member through explicit ownership-preserving projection.
     /// Optional members keep zero intact until a separate non-None proof exists.
     pub(super) fn read_local(&self, slot: usize) -> Expr {
@@ -19,6 +62,14 @@ impl Checker<'_> {
         }
         if ty == value.ty {
             return value;
+        }
+        if value.ty == Type::ObjectValue
+            && let Type::Class(class) = ty
+        {
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::ObjectRecordProject(class), vec![value]),
+            };
         }
         if matches!(value.ty, Type::Document(_)) {
             return if ty == Type::Str {
@@ -42,7 +93,10 @@ impl Checker<'_> {
             return literals::view(value, ty);
         }
         if self.types.payload(value.ty).unwrap_or(value.ty) == Type::Exception
-            && ty == Type::TimeoutExpired
+            && matches!(
+                ty,
+                Type::ImportException | Type::TimeoutExpired | Type::NamedException(_)
+            )
         {
             let value = if value.ty == Type::Exception {
                 value
@@ -62,11 +116,13 @@ impl Checker<'_> {
         }
         let source = self.types.payload(value.ty).unwrap_or(value.ty);
         let target = self.types.payload(ty).unwrap_or(ty);
-        let kind = if self
-            .types
-            .members(source)
-            .is_some_and(|members| members.contains(&target))
-        {
+        let kind = if self.types.members(source).is_some_and(|members| {
+            members.contains(&target)
+                || self
+                    .types
+                    .members(target)
+                    .is_some_and(|subset| subset.iter().all(|member| members.contains(member)))
+        }) {
             ExprKind::Builtin(Builtin::UnionProject, vec![value])
         } else {
             debug_assert_eq!(self.types.payload(value.ty), Some(ty));
@@ -75,9 +131,49 @@ impl Checker<'_> {
         Expr { ty, kind }
     }
 
+    /// Compare numeric values without changing the stored member used by repr or identity.
+    pub(super) fn numeric_union_comparison(&self, values: Vec<Expr>) -> Vec<Expr> {
+        if !values.iter().any(|v| self.types.is_bool_or_int(v.ty))
+            || !values
+                .iter()
+                .all(|v| matches!(v.ty, Type::Int | Type::Bool) || self.types.is_bool_or_int(v.ty))
+        {
+            return values;
+        }
+        values
+            .into_iter()
+            .map(|value| {
+                let cast = match value.ty {
+                    Type::Int => return value,
+                    Type::Bool => Builtin::Int,
+                    _ => Builtin::UnionProject,
+                };
+                Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(cast, vec![value]),
+                }
+            })
+            .collect()
+    }
+
     /// Class arguments are static builtin/nominal classes or tuples of them;
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StatResult)) {
+            return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
+        }
+        match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::ModuleSpec)) => {
+                return Ok(vec![InstanceType::ModuleSpec]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => {
+                return Ok(vec![InstanceType::ForwardRef]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::SimpleNamespace)) => {
+                return Ok(vec![InstanceType::SimpleNamespace]);
+            }
+            _ => {}
+        }
         if let ast::Expr::Tuple(tuple) = expression {
             let mut result = Vec::new();
             for value in &tuple.elts {
@@ -87,6 +183,22 @@ impl Checker<'_> {
         }
         if let Some(kind) = self.exception_category(expression) {
             return Ok(vec![InstanceType::Exception(kind)]);
+        }
+        if matches!(
+            self.resolve(expression),
+            Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+        ) {
+            let mut classes = vec![InstanceType::Dict];
+            classes.extend(
+                self.classes
+                    .declarations
+                    .definitions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, class)| class.mapping)
+                    .map(|(id, _)| InstanceType::Exact(Type::Class(id))),
+            );
+            return Ok(classes);
         }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StrEnum)) {
             return Ok(vec![InstanceType::StrEnum]);
@@ -103,7 +215,19 @@ impl Checker<'_> {
         ) {
             return Ok(vec![InstanceType::Exact(Type::CompletedProcess(
                 crate::ir::ProcessCapture::TEXT,
+                None,
             ))]);
+        }
+        if let Some(Binding::Definition(definition)) = self.resolve(expression)
+            && self.types.namedtuple(definition).is_some()
+        {
+            return Ok(self
+                .types
+                .tuples()
+                .into_iter()
+                .filter(|(ty, _)| self.types.namedtuple_definition(*ty) == Some(definition))
+                .map(|(ty, _)| InstanceType::Exact(ty))
+                .collect());
         }
         if let Some(Binding::Definition(definition)) = self.resolve(expression)
             && let Some(&class) = self.classes.declarations.ids.get(&definition)
@@ -155,8 +279,23 @@ impl Checker<'_> {
             ));
         };
         let value = self.expr(value)?;
+        let classes = match self.instance_types(classes) {
+            Ok(classes) => classes,
+            Err(diagnostic) => {
+                if let Ok(target) = self.expr(classes)
+                    && matches!(target.ty, Type::ForwardRef(_))
+                {
+                    return Ok(Self::class_check_error(
+                        value,
+                        target,
+                        "isinstance() arg 2 must be a type, a tuple of types, or a union",
+                    ));
+                }
+                return Err(diagnostic);
+            }
+        };
         if matches!(value.ty, Type::Document(_)) {
-            let op = match self.instance_types(classes)?.as_slice() {
+            let op = match classes.as_slice() {
                 [InstanceType::Dict] => ir::DocumentOp::IsMap,
                 [InstanceType::List] => ir::DocumentOp::IsList,
                 [InstanceType::Exact(Type::Str)] => ir::DocumentOp::IsStr,
@@ -171,10 +310,7 @@ impl Checker<'_> {
             return Ok(documents::op(op, Type::Bool, vec![value]));
         }
         if matches!(value.ty, Type::JsonRoot | Type::JsonValue)
-            && matches!(
-                self.instance_types(classes)?.as_slice(),
-                [InstanceType::Exact(Type::Int)]
-            )
+            && matches!(classes.as_slice(), [InstanceType::Exact(Type::Int)])
         {
             return Ok(Expr {
                 ty: Type::Bool,
@@ -191,11 +327,62 @@ impl Checker<'_> {
                 "isinstance on readonly JSON is unsupported; select into an exact type",
             ));
         }
-        let classes = self.instance_types(classes)?;
         Ok(Expr {
             ty: Type::Bool,
             kind: ExprKind::Builtin(Builtin::IsInstance(classes), vec![value]),
         })
+    }
+
+    /// Class checks evaluate both operands before reporting an invalid class.
+    fn class_check_error(first: Expr, second: Expr, message: &str) -> Expr {
+        let exception = Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("TypeError").unwrap(),
+                message: Some(Box::new(unpacking::string(message))),
+            },
+        };
+        Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Builtin(Builtin::RaiseException, vec![first, second, exception]),
+        }
+    }
+
+    pub(super) fn issubclass(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.reject_builtin_keywords(call)?;
+        let [first, second] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "issubclass requires two positional operands",
+            ));
+        };
+        let first = self.expr(first)?;
+        let second = self.expr(second)?;
+        match (first.ty, second.ty) {
+            (Type::BuiltinClass, Type::BuiltinClass) => Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::IsBuiltinSubclass, vec![first, second]),
+            }),
+            (Type::BuiltinClass, Type::ForwardRef(_)) => Ok(Self::class_check_error(
+                first,
+                second,
+                "issubclass() arg 2 must be a class, a tuple of classes, or a union",
+            )),
+            (
+                Type::Bool | Type::Int | Type::Float | Type::Str | Type::None | Type::ForwardRef(_),
+                Type::BuiltinClass | Type::ForwardRef(_),
+            ) => Ok(Self::class_check_error(
+                first,
+                second,
+                "issubclass() arg 1 must be a class",
+            )),
+            _ => Err(error(
+                self.source,
+                call,
+                "issubclass requires supported native class objects",
+            )),
+        }
     }
 
     fn instance_members(&self, ty: Type) -> Vec<Type> {
@@ -210,15 +397,33 @@ impl Checker<'_> {
         members
     }
 
-    /// Exception categories below Exception need a runtime hierarchy test;
-    /// other category checks are exact for every admitted concrete layout.
+    /// Tests for derived records or exception kinds can require runtime inspection.
     /// A stored builtin exception can be either a SystemExit or an Exception.
-    fn instance_member_matches(ty: Type, classes: &[InstanceType]) -> Option<bool> {
-        if ty == Type::ExitCode {
+    fn instance_member_matches(&self, ty: Type, classes: &[InstanceType]) -> Option<bool> {
+        if matches!(ty, Type::ObjectValue | Type::StringIterable) {
             return None;
         }
         let mut unknown = false;
         for &class in classes {
+            if let (Type::Class(base), InstanceType::Exact(Type::Class(derived))) = (ty, class)
+                && self.classes.declarations.definitions[derived]
+                    .bases
+                    .contains(&base)
+            {
+                // A base view can contain either this derived layout or another one.
+                unknown = true;
+            }
+            if let InstanceType::Exception(kind) = class
+                && ty == Type::ImportException
+            {
+                if matches!(kind, 0 | 1 | 41) {
+                    return Some(true);
+                }
+                if kind == 42 || kind >= 256 {
+                    unknown = true;
+                }
+                continue;
+            }
             if let InstanceType::Exception(kind) = class
                 && ty == Type::TimeoutExpired
             {
@@ -228,7 +433,7 @@ impl Checker<'_> {
                 continue;
             }
             if let InstanceType::Exception(kind) = class
-                && ty == Type::Exception
+                && matches!(ty, Type::Exception | Type::NamedException(_))
                 && kind != 0
             {
                 unknown = true;
@@ -246,13 +451,26 @@ impl Checker<'_> {
             ExprKind::Builtin(Builtin::IsInstance(classes), args) => {
                 let mut result = None;
                 for member in self.instance_members(args[0].ty) {
-                    let current = Self::instance_member_matches(member, classes)?;
+                    let current = self.instance_member_matches(member, classes)?;
                     if result.is_some_and(|previous| previous != current) {
                         return None;
                     }
                     result = Some(current);
                 }
                 result
+            }
+            ExprKind::Compare(values, ops) => {
+                let [left, right] = values.as_slice() else {
+                    return None;
+                };
+                let (ExprKind::Str(left), ExprKind::Str(right)) = (&left.kind, &right.kind) else {
+                    return None;
+                };
+                match ops.as_slice() {
+                    [Compare::Equal] => Some(left == right),
+                    [Compare::NotEqual] => Some(left != right),
+                    _ => None,
+                }
             }
             ExprKind::Not(value) => self.instance_condition(value).map(|value| !value),
             _ => None,
@@ -324,6 +542,17 @@ impl Checker<'_> {
                 .get(&slot)
                 .copied()
                 .unwrap_or(self.locals[slot]);
+            if current == Type::ObjectValue {
+                for (classes, truth) in &constraints {
+                    if *truth
+                        && let [InstanceType::Exact(Type::Class(class))] = classes.as_slice()
+                        && self.boxed_dataclass(*class)
+                    {
+                        self.narrowed.insert_mut(slot, Type::Class(*class));
+                    }
+                }
+                continue;
+            }
             if matches!(current, Type::Document(_)) {
                 for (classes, truth) in &constraints {
                     if !*truth {
@@ -342,9 +571,12 @@ impl Checker<'_> {
             let mut members = self.instance_members(current);
             for (classes, truth) in &constraints {
                 members.retain(|&ty| {
-                    Self::instance_member_matches(ty, classes)
+                    self.instance_member_matches(ty, classes)
                         .is_none_or(|matches| matches == *truth)
                 });
+                if *truth && !classes.is_empty() && classes.iter().all(|c| matches!(c, InstanceType::Exception(kind) if self.is_import_error(*kind))) {
+                    for member in &mut members { if *member==Type::Exception { *member=Type::ImportException; } }
+                }
                 // A positive exact timeout category test establishes the byte
                 // payload contract even when the value was stored as Exception.
                 if *truth
@@ -366,7 +598,7 @@ impl Checker<'_> {
                 members = self.instance_members(self.locals[slot]);
                 for (classes, truth) in &constraints {
                     members.retain(|&ty| {
-                        Self::instance_member_matches(ty, classes)
+                        self.instance_member_matches(ty, classes)
                             .is_none_or(|matches| matches == *truth)
                     });
                 }

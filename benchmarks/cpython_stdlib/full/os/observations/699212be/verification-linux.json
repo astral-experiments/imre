@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "source": "699212be66bfbd97b4c3fc3c390178f3a89b602d",
+  "tree": "45e62ed1901f313717e56615917d3bdbb07ae07a",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "license_blob": "20cf39097c68baa17cc566b64e76d34ebf034044",
+  "posix_blob": "a895d57d1ffec1526332154669c9e72dccf3fef3",
+  "compiler_sha256": "f1ccced2cadebbd2b2728184315599e76f8b751a44baf34fba718546f9d9306b",
+  "runtime_sha256": "c41988cfdb7f24373650dac30ead29871d9fc866e06e30feb2087e32edae0f7c",
+  "clang": "clang-18",
+  "build_profile": "cargo +ohm -Zohm-defaults=no; locked stdlib-os, no debug or incremental builds, at most two jobs",
+  "clippy_log_sha256": "bfe26d11effb9fa0d098235c11ff86e85fa9ef74b3a28859e08a464cb354213e",
+  "supplemental_flags": {
+    "source": "pipe2_flags.py",
+    "result_sha256": "1ea1802a8e21900cd6e1704c2243e8bce1afc8c287eaa8b8d87c6adc98df3e35",
+    "lines_per_mode": 60,
+    "levels": [
+      0,
+      3
+    ],
+    "scopes": [
+      "whole-program",
+      "reachable-only"
+    ]
+  },
+  "per_level": {
+    "0": {
+      "pipe2_cases": {
+        "methods": 2,
+        "classification": {
+          "mixed": 1,
+          "host_driven_native": 1
+        },
+        "raw_sha256": "7d55281b2a40e6180d46967c3baed8a99488014ff8ffd483e2b26726ad4edf4f"
+      },
+      "credential_children": {
+        "methods": 14,
+        "classification": {
+          "native_body_host_fixture": 12,
+          "host_driven_native": 2
+        },
+        "raw_sha256": "b46aa83004d581b9da2130d2c45abe9464aecb03519b47c4e7245cb7f3c50603"
+      },
+      "host_descriptors": {
+        "methods": 11,
+        "classification": {
+          "host_driven_native": 11
+        },
+        "raw_sha256": "9000c7212d67e067c004d447d88991fd38a0abf904922d8dc3664fe536a2fb93"
+      },
+      "native_descriptors": {
+        "methods": 12,
+        "classification": {
+          "native_body_host_fixture": 12
+        },
+        "raw_sha256": "3480f21dcd1b37c4ec08d4fcaa483142aac9bd7f8966728d2bf010da0e2b8adb"
+      },
+      "value_cases": {
+        "methods": 5,
+        "classification": {
+          "native_body_host_fixture": 3,
+          "host_driven_native": 1,
+          "mixed": 1
+        },
+        "raw_sha256": "f967866beee71d7d359131e9da063f7524c0f1da5c24e0f506a7b44eda9330f3"
+      }
+    },
+    "3": {
+      "pipe2_cases": {
+        "methods": 2,
+        "classification": {
+          "mixed": 1,
+          "host_driven_native": 1
+        },
+        "raw_sha256": "a289dee57d09f973e44b2229d242a249a3f86e9553c1a3817fe8aa0e5eb5e1aa"
+      },
+      "credential_children": {
+        "methods": 14,
+        "classification": {
+          "native_body_host_fixture": 12,
+          "host_driven_native": 2
+        },
+        "raw_sha256": "1d240d75140d960ccb86df20ea1908cc4730ba9bde8c23fe29f6b8a12746225f"
+      },
+      "host_descriptors": {
+        "methods": 11,
+        "classification": {
+          "host_driven_native": 11
+        },
+        "raw_sha256": "b746664b225c5951df1454e7dbb9657b6da5d70a711b03bd22aa910204110633"
+      },
+      "native_descriptors": {
+        "methods": 12,
+        "classification": {
+          "native_body_host_fixture": 12
+        },
+        "raw_sha256": "1a1d95e45153aad9e1ebd1fd6896a0c533933bbe551d9105979950c2d98e967d"
+      },
+      "value_cases": {
+        "methods": 5,
+        "classification": {
+          "native_body_host_fixture": 3,
+          "host_driven_native": 1,
+          "mixed": 1
+        },
+        "raw_sha256": "b553fae08d3b63e4c9036de58456809ee199e315378a48916c84e115adbf9dc6"
+      }
+    }
+  },
+  "denominators": {
+    "test_os": 375,
+    "test_posix": 179,
+    "test_genericpath": 25
+  },
+  "raw_files_sha256": {
+    "flags-linux.json": "1ea1802a8e21900cd6e1704c2243e8bce1afc8c287eaa8b8d87c6adc98df3e35",
+    "original-O0.json": "7d55281b2a40e6180d46967c3baed8a99488014ff8ffd483e2b26726ad4edf4f",
+    "original-O3.json": "a289dee57d09f973e44b2229d242a249a3f86e9553c1a3817fe8aa0e5eb5e1aa"
+  },
+  "fixtures": "2ac8914722a6b7d56514f95f3cc7f2976c00ad96",
+  "base": "9492b48c62088b791d2e7e7a49f9a3e80f68a4fd",
+  "role_changes": {
+    "0": {
+      "test.test_posix.PosixTester.test_pipe2": [
+        "blocked",
+        "mixed"
+      ],
+      "test.test_posix.PosixTester.test_pipe2_c_limits": [
+        "blocked",
+        "host-driven-native-operation"
+      ]
+    },
+    "3": {
+      "test.test_posix.PosixTester.test_pipe2": [
+        "blocked",
+        "mixed"
+      ],
+      "test.test_posix.PosixTester.test_pipe2_c_limits": [
+        "blocked",
+        "host-driven-native-operation"
+      ]
+    }
+  },
+  "counts_per_level": {
+    "blocked": 439,
+    "host-driven-native-operation": 15,
+    "mixed": 2,
+    "native-body-host-fixture": 27,
+    "reference-only": 5,
+    "reference-skip": 91
+  }
+}
