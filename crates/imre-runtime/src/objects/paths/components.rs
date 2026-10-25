@@ -50,13 +50,9 @@ pub unsafe extern "C" fn imre_path_is_relative_to(
 ) -> u32 {
     // SAFETY: no callback, mutation or borrowed component escapes the comparison.
     let result = unsafe {
-        object(path).0.with(|s| {
-            s.parsed(|p| {
-                object(other)
-                    .0
-                    .with(|o| o.parsed(|o| Ok(p.is_relative_to(o))))
-            })
-        })
+        object(path)
+            .0
+            .with(|s| s.parsed(|p| object(other).0.with(|o| o.parsed(|o| p.is_relative_to(o)))))
     };
     finish(result.map(u32::from), 0)
 }

@@ -76,7 +76,7 @@ impl Hash for ObjectKey {
         unsafe {
             self.0.0.with(|key| match key {
                 Storage::Logger(_) => Rc::as_ptr(&self.0).hash(state),
-                path => path.path_key().hash(state),
+                path => path.hash_path(state),
             })
         };
     }
