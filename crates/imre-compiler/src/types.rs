@@ -289,6 +289,7 @@ impl Types {
             | Type::JsonRoot
             | Type::JsonValue
             | Type::JsonObject
+            | Type::Patch(_)
             | Type::None => true,
         };
         if valid {

@@ -20,6 +20,57 @@ fn type_error(message: &str) -> Statement {
 }
 
 impl Checker<'_> {
+    /// With both attribute lists empty, update_wrapper still attaches the
+    /// original callable and returns the wrapper itself.
+    pub(super) fn update_wrapper(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let names = ["wrapper", "wrapped", "assigned", "updated"];
+        let mut supplied = call.arguments.args.iter().enumerate().collect::<Vec<_>>();
+        for keyword in &call.arguments.keywords {
+            let index = names
+                .iter()
+                .position(|name| keyword.arg.as_deref() == Some(*name))
+                .ok_or_else(|| error(self.source, keyword, "unsupported update_wrapper keyword"))?;
+            supplied.push((index, &keyword.value));
+        }
+        let mut fields: [Option<Expr>; 4] = [None, None, None, None];
+        let mut scope = calls::ArgumentScope::default();
+        for (index, node) in supplied {
+            let slot = fields
+                .get_mut(index)
+                .filter(|slot| slot.is_none())
+                .ok_or_else(|| {
+                    error(self.source, node, "invalid update_wrapper argument binding")
+                })?;
+            let value = self.expr(node)?;
+            if index >= 2 && value.ty != self.types.tuple(Vec::new()) {
+                return Err(error(
+                    self.source,
+                    node,
+                    "native update_wrapper requires empty assigned and updated tuples",
+                ));
+            }
+            *slot = Some(scope.hold(self, value));
+        }
+        let [Some(wrapper), Some(wrapped), Some(_), Some(_)] = fields else {
+            return Err(error(
+                self.source,
+                call,
+                "native update_wrapper requires explicit assigned and updated tuples",
+            ));
+        };
+        if !matches!(wrapper.ty, Type::Callable(_)) || wrapper.ty != wrapped.ty {
+            return Err(error(
+                self.source,
+                call,
+                "native wrapper links require two functions with the same callable signature",
+            ));
+        }
+        Ok(scope.finish(Expr {
+            ty: wrapper.ty,
+            kind: ExprKind::Builtin(Builtin::FunctionWrappedSet, vec![wrapper, wrapped]),
+        }))
+    }
+
     /// Evaluate the callable, iterable and optional seed before acquiring the iterator.
     /// Without a seed, the first item becomes the accumulator without a callback.
     pub(super) fn reduce_call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {

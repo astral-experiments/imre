@@ -222,6 +222,8 @@ jobs:
       - run: cargo build --workspace --release --locked --features imre-compiler/verify-ir
       - name: Verify the standard library support table
         run: python3 -B benchmarks/cpython_stdlib/full/support_table.py --imre target/release/imre --check
+      - name: Compare interrupted socket calls and fd reuse with CPython
+        run: python3 tests/socket_eintr.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
       - name: Get the pinned CPython unittest support and extension docstrings
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -490,6 +492,7 @@ jobs:
       - name: Compare Ruff’s ecosystem check with CPython on local Git repositories
         run: |
           python3 -m pip install --no-deps tomli==2.5.0 tomli-w==1.2.0 unidiff==1.0.0
+          python3 tests/patchset.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
           target/release/imre check --entry-profile examples/ruff_ecosystem/check-entry.json examples/ruff_ecosystem/ruff_ecosystem/__main__.py
           python3 tests/ruff_ecosystem_live.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
       - name: Compare fixed-offset datetime operations and original methods with CPython
