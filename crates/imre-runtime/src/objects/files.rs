@@ -585,7 +585,8 @@ pub(super) fn read_path_text(path: &str) -> Result<Str> {
 }
 
 pub(super) fn read_path_bytes(path: &str) -> Result<Bytes> {
-    let (mut file, metadata) = open_file(path, 0)?;
+    let path = super::text::try_owned_string(path)?;
+    let (mut file, metadata) = open_file(&path, 0)?;
     let mut bytes = Vec::new();
     // Path.read_bytes owns the descriptor until close and consumes it to EOF.
     // A regular file can fill the result directly without allocating a second
