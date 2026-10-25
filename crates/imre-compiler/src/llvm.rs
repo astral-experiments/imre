@@ -6243,6 +6243,12 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
+            Builtin::DictUpdate => {
+                for source in &args[1..] {
+                    self.void_call("imre_dict_update", &[&args[0].value, &source.value]);
+                }
+                none()
+            }
             Builtin::DictDelete => {
                 let key = self.key_word(&args[1].value);
                 self.checked_line(format!(
@@ -8051,6 +8057,7 @@ declare ptr @imre_chainmap_maps(ptr)
 declare void @imre_chainmap_set_maps(ptr, ptr)
 declare i32 @imre_chainmap_truth(ptr)
 declare void @imre_counter_update(ptr, ptr)
+declare void @imre_dict_update(ptr, ptr)
 declare ptr @imre_counter_math(ptr, ptr, i32, i32)
 declare i64 @imre_dict_sum_values(ptr, i64)
 declare i64 @imre_counter_total(ptr)
