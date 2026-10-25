@@ -2166,8 +2166,8 @@ impl<'a> Checker<'a> {
 
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
-        if self.types.is_unread_argument(expected) {
-            return self.unread_argument(expression, expected);
+        if self.types.is_callback_argument(expected) {
+            return self.pack_callback_argument(expression, expected);
         }
         // A record can carry user fields with distinct types. An expected scalar type
         // permits reading such a field; the runtime checks its actual representation.
@@ -4557,6 +4557,11 @@ impl<'a> Checker<'a> {
         right: Expr,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        if op == ast::Operator::Mod
+            && let Some(formatted) = single_dispatch::format_argument(self.types, &left, &right)
+        {
+            return Ok(formatted);
+        }
         if op == ast::Operator::Mod
             && left.ty == Type::Str
             && (matches!(right.ty, Type::Int | Type::Str) || self.types.percent_tuple(right.ty))
