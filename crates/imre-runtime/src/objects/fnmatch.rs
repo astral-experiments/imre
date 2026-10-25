@@ -56,7 +56,7 @@ pub unsafe extern "C" fn imre_fnmatch(
 }
 
 /// # Safety
-/// The sequence stores only rooted str (kind 3) or bytes (kind 8) owners.
+/// The sequence stores rooted str, bytes, or their compiler-described union.
 /// The pattern is an independently rooted immutable owner with the indicated tag.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_fnmatch_filter(
@@ -69,14 +69,19 @@ pub unsafe extern "C" fn imre_fnmatch_filter(
     let pattern = Pattern::component(&unsafe { spelling(pat, pat_bytes != 0) });
     let filter = |storage: &super::Storage| {
         let source = storage.sequence();
-        let name_bytes = source.kind.raw() == 8;
         let mut output = Words::new(source.kind.raw());
         for &word in &source.values {
+            let (name_bytes, pointer) = match source.kind.raw() {
+                3 => (false, word),
+                8 => (true, word),
+                9 => (word & 7 == 1, word & !7), // the closed str | bytes union
+                _ => unreachable!("fnmatch filter input must contain str or bytes"),
+            };
             if name_bytes != (pat_bytes != 0) {
                 return Err(mixed(pat_bytes != 0));
             }
             // SAFETY: the immutable list roots every element throughout this scan.
-            let name = unsafe { spelling(word as *const (), name_bytes) };
+            let name = unsafe { spelling(pointer as *const (), name_bytes) };
             if pattern.matches(&name) != (inverse != 0) {
                 output
                     .values
@@ -182,6 +187,22 @@ pub unsafe extern "C" fn imre_fnmatch_translate(pat: *const Str) -> *const Str {
             .map_err(|_| Error::allocation()),
         std::ptr::null(),
     )
+}
+
+/// # Safety
+/// `pat` is a rooted bytes owner. Only the empty bytes input has no integer
+/// elements to pass to CPython's regular expression escaping operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_fnmatch_translate_bytes(pat: *const Bytes) -> *const Str {
+    // SAFETY: the caller keeps the exact bytes allocation alive for this check.
+    if unsafe { &*pat }.is_empty() {
+        return Rc::into_raw(super::text::owned_string("(?s:)\\z"));
+    }
+    Error::new(
+        Kind::TypeError,
+        "decoding to str: need a bytes-like object, int found",
+    )
+    .returning(std::ptr::null())
 }
 
 /// # Safety

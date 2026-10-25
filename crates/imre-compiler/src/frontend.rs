@@ -425,6 +425,11 @@ pub(crate) fn lower_with_owners(
         for (name, binding) in &module.bindings {
             if reserved(name)
                 && !(name == "open" && *binding == Binding::Intrinsic(Intrinsic::GzipOpen))
+                && !(name == "filter"
+                    && matches!(
+                        binding,
+                        Binding::Intrinsic(Intrinsic::Fnmatch(ir::FnmatchOperation::Filter { .. }))
+                    ))
             {
                 return Err(module.error(
                     module.parsed.syntax(),

@@ -3856,9 +3856,14 @@ impl Emitter<'_, '_> {
                         tuple
                     }
                     FnmatchOperation::Translate => {
-                        self.call("imre_fnmatch_translate", returns, &[first])
+                        let name = if first.ty == Type::Bytes {
+                            "imre_fnmatch_translate_bytes"
+                        } else {
+                            "imre_fnmatch_translate"
+                        };
+                        self.call(name, returns, &[first])
                     }
-                    FnmatchOperation::Match => {
+                    FnmatchOperation::Match { .. } => {
                         let pat = &args[1].value;
                         let value = self.checked_instruction(format!(
                             "call i32 @imre_fnmatch(ptr {}, ptr {}, i32 {}, i32 {})",
@@ -6307,6 +6312,7 @@ declare i32 @imre_path_match(ptr, ptr, i64, i32)
 declare i32 @imre_fnmatch(ptr, ptr, i32, i32)
 declare ptr @imre_fnmatch_filter(ptr, ptr, i32, i32)
 declare ptr @imre_fnmatch_translate(ptr)
+declare ptr @imre_fnmatch_translate_bytes(ptr)
 declare void @imre_fnmatch_parts(ptr, ptr, ptr, ptr)
 declare i32 @imre_path_match_object(ptr, ptr, i64, i32)
 declare ptr @imre_pure_path_new(i32)

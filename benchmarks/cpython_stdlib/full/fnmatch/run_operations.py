@@ -109,6 +109,7 @@ def main():
         parser.error("use a test-enabled CPython 3.14.5")
     manifest = json.loads((HERE/"UPSTREAM.json").read_bytes())
     verify_files(HERE/"upstream", manifest["files"])
+    verify_files(Path(fnmatch.__file__).resolve().parent, {"fnmatch.py": manifest["files"]["Lib/fnmatch.py"]})
     verify_interpreter_tests(manifest)
     reference = json.loads((HERE/"reference-linux.json").read_bytes())
     trace = Trace()

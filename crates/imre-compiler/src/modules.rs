@@ -367,7 +367,9 @@ impl IntrinsicModule {
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
             (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
-                Intrinsic::Fnmatch(FnmatchOperation::Match)
+                Intrinsic::Fnmatch(FnmatchOperation::Match {
+                    normcase: name == "fnmatch",
+                })
             }
             (Self::Fnmatch, "filter" | "filterfalse") => {
                 Intrinsic::Fnmatch(FnmatchOperation::Filter {

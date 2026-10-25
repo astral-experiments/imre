@@ -92,6 +92,7 @@ def main():
                 else:
                     loc=roles(body="cpython",assertions="cpython",operation="imre",fixture="cpython")
                     proof["operation"]="CPython runs the original case and receives each requested native fnmatch result."
+                    proof["fixture"]="Original CPython TestCase, helpers, platform flags and runner."
                 obs[name,1]={"outcome":"pass","roles":loc,"evidence":proof}
         report=build_report(reference,level,discovered,obs)
         print(f"O{level}: {report['counts']}",flush=True)

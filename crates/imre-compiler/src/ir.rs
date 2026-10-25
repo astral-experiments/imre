@@ -931,7 +931,7 @@ pub(crate) enum PathOperation {
 /// Shell filename operations do not interpret path separators.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FnmatchOperation {
-    Match,
+    Match { normcase: bool },
     Filter { inverse: bool },
     Translate,
     Parts,
