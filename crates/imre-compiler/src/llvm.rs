@@ -346,6 +346,7 @@ fn emit_program(
         uses_orig_argv,
         uses_linecache,
         uses_builtins_last: module.uses_builtins_last(),
+        changes_stdout: module.changes_stdout(),
         has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
@@ -533,6 +534,7 @@ struct Emitter<'a, 'module> {
     uses_orig_argv: bool,
     uses_linecache: bool,
     uses_builtins_last: bool,
+    changes_stdout: bool,
     has_extensions: bool,
 }
 
@@ -1771,6 +1773,9 @@ impl Emitter<'_, '_> {
             if self.uses_linecache {
                 self.line("call void @imre_linecache_clear()");
             }
+            if self.changes_stdout {
+                self.line("call void @imre_sys_stdout_clear()");
+            }
             if self.uses_builtins_last {
                 self.line("call void @imre_builtins_clear()");
             }
@@ -1808,6 +1813,9 @@ impl Emitter<'_, '_> {
             self.cleanup_globals();
             if self.uses_linecache {
                 self.line("call void @imre_linecache_clear()");
+            }
+            if self.changes_stdout {
+                self.line("call void @imre_sys_stdout_clear()");
             }
             if self.uses_builtins_last {
                 self.line("call void @imre_builtins_clear()");
@@ -4457,9 +4465,50 @@ impl Emitter<'_, '_> {
             Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
             Builtin::Chr => self.call("imre_chr", Type::Str, &[&args[0].value]),
+            Builtin::SysStdout => {
+                let pointer = self.checked_instruction("call ptr @imre_sys_stdout()");
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!("ptrtoint ptr {pointer} to i64")),
+                    small_integer: false,
+                }
+            }
+            Builtin::SysOriginalOutput { stderr } => Value {
+                ty: returns,
+                operand: self.instruction(format!(
+                    "call ptr @imre_sys_original_output(i32 {})",
+                    u32::from(*stderr)
+                )),
+                small_integer: false,
+            },
+            Builtin::SysStdoutSet => {
+                let word = self.word(&args[0].value);
+                self.line(format!("call void @imre_sys_stdout_set(i64 {word})"));
+                none()
+            }
+            Builtin::SysStdoutDelete => {
+                self.void_call("imre_sys_stdout_del", &[]);
+                none()
+            }
+            Builtin::TextOptionalReceiver => {
+                let word = self.word(&args[0].value);
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_text_optional_receiver(i64 {word}, ptr {})",
+                        args[1].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::BuiltinsLast => self.call("imre_builtins_last", returns, &[]),
-            Builtin::BuiltinsHasLast => {
-                let bit = self.instruction("call i32 @imre_builtins_has_last()");
+            Builtin::BuiltinsHasLast | Builtin::SysHasStdout => {
+                let symbol = if matches!(builtin, Builtin::BuiltinsHasLast) {
+                    "imre_builtins_has_last"
+                } else {
+                    "imre_sys_has_stdout"
+                };
+                let bit = self.instruction(format!("call i32 @{symbol}()"));
                 Value {
                     ty: Type::Bool,
                     operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
@@ -7605,6 +7654,13 @@ declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
+declare ptr @imre_sys_stdout()
+declare i32 @imre_sys_has_stdout()
+declare ptr @imre_sys_original_output(i32)
+declare void @imre_sys_stdout_set(i64)
+declare void @imre_sys_stdout_del()
+declare void @imre_sys_stdout_clear()
+declare ptr @imre_text_optional_receiver(i64, ptr)
 declare ptr @imre_builtins_last()
 declare i32 @imre_builtins_has_last()
 declare void @imre_builtins_set_last(i32, i64)
