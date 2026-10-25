@@ -17,6 +17,13 @@ also checks mutable value identity, argument evaluation before pulling keys,
 and bound Counter and defaultdict behavior. Probe output does not add any
 upstream occurrence.
 
+The fixture supplies a constructed set to `fromkeys`. The [nested set control](probes/set_range.py)
+retains `dict.fromkeys(set(range(6)), 0)` from the original case. On the first
+[Linux run](https://github.com/astral-sh/imre/actions/runs/40181575398), all four
+compiler modes rejected the inner `range` before the mapping operation ran.
+The complete original method stopped earlier, on its first dictionary comparison
+(`test_dict.py:336`): native `TestCase.assertEqual` required an integer operand.
+
 Stock [`TextWrapper` in CPython 3.14.5](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/textwrap.py#L66)
 uses `dict.fromkeys(map(ord, _whitespace), ord(' '))`. The distinct keys are
 9, 10, 11, 12, 13 and 32, each with value 32. The combined integration must

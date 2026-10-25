@@ -29,7 +29,7 @@ def main() -> None:
     print(dict.fromkeys(range(6), 0))
     print(dict.fromkeys(list(range(6)), 0))
     print(dict.fromkeys([9, 10, 11, 12, 13, 32], 32))
-    print(dict.fromkeys(set(range(6)), 0))
+    print(dict.fromkeys({0, 1, 2, 3, 4, 5}, 0))
     keys = {4: 10, 2: 20, 7: 30}
     print(dict.fromkeys(keys, 0))
     print(keys.fromkeys([8], 0))
