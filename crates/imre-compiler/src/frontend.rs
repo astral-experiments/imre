@@ -26,6 +26,7 @@ mod documents;
 mod enums;
 mod expansions;
 mod fixed_tuples;
+mod function_caches;
 mod functools;
 mod hashlib;
 mod inference;
@@ -39,6 +40,7 @@ mod logging_records;
 mod matching;
 mod module_values;
 mod native_generators;
+mod os;
 mod partials;
 mod paths;
 mod pipelines;
@@ -83,7 +85,7 @@ struct ClassInfo {
     fields: Vec<Vec<Type>>,
     methods: Vec<HashMap<String, Signature>>,
     keyword_copies: HashSet<usize>,
-    cached: HashSet<usize>,
+    cached: HashMap<usize, function_caches::Policy>,
     cached_properties: cached_properties::Slots,
     generators: HashSet<usize>,
     producer_items: HashMap<usize, Type>,
@@ -256,7 +258,7 @@ impl ClassInfo {
             parsers,
             methods: vec![HashMap::new(); fields.len()],
             keyword_copies: HashSet::new(),
-            cached: HashSet::new(),
+            cached: HashMap::new(),
             cached_properties,
             generators: HashSet::new(),
             producer_items: HashMap::new(),
@@ -424,7 +426,13 @@ pub(crate) fn lower_with_owners(
     for (module_id, module) in graph.modules.iter().enumerate() {
         for (name, binding) in &module.bindings {
             if reserved(name)
-                && !(name == "open" && *binding == Binding::Intrinsic(Intrinsic::GzipOpen))
+                && !(name == "open"
+                    && matches!(
+                        binding,
+                        Binding::Intrinsic(
+                            Intrinsic::GzipOpen | Intrinsic::Fd(ir::FdOperation::Open)
+                        )
+                    ))
             {
                 return Err(module.error(
                     module.parsed.syntax(),
@@ -441,16 +449,16 @@ pub(crate) fn lower_with_owners(
                     }) {
                         continue;
                     }
-                    let cached = matches!(function.decorator_list.as_slice(), [decorator] if graph.resolve(module_id, &decorator.expression) == Some(Binding::Intrinsic(Intrinsic::FunctionCache)));
+                    let cached = function_caches::policy(graph, module_id, function)?;
                     let mut function = function.clone();
-                    if cached {
+                    if cached.is_some() {
                         function.decorator_list.clear();
                     }
                     let element = native_generators::item_type(
                         &function, graph, module_id, &classes, &types,
                     )?;
                     if element.is_some() {
-                        if cached {
+                        if cached.is_some() {
                             return Err(
                                 module.error(&function, "generator functions cannot be cached")
                             );
@@ -472,14 +480,18 @@ pub(crate) fn lower_with_owners(
                         &inference,
                     )
                     .map_err(|error| format!("{}:{error}", module.path.display()))?;
-                    if cached {
+                    if let Some(policy) = cached {
                         if signature.asynchronous
-                            || !matches!(signature.params.as_slice(), [p] if types.hashable_key(p.ty) && p.default.is_none() && p.kind != ParameterKind::KeywordOnly)
                             || function.returns.is_none()
+                            || !signature.params.iter().all(|p| {
+                                types.hashable_key(p.ty)
+                                    && p.default.is_none()
+                                    && p.kind != ParameterKind::KeywordOnly
+                            })
                         {
-                            return Err(module.error(&function, "@cache requires one exact immutable positional key and an annotated synchronous result"));
+                            return Err(module.error(&function, "cached functions require exact immutable positional keys and an annotated synchronous result"));
                         }
-                        classes.cached.insert(signature.id);
+                        classes.cached.insert(signature.id, policy);
                     }
                     if let Some(element) = element {
                         classes.producer_items.insert(signature.id, element);
@@ -797,7 +809,7 @@ pub(crate) fn lower_with_owners(
         })();
         let (function, calls, reads, sums) =
             result.map_err(|error| format!("{}:{error}", module.path.display()))?;
-        let (function, calls, reads) = if classes.cached.contains(&signature.id) {
+        let (function, calls, reads) = if let Some(&policy) = classes.cached.get(&signature.id) {
             let raw = helpers.reserve();
             helpers.finish(
                 raw,
@@ -812,54 +824,12 @@ pub(crate) fn lower_with_owners(
                     ),
                 },
             );
-            let key = signature.params[0].ty;
-            let value = signature.returns;
-            let table = types.dict(key, value);
-            let local = |slot, ty| Expr {
-                ty,
-                kind: ExprKind::Local(slot),
-            };
-            let cache = || local(1, table);
-            let arg = || local(0, key);
-            let result = || local(2, value);
-            let builtin = |kind, ty, args| Expr {
-                ty,
-                kind: ExprKind::Builtin(kind, args),
-            };
-            let wrapper = ir::Function {
-                params: vec![0],
-                returns: value,
-                locals: vec![key, table, value],
-                body: vec![
-                    Statement::Assign(
-                        1,
-                        builtin(Builtin::FunctionCache(signature.id), table, vec![]),
-                    ),
-                    Statement::If(
-                        builtin(Builtin::DictContains, Type::Bool, vec![arg(), cache()]),
-                        vec![Statement::Return(builtin(
-                            Builtin::DictGet,
-                            value,
-                            vec![cache(), arg()],
-                        ))],
-                        vec![],
-                    ),
-                    Statement::Assign(
-                        2,
-                        Expr {
-                            ty: value,
-                            kind: ExprKind::Call(raw, ir::CallArgs::positional(vec![arg()])),
-                        },
-                    ),
-                    Statement::SetItem(cache(), arg(), result()),
-                    Statement::Return(result()),
-                ],
-            };
+            let wrapper = function_caches::wrapper(signature, raw, &types, policy);
             (wrapper, HashSet::from([raw]), HashSet::new())
         } else {
             (function, calls, reads)
         };
-        if sums.len() >= 2 && !classes.cached.contains(&signature.id) {
+        if sums.len() >= 2 && !classes.cached.contains_key(&signature.id) {
             zip_sums.push((functions.len(), sums));
         }
         owners.push(*module_id);
@@ -1248,19 +1218,58 @@ fn annotation_at(
     source: &str,
     owner: Option<usize>,
 ) -> Result<Type, String> {
+    annotation_with_aliases(
+        expression,
+        graph,
+        (module, source),
+        classes,
+        types,
+        owner,
+        0,
+    )
+}
+
+fn annotation_with_aliases(
+    expression: &ast::Expr,
+    graph: &SourceGraph,
+    (module, source): (ModuleId, &str),
+    classes: &Classes,
+    types: &Types,
+    owner: Option<usize>,
+    alias_depth: usize,
+) -> Result<Type, String> {
+    if alias_depth >= 32 {
+        return Err(error(
+            source,
+            expression,
+            "type aliases nest more than 32 levels or form a cycle",
+        ));
+    }
+    if let Some(Binding::TypeAlias(origin, index)) = graph.resolve_type(module, expression) {
+        let module = &graph.modules[origin];
+        return annotation_with_aliases(
+            &module.aliases[index].value,
+            graph,
+            (origin, &module.source),
+            classes,
+            types,
+            owner,
+            alias_depth + 1,
+        );
+    }
     if let ast::Expr::StringLiteral(value) = expression {
         check_string(value, source)?;
         let contents = value.value.to_str();
         let parsed = ruff_python_parser::parse_expression(contents)
             .map_err(|_| error(source, expression, "invalid quoted type annotation"))?;
-        return annotation_at(
+        return annotation_with_aliases(
             parsed.expr(),
             graph,
-            module,
+            (module, contents),
             classes,
             types,
-            contents,
             owner,
+            alias_depth,
         )
         .map_err(|message| {
             error(
@@ -1313,7 +1322,15 @@ fn annotation_at(
         _ => {}
     }
     let nested = |expression: &ast::Expr| {
-        annotation_at(expression, graph, module, classes, types, source, owner)
+        annotation_with_aliases(
+            expression,
+            graph,
+            (module, source),
+            classes,
+            types,
+            owner,
+            alias_depth,
+        )
     };
     match expression {
         ast::Expr::Name(name) => match name.id.as_str() {
@@ -3506,6 +3523,22 @@ impl<'a> Checker<'a> {
             ast::Stmt::Delete(delete) => {
                 let mut statements = Vec::new();
                 for target in &delete.targets {
+                    if let ast::Expr::Name(name) = target
+                        && let Some(&slot) = self.names.get(name.id.as_str())
+                        && matches!(self.locals[slot], Type::Cursor(_))
+                    {
+                        if !self.assigned.contains(&slot) {
+                            return Err(error(
+                                self.source,
+                                target,
+                                "iterator deletion requires a bound local",
+                            ));
+                        }
+                        self.assigned.remove(&slot);
+                        self.narrowed.remove_mut(&slot);
+                        statements.push(Statement::Clear(slot));
+                        continue;
+                    }
                     let ast::Expr::Subscript(target) = target else {
                         return Err(error(
                             self.source,
@@ -3948,7 +3981,16 @@ impl<'a> Checker<'a> {
         let mut normal_exit = (body_falls && else_falls).then(|| self.local_state());
 
         let mut handler_assigned = before.clone();
-        for name in narrowing::deleted_names(&try_.body) {
+        // Releasing a definitely bound cursor cannot raise. A handler can only
+        // be reached before a trailing deletion of plain locals takes effect.
+        let protected_prefix = if let [prefix @ .., ast::Stmt::Delete(last)] = try_.body.as_slice()
+            && last.targets.iter().all(ast::Expr::is_name_expr)
+        {
+            prefix
+        } else {
+            try_.body.as_slice()
+        };
+        for name in narrowing::deleted_names(protected_prefix) {
             if let Some(slot) = self.names.get(&name) {
                 handler_assigned.remove(slot);
             }
@@ -4384,17 +4426,32 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Int(mode.to_string()),
             });
         }
-        if matches!(
-            self.resolve(expression),
-            Some(Binding::Intrinsic(Intrinsic::Argv))
-        ) {
+        if let Some(Binding::Intrinsic(symbol @ (Intrinsic::Argv | Intrinsic::OrigArgv))) =
+            self.resolve(expression)
+        {
             return Ok(Expr {
                 ty: self.types.list(Type::Str),
-                kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
+                kind: ExprKind::Builtin(
+                    if symbol == Intrinsic::Argv {
+                        Builtin::SysArgv
+                    } else {
+                        Builtin::SysOrigArgv
+                    },
+                    Vec::new(),
+                ),
             });
         }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
             match symbol {
+                Intrinsic::OpenFlag(name) => {
+                    return Ok(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(
+                            Builtin::Process(ir::ProcessOperation::OpenFlag(name)),
+                            vec![],
+                        ),
+                    });
+                }
                 Intrinsic::HashAvailable => {
                     return Ok(Expr {
                         ty: self.types.set(Type::Str),
@@ -4865,6 +4922,10 @@ impl<'a> Checker<'a> {
                 let mut ops = Vec::new();
                 for (&op, pair) in compare.ops.iter().zip(values.windows(2)) {
                     let (ty, right) = (pair[0].ty, pair[1].ty);
+                    if let Some(order) = counter::comparison(self.types, ty, right, op) {
+                        ops.push(order);
+                        continue;
+                    }
                     let numeric = matches!(ty, Type::Int | Type::Float)
                         && matches!(right, Type::Int | Type::Float);
                     let records = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
@@ -5333,6 +5394,9 @@ impl<'a> Checker<'a> {
         if let Some(tuple) = self.fixed_tuple.filter(|proof| proof.at == call.range()) {
             return Ok(self.materialize_fixed_tuple(tuple));
         }
+        if let Some(value) = self.cache_control(call)? {
+            return Ok(value);
+        }
         if let Some(value) = self.sys_call(call)? {
             return Ok(value);
         }
@@ -5540,6 +5604,19 @@ impl<'a> Checker<'a> {
                     &format!("no native implementation for {symbol}"),
                 ));
             }
+            Some(Binding::TypeAlias(module, index))
+                if self.graph.modules[module].aliases[index].constructor =>
+            {
+                self.reject_builtin_keywords(call)?;
+                let [value] = call.arguments.args.as_ref() else {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "NewType constructors take one positional value",
+                    ));
+                };
+                return self.typed_expr(value);
+            }
             Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
             Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
@@ -5582,6 +5659,7 @@ impl<'a> Checker<'a> {
                 return self.cursor_length_hint(call);
             }
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
+            Some(Binding::Intrinsic(Intrinsic::Tee)) => return self.tee_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Count)) => return self.count_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Islice | Intrinsic::Cycle)) => {
                 return self.source_adapter(call);
@@ -5594,6 +5672,7 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::GetEnv)) => return self.environ_get(call),
+            Some(Binding::Intrinsic(Intrinsic::Fd(op))) => return self.fd_call(call, op),
             Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
                 self.arguments(call, &[], None)?;
                 return Ok(Expr {
@@ -5601,7 +5680,13 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetCwd), vec![]),
                 });
             }
-            Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call),
+            Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call, None),
+            Some(Binding::Intrinsic(Intrinsic::SubprocessCall)) => {
+                return self.popen(call, Some(false));
+            }
+            Some(Binding::Intrinsic(Intrinsic::SubprocessCheckCall)) => {
+                return self.popen(call, Some(true));
+            }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::CopyFile)) => return self.shutil_copyfile(call),
             Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
@@ -6473,7 +6558,8 @@ impl<'a> Checker<'a> {
                 && (matches!(
                     args[0].ty,
                     Type::Class(_) | Type::CompletedProcess(_) | Type::StringIterable
-                ) || self.types.is_counter(args[0].ty))
+                ) || self.types.is_counter(args[0].ty)
+                    || (name.id == "print" && self.types.element(args[0].ty).is_some()))
             {
                 let text = self.record_text(args.into_iter().next().unwrap(), call)?;
                 return Ok(if name.id == "str" {
