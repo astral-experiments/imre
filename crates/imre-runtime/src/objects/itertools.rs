@@ -237,7 +237,7 @@ impl Adapter {
 
     pub(super) fn next(&self) -> Result<Option<OwnedWord>, Error> {
         match self {
-            Self::Sequence(seq) => Ok(seq.next()),
+            Self::Sequence(seq) => seq.next(),
             Self::Progression(count) => Ok(count.next()),
             Self::FloatCount { current, step } => {
                 // SAFETY: a numeric step stays rooted; binary64 words carry no owner.
