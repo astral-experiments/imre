@@ -15,6 +15,10 @@ on:
         description: Retain the verified Linux compiler and runtime for local fixture runs
         type: boolean
         default: false
+      support_table:
+        description: Regenerate docs/stdlib.md with the prospective compiler and CPython 3.14.5
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -27,6 +31,7 @@ jobs:
     env:
       EXPECTED_SOURCE: ${{ inputs.source }}
       JSON_AUDIT: ${{ inputs.audit }}
+      JSON_REQUIRE_SUPPORT_TABLE: ${{ inputs.support_table }}
       CARGO_INCREMENTAL: 0
       CARGO_PROFILE_DEV_DEBUG: 0
     steps:
@@ -237,6 +242,18 @@ jobs:
           cp "$JSON_RESULTS/doctest-startup-linux.json" "$JSON_DIR/doctest-startup-linux.json"
           python3 -B "$JSON_DIR/evidence.py" --imre "$JSON_IMRE" --runtime "$JSON_RUNTIME" --clang /usr/bin/clang-18 --result "$JSON_RESULTS/evidence-linux.json"
           python3 -B benchmarks/cpython_stdlib/suite_evidence.py "$JSON_DIR/reference-linux.json" "$JSON_RESULTS/evidence-linux.json"
+      - name: Regenerate the public standard library table
+        if: ${{ success() && inputs.support_table }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$JSON_REQUIRE_SUPPORT_TABLE" != true ]]; then exit 0; fi
+          python3 -B -c 'import sys; assert sys.implementation.name == "cpython" and sys.version_info[:3] == (3, 14, 5)'
+          python3 -B benchmarks/cpython_stdlib/full/support_table.py --imre "$JSON_IMRE"
+          cp docs/stdlib.md "$JSON_RESULTS/stdlib.md"
+          grep -F '| `json` |' docs/stdlib.md > "$JSON_RESULTS/stdlib-json-row.txt"
+          test "$(wc -l < "$JSON_RESULTS/stdlib-json-row.txt")" -eq 1
+          git diff --exit-code HEAD -- docs/stdlib.md > "$JSON_RESULTS/stdlib-docs.diff"
       - name: Refresh main after the full suite
         if: ${{ success() && inputs.audit == 'decoder-current-main' }}
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -282,7 +299,8 @@ jobs:
                        'Compare decoder behavior and type checks at O0 and O3',
                        'Observe original key identity and nested decoding fixtures',
                        'Compare the overlapping native shutil callable path',
-                       'Validate both full per-occurrence reports'):
+                       'Validate both full per-occurrence reports',
+                       'Regenerate the public standard library table'):
               step, = [part for part in steps if part.startswith('name: ' + name + '\n')]
               command = textwrap.dedent(step.split('        run: |\n', 1)[1])
               print(name, flush=True)
