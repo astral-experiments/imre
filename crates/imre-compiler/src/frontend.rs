@@ -5900,7 +5900,8 @@ impl<'a> Checker<'a> {
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "clear"
-            && (self.unshadowed_builtin(&method.value, "dict")
+            && (self.unshadowed_builtin(&method.value, "list")
+                || self.unshadowed_builtin(&method.value, "dict")
                 || matches!(
                     self.resolve(&method.value),
                     Some(Binding::Intrinsic(
@@ -5913,10 +5914,20 @@ impl<'a> Checker<'a> {
                 return Err(error(
                     self.source,
                     call,
-                    "unbound dict.clear requires one dictionary",
+                    "unbound clear requires one receiver",
                 ));
             };
             let receiver = self.expr(owner)?;
+            if self.unshadowed_builtin(&method.value, "list") {
+                let receiver = self.json_mutation_receiver(receiver, owner)?;
+                if self.types.element(receiver.ty).is_none() {
+                    return Err(error(self.source, owner, "list.clear requires a list"));
+                }
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::ListClear, vec![receiver]),
+                });
+            }
             if self.types.mapping(receiver.ty).is_none() {
                 return Err(error(
                     self.source,
@@ -6460,7 +6471,7 @@ impl<'a> Checker<'a> {
             }
             let receiver = if matches!(
                 attribute.attr.as_str(),
-                "append" | "pop" | "extend" | "sort"
+                "append" | "pop" | "extend" | "sort" | "clear"
             ) {
                 self.json_mutation_receiver(receiver, call)?
             } else {
@@ -6791,11 +6802,12 @@ impl<'a> Checker<'a> {
                     (Builtin::Append, Type::None)
                 }
                 "pop" if call.arguments.args.is_empty() => (Builtin::Pop, element),
+                "clear" if call.arguments.args.is_empty() => (Builtin::ListClear, Type::None),
                 _ => {
                     return Err(error(
                         self.source,
                         call,
-                        "supported list methods are append(value), extend(iterable), and pop()",
+                        "supported list methods are append(value), extend(iterable), pop(), and clear()",
                     ));
                 }
             };
