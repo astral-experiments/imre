@@ -15,6 +15,7 @@ import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bindings import Boundary, PRIVATE, Probe
 from bodies import compiled
+from deep_decode import DRIVER as DEEP_DRIVER, METHOD as DEEP_METHOD, fixture as deep_fixture
 from native import counts
 from reference import BENCH, COMMIT, HERE, routine, verify
 sys.path.insert(0, str(BENCH))
@@ -126,6 +127,19 @@ def run(tools, directory, reference):
         executions.update(dict.fromkeys(names, native_body))
     driver = tools.build((BENCH / "json_values_driver.py").read_bytes(), directory)
     host = host_operation(driver, directory, tools.level, counts())
+    deep_dir = directory / "iterative-decoder"
+    deep_dir.mkdir()
+    deep = deep_fixture(tools.build(DEEP_DRIVER, deep_dir), deep_dir)
+
+    def native_depth(case, original):
+        calls = deep(case, original)
+        return {"outcome": "pass", "roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
+                "evidence": {"source": DEEP_METHOD, "method_sha256": definition(DEEP_METHOD)[1], "opt_level": tools.level,
+                             "fixture": "original CPython lifecycle, recursion decorators, method and assertions",
+                             "operation": "Imre json.loads; native RecursionError on each original input",
+                             "native_calls": {"loads": len(calls)}, "native_exceptions": calls}}
+
+    executions.update(dict.fromkeys(ids[DEEP_METHOD], native_depth))
     for key, case, (_, variant) in zip(keys, instances, discovered, strict=True):
         if key[0] in executions:
             continue

@@ -15,6 +15,11 @@ PYTHONPATH="$fixture_root/Lib" "$CPYTHON" -B -m test --single-process --randseed
 
 Discovery checks the complete ID multisets, including the duplicate JSON occurrences. It reports the single original free-threading package skip separately on a GIL build. Use each owner's reference resource flags for execution; compiling or discovering alone cannot establish a native pass.
 
+If regrtest produces missing or unidentifiable JUnit results, the summary records
+that module as `incomplete`, with its expected occurrence count and no observed
+counts (`instances: null`). Inspect the module's XML and log. Other modules
+still run and the overall command exits unsuccessfully.
+
 For a full Linux reference run, an upstream unittest CLI test launches `sys.executable -E`, deliberately ignoring `PYTHONPATH`. Give it a [disposable prefix](../reference_prefix.py) so the child resolves the same `test` package as its parent:
 
 ```sh

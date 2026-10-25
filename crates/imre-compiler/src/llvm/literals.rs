@@ -81,21 +81,9 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// Allocate an ordinary record even when every field is a constant. Unlike a
-    /// tuple literal, a nominal Python constructor produces a fresh identity.
-    pub(super) fn fresh_record(&mut self, ty: Type, values: &[Expr]) -> Value {
-        let object = self.record(ty);
-        for (field, value) in values.iter().enumerate() {
-            let value = self.operand(value);
-            self.set_field(&object, field, &value.value);
-            self.release_operand(&value);
-        }
-        object
-    }
-
     pub(super) fn tuple(&mut self, ty: Type, values: &[Expr]) -> Value {
         if !values.iter().all(immutable_literal) {
-            return self.fresh_record(ty, values);
+            return self.record_from_fields(ty, values);
         }
         let unit = self.output.current;
         let roots = self.tuple_literals.entry(unit).or_default();
@@ -103,7 +91,7 @@ impl Emitter<'_, '_> {
             .output
             .global_ref(format!("tuple_literal_{unit}_{}", roots.len()));
         roots.push(root.clone());
-        self.rooted_record(ty, &root, |emitter| emitter.fresh_record(ty, values))
+        self.rooted_record(ty, &root, |emitter| emitter.record_from_fields(ty, values))
     }
 
     /// Give the root the constructor's owner. Each read receives its own reference.
@@ -130,6 +118,17 @@ impl Emitter<'_, '_> {
         };
         self.retain(&value);
         value
+    }
+
+    /// Construct a new owner, even when all field values are literals.
+    pub(super) fn record_from_fields(&mut self, ty: Type, values: &[Expr]) -> Value {
+        let object = self.record(ty);
+        for (field, value) in values.iter().enumerate() {
+            let value = self.operand(value);
+            self.set_field(&object, field, &value.value);
+            self.release_operand(&value);
+        }
+        object
     }
 
     /// Main releases the literal roots after locals/globals on either exit.

@@ -51,7 +51,6 @@ enum Work {
 
 struct Scan {
     root: Str,
-    first: bool,
     stack: Vec<Str>,
     entries: Option<(Str, Names)>,
 }
@@ -77,7 +76,6 @@ fn is_dir(path: &str, follow: bool) -> bool {
 impl Scan {
     fn new(root: Str) -> Self {
         Self {
-            first: true,
             stack: vec![root.clone()],
             entries: None,
             root,
@@ -85,9 +83,6 @@ impl Scan {
     }
 
     fn next(&mut self, follow: bool) -> Result<Option<(Str, bool)>> {
-        if std::mem::take(&mut self.first) && is_dir(&self.root, true) {
-            return Ok(Some((self.root.clone(), true)));
-        }
         loop {
             if let Some((dir, entries)) = &mut self.entries
                 && let Some(name) = entries.next()
@@ -222,10 +217,25 @@ impl Glob {
                             let names = snapshot(&path, true)?.into_iter();
                             self.stack.push(Work::Children { path, part, names });
                         }
-                        Part::Recursive(_) => self.stack.push(Work::Descendants {
-                            part,
-                            scan: Scan::new(path),
-                        }),
+                        Part::Recursive(filter) => {
+                            self.stack.push(Work::Descendants {
+                                part,
+                                scan: Scan::new(path.clone()),
+                            });
+                            // ** can match zero components. Run the remaining selectors
+                            // before scanning, even when this directory may not exist.
+                            if filter.as_ref().is_none_or(|f| f.is_match("")) {
+                                if part + 1 < self.parts.len() {
+                                    self.stack.push(Work::Select {
+                                        path,
+                                        part: part + 1,
+                                        known,
+                                    });
+                                } else if known || is_dir(&path, true) {
+                                    return Ok(Some(path));
+                                }
+                            }
+                        }
                     }
                 }
                 Work::Children {

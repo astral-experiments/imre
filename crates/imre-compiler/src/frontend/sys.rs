@@ -2,6 +2,30 @@
 use super::*;
 
 impl Checker<'_> {
+    /// Read scalar fields of the immutable startup settings selected for a command.
+    pub(super) fn command_flag(&self, attr: &ast::ExprAttribute) -> Result<Option<Expr>, String> {
+        let Some((flags, _)) = &self.graph.command_startup else {
+            return Ok(None);
+        };
+        if self.resolve(&attr.value) != Some(Binding::Intrinsic(Intrinsic::SysFlags)) {
+            return Ok(None);
+        }
+        if attr.attr.as_str() == "safe_path" {
+            return Ok(Some(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Bool(flags.safe_path),
+            }));
+        }
+        let setting = match attr.attr.as_str() {
+            "isolated" | "ignore_environment" => flags.isolated,
+            "dont_write_bytecode" => flags.dont_write_bytecode,
+            "no_user_site" => flags.no_user_site,
+            "utf8_mode" => flags.utf8_mode,
+            _ => return Err(error(self.source, attr, "unsupported sys.flags field")),
+        };
+        Ok(Some(pipelines::integer(i64::from(setting))))
+    }
+
     fn sys_no_args(
         &mut self,
         call: &ast::ExprCall,
@@ -69,6 +93,15 @@ impl Checker<'_> {
                     kind: ExprKind::Builtin(Builtin::ActiveException, Vec::new()),
                 };
                 return self.sys_no_args(call, "exception", result).map(Some);
+            }
+            Some(Binding::Intrinsic(Intrinsic::SysJitPredicate(name))) => {
+                // Imre emits machine code before the program starts. No running
+                // frame has a JIT compiler, regardless of the child's PYTHON_JIT.
+                let result = Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(false),
+                };
+                return self.sys_no_args(call, name, result).map(Some);
             }
             _ => {}
         }

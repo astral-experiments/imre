@@ -62,7 +62,7 @@ pub(crate) enum Type {
     Path,
     PurePath(PathFlavor),
     /// A sealed process result whose capture modes fix each field’s ownership.
-    CompletedProcess(ProcessCapture),
+    CompletedProcess(ProcessCapture, Option<usize>),
     /// A synchronous child with statically known captured stream types.
     Popen(ProcessCapture, bool, usize),
     /// Async process handle, with bits for the captured stdout and stderr slots.
@@ -82,6 +82,12 @@ pub(crate) enum Type {
     Logger,
     TimedFileHandler,
     ClockTime,
+    /// An exact instance of Python's plain, identity-only object.
+    PlainObject,
+    /// An exact immutable method descriptor on the builtin str class.
+    StrDescriptor(StrDescriptor),
+    /// A live namespace wrapper; the interned shape describes its string-keyed backing dict.
+    SimpleNamespace(usize),
     Sha256,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
@@ -198,8 +204,10 @@ impl std::fmt::Display for Type {
             Self::Path => "pathlib.Path",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
-            Self::CompletedProcess(capture) if capture.text => "subprocess.CompletedProcess[str]",
-            Self::CompletedProcess(_) => "subprocess.CompletedProcess[bytes]",
+            Self::CompletedProcess(capture, _) if capture.text => {
+                "subprocess.CompletedProcess[str]"
+            }
+            Self::CompletedProcess(..) => "subprocess.CompletedProcess[bytes]",
             Self::Popen(..) => "subprocess.Popen",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
             Self::Coroutine(_) => "Coroutine",
@@ -215,6 +223,9 @@ impl std::fmt::Display for Type {
             Self::Logger => "logging.Logger",
             Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
             Self::ClockTime => "datetime.time",
+            Self::PlainObject => "object",
+            Self::StrDescriptor(_) => "method_descriptor",
+            Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
@@ -503,6 +514,15 @@ pub(crate) enum ZipField {
     IsDir,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u32)]
+pub(crate) enum ArgparseOutput {
+    Return,
+    Stdout,
+    Stderr,
+    File,
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     Repeat,
@@ -546,6 +566,10 @@ pub(crate) enum Builtin {
     LiteralStringView,
     StringListContains,
     StringContains,
+    /// Immutable byte subsequence; operands are evaluated needle first.
+    BytesContains,
+    /// Integer byte membership validates 0..=255 before searching.
+    BytesContainsInt,
     /// Reads an initialized module binding with an independent owned reference.
     GlobalGet(usize),
     /// Publishes one fixed module binding after its initializer succeeds.
@@ -571,7 +595,7 @@ pub(crate) enum Builtin {
     RaiseException,
     WallTime,
     TimeSleep,
-    PercentInteger,
+    PercentScalar,
     Logging(LogOperation),
     Timed(TimedOperation),
     LogRecord(LogRecordOperation),
@@ -591,6 +615,7 @@ pub(crate) enum Builtin {
     NamedException {
         kind: u32,
         message_field: usize,
+        tuple_args: bool,
         text: Option<usize>,
         repr: Option<usize>,
         dataclass_repr: bool,
@@ -606,6 +631,7 @@ pub(crate) enum Builtin {
     ImportErrorField(u32),
     ImportErrorReset,
     ImportErrorRejectReset,
+    ExceptionTupleView,
     ExceptionFieldRepr,
     ExceptionFieldLen,
     ExceptionFieldIndex,
@@ -696,6 +722,9 @@ pub(crate) enum Builtin {
     Sha256Hex,
     Sha256New,
     HashNew,
+    NewPlainObject,
+    StrDescriptor(StrDescriptor),
+    InspectSentinel,
     HashAvailable,
     Sha256Update,
     Sha256Digest {
@@ -750,8 +779,14 @@ pub(crate) enum Builtin {
     SysOrigArgv,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
+        namespace: usize,
         children: Vec<usize>,
         process_argv: bool,
+    },
+    /// Format parser text or print it to the requested stream.
+    ArgparseText {
+        usage: bool,
+        output: ArgparseOutput,
     },
     /// Retags a namespace after its immutable command field selects a child layout.
     RecordView,
@@ -778,6 +813,8 @@ pub(crate) enum Builtin {
     CacheInsert(i64),
     CacheStat(u32),
     CacheClear,
+    /// Read the public maxsize (false) or typed (true) of a constructed cache.
+    CacheParameter(bool),
     CallableContext,
     HashStr,
     HashRecord,
@@ -809,6 +846,7 @@ pub(crate) enum Builtin {
     JsonDump(Type),
     Path(PathOperation),
     PosixPath(PosixPathOperation),
+    Fnmatch(FnmatchOperation),
     Process(ProcessOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
@@ -838,6 +876,12 @@ pub(crate) enum Builtin {
     FileFileno,
     DictGet,
     DictCopy,
+    NamespaceWrap,
+    NamespaceDict,
+    NamespaceGet,
+    NamespaceDelete,
+    DeepCopy,
+    RecordCopy,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
     CounterNew,
@@ -879,6 +923,7 @@ pub(crate) enum Builtin {
     /// Arguments are key then dictionary, matching membership evaluation order.
     DictContains,
     DictDelete,
+    DictClear,
     /// False visits keys; true visits key/value pairs without an intermediate tuple.
     DictIter(bool),
     /// Arguments are the element then set, matching membership evaluation order.
@@ -959,10 +1004,42 @@ pub(crate) enum RegexCapture {
     End,
 }
 
+/// These descriptor values call the same native operation as their bound string methods.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[repr(u32)]
+pub(crate) enum StrDescriptor {
+    Lower,
+    Strip,
+    LStrip,
+    RStrip,
+}
+impl StrDescriptor {
+    pub(crate) fn named(name: &str) -> Option<Self> {
+        Some(match name {
+            "lower" => Self::Lower,
+            "strip" => Self::Strip,
+            "lstrip" => Self::LStrip,
+            "rstrip" => Self::RStrip,
+            _ => return None,
+        })
+    }
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Lower => "lower",
+            Self::Strip => "strip",
+            Self::LStrip => "lstrip",
+            Self::RStrip => "rstrip",
+        }
+    }
+}
+
 /// Closed string operations preserve exact argument and storage types.
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
+    IsSpace,
+    SplitLineEnds,
     Lower,
+    Capitalize,
     /// True splits from the right.
     Split(bool),
     /// 0 strips both ends, 1 the leading end, and 2 the trailing end.
@@ -974,6 +1051,7 @@ pub(crate) enum TextOperation {
     Unquote,
     Dedent,
     ShlexSplit,
+    ShlexQuote,
 }
 
 /// Native path operations keep their exact result types in the checked IR.
@@ -994,6 +1072,11 @@ pub(crate) enum PathOperation {
         full: bool,
     },
     WithName,
+    WithStem,
+    WithSuffix,
+    Suffixes,
+    IsRelativeTo,
+    RelativeTo,
     Text,
     Name,
     Stem,
@@ -1027,13 +1110,23 @@ pub(crate) enum PathOperation {
     ContextExit,
     UnionText,
     Iterdir,
+    Walk,
     Glob {
         recursive: bool,
     },
 }
 
-/// POSIX lexical operations preserve raw str or bytes spellings.
+/// Shell filename operations do not interpret path separators.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FnmatchOperation {
+    Match { normcase: bool },
+    Filter { inverse: bool },
+    Translate,
+    Parts,
+}
+
+/// POSIX lexical operations preserve raw str or bytes spellings.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PosixPathOperation {
     Join,
     MixedJoin { path_in_tail: bool },
@@ -1115,6 +1208,11 @@ pub(crate) enum LogOperation {
     NamesCopy,
     Configure,
     ConfigureName,
+    DictConfig,
+    DictConfigTyped,
+    FileConfig,
+    Disabled,
+    Propagate,
     Name,
     Level,
     Root,
@@ -1130,6 +1228,9 @@ pub(crate) enum LogOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
     Open,
+    Unlink,
+    Remove,
+    Seek,
     Pipe,
     Dup2,
     Close,
@@ -1158,9 +1259,17 @@ pub(crate) enum CopyOperation {
 pub(crate) enum ProcessOperation {
     Executable,
     RunToStderr,
-    CheckOutput,
+    CheckOutput {
+        streams: u32,
+        validation: u32,
+        errors: u8,
+        capture: ProcessCapture,
+    },
     Run {
         streams: u32,
+        validation: u32,
+        errors: u8,
+        timed: bool,
     },
     Popen {
         streams: u32,
@@ -1237,8 +1346,9 @@ pub(crate) enum ProcessOperation {
     Fd(FdOperation),
     OsErrorField(u32),
     Strerror,
-    OpenFlag(&'static str),
+    DescriptorConstant(&'static str),
     Which,
+    RmTree,
     Copy(CopyOperation),
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
@@ -1255,6 +1365,7 @@ pub(crate) enum ProcessOperation {
 pub(crate) enum InstanceType {
     Exact(Type),
     ForwardRef,
+    SimpleNamespace,
     StrEnum,
     List,
     Dict,
@@ -1266,7 +1377,7 @@ pub(crate) enum InstanceType {
 impl InstanceType {
     pub(crate) fn accepts(self, ty: Type) -> bool {
         match self {
-            Self::Exact(Type::CompletedProcess(_)) => matches!(ty, Type::CompletedProcess(_)),
+            Self::Exact(Type::CompletedProcess(..)) => matches!(ty, Type::CompletedProcess(..)),
             Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool),
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
@@ -1278,6 +1389,7 @@ impl InstanceType {
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),
             Self::Tuple => matches!(ty, Type::Tuple(_)),
+            Self::SimpleNamespace => matches!(ty, Type::SimpleNamespace(_)),
             Self::Exception(_) => matches!(
                 ty,
                 Type::Exception
