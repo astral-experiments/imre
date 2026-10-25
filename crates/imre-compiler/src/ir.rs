@@ -1199,6 +1199,7 @@ pub(crate) enum ProcessOperation {
     Strerror,
     OpenFlag(&'static str),
     Which,
+    RmTree,
     Copy(CopyOperation),
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.

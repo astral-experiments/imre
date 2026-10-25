@@ -1,0 +1,201 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "optimization_levels": {
+    "0": {
+      "test.test_shutil.TestRmTree.test_both_onerror_and_onexc": {
+        "status": "blocked",
+        "reason": "onexc must win over onerror and return after a filesystem failure"
+      },
+      "test.test_shutil.TestRmTree.test_on_error": {
+        "status": "blocked",
+        "reason": "onerror receives an OS function, a path and an exception-info triple"
+      },
+      "test.test_shutil.TestRmTree.test_on_exc": {
+        "status": "blocked",
+        "reason": "onexc receives and inspects the failing OS function and exception"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_above_recursion_limit": {
+        "status": "host_driven_native",
+        "native_calls": 1
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_deleted_race_condition": {
+        "status": "blocked",
+        "reason": "onexc restores permissions and removes siblings during traversal"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_does_not_choke_on_failing_lstat": {
+        "status": "blocked",
+        "reason": "replaces os.lstat during traversal"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_dont_delete_file": {
+        "status": "host_driven_native",
+        "native_calls": 1
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_errors": {
+        "status": "host_driven_native",
+        "native_calls": 8
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_errors_onerror": {
+        "status": "blocked",
+        "reason": "onerror inspects the failing scandir and rmdir functions and exception-info triples"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_errors_onexc": {
+        "status": "blocked",
+        "reason": "onexc inspects the failing scandir and rmdir functions and their exceptions"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_fails_on_close": {
+        "status": "blocked",
+        "reason": "patches os.close and requires the operation to observe the injected close error"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onerror": {
+        "status": "blocked",
+        "reason": "onerror captures os.path.islink and an exception-info triple"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onexc": {
+        "status": "blocked",
+        "reason": "onexc captures os.path.islink and the exception"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_on_named_pipe": {
+        "status": "host_driven_native",
+        "native_calls": 2
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_on_symlink": {
+        "status": "host_driven_native",
+        "native_calls": 3
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_uses_safe_fd_version_if_available": {
+        "status": "blocked",
+        "reason": "replaces os.open with a custom exception-raising function"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_with_dir_fd": {
+        "status": "host_driven_native",
+        "native_calls": 1
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_works_on_bytes": {
+        "status": "host_driven_native",
+        "native_calls": 1
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_works_on_symlinks": {
+        "status": "host_driven_native",
+        "native_calls": 1
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_fails_on_junctions_onerror": {
+        "status": "reference_skip",
+        "reason": "only relevant on Windows"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_fails_on_junctions_onexc": {
+        "status": "reference_skip",
+        "reason": "only relevant on Windows"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_on_junction": {
+        "status": "reference_skip",
+        "reason": "only relevant on Windows"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_with_dir_fd_unsupported": {
+        "status": "reference_skip",
+        "reason": "dir_fd is supported"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_works_on_junctions": {
+        "status": "reference_skip",
+        "reason": "only relevant on Windows"
+      }
+    },
+    "3": {
+      "test.test_shutil.TestRmTree.test_both_onerror_and_onexc": {
+        "status": "blocked",
+        "reason": "onexc must win over onerror and return after a filesystem failure"
+      },
+      "test.test_shutil.TestRmTree.test_on_error": {
+        "status": "blocked",
+        "reason": "onerror receives an OS function, a path and an exception-info triple"
+      },
+      "test.test_shutil.TestRmTree.test_on_exc": {
+        "status": "blocked",
+        "reason": "onexc receives and inspects the failing OS function and exception"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_above_recursion_limit": {
+        "status": "host_driven_native",
+        "native_calls": 1
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_deleted_race_condition": {
+        "status": "blocked",
+        "reason": "onexc restores permissions and removes siblings during traversal"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_does_not_choke_on_failing_lstat": {
+        "status": "blocked",
+        "reason": "replaces os.lstat during traversal"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_dont_delete_file": {
+        "status": "host_driven_native",
+        "native_calls": 1
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_errors": {
+        "status": "host_driven_native",
+        "native_calls": 8
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_errors_onerror": {
+        "status": "blocked",
+        "reason": "onerror inspects the failing scandir and rmdir functions and exception-info triples"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_errors_onexc": {
+        "status": "blocked",
+        "reason": "onexc inspects the failing scandir and rmdir functions and their exceptions"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_fails_on_close": {
+        "status": "blocked",
+        "reason": "patches os.close and requires the operation to observe the injected close error"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onerror": {
+        "status": "blocked",
+        "reason": "onerror captures os.path.islink and an exception-info triple"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onexc": {
+        "status": "blocked",
+        "reason": "onexc captures os.path.islink and the exception"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_on_named_pipe": {
+        "status": "host_driven_native",
+        "native_calls": 2
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_on_symlink": {
+        "status": "host_driven_native",
+        "native_calls": 3
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_uses_safe_fd_version_if_available": {
+        "status": "blocked",
+        "reason": "replaces os.open with a custom exception-raising function"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_with_dir_fd": {
+        "status": "host_driven_native",
+        "native_calls": 1
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_works_on_bytes": {
+        "status": "host_driven_native",
+        "native_calls": 1
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_works_on_symlinks": {
+        "status": "host_driven_native",
+        "native_calls": 1
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_fails_on_junctions_onerror": {
+        "status": "reference_skip",
+        "reason": "only relevant on Windows"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_fails_on_junctions_onexc": {
+        "status": "reference_skip",
+        "reason": "only relevant on Windows"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_on_junction": {
+        "status": "reference_skip",
+        "reason": "only relevant on Windows"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_with_dir_fd_unsupported": {
+        "status": "reference_skip",
+        "reason": "dir_fd is supported"
+      },
+      "test.test_shutil.TestRmTree.test_rmtree_works_on_junctions": {
+        "status": "reference_skip",
+        "reason": "only relevant on Windows"
+      }
+    }
+  }
+}
