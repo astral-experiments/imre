@@ -22,6 +22,10 @@ class Section(Mapping[str, str]):
 
 
 class Special(Section):
+    def __iter__(self) -> Iterator[str]:
+        print("iterating special")
+        yield from ["b2", "a1"]
+
     def __getitem__(self, key: str) -> str:
         if key == "help":
             return "custom"
@@ -49,6 +53,20 @@ class Missing(Mapping[str, str]):
         return 0
 
 
+class Complete(Missing):
+    def __getitem__(self, key: str) -> str:
+        return key
+
+    def __iter__(self) -> Iterator[str]:
+        yield from ["complete"]
+
+
+def walk_completed(section: Missing) -> None:
+    for name in section:
+        print(name)
+    print(sorted(section, key=lambda name: name[1:]))
+
+
 def truth(section: Section) -> bool:
     return bool(section)
 
@@ -66,6 +84,12 @@ def first_truthy(left: Section, right: Section) -> Section:
 
 def query(section: Section, key: str) -> str:
     return section.get(key, "fallback")
+
+
+def walk(section: Section) -> None:
+    for name in section:
+        print(name)
+    print(sorted(section, key=lambda name: name[1:]))
 
 
 def marker(value: str) -> str:
@@ -112,8 +136,9 @@ try:
     Missing()
 except TypeError as error:
     print(str(error))
-for name in plain:
-    print(name)
+walk(plain)
+walk(other)
+walk_completed(Complete())
 try:
     query(plain, "broken")
 except ValueError as error:

@@ -541,7 +541,17 @@ impl Checker<'_> {
         probe.comprehension_targets = self.comprehension_targets.clone();
         match target {
             ast::Expr::Attribute(attribute) => {
+                if let Some(class) = probe.class_reference(&attribute.value)
+                    && let Some(ty) = probe.class_data_type(class, attribute.attr.as_str())
+                {
+                    return Some(ty);
+                }
                 let receiver = probe.expr(&attribute.value).ok()?;
+                if let Type::Class(class) = receiver.ty
+                    && let Some(ty) = probe.class_data_type(class, attribute.attr.as_str())
+                {
+                    return Some(ty);
+                }
                 if let Type::ChainMap(id) = receiver.ty
                     && attribute.attr.as_str() == "maps"
                 {
@@ -553,6 +563,11 @@ impl Checker<'_> {
                         Some(inference) => inference.parameter(setter.id, 1),
                         None => Some(setter.params[1].ty),
                     };
+                }
+                if matches!(receiver.ty, Type::ModuleSpec(_))
+                    && attribute.attr.as_str() == "has_location"
+                {
+                    return None; // its descriptor applies bool() to the original RHS.
                 }
                 probe
                     .writable_field_value(attribute, receiver)

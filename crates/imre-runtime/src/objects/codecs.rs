@@ -1,6 +1,6 @@
 //! Native text codecs shared by the registry and text files.
 
-use super::bytes::decode_error;
+use super::bytes::{ascii_decode_error, decode_error, owned_input};
 use super::exceptions::Result;
 use super::{Bytes, Error, Kind, Object, Rc, Storage, StorageCell, Str, finish, object};
 use std::borrow::Cow;
@@ -90,7 +90,8 @@ pub unsafe extern "C" fn imre_codec_encode(
     errors: *const Str,
 ) -> *const Bytes {
     // SAFETY: the typed operands stay live until conversion is complete.
-    let result = unsafe { codec(info).encode(&*text, Some(&*errors)) };
+    let result =
+        unsafe { codec(info).encode(&*text, Some(&*errors), || super::acquire_rc(text as usize)) };
     finish(
         result.map(|b| Rc::into_raw(Rc::new(b.into_owned()))),
         std::ptr::null(),
@@ -154,13 +155,9 @@ impl Codec {
                     if byte.is_ascii() {
                         text.push(char::from(byte));
                     } else {
-                        decoding_error(&mut text, errors, &[byte], || {
-                            Error::new(
-                                Kind::UnicodeDecodeError,
-                                format!(
-                                    "'ascii' codec can't decode byte 0x{byte:02x} in position {index}: ordinal not in range(128)"
-                                ),
-                            )
+                        decoding_error(&mut text, errors, &[byte], || match owned_input(data) {
+                            Ok(bytes) => ascii_decode_error(bytes, index),
+                            Err(error) => error,
                         })?;
                     }
                 }
@@ -195,7 +192,12 @@ impl Codec {
         }
     }
 
-    pub(super) fn encode<'a>(self, text: &'a str, errors: Option<&str>) -> Result<Cow<'a, [u8]>> {
+    pub(super) fn encode<'a>(
+        self,
+        text: &'a str,
+        errors: Option<&str>,
+        error_input: impl FnOnce() -> Rc<Str>,
+    ) -> Result<Cow<'a, [u8]>> {
         let (codec, limit) = match self {
             Self::Utf8 { signature: false } => return Ok(Cow::Borrowed(text.as_bytes())),
             Self::Utf8 { signature: true } => {
@@ -226,9 +228,13 @@ impl Codec {
                     } else {
                         format!("characters in position {start}-{end}")
                     };
-                    return Err(Error::new(
-                        Kind::UnicodeEncodeError,
-                        format!("'{codec}' codec can't encode {at}: ordinal not in range({limit})"),
+                    let reason = format!("ordinal not in range({limit})");
+                    return Err(Error::unicode_encode(
+                        codec,
+                        error_input(),
+                        start..end + 1,
+                        &reason,
+                        format!("'{codec}' codec can't encode {at}: {reason}"),
                     ));
                 }
                 name => return Err(unknown_handler(name)),

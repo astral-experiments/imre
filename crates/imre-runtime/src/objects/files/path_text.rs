@@ -104,7 +104,14 @@ pub unsafe extern "C" fn imre_path_write_text_options(
                 } else {
                     text.as_str()
                 };
-                file.write_bytes(&codec.encode(value, errors)?)?;
+                file.write_bytes(&codec.encode(value, errors, || {
+                    if value == text.as_str() {
+                        // The native write roots its input until conversion finishes.
+                        super::super::acquire_rc(text as *const Str as usize)
+                    } else {
+                        Rc::new(Str::from(value))
+                    }
+                })?)?;
                 Ok(Int::from_usize(text.chars().count()).into_raw())
             })
         })
