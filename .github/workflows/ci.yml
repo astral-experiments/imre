@@ -85,6 +85,7 @@ jobs:
         run: |
           python3 benchmarks/cpython_stdlib/full/test_stage_tests.py
           python3 benchmarks/cpython_stdlib/full/stage_tests.py "$RUNNER_TEMP/imre-cpython-fixtures"
+          python3 -B benchmarks/cpython_stdlib/full/discover_staged.py "$RUNNER_TEMP/imre-cpython-fixtures"
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
