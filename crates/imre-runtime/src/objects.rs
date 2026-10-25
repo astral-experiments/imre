@@ -11,6 +11,7 @@ mod args;
 mod asyncio;
 mod builtins;
 mod bytes;
+mod codecs;
 mod contexts;
 mod copying;
 mod csv;
@@ -88,6 +89,7 @@ enum Storage {
     SimpleNamespace(Rc<Object>),
     Sha256(Box<sha2::Sha256>),
     CsvReader(Box<csv::Reader>),
+    CodecInfo(codecs::Codec),
     Exception(exceptions::Exception),
     ValueView(OwnedWord),
     File(Box<files::FileState>),

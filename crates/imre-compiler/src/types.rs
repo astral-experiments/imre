@@ -157,6 +157,7 @@ impl Types {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -537,6 +538,7 @@ impl Types {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
