@@ -33,6 +33,7 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 - `test_sys_exception_no_exception`: the complete method queries native handler state and compares the result to `None`. A separate program checks object identity across nested handlers, calls and handler exit.
 - `test_43581`: the complete method, both stream attributes, equality and assertion execute in the native binary.
 - `test_getdefaultencoding` and `test_getfilesystemencoding`: all `sys` operations execute in the native driver. The original unittest assertions, codec lookup and transport run on CPython.
+- `test_thread_info`: the original CPython body and assertions read the native thread record, length, name, lock and target platform. A separate operation check verifies the singleton, slice, field names and library version. On glibc the target reads the pthread version through `confstr`; separate controls cover a changed version, an unavailable version and a truncated result, and require only one query per process. Imre reports `lock=None` because it exposes neither of CPython’s named thread-lock backends. The full body still needs native `TestCase.assertIn` and membership over string/None tuple elements.
 - `test_ioencoding_nonascii`: the canonical reference and native gate both skip under the unchanged locale decorator. See the separate UTF-8-mode run below.
 
 The existing [stream and exit smoke runner](../../native_sys.py) exercises four
@@ -51,7 +52,10 @@ reference reasons even where UTF-8 mode also provides native evidence.
 
 [evidence-linux.json](evidence-linux.json) is the versioned [shared evidence
 contract](../../NATIVE_EVIDENCE.md): 97 distinct occurrences at each of O0 and O3.
-This baseline was executed with Imre compiler/runtime source `20f02ee43e0f33306ae8a7917d0d222d66972602`. The pinned suite has no companion module. The two shorter `native-O*.json`
+The `test_thread_info` rows were measured on native source
+`f369a158456a9847f3f827d5f10913194dede25f`. The other rows retain the
+parent's measured baseline from `20f02ee43e0f33306ae8a7917d0d222d66972602`.
+The pinned suite has no companion module. The two shorter `native-O*.json`
 files retain their original records and are not additional test occurrences.
 
 The versioned gate loads the original suite and runs its selected methods
