@@ -299,6 +299,7 @@ impl Kind {
                 Self::OSError
                     | Self::UnsupportedOperation
                     | Self::FileNotFoundError
+                    | Self::BlockingIOError
                     | Self::PermissionError
                     | Self::IsADirectoryError
                     | Self::NotADirectoryError
