@@ -526,6 +526,7 @@ impl Builtin {
             Self::Append | Self::JoinBufferAppend | Self::SortByKeys => {
                 Contract::new(true, PreservesOwners)
             }
+            Self::SortByComparator => Contract::new(true, Unknown),
             Self::ListReserveRange => Contract::new(false, PreservesOwners),
             Self::AnnotationRef
             | Self::BinaryOpen(_)

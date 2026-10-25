@@ -1,4 +1,6 @@
-//! Sealed scalar sorting and UTF-8 builders. User callbacks finish before entry.
+//! Scalar sorting, callback-based sorting, and UTF-8 builders.
+
+mod comparator;
 
 use crate::StrOwner;
 use std::cmp::Ordering;
@@ -401,27 +403,36 @@ pub unsafe extern "C" fn imre_sort_by_keys(
         super::exceptions::sequence_allocation_failed();
         return;
     };
+    // SAFETY: all immutable key storage borrows have ended.
+    unsafe { apply_order(values, element_kind, &mut order) };
+}
+
+/// Move element owners through a checked permutation without running user code.
+///
+/// # Safety
+/// The list is rooted with this exact kind; order covers each element once.
+unsafe fn apply_order(values: *const (), element_kind: u32, order: &mut [usize]) {
     if element_kind == 2 {
         // SAFETY: all immutable key access has ended; swaps transfer existing owners.
         unsafe {
             (&*values.cast::<List>())
                 .0
-                .with_mut(|values| permute(values, &mut order))
+                .with_mut(|values| permute(values, order))
         };
     } else {
         // SAFETY: no storage reference escapes and swaps never drop an owner.
         unsafe {
             object(values.cast()).0.with_mut(|storage| {
                 if let Some(rows) = storage.sequence_storage_mut().rows_mut() {
-                    match rows.reorder_shared(&order) {
-                        Ok(false) => permute_with(rows.len(), &mut order, |a, b| rows.swap(a, b)),
+                    match rows.reorder_shared(order) {
+                        Ok(false) => permute_with(rows.len(), order, |a, b| rows.swap(a, b)),
                         Ok(true) => {}
                         Err(error) => error.raise(),
                     }
                 } else {
                     let values = storage.sequence_mut();
                     values.check_kind(element_kind);
-                    permute(&mut values.values, &mut order);
+                    permute(&mut values.values, order);
                 }
             })
         };
