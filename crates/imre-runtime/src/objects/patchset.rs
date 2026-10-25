@@ -3,17 +3,17 @@
 //! normalization. Parsed files and hunks retain their storage independently.
 
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, Words, finish, object};
-use crate::StrOwner;
-use std::{borrow::Cow, fmt::Write, ops::Range, ptr, rc::Rc};
+use crate::{ObjectOwner, StrOwner};
+use std::{borrow::Cow, fmt::Write, ops::Range, ptr};
 
 pub(super) struct PatchSet {
-    files: Rc<Object>,
-    modified: Vec<Rc<Object>>,
+    files: ObjectOwner,
+    modified: Vec<ObjectOwner>,
 }
 
 pub(super) struct PatchedFile {
     path: StrOwner,
-    hunks: Rc<Object>,
+    hunks: ObjectOwner,
 }
 
 pub(super) struct Hunk {
@@ -113,15 +113,15 @@ impl<'a> File<'a> {
     }
 }
 
-fn boxed(value: Storage) -> Rc<Object> {
-    Rc::new(Object(StorageCell::new(value)))
+fn boxed(value: Storage) -> ObjectOwner {
+    ObjectOwner::new(Object(StorageCell::new(value)))
 }
 
-fn sequence(items: impl Iterator<Item = Rc<Object>>) -> Rc<Object> {
+fn sequence(items: impl Iterator<Item = ObjectOwner>) -> ObjectOwner {
     let mut words = Words::new(5);
     words
         .values
-        .extend(items.map(|item| Rc::into_raw(item) as usize));
+        .extend(items.map(|item| ObjectOwner::into_raw(item) as usize));
     words.into_object()
 }
 
@@ -429,7 +429,7 @@ fn parse(input: &StrOwner) -> Result<PatchSet, Error> {
         );
         let result = boxed(Storage::PatchedFile(PatchedFile { path, hunks }));
         if is_modified {
-            modified.push(Rc::clone(&result));
+            modified.push(ObjectOwner::clone(&result));
         }
         result
     }));
@@ -443,7 +443,7 @@ pub unsafe extern "C" fn imre_patch_parse(text: *const Str) -> *const Object {
     // SAFETY: the caller roots this exact immutable string throughout acquisition.
     let input = unsafe { StrOwner::acquire_word(text as usize) };
     finish(
-        parse(&input).map(|set| Rc::into_raw(boxed(Storage::PatchSet(set)))),
+        parse(&input).map(|set| ObjectOwner::into_raw(boxed(Storage::PatchSet(set)))),
         ptr::null(),
     )
 }
@@ -468,16 +468,16 @@ macro_rules! projection {
     };
 }
 projection!(imre_patch_files, PatchSet, *const Object, |set| {
-    Rc::into_raw(Rc::clone(&set.files))
+    ObjectOwner::into_raw(ObjectOwner::clone(&set.files))
 });
 projection!(imre_patch_modified_files, PatchSet, *const Object, |set| {
-    Rc::into_raw(sequence(set.modified.iter().cloned()))
+    ObjectOwner::into_raw(sequence(set.modified.iter().cloned()))
 });
 projection!(imre_patch_modified_count, PatchSet, usize, |set| {
     Int::from_usize(set.modified.len()).into_raw()
 });
 projection!(imre_patch_hunks, PatchedFile, *const Object, |file| {
-    Rc::into_raw(Rc::clone(&file.hunks))
+    ObjectOwner::into_raw(ObjectOwner::clone(&file.hunks))
 });
 projection!(imre_patch_path, PatchedFile, *const Str, |file| {
     StrOwner::into_raw(file.path.clone())

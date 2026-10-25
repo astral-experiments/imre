@@ -47,7 +47,7 @@ pub(super) enum PathText {
     /// Only paths whose info was requested pay for the persistent view.
     WithInfo {
         lexical: Box<PathText>,
-        view: Rc<Object>,
+        view: crate::ObjectOwner,
     },
     Joined {
         parts: JoinedParts,
@@ -87,9 +87,9 @@ impl PathText {
         }
     }
 
-    fn info(&mut self) -> Rc<Object> {
+    fn info(&mut self) -> crate::ObjectOwner {
         if let Self::WithInfo { view, .. } = self {
-            return Rc::clone(view);
+            return crate::ObjectOwner::clone(view);
         }
         let entry = if let Self::Scanned { kind, .. } = self {
             Some(*kind)
@@ -101,7 +101,7 @@ impl PathText {
         let lexical = std::mem::replace(self, Self::Flat(spelling));
         *self = Self::WithInfo {
             lexical: Box::new(lexical),
-            view: Rc::clone(&view),
+            view: crate::ObjectOwner::clone(&view),
         };
         view
     }
@@ -389,10 +389,12 @@ fn new_path(path: impl Into<StrOwner>) -> *const Object {
 }
 
 fn path_with_text(text: PathText) -> *const Object {
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Path {
-        text,
-        name: std::cell::OnceCell::new(),
-    }))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::Path {
+            text,
+            name: std::cell::OnceCell::new(),
+        },
+    ))))
 }
 
 fn name(path: &str) -> &str {
@@ -755,7 +757,7 @@ pub unsafe extern "C" fn imre_path_parent(path: *const Object) -> *const Object 
     unsafe {
         object(path).0.with_mut(|storage| {
             if storage.basename().is_empty() {
-                Rc::increment_strong_count(path);
+                crate::ObjectOwner::increment_strong_count(path);
                 return path;
             }
             if let Storage::PurePath(p) = storage {
@@ -794,7 +796,7 @@ pub unsafe extern "C" fn imre_path_absolute(path: *const Object) -> *const Objec
     let result = unsafe {
         object(path).0.with(|storage| {
             if storage.path().starts_with('/') {
-                Rc::increment_strong_count(path);
+                crate::ObjectOwner::increment_strong_count(path);
                 return Ok(path);
             }
             let cwd = std::env::current_dir().map_err(files::os_error)?;
@@ -900,7 +902,7 @@ pub unsafe extern "C" fn imre_path_read_bytes(path: *const Object) -> *const Byt
             .with(|storage| files::read_path_bytes(storage.path()))
     };
     finish(
-        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        result.map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes))),
         std::ptr::null(),
     )
 }
@@ -1156,9 +1158,9 @@ impl PathIterator {
     }
 
     fn into_object(self) -> *const Object {
-        Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::PathIterator(
-            Box::new(self),
-        )))))
+        crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+            Storage::PathIterator(Box::new(self)),
+        ))))
     }
 }
 
@@ -1426,7 +1428,7 @@ mod tests {
             fs::create_dir(&path).unwrap();
             Self(path)
         }
-        fn path(&self) -> Rc<Object> {
+        fn path(&self) -> crate::ObjectOwner {
             path(self.0.to_str().unwrap())
         }
     }
@@ -1435,10 +1437,10 @@ mod tests {
             fs::remove_dir_all(&self.0).unwrap();
         }
     }
-    fn path(text: &str) -> Rc<Object> {
+    fn path(text: &str) -> crate::ObjectOwner {
         let text = StrOwner::new(Str::from(text));
         // SAFETY: the input is rooted and the new path transfers one owner.
-        unsafe { Rc::from_raw(imre_path_new(StrOwner::as_ptr(&text))) }
+        unsafe { crate::ObjectOwner::from_raw(imre_path_new(StrOwner::as_ptr(&text))) }
     }
 
     #[test]
@@ -1449,14 +1451,15 @@ mod tests {
         let ordinary = path(entry_name);
         // SAFETY: each ABI result transfers one owner; take the view before dropping
         // its path to also check the independently retained spelling.
-        let view =
-            |p: &Rc<Object>| unsafe { Rc::from_raw(metadata::imre_path_info(Rc::as_ptr(p))) };
+        let view = |p: &crate::ObjectOwner| unsafe {
+            crate::ObjectOwner::from_raw(metadata::imre_path_info(crate::ObjectOwner::as_ptr(p)))
+        };
         // SAFETY: both object kinds accepted by this predicate remain rooted here.
-        let query = |p: &Rc<Object>, kind, follow| unsafe {
-            metadata::imre_path_query(Rc::as_ptr(p), kind, u32::from(follow)) != 0
+        let query = |p: &crate::ObjectOwner, kind, follow| unsafe {
+            metadata::imre_path_query(crate::ObjectOwner::as_ptr(p), kind, u32::from(follow)) != 0
         };
         let first = view(&ordinary);
-        assert!(Rc::ptr_eq(&first, &view(&ordinary)));
+        assert!(crate::ObjectOwner::ptr_eq(&first, &view(&ordinary)));
         assert!(!query(&first, 0, true));
         drop(ordinary);
         fs::write(&filename, "file").unwrap();
@@ -1468,10 +1471,13 @@ mod tests {
         // and its view outlive the directory iterator's snapshot.
         let scanned = unsafe {
             let dir = directory.path();
-            let it = Rc::from_raw(imre_path_iter(Rc::as_ptr(&dir), std::ptr::null()));
-            let item = imre_path_next(Rc::as_ptr(&it));
+            let it = crate::ObjectOwner::from_raw(imre_path_iter(
+                crate::ObjectOwner::as_ptr(&dir),
+                std::ptr::null(),
+            ));
+            let item = imre_path_next(crate::ObjectOwner::as_ptr(&it));
             assert!(!item.is_null());
-            Rc::from_raw(item)
+            crate::ObjectOwner::from_raw(item)
         };
         let entry = view(&scanned);
         fs::remove_file(&filename).unwrap();
@@ -1489,7 +1495,7 @@ mod tests {
         let unknown = || {
             let text = PathText::from_entry(Str::from(entry_name), rustix::fs::FileType::Unknown);
             // SAFETY: recover the sole path owner, then take its independently owned view.
-            view(&unsafe { Rc::from_raw(path_with_text(text)) })
+            view(&unsafe { crate::ObjectOwner::from_raw(path_with_text(text)) })
         };
         let remembered = unknown();
         let unqueried = unknown();
@@ -1515,17 +1521,21 @@ mod tests {
         // SAFETY: each returned raw pointer transfers one owner. All calls borrow
         // a live exact Path, and each returned owner is recovered just once.
         unsafe {
-            let path = Rc::from_raw(new_path(Str::from(format!("{prefix}/leaf"))));
-            let first = Rc::from_raw(imre_path_parent(Rc::as_ptr(&path)));
-            let second = Rc::from_raw(imre_path_parent(Rc::as_ptr(&path)));
-            assert!(!Rc::ptr_eq(&first, &second));
-            let first_text = StrOwner::from_raw(imre_path_text(Rc::as_ptr(&first)));
-            let second_text = StrOwner::from_raw(imre_path_text(Rc::as_ptr(&second)));
+            let path = crate::ObjectOwner::from_raw(new_path(Str::from(format!("{prefix}/leaf"))));
+            let first =
+                crate::ObjectOwner::from_raw(imre_path_parent(crate::ObjectOwner::as_ptr(&path)));
+            let second =
+                crate::ObjectOwner::from_raw(imre_path_parent(crate::ObjectOwner::as_ptr(&path)));
+            assert!(!crate::ObjectOwner::ptr_eq(&first, &second));
+            let first_text = StrOwner::from_raw(imre_path_text(crate::ObjectOwner::as_ptr(&first)));
+            let second_text =
+                StrOwner::from_raw(imre_path_text(crate::ObjectOwner::as_ptr(&second)));
             assert!(StrOwner::ptr_eq(&first_text, &second_text));
             let old = StrOwner::downgrade(&first_text);
             drop((first_text, second_text, first, second));
             assert!(old.upgrade().is_none());
-            let fresh = Rc::from_raw(imre_path_parent(Rc::as_ptr(&path)));
+            let fresh =
+                crate::ObjectOwner::from_raw(imre_path_parent(crate::ObjectOwner::as_ptr(&path)));
             assert!(fresh.0.with(|storage| storage.path() == prefix));
         }
     }
@@ -1539,12 +1549,12 @@ mod tests {
         // SAFETY: every input remains rooted through its call and each native
         // return transfers one owner. Source and results use normal Rc COW.
         unsafe {
-            let path = Rc::from_raw(imre_path_new(StrOwner::as_ptr(&source)));
-            let first = StrOwner::from_raw(imre_path_text(Rc::as_ptr(&path)));
-            let component = StrOwner::from_raw(imre_path_name(Rc::as_ptr(&path)));
-            let stem = StrOwner::from_raw(imre_path_stem(Rc::as_ptr(&path)));
+            let path = crate::ObjectOwner::from_raw(imre_path_new(StrOwner::as_ptr(&source)));
+            let first = StrOwner::from_raw(imre_path_text(crate::ObjectOwner::as_ptr(&path)));
+            let component = StrOwner::from_raw(imre_path_name(crate::ObjectOwner::as_ptr(&path)));
+            let stem = StrOwner::from_raw(imre_path_stem(crate::ObjectOwner::as_ptr(&path)));
             assert!(StrOwner::ptr_eq(&stem, &component));
-            let mut other = StrOwner::from_raw(imre_path_name(Rc::as_ptr(&path)));
+            let mut other = StrOwner::from_raw(imre_path_name(crate::ObjectOwner::as_ptr(&path)));
             assert!(StrOwner::ptr_eq(&first, &source));
             assert!(StrOwner::ptr_eq(&other, &component));
             StrOwner::make_mut(&mut source).push('!');
@@ -1585,7 +1595,7 @@ mod tests {
                 break;
             }
             // SAFETY: each successful next transfers one exact Path owner.
-            let next = unsafe { Rc::from_raw(next) };
+            let next = unsafe { crate::ObjectOwner::from_raw(next) };
             // SAFETY: the immutable Path remains rooted during this copied-name read.
             result.push(unsafe { next.0.with(|storage| name(storage.path()).to_owned()) });
         }
@@ -1602,29 +1612,35 @@ mod tests {
         // SAFETY: both inputs are rooted through the join, whose result owns
         // its operands. Each later text call transfers one independent owner.
         unsafe {
-            let joined = Rc::from_raw(imre_path_join(
-                Rc::as_ptr(&parent),
+            let joined = crate::ObjectOwner::from_raw(imre_path_join(
+                crate::ObjectOwner::as_ptr(&parent),
                 StrOwner::as_ptr(&child),
             ));
             drop(parent);
             StrOwner::make_mut(&mut child).push('!');
             let tail = StrOwner::new(Str::from(".."));
-            let descendant =
-                Rc::from_raw(imre_path_join(Rc::as_ptr(&joined), StrOwner::as_ptr(&tail)));
-            let rendered = StrOwner::from_raw(imre_path_text(Rc::as_ptr(&descendant)));
+            let descendant = crate::ObjectOwner::from_raw(imre_path_join(
+                crate::ObjectOwner::as_ptr(&joined),
+                StrOwner::as_ptr(&tail),
+            ));
+            let rendered =
+                StrOwner::from_raw(imre_path_text(crate::ObjectOwner::as_ptr(&descendant)));
             assert_eq!(
                 rendered.as_str(),
                 "/parent/child/a-long-component-that-needs-character-storage/.."
             );
-            assert_eq!(imre_path_is_absolute(Rc::as_ptr(&joined)), 1);
+            assert_eq!(
+                imre_path_is_absolute(crate::ObjectOwner::as_ptr(&joined)),
+                1
+            );
             joined.0.with(|storage| {
                 let PathText::Joined { spelling, .. } = storage.path_value() else {
                     panic!("expected a deferred path");
                 };
                 assert!(spelling.get().is_none());
             });
-            let first = StrOwner::from_raw(imre_path_text(Rc::as_ptr(&joined)));
-            let second = StrOwner::from_raw(imre_path_text(Rc::as_ptr(&joined)));
+            let first = StrOwner::from_raw(imre_path_text(crate::ObjectOwner::as_ptr(&joined)));
+            let second = StrOwner::from_raw(imre_path_text(crate::ObjectOwner::as_ptr(&joined)));
             drop(joined);
             assert!(StrOwner::ptr_eq(&first, &second));
             assert_eq!(
@@ -1654,7 +1670,7 @@ mod tests {
             assert_eq!(actual, normalized);
             // SAFETY: the Rc roots each Path; every ABI result transfers a fresh owner.
             unsafe {
-                let pointer = Rc::as_ptr(&value);
+                let pointer = crate::ObjectOwner::as_ptr(&value);
                 assert_eq!(
                     StrOwner::from_raw(imre_path_name(pointer)).as_str(),
                     expected_name
@@ -1664,7 +1680,7 @@ mod tests {
                     StrOwner::from_raw(imre_path_suffix(pointer)).as_str(),
                     suffix
                 );
-                let parent = Rc::from_raw(imre_path_parent(pointer));
+                let parent = crate::ObjectOwner::from_raw(imre_path_parent(pointer));
                 assert_eq!(
                     parent.0.with(|storage| storage.path().to_owned()),
                     expected_parent
@@ -1682,14 +1698,24 @@ mod tests {
         let right = path("a/b");
         // SAFETY: both roots have exact Object representation 5 for this traversal.
         unsafe {
-            assert_eq!(imre_path_equal(Rc::as_ptr(&left), Rc::as_ptr(&right)), 1);
+            assert_eq!(
+                imre_path_equal(
+                    crate::ObjectOwner::as_ptr(&left),
+                    crate::ObjectOwner::as_ptr(&right)
+                ),
+                1
+            );
             assert!(values::equal(
-                Rc::as_ptr(&left) as usize,
-                Rc::as_ptr(&right) as usize,
+                crate::ObjectOwner::as_ptr(&left) as usize,
+                crate::ObjectOwner::as_ptr(&right) as usize,
                 super::super::words::WordKind::new(5)
             ));
             assert_eq!(
-                StrOwner::from_raw(values::imre_value_repr(Rc::as_ptr(&left) as usize, 5)).as_str(),
+                StrOwner::from_raw(values::imre_value_repr(
+                    crate::ObjectOwner::as_ptr(&left) as usize,
+                    5
+                ))
+                .as_str(),
                 "PosixPath('a/b')"
             );
         }
@@ -1703,9 +1729,9 @@ mod tests {
         let root = directory.path();
         // SAFETY: all exact roots outlive their ABI calls, which transfer owned results.
         unsafe {
-            let pointer = Rc::as_ptr(&value);
+            let pointer = crate::ObjectOwner::as_ptr(&value);
             assert_eq!(imre_path_exists(pointer), 0);
-            assert_eq!(imre_path_is_dir(Rc::as_ptr(&root)), 1);
+            assert_eq!(imre_path_is_dir(crate::ObjectOwner::as_ptr(&root)), 1);
             let count = Int(imre_path_write_text(pointer, &Str::from("é\r\n🦀\r")));
             assert_eq!(count.as_small(), Some(5));
             assert_eq!(imre_path_is_file(pointer), 1);
@@ -1719,13 +1745,13 @@ mod tests {
             fs::remove_file(&filename).unwrap();
             assert!(imre_path_read_text(pointer).is_null());
             take_error(Kind::FileNotFoundError);
-            assert!(imre_path_read_text(Rc::as_ptr(&root)).is_null());
+            assert!(imre_path_read_text(crate::ObjectOwner::as_ptr(&root)).is_null());
             take_error(Kind::IsADirectoryError);
             let nul = path("a\0b");
-            assert_eq!(imre_path_exists(Rc::as_ptr(&nul)), 0);
-            assert_eq!(imre_path_is_file(Rc::as_ptr(&nul)), 0);
-            assert_eq!(imre_path_is_dir(Rc::as_ptr(&nul)), 0);
-            assert!(imre_path_read_text(Rc::as_ptr(&nul)).is_null());
+            assert_eq!(imre_path_exists(crate::ObjectOwner::as_ptr(&nul)), 0);
+            assert_eq!(imre_path_is_file(crate::ObjectOwner::as_ptr(&nul)), 0);
+            assert_eq!(imre_path_is_dir(crate::ObjectOwner::as_ptr(&nul)), 0);
+            assert!(imre_path_read_text(crate::ObjectOwner::as_ptr(&nul)).is_null());
             take_error(Kind::ValueError);
         }
         assert_eq!(imre_error_pending(), 0);
@@ -1740,9 +1766,9 @@ mod tests {
         let mode = Int::small(0o700).unwrap();
         // SAFETY: exact rooted Path/Int values remain live, and every failure is taken.
         unsafe {
-            imre_path_mkdir(Rc::as_ptr(&leaf), mode.0, 0, 0);
+            imre_path_mkdir(crate::ObjectOwner::as_ptr(&leaf), mode.0, 0, 0);
             take_error(Kind::FileNotFoundError);
-            imre_path_mkdir(Rc::as_ptr(&leaf), mode.0, 1, 0);
+            imre_path_mkdir(crate::ObjectOwner::as_ptr(&leaf), mode.0, 1, 0);
             assert_eq!(imre_error_pending(), 0);
             assert_eq!(
                 fs::metadata(directory.0.join("parent/leaf"))
@@ -1760,26 +1786,26 @@ mod tests {
                     & 0o777,
                 fs::metadata(&directory.0).unwrap().permissions().mode() & 0o777
             );
-            imre_path_mkdir(Rc::as_ptr(&leaf), mode.0, 1, 0);
+            imre_path_mkdir(crate::ObjectOwner::as_ptr(&leaf), mode.0, 1, 0);
             take_error(Kind::FileExistsError);
-            imre_path_mkdir(Rc::as_ptr(&leaf), mode.0, 1, 1);
+            imre_path_mkdir(crate::ObjectOwner::as_ptr(&leaf), mode.0, 1, 1);
             assert_eq!(imre_error_pending(), 0);
             symlink("parent/leaf", directory.0.join("link")).unwrap();
             let link = path(directory.0.join("link").to_str().unwrap());
-            imre_path_mkdir(Rc::as_ptr(&link), mode.0, 0, 1);
+            imre_path_mkdir(crate::ObjectOwner::as_ptr(&link), mode.0, 0, 1);
             assert_eq!(imre_error_pending(), 0);
             fs::write(directory.0.join("file"), "kept").unwrap();
             let file = path(directory.0.join("file").to_str().unwrap());
-            imre_path_mkdir(Rc::as_ptr(&file), mode.0, 1, 1);
+            imre_path_mkdir(crate::ObjectOwner::as_ptr(&file), mode.0, 1, 1);
             take_error(Kind::FileExistsError);
             let child = path(directory.0.join("file/child").to_str().unwrap());
-            imre_path_mkdir(Rc::as_ptr(&child), mode.0, 1, 1);
+            imre_path_mkdir(crate::ObjectOwner::as_ptr(&child), mode.0, 1, 1);
             take_error(Kind::NotADirectoryError);
             let huge = Int::new(num_bigint::BigInt::from(1_u8) << 100);
-            imre_path_mkdir(Rc::as_ptr(&leaf), huge.0, 1, 1);
+            imre_path_mkdir(crate::ObjectOwner::as_ptr(&leaf), huge.0, 1, 1);
             take_error(Kind::OverflowError);
             let nul = path("invalid\0path");
-            imre_path_mkdir(Rc::as_ptr(&nul), huge.0, 1, 1);
+            imre_path_mkdir(crate::ObjectOwner::as_ptr(&nul), huge.0, 1, 1);
             take_error(Kind::ValueError);
         }
     }
@@ -1797,9 +1823,10 @@ mod tests {
         let target_text = Str::from(target.to_str().unwrap());
         // SAFETY: exact paths/strings are rooted, and successful results transfer owners.
         unsafe {
-            let replaced = imre_path_replace(Rc::as_ptr(&source_path), &target_text);
+            let replaced =
+                imre_path_replace(crate::ObjectOwner::as_ptr(&source_path), &target_text);
             assert!(!replaced.is_null());
-            let replaced = Rc::from_raw(replaced);
+            let replaced = crate::ObjectOwner::from_raw(replaced);
             assert_eq!(imre_error_pending(), 0);
             assert_eq!(
                 replaced.0.with(|storage| storage.path().to_owned()),
@@ -1808,21 +1835,23 @@ mod tests {
             assert!(!source.exists());
             assert_eq!(fs::read_to_string(&target).unwrap(), "replacement");
             assert_eq!(fs::read_to_string(&outside).unwrap(), "original");
-            assert!(imre_path_replace(Rc::as_ptr(&source_path), &target_text).is_null());
+            assert!(
+                imre_path_replace(crate::ObjectOwner::as_ptr(&source_path), &target_text).is_null()
+            );
             take_error(Kind::FileNotFoundError);
-            imre_path_unlink(Rc::as_ptr(&replaced), 0);
-            imre_path_unlink(Rc::as_ptr(&replaced), 1);
+            imre_path_unlink(crate::ObjectOwner::as_ptr(&replaced), 0);
+            imre_path_unlink(crate::ObjectOwner::as_ptr(&replaced), 1);
             assert_eq!(imre_error_pending(), 0);
             symlink(&outside, &target).unwrap();
-            imre_path_rmdir(Rc::as_ptr(&replaced));
+            imre_path_rmdir(crate::ObjectOwner::as_ptr(&replaced));
             take_error(Kind::NotADirectoryError);
-            imre_path_unlink(Rc::as_ptr(&replaced), 0);
+            imre_path_unlink(crate::ObjectOwner::as_ptr(&replaced), 0);
             assert_eq!(fs::read_to_string(outside).unwrap(), "original");
             let non_directory = path(directory.0.join("preserved/child").to_str().unwrap());
-            imre_path_unlink(Rc::as_ptr(&non_directory), 1);
+            imre_path_unlink(crate::ObjectOwner::as_ptr(&non_directory), 1);
             take_error(Kind::NotADirectoryError);
             let root = directory.path();
-            imre_path_unlink(Rc::as_ptr(&root), 1);
+            imre_path_unlink(crate::ObjectOwner::as_ptr(&root), 1);
             // Darwin returns EPERM and Linux returns EISDIR for unlink on a directory.
             take_error(if cfg!(target_os = "macos") {
                 Kind::PermissionError

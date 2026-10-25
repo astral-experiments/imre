@@ -58,6 +58,7 @@ pub(crate) enum Binding {
 /// Sealed namespaces expose only compiler-known symbols, never module values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IntrinsicModule {
+    ContextVars,
     Importlib,
     ImportlibMachinery,
     ImportlibUtil,
@@ -137,6 +138,10 @@ pub(crate) enum IntrinsicModule {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
+    Context,
+    ContextVar,
+    ContextToken,
+    CopyContext,
     ModuleSpec,
     CachePath { reverse: bool },
     GetAnnotations,
@@ -214,6 +219,7 @@ pub(crate) enum Intrinsic {
     Pipe,
     Devnull,
     CheckOutput,
+    ShellOutput { status: bool },
     NullContext,
     IntConstant(i64),
     WallTime,
@@ -419,6 +425,7 @@ impl IntrinsicModule {
             "datetime" => Some(Self::Datetime),
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
+            "contextvars" => Some(Self::ContextVars),
             "inspect" => Some(Self::Inspect),
             "linecache" => Some(Self::Linecache),
             "contextlib" => Some(Self::Contextlib),
@@ -564,6 +571,10 @@ impl IntrinsicModule {
             (Self::Abc, "abstractmethod") => Intrinsic::AbstractMethod,
             (Self::Asyncio, "create_subprocess_exec") => Intrinsic::CreateSubprocessExec,
             (Self::Asyncio, "run") => Intrinsic::RunLoop,
+            (Self::ContextVars, "Context") => Intrinsic::Context,
+            (Self::ContextVars, "ContextVar") => Intrinsic::ContextVar,
+            (Self::ContextVars, "Token") => Intrinsic::ContextToken,
+            (Self::ContextVars, "copy_context") => Intrinsic::CopyContext,
             (Self::Asyncio, "new_event_loop") => Intrinsic::NewLoop,
             (Self::Asyncio, "set_event_loop") => Intrinsic::SetLoop,
             (Self::Asyncio, "ensure_future") => Intrinsic::EnsureTask,
@@ -646,6 +657,8 @@ impl IntrinsicModule {
             (Self::Subprocess, "PIPE") => Intrinsic::Pipe,
             (Self::Subprocess, "DEVNULL") => Intrinsic::Devnull,
             (Self::Subprocess, "check_output") => Intrinsic::CheckOutput,
+            (Self::Subprocess, "getoutput") => Intrinsic::ShellOutput { status: false },
+            (Self::Subprocess, "getstatusoutput") => Intrinsic::ShellOutput { status: true },
             (Self::Typing, "TYPE_CHECKING") => Intrinsic::TypeChecking,
             (Self::Sys, "stdin" | "__stdin__") => Intrinsic::Stdin,
             (Self::Sys, "stdout" | "__stdout__") => Intrinsic::Stdout,
@@ -959,6 +972,10 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    pub(crate) fn checked_diagnostic_count(&self, module: ModuleId) -> usize {
+        self.checked_diagnostics.borrow()[module].len()
+    }
+
     pub(crate) fn is_unittest_main(&self, id: DefinitionId) -> bool {
         let owner = &self.modules[id.module];
         owner.bundled
@@ -1500,6 +1517,15 @@ fn textwrap_implementation(name: &str) -> Option<&'static str> {
 
 /// Resolve the public definitions compiled from Python alongside sealed native operations.
 fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) -> Option<Binding> {
+    if module == IntrinsicModule::Selectors
+        && matches!(
+            name,
+            "PollSelector" | "DefaultSelector" | "SelectorKey" | "EVENT_READ" | "EVENT_WRITE"
+        )
+        && let Some(source) = modules.iter().find(|source| source.is_bundled("selectors"))
+    {
+        return source.export(name);
+    }
     module.symbol(name).or_else(|| {
         let implementation = match module {
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
@@ -2168,6 +2194,11 @@ impl<'a> Loader<'a> {
         });
         if module.is_some() {
             self.reject_stdlib_shadow(name)?;
+        }
+        if module == Some(IntrinsicModule::Selectors)
+            && cfg!(any(target_os = "linux", target_os = "macos"))
+        {
+            self.load_module(name)?;
         }
         let needs_textwrap = |implementation| {
             matches!(module, Some(IntrinsicModule::Textwrap))

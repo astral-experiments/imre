@@ -110,6 +110,45 @@ fn value_class(types: &Types, arg: &Expr) -> Option<Expr> {
     Some(unpacking::string(class(arg.ty)?.0))
 }
 
+pub(super) enum LocalDecorator {
+    Dispatch,
+    Register(Box<Registration>),
+}
+
+/// Hold the receiver and class before evaluating the function being registered.
+pub(super) struct Registration {
+    scope: calls::ArgumentScope,
+    table: Expr,
+    key: Expr,
+    callable: Type,
+}
+
+impl Registration {
+    fn apply(
+        mut self,
+        checker: &mut Checker<'_>,
+        target: Expr,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        if target.ty != self.callable {
+            return Err(error(
+                checker.source,
+                node,
+                "dispatch implementation must accept the same native positional signature",
+            ));
+        }
+        let target = self.scope.hold(checker, target);
+        Ok(self.scope.finish(Expr {
+            ty: target.ty,
+            kind: ExprKind::Scope {
+                body: vec![Statement::SetItem(self.table, self.key, target.clone())],
+                value: Box::new(target),
+                clear: vec![],
+            },
+        }))
+    }
+}
+
 impl Checker<'_> {
     /// An unbound function cannot retain its dispatcher through a captured receiver.
     fn dispatch_target(&mut self, node: &ast::Expr) -> Result<Expr, String> {
@@ -123,7 +162,7 @@ impl Checker<'_> {
             }
             _ => false,
         };
-        if !unbound {
+        if !unbound || self.types.dispatcher(value.ty).is_some() {
             return Err(error(
                 self.source,
                 node,
@@ -142,8 +181,12 @@ impl Checker<'_> {
                 "singledispatch needs one function",
             ));
         };
-        let mut scope = calls::ArgumentScope::default();
         let target = self.dispatch_target(node)?;
+        self.new_dispatcher(target, call)
+    }
+
+    fn new_dispatcher(&mut self, target: Expr, node: &impl Ranged) -> Result<Expr, String> {
+        let mut scope = calls::ArgumentScope::default();
         let target = scope.hold(self, target);
         let (parameters, returns) = self.types.signature(target.ty).unwrap();
         if matches!(returns, Type::Coroutine(_)) {
@@ -202,7 +245,7 @@ impl Checker<'_> {
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
                 recursion_error: self.graph.modules[self.module]
-                    .error(call, "recursive indirect single dispatch is unsupported"),
+                    .error(node, "recursive indirect single dispatch is unsupported"),
                 function,
             },
         );
@@ -250,6 +293,23 @@ impl Checker<'_> {
                 ));
             }
         };
+        let selection = self.dispatch_selection(receiver, layout, class)?;
+        if let Some(node) = registration {
+            let target = self.dispatch_target(node)?;
+            selection.apply(self, target, node)
+        } else {
+            Ok(selection
+                .scope
+                .finish(lookup(&selection.table, selection.key, selection.callable)))
+        }
+    }
+
+    fn dispatch_selection(
+        &mut self,
+        receiver: Expr,
+        layout: DispatchFunction,
+        class: &ast::Expr,
+    ) -> Result<Registration, String> {
         let mut scope = calls::ArgumentScope::default();
         let table = scope.hold(self, field(context(receiver, layout), 1, layout.registry));
         let class_value = self.expr(class)?;
@@ -261,27 +321,82 @@ impl Checker<'_> {
             ));
         }
         let key = scope.hold(self, annotations::type_name(class_value));
-        let value = if let Some(node) = registration {
-            let target = self.dispatch_target(node)?;
-            if target.ty != layout.callable {
-                return Err(error(
-                    self.source,
-                    node,
-                    "dispatch implementation must accept the same native positional signature",
-                ));
-            }
-            let target = scope.hold(self, target);
-            Expr {
-                ty: target.ty,
-                kind: ExprKind::Scope {
-                    body: vec![Statement::SetItem(table, key, target.clone())],
-                    value: Box::new(target),
-                    clear: vec![],
-                },
-            }
-        } else {
-            lookup(&table, key, layout.callable)
+        Ok(Registration {
+            scope,
+            table,
+            key,
+            callable: layout.callable,
+        })
+    }
+
+    fn registration(&mut self, expression: &ast::Expr) -> Result<Option<Registration>, String> {
+        let ast::Expr::Call(call) = expression else {
+            return Ok(None);
         };
-        Ok(scope.finish(value))
+        let ast::Expr::Attribute(attr) = &*call.func else {
+            return Ok(None);
+        };
+        if attr.attr.as_str() != "register" {
+            return Ok(None);
+        }
+        let [class] = call.arguments.args.as_ref() else {
+            return Ok(None);
+        };
+        let receiver = self.expr(&attr.value)?;
+        let Some(layout) = self.types.dispatcher(receiver.ty) else {
+            return Ok(None);
+        };
+        self.reject_builtin_keywords(call)?;
+        self.dispatch_selection(receiver, layout, class).map(Some)
+    }
+
+    pub(super) fn local_dispatch_decorator(
+        &mut self,
+        def: &ast::StmtFunctionDef,
+    ) -> Result<Option<LocalDecorator>, String> {
+        let [decorator] = def.decorator_list.as_slice() else {
+            return Ok(None);
+        };
+        if self.resolve(&decorator.expression)
+            == Some(Binding::Intrinsic(Intrinsic::SingleDispatch))
+        {
+            Ok(Some(LocalDecorator::Dispatch))
+        } else {
+            Ok(self
+                .registration(&decorator.expression)?
+                .map(Box::new)
+                .map(LocalDecorator::Register))
+        }
+    }
+
+    pub(super) fn decorate_dispatch(
+        &mut self,
+        decorator: LocalDecorator,
+        target: Expr,
+        def: &ast::StmtFunctionDef,
+    ) -> Result<Expr, String> {
+        match decorator {
+            LocalDecorator::Dispatch => self.new_dispatcher(target, def),
+            LocalDecorator::Register(selection) => selection.apply(self, target, def),
+        }
+    }
+
+    pub(super) fn immediate_registration(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Option<Expr>, String> {
+        let Some(selection) = self.registration(&call.func)? else {
+            return Ok(None);
+        };
+        self.reject_builtin_keywords(call)?;
+        let [implementation] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "a dispatch registration decorator needs one function",
+            ));
+        };
+        let target = self.dispatch_target(implementation)?;
+        selection.apply(self, target, implementation).map(Some)
     }
 }

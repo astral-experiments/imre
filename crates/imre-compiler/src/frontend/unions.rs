@@ -174,6 +174,15 @@ impl Checker<'_> {
             return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
         }
         match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::Context)) => {
+                return Ok(vec![InstanceType::Exact(Type::Context)]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ContextVar)) => {
+                return Ok(vec![InstanceType::ContextVar]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ContextToken)) => {
+                return Ok(vec![InstanceType::ContextToken]);
+            }
             Some(Binding::Intrinsic(Intrinsic::ModuleSpec)) => {
                 return Ok(vec![InstanceType::ModuleSpec]);
             }

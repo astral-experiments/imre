@@ -9,7 +9,6 @@ use std::io;
 use std::net::Ipv4Addr;
 use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::ptr;
-use std::rc::Rc;
 
 pub(super) struct Socket {
     fd: RawFd,
@@ -111,7 +110,7 @@ fn setopt(fd: RawFd, level: i32, name: i32, value: i32) -> io::Result<()> {
     Ok(())
 }
 
-fn handle(raw: RawFd, blocking: bool) -> io::Result<Rc<Object>> {
+fn handle(raw: RawFd, blocking: bool) -> io::Result<crate::ObjectOwner> {
     // SAFETY: the kernel transferred a new fd; every path now has an owner.
     let fd = unsafe { OwnedFd::from_raw_fd(raw) };
     #[cfg(not(target_os = "linux"))]
@@ -121,10 +120,12 @@ fn handle(raw: RawFd, blocking: bool) -> io::Result<Rc<Object>> {
     }
     #[cfg(target_vendor = "apple")]
     setopt(raw, libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1)?;
-    Ok(Rc::new(Object(StorageCell::new(Storage::Socket(Socket {
-        fd: fd.into_raw_fd(),
-        blocking,
-    })))))
+    Ok(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::Socket(Socket {
+            fd: fd.into_raw_fd(),
+            blocking,
+        }),
+    ))))
 }
 
 #[unsafe(no_mangle)]
@@ -154,7 +155,9 @@ pub extern "C" fn imre_socket_new(family: usize, ty: usize, proto: usize) -> *co
             let ty = ty | libc::SOCK_CLOEXEC;
             // SAFETY: socket consumes only integer arguments; handle acquires a successful fd.
             let raw = checked(unsafe { libc::socket(family, ty, proto) }).map_err(errno_error)?;
-            handle(raw, true).map(Rc::into_raw).map_err(errno_error)
+            handle(raw, true)
+                .map(crate::ObjectOwner::into_raw)
+                .map_err(errno_error)
         })(),
         ptr::null(),
     )
@@ -386,7 +389,8 @@ pub unsafe extern "C" fn imre_socket_accept(
         // SAFETY: both descriptors match these transferred owners. No fallible syscall remains.
         unsafe {
             let pair = imre_record_new(layout);
-            pair.cast::<*const Object>().write(Rc::into_raw(child));
+            pair.cast::<*const Object>()
+                .write(crate::ObjectOwner::into_raw(child));
             pair.add(1)
                 .cast::<*mut usize>()
                 .write(addr_tuple(addr_layout, a));
@@ -435,7 +439,9 @@ pub unsafe extern "C" fn imre_socket_recv(s: &Object, size: usize, flags: usize)
                 bytes.shrink_to_fit();
             }
         }
-        Ok(Rc::into_raw(Rc::new(bytes)))
+        crate::BytesOwner::try_new(bytes)
+            .map(crate::BytesOwner::into_raw)
+            .map_err(|_| Error::memory_error())
     })();
     finish(result, ptr::null())
 }
@@ -531,7 +537,7 @@ pub extern "C" fn imre_socket_dup(s: &Object) -> *const Object {
         let child = handle(copy, blocking)?;
         // socket.dup reapplies its source's blocking mode to the shared open file.
         set_blocking(copy, blocking)?;
-        Ok(Rc::into_raw(child))
+        Ok(crate::ObjectOwner::into_raw(child))
     })();
     finish(result.map_err(errno_error), ptr::null())
 }

@@ -258,7 +258,7 @@ pub unsafe extern "C" fn imre_ndiff_deferred(
             signed: OnceCell::new(),
             projected: OnceCell::new(),
         });
-        Ok(Rc::into_raw(
+        Ok(crate::ObjectOwner::into_raw(
             Words::deferred(Deferred(View::Full(source))).into_object(),
         ))
     })();
@@ -276,7 +276,7 @@ pub unsafe extern "C" fn imre_str_list_copy(list: *const Object) -> *const Objec
             .with(|storage| storage.sequence_storage().plan().cloned())
     };
     match plan {
-        Some(plan) => Rc::into_raw(Words::deferred(plan).into_object()),
+        Some(plan) => crate::ObjectOwner::into_raw(Words::deferred(plan).into_object()),
         // SAFETY: omitted bounds copy the entire rooted sequence.
         None => unsafe { super::sequences::imre_seq_slice(list, 0, 0, 0) },
     }
@@ -363,7 +363,7 @@ pub unsafe extern "C" fn imre_str_list_filter(
         })
     };
     super::finish(
-        result.map(|words| Rc::into_raw(words.into_object())),
+        result.map(|words| crate::ObjectOwner::into_raw(words.into_object())),
         std::ptr::null(),
     )
 }
@@ -417,7 +417,7 @@ pub unsafe extern "C" fn imre_str_list_sorted_suffix(
         })
     };
     crate::finish(
-        result.map(|words| Rc::into_raw(words.into_object())),
+        result.map(|words| crate::ObjectOwner::into_raw(words.into_object())),
         std::ptr::null(),
     )
 }

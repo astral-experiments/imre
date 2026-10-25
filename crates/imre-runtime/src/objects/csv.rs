@@ -2,17 +2,14 @@
 
 use crate::StrOwner;
 use std::ptr;
-use std::rc::Rc;
 
-use super::{
-    Error, Int, Kind, Object, Storage, StorageCell, Str, Words, acquire_rc, finish, object,
-};
+use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, Words, finish, object};
 
 type Result<T> = std::result::Result<T, Error>;
 
 enum Lines {
-    List(Rc<Object>, usize),
-    File(Rc<Object>),
+    List(crate::ObjectOwner, usize),
+    File(crate::ObjectOwner),
     Text(StrOwner, usize),
     End,
 }
@@ -262,7 +259,7 @@ impl Row {
 }
 
 impl Reader {
-    fn next(&mut self) -> Result<Option<Rc<Object>>> {
+    fn next(&mut self) -> Result<Option<crate::ObjectOwner>> {
         let mut row = Row {
             fields: Words::new(3),
             field: String::new(),
@@ -357,12 +354,12 @@ unsafe fn create(
     // SAFETY: the checked owner and kind agree; entering checks file closure as iter(file) does.
     let lines = unsafe {
         match kind {
-            0 => Lines::List(acquire_rc(source as usize), 0),
+            0 => Lines::List(crate::ObjectOwner::acquire_word(source as usize), 0),
             1 => {
                 if super::files::imre_text_enter(source) == 0 {
                     return ptr::null();
                 }
-                Lines::File(acquire_rc(source as usize))
+                Lines::File(crate::ObjectOwner::acquire_word(source as usize))
             }
             2 => Lines::Text(crate::StrOwner::acquire_word(source as usize), 0),
             _ => unreachable!(),
@@ -378,13 +375,13 @@ unsafe fn create(
             })
             .and_then(|terminator| dialect.validate(terminator))
             .map(|()| {
-                Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::CsvReader(
-                    Box::new(Reader {
+                crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+                    Storage::CsvReader(Box::new(Reader {
                         lines,
                         dialect,
                         line_num: 0,
-                    }),
-                )))))
+                    })),
+                ))))
             }),
         ptr::null(),
     )
@@ -407,7 +404,7 @@ pub unsafe extern "C" fn imre_csv_next(reader: *const Object, required: u32) -> 
     };
     finish(
         row.and_then(|row| match row {
-            Some(row) => Ok(Rc::into_raw(row)),
+            Some(row) => Ok(crate::ObjectOwner::into_raw(row)),
             None if required == 0 => Ok(ptr::null()),
             None => Err(Error::new(Kind::StopIteration, "")),
         }),
