@@ -1,0 +1,345 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "denominator": 353,
+  "reference": {
+    "path": "reference-linux.json",
+    "sha256": "505ce5d2b1fa32d257708c502d19daa78cb042c0592cd39a0a0d8aa4c501ce96",
+    "passed": 312,
+    "skipped": 41,
+    "faithful_rerun": true
+  },
+  "configurations": [
+    {
+      "name": "unittest mock PR",
+      "source": {
+        "revision": "8b15136c335a70905ea0861c2483d717a2910f80",
+        "tested_tree": "e0d012f12c138cd432f7a72e0dc20c42f21523d4",
+        "pr": 758,
+        "pr_head": "4ffa8406bae7e321093b5a4bb6550e2d4f34e502",
+        "run": 40180137616,
+        "job": 121129251876,
+        "tools_artifact": 12593628056,
+        "tools_zip_sha256": "e4e98d449b236df4d906214c0c1660d05e64e9bdd752d0adf2d167ddb4a26724"
+      },
+      "shared_startup_check": {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "compiler_sha256": "d82ff3505d555d99e4b8cf6c51f1281b66829db731970e6c56c3baaac3c10b63",
+        "operation": "check",
+        "tests_executed": 0,
+        "source": "git",
+        "support_files": [],
+        "checks": [
+          {
+            "suite": "test.test_subprocess",
+            "entry": "import",
+            "reachable_only": false,
+            "exit": 1,
+            "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_subprocess.py:3:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+          },
+          {
+            "suite": "test.test_subprocess",
+            "entry": "import",
+            "reachable_only": true,
+            "exit": 1,
+            "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_subprocess.py:5:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+          },
+          {
+            "suite": "test.test_subprocess",
+            "entry": "runner",
+            "reachable_only": false,
+            "exit": 1,
+            "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_subprocess.py:3:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+          },
+          {
+            "suite": "test.test_subprocess",
+            "entry": "runner",
+            "reachable_only": true,
+            "exit": 1,
+            "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_subprocess.py:5:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+          }
+        ]
+      },
+      "build_and_execute": {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "denominator": 353,
+        "toolchain": {
+          "imre": "d82ff3505d555d99e4b8cf6c51f1281b66829db731970e6c56c3baaac3c10b63",
+          "runtime": "d02b66ec69247c7e8f6775816c4c7d523c46f91ad46c19cba28ee16af2654777",
+          "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+        },
+        "original_patch": "with mock.patch('subprocess.os.waitpid', return_value=(proc.pid, status)):\n    returncode = proc.wait()\n",
+        "levels": [
+          {
+            "opt_level": 0,
+            "unchanged_suite": [
+              {
+                "entry": "import",
+                "reachable_only": false,
+                "phase": "build",
+                "exit": 1,
+                "ran": false,
+                "diagnostic": "<work>/Lib/imre_suite.py:1:1: Imre: <work>/Lib/test/test_subprocess.py:3:1: Imre: <work>/Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+              },
+              {
+                "entry": "import",
+                "reachable_only": true,
+                "phase": "build",
+                "exit": 1,
+                "ran": false,
+                "diagnostic": "<work>/Lib/imre_suite.py:1:1: Imre: <work>/Lib/test/test_subprocess.py:5:1: Imre: <work>/Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+              },
+              {
+                "entry": "runner",
+                "reachable_only": false,
+                "phase": "build",
+                "exit": 1,
+                "ran": false,
+                "diagnostic": "<work>/Lib/imre_suite.py:1:1: Imre: <work>/Lib/test/test_subprocess.py:3:1: Imre: <work>/Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+              },
+              {
+                "entry": "runner",
+                "reachable_only": true,
+                "phase": "build",
+                "exit": 1,
+                "ran": false,
+                "diagnostic": "<work>/Lib/imre_suite.py:1:1: Imre: <work>/Lib/test/test_subprocess.py:5:1: Imre: <work>/Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+              }
+            ],
+            "shared_mock_import_and_call": {
+              "phase": "execute",
+              "ran": true,
+              "exit": 0,
+              "stdout": "1\n",
+              "stderr": ""
+            },
+            "native_direct_patch": {
+              "phase": "build",
+              "exit": 1,
+              "ran": false,
+              "diagnostic": "<work>/probe/patch.py:8:6: Imre: name is not a local value; globals and first-class functions are unsupported"
+            }
+          },
+          {
+            "opt_level": 3,
+            "unchanged_suite": [
+              {
+                "entry": "import",
+                "reachable_only": false,
+                "phase": "build",
+                "exit": 1,
+                "ran": false,
+                "diagnostic": "<work>/Lib/imre_suite.py:1:1: Imre: <work>/Lib/test/test_subprocess.py:3:1: Imre: <work>/Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+              },
+              {
+                "entry": "import",
+                "reachable_only": true,
+                "phase": "build",
+                "exit": 1,
+                "ran": false,
+                "diagnostic": "<work>/Lib/imre_suite.py:1:1: Imre: <work>/Lib/test/test_subprocess.py:5:1: Imre: <work>/Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+              },
+              {
+                "entry": "runner",
+                "reachable_only": false,
+                "phase": "build",
+                "exit": 1,
+                "ran": false,
+                "diagnostic": "<work>/Lib/imre_suite.py:1:1: Imre: <work>/Lib/test/test_subprocess.py:3:1: Imre: <work>/Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+              },
+              {
+                "entry": "runner",
+                "reachable_only": true,
+                "phase": "build",
+                "exit": 1,
+                "ran": false,
+                "diagnostic": "<work>/Lib/imre_suite.py:1:1: Imre: <work>/Lib/test/test_subprocess.py:5:1: Imre: <work>/Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+              }
+            ],
+            "shared_mock_import_and_call": {
+              "phase": "execute",
+              "ran": true,
+              "exit": 0,
+              "stdout": "1\n",
+              "stderr": ""
+            },
+            "native_direct_patch": {
+              "phase": "build",
+              "exit": 1,
+              "ran": false,
+              "diagnostic": "<work>/probe/patch.py:8:6: Imre: name is not a local value; globals and first-class functions are unsupported"
+            }
+          }
+        ],
+        "reference_direct_patch_stdout": "-3 7\n"
+      }
+    },
+    {
+      "name": "merged stopped status + unittest mock PR",
+      "source": {
+        "revision": "95689594535c62f195be32e22cd37bab703c19f2",
+        "tested_tree": "21c8082012292b705ba7891d56ec53711ecd0457",
+        "product_tree": "cca5f2cc96c18644049933e31012d6fa61ab6570",
+        "product_crates": "7474994f8362b029a7c00dc4e3ee28cb9eac5ab6",
+        "main": "e90462e6f75532b5aa77641cfb67c8c9478875ec",
+        "unittest_mock": "4ffa8406bae7e321093b5a4bb6550e2d4f34e502",
+        "run": 40187170193,
+        "job": 121150323621,
+        "tools_artifact": 12597260179,
+        "tools_zip_sha256": "07e3685023cbfb6df8508179b1df60e17ef90baedf49236932fc7b7de2a35a73",
+        "receipts_artifact": 12597370004,
+        "receipts_zip_sha256": "efb69132bb15f91764317879980fca2bc3716fb080b2a3255a802dcb33be2e07"
+      },
+      "shared_startup_check": {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "compiler_sha256": "42eec057ca991dd6c1b548a0579700426ff1aa88cdcb116636f820414f6ae5d8",
+        "operation": "check",
+        "tests_executed": 0,
+        "source": "git",
+        "support_files": [],
+        "checks": [
+          {
+            "suite": "test.test_subprocess",
+            "entry": "import",
+            "reachable_only": false,
+            "exit": 1,
+            "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_subprocess.py:5:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+          },
+          {
+            "suite": "test.test_subprocess",
+            "entry": "import",
+            "reachable_only": true,
+            "exit": 1,
+            "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_subprocess.py:5:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+          },
+          {
+            "suite": "test.test_subprocess",
+            "entry": "runner",
+            "reachable_only": false,
+            "exit": 1,
+            "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_subprocess.py:5:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+          },
+          {
+            "suite": "test.test_subprocess",
+            "entry": "runner",
+            "reachable_only": true,
+            "exit": 1,
+            "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_subprocess.py:5:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+          }
+        ]
+      },
+      "build_and_execute": {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "denominator": 353,
+        "toolchain": {
+          "imre": "42eec057ca991dd6c1b548a0579700426ff1aa88cdcb116636f820414f6ae5d8",
+          "runtime": "c10e6defb5afd0cbc2d2278414e62d699ed4a58351f2b140b7ad822583f7344f",
+          "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+        },
+        "original_patch": "with mock.patch('subprocess.os.waitpid', return_value=(proc.pid, status)):\n    returncode = proc.wait()\n",
+        "levels": [
+          {
+            "opt_level": 0,
+            "unchanged_suite": [
+              {
+                "entry": "import",
+                "reachable_only": false,
+                "phase": "build",
+                "exit": 1,
+                "ran": false,
+                "diagnostic": "<work>/Lib/imre_suite.py:1:1: Imre: <work>/Lib/test/test_subprocess.py:5:1: Imre: <work>/Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+              },
+              {
+                "entry": "import",
+                "reachable_only": true,
+                "phase": "build",
+                "exit": 1,
+                "ran": false,
+                "diagnostic": "<work>/Lib/imre_suite.py:1:1: Imre: <work>/Lib/test/test_subprocess.py:5:1: Imre: <work>/Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+              },
+              {
+                "entry": "runner",
+                "reachable_only": false,
+                "phase": "build",
+                "exit": 1,
+                "ran": false,
+                "diagnostic": "<work>/Lib/imre_suite.py:1:1: Imre: <work>/Lib/test/test_subprocess.py:5:1: Imre: <work>/Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+              },
+              {
+                "entry": "runner",
+                "reachable_only": true,
+                "phase": "build",
+                "exit": 1,
+                "ran": false,
+                "diagnostic": "<work>/Lib/imre_suite.py:1:1: Imre: <work>/Lib/test/test_subprocess.py:5:1: Imre: <work>/Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+              }
+            ],
+            "shared_mock_import_and_call": {
+              "phase": "execute",
+              "ran": true,
+              "exit": 0,
+              "stdout": "1\n",
+              "stderr": ""
+            },
+            "native_direct_patch": {
+              "phase": "build",
+              "exit": 1,
+              "ran": false,
+              "diagnostic": "<work>/probe/patch.py:8:6: Imre: name is not a local value; globals and first-class functions are unsupported"
+            }
+          },
+          {
+            "opt_level": 3,
+            "unchanged_suite": [
+              {
+                "entry": "import",
+                "reachable_only": false,
+                "phase": "build",
+                "exit": 1,
+                "ran": false,
+                "diagnostic": "<work>/Lib/imre_suite.py:1:1: Imre: <work>/Lib/test/test_subprocess.py:5:1: Imre: <work>/Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+              },
+              {
+                "entry": "import",
+                "reachable_only": true,
+                "phase": "build",
+                "exit": 1,
+                "ran": false,
+                "diagnostic": "<work>/Lib/imre_suite.py:1:1: Imre: <work>/Lib/test/test_subprocess.py:5:1: Imre: <work>/Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+              },
+              {
+                "entry": "runner",
+                "reachable_only": false,
+                "phase": "build",
+                "exit": 1,
+                "ran": false,
+                "diagnostic": "<work>/Lib/imre_suite.py:1:1: Imre: <work>/Lib/test/test_subprocess.py:5:1: Imre: <work>/Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+              },
+              {
+                "entry": "runner",
+                "reachable_only": true,
+                "phase": "build",
+                "exit": 1,
+                "ran": false,
+                "diagnostic": "<work>/Lib/imre_suite.py:1:1: Imre: <work>/Lib/test/test_subprocess.py:5:1: Imre: <work>/Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+              }
+            ],
+            "shared_mock_import_and_call": {
+              "phase": "execute",
+              "ran": true,
+              "exit": 0,
+              "stdout": "1\n",
+              "stderr": ""
+            },
+            "native_direct_patch": {
+              "phase": "build",
+              "exit": 1,
+              "ran": false,
+              "diagnostic": "<work>/probe/patch.py:8:6: Imre: name is not a local value; globals and first-class functions are unsupported"
+            }
+          }
+        ],
+        "reference_direct_patch_stdout": "-3 7\n"
+      }
+    }
+  ]
+}
