@@ -78,7 +78,8 @@ try:
         try:
             shutil.move(root, sys.argv[2])
         except PermissionError as error:
-            print(f"root removal {error_number(error.errno)} {error.filename is root} {error.filename2 is None}")
+            filename = error.filename
+            print(f"root removal {error_number(error.errno)} {isinstance(filename, Path) and filename is root} {error.filename2 is None}")
     else:
         shutil.move(sys.argv[1], sys.argv[2], copy_function=refuse)
 except ValueError as error:

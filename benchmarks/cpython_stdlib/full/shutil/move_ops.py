@@ -32,7 +32,10 @@ NATIVE_METHODS = {
 COPY_CALLBACKS = {"test_move_file_special_function": 1, "test_move_dir_special_function": 3}
 CALLBACK_DRIVER = "import shutil\nimport sys\n\n" + tree_host_callbacks.COPY_CALLBACK + '''
 try:
-    print(shutil.move(sys.argv[1], sys.argv[2], copy_function=copy_file))
+    moved = shutil.move(sys.argv[1], sys.argv[2], copy_function=copy_file)
+    if moved is None:
+        raise AssertionError("distinct move destinations must return a pathname")
+    print(moved)
 except RuntimeError as exc:
     print(str(exc))
 '''
@@ -40,10 +43,24 @@ except RuntimeError as exc:
 
 def native_fixture(case, source, helper):
     fields = {k: getattr(case, k) for k in ("src_dir", "dst_dir", "src_file", "dst_file")}
-    fixture = ("import os\nimport os.path\nimport shutil\nimport unittest\n\nclass NativeCase(unittest.TestCase):\n"
+    fixture = ("import os\nimport os.path\nimport shutil\nimport unittest\n\nclass NativeCase:\n"
                + "".join(f"    {key}: str\n" for key in fields)
-               + "    def __init__(self) -> None:\n        super().__init__()\n"
+               + "    def __init__(self) -> None:\n"
                + "".join(f"        self.{key} = {v!r}\n" for key, v in fields.items()))
+    fixture += ("    def assertFalse(self, condition: bool) -> None:\n"
+                "        unittest.TestCase().assertFalse(condition)\n")
+    if helper == "_check_move_file":
+        fixture += ("    def assertEqual(self, first: bytes, second: bytes) -> None:\n"
+                    "        unittest.TestCase().assertTrue(first == second)\n")
+    elif helper == "_check_move_dir":
+        fixture += ("    def assertEqual(self, first: list[str], second: list[str]) -> None:\n"
+                    "        unittest.TestCase().assertTrue(first == second)\n")
+    else:
+        fixture += ("    def assertEqual(self, first: str | None, second: str) -> None:\n"
+                    "        if first is None:\n"
+                    "            unittest.TestCase().fail('move unexpectedly returned None')\n"
+                    "        else:\n"
+                    "            unittest.TestCase().assertMultiLineEqual(first, second)\n")
     if helper:
         body = method_bytes(source, "TestMove", helper)
         return fixture + body.decode(), hashlib.sha256(body).hexdigest()
@@ -170,6 +187,7 @@ def executors(module, tools, work, *, with_roles=False):
                 native_blocker["native_body_blocker"] = str(exc).strip().splitlines()[-1].split("Imre: ")[-1]
             else:
                 row = {"status": "native_body_host_fixture", **execute(case, original)}
+                row["observation"]["evidence"]["assertion_fixture"] = "typed equality on the original operands, using native unittest assertions"
                 if helper_sha:
                     row["helper_sha256"] = helper_sha
                     row["observation"]["evidence"]["helper_sha256"] = helper_sha
