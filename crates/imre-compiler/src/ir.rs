@@ -964,6 +964,7 @@ pub(crate) enum Builtin {
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
     DequeNew,
+    DequeReset,
     DequeAppend {
         left: bool,
         extending: bool,

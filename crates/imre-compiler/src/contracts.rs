@@ -447,6 +447,7 @@ impl Builtin {
             | Self::BytesValidateUtf8
             | Self::BytesContainsInt
             | Self::DequeNew
+            | Self::DequeReset
             | Self::DequeCopy
             | Self::DequeExtendSource
             | Self::NamespaceDelete
@@ -955,6 +956,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_seq_get_index"
                 | "imre_seq_set_index"
                 | "imre_deque_new"
+                | "imre_deque_reset"
                 | "imre_deque_append"
                 | "imre_deque_copy"
                 | "imre_deque_extend_source"
