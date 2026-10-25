@@ -27,6 +27,7 @@ mod chainmap;
 mod class_data;
 mod closed_calls;
 mod comprehensions;
+mod consuming_lists;
 mod contexts;
 mod copying;
 mod counter;
@@ -891,6 +892,7 @@ pub(crate) fn lower_with_owners(
             checker.interactive_names =
                 module.is_doctest_case() && definition.name.as_str() == "_run_case";
             checker.joined_lines = joined_lines::find(&definition.body);
+            checker.consuming_lists = consuming_lists::find(&definition.body);
             checker.asynchronous = signature.asynchronous;
             checker.method_context(signature.method);
             checker.generator_item = classes.producer_items.get(&signature.id).copied();
@@ -2064,7 +2066,8 @@ struct Checker<'a> {
     regex_locals: HashMap<usize, regex::CaptureLayout>,
     /// Group dictionary locals whose complete set of reads resolves to capture slots.
     regex_fields: HashMap<usize, HashMap<String, usize>>,
-    joined_lines: HashMap<TextRange, String>,
+    joined_lines: joined_lines::Plan,
+    consuming_lists: HashSet<TextRange>,
     namespace_guards: Vec<(usize, usize)>,
     captured_process_errors: Vec<processes::CapturedFields>,
     returns: Type,
@@ -2132,7 +2135,8 @@ impl<'a> Checker<'a> {
             present_subscripts: Vec::new(),
             regex_locals: HashMap::new(),
             regex_fields: HashMap::new(),
-            joined_lines: HashMap::new(),
+            joined_lines: joined_lines::Plan::default(),
+            consuming_lists: HashSet::new(),
             namespace_guards: Vec::new(),
             captured_process_errors: Vec::new(),
             returns: Type::None,
@@ -2557,6 +2561,20 @@ impl<'a> Checker<'a> {
             return Ok(value);
         }
         self.reject_class_receiver_value(expression)?;
+        if self.types.element(expected) == Some(Type::Str)
+            && let Some(separator) = self.joined_lines.start_buffer(expression.range())
+        {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(
+                    Builtin::JoinBufferNew,
+                    vec![Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str(separator),
+                    }],
+                ),
+            });
+        }
         let mut concrete = self.types.payload(expected).unwrap_or(expected);
         if let ast::Expr::Call(call) = expression
             && let Some(raised) = self.defaultdict_factory_error(call, expected)?
@@ -3284,7 +3302,7 @@ impl<'a> Checker<'a> {
             iterable.kind = ExprKind::Tuple(std::mem::take(values));
         }
         if matches!(&input, Iteration::Container { iterable, items: false, start: None }
-            if matches!(iterable.ty, Type::Tuple(_)))
+            if matches!(iterable.ty, Type::Tuple(_)) || self.consumes_list(iterable.ty, loop_.iter.range()))
         {
             input =
                 Iteration::Prepared(self.prepare_iteration(input, loop_.iter.as_ref(), false)?);
@@ -8149,14 +8167,19 @@ impl<'a> Checker<'a> {
                     "supported value methods are typed-list append/pop, dict.get, set.add/discard, and str.split()",
                 )
             })?;
+            let append = if self.joined_lines.writes_buffer(call.range()) {
+                Builtin::JoinBufferAppend
+            } else {
+                Builtin::Append
+            };
             if attribute.attr.as_str() == "extend" && call.arguments.args.len() == 1 {
-                return self.extend_list(receiver, &call.arguments.args[0], call);
+                return self.extend_list(receiver, &call.arguments.args[0], call, append);
             }
             let mut args = vec![receiver];
             let (builtin, ty) = match attribute.attr.as_str() {
                 "append" if call.arguments.args.len() == 1 => {
                     args.push(self.expr_expected(&call.arguments.args[0], element)?);
-                    (Builtin::Append, Type::None)
+                    (append, Type::None)
                 }
                 "pop" if call.arguments.args.is_empty() => (Builtin::Pop, element),
                 "clear" if call.arguments.args.is_empty() => (Builtin::ListClear, Type::None),

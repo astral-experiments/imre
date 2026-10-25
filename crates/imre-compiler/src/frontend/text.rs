@@ -192,7 +192,7 @@ impl Checker<'_> {
                 // Preserve the existing bytes.decode().splitlines() path and
                 // direct-iteration fusion for the no-argument method.
                 match receiver.kind {
-                    _ if let Some(separator) = self.joined_lines.get(&call.range()) => {
+                    _ if let Some(separator) = self.joined_lines.splits.get(&call.range()) => {
                         ExprKind::Builtin(
                             Builtin::JoinedSplitLines,
                             vec![

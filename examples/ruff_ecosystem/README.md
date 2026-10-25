@@ -110,13 +110,19 @@ python3 benchmarks/ruff_ecosystem_format.py --captures /tmp/format-captures \
   --rust benchmarks/reference/ruff_ecosystem/target/release/format --cpu 3 --output /tmp/format-times.json
 ```
 
-The Rust reference parses the Git patches and writes Markdown independently. Codon compiles Ruff’s Markdown function bodies with native patch types. The Linux harness checks each Imre project report separately against CPython, compares every combined report byte-for-byte, and rotates all four processes across eight measured rounds on one CPU. Wall time includes startup, patch reads, rendering, and writing the full Markdown. Git and Ruff subprocesses run only during capture.
+The Rust reference parses the Git patches and writes Markdown independently. Codon compiles Ruff’s Markdown function bodies with native patch types. The Linux harness checks each Imre project separately against CPython and compares every combined report byte-for-byte. Wall time includes startup, patch reads, rendering, and writing Markdown. Git and Ruff subprocesses run only during capture.
 
-On the pinned revisions, the 58-project report contained 693,937 bytes of Markdown: 22 changed projects, 30 unchanged projects, and six formatter errors. The 580-project report contained 7,014,958 bytes.
+The default benchmark rotates four programs across eight rounds on one CPU. To compare a compiler change, add `--previous-imre /path/to/old/format-replay`; this rotates all five programs across ten rounds. The table uses the same 58 patches and errors as [the original comparison](https://github.com/astral-sh/imre/pull/431). At 1×, the report was 693,937 bytes (22 changed projects, 30 unchanged, six errors). At 10×, it was 7,014,958 bytes.
 
-| Frozen input | CPython 3.14 | Imre | Codon 0.20.4 | Rust | Imre / Rust |
+| Median | Previous Imre | Imre | CPython 3.14 | Codon 0.20.4 | Rust |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 58 projects | 174.8 ms | 12.0 ms | 31.5 ms | 8.7 ms | 1.37× |
-| 580 projects | 749.9 ms | 107.0 ms | 233.1 ms | 62.9 ms | 1.70× |
+| 1× wall time | 11.9 ms | 9.9 ms | 169.9 ms | 32.8 ms | 8.9 ms |
+| 1× peak RSS | 6.25 MiB | 4.5 MiB | 30.2 MiB | 19.3 MiB | 4.5 MiB |
+| 10× wall time | 104.6 ms | 79.8 ms | 742.8 ms | 230.6 ms | 62.2 ms |
+| 10× peak RSS | 37.75 MiB | 19.5 MiB | 107.1 MiB | 87.75 MiB | 16.5 MiB |
 
-At 10×, median peak RSS was 37.8 MiB for Imre, 16.5 MiB for Rust, 88.3 MiB for Codon, and 107.1 MiB for CPython. Across the 58-project replay, the input and output optimizations cut heap allocations from 85,005 to 25,032 (Valgrind DHAT). The original Imre renderer allocated an owned string for each hunk line before joining it again. The compiler now groups the tail of a split when it can prove that the only use is a private list’s final join. Enabling just this optimization on the same generated LLVM program brought the 10× replay from 131.5 to 103.3 ms in a separate paired run. [Input hashes, individual report digests, peak memory, and raw timings](../../benchmarks/results/2026-10-24-ruff-ecosystem-format.json.gz)
+Ruff parses `PatchSet("\n".join(diff.lines))`. When the lines already occupy one contiguous span, Imre can share the text with the patch parser; a caller holding the original string still sees its final line ending. Ordinary Git hunks store their start and end in that text, and a private list of parsed patches releases each entry as Ruff renders it. The final Markdown grows in one buffer when the compiler proves that the list of strings is only appended to or extended before its final join.
+
+At 10×, peak live heap fell from 35.7 MB to 18.4 MB. Growing the output buffer increased cumulative allocation traffic from 72.6 MB to 100.6 MB, even though both peak RSS and wall time fell. The full live formatter still spends most of its time running Git and Ruff.
+
+[Per-project digests and raw timing and RSS samples](../../benchmarks/results/2026-10-24-ruff-ecosystem-format-memory.json.gz) · [Raw DHAT profiles](../../benchmarks/results/2026-10-24-ruff-ecosystem-format-memory-dhat.json.gz) · [Original benchmark](../../benchmarks/results/2026-10-24-ruff-ecosystem-format.json.gz)

@@ -1312,6 +1312,8 @@ impl Checker<'_> {
                     kind: ExprKind::Builtin(
                         if ty == Type::Bytes {
                             Builtin::BytesGet
+                        } else if !reverse && self.consumes_list(ty, node.range()) {
+                            Builtin::SequenceTakeInBounds
                         } else if matches!(ty, Type::List(_)) {
                             Builtin::SequenceGetInBounds
                         } else {

@@ -969,6 +969,20 @@ def run(command: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def check_join_under_memory_limit(command: list[str]) -> None:
+    import resource
+
+    def limit() -> None:
+        resource.setrlimit(resource.RLIMIT_AS, (96 << 20, 96 << 20))
+
+    # The private list holds repeated references to one string. Building the
+    # 256 MiB result must fail at the join, after the user's print has run.
+    result = subprocess.run(
+        [*command, "bounded"], capture_output=True, check=True, timeout=30, preexec_fn=limit
+    )
+    assert result.stdout == b"finished collecting\njoin raised MemoryError\n", result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
@@ -1067,6 +1081,9 @@ def main() -> None:
                     level,
                     actual.stderr,
                 )
+                if name == "private_join_memory" and sys.platform == "linux" and not args.sanitize:
+                    check_join_under_memory_limit([sys.executable, str(path)])
+                    check_join_under_memory_limit([str(binary)])
                 passed += 1
     print(
         f"Passed {passed} container checks ({len(REJECTED)} rejected programs; optimization levels {args.opt_levels}; ASan={args.sanitize})"
