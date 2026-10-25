@@ -4,6 +4,7 @@ import argparse
 import ast
 from collections import Counter
 from contextlib import contextmanager
+import hashlib
 import json
 from pathlib import Path
 import select
@@ -23,9 +24,9 @@ from suite_native import Toolchain, method_bytes, native_method, run_in_fixtures
 SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
 OWNER = "RotatingFileHandlerTest"
 PREFIX = "test.test_logging." + OWNER + "."
-NATIVE = ("test_file_created", "test_should_not_rollover", "test_should_rollover")
+NON_FILE = "test_should_not_rollover_non_file"
+NATIVE = ("test_file_created", "test_should_not_rollover", "test_should_rollover", NON_FILE)
 HOST = {
-    "test_should_not_rollover_non_file": {"open": 1, "create": 1, "should": 1, "close": 1},
     "test_should_not_rollover_named_pipe": {"open": 1, "create": 1, "should": 1, "emit": 1,
                                             "close": 1, "message": 1},
     "test_max_bytes": {"open": 1, "from_message": 2, "should": 6, "emit": 2, "close": 1},
@@ -49,13 +50,38 @@ class NativeCase(unittest.TestCase):
 """
 
 
+def non_file_case(toolchain, directory, case, original, fixture):
+    """Use the original unittest skip decision before running the definition on /dev/null."""
+    source = SOURCE.read_bytes()
+    cls, = [n for n in ast.parse(source).body if isinstance(n, ast.ClassDef) and n.name == OWNER]
+    node, = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == NON_FILE]
+    guard, = node.decorator_list
+    condition = ast.unparse(guard)
+    if (condition != "unittest.skipIf(support.is_wasi, 'WASI does not have /dev/null.')"
+            or original.__func__ is not getattr(type(case), NON_FILE)
+            or original.__code__.co_firstlineno != guard.lineno
+            or getattr(original, "__unittest_skip__", False)):
+        raise ValueError(f"unexpected bound method or upstream guard on {case.id()}")
+    body = b"".join(source.splitlines(keepends=True)[node.lineno - 1:node.end_lineno])
+    entry = fixture.encode() + b"\n" + body + f"\nNativeCase().{NON_FILE}()\nprint('complete')\n".encode()
+    binary = toolchain.build(entry, directory)
+    run = subprocess.run([binary], capture_output=True, timeout=60)
+    if (run.returncode, run.stdout, run.stderr) != (0, b"complete\n", b""):
+        raise AssertionError((run.returncode, run.stdout, run.stderr))
+    return {"roles": roles(body="imre", assertions="imre", fixture="mixed", operation="imre"),
+            "evidence": {"method_sha256": hashlib.sha256(body).hexdigest(), "guard": condition,
+                         "operation": "Native /dev/null handler, record construction, shouldRollover and close",
+                         "fixture": "Original CPython hooks and unittest.skipIf decision; native child instance",
+                         "opt_level": toolchain.level}}
+
+
 def run_case(toolchain, directory, case, original):
     fixture = FIXTURE.replace("FILENAME", repr(case.fn)).replace("MESSAGE_NUM", str(case.message_num))
     method = case._testMethodName
     helpers = []
     if method not in {"test_should_not_rollover", "test_max_bytes", "test_max_bytes_delay"}:
         helpers.extend((("BaseTest", "next_message"), ("BaseFileTest", "next_rec")))
-    if method not in {"test_should_not_rollover", "test_should_rollover"}:
+    if method not in {"test_should_not_rollover", "test_should_rollover", NON_FILE}:
         helpers.append(("BaseFileTest", "assertLogFile"))
     if method == "test_max_bytes_delay":
         helpers.append((OWNER, "test_max_bytes"))
@@ -66,6 +92,8 @@ def run_case(toolchain, directory, case, original):
     # the host's original tearDown; BaseFileTest already removes the active file.
     before = set(path.parent.glob(path.name + ".*"))
     try:
+        if method == NON_FILE:
+            return non_file_case(toolchain, directory, case, original, fixture)
         return native_method(toolchain, directory, SOURCE, OWNER, case.id(), fixture,
                              operation=("imre", "Native file handler, descriptor position, rotation and on-disk assertions"))(case, original)
     finally:
