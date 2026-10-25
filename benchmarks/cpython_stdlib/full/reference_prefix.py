@@ -41,7 +41,9 @@ def main():
             shutil.copytree(src, stdlib / src.name, ignore=ignore)
         elif src.is_file():
             shutil.copy2(src, stdlib / src.name)
-    shutil.copytree(Path(_testcapi.__file__).resolve().parent, stdlib / "lib-dynload", ignore=ignore)
+    # A source build can symlink extension files into its import directory.
+    # Copy that directory, including its generated sysconfig data.
+    shutil.copytree(Path(_testcapi.__file__).parent.resolve(), stdlib / "lib-dynload", ignore=ignore)
     binary = prefix / "bin" / version
     binary.parent.mkdir()
     shutil.copy2(sys.executable, binary)
@@ -52,7 +54,9 @@ def main():
                     shutil.copy2(source, lib / name)
                     break
     # -E is the flag used by an upstream unittest child: it ignores PYTHONPATH.
-    check = "import pathlib,sys,test,_testcapi; assert pathlib.Path(test.__file__).resolve() == pathlib.Path(sys.argv[1])"
+    check = ("import pathlib,sys,sysconfig,test,_testcapi; "
+             "assert pathlib.Path(test.__file__).resolve() == pathlib.Path(sys.argv[1]); "
+             "assert pathlib.Path(sysconfig.get_path('stdlib')).resolve() == pathlib.Path(sys.argv[1]).parents[1]")
     subprocess.run([binary, "-E", "-B", "-c", check, stdlib / "test/__init__.py"], check=True)
     print(f"Staged {count} verified test files. Run: {binary} -B -m test")
 
