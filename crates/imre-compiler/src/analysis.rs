@@ -462,6 +462,10 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
+                            || (matches!(
+                                diagnostic.id().as_str(),
+                                "too-many-positional-arguments" | "missing-argument"
+                            ) && native_partial_call(db, file, range, diagnostic.id().as_str()))
                             || overloads
                                 .iter()
                                 .any(|scope| scope.covers(diagnostic.id().as_str(), range))
@@ -476,6 +480,48 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                 .to_string()
         })
         .collect()
+}
+
+/// ty 0.0.14 counts functools.Placeholder as an occupied parameter. Imre has
+/// already checked the exact open slots before requesting these diagnostics.
+/// The zero-argument constructor also has a native runtime TypeError. Match
+/// only the diagnosed invocation; unrelated binding errors remain diagnostics.
+fn native_partial_call(db: &dyn Db, file: File, range: TextRange, rule: &str) -> bool {
+    use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+    use ty_python_semantic::types::{KnownClass, KnownInstanceType, ProgramEnvironment, Type};
+    let file = db.program_file(file);
+    let parsed = ruff_db::parsed::parsed_module(db, file.python_file(db)).load(db);
+    let root = AnyNodeRef::from(parsed.syntax());
+    if !root.range().contains_range(range) {
+        return false;
+    }
+    let nodes = covering_node(root, range);
+    let Some(call) = nodes.ancestors().find_map(|node| match node {
+        AnyNodeRef::ExprCall(call) => Some(call),
+        _ => None,
+    }) else {
+        return false;
+    };
+    let Some(callee) = call.func.inferred_type(&SemanticModel::new(db, file)) else {
+        return false;
+    };
+    match (rule, callee) {
+        (
+            "too-many-positional-arguments",
+            Type::KnownInstance(KnownInstanceType::FunctoolsPartial(_)),
+        ) => call.arguments.args.iter().any(|arg| arg.range() == range),
+        ("missing-argument", Type::ClassLiteral(_))
+            if call.arguments.args.is_empty() && call.range() == range =>
+        {
+            let env = ProgramEnvironment::from_file(file);
+            callee.is_assignable_to(
+                db,
+                &env,
+                KnownClass::FunctoolsPartial.to_subclass_of(db, &env),
+            )
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]

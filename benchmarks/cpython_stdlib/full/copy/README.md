@@ -14,3 +14,12 @@ a test-enabled build of the pinned release:
 /path/to/cpython-3.14.5/python -B benchmarks/cpython_stdlib/suite_inventory.py \
     benchmarks/cpython_stdlib/full/copy/UPSTREAM.json --result /tmp/copy-reference.json
 ```
+
+## Native coverage
+
+Four complete upstream methods execute at both O0 and O3: `test_copy_basic`,
+`test_copy_list`, `test_copy_dict`, and `test_copy_set`. Their 13 original
+assertions run in native executables with typed equality and identity checks.
+The [native report](native-linux.json) retains all 81 IDs; the other 77 have
+reference evidence only. A separate differential fixture exercises shared
+children, independent outer containers, and Counter/defaultdict missing keys.

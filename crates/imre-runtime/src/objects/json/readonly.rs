@@ -381,13 +381,13 @@ impl View {
 #[derive(Clone, Copy)]
 struct Source<'a> {
     text: &'a str,
-    original: Option<&'a str>,
+    original: Option<(&'a str, &'a Rc<String>)>,
     shared: Option<(&'a Rc<str>, usize)>,
 }
 
 impl Source<'_> {
     fn token<'a>(&'a self, raw: &'a str) -> &'a str {
-        if let Some(original) = self.original {
+        if let Some((original, _)) = self.original {
             let offset = raw.as_ptr() as usize - self.text.as_ptr() as usize;
             &original[offset..offset + raw.len()]
         } else {
@@ -563,10 +563,11 @@ pub(super) fn loads(text: &str, owner: impl FnOnce() -> Rc<Str>) -> Result<*cons
         shared: None,
     })
     .or_else(|error| {
-        if let Some(patched) = constants::normalize(text, &error) {
+        if let Some(patched) = constants::normalize(text, &error)? {
+            let patched = Rc::new(patched);
             build(Source {
                 text: &patched,
-                original: Some(text),
+                original: Some((text, &patched)),
                 shared: None,
             })
             .map_err(|error| super::syntax::decode_error(text, error, owner))
