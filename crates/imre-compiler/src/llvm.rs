@@ -88,6 +88,8 @@ impl Type {
             | Self::Logger
             | Self::TimedFileHandler
             | Self::ClockTime
+            | Self::PlainObject
+            | Self::StrDescriptor(_)
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -145,6 +147,8 @@ impl Type {
             | Self::Logger
             | Self::TimedFileHandler
             | Self::ClockTime
+            | Self::PlainObject
+            | Self::StrDescriptor(_)
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -732,6 +736,8 @@ impl Emitter<'_, '_> {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -3316,6 +3322,8 @@ impl Emitter<'_, '_> {
                 | Type::None
                 | Type::Class(_)
                 | Type::TimedFileHandler
+                | Type::StrDescriptor(_)
+                | Type::PlainObject
                 | Type::Sha256
                 | Type::ZipFile
                 | Type::ZipInfo
@@ -4498,6 +4506,16 @@ impl Emitter<'_, '_> {
                 Type::Sha256,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::StrDescriptor(method) => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @imre_inspect_str_descriptor(i32 {})",
+                    *method as u32
+                )),
+                small_integer: false,
+            },
+            Builtin::NewPlainObject => self.call("imre_plain_object_new", returns, &[]),
+            Builtin::InspectSentinel => self.call("imre_inspect_sentinel", returns, &[]),
             Builtin::HashAvailable => self.call("imre_hash_algorithms_available", returns, &[]),
             Builtin::Sha256New => self.call("imre_sha256_new", Type::Sha256, &[&args[0].value]),
             Builtin::Sha256Update => {
@@ -5532,6 +5550,8 @@ impl Emitter<'_, '_> {
                     | Type::Logger
                     | Type::TimedFileHandler
                     | Type::ClockTime
+                    | Type::StrDescriptor(_)
+                    | Type::PlainObject
                     | Type::Sha256
                     | Type::ZipFile
                     | Type::ZipInfo
@@ -5777,6 +5797,8 @@ impl Emitter<'_, '_> {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -5848,6 +5870,8 @@ impl Emitter<'_, '_> {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -6432,6 +6456,8 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Logger
         | Type::TimedFileHandler
         | Type::ClockTime
+        | Type::StrDescriptor(_)
+        | Type::PlainObject
         | Type::Sha256
         | Type::ZipFile
         | Type::ZipInfo
@@ -6757,6 +6783,9 @@ declare ptr @imre_csv_reader(ptr, i32, i32, i32, i32, i32)
 declare ptr @imre_csv_reader_terminator(ptr, i32, i32, i32, i32, i32, ptr, ptr)
 declare ptr @imre_csv_next(ptr, i32)
 declare i64 @imre_csv_line_number(ptr)
+declare ptr @imre_plain_object_new()
+declare ptr @imre_inspect_sentinel()
+declare ptr @imre_inspect_str_descriptor(i32)
 declare ptr @imre_sha256_new(ptr)
 declare ptr @imre_hash_new(ptr, ptr)
 declare ptr @imre_hash_algorithms_available()

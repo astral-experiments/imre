@@ -162,6 +162,29 @@ impl Checker<'_> {
                 ),
             });
         }
+        if types
+            .iter()
+            .any(|ty| matches!(ty, Type::PlainObject | Type::StrDescriptor(_)))
+            && types == [left.ty, right.ty]
+        {
+            if left.ty == right.ty {
+                return Ok(Self::identity_result(
+                    vec![left, right],
+                    op == ast::CmpOp::IsNot,
+                ));
+            }
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Expr(left), Statement::Expr(right)],
+                    value: Box::new(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Bool(op == ast::CmpOp::IsNot),
+                    }),
+                    clear: vec![],
+                },
+            });
+        }
         if types.contains(&Type::StringIterable) && types == [left.ty, right.ty] {
             // Both operands must reach identity with the same pointer tag.
             let left = self.coerce(left, Type::StringIterable, node)?;

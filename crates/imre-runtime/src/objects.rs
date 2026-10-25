@@ -18,6 +18,7 @@ pub(crate) mod exceptions;
 mod files;
 mod fnmatch;
 mod hashlib;
+mod inspect;
 mod itertools;
 mod json;
 mod logging;
@@ -52,6 +53,8 @@ use words::{OwnedWord, Words};
 pub struct Object(StorageCell<Storage>);
 
 enum Storage {
+    Plain,
+    StrDescriptor(u32),
     Sequence(Words),
     Dictionary(Box<mappings::Mapping>),
     Set(Box<mappings::Set>),
