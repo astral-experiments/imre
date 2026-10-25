@@ -24,9 +24,11 @@ mod dispatch;
 mod documents;
 mod enums;
 mod expansions;
+mod functools;
 mod hashlib;
 mod inference;
 mod iterables;
+mod itertools;
 mod json;
 mod literals;
 mod local_functions;
@@ -1286,6 +1288,7 @@ fn annotation_at(
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
+        Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
             return Ok(Type::CompletedProcess(crate::ir::ProcessCapture::TEXT));
         }
@@ -4295,11 +4298,12 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
-                Intrinsic::SysExecutable | Intrinsic::SysPlatform => {
+                Intrinsic::SysExecutable | Intrinsic::SysPlatform | Intrinsic::OsName => {
                     let operation = match symbol {
                         Intrinsic::SysExecutable => {
                             Builtin::Process(ir::ProcessOperation::Executable)
                         }
+                        Intrinsic::OsName => Builtin::OsName,
                         _ => Builtin::SysPlatform,
                     };
                     return Ok(Expr {
@@ -4479,9 +4483,7 @@ impl<'a> Checker<'a> {
                     left = Self::string_value(left);
                     right = Self::string_value(right);
                 }
-                if binary.op == ast::Operator::Div
-                    && (left.ty == Type::Path || right.ty == Type::Path)
-                {
+                if binary.op == ast::Operator::Div && (left.ty.is_path() || right.ty.is_path()) {
                     return self.path_join(left, right, binary);
                 }
                 if binary.op == ast::Operator::Add && self.types.element(left.ty).is_some() {
@@ -4751,7 +4753,8 @@ impl<'a> Checker<'a> {
                         && matches!(right, Type::Int | Type::Float);
                     let records = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
                         && matches!((ty, right), (Type::Class(_), Type::Class(_)));
-                    if !numeric && !records {
+                    let paths = ty.is_path() && right.is_path();
+                    if !numeric && !records && !paths {
                         self.expect(ty, right, expression)?;
                     }
                     let ordered = numeric
@@ -4997,6 +5000,7 @@ impl<'a> Checker<'a> {
                 } else {
                     Self::exception_record(receiver)
                 };
+                let receiver = self.checked_record_receiver(receiver, attribute);
                 if let Type::StrEnum(class) | Type::Enum(class) = receiver.ty {
                     match attribute.attr.as_str() {
                         "name" => {
@@ -5023,7 +5027,7 @@ impl<'a> Checker<'a> {
                 if receiver.ty == Type::Logger {
                     return self.logger_attribute(receiver, attribute);
                 }
-                if receiver.ty == Type::Path {
+                if receiver.ty.is_path() {
                     return self.path_attribute(receiver, attribute);
                 }
                 if matches!(receiver.ty, Type::AsyncProcess(_)) {
@@ -5374,6 +5378,7 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.async_builtin(kind, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
                 let [ast::Expr::StringLiteral(target), value] = call.arguments.args.as_ref() else {
@@ -5410,6 +5415,10 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
+            Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
+                return self.cursor_length_hint(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
                 return Err(error(
                     self.source,
@@ -5511,7 +5520,10 @@ impl<'a> Checker<'a> {
             self.resolve(&call.func),
             Some(Binding::Intrinsic(Intrinsic::Path))
         ) {
-            return self.path_constructor(call);
+            return self.path_constructor(call, Type::Path);
+        }
+        if let Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) = self.resolve(&call.func) {
+            return self.path_constructor(call, Type::PurePath(flavor));
         }
         if matches!(
             self.resolve(&call.func),
@@ -5594,6 +5606,7 @@ impl<'a> Checker<'a> {
                 ));
             }
             let receiver = Self::exception_record(receiver);
+            let receiver = self.checked_record_receiver(receiver, attribute);
             if let Type::Class(class) = receiver.ty {
                 if self.classes.declarations.definitions[class]
                     .exception_aliases
@@ -5629,7 +5642,7 @@ impl<'a> Checker<'a> {
             } else {
                 receiver
             };
-            if receiver.ty == Type::Path {
+            if receiver.ty.is_path() {
                 return self.path_method(receiver, attribute, call);
             }
             if matches!(receiver.ty, Type::CompletedProcess(_)) {
@@ -5974,6 +5987,8 @@ impl<'a> Checker<'a> {
             "list" => return self.list_call(call, None),
             "sorted" => return self.sorted_call(call, None),
             "abs" => return self.abs_call(call),
+            "next" => return self.next_cursor(call),
+            "iter" if call.arguments.args.len() == 1 => return self.iter_cursor(call),
             "sum" => return self.sum_call(call),
             "min" | "max" => return self.extremum_call(call, name.id == "min"),
             "any" | "all" => return self.quantifier_call(call, name.id == "all"),
@@ -6061,10 +6076,7 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(builtin, args),
             });
         }
-        if args.len() == 1
-            && args[0].ty == Type::Path
-            && matches!(name.id.as_str(), "str" | "print")
-        {
+        if args.len() == 1 && args[0].ty.is_path() && matches!(name.id.as_str(), "str" | "print") {
             let text = paths::operation(ir::PathOperation::Text, Type::Str, args);
             return Ok(if name.id == "str" {
                 text

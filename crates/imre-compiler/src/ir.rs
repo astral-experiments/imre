@@ -32,6 +32,8 @@ pub(crate) enum Type {
     Union(usize),
     /// An internal container or string cursor, never available in user annotations.
     Iterator,
+    /// A first-class cursor whose next operation transfers one exact element type.
+    Cursor(usize),
     /// A sealed builtin exception with an immutable category and owned payload.
     Exception,
     /// An exception object known to own the given fixed payload layout.
@@ -46,6 +48,7 @@ pub(crate) enum Type {
     BinaryIO,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
     Path,
+    PurePath(PathFlavor),
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture),
     /// Async process handle, with bits for the captured stdout and stderr slots.
@@ -105,6 +108,18 @@ impl ProcessCapture {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum PathFlavor {
+    Posix,
+    Windows,
+}
+
+impl Type {
+    pub(crate) fn is_path(self) -> bool {
+        matches!(self, Self::Path | Self::PurePath(_))
+    }
+}
+
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Self::Class(id) = self {
@@ -114,6 +129,7 @@ impl std::fmt::Display for Type {
             Self::StrLiteral(id) => return write!(f, "string-literal#{id}"),
             Self::StrEnum(id) => return write!(f, "string-enum#{id}"),
             Self::Enum(id) => return write!(f, "enum#{id}"),
+            Self::Cursor(id) => return write!(f, "iterator#{id}"),
             Self::List(id) => return write!(f, "list#{id}"),
             Self::Dict(id) => return write!(f, "dict#{id}"),
             Self::Set(id) => return write!(f, "set#{id}"),
@@ -140,6 +156,8 @@ impl std::fmt::Display for Type {
             Self::TextIO => "typing.TextIO",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
+            Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
+            Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
             Self::CompletedProcess(capture) if capture.text => "subprocess.CompletedProcess[str]",
             Self::CompletedProcess(_) => "subprocess.CompletedProcess[bytes]",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
@@ -166,6 +184,7 @@ impl std::fmt::Display for Type {
             | Self::StrEnum(_)
             | Self::Enum(_)
             | Self::Class(_)
+            | Self::Cursor(_)
             | Self::List(_)
             | Self::Dict(_)
             | Self::Set(_)
@@ -425,6 +444,8 @@ pub(crate) enum ZipField {
 
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    Repeat,
+    CursorLengthHint,
     DirectoryContextView,
     Document(DocumentOp),
     /// Runs the static archive's module initializer in ordinary import order.
@@ -461,6 +482,7 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    OsName,
     SystemExitNew {
         omit_none: bool,
     },
@@ -819,6 +841,12 @@ pub(crate) enum PathOperation {
     Scripts,
     OsExists,
     New,
+    PureNew(PathFlavor),
+    JoinObject,
+    Drive,
+    Root,
+    Anchor,
+    AsPosix,
     Join,
     Match {
         full: bool,

@@ -209,20 +209,28 @@ impl Checker<'_> {
                 self.source,
                 call,
                 if file {
-                    "json.load requires one open text stream"
+                    "json.load requires one open stream"
                 } else {
-                    "json.loads requires one UTF-8 string"
+                    "json.loads requires one str or bytes argument"
                 },
             ));
         };
-        let text = if file {
-            let stream = self.expr_expected(text, Type::TextIO)?;
+        let value = self.expr(text)?;
+        let text = if file && value.ty == Type::BinaryIO {
+            Expr {
+                ty: Type::Bytes,
+                kind: ExprKind::Builtin(Builtin::BinaryRead, vec![value]),
+            }
+        } else if file {
+            let stream = self.coerce(value, Type::TextIO, text)?;
             Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::TextRead, vec![stream]),
             }
+        } else if value.ty == Type::Bytes {
+            value
         } else {
-            self.expr_expected(text, Type::Str)?
+            self.coerce(value, Type::Str, text)?
         };
         Ok(Expr {
             ty: Type::JsonRoot,

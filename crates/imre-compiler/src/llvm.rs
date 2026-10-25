@@ -58,12 +58,14 @@ impl Type {
             | Self::Set(_)
             | Self::StringKeys
             | Self::Iterator
+            | Self::Cursor(_)
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
             | Self::ExitCode
             | Self::TimeoutExpired
             | Self::Path
+            | Self::PurePath(_)
             | Self::CompletedProcess(_)
             | Self::EventLoop
             | Self::Coroutine(_)
@@ -105,12 +107,14 @@ impl Type {
             | Self::Set(_)
             | Self::StringKeys
             | Self::Iterator
+            | Self::Cursor(_)
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
             | Self::ExitCode
             | Self::TimeoutExpired
             | Self::Path
+            | Self::PurePath(_)
             | Self::CompletedProcess(_)
             | Self::EventLoop
             | Self::Coroutine(_)
@@ -680,12 +684,14 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
+            | Type::Cursor(_)
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
             | Type::ExitCode
             | Type::TimeoutExpired
             | Type::Path
+            | Type::PurePath(_)
             | Type::TextIO
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -3183,8 +3189,8 @@ impl Emitter<'_, '_> {
                     };
                     self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
                 }
-                Type::Path | Type::List(_) | Type::Dict(_) | Type::Set(_) => {
-                    let operation = if left.ty == Type::Path {
+                Type::Path | Type::PurePath(_) | Type::List(_) | Type::Dict(_) | Type::Set(_) => {
+                    let operation = if left.ty.is_path() {
                         "path"
                     } else {
                         "sequence"
@@ -3266,6 +3272,7 @@ impl Emitter<'_, '_> {
                 Type::ListInt
                 | Type::StringKeys
                 | Type::Iterator
+                | Type::Cursor(_)
                 | Type::ByteOutput
                 | Type::Callable(_)
                 | Type::EventLoop
@@ -3745,14 +3752,21 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::JsonLoads => Value {
-                ty: returns,
-                operand: self.checked_instruction(format!(
-                    "call ptr @imre_json_loads(ptr {})",
-                    args[0].value.operand
-                )),
-                small_integer: false,
-            },
+            Builtin::JsonLoads => {
+                let function = if args[0].value.ty == Type::Bytes {
+                    "imre_json_loads_bytes"
+                } else {
+                    "imre_json_loads"
+                };
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @{function}(ptr {})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::JsonSelect(path) => self.json_select(path, returns, &args),
             Builtin::JsonIndex => self.call(
                 "imre_json_index",
@@ -3897,6 +3911,7 @@ impl Emitter<'_, '_> {
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
+            Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::SysStreamWrite { stderr } => Value {
                 ty: returns,
                 operand: self.checked_instruction(format!(
@@ -4269,7 +4284,9 @@ impl Emitter<'_, '_> {
             }
             Builtin::Repr => self.value_repr(&args[0].value),
             Builtin::Str => match args[0].value.ty {
-                Type::Path => self.call("imre_path_text", Type::Str, &[&args[0].value]),
+                Type::Path | Type::PurePath(_) => {
+                    self.call("imre_path_text", Type::Str, &[&args[0].value])
+                }
                 Type::Str | Type::StrLiteral(_) => {
                     return Value {
                         ty: Type::Str,
@@ -4527,6 +4544,24 @@ impl Emitter<'_, '_> {
                     ty: Type::Int,
                     operand,
                     small_integer: true,
+                }
+            }
+            Builtin::CursorLengthHint => self.call(
+                "imre_cursor_length_hint",
+                Type::Int,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::Repeat => {
+                let value = &args[0].value;
+                let word = self.word(value);
+                let kind = representation_kind(value.ty, &self.module.types);
+                let times = args.get(1).map_or("0", |arg| arg.value.operand.as_str());
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_repeat(i32 {kind}, i64 {word}, i64 {times})"
+                    )),
+                    small_integer: false,
                 }
             }
             Builtin::BytesIter => self.call("imre_bytes_iter", Type::Iterator, &[&args[0].value]),
@@ -4841,12 +4876,14 @@ impl Emitter<'_, '_> {
                     | Type::Set(_)
                     | Type::StringKeys
                     | Type::Iterator
+                    | Type::Cursor(_)
                     | Type::ByteOutput
                     | Type::Exception
                     | Type::NamedException(_)
                     | Type::ExitCode
                     | Type::TimeoutExpired
                     | Type::Path
+                    | Type::PurePath(_)
                     | Type::TextIO
                     | Type::EventLoop
                     | Type::Coroutine(_)
@@ -4990,7 +5027,10 @@ impl Emitter<'_, '_> {
     /// or replaces an output owner; nested loops can safely reuse both scratch
     /// words after this synchronous conversion.
     fn iter_next(&mut self, iterator: usize, key: usize, value: Option<usize>, ready: usize) {
-        debug_assert_eq!(self.locals[iterator], Type::Iterator);
+        debug_assert!(matches!(
+            self.locals[iterator],
+            Type::Iterator | Type::Cursor(_)
+        ));
         debug_assert_eq!(self.locals[ready], Type::Bool);
         debug_assert_ne!(iterator, key);
         debug_assert_ne!(iterator, ready);
@@ -5062,12 +5102,14 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
+            | Type::Cursor(_)
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
             | Type::ExitCode
             | Type::TimeoutExpired
             | Type::Path
+            | Type::PurePath(_)
             | Type::TextIO
             | Type::BinaryIO
             | Type::EventLoop
@@ -5120,12 +5162,14 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
+            | Type::Cursor(_)
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
             | Type::ExitCode
             | Type::TimeoutExpired
             | Type::Path
+            | Type::PurePath(_)
             | Type::TextIO
             | Type::BinaryIO
             | Type::EventLoop
@@ -5336,6 +5380,9 @@ impl Emitter<'_, '_> {
             "call void @imre_set_{operation}(ptr {}, i64 {word})",
             set.operand
         ));
+        if insert {
+            self.check_error();
+        }
     }
 
     fn nonnegative_index(&self, expression: &Expr) -> bool {
@@ -5405,11 +5452,9 @@ impl Emitter<'_, '_> {
         if matches!(list.ty, Type::Dict(_)) {
             let key = self.key_word(index);
             let lookup = format!("call i64 @imre_dict_get(ptr {}, i64 {key})", list.operand);
-            // Default-list and Counter subscriptions both produce a missing
-            // value. Receiver and key evaluation has already checked for errors.
-            let word = if self.module.types.is_default_list_dict(list.ty)
-                || self.module.types.is_counter(list.ty)
-            {
+            // A missing Counter key returns immediate zero. Default-list
+            // factories insert a new entry and can fail to reserve it.
+            let word = if self.module.types.is_counter(list.ty) {
                 self.instruction(lookup)
             } else {
                 self.checked_instruction(lookup)
@@ -5442,6 +5487,7 @@ impl Emitter<'_, '_> {
                 "call void @imre_dict_set(ptr {}, i64 {key}, i64 {word})",
                 list.operand
             ));
+            self.check_error();
             return;
         }
         if list.ty == Type::ListInt {
@@ -5678,12 +5724,14 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Set(_)
         | Type::StringKeys
         | Type::Iterator
+        | Type::Cursor(_)
         | Type::ByteOutput
         | Type::Exception
         | Type::NamedException(_)
         | Type::ExitCode
         | Type::TimeoutExpired
         | Type::Path
+        | Type::PurePath(_)
         | Type::TextIO
         | Type::EventLoop
         | Type::Coroutine(_)
@@ -5900,6 +5948,11 @@ declare i32 @imre_path_text_exists(ptr)
 declare i32 @imre_path_exists(ptr)
 declare i32 @imre_path_is_file(ptr)
 declare i32 @imre_path_match(ptr, ptr, i64, i32)
+declare i32 @imre_path_match_object(ptr, ptr, i64, i32)
+declare ptr @imre_pure_path_new(i32)
+declare ptr @imre_path_join_object(ptr, ptr)
+declare ptr @imre_path_prefix(ptr, i32)
+declare ptr @imre_path_as_posix(ptr)
 declare i32 @imre_path_is_dir(ptr)
 declare i32 @imre_path_equal(ptr, ptr)
 declare ptr @imre_path_read_bytes(ptr)
@@ -6014,6 +6067,7 @@ declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
 declare ptr @imre_json_loads(ptr)
+declare ptr @imre_json_loads_bytes(ptr)
 declare ptr @imre_json_index(ptr, i64)
 declare ptr @imre_json_iter(ptr)
 declare i64 @imre_json_len(ptr)
@@ -6183,6 +6237,7 @@ declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_platform()
+declare ptr @imre_os_name()
 declare i64 @imre_sys_stream_write(i32, ptr)
 declare void @imre_sys_stream_flush(i32)
 declare ptr @imre_system_exit_new(i32, i64)
@@ -6231,6 +6286,8 @@ declare i32 @imre_regex_present(ptr, i64, i32)
 declare i64 @imre_regex_bound(ptr, i64, i32, i32)
 declare ptr @imre_str_get(ptr, i64)
 declare ptr @imre_str_slice(ptr, i64, i64, i64)
+declare i64 @imre_cursor_length_hint(ptr, i64)
+declare ptr @imre_repeat(i32, i64, i64)
 declare ptr @imre_str_iter(ptr)
 declare ptr @imre_str_reverse_iter(ptr)
 declare ptr @imre_str_int_list(ptr)
@@ -6923,6 +6980,27 @@ mod tests {
     }
 
     #[test]
+    fn mapping_insertions_propagate_errors_through_user_functions() {
+        let llvm = compile(
+            "from collections import Counter\ndef put(d: dict[int, int]) -> None:\n    d[1] = 3\ndef add(s: set[int]) -> None:\n    s.add(1)\ndef update(a: Counter[int], b: Counter[int]) -> None:\n    a.update(b)\ndef run(d: dict[int, int], s: set[int], c: Counter[int]) -> None:\n    try:\n        put(d)\n        add(s)\n        update(c, c)\n    except MemoryError:\n        pass\n",
+            &CompileOptions::default(),
+        ).unwrap();
+        for symbol in ["imre_dict_set", "imre_set_add", "imre_counter_update"] {
+            let mut lines = llvm
+                .lines()
+                .skip_while(|line| !line.contains(&format!("call void @{symbol}(")));
+            assert!(lines.next().is_some(), "{symbol}");
+            assert!(
+                lines
+                    .next()
+                    .unwrap()
+                    .contains("call i32 @imre_error_pending()"),
+                "{symbol}"
+            );
+        }
+    }
+
+    #[test]
     fn sorted_key_union_fuses_only_local_dictionary_reads() {
         let llvm = compile(
             "def add(d: dict[str, int]) -> dict[str, int]:\n    d['late'] = 1\n    return {}\ndef keys(a: dict[str, int], b: dict[str, int]) -> list[str]:\n    first = sorted(a.keys() | b.keys())\n    later = sorted(a.keys() | b.keys() | add(a).keys())\n    return first if first else later\n",
@@ -6995,7 +7073,7 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
     }
 
     #[test]
-    fn only_a_sealed_list_factory_eliminates_subscription_errors() {
+    fn default_list_subscriptions_check_allocation_and_counter_misses_return_zero() {
         let factory = function_body(
             "from collections import defaultdict\ndef get(d: defaultdict[str, list[int]], key: str) -> list[int]:\n    return d[key]\n",
         );
@@ -7005,8 +7083,12 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
         for body in [&factory, &ordinary] {
             assert!(body.contains("call i64 @imre_dict_get("));
         }
-        assert!(!factory.contains("call i32 @imre_error_pending()"));
+        assert!(factory.contains("call i32 @imre_error_pending()"));
         assert!(ordinary.contains("call i32 @imre_error_pending()"));
+        let counter = function_body(
+            "from collections import Counter\ndef get(d: Counter[str], key: str) -> int:\n    return d[key]\n",
+        );
+        assert!(!counter.contains("call i32 @imre_error_pending()"));
     }
 
     #[test]

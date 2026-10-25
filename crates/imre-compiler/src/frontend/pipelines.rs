@@ -52,6 +52,9 @@ impl Checker<'_> {
         value: &Expr,
         node: &impl Ranged,
     ) -> Result<Option<Prepared>, String> {
+        if let Some(element) = self.types.cursor_element(value.ty) {
+            return Ok(Some(self.prepare_cursor(value.clone(), element)));
+        }
         let (function, mut args, returns) = match (&value.kind, value.ty) {
             (ExprKind::Call(id, args), _) if self.classes.generators.contains(id) => {
                 (*id, args.clone(), value.ty)
@@ -200,6 +203,19 @@ impl Checker<'_> {
         let ast::Expr::Call(call) = expression else {
             return Ok(None);
         };
+        if self.is_builtin_iter(call) && call.arguments.args.len() != 1 {
+            return Ok(Some(Iteration::Prepared(self.sentinel_input(call)?)));
+        }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Repeat)) {
+            let cursor = self.repeat_cursor(call)?;
+            let element = self.types.cursor_element(cursor.ty).unwrap();
+            return Ok(Some(Iteration::Prepared(
+                self.prepare_cursor(cursor, element),
+            )));
+        }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain)) {
+            return Ok(Some(Iteration::Prepared(self.chain_input(call, element)?)));
+        }
         if let Some((signature, element)) = self.generator_signature(call) {
             let frame = self.source_call(call, &signature, None, 0)?;
             let handle = self.hidden(Type::GeneratorContext);
@@ -228,12 +244,6 @@ impl Checker<'_> {
                 writes: HashSet::new(),
                 clear: vec![handle, value, ready],
             })));
-        }
-        if self.is_builtin_iter(call) {
-            return Ok(Some(Iteration::Prepared(self.sentinel_input(call)?)));
-        }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain)) {
-            return Ok(Some(Iteration::Prepared(self.chain_input(call, element)?)));
         }
         if self.resolve(&call.func).is_some() {
             return Ok(None);
@@ -646,6 +656,30 @@ impl Checker<'_> {
             writes: HashSet::new(),
             clear: vec![iterator, value, ready],
         })
+    }
+
+    fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {
+        let iterator = self.hidden(cursor.ty);
+        let value = self.hidden(element);
+        let ready = self.hidden(Type::Bool);
+        Prepared {
+            evaluate: vec![Statement::Assign(iterator, cursor)],
+            acquire: Vec::new(),
+            next: vec![
+                Statement::Clear(value),
+                Statement::IterNext {
+                    iterator,
+                    key: value,
+                    value: None,
+                    ready,
+                },
+            ],
+            value,
+            ready,
+            elementless: false,
+            writes: HashSet::new(),
+            clear: vec![iterator, value, ready],
+        }
     }
 
     /// Method evaluation creates the iterator at Python's observable point.
