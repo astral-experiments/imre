@@ -34,6 +34,7 @@ Supply `--extension-path` again for additional installed directories. CPython wh
 Module initialization uses `PyModule_Create` and a `METH_VARARGS` method table. In its `.pyi` file, each exported function declares positional-only arguments and a return type. Supported native values are `None`, `int`, `bytes`, `list[int]`, and an integer callback of type `Callable[[int], int]`. The header printed by `imre extension-header` is the authoritative list of available operations.
 
 - `PyArg_ParseTuple` handles `O`, `k`, and `y#`, including a `:function` suffix. A read-only bytes view remains valid while the extension holds the object.
+- `PyBytes_FromStringAndSize` copies a C buffer into an owned `bytes` result. Its length is explicit, so embedded NULs are preserved and the source can be reused immediately. A null source allocates the requested length with unspecified contents.
 - `Py_INCREF` and `Py_DECREF` let an extension retain arguments beyond the call. A retained list shares the original storage. Foreign writes preserve `list[int]` and a rejected write raises `TypeError`.
 - `PyObject_CallOneArg` invokes a retained integer callback, including a bound method. The callback can call the extension again. Its exceptions propagate to the Python caller.
 - A returned object transfers an owned reference. Imre validates it against the declared return type. A module can release retained references in its `m_free` hook.
