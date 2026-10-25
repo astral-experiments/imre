@@ -58,23 +58,20 @@ pub(super) fn binary(
         vec![left, right],
     ))
 }
+pub(super) fn utc() -> Expr {
+    op(Op::Utc, Type::Calendar(C::Zone), vec![])
+}
+
 impl Checker<'_> {
-    pub(super) fn calendar_constant(&self, expr: &ast::Expr) -> Option<Expr> {
-        let zone = Type::Calendar(C::Zone);
-        if self.resolve(expr) == Some(Binding::Intrinsic(Intrinsic::CalendarUtc)) {
-            return Some(op(Op::Utc, zone, vec![]));
-        }
-        let ast::Expr::Attribute(a) = expr else {
-            return None;
-        };
+    pub(super) fn calendar_class_attribute(&self, a: &ast::ExprAttribute) -> Option<Expr> {
         if self.resolve(&a.value) != Some(Binding::Intrinsic(Intrinsic::Calendar(C::Zone))) {
             return None;
         }
         match a.attr.as_str() {
-            "utc" => Some(op(Op::Utc, zone, vec![])),
+            "utc" => Some(utc()),
             "min" | "max" => Some(op(
                 Op::ZoneLimit,
-                zone,
+                Type::Calendar(C::Zone),
                 vec![boolean(a.attr.as_str() == "max")],
             )),
             _ => None,

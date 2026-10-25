@@ -5,6 +5,7 @@ use super::*;
 /// The rooted receiver is an exact timedelta.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_seconds(d: *const Object) -> f64 {
+    // SAFETY: the caller roots the exact timedelta until the conversion returns.
     let n = delta(unsafe { object(d) });
     if n == 0 {
         return 0.0;
@@ -31,6 +32,7 @@ pub unsafe extern "C" fn imre_calendar_seconds(d: *const Object) -> f64 {
 /// The fixed timezone owns the returned offset object.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_zoneoffset(z: *const Object) -> *const Object {
+    // SAFETY: the caller roots the zone that owns the returned offset.
     with(unsafe { object(z) }, |v| match v {
         Value::Zone { offset, .. } => Rc::into_raw(offset.clone()),
         _ => unreachable!(),
@@ -56,8 +58,10 @@ pub unsafe extern "C" fn imre_calendar_compare(
     b: *const Object,
     equality: bool,
 ) -> i32 {
-    let res = with(unsafe { object(a) }, |a| {
-        with(unsafe { object(b) }, |b| {
+    // SAFETY: both calendar operands remain rooted throughout the comparison.
+    let (a, b) = unsafe { (object(a), object(b)) };
+    let res = with(a, |a| {
+        with(b, |b| {
             let ord = match (a, b) {
                 (Value::Delta(a), Value::Delta(b)) => a.cmp(b),
                 (Value::Zone { offset: a, .. }, Value::Zone { offset: b, .. }) => {
@@ -139,6 +143,7 @@ fn with<T>(obj: &Object, f: impl FnOnce(&Value) -> T) -> T {
 /// The caller roots an immutable timedelta.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_truth(o: *const Object) -> bool {
+    // SAFETY: the caller roots the exact timedelta.
     delta(unsafe { object(o) }) != 0
 }
 fn delta(obj: &Object) -> i128 {
@@ -276,9 +281,9 @@ pub unsafe extern "C" fn imre_calendar_equal_optional(a: usize, b: usize) -> boo
     if a == 0 || b == 0 {
         return false;
     }
-    with(unsafe { object(a as *const Object) }, |l| {
-        with(unsafe { object(b as *const Object) }, |r| equal(l, r))
-    })
+    // SAFETY: zero was excluded; both calendar values remain rooted for comparison.
+    let (a, b) = unsafe { (object(a as *const Object), object(b as *const Object)) };
+    with(a, |l| with(b, |r| equal(l, r)))
 }
 pub(super) fn equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
@@ -403,12 +408,16 @@ fn ymd(ord: i128) -> (i32, i32, i32) {
 fn c_component(word: usize) -> Result<i32, Error> {
     // SAFETY: the frontend accepts/roots only exact tagged integers and bools converted to int.
     let value = unsafe { Int::borrow(word) };
-    let v = value.big().to_i64().ok_or_else(|| {
-        Error::new(
-            Kind::OverflowError,
-            "Python int too large to convert to C long",
-        )
-    })?;
+    let v = value
+        .big()
+        .to_i64()
+        .filter(|n| std::mem::size_of::<libc::c_long>() == 8 || i32::try_from(*n).is_ok())
+        .ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "Python int too large to convert to C long",
+            )
+        })?;
     i32::try_from(v).map_err(|_| {
         Error::new(
             Kind::OverflowError,
@@ -494,6 +503,18 @@ fn date_text(local: i128, zone: &Option<Rc<Object>>, sep: char) -> String {
     text
 }
 
+/// Makes a separately owned reference from a Python value retained by its caller.
+///
+/// # Safety
+/// `p` must point to a live `Rc<T>` allocation.
+unsafe fn retain<T>(p: *const T) -> Rc<T> {
+    // SAFETY: preserve the caller's strong reference when materializing the new owner.
+    unsafe {
+        Rc::increment_strong_count(p);
+        Rc::from_raw(p)
+    }
+}
+
 fn rc_result(result: Result<Rc<Object>, Error>) -> *const Object {
     finish(result.map(Rc::into_raw), std::ptr::null())
 }
@@ -517,18 +538,8 @@ pub unsafe extern "C" fn imre_calendar_delta(
 /// The incoming delta and optional string are rooted for the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_zone(d: *const Object, name: usize) -> *const Object {
-    // SAFETY: each nonnull raw ABI pointer references exactly the declared Rc allocation.
-    let d = unsafe {
-        Rc::increment_strong_count(d);
-        Rc::from_raw(d)
-    };
-    let name = (name != 0).then(|| {
-        let p = name as *const Str;
-        unsafe {
-            Rc::increment_strong_count(p);
-            Rc::from_raw(p)
-        }
-    });
+    // SAFETY: the caller roots the delta and any present name until the new zone owns both.
+    let (d, name) = unsafe { (retain(d), (name != 0).then(|| retain(name as *const Str))) };
     rc_result(make_zone(d, name))
 }
 #[unsafe(no_mangle)]
@@ -549,23 +560,16 @@ pub unsafe extern "C" fn imre_calendar_datetime(
     z: usize,
     f: usize,
 ) -> *const Object {
-    let zone = (z != 0).then(|| {
-        let p = z as *const Object;
-        unsafe {
-            Rc::increment_strong_count(p);
-            Rc::from_raw(p)
-        }
-    });
+    // SAFETY: a present zone remains rooted until the new datetime owns it.
+    let zone = (z != 0).then(|| unsafe { retain(z as *const Object) });
     rc_result(new_date([y, m, d, h, mi, s, u, f], zone))
 }
 /// # Safety
 /// The argument is a rooted exact fixed timezone, retained by the resulting datetime.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_now(z: *const Object) -> *const Object {
-    let zone = unsafe {
-        Rc::increment_strong_count(z);
-        Rc::from_raw(z)
-    };
+    // SAFETY: the caller roots this nonnull fixed zone until the new datetime owns it.
+    let zone = unsafe { retain(z) };
     let epoch_us = match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(d) => d.as_micros() as i128,
         Err(e) => (-(e.duration().as_nanos() as i128)).div_euclid(1000),
@@ -583,9 +587,11 @@ pub unsafe extern "C" fn imre_calendar_shift(
     d: *const Object,
     sub: bool,
 ) -> *const Object {
-    let n = delta(unsafe { object(d) });
+    // SAFETY: both typed operands remain rooted until the new datetime is built.
+    let (dt, d) = unsafe { (object(dt), object(d)) };
+    let n = delta(d);
     let n = if sub { -n } else { n };
-    rc_result(with(unsafe { object(dt) }, |dt| match dt {
+    rc_result(with(dt, |dt| match dt {
         Value::Date { local, zone, .. } => date(*local + n, zone.clone()),
         _ => unreachable!(),
     }))
@@ -594,16 +600,18 @@ pub unsafe extern "C" fn imre_calendar_shift(
 /// The argument is a rooted exact timedelta; the result is separately owned.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_negate(d: *const Object) -> *const Object {
-    rc_result(
-        validate_delta(&BigInt::from(-delta(unsafe { object(d) }))).map(|n| owner(Value::Delta(n))),
-    )
+    // SAFETY: the caller roots the exact timedelta until its microseconds have been read.
+    let n = delta(unsafe { object(d) });
+    rc_result(validate_delta(&BigInt::from(-n)).map(|n| owner(Value::Delta(n))))
 }
 /// # Safety
 /// The receiver is a rooted datetime or timedelta; the field index is statically validated.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_field(o: *const Object, index: usize) -> usize {
-    let i = unsafe { Int::borrow(index) }.as_small().unwrap() as usize;
-    let n = with(unsafe { object(o) }, |v| match v {
+    // SAFETY: the receiver is rooted and the compiler supplies a tagged integer field index.
+    let (o, index) = unsafe { (object(o), Int::borrow(index)) };
+    let i = index.as_small().unwrap() as usize;
+    let n = with(o, |v| match v {
         Value::Date { local, fold, .. } => date_fields(*local, *fold)[i],
         Value::Delta(n) => {
             let (d, s, u) = parts(*n);
@@ -617,6 +625,7 @@ pub unsafe extern "C" fn imre_calendar_field(o: *const Object, index: usize) -> 
 /// The receiver is a rooted datetime; the optional owned zone is zero only for naive values.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_tzinfo(dt: *const Object) -> usize {
+    // SAFETY: the caller roots the datetime while its optional zone is cloned.
     with(unsafe { object(dt) }, |v| match v {
         Value::Date { zone, .. } => zone
             .as_ref()
@@ -634,6 +643,7 @@ pub unsafe extern "C" fn imre_calendar_offset(o: *const Object) -> usize {
             _ => unreachable!(),
         })
     }
+    // SAFETY: the caller roots the receiver, which owns its fixed offset when present.
     with(unsafe { object(o) }, |v| match v {
         Value::Date { zone, .. } => zone.as_ref().map_or(0, |z| ret(z)),
         Value::Zone { offset, .. } => Rc::into_raw(offset.clone()) as usize,
@@ -644,6 +654,7 @@ pub unsafe extern "C" fn imre_calendar_offset(o: *const Object) -> usize {
 /// The receiver is an exact timezone; the result has its own string owner.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_zonename(z: *const Object) -> *const Str {
+    // SAFETY: the caller roots the exact fixed zone during the string lookup.
     with(unsafe { object(z) }, |v| match v {
         Value::Zone { offset, name } => Rc::into_raw(
             name.clone()
@@ -656,6 +667,7 @@ pub unsafe extern "C" fn imre_calendar_zonename(z: *const Object) -> *const Str 
 /// The receiver is a rooted datetime or timedelta; static calls decide whether to use the ISO separator.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_text(o: *const Object, iso: bool) -> *const Str {
+    // SAFETY: the compiler roots this exact calendar value while its fields are formatted.
     let s = with(unsafe { object(o) }, |v| match v {
         Value::Date { local, zone, .. } => date_text(*local, zone, if iso { 'T' } else { ' ' }),
         Value::Delta(n) => {

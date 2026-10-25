@@ -4953,10 +4953,15 @@ impl<'a> Checker<'a> {
                 &format!("no native implementation for {symbol}"),
             ));
         }
-        if let Some(value) = self.calendar_constant(expression) {
+        if let ast::Expr::Attribute(attr) = expression
+            && let Some(value) = self.calendar_class_attribute(attr)
+        {
             return Ok(value);
         }
         if let Some(target) = self.resolve(expression) {
+            if target == Binding::Intrinsic(Intrinsic::CalendarUtc) {
+                return Ok(calendar::utc());
+            }
             if matches!(target, Binding::Module(_) | Binding::IntrinsicModule(_))
                 && let Some(module) = self.module_docs(target, expression)?
             {
