@@ -58,6 +58,7 @@ pub(crate) enum Binding {
 /// Sealed namespaces expose only compiler-known symbols, never module values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IntrinsicModule {
+    Array,
     AnnotationLib,
     AnnotationFormat,
     Declaration(&'static str),
@@ -123,6 +124,8 @@ pub(crate) enum IntrinsicModule {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
+    /// A sealed class whose identity is its fully qualified Python name.
+    NominalClass(&'static str),
     GetAnnotations,
     AnnotationTypeRepr,
     AnnotationFormat(i64),
@@ -138,7 +141,9 @@ pub(crate) enum Intrinsic {
     GetLevelName,
     AddLevelName,
     LevelNamesMapping,
-    LevelMap { names: bool },
+    LevelMap {
+        names: bool,
+    },
     LogRecord,
     MakeLogRecord,
     LogFormatter,
@@ -326,6 +331,7 @@ impl Intrinsic {
 impl IntrinsicModule {
     fn named(name: &str) -> Option<Self> {
         match name {
+            "array" => Some(Self::Array),
             "annotationlib" => Some(Self::AnnotationLib),
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
@@ -429,6 +435,16 @@ impl IntrinsicModule {
             return Some(Binding::IntrinsicModule(Self::ImreToml));
         }
         let symbol = match (self, name) {
+            (Self::Array, "array") => Intrinsic::NominalClass("array.array"),
+            (Self::CollectionsAbc, "Sequence") => {
+                Intrinsic::NominalClass("collections.abc.Sequence")
+            }
+            (Self::CollectionsAbc, "MutableSequence") => {
+                Intrinsic::NominalClass("collections.abc.MutableSequence")
+            }
+            (Self::CollectionsAbc, "MutableMapping") => {
+                Intrinsic::NominalClass("collections.abc.MutableMapping")
+            }
             (Self::AnnotationLib, "get_annotations") => Intrinsic::GetAnnotations,
             (Self::AnnotationLib, "type_repr") => Intrinsic::AnnotationTypeRepr,
             (Self::AnnotationFormat, "VALUE") => Intrinsic::AnnotationFormat(1),
@@ -585,7 +601,7 @@ impl IntrinsicModule {
             (Self::Typing, "assert_never") => Intrinsic::AssertNever,
             (Self::Typing, "cast") => Intrinsic::Cast,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
-            (Self::Typing | Self::CollectionsAbc, "Sequence") => Intrinsic::Sequence,
+            (Self::Typing, "Sequence") => Intrinsic::Sequence,
             (Self::Typing | Self::CollectionsAbc, "Iterable") => Intrinsic::Iterable,
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
