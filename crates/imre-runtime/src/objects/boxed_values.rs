@@ -153,6 +153,9 @@ pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) ->
                     }
                     if n != 0 {
                         if n > 1 {
+                            if pending.try_reserve(1).is_err() {
+                                return Error::allocation().returning(false);
+                            }
                             pending.push((wa, wb, 1, n));
                         }
                         next = (tuple_item(wa, 0), tuple_item(wb, 0));

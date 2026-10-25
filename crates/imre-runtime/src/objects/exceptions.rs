@@ -6,6 +6,7 @@
 //! attributes can introduce ownership cycles.
 
 mod imports;
+pub(super) use imports::imre_exception_field_repr;
 mod tree;
 pub(super) use tree::append_tree_entries;
 
@@ -84,6 +85,9 @@ pub(crate) enum Kind {
     ImportError = 41,
     ModuleNotFoundError = 42,
     RecursionError = 43,
+    // Warning exception identities use a separate block from module errors and filter categories.
+    Warning = 80,
+    RuntimeWarning = 81,
 }
 
 impl Kind {
@@ -141,6 +145,8 @@ impl Kind {
             41 => Self::ImportError,
             42 => Self::ModuleNotFoundError,
             43 => Self::RecursionError,
+            80 => Self::Warning,
+            81 => Self::RuntimeWarning,
             _ => return None,
         })
     }
@@ -195,12 +201,15 @@ impl Kind {
             Self::ImportError => "ImportError",
             Self::ModuleNotFoundError => "ModuleNotFoundError",
             Self::RecursionError => "RecursionError",
+            Self::Warning => "Warning",
+            Self::RuntimeWarning => "RuntimeWarning",
         }
     }
 
     fn matches(self, expected: Self) -> bool {
         match expected {
             Self::BaseException => true,
+            Self::Warning => matches!(self, Self::Warning | Self::RuntimeWarning),
             Self::NameError => matches!(self, Self::NameError | Self::UnboundLocalError),
             Self::Exception => !matches!(
                 self,
@@ -1362,6 +1371,8 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
         2 => word != 1, // tagged zero
         // SAFETY: the immutable exit code owns this string.
         3 => !unsafe { &*(word as *const Str) }.is_empty(),
+        // SAFETY: the view owns this integer list through the length read.
+        4 => unsafe { (&*(word as *const super::List)).0.with(|v| !v.is_empty()) },
         // SAFETY: the view owns this exact byte buffer.
         8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),
         6 => {
