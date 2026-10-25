@@ -6590,6 +6590,11 @@ impl<'a> Checker<'a> {
             {
                 return self.named_format_call(Self::string_value(receiver), call);
             }
+            if attribute.attr.as_str() == "translate"
+                && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            {
+                return self.translate_method(Self::string_value(receiver), call);
+            }
             if receiver.ty == Type::Str {
                 match attribute.attr.as_str() {
                     "join" => return self.join_call(receiver, call),

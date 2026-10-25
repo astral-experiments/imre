@@ -845,6 +845,12 @@ impl SourceGraph {
             .push(CheckedDiagnostic::ExcessArgument(argument));
     }
 
+    /// The native positional-only binder already raises at this exact keyword.
+    pub(crate) fn checked_positional_keyword(&self, module: ModuleId, keyword: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::PositionalKeyword(keyword));
+    }
+
     pub(crate) fn checked_keywords(
         &self,
         module: ModuleId,

@@ -261,6 +261,95 @@ impl Checker<'_> {
         })
     }
 
+    fn translation_argument(&mut self, argument: &ast::Expr) -> Result<Expr, String> {
+        if matches!(argument, ast::Expr::Dict(dict) if dict.items.is_empty()) {
+            // The empty literal has no observable key/value layout.
+            self.expr_expected(argument, self.types.dict(Type::Int, Type::Int))
+        } else {
+            self.expr(argument)
+        }
+    }
+
+    /// Preserve ordinal lookup semantics only for plain tables without Python callbacks.
+    pub(super) fn translate_method(
+        &mut self,
+        source: Expr,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let args = &call.arguments;
+        if let ([table], []) = (args.args.as_ref(), args.keywords.as_ref()) {
+            let value = self.translation_argument(table)?;
+            let Some((key, member)) = self.types.mapping(value.ty) else {
+                return Err(error(
+                    self.source,
+                    table,
+                    "str.translate requires an exact plain dictionary",
+                ));
+            };
+            let member = self.types.payload(member).unwrap_or(member);
+            if self.types.is_counter(value.ty)
+                || self.types.is_default_list_dict(value.ty)
+                || !matches!(key, Type::Int | Type::Str | Type::Bytes | Type::Tuple(_))
+                || matches!(member, Type::StrEnum(_))
+            {
+                return Err(error(
+                    self.source,
+                    table,
+                    "unsupported str.translate dictionary layout or missing-key protocol",
+                ));
+            }
+            self.graph.checked_overload(self.module, call.range());
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(
+                    Builtin::Text(TextOperation::Translate),
+                    vec![source, value],
+                ),
+            });
+        }
+        self.graph
+            .checked_missing_argument(self.module, call.range());
+        for kw in &args.keywords {
+            if kw.arg.as_deref() == Some("table") {
+                self.graph
+                    .checked_positional_keyword(self.module, kw.range());
+            }
+        }
+        self.graph
+            .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
+        for extra in args.args.iter().skip(1) {
+            self.graph
+                .checked_excess_argument(self.module, extra.range());
+        }
+        let mut values = vec![source];
+        for argument in &args.args {
+            values.push(self.translation_argument(argument)?);
+        }
+        for kw in &args.keywords {
+            values.push(self.translation_argument(&kw.value)?);
+        }
+        let message = if args.keywords.is_empty() {
+            format!(
+                "str.translate() takes exactly one argument ({} given)",
+                args.args.len()
+            )
+        } else {
+            "str.translate() takes no keyword arguments".into()
+        };
+        values.push(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("TypeError").unwrap(),
+                message: Some(Box::new(unpacking::string(message))),
+            },
+        });
+        Ok(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::RaiseException, values),
+        })
+    }
+
     /// Checks the bounded native signatures while retaining source evaluation order.
     pub(super) fn text_method(
         &mut self,

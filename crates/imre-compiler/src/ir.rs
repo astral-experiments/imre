@@ -1035,6 +1035,7 @@ pub(crate) enum TextOperation {
     EndsWith,
     Find,
     Partition,
+    Translate,
     Unquote,
     Dedent,
     ShlexSplit,
