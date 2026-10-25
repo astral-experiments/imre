@@ -297,3 +297,16 @@ pub(super) fn exit_payload_supported(ty: Type, types: &Types) -> bool {
         _ => false,
     }
 }
+
+impl Checker<'_> {
+    pub(super) fn sys_version_info(&self, implementation: bool) -> Expr {
+        Expr {
+            ty: self.types.struct_sequence(
+                "sys.version_info",
+                crate::version::FIELDS,
+                vec![Type::Int, Type::Int, Type::Int, Type::Str, Type::Int],
+            ),
+            kind: ExprKind::Builtin(Builtin::SysVersionInfo { implementation }, vec![]),
+        }
+    }
+}

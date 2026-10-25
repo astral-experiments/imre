@@ -37,7 +37,8 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 - `test_ioencoding_nonascii`: the canonical reference and native gate both skip under the unchanged locale decorator. See the separate UTF-8-mode run below.
 
 The existing [stream and exit smoke runner](../../native_sys.py) exercises four
-`test_subprocess` IDs and additional native program fixtures. Those are outside this
+`test_subprocess` IDs and additional native program fixtures, including the
+[standard-stream buffering checks](STREAM_BUFFERING.md). Those are outside this
 suite's denominator. A CPython-only result or an operation probe is not a native
 pass for a complete routine.
 

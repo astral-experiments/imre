@@ -17,6 +17,7 @@ mod assignments;
 mod asyncio;
 mod bytes;
 mod cached_properties;
+mod call_binding_errors;
 mod callables;
 mod calls;
 mod codecs;
@@ -59,6 +60,7 @@ mod module_values;
 mod namedtuples;
 mod namespaces;
 mod native_generators;
+mod ord;
 mod os;
 mod partials;
 mod paths;
@@ -85,6 +87,7 @@ mod truthiness;
 mod unbound_locals;
 mod unions;
 mod unittest;
+mod unittest_bound;
 mod unittest_equality;
 mod unittest_main;
 mod unittest_mock;
@@ -1873,6 +1876,7 @@ struct Checker<'a> {
     module_scope: bool,
     class: Option<usize>,
     class_receiver: Option<String>,
+    super_method_base: Option<usize>,
     iterator_source: Option<TextRange>,
     super_initializer: Option<records::BaseInitializer>,
     initializing: bool,
@@ -1932,6 +1936,7 @@ impl<'a> Checker<'a> {
             module_scope: false,
             class: None,
             class_receiver: None,
+            super_method_base: None,
             iterator_source: None,
             super_initializer: None,
             initializing: false,
@@ -2321,8 +2326,12 @@ impl<'a> Checker<'a> {
             }
         }
         if matches!(concrete, Type::Callable(_)) {
-            if let Some(Binding::Intrinsic(op @ (Intrinsic::Copy(_) | Intrinsic::RmTree))) =
-                self.resolve(expression)
+            if let Some(Binding::Intrinsic(
+                op @ (Intrinsic::Copy(_)
+                | Intrinsic::RmTree
+                | Intrinsic::Move
+                | Intrinsic::DestInSrc),
+            )) = self.resolve(expression)
             {
                 let value = self.shutil_function_value(op, Some(concrete), expression)?;
                 return self.coerce(value, expected, expression);
@@ -2669,6 +2678,9 @@ impl<'a> Checker<'a> {
     /// Captures the receiver before ordered bounds. Nullable integer operands
     /// preserve omitted bounds without allocating a general slice object.
     fn slice(&mut self, receiver: Expr, slice: &ast::ExprSlice) -> Result<Expr, String> {
+        if let Some(fields) = self.types.struct_sequence_fields(receiver.ty) {
+            return self.struct_sequence_slice(receiver, &fields, slice);
+        }
         if !matches!(receiver.ty, Type::Str | Type::Bytes)
             && self.types.element(receiver.ty).is_none()
         {
@@ -4867,8 +4879,9 @@ impl<'a> Checker<'a> {
         {
             return self.callable_value(&signature, None, None, expression);
         }
-        if let Some(Binding::Intrinsic(op @ (Intrinsic::Copy(_) | Intrinsic::RmTree))) =
-            self.resolve(expression)
+        if let Some(Binding::Intrinsic(
+            op @ (Intrinsic::Copy(_) | Intrinsic::RmTree | Intrinsic::Move | Intrinsic::DestInSrc),
+        )) = self.resolve(expression)
         {
             return self.shutil_function_value(op, None, expression);
         }
@@ -4978,6 +4991,19 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
+                Intrinsic::SysVersionInfo => return Ok(self.sys_version_info(false)),
+                Intrinsic::SysHexversion => {
+                    return Ok(crate::version::integer(crate::version::hex(
+                        crate::version::components(false),
+                    )));
+                }
+                Intrinsic::SysVersion => {
+                    let [major, minor, micro] = crate::version::components(false);
+                    return Ok(unpacking::string(format!(
+                        "{major}.{minor}.{micro} (Imre {})",
+                        env!("CARGO_PKG_VERSION")
+                    )));
+                }
                 Intrinsic::SysExecutable | Intrinsic::SysPlatform | Intrinsic::OsName => {
                     let operation = match symbol {
                         Intrinsic::SysExecutable => {
@@ -5809,8 +5835,8 @@ impl<'a> Checker<'a> {
                 if let Type::StrDescriptor(method) = receiver.ty {
                     return self.descriptor_attribute(receiver, method, attribute);
                 }
-                if let Some(definition) = self.types.namedtuple_definition(receiver.ty) {
-                    return self.namedtuple_instance_attribute(attribute, receiver, definition);
+                if let Some(declaration) = self.types.tuple_metadata(receiver.ty) {
+                    return self.namedtuple_instance_attribute(attribute, receiver, &declaration);
                 }
                 if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
                     return Ok(self.string_join_value(Some(receiver), attribute));
@@ -6049,6 +6075,9 @@ impl<'a> Checker<'a> {
                 {
                     return self.mock_child(class, receiver, attribute);
                 }
+                if let Some(bound) = self.bound_unittest_assertion(attribute, &receiver) {
+                    return Ok(bound);
+                }
                 let (receiver, field, ty) = self.field_value(attribute, receiver)?;
                 if let Some(name) = attribute.value.as_name_expr()
                     && let Some(&slot) = self.names.get(name.id.as_str())
@@ -6268,8 +6297,15 @@ impl<'a> Checker<'a> {
         {
             return self.namedtuple_call(definition, &declaration, call);
         }
-        if crate::classes::super_init(call) {
-            return self.call_super_initializer(call);
+        if let Some((method, name)) = crate::classes::super_method(call)
+            && self.unshadowed_builtin(name, "super")
+        {
+            if method.attr.as_str() == "__init__" {
+                return self.call_super_initializer(call);
+            }
+            if let Some(base) = self.super_method_base {
+                return self.call_super_method(call, method, base);
+            }
         }
         if let Some(expr) = self.explicit_exception_initializer(call)? {
             return Ok(expr);
@@ -6591,6 +6627,8 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
             Some(Binding::Intrinsic(Intrinsic::CopyTree)) => return self.shutil_copytree(call),
+            Some(Binding::Intrinsic(Intrinsic::Move)) => return self.shutil_move(call, false),
+            Some(Binding::Intrinsic(Intrinsic::DestInSrc)) => return self.shutil_move(call, true),
             Some(Binding::Intrinsic(Intrinsic::IgnorePatterns)) => {
                 return self.shutil_ignore_patterns(call);
             }
@@ -7408,6 +7446,10 @@ impl<'a> Checker<'a> {
                 ));
             }
             _ => {}
+        }
+        if name.id == "ord" && !self.names.contains_key("ord") && self.resolve(&call.func).is_none()
+        {
+            return self.ordinal_call(call);
         }
         self.reject_builtin_keywords(call)?;
         if name.id == "bool" {
