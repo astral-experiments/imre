@@ -17,12 +17,27 @@ pub(super) struct Prepared {
     pub(super) ready: usize,
     /// An empty tuple has no element type or executable item assignment.
     elementless: bool,
+    /// An eager list alternative of this exact virtual generator call.
+    eager_list: Option<(TextRange, EagerList)>,
     /// Enclosing slots a later pull may replace, after constructor arguments.
     writes: HashSet<usize>,
     pub clear: Vec<usize>,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct EagerList {
+    pub(super) value: usize,
+    pub(super) selected: usize,
+}
+
 impl Prepared {
+    /// An enclosing adapter has its own iteration semantics even if it reuses this state.
+    pub(super) fn eager_list_at(&self, source: &impl Ranged) -> Option<EagerList> {
+        self.eager_list
+            .filter(|(range, _)| *range == source.range())
+            .map(|(_, list)| list)
+    }
+
     /// Only reads during a pull can observe an exception binding cleared by the consumer.
     pub(super) fn reads_on_pull(&self, slot: usize) -> bool {
         let mut reads = false;
@@ -57,8 +72,9 @@ impl Checker<'_> {
         }
         let mut evaluate = Vec::new();
         let mut roots = Vec::new();
-        let call = if self.is_delegated_call(value) {
-            self.capture_delegated_call(value.clone(), &mut evaluate, &mut roots)
+        let mut eager = None;
+        let call = if self.has_delegated_call(value) {
+            self.capture_delegated_call(value.clone(), &mut evaluate, &mut roots, &mut eager)
         } else if let Type::Class(class) = value.ty
             && self.classes.has_record_iterator(class)
         {
@@ -69,6 +85,10 @@ impl Checker<'_> {
             return Ok(None);
         };
         let mut prepared = self.prepare_container(call, false, node, false)?;
+        if let Some(list) = eager {
+            evaluate.insert(0, Statement::Assign(list.selected, boolean(false)));
+            prepared.eager_list = Some((node.range(), list));
+        }
         let started = self.hidden(Type::Bool);
         let mut initialize = std::mem::replace(&mut prepared.evaluate, evaluate);
         initialize.extend(std::mem::replace(
@@ -85,13 +105,13 @@ impl Checker<'_> {
         Ok(Some(prepared))
     }
 
-    /// Every possible selected method must be a generator before its body can be delayed.
-    fn is_delegated_call(&self, value: &Expr) -> bool {
+    /// Identify generator branches in the checked dispatch expression.
+    fn has_delegated_call(&self, value: &Expr) -> bool {
         match &value.kind {
             ExprKind::Call(id, _) => self.classes.generators.contains(id),
-            ExprKind::Scope { value, .. } => self.is_delegated_call(value),
+            ExprKind::Scope { value, .. } => self.has_delegated_call(value),
             ExprKind::Conditional(_, yes, no) => {
-                self.is_delegated_call(yes) && self.is_delegated_call(no)
+                self.has_delegated_call(yes) || self.has_delegated_call(no)
             }
             _ => false,
         }
@@ -104,9 +124,10 @@ impl Checker<'_> {
         mut call: Expr,
         evaluate: &mut Vec<Statement>,
         roots: &mut Vec<usize>,
+        eager: &mut Option<EagerList>,
     ) -> Expr {
         match call.kind {
-            ExprKind::Call(id, ref mut args) => {
+            ExprKind::Call(id, ref mut args) if self.classes.generators.contains(&id) => {
                 for arg in &mut args.values {
                     evaluate.push(self.capture_generator_operand(arg, roots));
                 }
@@ -118,7 +139,7 @@ impl Checker<'_> {
                 value,
                 clear,
             } => {
-                let delayed = self.capture_delegated_call(*value, &mut body, roots);
+                let delayed = self.capture_delegated_call(*value, &mut body, roots, eager);
                 evaluate.push(Statement::Expr(Expr {
                     ty: Type::None,
                     kind: ExprKind::Scope {
@@ -136,15 +157,25 @@ impl Checker<'_> {
                 evaluate.push(self.capture_generator_operand(&mut test, roots));
                 let mut on_yes = Vec::new();
                 let mut on_no = Vec::new();
-                let yes = self.capture_delegated_call(*yes, &mut on_yes, roots);
-                let no = self.capture_delegated_call(*no, &mut on_no, roots);
+                let yes = self.capture_delegated_call(*yes, &mut on_yes, roots, eager);
+                let no = self.capture_delegated_call(*no, &mut on_no, roots, eager);
                 evaluate.push(Statement::If((*test).clone(), on_yes, on_no));
                 Expr {
                     ty: call.ty,
                     kind: ExprKind::Conditional(test, Box::new(yes), Box::new(no)),
                 }
             }
-            _ => unreachable!("expected a delegated generator call"),
+            _ => {
+                let list = eager.get_or_insert_with(|| {
+                    let value = self.hidden(call.ty);
+                    let selected = self.hidden(Type::Bool);
+                    roots.extend([value, selected]);
+                    EagerList { value, selected }
+                });
+                evaluate.push(Statement::Assign(list.value, call));
+                evaluate.push(Statement::Assign(list.selected, boolean(true)));
+                self.local(list.value)
+            }
         }
     }
 
@@ -317,6 +348,7 @@ impl Checker<'_> {
                 value,
                 ready,
                 elementless: false,
+                eager_list: None,
                 writes: HashSet::new(),
                 clear: vec![handle, value, ready],
             })));
@@ -403,8 +435,9 @@ impl Checker<'_> {
                         "reversed requires one positional sequence",
                     ));
                 }
-                let input = self.expansion_input(&call.arguments.args[0], element)?;
-                let mut input = self.prepare_iteration(input, call, true)?;
+                let source = &call.arguments.args[0];
+                let input = self.expansion_input(source, element)?;
+                let mut input = self.prepare_iteration(input, source, true)?;
                 input.evaluate.append(&mut input.acquire);
                 input
             }
@@ -602,6 +635,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes: HashSet::new(),
             clear: vec![stop, value, ready],
         })
@@ -686,6 +720,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: element.is_none(),
+            eager_list: None,
             writes,
             clear,
         })
@@ -730,6 +765,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes: HashSet::new(),
             clear: vec![iterator, value, ready],
         })
@@ -754,6 +790,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes: HashSet::new(),
             clear: vec![iterator, value, ready],
         }
@@ -823,6 +860,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes: HashSet::new(),
             clear: vec![iterator, optional, value, ready, done],
         }
@@ -911,6 +949,23 @@ impl Checker<'_> {
     ) -> Result<Prepared, String> {
         match input {
             Iteration::Prepared(input) if !reverse => Ok(input),
+            Iteration::Prepared(mut input) if let Some(list) = input.eager_list_at(node) => {
+                let mut reverse =
+                    self.prepare_container(self.local(list.value), false, node, true)?;
+                input.evaluate.push(Statement::If(
+                    not(self.local(list.selected)),
+                    vec![Statement::Expr(calls::type_error(
+                        Type::None,
+                        Vec::new(),
+                        "'generator' object is not reversible".into(),
+                    ))],
+                    Vec::new(),
+                ));
+                input.evaluate.append(&mut reverse.evaluate);
+                reverse.evaluate = input.evaluate;
+                reverse.clear.extend(input.clear);
+                Ok(reverse)
+            }
             Iteration::Prepared(_) => Err(error(
                 self.source,
                 node,
@@ -1059,6 +1114,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes: HashSet::new(),
             clear: arguments,
         }
@@ -1094,6 +1150,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes: HashSet::new(),
             clear: vec![source, value, ready],
         }
@@ -1134,6 +1191,7 @@ impl Checker<'_> {
                 value,
                 ready,
                 elementless: true,
+                eager_list: None,
                 writes: HashSet::new(),
                 clear: vec![source, value, ready],
             });
@@ -1357,6 +1415,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes: HashSet::new(),
             clear,
         })
@@ -1435,6 +1494,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes: HashSet::new(),
             clear,
         }
@@ -1608,6 +1668,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes,
             clear,
         })
@@ -1878,6 +1939,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes,
             clear,
         })
