@@ -1514,6 +1514,8 @@ pub unsafe extern "C" fn imre_dict_update(target: *const Object, source: *const 
             .0
             .with(|s| s.dictionary().missing == Missing::Zero)
     } {
+        // SAFETY: this policy guarantees integer values, and both rooted
+        // dictionaries have the same key and value representations.
         unsafe { imre_counter_update(target, source) };
         return;
     }
