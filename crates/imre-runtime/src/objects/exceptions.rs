@@ -728,6 +728,10 @@ impl Error {
         }
     }
 
+    pub(super) fn into_exception(self) -> Rc<Object> {
+        self.into_object()
+    }
+
     /// Installs this error only after any runtime storage access has ended.
     /// Keep exception allocation and cleanup out of successful access paths.
     #[cold]
