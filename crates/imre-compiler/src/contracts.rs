@@ -523,6 +523,9 @@ impl Builtin {
             | Self::DequeMaxlen
             | Self::DequeIter { .. }
             | Self::CounterNew
+            | Self::ChainMapNew
+            | Self::ChainMapMaps
+            | Self::ChainMapSetMaps
             | Self::CounterTotal
             | Self::DictAsBase
             | Self::DictClear
