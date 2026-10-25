@@ -107,6 +107,9 @@ impl Checker<'_> {
             .get(&(class, name.to_owned()))
             .copied()
     }
+    pub(super) fn class_data_type(&self, class: usize, name: &str) -> Option<Type> {
+        self.cell(class, name).map(|cell| cell.ty)
+    }
     /// A subclass can gain a new local class binding after its body returns.
     pub(super) fn inherit_class_data(
         &self,

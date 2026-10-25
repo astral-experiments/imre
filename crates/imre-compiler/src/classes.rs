@@ -655,6 +655,7 @@ fn collect_class(
             module,
             &methods[initializer],
             &fields,
+            &static_bindings,
             if generated_initializer {
                 &[]
             } else {
@@ -828,6 +829,7 @@ fn check_initializer(
     module: &SourceModule,
     initializer: &ast::StmtFunctionDef,
     fields: &[Field],
+    bindings: &HashMap<String, ClassValue>,
     inherited: &[Field],
     exception_layout: bool,
 ) -> Result<(), String> {
@@ -842,7 +844,12 @@ fn check_initializer(
         .iter()
         .map(|field| field.name.as_str())
         .collect::<HashSet<_>>();
-    let mut initialized = HashSet::new();
+    // Plain class values are available even while the instance is under construction.
+    // A write shadows them; it does not initialize a mandatory physical field.
+    let mut initialized: HashSet<_> = bindings
+        .iter()
+        .filter_map(|(n, v)| matches!(v, ClassValue::Runtime { .. }).then_some(n.as_str()))
+        .collect();
     let mut called_super = false;
     let mut called_exception_base = false;
     for statement in &initializer.body {
@@ -950,6 +957,9 @@ fn check_initializer(
                 return Err(module.error(target, "__init__ must assign a declared self.field"));
             }
             let name = attribute.attr.as_str();
+            if matches!(bindings.get(name), Some(ClassValue::Runtime { .. })) {
+                continue;
+            }
             if !declared.contains(name) {
                 return Err(module.error(
                     target,

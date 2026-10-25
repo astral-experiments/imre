@@ -541,7 +541,17 @@ impl Checker<'_> {
         probe.comprehension_targets = self.comprehension_targets.clone();
         match target {
             ast::Expr::Attribute(attribute) => {
+                if let Some(class) = probe.class_reference(&attribute.value)
+                    && let Some(ty) = probe.class_data_type(class, attribute.attr.as_str())
+                {
+                    return Some(ty);
+                }
                 let receiver = probe.expr(&attribute.value).ok()?;
+                if let Type::Class(class) = receiver.ty
+                    && let Some(ty) = probe.class_data_type(class, attribute.attr.as_str())
+                {
+                    return Some(ty);
+                }
                 if let Some(class) = self.writable_property(receiver.ty, attribute) {
                     let setter = &self.classes.setters[class][attribute.attr.as_str()];
                     return match self.inference {
