@@ -320,6 +320,8 @@ class Parent:
             for fd in self.fds
         )
         return dict(
+            parent_executable_verified=True,
+            data_child_argv=["<pinned-cpython>", *self.argv[1:]],
             parent_warning_pid_matched=True,
             applied_host_filter="always",
             original_object_identity_retained=True,
@@ -448,6 +450,7 @@ def main():
             cpython_commit=manifest["commit"],
             opt_level=tc.level,
             actor_sha256=hash_file(binary),
+            parent_source_sha256=hash_file(HERE / "active_parent.py"),
             fixture_os_sha256=hash_file(HERE / "fixture_active_os.c"),
             toolchain={
                 key: hash_file(getattr(a, key)) for key in ("imre", "runtime", "clang")

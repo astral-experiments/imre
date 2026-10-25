@@ -56,8 +56,12 @@ while command != "quit":
                 (input(),), stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
         except OSError as error:
-            print(error.errno)
-            print(error.filename)
+            number = error.errno
+            name = error.filename
+            if number is None or not isinstance(name, str):
+                raise AssertionError("launch error lost its errno or original filename")
+            print(number)
+            print(name)
         else:
             unexpected.kill()
             unexpected.wait()
