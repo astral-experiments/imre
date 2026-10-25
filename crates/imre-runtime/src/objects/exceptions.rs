@@ -362,6 +362,7 @@ pub(crate) struct Error {
     kind: Kind,
     // A missing payload uses the preallocated MemoryError when raised.
     payload: Option<Payload>,
+    cause: Option<Rc<Object>>,
 }
 
 impl Error {
@@ -372,6 +373,7 @@ impl Error {
         Self {
             kind: Kind::SystemExit,
             payload: Some(Payload::Exit(Some(code))),
+            cause: None,
         }
     }
 
@@ -379,6 +381,7 @@ impl Error {
         Self {
             kind,
             payload: Some(Payload::Message(Rc::new(message.into()))),
+            cause: None,
         }
     }
 
@@ -386,6 +389,7 @@ impl Error {
         Self {
             kind: Kind::MemoryError,
             payload: None,
+            cause: None,
         }
     }
 
@@ -393,6 +397,7 @@ impl Error {
         Self {
             kind: Kind::KeyError,
             payload: Some(Payload::Key(key)),
+            cause: None,
         }
     }
 
@@ -406,16 +411,25 @@ impl Error {
         Self::new(Kind::IndexError, "list index out of range")
     }
 
+    /// Retain the original exception when a native operation translates an error.
+    pub(super) fn with_cause(mut self, cause: Self) -> Self {
+        self.cause = Some(cause.into_object());
+        self
+    }
+
+    fn into_object(self) -> Rc<Object> {
+        match self.payload {
+            Some(payload) => exception_with_cause(self.kind, payload, self.cause),
+            None => SEQUENCE_ALLOCATION_ERROR.with_borrow(Rc::clone),
+        }
+    }
+
     /// Installs this error only after any runtime storage access has ended.
     /// Keep exception allocation and cleanup out of successful access paths.
     #[cold]
     #[inline(never)]
     pub(crate) fn raise(self) {
-        if let Some(payload) = self.payload {
-            replace_pending(Some(new_exception(self.kind, payload)));
-        } else {
-            sequence_allocation_failed();
-        }
+        replace_pending(Some(self.into_object()));
     }
 
     /// Returns a failure sentinel after installing the owned exception.
@@ -585,11 +599,20 @@ pub unsafe extern "C" fn imre_error_attach_directory_frame(frame: *const Object)
 }
 
 fn new_exception(kind: Kind, payload: impl Into<Payload>) -> Rc<Object> {
+    exception_with_cause(kind, payload.into(), None)
+}
+
+fn exception_with_cause(kind: Kind, payload: Payload, cause: Option<Rc<Object>>) -> Rc<Object> {
     Rc::new(Object(StorageCell::new(Storage::Exception(Exception {
         kind,
-        payload: payload.into(),
-        suppress_context: false,
-        details: None,
+        payload,
+        suppress_context: cause.is_some(),
+        details: cause.map(|cause| {
+            Rc::new(ExceptionDetails {
+                cause: Some(cause),
+                ..Default::default()
+            })
+        }),
     }))))
 }
 

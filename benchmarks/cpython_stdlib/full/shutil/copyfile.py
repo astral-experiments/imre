@@ -114,7 +114,8 @@ def cases(args, suite, directory, level):
     result = run([native, src, dst])
     if result.stderr or result.stdout != "2\n":
         raise AssertionError((result.stdout, result.stderr))
-    rows = {suite.TestCopy(NATIVE_CASE).id(): {"status": "fully_native",
+    rows = {suite.TestCopy(NATIVE_CASE).id(): {"status": "native_body_host_fixture",
+            "body": "Imre", "assertion_execution": "Imre", "fixture": "CPython creates two temporary directories",
             "method_sha256": hashlib.sha256(body).hexdigest(), "assertions": 2}}
 
     exe = build(args, directory, "copy", driver().encode(), level)

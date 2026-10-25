@@ -3,7 +3,10 @@
   "optimization_levels": {
     "0": {
       "test.test_shutil.TestCopy.test_copyfile_return_value": {
-        "status": "fully_native",
+        "status": "native_body_host_fixture",
+        "body": "Imre",
+        "assertion_execution": "Imre",
+        "fixture": "CPython creates two temporary directories",
         "method_sha256": "5c545f087d4996a8d0132e51b3cb6ee5a33f78a628fbc12aa8446cdaac0ce705",
         "assertions": 2
       },
@@ -38,7 +41,10 @@
     },
     "3": {
       "test.test_shutil.TestCopy.test_copyfile_return_value": {
-        "status": "fully_native",
+        "status": "native_body_host_fixture",
+        "body": "Imre",
+        "assertion_execution": "Imre",
+        "fixture": "CPython creates two temporary directories",
         "method_sha256": "5c545f087d4996a8d0132e51b3cb6ee5a33f78a628fbc12aa8446cdaac0ce705",
         "assertions": 2
       },

@@ -85,6 +85,7 @@ fn copy_data(src: &Name<'_>, dst: &Name<'_>) -> Result<()> {
                     Kind::FileNotFoundError,
                     format!("Directory does not exist: {}", dst.display()),
                 )
+                .with_cause(dst.error(e))
             } else {
                 dst.error(e)
             }

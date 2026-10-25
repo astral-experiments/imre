@@ -37,6 +37,11 @@ try:
     copyfile("input.txt", "missing directory/")
 except FileNotFoundError as exc:
     print(str(exc))
+    cause = exc.__cause__
+    print(exc.__suppress_context__)
+    if cause is not None:
+        print(isinstance(cause, IsADirectoryError))
+        print(str(cause))
 try:
     copyfile("tree", "missing directory/")
 except IsADirectoryError as exc:
