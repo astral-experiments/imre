@@ -22,6 +22,7 @@ pub(super) enum ParameterKind {
     PositionalOnly,
     PositionalOrKeyword,
     KeywordOnly,
+    Variadic,
     KeywordRest,
 }
 
@@ -46,6 +47,12 @@ pub(super) fn scalar_default(
     let mut value = scalar_literal(expression, source)?;
     let ty = value.ty;
     let concrete = types.payload(expected).unwrap_or(expected);
+    if expected == Type::ObjectValue && ty == Type::None {
+        return Ok(Expr {
+            ty: expected,
+            kind: ExprKind::Builtin(Builtin::BoxValue, vec![value]),
+        });
+    }
     if literals::accepts(types, concrete, &value) {
         value = literals::view(value, concrete);
     }
@@ -406,22 +413,39 @@ impl Checker<'_> {
         let rest = params
             .iter()
             .position(|p| p.kind == ParameterKind::KeywordRest);
+        let pack = params
+            .iter()
+            .position(|p| p.kind == ParameterKind::Variadic);
+        let mut packed = Vec::new();
         let mut extra = Vec::new();
         let mut positional = 0;
         for arg in &call.arguments.args {
             let mut bind = |checker: &mut Self,
-                            input,
+                            input: Supplied<'_>,
                             scope: Option<&mut ArgumentScope>|
              -> Result<(), String> {
-                params
-                    .get(positional)
-                    .filter(|parameter| {
-                        matches!(
-                            parameter.kind,
-                            ParameterKind::PositionalOnly | ParameterKind::PositionalOrKeyword
-                        )
-                    })
-                    .ok_or_else(|| error(checker.source, arg, "too many positional arguments"))?;
+                let ordinary = params.get(positional).is_some_and(|parameter| {
+                    matches!(
+                        parameter.kind,
+                        ParameterKind::PositionalOnly | ParameterKind::PositionalOrKeyword
+                    )
+                });
+                if !ordinary {
+                    let index = pack.ok_or_else(|| {
+                        error(checker.source, arg, "too many positional arguments")
+                    })?;
+                    let element = checker
+                        .types
+                        .element(params[index].ty)
+                        .expect("typed positional rest");
+                    let value = input.checked(checker, element, false)?;
+                    packed.push(if let Some(scope) = scope {
+                        scope.hold(checker, value)
+                    } else {
+                        value
+                    });
+                    return Ok(());
+                }
                 order[positional + offset] = values.len();
                 let value = check(checker, positional, input)?;
                 values.push(if let Some(scope) = scope {
@@ -443,6 +467,13 @@ impl Checker<'_> {
                 bind(self, Supplied::Source(arg), scope.as_deref_mut())?;
             }
         }
+        if let Some(index) = pack {
+            order[index + offset] = values.len();
+            values.push(Expr {
+                ty: params[index].ty,
+                kind: ExprKind::List(packed),
+            });
+        }
         for keyword in &call.arguments.keywords {
             let name = keyword
                 .arg
@@ -455,9 +486,10 @@ impl Checker<'_> {
                     )
                 })?
                 .as_str();
-            let fixed = params
-                .iter()
-                .position(|p| p.name == name && p.kind != ParameterKind::KeywordRest);
+            let fixed = params.iter().position(|p| {
+                p.name == name
+                    && !matches!(p.kind, ParameterKind::Variadic | ParameterKind::KeywordRest)
+            });
             if let Some(index) = rest
                 && fixed.is_none_or(|i| params[i].kind == ParameterKind::PositionalOnly)
             {

@@ -106,6 +106,8 @@ impl Type {
             | Self::CacheState(_)
             | Self::ProcessSelectorClass
             | Self::ClockTime
+            | Self::FunctionRef
+            | Self::OverloadStub
             | Self::Calendar(_)
             | Self::PlainObject
             | Self::StrDescriptor(_)
@@ -191,6 +193,8 @@ impl Type {
             | Self::CacheState(_)
             | Self::ProcessSelectorClass
             | Self::ClockTime
+            | Self::FunctionRef
+            | Self::OverloadStub
             | Self::Calendar(_)
             | Self::PlainObject
             | Self::StrDescriptor(_)
@@ -793,6 +797,7 @@ impl Emitter<'_, '_> {
             | Type::Tuple(_)
             | Type::Callable(_)
             | Type::ForwardRef(_)
+            | Type::FunctionRef
             | Type::AnnotationValue(_)
             | Type::VarTuple(_)
             | Type::ModuleSpec(_)
@@ -840,6 +845,7 @@ impl Emitter<'_, '_> {
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::OverloadStub
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
@@ -3568,6 +3574,8 @@ impl Emitter<'_, '_> {
                 | Type::ProcessSelectorClass
                 | Type::TimedFileHandler
                 | Type::StrDescriptor(_)
+                | Type::FunctionRef
+                | Type::OverloadStub
                 | Type::PlainObject
                 | Type::PathInfo
                 | Type::Poll
@@ -5236,6 +5244,46 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::Typing(operation) => {
+                use crate::ir::TypingOperation::*;
+                let values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
+                match operation {
+                    Register | RegisterBuiltin => {
+                        let symbol = if *operation == Register {
+                            "imre_typing_overload"
+                        } else {
+                            "imre_typing_overload_builtin"
+                        };
+                        self.void_call(symbol, &values);
+                        self.call("imre_typing_overload_dummy", returns, &[])
+                    }
+                    Get => self.call("imre_typing_get_overloads", returns, &values),
+                    GetBuiltin => self.call("imre_typing_get_builtin_overloads", returns, &values),
+                    Clear => {
+                        self.void_call("imre_typing_clear_overloads", &[]);
+                        none()
+                    }
+                    CallStub => self.call("imre_typing_call_stub", returns, &[]),
+                    Attr(index) => Value {
+                        ty: returns,
+                        small_integer: false,
+                        operand: self.checked_instruction(format!(
+                            "call ptr @imre_typing_function_attr(ptr {}, i32 {index})",
+                            values[0].operand
+                        )),
+                    },
+                    SetAttr(index) => Value {
+                        ty: returns,
+                        small_integer: false,
+                        operand: self.checked_instruction(format!(
+                            "call i8 @imre_typing_set_function_attr(ptr {}, ptr {}, i32 {index})",
+                            values[0].operand, values[1].operand
+                        )),
+                    },
+                    RegistryLen => self.call("imre_typing_registry_len", returns, &[]),
+                    Dummy => self.call("imre_typing_overload_dummy", returns, &[]),
+                }
+            }
             Builtin::NewPlainObject => self.call("imre_plain_object_new", returns, &[]),
             Builtin::Linecache(op, entry, env) => {
                 use crate::ir::LinecacheOperation as Op;
@@ -6393,6 +6441,37 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::DefaultDictMissing => {
+                let key = self.key_word(&args[1].value);
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_defaultdict_missing(ptr {}, i64 {key})",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            Builtin::DefaultFactoryEnabled => {
+                let flag = self.instruction(format!(
+                    "call i32 @imre_defaultdict_has_factory(ptr {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {flag}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::DefaultFactorySet { enabled } => {
+                let receiver = &args[0].value;
+                let (_, list) = self.module.types.mapping(receiver.ty).unwrap();
+                let element = self.module.types.element(list).unwrap();
+                self.line(format!(
+                    "call void @imre_defaultdict_set_factory(ptr {}, i32 {}, i32 {})",
+                    receiver.operand,
+                    representation_kind(element, &self.module.types),
+                    u8::from(*enabled)
+                ));
+                none()
+            }
             Builtin::DefaultListDict => {
                 let (key, list) = self.module.types.mapping(returns).unwrap();
                 let element = self.module.types.element(list).unwrap();
@@ -6799,6 +6878,7 @@ impl Emitter<'_, '_> {
                     Type::None => self.void_call("imre_print_none", &[]),
                     Type::ListInt
                     | Type::ForwardRef(_)
+                    | Type::FunctionRef
                     | Type::AnnotationValue(_)
                     | Type::BuiltinClass
                     | Type::Class(_)
@@ -6845,6 +6925,7 @@ impl Emitter<'_, '_> {
                     | Type::ClockTime
                     | Type::Calendar(_)
                     | Type::StrDescriptor(_)
+                    | Type::OverloadStub
                     | Type::PlainObject
                     | Type::SimpleNamespace(_)
                     | Type::PathInfo
@@ -7079,6 +7160,7 @@ impl Emitter<'_, '_> {
             Type::None => "0".to_owned(),
             Type::Str
             | Type::ForwardRef(_)
+            | Type::FunctionRef
             | Type::AnnotationValue(_)
             | Type::BuiltinClass
             | Type::StrLiteral(_)
@@ -7131,6 +7213,7 @@ impl Emitter<'_, '_> {
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::OverloadStub
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
@@ -7178,6 +7261,7 @@ impl Emitter<'_, '_> {
             Type::None => "0".to_owned(),
             Type::Str
             | Type::ForwardRef(_)
+            | Type::FunctionRef
             | Type::AnnotationValue(_)
             | Type::BuiltinClass
             | Type::StrLiteral(_)
@@ -7230,6 +7314,7 @@ impl Emitter<'_, '_> {
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::OverloadStub
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
@@ -7794,11 +7879,13 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Str | Type::StrLiteral(_) => 3,
         Type::BuiltinClass => 11,
         Type::ForwardRef(_) => 12,
+        Type::FunctionRef => 14,
         Type::AnnotationValue(_) => 13,
         Type::StrEnum(_) | Type::Enum(_) => 10,
         Type::Bytes => 8,
         Type::Union(_) | Type::StringIterable => 9,
         Type::ListInt => 4,
+        Type::Callable(_) if types.is_plain_callback(ty) => 14,
         Type::Class(_)
         | Type::VarTuple(_)
         | Type::Tuple(_)
@@ -7848,6 +7935,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ClockTime
         | Type::Calendar(_)
         | Type::StrDescriptor(_)
+        | Type::OverloadStub
         | Type::PlainObject
         | Type::SimpleNamespace(_)
         | Type::PathInfo
@@ -8255,6 +8343,17 @@ declare ptr @imre_csv_reader(ptr, i32, i32, i32, i32, i32)
 declare ptr @imre_csv_reader_terminator(ptr, i32, i32, i32, i32, i32, ptr, ptr)
 declare ptr @imre_csv_next(ptr, i32)
 declare i64 @imre_csv_line_number(ptr)
+declare void @imre_typing_declare(ptr, i32, ptr, ptr, ptr, i32)
+declare void @imre_typing_overload(ptr)
+declare void @imre_typing_overload_builtin(ptr, ptr)
+declare ptr @imre_typing_get_overloads(ptr)
+declare ptr @imre_typing_get_builtin_overloads(ptr, ptr)
+declare void @imre_typing_clear_overloads()
+declare ptr @imre_typing_overload_dummy()
+declare i8 @imre_typing_call_stub()
+declare ptr @imre_typing_function_attr(ptr, i32)
+declare i8 @imre_typing_set_function_attr(ptr, ptr, i32)
+declare i64 @imre_typing_registry_len()
 declare ptr @imre_plain_object_new()
 declare void @imre_linecache_init()
 declare ptr @imre_linecache_cache()
@@ -8290,6 +8389,9 @@ declare void @imre_socket_close(ptr)
 declare i64 @imre_socket_fileno(ptr)
 declare void @imre_socket_setblocking(ptr, i64)
 declare i1 @imre_socket_getblocking(ptr)
+declare ptr @imre_socket_dup(ptr)
+declare i1 @imre_socket_get_inheritable(ptr)
+declare void @imre_socket_set_inheritable(ptr, i64)
 declare void @imre_socket_setsockopt(ptr, i64, i64, i64)
 declare void @imre_socket_setsockopt_bytes(ptr, i64, i64, ptr)
 declare i64 @imre_socket_getsockopt(ptr, i64, i64)
@@ -8592,6 +8694,9 @@ declare i32 @imre_dict_try_pop(ptr, i64, ptr)
 declare i64 @imre_dict_pop(ptr, i64, i64, i32)
 declare i64 @imre_dict_get_default(ptr, i64, i64)
 declare i64 @imre_dict_setdefault(ptr, i64, i64)
+declare i64 @imre_defaultdict_missing(ptr, i64)
+declare i32 @imre_defaultdict_has_factory(ptr)
+declare void @imre_defaultdict_set_factory(ptr, i32, i32)
 declare void @imre_dict_set(ptr, i64, i64)
 declare void @imre_dict_delete(ptr, i64)
 declare void @imre_dict_clear(ptr)

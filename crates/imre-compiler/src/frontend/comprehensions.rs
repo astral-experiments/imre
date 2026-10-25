@@ -196,12 +196,7 @@ pub(super) fn function_reads(function: &ast::StmtFunctionDef) -> HashSet<String>
 impl Reads {
     fn visit_function(&mut self, function: &ast::StmtFunctionDef) {
         let mut bound = narrowing::assigned_names(&function.body);
-        bound.extend(
-            function
-                .parameters
-                .iter_non_variadic_params()
-                .map(|p| p.name().to_string()),
-        );
+        bound.extend(closed_calls::parameters(&function.parameters).map(|p| p.name.to_string()));
         self.bound.push(bound);
         self.visit_body(&function.body);
         self.bound.pop();

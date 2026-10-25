@@ -106,6 +106,10 @@ pub(crate) enum Type {
     Calendar(CalendarType),
     /// An exact instance of Python's plain, identity-only object.
     PlainObject,
+    /// A source function from a heterogeneous overload list.
+    FunctionRef,
+    /// The shared failing function returned by typing.overload.
+    OverloadStub,
     /// An exact immutable method descriptor on the builtin str class.
     StrDescriptor(StrDescriptor),
     ProcessSelectorClass,
@@ -196,6 +200,20 @@ pub(crate) enum PathFlavor {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TypingOperation {
+    Register,
+    Get,
+    RegisterBuiltin,
+    GetBuiltin,
+    Clear,
+    CallStub,
+    Attr(u32),
+    SetAttr(u32),
+    RegistryLen,
+    Dummy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SocketOp {
     Constant(&'static str),
     New,
@@ -211,6 +229,9 @@ pub(crate) enum SocketOp {
     Fileno,
     SetBlocking,
     GetBlocking,
+    Dup,
+    GetInheritable,
+    SetInheritable,
     SetSockOpt,
     GetSockOpt,
 }
@@ -318,6 +339,7 @@ impl std::fmt::Display for Type {
             Self::Calendar(CalendarType::Delta) => "datetime.timedelta",
             Self::Calendar(CalendarType::Zone) => "datetime.timezone",
             Self::PlainObject => "object",
+            Self::FunctionRef | Self::OverloadStub => "function",
             Self::StrDescriptor(_) => "method_descriptor",
             Self::ProcessSelectorClass => "subprocess selector class",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
@@ -986,6 +1008,7 @@ pub(crate) enum Builtin {
     Sha256New,
     HashNew,
     NewPlainObject,
+    Typing(TypingOperation),
     StrDescriptor(StrDescriptor),
     InspectSentinel,
     HashAvailable,
@@ -1168,6 +1191,11 @@ pub(crate) enum Builtin {
     RecordCopy,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
+    DefaultDictMissing,
+    DefaultFactoryEnabled,
+    DefaultFactorySet {
+        enabled: bool,
+    },
     DequeNew,
     DequeReset,
     DequeAppend {

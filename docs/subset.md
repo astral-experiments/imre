@@ -30,7 +30,7 @@ defaults and inspecting a partial's attributes are not yet supported.
 | Modules | Closed UTF-8 source graph; imports can follow literal exports in imported modules; entry definitions precede executable statements; imported initializers run once in dependency/source order; optional docstrings |
 | Imports | Absolute, `from`, and package-relative imports; aliases and package re-exports; fixed module, definition, and exported value bindings; shared mutable values; no import cycles |
 | Copying | Shallow copies of mutable containers share their children. Plain fixed class instances copy their stored fields without rerunning the initializer; a class may override this through an inherited or explicit `__copy__(self)` method. Deep copy preserves aliases in closed builtin container graphs with immutable keys, using the implicit memo or literal `None`. |
-| Functions | Exact signatures declared or inferred from concrete calls, scalar defaults, and checked bodies; direct positional and keyword calls; positional-only and keyword-only parameters; exact callable values, bound methods, and noncapturing lambdas; no recursive call cycles |
+| Functions | Exact signatures declared or inferred from concrete calls, scalar defaults, and checked bodies; direct positional and keyword calls; positional-only, keyword-only, and read-only variadic positional parameters; exact callable values, bound methods, and noncapturing lambdas; no recursive call cycles |
 | Types | `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed `pathlib.Path` and `subprocess.CompletedProcess[str]`, `typing.TextIO` and `typing.BinaryIO`, the sealed builtin `Exception` family, fixed nominal classes, string-valued `enum.StrEnum` and `typing.Literal`, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, exact `typing.Callable[[T1, T2], R]` signatures, `str \| bytes`, and `T \| None`; locals have one inferred or declared storage type |
 | Classes | Fixed fields, explicit or dataclass-generated initialization, typed instance/class/static methods, properties with optional setters, method-local `typing.Self`, alias-visible mutation, and frozen dataclasses |
 | Statements | Single-target and chained assignment; nested and starred unpacking of fixed tuples, lists, strings, and bytes, annotated assignment, numeric augmented assignment, local string/bytes `+=` and bytes `*=`, dictionary entry deletion, `if`/`elif`/`else`, structural `match`/`case`, `while`, `for` over ranges, strings, bytes, concrete containers, or supported iterator pipelines, loop `else`, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin file/workspace `with` |
@@ -57,7 +57,7 @@ Indentation must use spaces; tabs and form feeds remain valid inside string data
 
 The compiler bounds syntax complexity before parsing each module. Deeply nested blocks, delimiters, or long chains of operators can exceed the limit. Splitting a long expression into intermediate assignments reduces its depth.
 
-Global rebinding, capturing closures, arbitrary decorators, reflection, dynamic attributes, general generator functions, escaping iterator values, async generators, slice assignment/deletion, dynamic call argument expansion, variadic parameters, function defaults other than scalar literals, mutable-list augmented assignment, and arbitrary object identity comparisons are currently rejected. By default the compiler checks every function and branch. A closed entry profile can select particular branches of reachable functions. A recursive call graph is rejected, including indirect recursion through callable values, methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+Global rebinding, capturing closures, arbitrary decorators, reflection, dynamic attributes, general generator functions, escaping iterator values, async generators, slice assignment/deletion, open-ended call argument expansion, untyped variadic parameters, function defaults other than scalar literals, mutable-list augmented assignment, and arbitrary object identity comparisons are currently rejected. By default the compiler checks every function and branch. A closed entry profile can select particular branches of reachable functions. A recursive call graph is rejected, including indirect recursion through callable values, methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
 
 ## Inferred function signatures and iterable consumers
 
@@ -618,7 +618,11 @@ Defaults must be `int`, `float`, `bool`, `str`, `bytes`, or `None` literals. A n
 
 The receiver of an instance call evaluates first. Supplied arguments then evaluate once in source order, independently of parameter order; a failure prevents later arguments and the callee from running. The compiler applies each parameter's exact type context to its argument, including empty containers and optional values, and retains evaluated values across later mutations and failures. Named arguments lower to ordinary positional native calls.
 
-Variadic parameters and `*`/`**` argument expansion remain unsupported. Builtins and methods accept specific keywords. `open` accepts `encoding="utf-8"`, `sum` accepts `start`, `zip` accepts `strict`, and both `sorted` and `list.sort` accept `key` and `reverse`.
+Calls can expand a fixed tuple literal or local with `*args`, and a dictionary with distinct literal string keys with `**options`. A local dictionary must be assigned once and used only for expansion. Its values are evaluated when the dictionary is created. Rebinding the original variables does not change those values. When a packed value has type `T | None` and the parameter requires `T`, the call checks for `None` and raises `TypeError` before entering the callee. Ordinary nullable parameters still receive `None`.
+
+A function or method can declare homogeneous positional arguments such as `*args: str`. The body can iterate, check the length or expand the values into a fresh list. Indexing and slicing the pack are outside this subset. Returning the pack, mutating it, or observing its concrete storage is unsupported. `**kwargs` parameters, dynamically computed keyword shapes and variable-length spreading into an ordinary fixed call remain unsupported.
+
+Builtins and methods accept specific keywords. `open` accepts `encoding="utf-8"`, `sum` accepts `start`, `zip` accepts `strict`, and both `sorted` and `list.sort` accept `key` and `reverse`.
 
 ## String percent formatting
 
@@ -904,6 +908,16 @@ in seconds. It returns three fresh lists in input order, including duplicate rea
 Closed descriptors raise `OSError(EBADF)`; descriptors outside the target's `FD_SETSIZE` raise `ValueError`.
 The native poller is not subject to the select fd-set limit. Objects with a dynamic `fileno()` and Python signal
 callbacks are outside this integer-fd interface.
+
+`selectors.DefaultSelector` uses `selectors.PollSelector`, the most capable backend
+exposed by this build. Both support integer descriptors, `register`, `modify`,
+`unregister`, `select`, `get_key`, `close`, and `with`. The key is an immutable
+`SelectorKey(fileobj, fd, events, data)` namedtuple. Ready results pair that same
+key with `EVENT_READ` and/or `EVENT_WRITE` restricted to its registered interests.
+Timeouts are seconds; a nonpositive timeout checks immediately. Opaque data can
+use the compiler's boxed values (`None`, booleans, integers, strings, bytes and
+supported tuples). `get_map`, arbitrary data objects and automatic `fileno()`
+conversion are outside this selector subset. Pass a socket's integer `fileno()`.
 
 `os.environ.get(key)` and `os.getenv(key)` read a string from the environment and return `None` for a missing key. Both accept an optional `default` of type `str | None`. A string default gives a `str` result. `os.getcwd()` returns the current directory, and `os.fspath(path)` accepts a `str`, `bytes`, or native `Path`. `print(text, file=sys.stderr)` writes a string and a newline to standard error.
 
@@ -1203,6 +1217,11 @@ entries. A native defaultdict produces a new mapping with no default factory;
 a native Counter raises `NotImplementedError`.
 
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.
+
+Its `default_factory` can be read and set to `list` or `None` through a typed
+defaultdict. An explicit `__missing__(key)` call runs the list factory, then
+returns the stored object if the key already exists. With no factory it raises
+`KeyError` for any key of the declared type, even one present in the mapping.
 
 `collections.ChainMap[K, V]` accepts dictionaries with matching key and value
 types and exposes them in its mutable `maps` list. A no-argument constructor

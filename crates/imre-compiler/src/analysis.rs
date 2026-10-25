@@ -551,6 +551,7 @@ struct CheckedFile<'db> {
 pub(crate) enum CheckedDiagnostic {
     AbstractClassCall(TextRange),
     Decorator(TextRange),
+    RuntimeOverload(TextRange),
     OptionalLockContext(TextRange),
     Call(TextRange),
     DictDeletion(TextRange),
@@ -582,6 +583,7 @@ impl CheckedDiagnostic {
             Self::PositionalKeyword(range) => (range, 7),
             Self::DeferredName(range) => (range, 9),
             Self::NonIterableSpread(range) => (range, 10),
+            Self::RuntimeOverload(range) => (range, 12),
         };
         (range.start(), range.end(), kind)
     }
@@ -594,6 +596,7 @@ impl CheckedDiagnostic {
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
+            Self::RuntimeOverload(name) => diagnostic == "invalid-overload" && name == range,
             Self::DeferredName(name) => diagnostic == "unresolved-reference" && name == range,
             Self::OptionalLockContext(expr) => {
                 diagnostic == "invalid-context-manager" && expr == range

@@ -417,6 +417,7 @@ impl Builtin {
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::Bool
+            | Self::DefaultFactoryEnabled
             | Self::EnumLookup(_)
             | Self::DictSumValues
             | Self::Encode
@@ -520,6 +521,7 @@ impl Builtin {
             | Self::ChainMapGet(_)
             | Self::DictPop
             | Self::DictSetDefault
+            | Self::DefaultDictMissing
             | Self::DictTryPop(_)
             | Self::DictGatherBytesInt
             | Self::DictGatherStrInt
@@ -595,6 +597,7 @@ impl Builtin {
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
             | Self::DefaultListDict
+            | Self::DefaultFactorySet { .. }
             | Self::DequeMaxlen
             | Self::DequeIter { .. }
             | Self::CounterNew
@@ -624,6 +627,7 @@ impl Builtin {
             | Self::SortedRecordRows { .. }
             | Self::SortedStringKeys
             | Self::TupleCacheNew
+            | Self::Typing(_)
             | Self::TupleCacheResult => Contract::new(true, Unknown),
         }
     }
@@ -867,6 +871,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
             "int_floordiv"
                 | "imre_chr"
                 | "imre_annotation_ref"
+                | "imre_typing_call_stub"
                 | "imre_random_bits"
                 | "imre_random_choice_index"
                 | "imre_random_progression"

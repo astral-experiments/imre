@@ -8,10 +8,10 @@ each one to its upstream decorator or runtime condition.
 
 | At both O0 and O3 | Methods | What ran |
 | --- | ---: | --- |
-| Native body, host fixture | 4 | `BasicTCPTest.testRecv`, `testOverFlowRecv`, `testSendAll` and `GeneralModuleTests.test_listen_backlog`. |
+| Native body, host fixture | 7 | `BasicTCPTest.testRecv`, `testOverFlowRecv`, `testSendAll` and `GeneralModuleTests.test_listen_backlog`; three `InheritanceTest` methods cover default and changed descriptor flags and duplication. |
 | Native body, mixed operations | 3 | The same three TCP methods under `BasicTCPTest2`; its defining `socket.create_connection` call runs on CPython. |
 | Host body, native operations | 2 | `GeneralModuleTests.testGetSockOpt` and `testSetSockOpt`. |
-| Reference only | 672 | Stock CPython passed; no Imre execution is claimed. |
+| Reference only | 669 | Stock CPython passed; no Imre execution is claimed. |
 | Reference skip | 65 | Stock CPython skipped on this host; these are not Imre exclusions. |
 
 The receiving methods and their original senders compile from complete,
@@ -27,6 +27,14 @@ the six receiving occurrences must fail its own assertion on a corrupt wire.
 A paired sender is evidence for the same occurrence, never an additional
 method. The backlog method runs its original three binds, listens and context
 cleanups under the stock module fixture.
+
+The three unmodified InheritanceTest methods create or duplicate real native
+descriptors under the stock module fixture. Their boolean comparisons run
+through native TestCase.assertTrue; a deliberately inheritable socket must fail
+the default-flag assertion. The separate socket-only check observes
+FD_CLOEXEC through os in both directions, verifies that copying restores the
+source socket's stored blocking mode and transmits data after the original
+closes. Closed descriptor operations must report EBADF.
 
 For the two option methods, stock unittest executes the unchanged test and
 registered cleanup. A pipe forwards each constructor/method call to one native

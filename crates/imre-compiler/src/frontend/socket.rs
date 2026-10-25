@@ -69,6 +69,9 @@ impl Checker<'_> {
             "fileno" => (Fileno, int, vec![]),
             "setblocking" => (SetBlocking, Type::None, vec![("flag", int, None)]),
             "getblocking" => (GetBlocking, Type::Bool, vec![]),
+            "dup" => (Dup, Type::Socket, vec![]),
+            "get_inheritable" => (GetInheritable, Type::Bool, vec![]),
+            "set_inheritable" => (SetInheritable, Type::None, vec![("inheritable", int, None)]),
             "getsockopt" => (
                 GetSockOpt,
                 int,
@@ -90,7 +93,11 @@ impl Checker<'_> {
             .map(|(name, ty, default)| Parameter {
                 name: name.into(),
                 ty,
-                kind: ParameterKind::PositionalOnly,
+                kind: if op == SetInheritable {
+                    ParameterKind::PositionalOrKeyword
+                } else {
+                    ParameterKind::PositionalOnly
+                },
                 default,
                 sign_only: false,
             })
