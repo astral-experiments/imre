@@ -1,7 +1,8 @@
 //! Capture Python standard output at the stream shared by print and sys.stdout.
 //! Nested examples restore their caller's stream; stderr is never captured.
 
-use super::{Error, Kind, OUTPUT, Rc, Str};
+use super::{Error, Kind, OUTPUT, Str};
+use crate::StrOwner;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_doctest_capture_start() {
@@ -37,5 +38,5 @@ pub extern "C" fn imre_doctest_capture_take() -> *const Str {
         }
         text.push('\n');
     }
-    Rc::into_raw(Rc::new(Str::from(text)))
+    StrOwner::into_raw(StrOwner::new(Str::from(text)))
 }

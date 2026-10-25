@@ -1,5 +1,6 @@
 //! Decode deeply nested standard JSON without recursing on the Rust stack.
 //! Frames contain arena indices, so errors and discarded results unwind iteratively too.
+use crate::StrOwner;
 use std::rc::Rc;
 
 use super::super::syntax::{self, Cursor, Failure};
@@ -124,7 +125,9 @@ fn parse(text: &str) -> Result<(Vec<Node>, usize), Problem> {
                     "true" => Node::Bool(true),
                     "false" => Node::Bool(false),
                     "null" => Node::Null,
-                    token if token.starts_with('"') => Node::String(Rc::new(string(token, start)?)),
+                    token if token.starts_with('"') => {
+                        Node::String(StrOwner::new(string(token, start)?))
+                    }
                     token => number(token),
                 }
             }
@@ -167,7 +170,7 @@ fn parse(text: &str) -> Result<(Vec<Node>, usize), Problem> {
 
 pub(super) fn loads(
     text: &str,
-    owner: impl FnOnce() -> Option<Rc<Str>>,
+    owner: impl FnOnce() -> Option<StrOwner>,
 ) -> Result<*const Object, Error> {
     let (mut nodes, index) = parse(text).map_err(|problem| {
         let (at, message) = match problem {

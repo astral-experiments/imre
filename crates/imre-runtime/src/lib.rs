@@ -5,7 +5,7 @@
 //! is always nonzero and lets compiler range proofs imply representation;
 //! extension adapters must normalize incoming integers before exposing them to
 //! generated code.
-//! String and list handles are live `Rc` pointers of
+//! String and list handles are live reference-counted pointers of
 //! their respective types. ABI arguments borrow these handles; results transfer
 //! one owned reference unless an entry point explicitly documents a borrowed
 //! result. Release functions consume one reference. Generated code
@@ -34,6 +34,8 @@
 
 mod extensions;
 mod floats;
+mod string_owner;
+use string_owner::{StrOwner, WeakStr};
 mod integer_power;
 mod integer_text;
 mod objects;
@@ -340,7 +342,7 @@ impl Drop for List {
     }
 }
 
-/// Immutable UTF-8 storage behind an opaque `Rc` handle. Short strings fit inside
+/// Immutable UTF-8 storage behind an opaque shared handle. Short strings fit inside
 /// that allocation; longer strings own a separate buffer. LLVM never reads this
 /// representation directly.
 pub type Str = compact_str::CompactString;
@@ -857,22 +859,33 @@ pub extern "C" fn imre_print_none() {
 pub unsafe extern "C" fn imre_int_str(value: usize) -> *const Str {
     // SAFETY: the caller keeps the integer alive through formatting.
     let value = unsafe { Int::borrow(value) };
-    match integer_text::decimal_string(&value) {
-        Ok(text) => Rc::into_raw(Rc::new(text)),
+    match integer_text::decimal_string(&value).and_then(checked_owned_str) {
+        Ok(text) => text,
         Err(error) => error.returning(std::ptr::null()),
     }
+}
+
+/// Transfer a freshly formatted string to generated code, preserving allocation failure.
+fn checked_owned_str(text: Str) -> Result<*const Str, Error> {
+    StrOwner::try_new(text)
+        .map(StrOwner::into_raw)
+        .map_err(|_| Error::allocation())
 }
 
 /// Returns an owned Python spelling for a compiler-validated boolean.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_bool_str(value: u32) -> *const Str {
-    Rc::into_raw(Rc::new(Str::new(if value == 0 { "False" } else { "True" })))
+    StrOwner::into_raw(StrOwner::new(Str::new(if value == 0 {
+        "False"
+    } else {
+        "True"
+    })))
 }
 
 /// Returns an owned string containing Python's None spelling.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_none_str() -> *const Str {
-    Rc::into_raw(Rc::new(Str::new("None")))
+    StrOwner::into_raw(StrOwner::new(Str::new("None")))
 }
 
 /// # Safety
@@ -881,7 +894,7 @@ pub extern "C" fn imre_none_str() -> *const Str {
 pub unsafe extern "C" fn imre_str_literal(data: *const u8, length: usize) -> *const Str {
     // SAFETY: the compiler supplies the readable constant span.
     let literal = unsafe { text(data, length) };
-    Rc::into_raw(objects::literal_string(literal))
+    StrOwner::into_raw(objects::literal_string(literal))
 }
 
 /// # Safety
@@ -891,10 +904,10 @@ pub unsafe extern "C" fn imre_str_literal(data: *const u8, length: usize) -> *co
 pub unsafe extern "C" fn imre_str_static_literal(data: *const u8, length: usize) -> *const Str {
     // SAFETY: the compiler's string globals have static storage duration.
     let literal: &'static str = unsafe { text(data, length) };
-    Rc::into_raw(if literal.len() <= 2 {
+    StrOwner::into_raw(if literal.len() <= 2 {
         objects::literal_string(literal)
     } else {
-        Rc::new(Str::const_new(literal))
+        StrOwner::new(Str::const_new(literal))
     })
 }
 
@@ -903,8 +916,8 @@ pub unsafe extern "C" fn imre_str_static_literal(data: *const u8, length: usize)
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_retain(value: *const Str) {
     if !value.is_null() {
-        // SAFETY: the caller owns a live Rc<Str> reference.
-        unsafe { Rc::increment_strong_count(value) };
+        // SAFETY: the caller owns a live StrOwner reference.
+        unsafe { StrOwner::increment_strong_count(value) };
     }
 }
 
@@ -913,8 +926,8 @@ pub unsafe extern "C" fn imre_str_retain(value: *const Str) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_release(value: *const Str) {
     if !value.is_null() {
-        // SAFETY: the caller transfers one live Rc<Str> reference.
-        unsafe { Rc::decrement_strong_count(value) };
+        // SAFETY: the caller transfers one live StrOwner reference.
+        unsafe { StrOwner::decrement_strong_count(value) };
     }
 }
 
@@ -1055,7 +1068,7 @@ pub extern "C" fn imre_input() -> *const Str {
     if line.ends_with('\n') {
         line.pop();
     }
-    Rc::into_raw(Rc::new(Str::from(line)))
+    StrOwner::into_raw(StrOwner::new(Str::from(line)))
 }
 
 #[unsafe(no_mangle)]
@@ -2206,15 +2219,15 @@ mod tests {
             let expected = value.to_string();
             let value = Int::new(value);
             // SAFETY: the integer stays rooted and the returned string transfers ownership.
-            let formatted = unsafe { Rc::from_raw(imre_int_str(value.0)) };
+            let formatted = unsafe { StrOwner::from_raw(imre_int_str(value.0)) };
             drop(value);
             assert_eq!(formatted.as_str(), expected);
         }
         // SAFETY: each conversion returns one fresh owned string handle.
         unsafe {
-            assert_eq!(Rc::from_raw(imre_bool_str(0)).as_str(), "False");
-            assert_eq!(Rc::from_raw(imre_bool_str(1)).as_str(), "True");
-            assert_eq!(Rc::from_raw(imre_none_str()).as_str(), "None");
+            assert_eq!(StrOwner::from_raw(imre_bool_str(0)).as_str(), "False");
+            assert_eq!(StrOwner::from_raw(imre_bool_str(1)).as_str(), "True");
+            assert_eq!(StrOwner::from_raw(imre_none_str()).as_str(), "None");
         }
     }
 
@@ -2308,7 +2321,7 @@ mod tests {
                 let error = imre_error_take();
                 assert!(!error.is_null());
                 assert_eq!(imre_exception_matches(error, Kind::ValueError as u32), 1);
-                let message = Rc::from_raw(imre_exception_message(error));
+                let message = StrOwner::from_raw(imre_exception_message(error));
                 assert_eq!(
                     message.as_str(),
                     format!("invalid literal for int() with base 10: {literal}")
@@ -2323,7 +2336,7 @@ mod tests {
             assert_eq!(imre_int_parse(&source), 1);
             let error = imre_error_take();
             assert!(!error.is_null());
-            let message = Rc::from_raw(imre_exception_message(error));
+            let message = StrOwner::from_raw(imre_exception_message(error));
             assert_eq!(
                 message.as_str(),
                 format!(
@@ -2374,7 +2387,7 @@ mod tests {
                         imre_exception_matches(error, Kind::ZeroDivisionError as u32),
                         1
                     );
-                    let message = Rc::from_raw(imre_exception_message(error));
+                    let message = StrOwner::from_raw(imre_exception_message(error));
                     assert_eq!(message.as_str(), "division by zero");
                     objects::imre_object_release(error);
                 }
