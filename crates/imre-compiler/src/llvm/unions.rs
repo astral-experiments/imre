@@ -125,6 +125,21 @@ impl Emitter<'_, '_> {
     /// Inspect exception and record layouts only after proving the payload is present
     /// and selecting its tag if it is part of a finite union.
     pub(super) fn instance_test(&mut self, value: &Value, classes: &[InstanceType]) -> String {
+        if matches!(value.ty, Type::AnnotationValue(_)) {
+            let kind = self.instruction(format!(
+                "call i32 @imre_annotation_kind(ptr {})",
+                value.operand
+            ));
+            let mut result = "false".to_string();
+            for member in self.module.types.children(value.ty) {
+                if classes.iter().any(|class| class.accepts(member)) {
+                    let tag = super::representation_kind(member, &self.module.types);
+                    let is_member = self.instruction(format!("icmp eq i32 {kind}, {tag}"));
+                    result = self.instruction(format!("or i1 {result}, {is_member}"));
+                }
+            }
+            return result;
+        }
         if let Some(payload) = self.module.types.payload(value.ty) {
             let present = self.instruction(format!("icmp ne i64 {}, 0", value.operand));
             let (inspect, end) = (self.label(), self.label());
@@ -157,7 +172,9 @@ impl Emitter<'_, '_> {
                 (4, Type::ListInt),
                 (5, Type::Dict(0)),
                 (6, Type::Tuple(0)),
+                (7, Type::Float),
                 (8, Type::Bytes),
+                (12, Type::Set(0)),
             ]
             .iter()
             .filter(|(_, ty)| classes.iter().any(|class| class.accepts(*ty)))
@@ -172,14 +189,24 @@ impl Emitter<'_, '_> {
                 self.instruction(format!("icmp ne i32 {found}, 0"))
             });
             for class in classes {
-                if let InstanceType::Exact(Type::Class(class)) = class {
-                    let ptr = self.boxed_record(value, *class);
-                    let found = self.instruction(format!("icmp ne ptr {ptr}, null"));
-                    matched = Some(match matched {
-                        Some(previous) => self.instruction(format!("or i1 {previous}, {found}")),
-                        None => found,
-                    });
-                }
+                let found = match class {
+                    InstanceType::Exact(Type::Class(class)) => {
+                        let ptr = self.boxed_record(value, *class);
+                        self.instruction(format!("icmp ne ptr {ptr}, null"))
+                    }
+                    InstanceType::Exception(kind) => {
+                        let child = self.instruction(format!(
+                            "call i32 @imre_exception_field_matches(ptr {}, i32 {kind})",
+                            value.operand
+                        ));
+                        self.instruction(format!("icmp ne i32 {child}, 0"))
+                    }
+                    _ => continue,
+                };
+                matched = Some(match matched {
+                    Some(previous) => self.instruction(format!("or i1 {previous}, {found}")),
+                    None => found,
+                });
             }
             return matched.unwrap_or_else(|| "false".into());
         }
@@ -206,7 +233,11 @@ impl Emitter<'_, '_> {
                             (InstanceType::Exact(Type::Class(_)), Type::Class(_))
                         )
                 };
-                if members.iter().copied().all(accepts_tag) {
+                let inspect_io =
+                    |ty| matches!(class, InstanceType::IoBase(base) if base.matches(ty).is_none());
+                if members.iter().copied().all(accepts_tag)
+                    && !members.iter().copied().any(inspect_io)
+                {
                     "true".to_owned()
                 } else {
                     let mut matched = None;
@@ -223,7 +254,8 @@ impl Emitter<'_, '_> {
                             (class, selected),
                             (InstanceType::Exception(1..), Type::Exception)
                                 | (InstanceType::Exact(Type::Class(_)), Type::Class(_))
-                        ) {
+                        ) || inspect_io(selected)
+                        {
                             let (inspect, end) = (self.label(), self.label());
                             let other = self.current.clone();
                             self.branch(&found, &inspect, &end);
@@ -247,6 +279,17 @@ impl Emitter<'_, '_> {
                     }
                     matched.unwrap_or_else(|| "false".to_owned())
                 }
+            } else if let InstanceType::IoBase(base) = class
+                && base.matches(value.ty).is_none()
+            {
+                let raw =
+                    self.instruction(format!("call i32 @imre_file_is_raw(ptr {})", value.operand));
+                let comparison = if base == crate::ir::IoBase::Raw {
+                    "ne"
+                } else {
+                    "eq"
+                };
+                self.instruction(format!("icmp {comparison} i32 {raw}, 0"))
             } else if let (InstanceType::Exact(Type::Class(class)), Type::Class(_)) =
                 (class, value.ty)
             {

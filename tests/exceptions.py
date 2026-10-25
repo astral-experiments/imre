@@ -28,6 +28,10 @@ ACCEPTED = {
     "boxed_payload": (Path(__file__).parent / "fixtures/exceptions/boxed_payload.py").read_text(),
     "inherited_payload": (Path(__file__).parent / "fixtures/exceptions/inherited_payload.py").read_text(),
     "warning_hierarchy": (Path(__file__).parent / "fixtures/exceptions/warning_hierarchy.py").read_text(),
+    **{
+        name: (Path(__file__).parent / f"fixtures/exceptions/{name}.py").read_text()
+        for name in ("generic_args", "generic_args_processes", "generic_args_groups", "generic_args_records")
+    },
     "explicit_base": (Path(__file__).parent / "fixtures/exceptions/explicit_base.py").read_text(),
     "import_error": (Path(__file__).parent / "fixtures/exceptions/import_error.py").read_text(),
     "classvar_exception_constructor": """
@@ -906,6 +910,19 @@ except KeyError:
 }
 
 REJECTED = {
+    **{
+        f"forwarding_exception_descriptor_{name}": f"""
+class Problem(Exception):
+    def __init__(self, value, *rest):
+        super().__init__(value, *rest)
+        self.{name} = value
+Problem("ab")
+"""
+        for name in (
+            "args", "__cause__", "__context__", "__traceback__",
+            "__suppress_context__", "__dict__", "__class__", "__weakref__",
+        )
+    },
     "separate_payload_layouts": """
 class Left(ValueError):
     def __init__(self, x: int) -> None:

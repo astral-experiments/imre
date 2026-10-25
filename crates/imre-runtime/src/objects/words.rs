@@ -5,6 +5,7 @@
 //! a nullable value; optional booleans use 0=None, 1=False, and 2=True.
 //! Bare float words hold all binary64 bits; nullable floats instead own an Rc<f64>.
 
+use crate::StrOwner;
 use smallvec::SmallVec;
 use std::cell::Cell;
 use std::mem::ManuallyDrop;
@@ -24,7 +25,7 @@ impl WordKind {
     const STRUCT_ROWS: Self = Self(u16::MAX - 1);
 
     pub(super) fn new(kind: u32) -> Self {
-        if kind & !NULLABLE > 12 {
+        if kind & !NULLABLE > 13 {
             fail("SystemError", "invalid concrete word representation");
         }
         Self(kind as u16)
@@ -51,7 +52,7 @@ impl WordKind {
     /// `field` is an aligned, readable record slot stored using this descriptor's
     /// LLVM representation, or its initial all-zero state.
     pub(super) unsafe fn read_record_field(self, field: *const usize) -> usize {
-        if matches!(self.0, 3..=6 | 8 | 11 | 12) {
+        if matches!(self.0, 3..=6 | 8 | 11..=13) {
             // SAFETY: this exact descriptor denotes a pointer-typed field.
             unsafe { field.cast::<*const ()>().read() as usize }
         } else if self.0 == 7 {
@@ -70,7 +71,7 @@ impl WordKind {
         let valid = match self.base() {
             0 => word == 0,
             1 => word <= if nullable { 2 } else { 1 },
-            2..=6 | 8..=12 => word != 0 || nullable,
+            2..=6 | 8..=13 => word != 0 || nullable,
             7 => true,
             _ => unreachable!(),
         };
@@ -104,10 +105,10 @@ impl WordKind {
                         Rc::increment_strong_count(word as *const num_bigint::BigInt);
                     }
                 }
-                3 | 11 => Rc::increment_strong_count(word as *const Str),
+                3 | 11 => StrOwner::increment_strong_count(word as *const Str),
                 4 => Rc::increment_strong_count(word as *const List),
                 5 => Rc::increment_strong_count(word as *const Object),
-                6 | 12 => records::imre_record_retain(word as *const usize),
+                6 | 12 | 13 => records::imre_record_retain(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::increment_strong_count(word as *const f64),
                 7 => {}
                 8 => Rc::increment_strong_count(word as *const Bytes),
@@ -129,10 +130,10 @@ impl WordKind {
             match self.base() {
                 0 | 1 | 10 => {}
                 2 => drop(Int(word)),
-                3 | 11 => Rc::decrement_strong_count(word as *const Str),
+                3 | 11 => StrOwner::decrement_strong_count(word as *const Str),
                 4 => crate::imre_list_release(word as *const List),
                 5 => records::release_object_word(Rc::from_raw(word as *const Object)),
-                6 | 12 => records::imre_record_release(word as *const usize),
+                6 | 12 | 13 => records::imre_record_release(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::decrement_strong_count(word as *const f64),
                 7 => {}
                 8 => Rc::decrement_strong_count(word as *const Bytes),
@@ -331,26 +332,27 @@ impl Words {
     /// Publish a fully initialized buffer after bulk initialization by a decoder or splitter.
     /// Bulk producers build initialized, owned record words before publication.
     /// Convert homogeneous struct outputs too, including schema-decoded lists.
-    pub(super) fn pack_structs(&mut self) {
+    pub(super) fn pack_structs(&mut self) -> super::exceptions::Result<()> {
         if self.kind.raw() != 6 || self.values.is_empty() {
-            return;
+            return Ok(());
         }
         // SAFETY: kind six guarantees initialized, rooted native record payloads.
         let layout = unsafe { records::descriptor(self.values[0] as *const usize) };
         if !layout.is_value_struct() {
-            return;
+            return Ok(());
         }
         let mut rows = super::structs::Rows::new(layout);
         for &word in &self.values {
             // SAFETY: all words share the immutable exact class and are rooted by self.
-            rows.append(unsafe { rows.payload(word as *const usize) })
-                .unwrap_or_else(|_| fail("MemoryError", "struct list allocation failed"));
+            rows.append(unsafe { rows.payload(word as *const usize) })?;
         }
         *self = Self::from_rows(rows);
+        Ok(())
     }
 
     pub(super) fn into_object(mut self) -> Rc<Object> {
-        self.pack_structs();
+        // The original boxed list remains usable if optional packing cannot allocate.
+        let _ = self.pack_structs();
         if self.kind != WordKind::DEFERRED {
             self.update_header();
         }
@@ -589,13 +591,13 @@ mod tests {
         };
         use super::super::{imre_seq_append, imre_seq_data_readonly};
 
-        let held = Rc::new(Str::new("rooted"));
-        let weak = Rc::downgrade(&held);
+        let held = StrOwner::new(Str::new("rooted"));
+        let weak = StrOwner::downgrade(&held);
         let input = Words::new(3).into_object();
         // SAFETY: all handles remain rooted through their last access. The
         // buffer pointer is read before either the list or a copy is changed.
         unsafe {
-            imre_seq_append(Rc::as_ptr(&input), Rc::as_ptr(&held) as usize, 3);
+            imre_seq_append(Rc::as_ptr(&input), StrOwner::as_ptr(&held) as usize, 3);
             let diff = Rc::from_raw(imre_ndiff_deferred(Rc::as_ptr(&input), Rc::as_ptr(&input)));
             let copy = Rc::from_raw(imre_str_list_copy(Rc::as_ptr(&diff)));
             drop(held);

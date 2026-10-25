@@ -1,4 +1,5 @@
 use super::*;
+use crate::StrOwner;
 use crate::objects::{mappings, values};
 use std::borrow::Cow;
 
@@ -28,7 +29,7 @@ impl Ignore {
         for entry in entries {
             let name = src.joined(Path::new(&entry.file_name()))?;
             let value = match name {
-                Name::Text(s) | Name::Path(s) => Rc::into_raw(s) as usize,
+                Name::Text(s) | Name::Path(s) => StrOwner::into_raw(s) as usize,
                 Name::Bytes(b) => Rc::into_raw(b) as usize,
             };
             names.values.push(value);

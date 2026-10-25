@@ -1,8 +1,9 @@
 //! Owning, type-erased views of native Python scalars, sequences, and eligible dataclasses.
-use super::exceptions::{Error, Kind};
+use super::exceptions::Error;
 use super::words::WordKind;
-use super::{Bytes, Object, Storage, StorageCell, Str, acquire_rc, object, records, values};
+use super::{Bytes, Object, Storage, StorageCell, Str, object, records, values};
 use crate::Int;
+use crate::StrOwner;
 use std::rc::Rc;
 
 // A tuple may store an optional scalar in its nullable representation. Views
@@ -46,68 +47,38 @@ pub(super) unsafe fn tuple_item(tuple: usize, index: usize) -> (WordKind, usize)
     }
 }
 
-pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rc<Str> {
+pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> StrOwner {
     if kind.raw() == 3 && !repr {
         // SAFETY: the owning field roots the exact string.
-        return unsafe { acquire_rc(word) };
+        return unsafe { crate::StrOwner::acquire_word(word) };
     }
     let mut result = String::new();
     // SAFETY: only concrete, representable field types reach this routine.
     unsafe {
-        values::write_repr(&mut result, word, kind);
+        values::write_checked_repr(&mut result, word, kind);
     }
-    Rc::new(result.into())
+    StrOwner::new(result.into())
 }
 
-/// The default CPython decimal conversion limit is tested only when a selected
-/// value is actually formatted. Compare magnitudes before converting,
-/// so a huge input cannot allocate an unbounded decimal scratch string.
+/// Transfer the formatted string only after all visited fields and callbacks succeed.
 pub(super) unsafe fn checked_text(kind: WordKind, word: usize, repr: bool) -> *const Str {
-    static LIMIT: std::sync::LazyLock<num_bigint::BigUint> =
-        std::sync::LazyLock::new(|| num_bigint::BigUint::from(10u8).pow(4300));
     // SAFETY: all descendants stay rooted in the original immutable boxed value.
     unsafe {
-        // A sibling cursor per ancestor keeps scratch space proportional to depth.
-        let mut pending = smallvec::SmallVec::<[(WordKind, usize, usize, usize); 4]>::new();
-        let mut next = (kind, word);
-        'scan: loop {
-            let (k, w) = next;
-            if k.raw() == 2 {
-                let n = Int::borrow(w);
-                if n.as_small().is_none() && n.big().magnitude() >= &*LIMIT {
-                    return Error::new(Kind::ValueError, "Exceeds the limit (4300 digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit")
-                        .returning(std::ptr::null());
-                }
-            } else if matches!(k.raw(), 4..=6) {
-                // Dataclasses have no Python length, but their selected repr fields are visited.
-                let n = if k.raw() == 6 {
-                    records::descriptor(w as *const usize).length
-                } else {
-                    length(k, w).unwrap_or(0)
-                };
-                if n != 0 {
-                    pending.push((k, w, 0, n));
-                }
-            }
-            while let Some((k, w, i, n)) = pending.pop() {
-                let selected = if k.raw() == 6
-                    && let Some(class) = records::descriptor(w as *const usize).class_semantics()
-                {
-                    (i..n).find(|&j| (*class.fields.add(j)).flags & 2 != 0)
-                } else {
-                    Some(i)
-                };
-                if let Some(i) = selected {
-                    if i + 1 < n {
-                        pending.push((k, w, i + 1, n));
-                    }
-                    next = sequence_item(k, w, i);
-                    continue 'scan;
-                }
-            }
-            break;
+        if !repr
+            && kind.raw() == 5
+            && object(word as *const Object)
+                .0
+                .with(|s| matches!(s, Storage::Exception(_)))
+        {
+            // The storage borrow ends before a user-defined __str__ can be called.
+            return super::exceptions::imre_exception_message(word as *const Object);
         }
-        Rc::into_raw(word_text(kind, word, repr))
+        let text = word_text(kind, word, repr);
+        if super::exceptions::imre_error_pending() == 0 {
+            StrOwner::into_raw(text)
+        } else {
+            std::ptr::null()
+        }
     }
 }
 
@@ -172,6 +143,21 @@ pub(super) fn length(kind: WordKind, word: usize) -> Option<usize> {
     }
 }
 
+/// Observable Python length, including containers whose members are not sequence indices.
+pub(super) fn python_length(kind: WordKind, word: usize) -> Option<usize> {
+    length(kind, word).or_else(|| {
+        if kind.raw() != 5 {
+            return None;
+        }
+        // SAFETY: this rooted object stays live for the brief storage read.
+        unsafe {
+            object(word as *const Object)
+                .0
+                .with(Storage::mapping_or_set_len)
+        }
+    })
+}
+
 /// # Safety
 /// The caller roots a sequence and has checked the element index against its length.
 pub(super) unsafe fn sequence_item(kind: WordKind, word: usize, i: usize) -> (WordKind, usize) {
@@ -233,7 +219,7 @@ pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) ->
                 if !(ka == kb && wa == wb) && n != 0 {
                     if n > 1 {
                         if pending.try_reserve(1).is_err() {
-                            return Error::allocation().returning(false);
+                            return Error::memory_error().returning(false);
                         }
                         pending.push((a, b, 1, n));
                     }

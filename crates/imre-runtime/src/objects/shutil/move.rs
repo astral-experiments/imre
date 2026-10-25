@@ -1,6 +1,7 @@
 //! Move by rename first. Copy and remove the source only after a failed rename
 //! and a successful fallback; preserve symbolic links even when their targets are gone.
 
+use crate::StrOwner;
 use rustix::fs::{Access, AtFlags, CWD, accessat};
 use std::path::PathBuf;
 
@@ -228,7 +229,7 @@ pub unsafe extern "C" fn imre_shutil_move(
                 Destination::Original => {
                     retain_handle(dst, dst_tag) | if dst_tag == 2 { 6 } else { 0 }
                 }
-                Destination::Joined(path) => Rc::into_raw(Rc::new(
+                Destination::Joined(path) => StrOwner::into_raw(StrOwner::new(
                     crate::objects::paths::path_utf8(path.into_os_string())?,
                 )) as usize,
             })
