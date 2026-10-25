@@ -151,6 +151,28 @@ impl Checker<'_> {
         }
         let left = self.expr(left)?;
         let right = self.expr(right)?;
+        if [left.ty, right.ty].contains(&Type::ObjectValue)
+            && [left.ty, right.ty]
+                .iter()
+                .any(|ty| matches!(ty, Type::ListInt | Type::List(_)))
+        {
+            let reversed = right.ty == Type::ObjectValue;
+            let same = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(
+                    Builtin::ExceptionFieldIdentity { reversed },
+                    vec![left, right],
+                ),
+            };
+            return Ok(if op == ast::CmpOp::IsNot {
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Not(Box::new(same)),
+                }
+            } else {
+                same
+            });
+        }
         // A comparison with a bool singleton only observes whether the other
         // operand is that same singleton; integer object identity is irrelevant.
         if let Some(union) = [left.ty, right.ty]

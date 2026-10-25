@@ -340,6 +340,9 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         resume: (position + 1 < left.values.len()).then_some(position + 1),
                     }
                 }
+                (Storage::ModuleMember(left), Storage::ModuleMember(right)) => {
+                    Comparison::Done(left.equal_member(right))
+                }
                 (Storage::ObjectValue(l), Storage::ObjectValue(r)) => Comparison::Done(
                     super::boxed_values::equal((l.kind, l.word), (r.kind, r.word)),
                 ),
@@ -420,6 +423,14 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         | Storage::TokenMissing => Some(ReprTask::Context(
                             super::contextvars::repr_view(owner, storage),
                         )),
+                        Storage::ModuleMember(member) => {
+                            let text = member.text(1);
+                            if !text.is_null() {
+                                // SAFETY: the metadata formatter returns an independently owned string.
+                                output.push_str(Rc::from_raw(text).as_str());
+                            }
+                            None
+                        }
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None

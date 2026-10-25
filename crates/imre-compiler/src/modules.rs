@@ -994,7 +994,7 @@ impl SourceGraph {
             .push(CheckedDiagnostic::PositionalKeyword(keyword));
     }
 
-    /// The native binder raises for this keyword because the receiver was already bound.
+    /// The native binder raises because this keyword's parameter was already bound.
     pub(crate) fn checked_repeated_keyword(&self, module: ModuleId, keyword: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::RepeatedKeyword(keyword));
