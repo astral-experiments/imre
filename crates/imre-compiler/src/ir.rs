@@ -812,6 +812,7 @@ pub(crate) enum PathOperation {
 pub(crate) enum PosixPathOperation {
     Join,
     MixedJoin { path_in_tail: bool },
+    Commonpath,
     Basename,
     Dirname,
     Splitext,

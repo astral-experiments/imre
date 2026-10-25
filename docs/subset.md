@@ -519,6 +519,8 @@ Indexing uses exact integer indexes, including negative indexes, and returns an 
 
 ## Native paths and directory traversal
 
+On POSIX, `os.devnull` is `"/dev/null"`. `os.path.commonpath(paths)` compares path components for lists of `str`, `bytes`, or native `Path` objects and literal list or tuple displays. It removes redundant separators and `.` components, preserves `..`, and rejects an empty sequence, mixed string and byte paths, or mixed absolute and relative paths.
+
 On POSIX, `os.path.join(a, *parts)`, `basename(p)`, `dirname(p)`, and `splitext(p)` take strings, bytes, or native `pathlib.Path` values. Calls can also use `posixpath`, aliased modules, and imported function names. String and byte spellings preserve redundant slashes, dots, and trailing separators according to each function. A native `Path` supplies its normalized string spelling. A join accepts fixed positional components and raises `TypeError` when string and byte paths are mixed. `splitext` returns a pair of the input string or byte type.
 
 `os.path.normpath(path)` removes redundant separators and dot components and collapses `..` lexically. Exactly two leading slashes survive. `os.path.abspath(path)` applies the same rules after prepending the current directory to a relative input; it does not resolve symlinks or require the path to exist. Both accept `str`, `bytes`, and native `Path`. Byte inputs produce bytes even when a path or working directory contains invalid UTF-8. Text results must be representable as Imre strings.
