@@ -20,6 +20,7 @@ pub(crate) use inheritance::super_init;
 pub(crate) enum MethodKind {
     Instance,
     Property,
+    PropertySetter,
     Class,
     Static,
 }
@@ -207,7 +208,7 @@ fn collect_class(
     {
         return Err(module.error(node, "incompatible base for a fixed-layout class"));
     }
-    let mut methods = Vec::new();
+    let mut methods: Vec<ast::StmtFunctionDef> = Vec::new();
     let mut method_kinds = Vec::new();
     let mut initializer = None;
     for statement in &node.body {
@@ -360,7 +361,19 @@ fn collect_class(
                     );
                 }
                 let kind = method_kind(graph, definition.module, method, &class_bindings)?;
-                if !names.insert(name.to_owned()) {
+                if kind == MethodKind::PropertySetter {
+                    let mut accessors = methods
+                        .iter()
+                        .zip(&method_kinds)
+                        .filter(|(m, _)| m.name.as_str() == name)
+                        .map(|(_, &k)| k);
+                    if accessors.next() != Some(MethodKind::Property) || accessors.next().is_some()
+                    {
+                        return Err(
+                            module.error(method, "a property setter needs its preceding getter")
+                        );
+                    }
+                } else if !names.insert(name.to_owned()) {
                     return Err(module.error(method, &format!("duplicate class member {name:?}")));
                 }
                 let first = method
@@ -369,7 +382,9 @@ fn collect_class(
                     .first()
                     .or_else(|| method.parameters.args.first());
                 let receiver = match kind {
-                    MethodKind::Instance | MethodKind::Property => Some("self"),
+                    MethodKind::Instance | MethodKind::Property | MethodKind::PropertySetter => {
+                        Some("self")
+                    }
                     MethodKind::Class => Some("cls"),
                     MethodKind::Static => None,
                 };
@@ -387,6 +402,14 @@ fn collect_class(
                     && (method.parameters.len() != 1 || first.unwrap().default.is_some())
                 {
                     return Err(module.error(method, "a property getter must take only self"));
+                }
+                if kind == MethodKind::PropertySetter
+                    && (method.parameters.posonlyargs.len() + method.parameters.args.len() != 2
+                        || method.parameters.len() != 2)
+                {
+                    return Err(
+                        module.error(method, "a property setter must take self and a value")
+                    );
                 }
                 if (unary_protocol || matches!(name, "__repr__" | "__post_init__"))
                     && (kind != MethodKind::Instance
@@ -645,6 +668,14 @@ fn method_kind(
             "staticmethod" => return Ok(MethodKind::Static),
             _ => {}
         }
+    }
+    if let ast::Expr::Attribute(attr) = &decorator.expression
+        && attr.attr.as_str() == "setter"
+        && let ast::Expr::Name(name) = &*attr.value
+        && name.id == method.name.id
+        && class_names.contains(name.id.as_str())
+    {
+        return Ok(MethodKind::PropertySetter);
     }
     Err(module.error(
         decorator,

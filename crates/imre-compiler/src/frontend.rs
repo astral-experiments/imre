@@ -96,6 +96,7 @@ struct ClassInfo {
     declarations: Classes,
     fields: Vec<Vec<Type>>,
     methods: Vec<HashMap<String, Signature>>,
+    setters: Vec<HashMap<String, Signature>>,
     keyword_copies: HashSet<usize>,
     cached: HashMap<usize, function_caches::Policy>,
     cached_properties: cached_properties::Slots,
@@ -283,6 +284,7 @@ impl ClassInfo {
         Ok(Self {
             parsers,
             methods: vec![HashMap::new(); fields.len()],
+            setters: vec![HashMap::new(); fields.len()],
             keyword_copies: HashSet::new(),
             cached: HashMap::new(),
             cached_properties,
@@ -627,7 +629,12 @@ pub(crate) fn lower_with_owners(
             if keyword_copy {
                 classes.keyword_copies.insert(signature.id);
             }
-            classes.methods[class_id].insert(method.name.to_string(), signature.clone());
+            let table = if class.method_kinds[index] == crate::classes::MethodKind::PropertySetter {
+                &mut classes.setters[class_id]
+            } else {
+                &mut classes.methods[class_id]
+            };
+            table.insert(method.name.to_string(), signature.clone());
             if contexts::decorated(&class.methods[index], graph, module_id) {
                 if !contexts::single_yield(&method) {
                     return Err(module.error(&method, "a context manager requires one bare yield on each successful path and an optional finally suite"));
@@ -1031,7 +1038,9 @@ fn signature(
         .filter(|context| {
             matches!(
                 context.kind(classes),
-                crate::classes::MethodKind::Instance | crate::classes::MethodKind::Property
+                crate::classes::MethodKind::Instance
+                    | crate::classes::MethodKind::Property
+                    | crate::classes::MethodKind::PropertySetter
             )
         })
         .map(|context| classes.instance(context.class));
