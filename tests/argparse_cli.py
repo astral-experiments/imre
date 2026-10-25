@@ -108,6 +108,9 @@ CASES = {
         ["one", "-v", "two"], ["one", "--", "-v", "--"], ["--", "--", "tail"],
         ["one", "--unknown", "two"], ["--unknown", "one"], ["one", "--help"],
     ],
+    "flag_actions": [[], ["--help"], ["-v"], ["-vvv"], ["-vqvfq"], ["-s", "-n", "--pi", "--toggle"],
+                     ["-q", "-q", "-q"], ["--off"], ["--off=x"], ["-s=x"], ["-v=3"], ["-vh"],
+                     ["-v=f", "--help"], ["--help", "--off=x"], ["-f", "extra"]],
     "method_args": [[]],
     "known_args": [
         [], ["--help"], ["--foo", "F", "--bar", "--baz"], ["--foo"],

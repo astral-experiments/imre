@@ -162,6 +162,10 @@ jobs:
       - name: Check pinned types.SimpleNamespace tests and dictionary aliases
         run: |
           python3 benchmarks/cpython_stdlib/full/types/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-types.json"
+      - name: Check pinned linecache methods, cache mutation, and source encodings
+        run: |
+          python3 benchmarks/cpython_stdlib/full/linecache/generate_codecs.py --check
+          python3 benchmarks/cpython_stdlib/full/linecache/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-linecache.json"
       - name: Compare structured OS failures with CPython
         run: |
           work=$(mktemp -d "$RUNNER_TEMP/os-errno-fields-XXXXXX")
@@ -239,6 +243,7 @@ jobs:
           python3 benchmarks/cpython_stdlib/native_shutil.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil.json"
           python3 benchmarks/cpython_stdlib/full/shutil/native_copy.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-copy.json"
           python3 benchmarks/cpython_stdlib/full/shutil/native_rmtree.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-rmtree.json"
+          python3 benchmarks/cpython_stdlib/full/shutil/tree_ops.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-copytree.json"
           python3 benchmarks/cpython_stdlib/native_json.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json.json"
           python3 benchmarks/cpython_stdlib/native_json_values.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json-values.json"
           python3 benchmarks/cpython_stdlib/full/shlex/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shlex.json"

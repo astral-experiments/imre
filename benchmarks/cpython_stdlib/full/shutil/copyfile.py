@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
@@ -69,9 +70,14 @@ def driver():
 import sys
 
 try:
-    result = shutil.copyfile(sys.argv[1], sys.argv[2], follow_symlinks=sys.argv[3] == "1")
-    print("ok")
-    print(repr(result))
+    if sys.argv[1] == "rmtree":
+        shutil.rmtree(sys.argv[2], ignore_errors=sys.argv[3] == "1")
+        print("ok")
+        print("None")
+    else:
+        result = shutil.copyfile(sys.argv[2], sys.argv[3], follow_symlinks=sys.argv[4] == "1")
+        print("ok")
+        print(repr(result))
 ''' + "".join(f"except {exc} as error:\n    print('{exc}')\n    print(repr(str(error)))\n" for exc in ERRORS)
 
 
@@ -103,33 +109,44 @@ def executors(args, suite, directory, level, *, with_roles=False):
     errors = {n: getattr(suite.shutil if "." in n else builtins, n.split(".")[-1]) for n in ERRORS}
 
     def host(case, original):
-        calls = 0
-        def invoke(src, dst, *, follow_symlinks=True):
-            nonlocal calls
-            result = run([exe, src, dst, str(int(follow_symlinks))])
+        counts = {}
+        def call(op, *args):
+            result = run([exe, op, *args])
             if result.stderr:
                 raise AssertionError(result.stderr)
             status, payload = result.stdout.rstrip("\n").split("\n", 1)
             value = ast.literal_eval(payload)
-            calls += 1
+            counts[op] = counts.get(op, 0) + 1
             if status != "ok":
                 raise errors[status](value)
             return value
 
-        with patch.object(suite.shutil, "copyfile", invoke):
+        def copy(src, dst, *, follow_symlinks=True):
+            return call("copyfile", src, dst, str(int(follow_symlinks)))
+
+        def remove(path, *, ignore_errors=False):
+            # The original finally block removes the directory that held its aliases.
+            assert os.path.isdir(path)
+            assert call("rmtree", path, str(int(ignore_errors))) is None
+            assert not os.path.lexists(path)
+
+        proxy = SimpleNamespace(copyfile=copy, rmtree=remove, Error=suite.Error,
+                                SameFileError=suite.SameFileError, SpecialFileError=suite.shutil.SpecialFileError)
+        with patch.object(suite, "shutil", proxy):
             original()
-        assert calls == HOST_CASES[case._testMethodName], (case.id(), calls)
-        host_cleanup = case._testMethodName.startswith("test_dont_copy_file_onto_")
+        expected = {"copyfile": HOST_CASES[case._testMethodName]}
+        if case._testMethodName.startswith("test_dont_copy_file_onto_"):
+            expected["rmtree"] = 1
+        assert counts == expected, (case.id(), counts)
+        evidence = {"native_calls": sum(counts.values())}
+        if "rmtree" in counts:
+            evidence.update(calls_by_operation=counts, removed_directory=True)
         if with_roles:
             from suite_evidence import roles
-            operation = "shutil.copyfile in Imre; shutil.rmtree in the original finally block in CPython" if host_cleanup else "shutil.copyfile"
-            return {"roles": roles(body="cpython", assertions="cpython", operation="mixed" if host_cleanup else "imre", fixture="cpython"),
-                    "evidence": {"operation": operation, "native_calls": calls, "opt_level": level,
-                                 "fixture": "original CPython TestCopy fixture and assertions; native copyfile receives both real paths"}}
-        if host_cleanup:
-            return {"status": "mixed", "native_calls": calls, "native": "copyfile",
-                    "host": "unittest assertions and shutil.rmtree in the method's finally block"}
-        return {"status": "host_driven_native", "native_calls": calls}
+            return {"roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
+                    "evidence": dict(evidence, operation=", ".join("shutil." + op for op in counts),
+                                     opt_level=level, fixture="original CPython TestCopy fixture and assertions")}
+        return {"status": "host_driven_native", **evidence}
 
     executions = {suite.TestCopy(name).id(): host for name in HOST_CASES}
     executions[test_id] = native
