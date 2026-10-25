@@ -69,6 +69,7 @@ pub(crate) enum IntrinsicModule {
     Dataclasses,
     Difflib,
     DoctestRuntime,
+    MockRuntime,
     Logging,
     LoggingConfig,
     LoggingHandlers,
@@ -225,6 +226,7 @@ pub(crate) enum Intrinsic {
     DocCaptureTake,
     DocDisplay,
     DocAscii,
+    MockCallList { mark: bool },
     DocExecute,
     Final,
     Argv,
@@ -328,6 +330,7 @@ pub(crate) enum Intrinsic {
     GetEnv,
     GetCwd,
     Strerror,
+    StatResult,
     Fd(crate::ir::FdOperation),
     DescriptorConstant(&'static str),
     FsPath,
@@ -376,6 +379,7 @@ impl IntrinsicModule {
             "dataclasses" => Some(Self::Dataclasses),
             "difflib" => Some(Self::Difflib),
             "_imre_doctest" => Some(Self::DoctestRuntime),
+            "_imre_mock" => Some(Self::MockRuntime),
             "pathlib" => Some(Self::Pathlib),
             "shlex" => Some(Self::Shlex),
             "tempfile" => Some(Self::Tempfile),
@@ -607,6 +611,8 @@ impl IntrinsicModule {
             (Self::DoctestRuntime, "display") => Intrinsic::DocDisplay,
             (Self::DoctestRuntime, "ascii_output") => Intrinsic::DocAscii,
             (Self::DoctestRuntime, "execute") => Intrinsic::DocExecute,
+            (Self::MockRuntime, "mark_call_list") => Intrinsic::MockCallList { mark: true },
+            (Self::MockRuntime, "is_call_list") => Intrinsic::MockCallList { mark: false },
             (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
@@ -938,10 +944,10 @@ impl SourceGraph {
             .push(CheckedDiagnostic::PositionalKeyword(keyword));
     }
 
-    /// The native Python binder found that this specific keyword also received a positional value.
-    pub(crate) fn checked_duplicate_argument(&self, module: ModuleId, keyword: TextRange) {
+    /// The native binder raises because this keyword's parameter was already bound.
+    pub(crate) fn checked_repeated_keyword(&self, module: ModuleId, keyword: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
-            .push(CheckedDiagnostic::DuplicateArgument(keyword));
+            .push(CheckedDiagnostic::RepeatedKeyword(keyword));
     }
 
     pub(crate) fn checked_keywords(

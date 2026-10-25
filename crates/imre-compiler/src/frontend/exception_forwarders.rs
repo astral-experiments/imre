@@ -73,8 +73,7 @@ impl Checker<'_> {
                 .iter()
                 .find(|kw| kw.arg.as_ref().is_some_and(|n| n.as_str() == name));
             if positional && let Some(kw) = keyword {
-                self.graph
-                    .checked_duplicate_argument(self.module, kw.range());
+                self.graph.checked_repeated_keyword(self.module, kw.range());
             }
             missing |= !positional && keyword.is_none() && default.is_none();
         }
@@ -90,8 +89,7 @@ impl Checker<'_> {
         for kw in keywords {
             let Some(name) = &kw.arg else { continue };
             if name.as_str() == plan.receiver {
-                self.graph
-                    .checked_duplicate_argument(self.module, kw.range());
+                self.graph.checked_repeated_keyword(self.module, kw.range());
             } else if !plan.parameters.iter().any(|(key, _)| key == name.as_str()) {
                 self.graph
                     .checked_keywords(self.module, std::iter::once(kw.range()));
