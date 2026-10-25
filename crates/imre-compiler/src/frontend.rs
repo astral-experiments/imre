@@ -29,6 +29,7 @@ mod dispatch;
 mod doctest;
 mod documents;
 mod enums;
+mod expandtabs;
 mod expansions;
 mod fixed_tuples;
 mod fnmatch;
@@ -753,11 +754,12 @@ pub(crate) fn lower_with_owners(
         }
     }
     let initializer_start = definitions.len();
-    let helpers = Helpers::new(definitions.len() + graph.initializers().count());
+    let class_globals = classes.declarations.owns_class_tuples(graph.entry);
+    let helpers = Helpers::new(definitions.len() + graph.initializers(class_globals).count());
     let globals = ModuleValues::default();
     let mut initializations = Vec::new();
     let mut available = HashSet::new();
-    for (module_id, range) in graph.initializers() {
+    for (module_id, range) in graph.initializers(class_globals) {
         let checker = Checker::new(
             graph,
             module_id,
@@ -5186,6 +5188,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                let mut values = self.numeric_union_comparison(values);
                 if let ([left, right], [op]) = (values.as_slice(), compare.ops.as_ref())
                     && let Some(result) = inspect::equality(left, right, *op)
                 {
@@ -5784,7 +5787,16 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if let Type::Class(class) = receiver.ty
-                    && self.classes.methods[class].contains_key(attribute.attr.as_str())
+                    && (self.classes.methods[class].contains_key(attribute.attr.as_str())
+                        || matches!(
+                            self.classes.declarations.definitions[class]
+                                .static_bindings
+                                .get(attribute.attr.as_str()),
+                            Some(
+                                crate::classes::ClassValue::String(_)
+                                    | crate::classes::ClassValue::Strings { .. }
+                            )
+                        ))
                 {
                     return self.class_attribute(attribute, class, Some(receiver), None);
                 }
@@ -6605,7 +6617,7 @@ impl<'a> Checker<'a> {
             } else {
                 receiver
             };
-            if receiver.ty.is_path() {
+            if receiver.ty.is_path() || receiver.ty == Type::PathInfo {
                 return self.path_method(receiver, attribute, call);
             }
             if matches!(receiver.ty, Type::Popen(..)) {
@@ -6658,6 +6670,11 @@ impl<'a> Checker<'a> {
                     attribute.attr.as_str(),
                     call,
                 );
+            }
+            if attribute.attr.as_str() == "expandtabs"
+                && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            {
+                return self.expandtabs(Self::string_value(receiver), call);
             }
             if matches!(attribute.attr.as_str(), "lower" | "capitalize")
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
@@ -7098,9 +7115,18 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(builtin, args),
             });
         }
-        if args.len() == 1 && args[0].ty.is_path() && matches!(name.id.as_str(), "str" | "print") {
-            let text = paths::operation(ir::PathOperation::Text, Type::Str, args);
-            return Ok(if name.id == "str" {
+        if args.len() == 1
+            && ((args[0].ty.is_path() && matches!(name.id.as_str(), "str" | "print"))
+                || (args[0].ty == Type::PathInfo
+                    && matches!(name.id.as_str(), "str" | "repr" | "print")))
+        {
+            let op = if args[0].ty == Type::PathInfo {
+                ir::PathOperation::InfoRepr
+            } else {
+                ir::PathOperation::Text
+            };
+            let text = paths::operation(op, Type::Str, args);
+            return Ok(if name.id != "print" {
                 text
             } else {
                 Expr {

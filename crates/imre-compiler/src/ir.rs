@@ -57,6 +57,8 @@ pub(crate) enum Type {
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
     Path,
     PurePath(PathFlavor),
+    /// The shared, independently retained metadata view of an exact concrete Path.
+    PathInfo,
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture, Option<usize>),
     /// A synchronous child with statically known captured stream types.
@@ -196,6 +198,7 @@ impl std::fmt::Display for Type {
             Self::TextIO => "typing.TextIO",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
+            Self::PathInfo => "pathlib.types.PathInfo",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
             Self::CompletedProcess(capture, _) if capture.text => {
@@ -1072,6 +1075,7 @@ impl StrDescriptor {
 pub(crate) enum TextOperation {
     IsSpace,
     SplitLineEnds,
+    ExpandTabs,
     Lower,
     Capitalize,
     /// True splits from the right.
@@ -1086,6 +1090,20 @@ pub(crate) enum TextOperation {
     Dedent,
     ShlexSplit,
     ShlexQuote,
+}
+
+/// Numeric selectors for the runtime's imre_path_query ABI.
+#[derive(Clone, Copy)]
+#[repr(u32)]
+pub(crate) enum PathQuery {
+    Exists = 0,
+    Directory = 1,
+    File = 2,
+    Symlink = 3,
+    Fifo = 4,
+    Socket = 5,
+    BlockDevice = 6,
+    CharDevice = 7,
 }
 
 /// Native path operations keep their exact result types in the checked IR.
@@ -1119,9 +1137,9 @@ pub(crate) enum PathOperation {
     IsAbsolute,
     Absolute,
     Resolve,
-    Exists,
-    IsFile,
-    IsDir,
+    Info,
+    InfoRepr,
+    Query(PathQuery),
     ReadText,
     ReadBytes,
     WriteText,
