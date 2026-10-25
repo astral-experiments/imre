@@ -50,12 +50,6 @@ def observe_result(result: Result) -> None:
         print(value)
 
 
-observe_result(Result())
-observe_result(Missing())
-observe_result(FalseResult())
-observe_result(ZeroResult())
-
-
 class Rows(ABC):
     def __init__(self, lines: Iterable[str]) -> None:
         self.lines = list(lines)
@@ -173,3 +167,8 @@ def run() -> None:
 
 
 run()
+
+observe_result(Result())
+observe_result(Missing())
+observe_result(FalseResult())
+observe_result(ZeroResult())
