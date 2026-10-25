@@ -25,6 +25,8 @@ pub(crate) enum Type {
     Class(usize),
     List(usize),
     Dict(usize),
+    /// A ChainMap owner, parameterized by the exact dictionary shape of its maps.
+    ChainMap(usize),
     Set(usize),
     Deque(usize),
     /// The immutable top-level string keys of a private TOML document.
@@ -178,6 +180,7 @@ impl std::fmt::Display for Type {
             Self::Cursor(id) => return write!(f, "iterator#{id}"),
             Self::List(id) => return write!(f, "list#{id}"),
             Self::Dict(id) => return write!(f, "dict#{id}"),
+            Self::ChainMap(id) => return write!(f, "ChainMap#{id}"),
             Self::Set(id) => return write!(f, "set#{id}"),
             Self::Deque(id) => return write!(f, "deque#{id}"),
             Self::Tuple(id) => return write!(f, "tuple#{id}"),
@@ -256,6 +259,7 @@ impl std::fmt::Display for Type {
             | Self::Cursor(_)
             | Self::List(_)
             | Self::Dict(_)
+            | Self::ChainMap(_)
             | Self::Set(_)
             | Self::Deque(_)
             | Self::Tuple(_)
@@ -1018,6 +1022,9 @@ pub(crate) enum Builtin {
         reverse: bool,
     },
     CounterNew,
+    ChainMapNew,
+    ChainMapMaps,
+    ChainMapSetMaps,
     CounterTotal,
     CounterMostCommon,
     CounterUpdate,
