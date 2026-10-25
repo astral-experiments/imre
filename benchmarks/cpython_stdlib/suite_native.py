@@ -36,6 +36,7 @@ class Toolchain:
     clang: Path
     level: int
     reachable_only: bool = False
+    module_root: Path | None = None
 
     def build(self, source, directory):
         directory = directory.resolve()
@@ -45,6 +46,8 @@ class Toolchain:
         command = [self.imre.resolve(), "build", entry, "-o", binary, "--no-cache",
                    "--opt-level", str(self.level), "--runtime", self.runtime.resolve(),
                    "--clang", self.clang.resolve()]
+        if self.module_root is not None:
+            command.extend(["--module-root", self.module_root.resolve()])
         if self.reachable_only:
             command.append("--reachable-only")
         try:

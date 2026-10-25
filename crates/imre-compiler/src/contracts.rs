@@ -100,8 +100,7 @@ impl Builtin {
                     | TextOperation::Unquote
                     | TextOperation::ShlexSplit
                     | TextOperation::ShlexQuote => true,
-                    TextOperation::IsSpace
-                    | TextOperation::IsUpper
+                    TextOperation::Predicate(_)
                     | TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith

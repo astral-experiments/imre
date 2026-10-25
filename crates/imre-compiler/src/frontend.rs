@@ -935,6 +935,9 @@ pub(crate) fn lower_with_owners(
                     "not every path returns the declared type",
                 ));
             }
+            if classes.generators.contains(&signature.id) {
+                body = checker.generator_body(body);
+            }
             Ok((
                 ir::Function {
                     params,
@@ -7314,7 +7317,7 @@ impl<'a> Checker<'a> {
             }
             if matches!(
                 attribute.attr.as_str(),
-                "splitlines" | "isspace" | "isupper"
+                "splitlines" | "isalnum" | "isspace" | "isupper"
             ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
                 return self.splitlines_or_predicate(
