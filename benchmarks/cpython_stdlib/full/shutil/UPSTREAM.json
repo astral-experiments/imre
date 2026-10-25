@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/test/test_shutil.py": "fb1a7d876a617e17bcecbb8d8b654a2a87dafe48"
+  },
+  "module": "test.test_shutil"
+}
