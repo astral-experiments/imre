@@ -463,9 +463,21 @@ pub(crate) enum CheckedDiagnostic {
     Call(TextRange),
     Keyword(TextRange),
     TupleListRead(TextRange),
+    MissingArgument(TextRange),
 }
 
 impl CheckedDiagnostic {
+    pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
+        let (range, kind) = match self {
+            Self::Decorator(range) => (range, 0),
+            Self::Call(range) => (range, 1),
+            Self::Keyword(range) => (range, 2),
+            Self::TupleListRead(range) => (range, 3),
+            Self::MissingArgument(range) => (range, 4),
+        };
+        (range.start(), range.end(), kind)
+    }
+
     fn covers(self, diagnostic: &str, range: TextRange) -> bool {
         match self {
             Self::Decorator(decorator) => {
@@ -474,6 +486,7 @@ impl CheckedDiagnostic {
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
             Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
+            Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
         }
     }
 }

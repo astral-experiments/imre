@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_string",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/test/test_string/__init__.py": "4b16ecc31156a512db4a28fe272e5339994a4538",
+    "Lib/test/test_string/_support.py": "cfead782b7d4c1304a7838d9ee301f164f4680af",
+    "Lib/test/test_string/test_string.py": "5394fe4e12cd41c29dc0d398efbfa14b9a4c7261",
+    "Lib/test/test_string/test_templatelib.py": "1c86717155fd5aba5423263ae89c3592ba569c91"
+  }
+}
