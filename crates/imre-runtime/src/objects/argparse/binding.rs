@@ -277,7 +277,7 @@ impl OptionSpec {
                 for value in values {
                     words.values.push(value.word(self.kind, false)?);
                 }
-                let word = Rc::into_raw(words.into_object()) as usize;
+                let word = crate::ObjectOwner::into_raw(words.into_object()) as usize;
                 // The closed str | list[str] union reserves tag 2 for the list.
                 if self.list_default { word | 2 } else { word }
             }

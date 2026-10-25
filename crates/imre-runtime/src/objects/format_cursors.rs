@@ -6,7 +6,7 @@ use super::{
 };
 use crate::StrOwner;
 use records::RecordDescriptor;
-use std::{cell::Cell, ops::Range, rc::Rc};
+use std::{cell::Cell, ops::Range};
 
 enum Grammar {
     Markup,
@@ -66,7 +66,7 @@ impl Cursor {
         position: usize,
         grammar: Grammar,
         row: &'static RecordDescriptor,
-    ) -> Rc<Object> {
+    ) -> crate::ObjectOwner {
         itertools::adapter(itertools::Adapter::Format(Self {
             input,
             position: Cell::new(position),
@@ -120,7 +120,7 @@ pub unsafe extern "C" fn imre_formatter_parser(
 ) -> *const Object {
     // SAFETY: the caller roots the input; the cursor acquires another reference.
     let input = unsafe { StrOwner::acquire_word(input as usize) };
-    Rc::into_raw(Cursor::create(input, 0, Grammar::Markup, row))
+    crate::ObjectOwner::into_raw(Cursor::create(input, 0, Grammar::Markup, row))
 }
 
 /// # Safety
@@ -140,7 +140,8 @@ pub unsafe extern "C" fn imre_formatter_field_name_split(
             tuple(outer, || {
                 [
                     key(&input, first),
-                    Rc::into_raw(Cursor::create(input, pos, Grammar::Field, row)) as usize,
+                    crate::ObjectOwner::into_raw(Cursor::create(input, pos, Grammar::Field, row))
+                        as usize,
                 ]
             })
         })

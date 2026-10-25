@@ -34,7 +34,7 @@ impl Drop for Block {
 }
 
 struct Shared {
-    source: Option<Rc<Object>>,
+    source: Option<crate::ObjectOwner>,
     pulling: Cell<bool>,
 }
 
@@ -45,7 +45,7 @@ pub(in crate::objects) struct Fork {
 }
 
 impl Fork {
-    pub(super) fn take_source(&mut self) -> Option<Rc<Object>> {
+    pub(super) fn take_source(&mut self) -> Option<crate::ObjectOwner> {
         Rc::get_mut(&mut self.shared)?.source.take()
     }
 
@@ -57,7 +57,7 @@ impl Fork {
         }
     }
 
-    fn from_source(source: Rc<Object>) -> Self {
+    fn from_source(source: crate::ObjectOwner) -> Self {
         // SAFETY: snapshot an existing fork without pulling from or changing it.
         let fork = unsafe {
             source.0.with(|storage| {
@@ -118,7 +118,7 @@ impl Fork {
                 return Advance::Return(Err(Error::allocation()));
             }
             self.shared.pulling.set(true);
-            return Advance::Pull(Rc::clone(
+            return Advance::Pull(crate::ObjectOwner::clone(
                 self.shared.source.as_ref().expect("live tee source"),
             ));
         };
@@ -148,7 +148,7 @@ pub unsafe extern "C" fn imre_tee(
             tuple
                 .cast::<*const Object>()
                 .add(i)
-                .write(Rc::into_raw(fork));
+                .write(crate::ObjectOwner::into_raw(fork));
         }
         tuple
     }
