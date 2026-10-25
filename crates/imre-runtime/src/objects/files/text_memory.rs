@@ -48,11 +48,15 @@ impl TextMemory {
                 })
             })
         };
-        let end = self.pos.checked_add(translated().count())
+        let end = self
+            .pos
+            .checked_add(translated().count())
             .filter(|&end| end <= isize::MAX as usize)
             .ok_or_else(|| Error::new(Kind::OverflowError, "new position too large"))?;
         if end > self.data.len() {
-            self.data.try_reserve(end - self.data.len()).map_err(|_| Error::allocation())?;
+            self.data
+                .try_reserve(end - self.data.len())
+                .map_err(|_| Error::allocation())?;
             self.data.resize(end, '\0');
         }
         for (slot, c) in self.data[self.pos..end].iter_mut().zip(translated()) {
@@ -66,7 +70,8 @@ impl TextMemory {
     fn text(data: &[char]) -> Result<Str> {
         let mut text = String::new();
         let bytes = data.iter().map(|c| c.len_utf8()).sum();
-        text.try_reserve_exact(bytes).map_err(|_| Error::allocation())?;
+        text.try_reserve_exact(bytes)
+            .map_err(|_| Error::allocation())?;
         text.extend(data);
         Ok(Str::from(text))
     }
@@ -78,7 +83,9 @@ impl TextMemory {
         if line {
             for (i, &c) in remaining[..n].iter().enumerate() {
                 let delimiter = match self.newline {
-                    Newline::Preserve if c == '\r' => 1 + usize::from(remaining.get(i + 1) == Some(&'\n')),
+                    Newline::Preserve if c == '\r' => {
+                        1 + usize::from(remaining.get(i + 1) == Some(&'\n'))
+                    }
                     Newline::Preserve | Newline::Lf | Newline::Universal if c == '\n' => 1,
                     Newline::Cr if c == '\r' => 1,
                     Newline::CrLf if c == '\r' && remaining.get(i + 1) == Some(&'\n') => 2,
@@ -114,7 +121,10 @@ impl FileState {
 pub unsafe extern "C" fn imre_string_io(initial: usize, newline: usize) -> *const Object {
     // SAFETY: the caller retains both optional strings through construction.
     let (initial, newline) = unsafe {
-        ((initial as *const Str).as_ref(), (newline as *const Str).as_ref())
+        (
+            (initial as *const Str).as_ref(),
+            (newline as *const Str).as_ref(),
+        )
     };
     let result = (|| {
         let newline = match newline.map(Str::as_str) {
@@ -123,17 +133,31 @@ pub unsafe extern "C" fn imre_string_io(initial: usize, newline: usize) -> *cons
             Some("\n") => Newline::Lf,
             Some("\r") => Newline::Cr,
             Some("\r\n") => Newline::CrLf,
-            Some(other) => return Err(Error::new(Kind::ValueError,
-                format!("illegal newline value: {}", string_repr(other)))),
+            Some(other) => {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    format!("illegal newline value: {}", string_repr(other)),
+                ));
+            }
         };
-        let mut memory = TextMemory { data: Vec::new(), pos: 0, newline };
+        let mut memory = TextMemory {
+            data: Vec::new(),
+            pos: 0,
+            newline,
+        };
         if let Some(initial) = initial {
             memory.write(initial)?;
             memory.pos = 0;
         }
-        Ok(Rc::into_raw(FileState {
-            fd: None, name: None, kind: FileKind::TextMemory, stream: Some(Stream::TextMemory(memory)),
-        }.into_object()))
+        Ok(Rc::into_raw(
+            FileState {
+                fd: None,
+                name: None,
+                kind: FileKind::TextMemory,
+                stream: Some(Stream::TextMemory(memory)),
+            }
+            .into_object(),
+        ))
     })();
     finish(result, std::ptr::null())
 }
@@ -145,7 +169,9 @@ pub unsafe extern "C" fn imre_string_io(initial: usize, newline: usize) -> *cons
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_string_io_value(file: *const Object) -> *const Str {
     // SAFETY: only independently owned results escape the rooted object.
-    let result = unsafe { object(file) }.0.with_mut(|s| TextMemory::text(&s.file_mut().text_memory()?.data));
+    let result = unsafe { object(file) }
+        .0
+        .with_mut(|s| TextMemory::text(&s.file_mut().text_memory()?.data));
     finish(result.map(|s| Rc::into_raw(Rc::new(s))), std::ptr::null())
 }
 
@@ -155,15 +181,23 @@ pub unsafe extern "C" fn imre_string_io_value(file: *const Object) -> *const Str
 /// # Safety
 /// The file and optional tagged integer remain rooted until return.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_string_io_read(file: *const Object, size: usize, line: bool) -> *const Str {
+pub unsafe extern "C" fn imre_string_io_read(
+    file: *const Object,
+    size: usize,
+    line: bool,
+) -> *const Str {
     let result = (|| {
-        // SAFETY: a nonzero word is an owned or rooted canonical integer.
-        let limit = if size == 0 { None } else {
+        let limit = if size == 0 {
+            None
+        } else {
+            // SAFETY: a nonzero word is a rooted canonical integer.
             let n = unsafe { Int::borrow(size) };
             usize::try_from(native_size(&n)?).ok()
         };
         // SAFETY: the file remains rooted for this synchronous read.
-        unsafe { object(file) }.0.with_mut(|s| s.file_mut().text_memory()?.read(limit, line))
+        unsafe { object(file) }
+            .0
+            .with_mut(|s| s.file_mut().text_memory()?.read(limit, line))
     })();
     finish(result.map(|s| Rc::into_raw(Rc::new(s))), std::ptr::null())
 }
@@ -173,23 +207,46 @@ pub unsafe extern "C" fn imre_string_io_read(file: *const Object, size: usize, l
 /// # Safety
 /// The caller roots the StringIO and both canonical integer words.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_string_io_seek(file: *const Object, pos: usize, whence: usize) -> usize {
+pub unsafe extern "C" fn imre_string_io_seek(
+    file: *const Object,
+    pos: usize,
+    whence: usize,
+) -> usize {
     let result = (|| {
         // SAFETY: this position is a rooted exact integer.
         let p = unsafe { Int::borrow(pos) };
-        let pos = p.as_small().or_else(|| p.big().to_i64()).ok_or_else(||
-            Error::new(Kind::OverflowError, "Python int too large to convert to C ssize_t"))?;
+        let pos = p.as_small().or_else(|| p.big().to_i64()).ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "Python int too large to convert to C ssize_t",
+            )
+        })?;
         let whence = c_int(whence)?;
         // SAFETY: the rooted file outlives this mutation.
         unsafe { object(file) }.0.with_mut(|s| {
             let m = s.file_mut().text_memory()?;
             m.pos = match (whence, pos) {
                 (0, p) if p >= 0 => p as usize,
-                (0, _) => return Err(Error::new(Kind::ValueError, format!("Negative seek position {pos}"))),
+                (0, _) => {
+                    return Err(Error::new(
+                        Kind::ValueError,
+                        format!("Negative seek position {pos}"),
+                    ));
+                }
                 (1, 0) => m.pos,
                 (2, 0) => m.data.len(),
-                (1 | 2, _) => return Err(Error::new(Kind::OSError, "Can't do nonzero cur-relative seeks")),
-                _ => return Err(Error::new(Kind::ValueError, format!("Invalid whence ({whence}, should be 0, 1 or 2)"))),
+                (1 | 2, _) => {
+                    return Err(Error::new(
+                        Kind::OSError,
+                        "Can't do nonzero cur-relative seeks",
+                    ));
+                }
+                _ => {
+                    return Err(Error::new(
+                        Kind::ValueError,
+                        format!("Invalid whence ({whence}, should be 0, 1 or 2)"),
+                    ));
+                }
             };
             Ok(Int::from_usize(m.pos).into_raw())
         })
@@ -203,10 +260,16 @@ pub unsafe extern "C" fn imre_string_io_seek(file: *const Object, pos: usize, wh
 /// # Safety
 /// The file and any nonzero optional size are rooted throughout the operation.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_string_io_position(file: *const Object, size: usize, truncate: bool) -> usize {
+pub unsafe extern "C" fn imre_string_io_position(
+    file: *const Object,
+    size: usize,
+    truncate: bool,
+) -> usize {
     let result = (|| {
-        // SAFETY: a nonzero size is a present exact integer.
-        let size = if size == 0 { None } else {
+        let size = if size == 0 {
+            None
+        } else {
+            // SAFETY: a nonzero size is a rooted canonical integer.
             let n = unsafe { Int::borrow(size) };
             Some(native_size(&n)?)
         };
@@ -214,10 +277,14 @@ pub unsafe extern "C" fn imre_string_io_position(file: *const Object, size: usiz
         unsafe { object(file) }.0.with_mut(|s| {
             let m = s.file_mut().text_memory()?;
             let n = match size {
-                Some(n) => usize::try_from(n).map_err(|_| Error::new(Kind::ValueError, format!("Negative size value {n}")))?,
+                Some(n) => usize::try_from(n).map_err(|_| {
+                    Error::new(Kind::ValueError, format!("Negative size value {n}"))
+                })?,
                 None => m.pos,
             };
-            if truncate { m.data.truncate(n); }
+            if truncate {
+                m.data.truncate(n);
+            }
             Ok(Int::from_usize(n).into_raw())
         })
     })();

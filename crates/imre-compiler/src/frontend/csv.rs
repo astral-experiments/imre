@@ -16,7 +16,7 @@ impl Checker<'_> {
         } else {
             self.expr(lines)?
         };
-        if input.ty != Type::TextIO
+        if !matches!(input.ty, Type::TextIO | Type::StringIO)
             && input.ty != Type::Str
             && self.types.element(input.ty) != Some(Type::Str)
         {

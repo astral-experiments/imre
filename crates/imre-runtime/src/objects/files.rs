@@ -280,7 +280,9 @@ impl FileState {
             return Err(Error::new(Kind::ValueError, "flush of closed file"));
         }
         match self.stream()? {
-            Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) | Stream::TextMemory(_) => Ok(()),
+            Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) | Stream::TextMemory(_) => {
+                Ok(())
+            }
             Stream::Write(writer) => writer.flush().map_err(os_error),
         }
     }
