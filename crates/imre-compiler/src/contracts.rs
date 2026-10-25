@@ -173,11 +173,20 @@ impl Builtin {
                 | ProcessOperation::Await
                 | ProcessOperation::RunLoop
                 | ProcessOperation::JoinGroup
+                | ProcessOperation::GeneratorNext
+                | ProcessOperation::GeneratorYield
                 | ProcessOperation::Acquire => Contract::new(true, Unknown),
                 ProcessOperation::Executable
                 | ProcessOperation::CheckOutput
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
+                | ProcessOperation::Popen { .. }
+                | ProcessOperation::PopenPid
+                | ProcessOperation::PopenArgs
+                | ProcessOperation::PopenStatus { .. }
+                | ProcessOperation::PopenExit
+                | ProcessOperation::PopenWait
+                | ProcessOperation::PopenSignal
                 | ProcessOperation::AsyncSpawn { .. }
                 | ProcessOperation::AsyncStatus { wait: false }
                 | ProcessOperation::Coroutine { .. }
@@ -187,6 +196,7 @@ impl Builtin {
                 | ProcessOperation::ContextEnter
                 | ProcessOperation::ContextExit
                 | ProcessOperation::ContextThrow
+                | ProcessOperation::GeneratorTake
                 | ProcessOperation::ContextYield
                 | ProcessOperation::CreateTask
                 | ProcessOperation::NewLoop
@@ -227,6 +237,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::BytesGet
+            | Self::Chr
             | Self::Decode
             | Self::HashNew
             | Self::DecodeSplitLines
@@ -285,6 +296,7 @@ impl Builtin {
             | Self::ExceptionCause
             | Self::ExceptionSuppressContext
             | Self::FloatFormat { .. }
+            | Self::HexFormat { .. }
             | Self::GlobalGet(_)
             | Self::IntBounded { .. }
             | Self::IntSignAsFloat
@@ -330,6 +342,8 @@ impl Builtin {
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
             | Self::DictDelete
+            | Self::DictPop
+            | Self::DictTryPop(_)
             | Self::DictGatherBytesInt
             | Self::DictGatherStrInt
             | Self::FileReadline
@@ -371,7 +385,11 @@ impl Builtin {
             | Self::TextRead
             | Self::TextWrite
             | Self::TomlKeys => Contract::new(true, Unknown),
-            Self::Repeat | Self::CursorLengthHint => Contract::new(true, PreservesLists),
+            Self::Repeat
+            | Self::CursorLengthHint
+            | Self::Progression { .. }
+            | Self::Islice
+            | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
             | Self::DefaultListDict
             | Self::CounterNew
@@ -598,6 +616,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || matches!(
             name,
             "int_floordiv"
+                | "imre_chr"
                 | "imre_json_index"
                 | "imre_exception_message"
                 | "imre_exception_repr"
@@ -731,6 +750,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
                 | "imre_dict_delete"
+                | "imre_dict_pop"
                 | "imre_cursor_length_hint"
                 | "imre_mapping_iter_next"
                 | "imre_exception_raise"

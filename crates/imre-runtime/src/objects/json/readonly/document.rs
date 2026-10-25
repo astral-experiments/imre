@@ -2,6 +2,7 @@
 //! A subscript or shallow spread retains the same nested container owner.
 
 use ::toml::de::{DeTable, DeValue};
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use super::{Node, Nodes, View};
@@ -230,21 +231,52 @@ impl Value {
             Self::Table(t) => unsafe { t.0.with(|s| !s.dictionary().is_empty()) },
         }
     }
-    fn reaches(&self, target: &Rc<Object>) -> bool {
-        match self {
-            Self::Array(v) => {
-                Rc::ptr_eq(v, target)
-                    || Self::elements(v)
-                        .iter()
-                        .any(|child| Self::read(child).reaches(target))
+    fn check_acyclic(&self, target: &Rc<Object>) -> Result<(), Error> {
+        let (Self::Array(root) | Self::Table(root)) = self else {
+            return Ok(());
+        };
+        let mut current = root.clone();
+        let mut pending = Vec::new();
+        let mut seen = HashSet::new();
+        loop {
+            if Rc::ptr_eq(&current, target) {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    "cyclic document mutation is unsupported",
+                ));
             }
-            Self::Table(v) => {
-                Rc::ptr_eq(v, target)
-                    || Self::items(v)
-                        .iter()
-                        .any(|(_, child)| Self::read(child).reaches(target))
+            // SAFETY: the source graph roots every child throughout this read-only
+            // traversal. Its array and table words are exact document owners.
+            unsafe {
+                current.0.with(|storage| {
+                    let visit = |word| {
+                        let (Self::Array(child) | Self::Table(child)) =
+                            Self::read(object(word as *const Object))
+                        else {
+                            return Ok(());
+                        };
+                        let id = Rc::as_ptr(&child);
+                        if !seen.contains(&id) {
+                            seen.try_reserve(1).map_err(|_| Error::allocation())?;
+                            pending.try_reserve(1).map_err(|_| Error::allocation())?;
+                            seen.insert(id);
+                            pending.push(child);
+                        }
+                        Ok(())
+                    };
+                    match storage {
+                        Storage::Sequence(items) => {
+                            items.values.iter().copied().try_for_each(visit)
+                        }
+                        Storage::Dictionary(map) => map.document_values().try_for_each(visit),
+                        _ => unreachable!("expected a document container"),
+                    }
+                })?;
             }
-            _ => false,
+            let Some(next) = pending.pop() else {
+                return Ok(());
+            };
+            current = next;
         }
     }
 }
@@ -348,11 +380,8 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
             25 => {
                 let target = doc(b).list()?;
                 let values = Value::elements(object(a));
-                if values.iter().any(|v| Value::read(v).reaches(&target)) {
-                    return Err(Error::new(
-                        Kind::ValueError,
-                        "cyclic document mutation is unsupported",
-                    ));
+                for value in &values {
+                    Value::read(value).check_acyclic(&target)?;
                 }
                 let old = target.0.with_mut(|s| {
                     let words = s.sequence_mut();
@@ -371,12 +400,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
             }
             26 => {
                 let target = doc(b).map()?;
-                if doc(a).reaches(&target) {
-                    return Err(Error::new(
-                        Kind::ValueError,
-                        "cyclic document mutation is unsupported",
-                    ));
-                }
+                doc(a).check_acyclic(&target)?;
                 dict_set(Rc::as_ptr(&target), c, a)?;
                 0
             }
@@ -393,4 +417,27 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
         })
     };
     crate::finish(run(), 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cycle_check_traverses_deep_shared_children_once() {
+        let mut owners = vec![Words::new(5).into_object()];
+        for _ in 0..8192 {
+            let child = Value::Array(owners.last().unwrap().clone()).object();
+            let mut parent = Words::new(5);
+            parent.values.push(Rc::into_raw(child.clone()) as usize);
+            parent.values.push(Rc::into_raw(child) as usize);
+            owners.push(parent.into_object());
+        }
+        let root = Value::Array(owners.last().unwrap().clone());
+        assert!(root.check_acyclic(&Words::new(5).into_object()).is_ok());
+        assert!(root.check_acyclic(&owners[0]).is_err());
+        drop(root);
+        // Release parents before their independently rooted children.
+        while owners.pop().is_some() {}
+    }
 }
