@@ -35,8 +35,16 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let mut values: Vec<_> = receiver.into_iter().collect();
-        for arg in &call.arguments.args {
+        let first_extra = 1 - values.len();
+        for (index, arg) in call.arguments.args.iter().enumerate() {
             values.push(self.expr(arg)?);
+            if index >= first_extra {
+                self.graph.checked_diagnostic(
+                    self.module,
+                    "too-many-positional-arguments",
+                    arg.range(),
+                );
+            }
         }
         let positional = values.len();
         let mut keyword_self = None;
@@ -44,13 +52,22 @@ impl Checker<'_> {
         for keyword in &call.arguments.keywords {
             let name = keyword.arg.as_ref().unwrap().as_str();
             if name != "self" {
-                failure = Some(format!("got an unexpected keyword argument '{name}'"));
-                break;
+                self.graph
+                    .checked_diagnostic(self.module, "unknown-argument", keyword.range());
+                failure
+                    .get_or_insert_with(|| format!("got an unexpected keyword argument '{name}'"));
+            } else if positional != 0 || keyword_self.replace(&keyword.value).is_some() {
+                self.graph.checked_diagnostic(
+                    self.module,
+                    "parameter-already-assigned",
+                    keyword.range(),
+                );
+                failure.get_or_insert_with(|| "got multiple values for argument 'self'".to_owned());
             }
-            if positional != 0 || keyword_self.replace(&keyword.value).is_some() {
-                failure = Some("got multiple values for argument 'self'".to_owned());
-                break;
-            }
+        }
+        if positional == 0 && keyword_self.is_none() {
+            self.graph
+                .checked_diagnostic(self.module, "missing-argument", call.range());
         }
         let failure = failure.or_else(|| match positional {
             0 if keyword_self.is_none() => {
@@ -62,7 +79,6 @@ impl Checker<'_> {
             _ => None,
         });
         if let Some(message) = failure {
-            self.graph.checked_overload(self.module, call.range());
             return self.counter_call_error(call, values, format!("Counter.elements() {message}"));
         }
         let mapping = if let Some(keyword) = keyword_self {
