@@ -555,7 +555,7 @@ fn build(source: Source<'_>) -> Result<*const Object, serde_json::Error> {
     .into_handle())
 }
 
-fn loads(text: &str) -> Result<*const Object, Error> {
+pub(super) fn loads(text: &str) -> Result<*const Object, Error> {
     check_depth(text).map_err(|message| Error::new(Kind::ValueError, message))?;
     build(Source {
         text,

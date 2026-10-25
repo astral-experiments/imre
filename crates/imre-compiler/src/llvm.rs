@@ -3728,14 +3728,21 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::JsonLoads => Value {
-                ty: returns,
-                operand: self.checked_instruction(format!(
-                    "call ptr @imre_json_loads(ptr {})",
-                    args[0].value.operand
-                )),
-                small_integer: false,
-            },
+            Builtin::JsonLoads => {
+                let function = if args[0].value.ty == Type::Bytes {
+                    "imre_json_loads_bytes"
+                } else {
+                    "imre_json_loads"
+                };
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @{function}(ptr {})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::JsonSelect(path) => self.json_select(path, returns, &args),
             Builtin::JsonIndex => self.call(
                 "imre_json_index",
@@ -5928,6 +5935,7 @@ declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
 declare ptr @imre_json_loads(ptr)
+declare ptr @imre_json_loads_bytes(ptr)
 declare ptr @imre_json_index(ptr, i64)
 declare ptr @imre_json_iter(ptr)
 declare i64 @imre_json_len(ptr)

@@ -158,8 +158,9 @@ A generator expression evaluates its leftmost iterable and acquires that iterato
 ## Typed JSON boundaries
 
 `json.loads(text)` and `json.load(stream)` accept JSON arrays, objects, and
-scalars. `json.load` reads a native UTF-8 text stream from its current
-position, including streams opened with `open(path)`. A document supports literal string keys, integer indices, length,
+scalars. `json.loads` accepts strings and bytes; `json.load` reads a text or
+binary stream from its current position. Binary input detects UTF-8, UTF-16,
+and UTF-32 with or without a byte order mark. A document supports literal string keys, integer indices, length,
 truth tests, and iteration. Array iteration yields values and object iteration
 yields keys in insertion order. Select a value into a concrete scalar or
 `dict[str, Any]` at a checked boundary. The latter is a read-only JSON view,
