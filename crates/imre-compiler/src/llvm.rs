@@ -4352,6 +4352,9 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::Repr if args[0].value.ty == Type::ExitCode => {
+                self.call("imre_system_exit_code_repr", Type::Str, &[&args[0].value])
+            }
             Builtin::Repr => self.value_repr(&args[0].value),
             Builtin::Str => match args[0].value.ty {
                 Type::Path | Type::PurePath(_) => {
@@ -6439,6 +6442,7 @@ declare ptr @imre_system_exit_new(i32, i64)
 declare ptr @imre_system_exit_code(ptr)
 declare i32 @imre_system_exit_code_kind(ptr)
 declare ptr @imre_system_exit_code_text(ptr)
+declare ptr @imre_system_exit_code_repr(ptr)
 declare i32 @imre_system_exit_code_equal(ptr, i32, i64)
 declare i32 @imre_system_exit_code_truth(ptr)
 declare void @imre_args_clear()

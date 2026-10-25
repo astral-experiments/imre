@@ -4780,21 +4780,13 @@ impl<'a> Checker<'a> {
                 if values.iter().any(|value| value.ty == Type::ExitCode) {
                     if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
                         || !values.iter().all(|v| {
-                            matches!(
-                                v.ty,
-                                Type::None
-                                    | Type::Bool
-                                    | Type::Int
-                                    | Type::Str
-                                    | Type::StrLiteral(_)
-                                    | Type::ExitCode
-                            )
+                            v.ty == Type::ExitCode || sys::exit_payload_supported(v.ty, self.types)
                         })
                     {
                         return Err(error(
                             self.source,
                             expression,
-                            "exit codes support equality with None, bool, int, or str",
+                            "unsupported comparison with a SystemExit payload",
                         ));
                     }
                     let reversed = values[0].ty != Type::ExitCode;
@@ -6290,6 +6282,12 @@ impl<'a> Checker<'a> {
                     }),
                     clear: slots,
                 },
+            });
+        }
+        if name.id == "repr" && args.len() == 1 && args[0].ty == Type::ExitCode {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::Repr, args),
             });
         }
         if matches!(name.id.as_str(), "str" | "print")
