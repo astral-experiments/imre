@@ -4141,18 +4141,11 @@ impl Emitter<'_, '_> {
                 let value = self.own_operand(args.into_iter().next().unwrap());
                 return self.union_inject(value, returns);
             }
-            Builtin::ExactRecord(class) => {
-                let layout = self.output.global_ref(format!("layout_class_{class}"));
-                let matched = self.instruction(format!(
-                    "call i32 @imre_record_has_type(ptr {}, ptr @{layout})",
-                    args[0].value.operand
-                ));
-                Value {
-                    ty: Type::Bool,
-                    operand: self.instruction(format!("icmp ne i32 {matched}, 0")),
-                    small_integer: false,
-                }
-            }
+            Builtin::ExactRecord(class) => Value {
+                ty: Type::Bool,
+                operand: self.exact_record_test(&args[0].value, *class),
+                small_integer: false,
+            },
             Builtin::UnionProject => {
                 let value = self.own_operand(args.into_iter().next().unwrap());
                 return self.union_project(value, returns);

@@ -6859,7 +6859,7 @@ impl<'a> Checker<'a> {
             }
         };
         let path = self.path_argument(path)?;
-        let (ty, builtin) = match (gzip, mode) {
+        let (ty, mut builtin) = match (gzip, mode) {
             (true, "rt") => (Type::TextIO, Builtin::GzipOpen),
             (true, "rb") => (Type::BinaryIO, Builtin::GzipOpen),
             (true, _) => {
@@ -6879,13 +6879,61 @@ impl<'a> Checker<'a> {
         };
         if ty == Type::BinaryIO {
             self.reject_builtin_keywords(call)?;
-        } else if gzip || !call.arguments.keywords.is_empty() {
+        } else if gzip {
             self.utf8_encoding(call)?;
+        } else {
+            let (mut encoding, mut newline) = (false, false);
+            for keyword in &call.arguments.keywords {
+                match keyword.arg.as_deref() {
+                    Some("encoding") if !encoding => {
+                        self.utf8_encoding_keyword(keyword)?;
+                        encoding = true;
+                    }
+                    Some("newline") if !newline => {
+                        builtin = self.text_newline(&keyword.value, builtin)?;
+                        newline = true;
+                    }
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            keyword,
+                            "unexpected or repeated text open keyword",
+                        ));
+                    }
+                }
+            }
         }
         Ok(Expr {
             ty,
             kind: ExprKind::Builtin(builtin, vec![path]),
         })
+    }
+
+    /// POSIX writers already preserve newlines. Readers must retain CR and
+    /// CRLF while still recognizing each as a physical line terminator.
+    fn text_newline(&self, value: &ast::Expr, builtin: Builtin) -> Result<Builtin, String> {
+        if !matches!(builtin, Builtin::TextOpen(_)) {
+            return Err(error(
+                self.source,
+                value,
+                "binary open does not accept newline",
+            ));
+        }
+        match value {
+            ast::Expr::NoneLiteral(_) => Ok(builtin),
+            ast::Expr::StringLiteral(s) if s.value.to_str().is_empty() => {
+                Ok(if matches!(builtin, Builtin::TextOpen(0)) {
+                    Builtin::TextOpen(4)
+                } else {
+                    builtin
+                })
+            }
+            _ => Err(error(
+                self.source,
+                value,
+                "expected newline=None or an empty literal string",
+            )),
+        }
     }
 
     /// Validate an explicit encoding for native text I/O.

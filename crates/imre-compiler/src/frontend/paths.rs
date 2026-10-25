@@ -585,10 +585,12 @@ impl Checker<'_> {
         }
         let mut mode = call.arguments.args.first();
         let mut encoding = None;
+        let mut newline = None;
         for keyword in &call.arguments.keywords {
             match keyword.arg.as_ref().map(|arg| arg.as_str()) {
                 Some("mode") if mode.is_none() => mode = Some(&keyword.value),
                 Some("encoding") if encoding.is_none() => encoding = Some(keyword),
+                Some("newline") if newline.is_none() => newline = Some(&keyword.value),
                 _ => {
                     return Err(error(
                         self.source,
@@ -612,7 +614,7 @@ impl Checker<'_> {
                 ));
             }
         };
-        let (ty, builtin) = match mode {
+        let (ty, mut builtin) = match mode {
             "rt" | "tr" => file_open_mode("r"),
             "wt" | "tw" => file_open_mode("w"),
             "br" => file_open_mode("rb"),
@@ -635,6 +637,9 @@ impl Checker<'_> {
             self.utf8_encoding_keyword(encoding)?;
         }
         let path = operation(PathOperation::Text, Type::Str, vec![receiver]);
+        if let Some(newline) = newline {
+            builtin = self.text_newline(newline, builtin)?;
+        }
         Ok(Expr {
             ty,
             kind: ExprKind::Builtin(builtin, vec![path]),
