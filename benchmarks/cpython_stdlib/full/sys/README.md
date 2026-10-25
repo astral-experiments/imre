@@ -14,7 +14,10 @@ Use a test-enabled checkout of the pinned release to reproduce the reference:
 "$CPYTHON" -B -m test --single-process --randseed 1 --junit-xml /tmp/sys.xml test_sys
 ```
 
-To run the selected full methods against the compiler and runtime under test:
+To run the selected full methods against the compiler and runtime under test, use
+the [shared suite harness](../../SUITE_RUNNER.md). Module, class and instance
+fixture hooks run in the pinned CPython host. Each result records where the
+original body, its assertions and the tested operations execute.
 
 ```sh
 for opt in 0 3; do
@@ -22,6 +25,7 @@ for opt in 0 3; do
         --imre "$IMRE" --runtime "$RUNTIME" --clang "$CLANG" \
         --opt-level "$opt" --result "/tmp/sys-O$opt.json"
 done
+python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverage.json
 ```
 
 - `test_sys_exception_no_exception`: the complete method queries native handler state and compares the result to `None`. A separate program checks object identity across nested handlers, calls and handler exit.
@@ -33,3 +37,10 @@ The existing [stream and exit smoke runner](../../native_sys.py) exercises four
 `test_subprocess` IDs and additional native program fixtures. Those are outside this
 suite's denominator. A CPython-only result or an operation probe is not a native
 pass for a complete routine.
+
+The coverage report joins [every reference ID](reference-linux.json) to the
+two optimization reports and [individual assessments](assessments.tsv). It
+rejects missing IDs and duplicate classifications. An exclusion proposal is
+listed with its reason, remains in the denominator, and has no native credit.
+The seven platform/build skips and the default-locale skip retain their original
+reference reasons even where UTF-8 mode also provides native evidence.
