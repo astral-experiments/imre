@@ -688,6 +688,10 @@ pub(crate) enum Builtin {
     JsonLoads,
     JsonEmptyObject,
     FunctionCache(usize),
+    FunctionCacheProbe(usize, i64),
+    FunctionCacheInsert(usize, i64),
+    FunctionCacheStat(usize, u32),
+    FunctionCacheClear(usize),
     HashStr,
     HashRecord,
     /// A dictionary with a read-only JSON receiver and a literal string key.

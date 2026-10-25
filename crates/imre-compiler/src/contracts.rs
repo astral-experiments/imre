@@ -278,6 +278,8 @@ impl Builtin {
             | Self::JsonSelect(_)
             | Self::ListGet
             | Self::ListGetBounded { .. }
+            | Self::FunctionCacheProbe(..)
+            | Self::FunctionCacheInsert(..)
             | Self::ListGetI32
             | Self::ListSliceSum
             | Self::Slice
@@ -319,6 +321,8 @@ impl Builtin {
             | Self::JsonEmptyObject
             | Self::WallTime
             | Self::FunctionCache(_)
+            | Self::FunctionCacheStat(..)
+            | Self::FunctionCacheClear(_)
             | Self::HashStr
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum
