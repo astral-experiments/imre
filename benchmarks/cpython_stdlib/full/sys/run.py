@@ -18,6 +18,7 @@ from suite_native import Toolchain, native_method, run_evidence, run_in_fixtures
 from suite_evidence import roles
 from occurrences import blocked_methods, reference_skips
 import argv_case
+import jit_case
 import locale_case
 
 MODULE = "test.test_sys"
@@ -72,6 +73,17 @@ def select(toolchain, work, source, module):
         case_id = f"{MODULE}.{cls}.{method}"
         executions[case_id] = native_method(toolchain, directory(work, method),
                                              source, cls, case_id, fixture, operation=("imre", operation))
+
+    # Both implementations check internal consistency using their own language version.
+    metadata = HERE / "version_info.py"
+    version_work = directory(work, "language-version")
+    owner = HERE / "version_info_owner.py"
+    (version_work / owner.name).write_bytes(owner.read_bytes())
+    program = toolchain.build(metadata.read_bytes(), version_work)
+    reference = subprocess.run([sys.executable, "-E", "-B", version_work / "case.py"],
+                               capture_output=True, check=True, timeout=15)
+    if (reference.stdout, reference.stderr) != (b"", b"") or output(program) != (b"", b""):
+        raise AssertionError("unexpected output from language version checks")
 
     # Independent object-identity regression; never counts as an upstream ID.
     exercise = HERE / "active_exception.py"
@@ -130,6 +142,9 @@ def select(toolchain, work, source, module):
         module, toolchain, work / "argv-controls", pinned_methods["SysModuleTest", "test_orig_argv"])
     executions[locale_case.CASE_ID] = locale_case.observer(
         module, toolchain, work / "nonascii-child", pinned_methods["SysModuleTest", "test_ioencoding_nonascii"])
+    jit = jit_case.observer(module, toolchain, work, pinned_methods)
+    for method in ("test_jit_is_available", "test_jit_is_enabled"):
+        executions[f"{MODULE}.TestSysJIT.{method}"] = jit
     return executions
 
 
@@ -181,6 +196,7 @@ def main():
         executions = select(toolchain, Path(tmp), source, test_sys)
         if args.evidence:
             preflight = blocked_methods(toolchain, Path(tmp), source, reference, executions, test_sys)
+            jit_case.audit_active(load_suite(MODULE), executions, preflight)
             evidence = {}
 
             def capture(callback):

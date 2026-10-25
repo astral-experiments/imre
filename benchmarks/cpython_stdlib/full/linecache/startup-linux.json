@@ -1,0 +1,130 @@
+{
+  "operation": "compile the unchanged pinned controller in import and runner mode, normal or reachable-only",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "tests_executed": 0,
+  "checks": [
+    {
+      "suite": "test.test_warnings",
+      "entry": "import",
+      "reachable_only": false,
+      "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"linecache\"",
+      "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:5:1: Imre: standard-library imports and shadowing are unsupported: \"importlib\""
+    },
+    {
+      "suite": "test.test_warnings",
+      "entry": "import",
+      "reachable_only": true,
+      "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"linecache\"",
+      "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:7:1: Imre: unsupported sealed standard-library export io.StringIO"
+    },
+    {
+      "suite": "test.test_warnings",
+      "entry": "runner",
+      "reachable_only": false,
+      "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"linecache\"",
+      "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:5:1: Imre: standard-library imports and shadowing are unsupported: \"importlib\""
+    },
+    {
+      "suite": "test.test_warnings",
+      "entry": "runner",
+      "reachable_only": true,
+      "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"linecache\"",
+      "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:7:1: Imre: unsupported sealed standard-library export io.StringIO"
+    },
+    {
+      "suite": "test.test_inspect",
+      "entry": "import",
+      "reachable_only": false,
+      "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+      "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+    },
+    {
+      "suite": "test.test_inspect",
+      "entry": "import",
+      "reachable_only": true,
+      "before": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass",
+      "after": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+    },
+    {
+      "suite": "test.test_inspect",
+      "entry": "runner",
+      "reachable_only": false,
+      "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+      "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+    },
+    {
+      "suite": "test.test_inspect",
+      "entry": "runner",
+      "reachable_only": true,
+      "before": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass",
+      "after": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+    },
+    {
+      "suite": "test.test_inspect.test_inspect",
+      "entry": "import",
+      "reachable_only": false,
+      "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+      "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+    },
+    {
+      "suite": "test.test_inspect.test_inspect",
+      "entry": "import",
+      "reachable_only": true,
+      "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/test_inspect.py:1:1: Imre: unsupported sealed standard-library export annotationlib.ForwardRef",
+      "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/test_inspect.py:1:1: Imre: unsupported sealed standard-library export annotationlib.ForwardRef"
+    },
+    {
+      "suite": "test.test_inspect.test_inspect",
+      "entry": "runner",
+      "reachable_only": false,
+      "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+      "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+    },
+    {
+      "suite": "test.test_inspect.test_inspect",
+      "entry": "runner",
+      "reachable_only": true,
+      "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/test_inspect.py:1:1: Imre: unsupported sealed standard-library export annotationlib.ForwardRef",
+      "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/test_inspect.py:1:1: Imre: unsupported sealed standard-library export annotationlib.ForwardRef"
+    },
+    {
+      "suite": "test.test_linecache",
+      "entry": "import",
+      "reachable_only": false,
+      "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_linecache.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"linecache\"",
+      "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_linecache.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"threading\""
+    },
+    {
+      "suite": "test.test_linecache",
+      "entry": "import",
+      "reachable_only": true,
+      "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_linecache.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"linecache\"",
+      "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_linecache.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"threading\""
+    },
+    {
+      "suite": "test.test_linecache",
+      "entry": "runner",
+      "reachable_only": false,
+      "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_linecache.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"linecache\"",
+      "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_linecache.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"threading\""
+    },
+    {
+      "suite": "test.test_linecache",
+      "entry": "runner",
+      "reachable_only": true,
+      "before": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_linecache.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"linecache\"",
+      "after": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_linecache.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"threading\""
+    }
+  ],
+  "before": {
+    "revision": "56731b668c9d44bfbcbcbec42f8a4e12b25e448c",
+    "tree": "5a4cdf11e5ac7cd54628b5c7705913392e6a89dc",
+    "compiler_sha256": "740969b1c61e321739b066566c2bc5801aad159c4320349bd0f921b7a4dc82e4"
+  },
+  "after": {
+    "revision": "9637e304377004f2b0467fb766458f913e1afe31",
+    "tree": "731c143da5b8ee3d8f2bd47ea7d474df869fab85",
+    "compiler_sha256": "56a0900538dd83103964d162191ec205fa90109d3dfc037d77738a96acd60855"
+  },
+  "changed_first_diagnostics": 8
+}

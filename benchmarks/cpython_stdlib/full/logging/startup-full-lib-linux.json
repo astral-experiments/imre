@@ -1,0 +1,43 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "996b527d5466ec274f87fed2dbe05cef24a5b3f6a571e816b7838bcae1a99517",
+  "operation": "check",
+  "tests_executed": 0,
+  "source": "git",
+  "checks": [
+    {
+      "suite": "test.test_logging",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_logging.py:21:1: Imre: standard-library shadowing is unsupported: \"logging\""
+    },
+    {
+      "suite": "test.test_logging",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_logging.py:21:1: Imre: standard-library shadowing is unsupported: \"logging\""
+    },
+    {
+      "suite": "test.test_logging",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_logging.py:21:1: Imre: standard-library shadowing is unsupported: \"logging\""
+    },
+    {
+      "suite": "test.test_logging",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_logging.py:21:1: Imre: standard-library shadowing is unsupported: \"logging\""
+    }
+  ],
+  "imre_revision": "6e9fbaed38ddefd281ccc491fd60889996539de2",
+  "imre_tree": "5358232f3ffe1bd7e7053eaab467311cc39a33d7",
+  "primary_denominator": 272,
+  "support_python_files": 720,
+  "support_paths_sha256": "252da69a1cb2812c2ce3d503c67edb2ab26a9ec8ee1fd790161c6c2abfbf9551",
+  "staging": "Full pinned Lib/test plus every pinned Python source outside it under Lib/"
+}

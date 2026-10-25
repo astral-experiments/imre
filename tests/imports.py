@@ -15,6 +15,8 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "private_textwrap_module": ({"main.py": "import __imre_textwrap_wrapper__\n"}, "private textwrap implementation"),
+    "private_textwrap_helper": ({"main.py": "from textwrap import _chunk_text\n"}, "unsupported sealed standard-library export textwrap._chunk_text"),
     "external": ({"main.py": "import math\n"}, "standard-library"),
     "missing": ({"main.py": "import missing_dependency\n"}, "cannot resolve first-party"),
     "wildcard": ({"main.py": "from helper import *\n", "helper.py": HELPER}, "wildcard"),
@@ -43,6 +45,9 @@ REJECTED = {
     "reserved_alias": ({"main.py": "from helper import f as int\n", "helper.py": HELPER}, "reserved"),
     "normalized_reserved_alias": ({"main.py": "from helper import f as ℕone\n", "helper.py": HELPER}, "reserved"),
     "stdlib_shadow": ({"main.py": "import sys\n", "sys.py": HELPER}, "standard-library"),
+    "opcode_shadow": ({"main.py": "import _opcode\n", "_opcode.py": HELPER}, "shadowing"),
+    "opcode_bytecode_operation": ({"main.py": "from _opcode import stack_effect\n"}, "stack_effect"),
+    "opcode_typed_argument": ({"main.py": "import _opcode as op\ndef text(x: str) -> None:\n    print(x)\ntext(op.ENABLE_SPECIALIZATION)\n"}, "expected str, got int"),
     "unstubbed_builtin_shadow": ({"main.py": "import _types\n", "_types.py": HELPER}, "standard-library"),
     "frozen_shadow": ({"main.py": "import __hello__\n", "__hello__.py": HELPER}, "standard-library"),
     "imported_surrogate": ({"main.py": IMPORT, "helper.py": '"\\ud800"\n' + HELPER}, "surrogate"),
@@ -157,6 +162,20 @@ def main() -> None:
                 require_success(result)
                 assert result.stdout == baseline.stdout, (name, level, result.stdout, baseline.stdout)
                 checks += 1
+
+        # These are build capabilities: CPython's flags depend on its build; Imre emits native code.
+        source = root / "opcode_flags.py"
+        for level in args.opt_levels:
+            executable = temporary / f"opcode-flags-{level}"
+            command = [compiler, "build", str(source), "-o", str(executable), "--runtime", runtime,
+                       "--clang", args.clang, "--opt-level", str(level), *build_flags]
+            if args.sanitize:
+                command.append("--sanitize")
+            require_success(run(command, temporary))
+            result = run([str(executable)], temporary)
+            require_success(result)
+            assert result.stdout == "0\n0\nno bytecode specialization\n", result
+            checks += 1
 
         # A failing guard must run before the next import initializes its child.
         guarded = temporary / "wrong_name"

@@ -23,6 +23,7 @@ mod tuples;
 mod types;
 #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
 mod verify;
+mod version;
 mod watch;
 
 use std::borrow::Cow;
@@ -657,7 +658,7 @@ mod tests {
             &CompileOptions::default(),
         )
         .unwrap();
-        assert!(llvm.contains("call ptr @imre_subprocess_run_modes"));
+        assert!(llvm.contains("call ptr @imre_run_config"));
         assert!(llvm.contains("call i64 @imre_subprocess_timeout_field"));
         compile(
             include_str!("../../../tests/fixtures/processes/timeout_arguments.py"),
