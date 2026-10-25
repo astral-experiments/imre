@@ -1,5 +1,6 @@
 """Fail one write or flush on /dev/full, restore the descriptor, and retry."""
 
+import builtins
 import os
 import sys
 
@@ -24,6 +25,9 @@ def main() -> None:
         elif mode == "stderr-flush":
             sys.stderr.write("buffered")
             sys.stderr.flush()
+        elif mode == "stdout-displayhook":
+            builtins._ = 42
+            sys.__displayhook__("x" * (256 * 1024))
         else:
             raise ValueError("unknown stream operation")
     except OSError as error:
@@ -37,6 +41,8 @@ def main() -> None:
         os.close(saved)
     if not message:
         raise AssertionError("expected the stream operation to fail")
+    if mode == "stdout-displayhook" and builtins._ is not None:
+        raise AssertionError("a failed display left a stale value in builtins._")
     sys.stdout.flush()
     sys.stderr.flush()
     print(message)

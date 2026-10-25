@@ -6,7 +6,11 @@ use std::io::{self, Write};
 
 static STDERR: LazyLock<Mutex<Output<io::Stderr>>> = LazyLock::new(|| {
     initialize_io();
-    Mutex::new(Output::with_stream(io::stderr(), true))
+    Mutex::new(Output::with_stream(
+        io::stderr(),
+        super::STDIO_SETTINGS.stderr_capacity,
+        true,
+    ))
 });
 
 fn write_stream<W: Write>(stream: &Mutex<Output<W>>, text: &str, newline: bool) -> io::Result<()> {
@@ -14,9 +18,6 @@ fn write_stream<W: Write>(stream: &Mutex<Output<W>>, text: &str, newline: bool) 
     stream.write_all(text.as_bytes())?;
     if newline {
         stream.write_all(b"\n")?;
-    }
-    if stream.line_buffered && (newline || text.contains(['\r', '\n'])) {
-        stream.flush()?;
     }
     Ok(())
 }
@@ -37,6 +38,14 @@ pub(super) fn flush_stderr() -> io::Result<()> {
             .flush()?;
     }
     Ok(())
+}
+
+/// Write the default display hook's repr followed by a newline to stdout.
+pub(super) fn write_display_line(text: &str) -> bool {
+    match write_stream(&OUTPUT, text, true) {
+        Ok(()) => true,
+        Err(error) => errno_error(error).returning(false),
+    }
 }
 
 /// Return the Python platform name of the target that built this runtime.

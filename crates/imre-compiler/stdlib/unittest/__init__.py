@@ -2,6 +2,7 @@
 
 
 import difflib
+import re
 from types import ModuleType
 from typing import ClassVar
 
@@ -142,13 +143,25 @@ class TestCase:
     def skipTest(self, reason: str) -> None:
         raise SkipTest(reason)
 
-    def assertTrue(self, expr: bool, msg: str | None = None) -> None:
-        if not expr:
-            self.fail(self._formatMessage(msg, repr(expr) + " is not true"))
+    def _raise_missing_callable(self, kind: str, name: str) -> None:
+        raise self.failureException(self._formatMessage(None, kind + " not raised by " + name))
 
-    def assertFalse(self, expr: bool, msg: str | None = None) -> None:
+    def _bound_assertEqual(self) -> _BoundEqual:
+        return _BoundEqual(self)
+
+    def _bound_assertListEqual(self) -> _BoundListEqual:
+        return _BoundListEqual(self)
+
+    def _bound_assertRaises(self) -> _BoundRaises:
+        return _BoundRaises(self)
+
+    def assertTrue(self, expr: object, msg: str | None = None) -> None:
+        if not expr:
+            raise self.failureException(self._formatMessage(msg, repr(expr) + " is not true"))
+
+    def assertFalse(self, expr: object, msg: str | None = None) -> None:
         if expr:
-            self.fail(self._formatMessage(msg, repr(expr) + " is not false"))
+            raise self.failureException(self._formatMessage(msg, repr(expr) + " is not false"))
 
     def assertLess(self, a: int, b: int, msg: str | None = None) -> None:
         if not a < b:
@@ -168,7 +181,8 @@ class TestCase:
 
     def _baseAssertEqual(self, first: int, second: int, msg: str | None = None) -> None:
         if first != second:
-            self.fail(self._formatMessage(msg, f"{first!r} != {second!r}"))
+            left, right = _short_reprs(repr(first), repr(second))
+            raise self.failureException(self._formatMessage(msg, left + " != " + right))
 
     def _truncateMessage(self, message: str, diff: str) -> str:
         limit = self.maxDiff
@@ -194,6 +208,8 @@ class TestCase:
                 second += "\n"
             changes = list(difflib.ndiff(_kept_lines(first), _kept_lines(second)))
             standard = self._truncateMessage(standard, "\n" + "".join(changes))
+        else:
+            raise self.failureException(self._formatMessage(msg, standard))
         self.fail(self._formatMessage(msg, standard))
 
     def _list_difference(self, left: list[str], right: list[str], pretty1: list[str],
@@ -252,7 +268,7 @@ class TestCase:
 
     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
         if first == second:
-            self.fail(self._formatMessage(msg, f"{first!r} == {second!r}"))
+            raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
 
     def assertHasAttr(self, obj: ModuleType, name: str, msg: str | None = None) -> None:
         if not hasattr(obj, name):
@@ -269,6 +285,29 @@ class TestCase:
         pass
 
 
+class _BoundAssertion:
+    _receiver: TestCase
+
+    def __init__(self, case: TestCase) -> None:
+        self._receiver = case
+
+
+class _BoundEqual(_BoundAssertion):
+    pass
+
+
+class _BoundListEqual(_BoundAssertion):
+    pass
+
+
+class _BoundRaises(_BoundAssertion):
+    pass
+
+
+def _raise_call_type_error(message: str) -> None:
+    raise TypeError(message)
+
+
 def _checked_expected(kinds: list[int], error: str | None) -> list[int]:
     if error is not None:
         raise TypeError(error)
@@ -281,13 +320,24 @@ class _AssertRaisesContext:
     _expected: list[int]
     _label: str
     _caught: Exception | None
+    _regex: re.Pattern[str] | None
+    _spelling: str
 
-    def __init__(self, case: TestCase, kinds: list[int], label: str, msg: str | None, error: str | None) -> None:
+    def __init__(self, case: TestCase, kinds: list[int], label: str, msg: str | None, error: str | None,
+                 pattern: re.Pattern[str] | None, spelling: str) -> None:
         self.test_case = case
         self._expected = _checked_expected(kinds, error)
         self._label = label
         self.msg = msg
         self._caught = None
+        self._regex = pattern
+        self._spelling = spelling
+
+    def _check_regex(self, exc: Exception) -> None:
+        pattern = self._regex
+        if pattern is not None and pattern.search(str(exc)) is None:
+            standard = '"' + self._spelling + '" does not match "' + str(exc) + '"'
+            raise self.test_case.failureException(self.test_case._formatMessage(self.msg, standard))
 
     def _missing(self) -> None:
         raise self.test_case.failureException(self.test_case._formatMessage(self.msg, self._label + " not raised"))

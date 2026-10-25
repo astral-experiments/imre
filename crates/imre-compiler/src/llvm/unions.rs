@@ -131,33 +131,13 @@ impl Emitter<'_, '_> {
                 "phi i1 [ false, %{absent} ], [ {result}, %{inspected} ]"
             ));
         }
-        if value.ty == Type::ModuleMember {
-            let mask = [
-                (0, Type::None),
-                (1, Type::Bool),
-                (2, Type::Int),
-                (3, Type::Str),
-                (5, Type::Dict(0)),
-                (8, Type::Bytes),
-            ]
-            .into_iter()
-            .filter(|(_, ty)| classes.iter().any(|class| class.accepts(*ty)))
-            .fold(0, |mask, (kind, _)| mask | 1 << kind);
-            let kind = self.instruction(format!(
-                "call i32 @imre_module_value_kind(ptr {})",
-                value.operand
-            ));
-            let bit = self.instruction(format!("shl i32 1, {kind}"));
-            let matched = self.instruction(format!("and i32 {bit}, {mask}"));
-            return self.instruction(format!("icmp ne i32 {matched}, 0"));
-        }
         // Frontend class tests include every descendant. If they include the
         // declared base, all layouts which can reach this view already match.
         if matches!(value.ty, Type::Class(_)) && classes.iter().any(|class| class.accepts(value.ty))
         {
             return "true".to_owned();
         }
-        if value.ty == Type::ExceptionField {
+        if value.ty == Type::ObjectValue {
             // The view retains its heterogeneous payload. None is not a class
             // accepted by this subset, and bool is also an instance of int.
             let mask = [
@@ -165,6 +145,8 @@ impl Emitter<'_, '_> {
                 (1, Type::Bool),
                 (2, Type::Int),
                 (3, Type::Str),
+                (4, Type::ListInt),
+                (5, Type::Dict(0)),
                 (6, Type::Tuple(0)),
                 (8, Type::Bytes),
             ]

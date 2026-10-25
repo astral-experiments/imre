@@ -1,11 +1,34 @@
 """Logging classes compiled into the native program."""
 
+import logging
 import os.path
-from logging import Formatter, LogRecord
+import sys
+from logging import Formatter, LogRecord, getLevelNamesMapping
+from imre._logging import _Level, _lookup_handler, _print_active_exception, _rename_handler
 from pathlib import Path
 from typing import TextIO
 
 _default_formatter = Formatter()
+
+
+def _handle_error(record: LogRecord) -> None:
+    if not logging.raiseExceptions:
+        return
+    try:
+        sys.stderr.write("--- Logging error ---\n")
+        _print_active_exception()
+        sys.stderr.write("Call stack:\n")
+        sys.stderr.write(f"Logged from file {record.filename}, line {record.lineno}\n")
+        details = Formatter("Message: %(msg)r\nArguments: %(args)s")
+        try:
+            sys.stderr.write(details.formatMessage(record) + "\n")
+        except RecursionError:
+            raise
+        except Exception:
+            sys.stderr.write("Unable to print the message and arguments - possible formatting error.\n"
+                             "Use the traceback above to help find the error.\n")
+    except OSError:
+        pass
 
 
 class Filter:
@@ -27,6 +50,68 @@ class Filter:
         if not name[:self.nlen].startswith(self.name):
             return False
         return name[self.nlen] == "."
+
+
+def _handler_level(level: _Level) -> int:
+    if isinstance(level, str):
+        levels = getLevelNamesMapping()
+        if level not in levels:
+            raise ValueError(f"Unknown level: {level!r}")
+        return levels[level]
+    return level
+
+
+class Handler:
+    _name: str | None
+    _closed: bool
+    level: int
+    formatter: Formatter | None
+    filters: list[Filter]
+
+    def __init__(self, level: _Level = 0) -> None:
+        self.filters = []
+        self._name = None
+        self.level = _handler_level(level)
+        self.formatter = None
+        self._closed = False
+
+    def get_name(self) -> str | None:
+        return self._name
+
+    def set_name(self, name: str | None) -> None:
+        _rename_handler(self, self._name, name)
+        self._name = name
+
+    name = property(get_name, set_name)
+
+    def setLevel(self, level: _Level) -> None:
+        self.level = _handler_level(level)
+
+    def setFormatter(self, fmt: Formatter | None) -> None:
+        self.formatter = fmt
+
+    def format(self, record: LogRecord) -> str:
+        fmt = self.formatter
+        if fmt is None:
+            return _default_formatter.format(record)
+        return fmt.format(record)
+
+    def emit(self, record: LogRecord | None) -> None:
+        raise NotImplementedError("emit must be implemented by Handler subclasses")
+
+    def handleError(self, record: LogRecord) -> None:
+        _handle_error(record)
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self._closed = True
+        _rename_handler(self, self._name, None)
+
+
+def getHandlerByName(name: str) -> Handler | None:
+    return _lookup_handler(name)
 
 
 def _logfile_name(filename: str | Path) -> str:
@@ -100,8 +185,20 @@ class FileHandler:
                 return
             stream = self._open()
             self.stream = stream
-        stream.write(self.format(record) + self.terminator)
-        self.flush()
+        try:
+            message = self.format(record)
+            stream = self.stream
+            if stream is None:
+                raise AttributeError("'NoneType' object has no attribute 'write'")
+            stream.write(message + self.terminator)
+            self.flush()
+        except RecursionError:
+            raise
+        except Exception:
+            self.handleError(record)
+
+    def handleError(self, record: LogRecord) -> None:
+        _handle_error(record)
 
     def handle(self, record: LogRecord) -> LogRecord:
         self.emit(record)
@@ -118,6 +215,26 @@ class FileHandler:
                     stream.close()
         finally:
             self._closed = True
+
+
+class NullHandler(Handler):
+    lock: None
+
+    def __init__(self, level: _Level = 0) -> None:
+        super().__init__(level)
+        self.createLock()
+
+    def handle(self, record: LogRecord | None):
+        pass
+
+    def emit(self, record: LogRecord | None) -> None:
+        pass
+
+    def createLock(self) -> None:
+        self.lock = None
+
+    def _at_fork_reinit(self) -> None:
+        pass
 
 
 class BufferingFormatter:

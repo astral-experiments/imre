@@ -28,6 +28,32 @@ struct References<'a> {
     found: &'a mut Reachable,
 }
 
+impl References<'_> {
+    /// Root an implicit index method only if argument binding can reach conversion.
+    fn invokes_index(&self, call: &ast::ExprCall) -> bool {
+        if let Some(Binding::Intrinsic(Intrinsic::Credential(name))) =
+            self.graph.resolve(self.module, &call.func)
+        {
+            let arity = super::credential_arity(name);
+            return arity != 0
+                && call.arguments.keywords.is_empty()
+                && (call.arguments.args.len() == arity
+                    || call
+                        .arguments
+                        .args
+                        .iter()
+                        .any(|arg| matches!(arg, ast::Expr::Starred(_))));
+        }
+        matches!(call.func.as_ref(), ast::Expr::Attribute(attr) if attr.attr.as_str() == "expandtabs")
+            && call.arguments.args.len() + call.arguments.keywords.len() == 1
+            && call
+                .arguments
+                .keywords
+                .first()
+                .is_none_or(|kw| kw.arg.as_deref() == Some("tabsize"))
+    }
+}
+
 impl<'a> Visitor<'a> for References<'_> {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         if !self
@@ -48,16 +74,8 @@ impl<'a> Visitor<'a> for References<'_> {
             self.found.attributes.insert("__copy__".to_owned());
             self.found.instance_attributes.insert("__copy__".to_owned());
         }
-        // Only a supplied, successfully bound width can invoke __index__.
         if let ast::Expr::Call(call) = expr
-            && let ast::Expr::Attribute(attr) = call.func.as_ref()
-            && attr.attr.as_str() == "expandtabs"
-            && call.arguments.args.len() + call.arguments.keywords.len() == 1
-            && call
-                .arguments
-                .keywords
-                .first()
-                .is_none_or(|kw| kw.arg.as_deref() == Some("tabsize"))
+            && self.invokes_index(call)
         {
             self.found.attributes.insert("__index__".to_owned());
             self.found
@@ -77,6 +95,29 @@ impl<'a> Visitor<'a> for References<'_> {
         }
         if let ast::Expr::Attribute(attr) = expr {
             let name = attr.attr.to_string();
+            if matches!(
+                name.as_str(),
+                "assertEqual" | "assertListEqual" | "assertRaises"
+            ) {
+                self.found.attributes.insert(format!("_bound_{name}"));
+            }
+            if matches!(name.as_str(), "assertRaises" | "assertRaisesRegex") {
+                self.found
+                    .attributes
+                    .insert("_raise_missing_callable".into());
+                if let Some(module) = self
+                    .graph
+                    .modules
+                    .iter()
+                    .find(|m| m.bundled && m.name == "unittest")
+                {
+                    for symbol in ["_AssertRaisesContext", "_raise_call_type_error"] {
+                        if let Some(Binding::Definition(def)) = module.bindings.get(symbol) {
+                            self.found.definitions.insert(*def);
+                        }
+                    }
+                }
+            }
             if matches!(name.as_str(), "assertEqual" | "assertListEqual") {
                 self.found.attributes.extend(
                     [
@@ -90,17 +131,6 @@ impl<'a> Visitor<'a> for References<'_> {
                     .into_iter()
                     .map(str::to_owned),
                 );
-            }
-            if name == "assertRaises"
-                && let Some(module) = self
-                    .graph
-                    .modules
-                    .iter()
-                    .find(|m| m.bundled && m.name == "unittest")
-                && let Some(Binding::Definition(context)) =
-                    module.bindings.get("_AssertRaisesContext")
-            {
-                self.found.definitions.insert(*context);
             }
             if let Some(Binding::Definition(owner)) = self.graph.resolve(self.module, &attr.value) {
                 self.found.class_attributes.insert((owner, name.clone()));
@@ -263,7 +293,7 @@ impl Reachable {
                             let assertion_exit = source.bundled
                                 && source.name == "unittest"
                                 && class.name.as_str() == "_AssertRaisesContext"
-                                && name == "_missing";
+                                && matches!(name, "_missing" | "_check_regex");
                             let unittest_method = refs.found.unittest_classes.contains(&id)
                                 && (name.starts_with("test")
                                     || matches!(
@@ -312,6 +342,10 @@ impl Reachable {
                                         | "__iter__"
                                         | "__str__"
                                 )
+                                || (matches!(name, "__getitem__" | "__len__" | "__contains__")
+                                    && has_base(graph, id, |module, base| {
+                                        crate::classes::mapping_base(graph, module, base)
+                                    }))
                                 || (name == "__repr__" && exception_base(graph, id))
                                 || definition_effect(graph, id.module, method))
                                 && refs.found.methods.insert((id.module, method.start()))
@@ -607,6 +641,21 @@ fn class_effect(graph: &SourceGraph, module: ModuleId, class: &ast::StmtClassDef
 
 /// Rich exception display overrides are reachable through base-class catches.
 fn exception_base(graph: &SourceGraph, id: DefinitionId) -> bool {
+    has_base(graph, id, |module, base| {
+        graph.resolve(module, base).is_none()
+            && base
+                .as_name_expr()
+                .and_then(|n| crate::frontend::exception_kind(n.id.as_str()))
+                .is_some()
+    })
+}
+
+/// Walk the finite class graph before fixed layouts are resolved.
+fn has_base(
+    graph: &SourceGraph,
+    id: DefinitionId,
+    matches: impl Fn(ModuleId, &ast::Expr) -> bool,
+) -> bool {
     let mut pending = vec![id];
     let mut seen = HashSet::new();
     while let Some(def) = pending.pop() {
@@ -621,16 +670,11 @@ fn exception_base(graph: &SourceGraph, id: DefinitionId) -> bool {
             continue;
         };
         for base in &args.args {
-            match graph.resolve(def.module, base) {
-                Some(Binding::Definition(parent)) => pending.push(parent),
-                None if base
-                    .as_name_expr()
-                    .and_then(|n| crate::frontend::exception_kind(n.id.as_str()))
-                    .is_some() =>
-                {
-                    return true;
-                }
-                _ => {}
+            if matches(def.module, base) {
+                return true;
+            }
+            if let Some(Binding::Definition(parent)) = graph.resolve(def.module, base) {
+                pending.push(parent);
             }
         }
     }

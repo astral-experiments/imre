@@ -2,7 +2,7 @@
 //! input before constructing the compiler-described, owned namespace record.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashSet, TryReserveError};
 use std::io::{self, Write};
 use std::rc::Rc;
 
@@ -51,6 +51,7 @@ enum Action {
     StoreConst,
     StoreTrue,
     StoreFalse,
+    BooleanOptional,
     Count,
 }
 
@@ -128,7 +129,7 @@ enum Token<'a> {
     Unknown,
     Ambiguous(Vec<&'a str>),
     Help(Option<&'a str>),
-    Option(usize, Option<&'a str>),
+    Option(usize, &'a str, Option<&'a str>),
     Cluster(char, &'a str),
 }
 
@@ -178,6 +179,12 @@ enum Stop<'a> {
     Help(&'a Parser),
     Error(&'a Parser, String),
     Exception(Error),
+}
+
+impl From<TryReserveError> for Stop<'_> {
+    fn from(_: TryReserveError) -> Self {
+        Self::Exception(Error::allocation())
+    }
 }
 
 impl Parser {
@@ -264,12 +271,12 @@ impl Parser {
         let Some(prefix) = chars.next().filter(|&c| self.prefixes.contains(c)) else {
             return Token::Value;
         };
-        let token = |slot, value| match slot {
+        let token = |flag, slot, value| match slot {
             None => Token::Help(value),
-            Some(i) => Token::Option(i, value),
+            Some(i) => Token::Option(i, flag, value),
         };
-        if let Some((_, slot)) = self.flags().find(|(s, _)| *s == arg) {
-            return token(slot, None);
+        if let Some((flag, slot)) = self.flags().find(|(s, _)| *s == arg) {
+            return token(flag, slot, None);
         }
         let Some(second) = chars.next() else {
             return Token::Value;
@@ -278,9 +285,9 @@ impl Parser {
             .split_once('=')
             .map_or((arg, None), |(h, v)| (h, Some(v)));
         if explicit.is_some()
-            && let Some((_, slot)) = self.flags().find(|(s, _)| *s == head)
+            && let Some((flag, slot)) = self.flags().find(|(s, _)| *s == head)
         {
-            return token(slot, explicit);
+            return token(flag, slot, explicit);
         }
         let long = self.prefixes.contains(second);
         let short = &arg[..prefix.len_utf8() + second.len_utf8()];
@@ -289,7 +296,7 @@ impl Parser {
             if !long && flag == short {
                 matches.push((flag, Token::Cluster(prefix, &arg[prefix.len_utf8()..])));
             } else if self.abbrev && flag.starts_with(head) {
-                matches.push((flag, token(slot, explicit)));
+                matches.push((flag, token(flag, slot, explicit)));
             }
         }
         if matches.len() > 1 {
@@ -378,6 +385,7 @@ impl Parser {
                             ));
                         };
                         let mut parsed = definition.parser.parse(&args[index + 1..])?;
+                        extras.try_reserve(parsed.extras.len())?;
                         extras.append(&mut parsed.extras);
                         selected = Some((child, name, parsed.words));
                         break 'parse;
@@ -399,6 +407,7 @@ impl Parser {
                             .map_err(|e| Stop::Error(self, e))?,
                     );
                 }
+                extras.try_reserve(end - index)?;
                 extras.extend(args[index..end].iter().copied().map(Cow::Borrowed));
                 index = end;
                 if index == args.len() {
@@ -408,7 +417,7 @@ impl Parser {
             let arg = args[index];
             index += 1;
             let mut clustered_help = false;
-            let (slot, explicit) = match self.token(arg) {
+            let (slot, spelling, explicit) = match self.token(arg) {
                 Token::Help(None) => return Err(Stop::Help(self)),
                 Token::Help(Some(value)) => {
                     return Err(Stop::Error(
@@ -428,6 +437,7 @@ impl Parser {
                 }
                 Token::End | Token::Value => unreachable!("positional run already consumed"),
                 Token::Unknown => {
+                    extras.try_reserve(1)?;
                     extras.push(Cow::Borrowed(arg));
                     continue;
                 }
@@ -437,22 +447,20 @@ impl Parser {
                         let letter = suffix.chars().next().unwrap();
                         let rest = &suffix[letter.len_utf8()..];
                         let spelling = format!("{prefix}{letter}");
-                        let option = self.options.iter().enumerate().find(|(_, option)| {
-                            !option.positional() && option.flags().any(|s| s == spelling)
-                        });
-                        let help = self
-                            .help_flags
-                            .as_ref()
-                            .is_some_and(|flags| flags[0] == spelling);
-                        if !help && option.is_none() {
+                        let Some((matched, slot)) =
+                            self.flags().find(|(name, _)| *name == spelling)
+                        else {
+                            extras.try_reserve(1)?;
                             extras.push(Cow::Owned(format!("{prefix}{suffix}")));
                             break;
-                        }
+                        };
+                        let option = slot.map(|slot| (slot, &self.options[slot]));
                         if let Some((slot, option)) = option
                             && option.takes_value()
                         {
                             take = Some((
                                 slot,
+                                matched,
                                 (!rest.is_empty()).then(|| rest.strip_prefix('=').unwrap_or(rest)),
                             ));
                             break;
@@ -480,7 +488,7 @@ impl Parser {
                         if let Some((slot, option)) = option {
                             values[slot] = Some(
                                 option
-                                    .flag_value(values[slot].take())
+                                    .flag_value(values[slot].take(), matched)
                                     .map_err(|e| Stop::Error(self, e))?,
                             );
                         } else {
@@ -496,7 +504,7 @@ impl Parser {
                     };
                     take
                 }
-                Token::Option(slot, value) => (slot, value),
+                Token::Option(slot, spelling, value) => (slot, spelling, value),
             };
             let option = &self.options[slot];
             let taken = if let Some(value) = explicit {
@@ -524,7 +532,7 @@ impl Parser {
             } else if !option.takes_value() {
                 values[slot] = Some(
                     option
-                        .flag_value(values[slot].take())
+                        .flag_value(values[slot].take(), spelling)
                         .map_err(|e| Stop::Error(self, e))?,
                 );
                 continue;
@@ -719,24 +727,25 @@ pub unsafe extern "C" fn imre_argparse_parse(
     // SAFETY: these immutable inputs remain rooted during parsing and construction.
     let (schema, description, argv) = unsafe { (&*schema, &*description, &*argv) };
     let parser = Parser::from_schema(schema);
+    let mut owners = Vec::new();
+    let mut args = Vec::new();
     // SAFETY: argv is a rooted list[str]; take independent string owners before
     // reading the argument values or constructing the output namespace.
-    let owners = unsafe {
+    let reserved = unsafe {
         argv.0.with(|storage| {
             let sequence = storage.sequence();
             sequence.check_kind(3);
-            sequence
-                .values
-                .iter()
-                .skip(usize::from(process_argv))
-                .map(|&word| super::acquire_rc::<Str>(word))
-                .collect::<Vec<_>>()
+            let words = sequence.values.iter().skip(usize::from(process_argv));
+            owners.try_reserve_exact(words.len())?;
+            args.try_reserve_exact(words.len())?;
+            owners.extend(words.map(|&word| super::acquire_rc::<Str>(word)));
+            Ok::<_, std::collections::TryReserveError>(())
         })
     };
-    let args = owners
-        .iter()
-        .map(|value| value.as_str())
-        .collect::<Vec<_>>();
+    if reserved.is_err() {
+        return Error::allocation().returning(std::ptr::null_mut());
+    }
+    args.extend(owners.iter().map(|value| value.as_str()));
     let parsed = match parser.parse(&args).and_then(|parsed| {
         if !pair_layout.is_null() || parsed.extras.is_empty() {
             Ok(parsed)
@@ -786,6 +795,15 @@ pub unsafe extern "C" fn imre_argparse_parse(
             return Error::exit_status(2).returning(std::ptr::null_mut());
         }
     };
+    let mut extras = Words::new(3);
+    if !pair_layout.is_null()
+        && extras
+            .values
+            .try_reserve_exact(parsed.extras.len())
+            .is_err()
+    {
+        return Error::allocation().returning(std::ptr::null_mut());
+    }
     // SAFETY: every slot receives exactly one owner of its declared kind. All
     // input validation is complete, and option conversion invokes no user code.
     unsafe {
@@ -811,7 +829,6 @@ pub unsafe extern "C" fn imre_argparse_parse(
         if pair_layout.is_null() {
             return result;
         }
-        let mut extras = Words::new(3);
         extras.values.extend(
             parsed
                 .extras

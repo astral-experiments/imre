@@ -104,6 +104,13 @@ impl OptionSpec {
         };
         if summary {
             if !self.takes_value() {
+                if self.action == super::Action::BooleanOptional {
+                    return paint(
+                        color,
+                        option_color(&self.flag, false),
+                        &self.flags().collect::<Vec<_>>().join(" | "),
+                    );
+                }
                 return paint(color, option_color(&self.flag, false), &self.flag);
             }
             return if color {
@@ -426,16 +433,15 @@ impl Parser {
     }
 
     fn description(&self, text: &str, width: usize, indent: usize) -> String {
-        let text = if text.contains("%(prog)") {
-            expand(text, &self.prog, None)
-        } else {
-            text.to_owned()
-        };
+        let expanded = text
+            .contains("%(prog)")
+            .then(|| expand(text, &self.prog, None));
+        let text = expanded.as_deref().unwrap_or(text);
         let prefix = " ".repeat(indent);
         if self.raw {
-            let mut offsets = super::super::LineOffsets::new(&text);
+            let mut offsets = super::super::LineOffsets::new(text);
             let mut result = String::new();
-            while let Some(line) = offsets.next(&text) {
+            while let Some(line) = offsets.next(text) {
                 result.push_str(&prefix);
                 result.push_str(&text[line.start..offsets.start]);
             }
@@ -444,7 +450,7 @@ impl Parser {
             // _format_text subtracts the current indent before textwrap.fill;
             // textwrap then counts its initial/subsequent indent in that width.
             let width = width.saturating_sub(indent).max(11);
-            wrap(&text, width.saturating_sub(indent).max(1))
+            wrap(text, width.saturating_sub(indent).max(1))
                 .into_iter()
                 .map(|line| format!("{prefix}{line}"))
                 .collect::<Vec<_>>()
