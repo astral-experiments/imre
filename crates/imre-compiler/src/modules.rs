@@ -205,6 +205,7 @@ pub(crate) enum Intrinsic {
     CacheInfo,
     LruCache,
     SingleDispatch,
+    UpdateWrapper,
     CachedProperty,
     NewType,
     Partial,
@@ -228,6 +229,9 @@ pub(crate) enum Intrinsic {
     WarningReset,
     WarningDisplay { show: bool },
     PatchSet,
+    PatchedFile,
+    Hunk,
+    UnidiffParseError,
     Awaitable,
     TypeVar,
     Stderr,
@@ -608,6 +612,9 @@ impl IntrinsicModule {
                 Intrinsic::IntConstant(0)
             }
             (Self::Unidiff, "PatchSet") => Intrinsic::PatchSet,
+            (Self::Unidiff, "PatchedFile") => Intrinsic::PatchedFile,
+            (Self::Unidiff, "Hunk") => Intrinsic::Hunk,
+            (Self::Unidiff, "UnidiffParseError") => Intrinsic::UnidiffParseError,
             (Self::CollectionsAbc, "Awaitable") => Intrinsic::Awaitable,
             (Self::Typing, "overload") => Intrinsic::Overload,
             (Self::Typing, "get_overloads") => Intrinsic::GetOverloads,
@@ -626,6 +633,7 @@ impl IntrinsicModule {
             }
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
             (Self::Functools, "singledispatch") => Intrinsic::SingleDispatch,
+            (Self::Functools, "update_wrapper") => Intrinsic::UpdateWrapper,
             (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
                 Intrinsic::Fnmatch(FnmatchOperation::Match {
                     normcase: name == "fnmatch",
