@@ -596,9 +596,15 @@ pub unsafe extern "C" fn imre_stderr_line(text: *const Str) {
     }
 }
 
-/// Writes already encoded text without the general formatting machinery.
-fn output_bytes(value: &[u8]) {
-    output(|writer| writer.write_all(value));
+/// Write one Python text line to the current stdout.
+fn print_text(value: &str) {
+    if let Some(result) = objects::stdio::write_line(value, false) {
+        if let Err(error) = result {
+            error.raise();
+        }
+    } else {
+        output(|writer| writer.write_all(value.as_bytes()));
+    }
 }
 
 /// The caller handles errors only after this function releases the writer lock.
@@ -841,7 +847,9 @@ pub unsafe extern "C" fn imre_print_int(value: usize) {
     let value = unsafe { Int::borrow(value) };
     if let Some(value) = value.as_small() {
         let mut digits = itoa::Buffer::new();
-        output_bytes(digits.format(value).as_bytes());
+        print_text(digits.format(value));
+    } else if objects::stdio::has_target() {
+        print_text(&value.big().to_string());
     } else {
         output(|writer| write!(writer, "{}", value.big()));
     }
@@ -849,12 +857,12 @@ pub unsafe extern "C" fn imre_print_int(value: usize) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_print_bool(value: u32) {
-    output_bytes(if value == 0 { b"False" } else { b"True" });
+    print_text(if value == 0 { "False" } else { "True" });
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_print_none() {
-    output_bytes(b"None");
+    print_text("None");
 }
 
 /// Formats an integer without changing its ownership or arbitrary precision.
@@ -933,7 +941,7 @@ pub unsafe extern "C" fn imre_str_release(value: *const Str) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_print_str(value: *const Str) {
     // SAFETY: the caller roots this immutable string for the duration of the call.
-    output_bytes(unsafe { &*value }.as_bytes());
+    print_text(unsafe { &*value });
 }
 
 /// # Safety
