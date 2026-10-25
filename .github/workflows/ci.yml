@@ -179,8 +179,21 @@ jobs:
               ;;
             *) exit 2 ;;
           esac
+      - name: Print failed logging occurrences
+        if: failure() && inputs.audit == 'logging'
+        run: |
+          python3 - <<'PYTHON'
+          import json, os
+          from pathlib import Path
+          path = Path(os.environ["RUNNER_TEMP"]) / "logging-results" / "evidence-linux.json"
+          if path.is_file():
+              for level in json.loads(path.read_text()):
+                  for row in level["records"]:
+                      if row["outcome"] in {"fail", "failed"}:
+                          print(level["opt_level"], row["id"], row.get("reason", row.get("evidence")))
+          PYTHON
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        if: success()
+        if: success() || failure()
         with:
           name: logging-${{ inputs.audit }}-${{ inputs.source }}
           path: ${{ runner.temp }}/logging-results
