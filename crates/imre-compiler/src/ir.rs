@@ -73,6 +73,9 @@ pub(crate) enum Type {
     Semaphore,
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
+    NativeModule,
+    ModuleNamespace,
+    ModuleMember,
     LogRecord,
     LogFormatter,
     Logger,
@@ -210,6 +213,9 @@ impl std::fmt::Display for Type {
             Self::DirectoryContext(_) => "directory context",
             Self::Semaphore => "asyncio.Semaphore",
             Self::RegexPattern => "re.Pattern[str]",
+            Self::NativeModule => "builtin module",
+            Self::ModuleNamespace => "module namespace",
+            Self::ModuleMember => "module attribute",
             Self::LogFormatter => "logging.Formatter",
             Self::LogRecord => "logging.LogRecord",
             Self::Logger => "logging.Logger",
@@ -568,6 +574,9 @@ pub(crate) enum Builtin {
     },
     SysPlatform,
     OsName,
+    Errno(ErrnoOperation),
+    StrIsUpper,
+    FreezeStrings,
     SystemExitNew {
         omit_none: bool,
     },
@@ -1229,6 +1238,25 @@ pub(crate) enum CopyOperation {
 }
 
 /// Synchronous process operations cannot invoke language callbacks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ErrnoOperation {
+    BoxValue,
+    DefaultLookup,
+    Module,
+    Namespace,
+    Keys,
+    Errorcode,
+    Number,
+    Text,
+    Lookup,
+    Has,
+    Items,
+    ItemRepr,
+    ItemText,
+    ItemEq,
+    MemberContains,
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
     Executable,

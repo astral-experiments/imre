@@ -65,6 +65,8 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::FreezeStrings => Contract::new(true, PreservesLists),
+            Self::Errno(_) => Contract::new(true, PreservesLists),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
@@ -442,6 +444,7 @@ impl Builtin {
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
             | Self::SysPlatform
+            | Self::StrIsUpper
             | Self::OsName
             | Self::SysOrigArgv
             | Self::SysArgv
