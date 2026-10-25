@@ -399,6 +399,7 @@ impl Builtin {
             | Self::ZipClose
             | Self::Input
             | Self::ParseArgs { .. }
+            | Self::ArgparseText { .. }
             | Self::Pop
             | Self::Print
             | Self::SortRestore

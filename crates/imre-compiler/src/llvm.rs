@@ -4244,6 +4244,22 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::ArgparseText { usage, output } => {
+                let file = args.get(2).map_or("null", |file| &file.value.operand);
+                let text = self.checked_instruction(format!(
+                    "call ptr @imre_argparse_text(ptr {}, ptr {}, i1 {usage}, i32 {}, ptr {file})",
+                    args[0].value.operand, args[1].value.operand, *output as u32
+                ));
+                if returns == Type::None {
+                    none()
+                } else {
+                    Value {
+                        ty: Type::Str,
+                        operand: text,
+                        small_integer: false,
+                    }
+                }
+            }
             Builtin::ParseArgs {
                 children,
                 process_argv,
@@ -6869,6 +6885,7 @@ declare i32 @imre_text_flush(ptr)
 declare i32 @imre_text_close(ptr)
 declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
+declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_orig_argv()
