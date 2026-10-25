@@ -8,9 +8,9 @@
     "denominator": 353,
     "distinct_ids": 353,
     "counts": {
-      "blocked": 170,
-      "failed": 13,
-      "host-driven-native-operation": 82,
+      "blocked": 168,
+      "failed": 12,
+      "host-driven-native-operation": 85,
       "host-operation": 6,
       "mixed": 9,
       "native-body-host-fixture": 32,
@@ -562,24 +562,23 @@
         "opt_level": 0,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "13 : Some fds were closed",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
-          "native_actor_calls": {
-            "Popen": 1,
-            "communicate": 1,
-            "streams": 1
-          }
+          "opt_level": 0,
+          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
+          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
+          "source": "fd-table-current-linux.json",
+          "operation": "three native launches inherit all 11 original fds, close them all, then keep the original set of eight; the native parent reaps each child and keeps every original descriptor and flag",
+          "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_close_fds_0_1",
@@ -1244,19 +1243,23 @@
         "opt_level": 0,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "Unsupported: Popen options: pass_fds",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+          "opt_level": 0,
+          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
+          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
+          "source": "fd-table-current-linux.json",
+          "operation": "the native child inherits both original pipe fds; the original non-inheritable fd remains non-inheritable in the parent; the native parent reaps each child and keeps every original descriptor and flag",
+          "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_redirected",
@@ -1264,19 +1267,23 @@
         "opt_level": 0,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "Unsupported: Popen options: pass_fds",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+          "opt_level": 0,
+          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
+          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
+          "source": "fd-table-current-linux.json",
+          "operation": "three borrowed stdio fds survive exec both at 0/1/2 and at the original explicitly kept numbers; the native parent reaps each child and keeps every original descriptor and flag",
+          "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_pipe_cloexec",
@@ -8569,9 +8576,9 @@
     "denominator": 353,
     "distinct_ids": 353,
     "counts": {
-      "blocked": 170,
-      "failed": 13,
-      "host-driven-native-operation": 82,
+      "blocked": 168,
+      "failed": 12,
+      "host-driven-native-operation": 85,
       "host-operation": 6,
       "mixed": 9,
       "native-body-host-fixture": 32,
@@ -9123,24 +9130,23 @@
         "opt_level": 3,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "13 : Some fds were closed",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
-          "native_actor_calls": {
-            "Popen": 1,
-            "communicate": 1,
-            "streams": 1
-          }
+          "opt_level": 3,
+          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
+          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
+          "source": "fd-table-current-linux.json",
+          "operation": "three native launches inherit all 11 original fds, close them all, then keep the original set of eight; the native parent reaps each child and keeps every original descriptor and flag",
+          "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_close_fds_0_1",
@@ -9805,19 +9811,23 @@
         "opt_level": 3,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "Unsupported: Popen options: pass_fds",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+          "opt_level": 3,
+          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
+          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
+          "source": "fd-table-current-linux.json",
+          "operation": "the native child inherits both original pipe fds; the original non-inheritable fd remains non-inheritable in the parent; the native parent reaps each child and keeps every original descriptor and flag",
+          "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_redirected",
@@ -9825,19 +9835,23 @@
         "opt_level": 3,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "Unsupported: Popen options: pass_fds",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+          "opt_level": 3,
+          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
+          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
+          "source": "fd-table-current-linux.json",
+          "operation": "three borrowed stdio fds survive exec both at 0/1/2 and at the original explicitly kept numbers; the native parent reaps each child and keeps every original descriptor and flag",
+          "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_pipe_cloexec",
