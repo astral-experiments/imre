@@ -58,6 +58,7 @@ enum Storage {
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
     Repeat(itertools::Repeat),
+    IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
