@@ -83,6 +83,7 @@ impl Checker<'_> {
                 return self.system_exit(call, true).map(Some);
             }
             Some(Binding::Intrinsic(Intrinsic::SysGetRecursionLimit)) => {
+                calls::reject_unpacking(call, self.source)?;
                 for arg in &call.arguments.args {
                     self.graph.checked_excess_argument(self.module, arg.range());
                 }
@@ -155,6 +156,7 @@ impl Checker<'_> {
     }
 
     fn set_recursion_limit(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
         let args = &call.arguments;
         if !args.keywords.is_empty() {
             self.graph
@@ -187,109 +189,12 @@ impl Checker<'_> {
             );
         };
         let value = self.expr(arg)?;
-        let index = if let Type::Class(class) = value.ty {
-            if self.classes.has_concrete_subclasses(class) {
-                self.dispatch_record(class, value, arg, |checker, class, value| {
-                    checker.recursion_index(class, value, arg)
-                })?
-            } else {
-                self.recursion_index(class, value, arg)?
-            }
-        } else if value.ty == Type::Bool {
-            Expr {
-                ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
-            }
-        } else if value.ty == Type::Int {
-            value
-        } else {
-            let name = self.recursion_type_name(value.ty, arg)?;
-            self.graph.checked_argument_type(self.module, arg.range());
-            Self::recursion_index_error(
-                value,
-                format!("'{name}' object cannot be interpreted as an integer"),
-            )
-        };
+        let index = self.index_word(value, arg, false)?;
+        self.graph.checked_argument_type(self.module, arg.range());
         Ok(Expr {
             ty: Type::None,
             kind: ExprKind::Builtin(Builtin::SysSetRecursionLimit, vec![index]),
         })
-    }
-
-    /// Look up __index__ on the actual fixed class, including inherited methods.
-    fn recursion_index(
-        &mut self,
-        class: usize,
-        value: Expr,
-        at: &ast::Expr,
-    ) -> Result<Expr, String> {
-        let Some(method) = self.classes.methods[class].get("__index__") else {
-            self.graph.checked_argument_type(self.module, at.range());
-            let name = &self.classes.declarations.definitions[class].name;
-            return Ok(Self::recursion_index_error(
-                value,
-                format!("'{name}' object cannot be interpreted as an integer"),
-            ));
-        };
-        self.calls.insert(method.id);
-        let value = Expr {
-            ty: method.returns,
-            kind: ExprKind::Call(method.id, ir::CallArgs::positional(vec![value])),
-        };
-        if value.ty == Type::Int {
-            return Ok(value);
-        }
-        if value.ty == Type::Bool {
-            return Err(error(
-                self.source,
-                at,
-                "__index__ returning bool requires the Python warning protocol",
-            ));
-        }
-        let name = self.recursion_type_name(value.ty, at)?;
-        Ok(Self::recursion_index_error(
-            value,
-            format!("__index__ returned non-int (type {name})"),
-        ))
-    }
-
-    fn recursion_type_name(&self, ty: Type, at: &ast::Expr) -> Result<String, String> {
-        Ok(match ty {
-            Type::None => "NoneType",
-            Type::Str => "str",
-            Type::Float => "float",
-            Type::Bytes => "bytes",
-            Type::Tuple(_) => "tuple",
-            Type::List(_) | Type::ListInt => "list",
-            Type::Dict(_) => "dict",
-            Type::Set(_) => "set",
-            Type::PlainObject => "object",
-            Type::Class(class) | Type::StrEnum(class) => {
-                &self.classes.declarations.definitions[class].name
-            }
-            _ => {
-                return Err(error(
-                    self.source,
-                    at,
-                    "the native index protocol does not yet support this representation",
-                ));
-            }
-        }
-        .to_owned())
-    }
-
-    fn recursion_index_error(value: Expr, message: String) -> Expr {
-        let exception = Expr {
-            ty: Type::Exception,
-            kind: ExprKind::Exception {
-                kind: exception_kind("TypeError").unwrap(),
-                message: Some(Box::new(unpacking::string(message))),
-            },
-        };
-        Expr {
-            ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::RaiseException, vec![value, exception]),
-        }
     }
 
     pub(super) fn system_exit(

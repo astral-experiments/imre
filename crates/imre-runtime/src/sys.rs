@@ -1,9 +1,8 @@
 //! The process's two UTF-8 text output streams use the same buffering as print.
 mod recursion;
 
-use super::{
-    Error, Int, Kind, LazyLock, Mutex, OUTPUT, Output, Rc, Str, flush_stdout, initialize_io,
-};
+use super::{Int, LazyLock, Mutex, OUTPUT, Output, Rc, Str, flush_stdout, initialize_io};
+use crate::objects::errno_error;
 use std::io::{self, Write};
 
 static STDERR: LazyLock<Mutex<Output<io::Stderr>>> = LazyLock::new(|| {
@@ -35,17 +34,6 @@ pub(super) fn flush_stderr() -> io::Result<()> {
             .flush()?;
     }
     Ok(())
-}
-
-fn write_error(stderr: bool) -> Error {
-    Error::new(
-        Kind::OSError,
-        if stderr {
-            "could not write standard error"
-        } else {
-            "could not write standard output"
-        },
-    )
 }
 
 /// Return the Python platform name of the target that built this runtime.
@@ -84,7 +72,7 @@ pub unsafe extern "C" fn imre_sys_stream_write(stderr: u32, text: *const Str) ->
     };
     match result {
         Ok(()) => Int::from_usize(text.chars().count()).into_raw(),
-        Err(_) => write_error(stderr != 0).returning(0),
+        Err(error) => errno_error(error).returning(0),
     }
 }
 
@@ -96,7 +84,7 @@ pub extern "C" fn imre_sys_stream_flush(stderr: u32) {
     } else {
         flush_stdout()
     };
-    if result.is_err() {
-        write_error(stderr != 0).raise();
+    if let Err(error) = result {
+        errno_error(error).raise();
     }
 }

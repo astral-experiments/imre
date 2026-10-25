@@ -290,6 +290,8 @@ pub(crate) enum Intrinsic {
     Which,
     Copy(CopyOperation),
     RmTree,
+    CopyTree,
+    IgnorePatterns,
     ShutilError,
     SameFileError,
     SpecialFileError,
@@ -652,6 +654,8 @@ impl IntrinsicModule {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
             (Self::Shutil, "rmtree") => Intrinsic::RmTree,
+            (Self::Shutil, "copytree") => Intrinsic::CopyTree,
+            (Self::Shutil, "ignore_patterns") => Intrinsic::IgnorePatterns,
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Shutil, "copyfile") => Intrinsic::Copy(CopyOperation::File),
             (Self::Shutil, "copymode") => Intrinsic::Copy(CopyOperation::Mode),
@@ -893,7 +897,7 @@ impl SourceGraph {
             .push(CheckedDiagnostic::ExcessArgument(argument));
     }
 
-    /// Lowering inspected this exact operand and emits the native type error itself.
+    /// Lowering checked this exact operand against the native integer protocol.
     pub(crate) fn checked_argument_type(&self, module: ModuleId, argument: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::ArgumentType(argument));

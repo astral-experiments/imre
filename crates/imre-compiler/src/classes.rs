@@ -362,7 +362,7 @@ fn collect_class(
                 }
                 let unary_protocol = matches!(
                     name,
-                    "__str__" | "__bool__" | "__iter__" | "__copy__" | "__fspath__" | "__index__"
+                    "__str__" | "__bool__" | "__index__" | "__iter__" | "__copy__" | "__fspath__"
                 );
                 if name.starts_with("__")
                     && name != "__init__"

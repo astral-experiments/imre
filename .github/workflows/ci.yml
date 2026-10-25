@@ -243,6 +243,7 @@ jobs:
           python3 benchmarks/cpython_stdlib/native_shutil.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil.json"
           python3 benchmarks/cpython_stdlib/full/shutil/native_copy.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-copy.json"
           python3 benchmarks/cpython_stdlib/full/shutil/native_rmtree.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-rmtree.json"
+          python3 benchmarks/cpython_stdlib/full/shutil/tree_ops.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-copytree.json"
           python3 benchmarks/cpython_stdlib/native_json.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json.json"
           python3 benchmarks/cpython_stdlib/native_json_values.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json-values.json"
           python3 benchmarks/cpython_stdlib/full/shlex/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shlex.json"
@@ -341,6 +342,8 @@ jobs:
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
       - name: Run original string core methods in native Imre
         run: python3 benchmarks/cpython_stdlib/full/string/native_core.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+      - name: Run pinned str.expandtabs methods and checked allocation controls
+        run: PYTHONPATH=.cpython-stdlib-reference/Lib python3 tests/text_expandtabs_upstream.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Validate guarded list lengths on bounded heaps
         run: |
           python3 tests/validate_list_length.py --compiler target/release/imre \
