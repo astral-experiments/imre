@@ -2,7 +2,7 @@
 
 Imre checks 194 publicly named top-level modules from [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) on Linux. Dotted APIs such as `os.path` appear under their parent. Private modules and third-party packages are outside this inventory.
 
-**At a glance:** 50 modules accept an ordinary import; 3 more accept it only with `--reachable-only`. Across 24 public modules with recorded suites, 72 complete test executions pass natively at both optimization levels; 8,324 of 8,324 upstream executions have a classification.
+**At a glance:** 51 modules accept an ordinary import; 3 more accept it only with `--reachable-only`. Across 24 public modules with recorded suites, 72 complete test executions pass natively at both optimization levels; 8,324 of 8,324 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -14,7 +14,7 @@ Imre checks 194 publicly named top-level modules from [CPython 3.14.5](https://g
 | --- | --- | --- | ---: | ---: |
 | `abc` | Yes | Abstract bases and `@abstractmethod` on fixed-layout classes. [Evidence](../tests/fixtures/classes/fixed_lineage.py) | — | — |
 | `annotationlib` | Yes | `get_annotations`, `Format` and `type_repr` for supported declarations. [Evidence](../tests/fixtures/callables/annotations.py) | — | — |
-| `argparse` | Yes | `ArgumentParser`, typed options, subcommands and generated help. [Evidence](../benchmarks/cpython_stdlib/full/argparse/README.md) | [0 / 1,893](../benchmarks/cpython_stdlib/full/argparse/) | 928 |
+| `argparse` | Yes | `ArgumentParser`, typed options, subcommands and generated help. [Evidence](../benchmarks/cpython_stdlib/full/argparse/README.md) | [0 / 1,893](../benchmarks/cpython_stdlib/full/argparse/) | 930 |
 | `asyncio` | Yes | Run subprocess tasks, wait for a task group and handle cancellation. [Evidence](../tests/fixtures/processes/async_groups.py) | — | — |
 | `base64` | Yes | `urlsafe_b64encode` on bytes. [Evidence](../benchmarks/cpython_stdlib/native_base64.py) | — | — |
 | `builtins` | Yes | Read, assign and delete `builtins._`, including the value saved by the default display hook. [Evidence](../benchmarks/cpython_stdlib/full/sys/BUILTINS.md) | — | — |
@@ -43,9 +43,9 @@ Imre checks 194 publicly named top-level modules from [CPython 3.14.5](https://g
 | `linecache` | Yes | Filesystem-backed `getline`, cache population and invalidation. [Evidence](../benchmarks/cpython_stdlib/full/linecache/README.md) | [0 / 29](../benchmarks/cpython_stdlib/full/linecache/) | 18 |
 | `logging` | Yes | Loggers, formatters and selected handlers and configuration. [Evidence](../benchmarks/cpython_stdlib/full/logging/README.md) | [0 / 272](../benchmarks/cpython_stdlib/full/logging/) | 51 |
 | `operator` | Yes | `length_hint` for supported iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/repeat.py) | — | — |
-| `os` | Yes | File descriptors, process environment and POSIX `os.path`, including `abspath` and `normpath`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | [0 / 579](../benchmarks/cpython_stdlib/full/os/) | 27 |
+| `os` | Yes | File descriptors, process environment and POSIX `os.path`, including `abspath` and `normpath`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | [0 / 579](../benchmarks/cpython_stdlib/full/os/) | 41 |
 | `pathlib` | Yes | Native paths, traversal and selected file I/O; POSIX and Windows pure paths. [Evidence](../benchmarks/cpython_stdlib/full/pathlib/README.md) | [0 / 1,369](../benchmarks/cpython_stdlib/full/pathlib/) | 190 |
-| `posix` | Rejected | The Linux POSIX companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | — | — |
+| `posix` | Yes | Read and set supported POSIX user and group IDs; the companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/CREDENTIALS.md) | — | — |
 | `posixpath` | Yes | POSIX `os.path` operations on strings and bytes; path tests are counted under `os`. [Evidence](../tests/fixtures/paths/os_path.py) | — | — |
 | `re` | Yes | Fixed regular expressions, captures and replacement escapes in `sub`. [Evidence](../benchmarks/cpython_stdlib/README.md) | — | — |
 | `shlex` | Yes | POSIX shell word splitting, quoting and joining. [Evidence](../benchmarks/cpython_stdlib/full/shlex/README.md) | [0 / 19](../benchmarks/cpython_stdlib/full/shlex/) | 5 |
