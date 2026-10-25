@@ -7,6 +7,7 @@ use std::rc::Rc;
 use super::{Object, fail, words::WordKind};
 
 pub(super) mod strings;
+pub(super) mod weak;
 
 enum Release {
     Record(*const usize),
@@ -69,8 +70,8 @@ pub struct RecordField {
 #[repr(C)]
 struct Header {
     references: Cell<usize>,
-    /// An aligned descriptor, or a pointer to a shared block with bit zero set.
-    descriptor: *const RecordDescriptor,
+    /// The descriptor, a shared block tagged with bit zero, or a weak anchor tagged with bit one.
+    descriptor: Cell<*const RecordDescriptor>,
 }
 
 const _: () = assert!(size_of::<Header>() == 16 && align_of::<Header>() == 8);
@@ -122,7 +123,7 @@ pub unsafe extern "C" fn imre_tuple_probe(
         let header = scratch.cast::<Header>();
         header.write(Header {
             references: Cell::new(0),
-            descriptor,
+            descriptor: Cell::new(descriptor),
         });
         header.add(1).cast()
     }
@@ -130,19 +131,24 @@ pub unsafe extern "C" fn imre_tuple_probe(
 
 impl Header {
     fn block(&self) -> Option<*const Block> {
-        if self.descriptor.addr() & 1 == 0 {
+        let layout = self.layout_pointer();
+        if layout.addr() & 1 == 0 {
             return None;
         }
         // Each tagged pointer owns a live block. Removing its tag
         // recovers the original aligned pointer and its allocation provenance.
-        Some(self.descriptor.map_addr(|addr| addr - 1).cast::<Block>())
+        Some(layout.map_addr(|addr| addr - 1).cast::<Block>())
     }
 
     fn descriptor(&self) -> &RecordDescriptor {
         // SAFETY: a tagged header owns its Rc until its last record owner drops.
-        let descriptor = self
-            .block()
-            .map_or(self.descriptor, |block| unsafe { (*block).descriptor });
+        let layout = self.layout_pointer();
+        let descriptor = if layout.addr() & 1 == 0 {
+            layout
+        } else {
+            // SAFETY: the untagged block is rooted for this record's lifetime.
+            unsafe { (*layout.map_addr(|addr| addr - 1).cast::<Block>()).descriptor }
+        };
         // SAFETY: both forms carry the original immutable compiler metadata.
         unsafe { &*descriptor }
     }
@@ -215,7 +221,7 @@ impl<'a> RecordBatch<'a> {
             self.next += self.words;
             slot.write(Header {
                 references: Cell::new(1),
-                descriptor: block.cast::<RecordDescriptor>().map_addr(|addr| addr | 1),
+                descriptor: Cell::new(block.cast::<RecordDescriptor>().map_addr(|addr| addr | 1)),
             });
             slot.add(1).cast()
         }
@@ -304,7 +310,7 @@ pub(super) unsafe fn allocate_record(descriptor: *const RecordDescriptor) -> *mu
     unsafe {
         allocation.cast::<Header>().write(Header {
             references: Cell::new(1),
-            descriptor,
+            descriptor: Cell::new(descriptor),
         });
         // Only the payload needs zeroing for partial-field cleanup. The ordinary
         // allocation can reuse a freed small record without clearing its header.
@@ -364,7 +370,7 @@ unsafe fn cached_result(
 ) -> *mut usize {
     // SAFETY: the caller roots this cache and its immutable descriptor.
     let header = unsafe { &*payload.cast::<Header>().sub(1) };
-    if header.references.get() == 1 {
+    if header.references.get() == 1 && !header.has_weak_anchor() {
         header.references.set(2);
         payload.cast_mut()
     } else {
@@ -455,6 +461,7 @@ unsafe fn release_record_owner(payload: *const usize) {
     if count != 1 {
         return;
     }
+    header.drop_weak_anchor();
     // SAFETY: metadata remains immutable and live even while payloads are released.
     let descriptor = header.descriptor();
     if let Some(block) = header.block() {
