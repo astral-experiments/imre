@@ -1020,7 +1020,7 @@ Direct `mapping.keys()` operands and sets of the same key type support `|`, incl
 
 `set[T]` accepts the same exact scalar or immutable fixed-tuple shapes as dictionary keys, with the same value equality. Nonempty literals infer their element type and evaluate every element from left to right, including duplicates. Empty `set()` requires a concrete contextual type. `add(value)` inserts an element, `discard(value)` removes it when present, and both return `None`. Adding a duplicate or discarding a missing element is a no-op. `len`, single `in`/`not in` comparisons, direct iteration, and loop-head `enumerate` are supported. Set iteration and display order are unspecified. Iteration checks size changes and owns each yielded element before the body can remove it.
 
-`set(cursor)` consumes a native iterator from its current position and owns each distinct element. An empty `set()` in a conditional can take its element type from the other branch.
+`set(cursor)` consumes a native iterator from its current position and owns each distinct element. `set` can also consume ranges, generator expressions and typed iterator pipelines directly. An empty `set()` in a conditional can take its element type from the other branch.
 
 Sets with the same checked element type support equality, inequality and f-string display. Union (`|`), intersection (`&`) and difference (`-`) on sets or dictionary key views return a fresh set. Symmetric difference, subset/superset comparisons, `remove`, `pop`, and `clear` are unsupported.
 

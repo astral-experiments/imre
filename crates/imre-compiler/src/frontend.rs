@@ -6137,13 +6137,21 @@ impl<'a> Checker<'a> {
             return self.simple_namespace(call);
         }
         calls::reject_unpacking(call, self.source)?;
-        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "set")
+        if self.unshadowed_builtin(&call.func, "set")
             && let [input] = call.arguments.args.as_ref()
             && call.arguments.keywords.is_empty()
         {
+            if pipelines::is_pipeline_expression(self, input)
+                || matches!(input, ast::Expr::Call(producer) if self.unshadowed_builtin(&producer.func, "range"))
+            {
+                let iterable = self.expansion_input(input, None)?;
+                let source = self.prepare_iteration(iterable, input, false)?;
+                return self.collect_set(source, input);
+            }
             let (source, key) = self.union_operand(input)?;
             if let Some(element) = self.types.cursor_element(source.ty) {
-                return self.collect_cursor_set(source, element, input);
+                let cursor = self.prepare_cursor(source, element);
+                return self.collect_set(cursor, input);
             }
             let key = key.ok_or_else(|| {
                 error(
