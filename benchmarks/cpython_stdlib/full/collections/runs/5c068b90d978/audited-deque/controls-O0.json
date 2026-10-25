@@ -1,0 +1,117 @@
+{
+  "compiler_revision": "5c068b90d978f4b57fe145984fa0459180a755ed",
+  "binary_sha256": {
+    "imre": "c27a36fc3160947bafa5e469399a6545710116cd0898218a68336d1c5b49aa3b",
+    "libimre_runtime.a": "4f4bcfabe107af06449b556848b5693d934f66b35854ada8feadc77d89be4d50"
+  },
+  "opt_level": 0,
+  "tests": {
+    "test.test_deque.TestBasic.test_clear": {
+      "positive": {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "1b85276a6291dfd65920d2ff9edf5040fe9cd0caad03136af5a6cd0119db4375",
+        "observation": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Imre clears the populated and empty native deque; native len and iteration observe the result.",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 0,
+            "method_sha256": "1b85276a6291dfd65920d2ff9edf5040fe9cd0caad03136af5a6cd0119db4375"
+          }
+        }
+      },
+      "negative_controls": [
+        {
+          "symbol": "imre_deque_clear",
+          "control": "void __wrap_imre_deque_clear(void *d) {}",
+          "exit": 1,
+          "stdout": "",
+          "stderr": "AssertionError: 100 != 0\n",
+          "assertion_failed": true
+        }
+      ]
+    },
+    "test.test_deque.TestBasic.test_maxlen_zero": {
+      "positive": {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "0507ae1db4e0badd7c2ab3444f57c6eb8ab1c94eafedde4a1b8d48fe0128d6b5",
+        "observation": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Imre consumes the original range iterators when constructing and extending zero-capacity deques at both ends.",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 0,
+            "method_sha256": "0507ae1db4e0badd7c2ab3444f57c6eb8ab1c94eafedde4a1b8d48fe0128d6b5"
+          }
+        }
+      },
+      "negative_controls": [
+        {
+          "symbol": "imre_mapping_iter_next",
+          "control": "extern int __real_imre_mapping_iter_next(void *,void *,void *); int __wrap_imre_mapping_iter_next(void *s,void *k,void *v) {static int first=1;if(first){first=0;return 0;} return __real_imre_mapping_iter_next(s,k,v);}",
+          "exit": 1,
+          "stdout": "",
+          "stderr": "AssertionError: Lists differ: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,[343 chars], 99] != []\n\nFirst list contains 100 additional elements.\nFirst extra element 0:\n0\n\nDiff is 695 characters long. Set self.maxDiff to None to see it.\n",
+          "assertion_failed": true
+        }
+      ]
+    },
+    "test.test_deque.TestBasic.test_init": {
+      "positive": {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "6560ae7e13f5af3f2c203640d90fff37cecb81fa0e7e64527d06cec67318750d",
+        "observation": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Imre binds the deque constructor and raises TypeError for excess arguments and a non-iterable integer.",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 0,
+            "method_sha256": "6560ae7e13f5af3f2c203640d90fff37cecb81fa0e7e64527d06cec67318750d"
+          }
+        }
+      },
+      "negative_controls": [
+        {
+          "symbol": "imre_error_set",
+          "control": "extern void __real_imre_error_set(void*); void __wrap_imre_error_set(void *e) {static int n;if(++n != 1) __real_imre_error_set(e);}",
+          "exit": 1,
+          "stdout": "",
+          "stderr": "AssertionError: TypeError not raised by deque\n",
+          "assertion_failed": true
+        },
+        {
+          "symbol": "imre_error_set",
+          "control": "extern void __real_imre_error_set(void*); void __wrap_imre_error_set(void *e) {static int n;if(++n != 2) __real_imre_error_set(e);}",
+          "exit": 1,
+          "stdout": "",
+          "stderr": "AssertionError: TypeError not raised by deque\n",
+          "assertion_failed": true
+        }
+      ]
+    }
+  }
+}

@@ -1,5 +1,6 @@
 //! C-main argument capture and independent Python-visible argument lists.
 
+use crate::StrOwner;
 use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, c_char};
 use std::rc::Rc;
@@ -67,7 +68,7 @@ fn decode_bytes<'a>(count: usize, arguments: impl Iterator<Item = &'a [u8]>) -> 
         })?;
         values
             .values
-            .push(Rc::into_raw(Rc::new(Str::new(text))) as usize);
+            .push(StrOwner::into_raw(StrOwner::new(Str::new(text))) as usize);
     }
     Ok(values.into_object())
 }
@@ -120,7 +121,7 @@ pub extern "C" fn imre_sysconfig_scripts() -> *const Str {
     let text = directory
         .and_then(|path| path.into_os_string().into_string().ok())
         .unwrap_or_default();
-    Rc::into_raw(Rc::new(Str::from(text)))
+    StrOwner::into_raw(StrOwner::new(Str::from(text)))
 }
 
 /// The Python interpreter for explicitly launched Python helpers. Preserve
@@ -130,7 +131,7 @@ pub extern "C" fn imre_sys_executable() -> *const Str {
     let text = python_executable()
         .and_then(|path| path.into_os_string().into_string().ok())
         .unwrap_or_default();
-    Rc::into_raw(Rc::new(Str::from(text)))
+    StrOwner::into_raw(StrOwner::new(Str::from(text)))
 }
 
 /// Returns an owned reference to the same mutable list on every successful call.
@@ -223,12 +224,13 @@ mod tests {
             let alias = Rc::from_raw(imre_sys_argv());
             assert!(Rc::ptr_eq(&first, &alias));
             assert_eq!(Int(imre_seq_len(Rc::as_ptr(&first))).as_small(), Some(3));
-            let unicode = Rc::from_raw(
-                imre_seq_get(Rc::as_ptr(&first), Int::small(2).unwrap().0) as *const Str
-            );
+            let unicode = StrOwner::from_raw(imre_seq_get(
+                Rc::as_ptr(&first),
+                Int::small(2).unwrap().0,
+            ) as *const Str);
             assert_eq!(unicode.as_str(), "é🦀");
-            let added = Rc::new(Str::new("new argument"));
-            imre_seq_append(Rc::as_ptr(&first), Rc::as_ptr(&added) as usize, 3);
+            let added = StrOwner::new(Str::new("new argument"));
+            imre_seq_append(Rc::as_ptr(&first), StrOwner::as_ptr(&added) as usize, 3);
             assert_eq!(Int(imre_seq_len(Rc::as_ptr(&alias))).as_small(), Some(4));
             let weak = Rc::downgrade(&first);
             let pending = imre_exception_new(Kind::RuntimeError as u32, std::ptr::null());

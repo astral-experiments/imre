@@ -1,6 +1,7 @@
 //! Large nested arrays used only for lookup or truth must not allocate a node
 //! for every descendant. Keep their validated span and expand it on demand.
 
+use crate::StrOwner;
 use std::cell::{Cell, OnceCell};
 use std::ops::Range;
 use std::rc::Rc;
@@ -10,7 +11,7 @@ use serde_json::value::RawValue;
 use super::{KeyMemo, Nodes, Source, View, elements, push_array};
 
 pub(in crate::objects::json) struct Deferred {
-    text: Rc<super::Str>,
+    text: StrOwner,
     normalized: Option<(Rc<String>, usize)>,
     range: Range<usize>,
     parsed: OnceCell<View>,
@@ -29,7 +30,7 @@ impl Deferred {
         let original = source.token(raw);
         let (text, start) = if let Some((owner, start)) = source.shared {
             (
-                Rc::clone(owner),
+                StrOwner::clone(owner),
                 start + (raw.as_ptr() as usize - source.text.as_ptr() as usize),
             )
         } else {
@@ -38,7 +39,7 @@ impl Deferred {
             }
             let text = super::Str::try_new(original)
                 .map_err(|_| super::allocation_error(source.refused))?;
-            (Rc::new(text), 0)
+            (StrOwner::new(text), 0)
         };
         // The parser has already validated the same-width substitutions. Keep the
         // spelling for this span so a later read never has to allocate it again.
@@ -163,7 +164,7 @@ mod tests {
         let Node::Deferred(inner) = &outer.nodes[items[0]] else {
             panic!()
         };
-        assert!(Rc::ptr_eq(&raw.text, &inner.text));
+        assert!(StrOwner::ptr_eq(&raw.text, &inner.text));
         assert!(Rc::ptr_eq(
             &raw.normalized.as_ref().unwrap().0,
             &inner.normalized.as_ref().unwrap().0,

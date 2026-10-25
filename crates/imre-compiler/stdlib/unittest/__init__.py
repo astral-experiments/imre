@@ -3,6 +3,7 @@
 
 import difflib
 import re
+from fnmatch import fnmatchcase
 from types import ModuleType
 from typing import ClassVar
 
@@ -116,17 +117,22 @@ def _pretty_list(flat: str, items: list[str]) -> list[str]:
 
 class TestCase:
     failureException: ClassVar[type[Exception]] = AssertionError
+    _testMethodName: str
     longMessage: bool
     maxDiff: int | None
     _diffThreshold: int
 
     def __init__(self) -> None:
+        self._testMethodName = "runTest"
         self.longMessage = True
         self.maxDiff = 640
         self._diffThreshold = 65536
 
     def countTestCases(self) -> int:
         return 1
+
+    def id(self) -> str:
+        return self.__class__.__module__ + "." + self.__class__.__qualname__ + "." + self._testMethodName
 
     def _formatMessage(self, msg: str | None, standardMsg: str) -> str:
         if msg is None:
@@ -179,9 +185,10 @@ class TestCase:
         if not a >= b:
             self.fail(self._formatMessage(msg, f"{a!r} not greater than or equal to {b!r}"))
 
-    def _baseAssertEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    def _baseAssertEqual(self, first: bool | int, second: bool | int, msg: str | None = None) -> None:
         if first != second:
-            raise self.failureException(self._formatMessage(msg, f"{first!r} != {second!r}"))
+            left, right = _short_reprs(repr(first), repr(second))
+            raise self.failureException(self._formatMessage(msg, left + " != " + right))
 
     def _truncateMessage(self, message: str, diff: str) -> str:
         limit = self.maxDiff
@@ -393,6 +400,40 @@ class TestResult:
 from typing import Callable
 import sys
 import time
+
+
+class TestLoader:
+    testMethodPrefix: str
+    testNamePatterns: list[str] | None
+    errors: list[str]
+
+    def __init__(self) -> None:
+        self.testMethodPrefix = "test"
+        self.testNamePatterns = None
+        self.errors = []
+
+    def _getTestCaseNames(self, owner: str, names: list[str], descriptors: list[str]) -> list[str]:
+        prefix = self.testMethodPrefix
+        if not prefix or prefix.startswith("_"):
+            raise NotImplementedError("native TestLoader cannot enumerate Python's private class metadata")
+        for name in descriptors:
+            if name.startswith(prefix):
+                raise NotImplementedError("native TestLoader cannot inspect descriptor " + owner + "." + name)
+        patterns = self.testNamePatterns
+        selected: list[str] = []
+        for name in names:
+            if name.startswith(prefix):
+                if patterns is None:
+                    selected.append(name)
+                else:
+                    for pattern in patterns:
+                        if fnmatchcase(owner + "." + name, pattern):
+                            selected.append(name)
+                            break
+        return selected
+
+
+defaultTestLoader = TestLoader()
 
 
 def main() -> None:
