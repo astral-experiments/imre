@@ -49,7 +49,7 @@ pub(crate) struct Class {
     pub(crate) fields: Vec<Field>,
     pub(crate) methods: Vec<ast::StmtFunctionDef>,
     /// Field writes required of every override called during construction.
-    init_hooks: init_hooks::Hooks,
+    pub(crate) init_hooks: HashMap<String, Vec<String>>,
     pub(crate) method_kinds: Vec<MethodKind>,
     /// Declaring class for the corresponding method's imports and lexical super.
     pub(crate) method_origins: Vec<DefinitionId>,
