@@ -1022,6 +1022,8 @@ impl StrDescriptor {
 /// Closed string operations preserve exact argument and storage types.
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
+    IsSpace,
+    SplitLineEnds,
     Lower,
     Capitalize,
     /// True splits from the right.
