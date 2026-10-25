@@ -1142,7 +1142,12 @@ pub(crate) enum CopyOperation {
 pub(crate) enum ProcessOperation {
     Executable,
     RunToStderr,
-    CheckOutput,
+    CheckOutput {
+        streams: u32,
+        validation: u32,
+        errors: u8,
+        capture: ProcessCapture,
+    },
     Run {
         streams: u32,
     },

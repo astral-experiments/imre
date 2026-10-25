@@ -123,6 +123,24 @@ impl Session {
             .read_to_string("stdlib/subprocess.pyi")
             .map_err(|error| error.to_string())?
             .replace("shell: bool =", "shell: bool | int =");
+        // check_output accepts **kwargs and reports these conflicts before
+        // launching. Code that catches those ValueErrors must reach the runtime.
+        let mut checked = false;
+        let subprocess: String = subprocess
+            .split_inclusive('\n')
+            .flat_map(|line| {
+                if line.trim_start().starts_with("def check_output(") {
+                    checked = true;
+                }
+                let extra = if checked && line.trim() == "*," {
+                    checked = false;
+                    "        stdout: object = ...,\n        check: object = ...,\n        capture_output: bool = False,\n"
+                } else {
+                    ""
+                };
+                [line, extra]
+            })
+            .collect();
         system
             .fs()
             .write_file_all(SystemPathBuf::from(root).join("subprocess.pyi"), subprocess)
