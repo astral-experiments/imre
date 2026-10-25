@@ -7,10 +7,11 @@ use std::rc::Rc;
 
 use serde_json::value::RawValue;
 
-use super::{Nodes, Source, View, constants, elements, push_array};
+use super::{Nodes, Source, View, elements, push_array};
 
 pub(in crate::objects::json) struct Deferred {
     text: Rc<str>,
+    normalized: Option<(Rc<String>, usize)>,
     range: Range<usize>,
     parsed: OnceCell<View>,
 }
@@ -33,8 +34,28 @@ impl Deferred {
             }
             (Rc::<str>::from(original), 0)
         };
+        // The parser has already validated the same-width substitutions. Keep the
+        // spelling for this span so a later read never has to allocate it again.
+        let normalized = source.original.and_then(|(_, patched)| {
+            if raw == original {
+                return None;
+            }
+            if source.shared.is_none() && raw.len() < patched.len() / 2 {
+                // Avoid pinning a large document for one small surviving array.
+                let mut span = String::new();
+                if span.try_reserve_exact(raw.len()).is_ok() {
+                    span.push_str(raw);
+                    return Some((Rc::new(span), 0));
+                }
+            }
+            Some((
+                Rc::clone(patched),
+                raw.as_ptr() as usize - patched.as_ptr() as usize,
+            ))
+        });
         Some(Rc::new(Self {
             text,
+            normalized,
             range: start..start + raw.len(),
             parsed: OnceCell::new(),
         }))
@@ -49,30 +70,30 @@ impl Deferred {
     pub(in crate::objects::json) fn view(&self) -> &View {
         self.parsed.get_or_init(|| {
             let original = &self.text[self.range.clone()];
-            let parse = |text: &str, unmodified| {
-                let mut nodes = Vec::new();
-                let source = Source {
-                    text,
-                    original: unmodified,
-                    shared: Some((&self.text, self.range.start)),
-                };
-                let node = match elements::parse(text, &mut nodes) {
-                    Some(array) => array,
-                    None => push_array(&mut nodes, text, source)?,
-                };
-                let index = nodes.len();
-                nodes.push(node);
-                Ok::<_, serde_json::Error>(View {
-                    nodes: Nodes::Document(Rc::new(nodes)),
-                    index,
-                })
+            let (text, spelling) = match &self.normalized {
+                Some((patched, start)) => (
+                    &patched[*start..*start + original.len()],
+                    Some((original, patched)),
+                ),
+                None => (original, None),
             };
-            parse(original, None)
-                .or_else(|error| {
-                    let patched = constants::normalize(original, &error).ok_or(error)?;
-                    parse(&patched, Some(original))
-                })
-                .expect("the complete document and these Unicode scalars were validated")
+            let mut nodes = Vec::new();
+            let source = Source {
+                text,
+                original: spelling,
+                shared: Some((&self.text, self.range.start)),
+            };
+            let node = match elements::parse(text, &mut nodes) {
+                Some(array) => array,
+                None => push_array(&mut nodes, text, source)
+                    .expect("the complete document and its Unicode scalars were validated"),
+            };
+            let index = nodes.len();
+            nodes.push(node);
+            View {
+                nodes: Nodes::Document(Rc::new(nodes)),
+                index,
+            }
         })
     }
 }
@@ -109,12 +130,19 @@ mod tests {
     #[test]
     fn unused_arrays_remain_raw_and_nested_reads_share_the_validated_span() {
         let input = format!(r#"[[{}"\ud834\udd20",Infinity]]"#, "0,".repeat(3000));
+        let error = serde_json::from_str::<&RawValue>(&input).unwrap_err();
+        let patched = Rc::new(
+            super::super::constants::normalize(&input, &error)
+                .ok()
+                .unwrap()
+                .unwrap(),
+        );
         let source = Source {
-            text: &input,
-            original: None,
+            text: &patched,
+            original: Some((&input, &patched)),
             shared: None,
         };
-        let raw = Deferred::new(&input, source).unwrap();
+        let raw = Deferred::new(&patched, source).unwrap();
         assert!(raw.truth());
         assert!(raw.parsed.get().is_none());
         let outer = raw.view();
@@ -125,6 +153,10 @@ mod tests {
             panic!()
         };
         assert!(Rc::ptr_eq(&raw.text, &inner.text));
+        assert!(Rc::ptr_eq(
+            &raw.normalized.as_ref().unwrap().0,
+            &inner.normalized.as_ref().unwrap().0,
+        ));
         assert!(inner.parsed.get().is_none());
         let inner = inner.view();
         let Node::Array(items) = &inner.nodes[inner.index] else {

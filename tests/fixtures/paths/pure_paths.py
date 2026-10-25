@@ -46,3 +46,14 @@ for spelling in ["a/b", "c:/a/b", "//share/path/a", "a\\b"]:
         print(w.full_match(up))
         print(u.match(wp))
         print(u.full_match(wp))
+
+for first, second in [
+    ('\ua7ce', '\ua7cf'),
+    ('A' * 16 + 'Σ', 'a' * 16 + 'ς'),
+    ('ʕΣ', 'ʕς'),
+    ('AΣ\u1acfA', 'aς\u1acfa'),
+]:
+    left, right = PureWindowsPath(first), PureWindowsPath(second)
+    print(left == right)
+    print(right in {left: 1})
+    print(PureWindowsPath('//' + first + '/share/dir', '//' + second + '/share').as_posix())
