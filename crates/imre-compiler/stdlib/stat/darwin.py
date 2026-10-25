@@ -1,0 +1,7 @@
+# Darwin stat.h and unsigned 16-bit mode_t.
+_MODE_MAX = 0xffff
+S_IFWHT = 0o160000
+_WHITEOUT_MASK = S_IFWHT
+SF_SETTABLE = 0x3fff0000
+SF_SUPPORTED = 0x009f0000
+SF_SYNTHETIC = 0xc0000000
