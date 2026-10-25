@@ -455,13 +455,19 @@ impl<'a> Shapes<'a> {
                 name,
                 if self.conditional {
                     let depth = old.depth.max(shape.depth);
-                    if matches!(
-                        (&old.contents, &shape.contents),
-                        (Contents::List(_), Contents::List(_))
-                    ) {
-                        Shape::list(depth, old.list_layers().min(shape.list_layers()))
-                    } else {
-                        Shape::plain(depth)
+                    match (&old.contents, &shape.contents) {
+                        (Contents::List(_), Contents::List(_)) => {
+                            Shape::list(depth, old.list_layers().min(shape.list_layers()))
+                        }
+                        (Contents::Dict { key_depth: old }, Contents::Dict { key_depth: new }) => {
+                            Shape {
+                                depth,
+                                contents: Contents::Dict {
+                                    key_depth: (*old).max(*new),
+                                },
+                            }
+                        }
+                        _ => Shape::plain(depth),
                     }
                 } else {
                     shape
@@ -712,6 +718,18 @@ mod tests {
         assert!(limited(&format!(
             "{deep}d = {{0: x}}\ncopy = ((dict(d),),)\n"
         )));
+    }
+
+    #[test]
+    fn conditional_dictionary_bindings_keep_key_depth() {
+        let mut source = String::from("def f(flag: bool) -> int:\n    x = [(1,)]\n");
+        for _ in 0..=MAX_DEPTH {
+            source.push_str(
+                "    d = {0: x}\n    if flag:\n        d = {0: x}\n    else:\n        d = {1: x}\n    x = list(zip(d))\n",
+            );
+        }
+        source.push_str("    return len(x)\n");
+        crate::check(&source).unwrap();
     }
 
     #[test]
