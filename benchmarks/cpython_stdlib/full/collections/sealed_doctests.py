@@ -94,6 +94,8 @@ def main():
                     entry["native"][mode] = row
                     print(name, mode, row["status"], flush=True)
     args.result.write_text(json.dumps(report, indent=2) + "\n")
+    assert all(row["status"] != "failed" for entry in report["entries"].values()
+               for row in entry["native"].values()), "native output differed from CPython"
     if args.require_discovery:
         assert all(row["status"] == "matched" for name, e in report["entries"].items()
                    if name.startswith("discover-") or name == "metadata" for row in e["native"].values())
