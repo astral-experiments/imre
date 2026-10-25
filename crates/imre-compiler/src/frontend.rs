@@ -1433,8 +1433,11 @@ fn signature(
     }
     // A .pyi describes the linked C function. Its ellipsis is not an executable body.
     let inert = graph.modules[module].archive.is_none() && annotations::inert_body(function);
-    if inert && let Some(ast::Expr::Name(n)) = function.returns.as_deref() {
-        graph.deferred_name(module, n.range());
+    if inert && let Some(annotation) = function.returns.as_deref() {
+        graph.checked_inert_return(module, annotation.range());
+        if let ast::Expr::Name(name) = annotation {
+            graph.deferred_name(module, name.range());
+        }
     }
     let returns = function
         .returns
@@ -1698,6 +1701,7 @@ fn annotation_with_aliases(
     match expression {
         ast::Expr::Name(name) => match name.id.as_str() {
             "int" => Ok(Type::Int),
+            "type" => Ok(Type::BuiltinClass),
             "float" => Ok(Type::Float),
             "bool" => Ok(Type::Bool),
             "str" => Ok(Type::Str),
@@ -6125,9 +6129,22 @@ impl<'a> Checker<'a> {
                             || self.types.is_value_struct(item)
                             || matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
                     });
+                    // Ordinary dictionaries compare their entries independently of insertion order.
+                    // Only enable value kinds whose Python equality has no user callbacks or boxed NaN identity.
+                    let scalar_dict = self.types.mapping(ty).is_some_and(|(_, value)| {
+                        matches!(
+                            value,
+                            Type::None
+                                | Type::Bool
+                                | Type::Int
+                                | Type::Str
+                                | Type::Bytes
+                                | Type::BuiltinClass
+                        )
+                    });
                     let comparable = match ty {
                         Type::List(_) => comparable_list,
-                        Type::Dict(_) => self.types.is_counter(ty),
+                        Type::Dict(_) => self.types.is_counter(ty) || scalar_dict,
                         Type::Tuple(_) => self.types.hashable_key(ty),
                         Type::VarTuple(_) => variable_tuple,
                         Type::ListInt

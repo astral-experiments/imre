@@ -1099,6 +1099,12 @@ impl SourceGraph {
             .push(CheckedDiagnostic::ExcessArgument(argument));
     }
 
+    /// Native lowering accepts an inert body at this exact return annotation.
+    pub(crate) fn checked_inert_return(&self, module: ModuleId, annotation: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::InertReturn(annotation));
+    }
+
     /// The native positional-only binder already raises at this exact keyword.
     pub(crate) fn checked_positional_keyword(&self, module: ModuleId, keyword: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]

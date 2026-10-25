@@ -52,6 +52,7 @@ pub(crate) struct CachedFunction {
     pub frame: Type,
     pub table: Type,
     pub capacity: i64,
+    pub annotations: Option<AnnotationOrigin>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -67,6 +68,13 @@ pub(crate) struct DispatchFunction {
     pub callable: Type,
     pub frame: Type,
     pub registry: Type,
+}
+
+/// A cache delegates annotation evaluation to the captured declaration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(crate) enum AnnotationOrigin {
+    Module(crate::modules::DefinitionId),
+    Local(usize),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
