@@ -177,10 +177,12 @@ impl Checker<'_> {
             ));
         }
         let skip = usize::from(receiver.is_some());
-        if signature.params[skip..]
-            .iter()
-            .any(|parameter| parameter.kind == ParameterKind::KeywordOnly)
-        {
+        if signature.params[skip..].iter().any(|parameter| {
+            matches!(
+                parameter.kind,
+                ParameterKind::KeywordOnly | ParameterKind::KeywordRest
+            )
+        }) {
             return Err(error(
                 self.source,
                 node,
@@ -388,6 +390,14 @@ impl Checker<'_> {
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
         if let Type::StrDescriptor(method) = callable.ty {
             return self.invoke_descriptor(call, callable, method);
+        }
+        if let Type::Class(class) = callable.ty
+            && self.native_mock(class)
+        {
+            return self.mock_arguments(call, class, callable, "_record");
+        }
+        if let Some(result) = self.invoke_bound_unittest(call, &callable)? {
+            return Ok(result);
         }
         let (params, returns) = self.types.signature(callable.ty).ok_or_else(|| {
             error(

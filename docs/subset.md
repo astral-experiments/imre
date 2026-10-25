@@ -218,6 +218,13 @@ The explicit typed schema decoder and the encoder retain their 128-container lim
 Unicode scalar values. Integers retain their exact precision. The standard
 reader also recognizes `NaN`, `Infinity`, and `-Infinity`.
 
+`json.JSONDecoder()` and `json.decoder.JSONDecoder()` create a reusable decoder.
+Its `decode(s)` method accepts Unicode text; `memo` returns the same dictionary
+on each read from that instance. Keys repeated within one document share the
+same string object. Separate decodes have independent key namespaces. Like
+CPython's default decoder, scanning does not consult or clear entries that a
+caller inserts into the public `memo` dictionary.
+
 `json.dumps(value)` returns a string and `json.dump(value, stream)` writes to
 a text stream. Both accept scalar values, typed lists, tuples, dictionaries
 with string or integer keys, and parsed documents. Fresh nested list and dict
@@ -309,13 +316,23 @@ The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as 
 
 ## Native text operations
 
+`ord(value)` returns the Unicode code point of one native string character or the unsigned value of a one-byte `bytes` object. Invalid lengths count Unicode scalars for strings and bytes for `bytes`. Direct consumers can also iterate `map(ord, source)`: input evaluation happens at iterator creation and the conversion runs on each pull. A source `StrEnum` contributes its Unicode value. Mutable `bytearray`, native strings containing lone surrogate code points, and storing the builtin as a first-class callback are outside this subset.
+
 `str.lower()` uses Unicode 16 full lowercase mappings, including expanding characters and contextual Greek final sigma. `str.capitalize()` titlecases the first code point and lowercases the remainder in the original string context.
 
 `str.expandtabs(tabsize=8)` counts Unicode code points, resets the column on CR or LF, and removes tabs for zero or negative widths. Converting the width happens before inspecting the text. Integers, booleans, and fixed classes with an integer-returning `__index__` are supported; values outside the platform C `int` range raise `OverflowError`. A string with no tabs retains its identity. A user `__index__` returning a boolean is rejected because Python's configurable deprecation warning is not supported.
 
 `str.translate(table)` looks up each Unicode ordinal in an exact plain dictionary. A missing ordinal keeps the character; `None` deletes it; an integer selects a code point, and a string can replace the character with any number of characters. An invalid value raises only when its key is hit. Tables use supported homogeneous or optional value layouts, and integer keys or provably distinct string, bytes or tuple keys. An inline ordinal table may mix strings, integers and `None`; the same value layout handles a closed string-or-integer result (such as `logging.getLevelName(name)`). User lookup callbacks, sequence tables, `str.maketrans`, and surrogate output are outside this subset.
 
-The bundled `string` module exports its nine ASCII character sets in CPython order (`ascii_letters`, `ascii_lowercase`, `ascii_uppercase`, `digits`, `hexdigits`, `octdigits`, `punctuation`, `printable`, `whitespace`). `string.capwords(s, sep=None)` accepts native strings, collapses Python whitespace by default, and preserves empty fields with an explicit separator. `Formatter`, `Template`, `string.templatelib`, and arbitrary module reflection are outside this subset.
+The bundled `string` module exports its nine ASCII character sets in CPython order (`ascii_letters`, `ascii_lowercase`, `ascii_uppercase`, `digits`, `hexdigits`, `octdigits`, `punctuation`, `printable`, `whitespace`). `string.capwords(s, sep=None)` accepts native strings, collapses Python whitespace by default, and preserves empty fields with an explicit separator.
+
+`string.Template` supports its default ASCII dollar grammar, a writable string `template`, `substitute`, `safe_substitute`, `is_valid`, `get_identifiers`, and its shared compiled `pattern`. Substitution accepts positional native string-key dictionaries and typed keyword values: None, bool, int, str, bytes, and fixed tuples of these types. Only referenced values are rendered; keywords override mapping entries. Passing `None` as the mapping is distinct from omitting it. Custom mapping callbacks, arbitrary placeholder objects, customized subclass patterns, `Formatter`, `string.templatelib`, and arbitrary module reflection are outside this subset. `Pattern.finditer(text)` streams native `Match` objects for fixed patterns proved to consume input; zero-width patterns are rejected.
+
+The `object` annotation is shared by concrete scalar/tuple values, structured exception fields, and dynamic native module attributes. Metadata and mutable dictionary aliases retain their existing owners.
+
+Native `Mapping[str, object]` is a read-only view of supported concrete dictionaries. It provides string-key lookup, membership, length and truth tests. Typed `**name: T` parameters on a direct source call receive an insertion-ordered dictionary; values are evaluated left to right, and positional-only names can occur as keys. Such functions are not first-class callables in this subset.
+
+A fixed-layout class can inherit from `collections.abc.Mapping[K, V]` or `typing.Mapping[K, V]`. The class supplies `__getitem__`, `__len__` and `__iter__`; a missing primitive makes the class abstract. Membership and `get` use the subclass's lookup, including an override or a raised exception. Both exports accept dictionary instances in class checks. The `typing` alias itself is not a class when passed as the first argument to `issubclass` with the ABC as the second argument.
 
 `str.split(sep=None, maxsplit=-1)` and `str.rsplit(sep=None, maxsplit=-1)` accept both positional and named arguments. With no separator, they group Python whitespace and omit empty fields; an explicit string separator preserves empty fields and must be nonempty. The split limit follows Python's left or right scanning rules. `str.strip([chars])`, `str.lstrip([chars])`, and `str.rstrip([chars])` accept an optional positional string or `None`: omitted/`None` removes Python whitespace, while a string names a set of Unicode scalar values to remove.
 
@@ -661,9 +678,18 @@ for path in sorted(root.glob("*.json"), key=lambda path: path.name):
 
 `exists()`, `is_file()`, and `is_dir()` follow symlinks and return false for failed filesystem queries, matching Python 3.14, including invalid NUL-containing paths.
 
+`Path.stat(*, follow_symlinks=True)` and `Path.lstat()` return a native
+`os.stat_result`. Its ten tuple entries include integral timestamps; the
+named time attributes include fractions, and their `_ns` counterparts retain
+nanoseconds. Linux and macOS also expose block size, blocks and device type.
+macOS exposes birth time, file flags and generation. OS failures retain the
+original path spelling in `OSError.filename`.
+
 `Path.read_text(encoding=None, errors=None, newline=None)` and `write_text(data, encoding=None, errors=None, newline=None)` use the same native file backend as binary reads and writes. UTF-8 is the default; UTF-8 with signature, Latin-1 and ASCII are also supported. Strict, ignore, replace and backslash-replace error modes work for these encodings; single-byte writes also support XML character references. With no newline override, reads translate CRLF and CR to LF. Empty or explicit newline strings keep the input line endings; on POSIX, write-side CR and CRLF overrides replace each LF. Writes return the number of input Unicode scalars, independent of encoded length. Data of the wrong type raises `TypeError` before opening the target. An invalid newline or codec name on an otherwise valid write is diagnosed after opening and truncating the file.
 
 `mkdir(mode=0o777, parents=False, exist_ok=False)` creates a directory. The mode is an exact integer within the signed C-int range; larger values raise `OverflowError`. Boolean options require exact booleans. The process umask applies, and missing parents use mode `0o777` independently of the leaf mode. `exist_ok=True` accepts an existing directory, including a symlink to one, without changing its permissions. `unlink(missing_ok=False)` removes a file or symlink; its flag suppresses only `FileNotFoundError`. `rmdir()` removes an empty directory. These methods return `None` and preserve their normal filesystem error categories.
+
+On POSIX, `new_link.symlink_to(target, target_is_directory=False)` and `new_link.hardlink_to(target)` accept strings, bytes, native paths, and typed `__fspath__` methods returning strings or bytes. Hard links follow a symlink source. Relative symlink targets retain their original spelling on disk; `readlink()` returns that target as a fresh Path without following it. OS failures retain the two converted pathnames. Reading a target containing undecodable bytes still needs surrogateescape support. An OS error involving a `StrEnum` source currently retains its text, losing the enum identity.
 
 Concrete paths expose `info`, a view with `exists()`, `is_dir()`, `is_file()`, and `is_symlink()`. The first three accept the keyword-only `follow_symlinks` flag. A saved view retains its results after filesystem changes; a new `Path(p)` starts with an empty cache. Paths from `iterdir()` use the file type reported by the directory scan. Calling these predicates on a path directly queries the filesystem again.
 
@@ -736,7 +762,9 @@ Invalid UTF-8 raises `UnicodeDecodeError`, matching `UnicodeError` and `ValueErr
 
 `sys.argv` and `sys.orig_argv` are independent mutable lists, each shared across aliases and modules. In a standalone executable both start with the arguments passed to its main function. With `imre run`, `sys.argv` starts with the source path followed by the program arguments after `--`; `sys.orig_argv` contains the actual Imre command, flags, and program arguments. Element writes and list mutation are supported; rebinding a module attribute or imported name is not. Native arguments must be valid UTF-8. Invalid Unix argument bytes raise `UnicodeDecodeError` when the list is first accessed; CPython's surrogateescaped strings are outside this runtime's string domain. Programs that never read process arguments emit no argument initialization or shutdown calls.
 
-`imre [-I] [-B] [-X utf8[=0|1]] -c CODE [ARG ...]` compiles the command in memory and runs it as `__main__`. Python 3.14's command dedent applies before parsing. The program sees `['-c', *args]` in `sys.argv`; `sys.orig_argv` preserves the complete invocation, including the original indentation and option spelling. `sys.executable` identifies the Imre launcher. Commands may import supported source modules from the working directory and `PYTHONPATH`. `-I` excludes the working directory and ignores `PYTHONPATH` and other Python startup environment flags. The selected `isolated`, `ignore_environment`, `safe_path`, `no_user_site`, `dont_write_bytecode`, and `utf8_mode` fields are available through `sys.flags` in command mode. The native compiler's existing text, filesystem, and import restrictions still apply. `IMRE_ENCODED_FLAGS` and `IMREFLAGS` select the native compiler and linker settings independently of Python startup flags.
+`imre [-I] [-B] [-O ...] [-X utf8[=0|1]] -c CODE [ARG ...]` compiles the command in memory and runs it as `__main__`. Python 3.14's command dedent applies before parsing. The program sees `['-c', *args]` in `sys.argv`; `sys.orig_argv` preserves the complete invocation, including the original indentation and option spelling. `sys.executable` identifies the Imre launcher. Commands may import supported source modules from the working directory and `PYTHONPATH`. `-I` excludes the working directory and ignores `PYTHONPATH` and other Python startup environment flags. The selected `isolated`, `ignore_environment`, `safe_path`, `no_user_site`, `dont_write_bytecode`, and `utf8_mode` fields are available through `sys.flags` in command mode. The native compiler's existing text, filesystem, and import restrictions still apply. `IMRE_ENCODED_FLAGS` and `IMREFLAGS` select the native compiler and linker settings independently of Python startup flags.
+
+In command mode, each `-O` raises `sys.flags.optimize` by one. `PYTHONOPTIMIZE` can raise that level unless `-I` ignores it. At level one or higher, `__debug__` is false and assertions do not evaluate their conditions or messages. At level two or higher, the module docstring is `None`. File builds use level zero, including when LLVM code generation uses `--opt-level 3`.
 
 ## Command-line options
 
@@ -759,7 +787,7 @@ if args.output:
     args.output.write_text(args.input.read_text())
 ```
 
-Positional and named arguments accept `nargs="?"`, `"*"`, `"+"`, or a positive integer. A fixed count (including `1`), `"*"`, or `"+"` produces a list. An earlier positional reserves enough values for the following positionals. A named option with `nargs="?"` uses its `const` when present without a value and its default when omitted. Named options accept one or more ASCII spellings, such as `-v` and `--verbose`, with `required` or `action="store_true"`. A list, tuple or `[member.value for member in Mode]` over a sealed enum supplies constant string choices. Omitted options with a nominal enum member as the default keep that member. Explicit values are strings. Constructor options include a literal `prog`, a literal description or `__doc__`, and `RawDescriptionHelpFormatter`. In the default configuration the displayed program name is the entry script's basename. The parser reads the current `sys.argv[1:]` and handles repeated options, unique long-option abbreviations, and `--`. Help layout and coloring follow CPython 3.14. Help and usage errors follow the native exception cleanup path and raise catch-only `SystemExit` with status 0 or 2.
+Positional and named arguments accept `nargs="?"`, `"*"`, `"+"`, or a positive integer. A fixed count (including `1`), `"*"`, or `"+"` produces a list. An earlier positional reserves enough values for the following positionals. A named option with `nargs="?"` uses its `const` when present without a value and its default when omitted. Named options accept one or more ASCII spellings, such as `-v` and `--verbose`, with `required` or `action="store_true"`. A list, tuple or `[member.value for member in Mode]` over a sealed enum supplies constant string choices. Omitted options with a nominal enum member as the default keep that member. Explicit values are strings. Constructor options include a literal `prog`, a literal description or `__doc__`, and `RawDescriptionHelpFormatter`. In the default configuration the displayed program name is the entry script's basename. The parser reads the current `sys.argv[1:]` and handles repeated options, unique long-option abbreviations, and `--`. Help layout and coloring follow CPython 3.14. Help and usage errors follow the native exception cleanup path and raise catch-only `SystemExit` with status 0 or 2. The `BooleanOptionalAction` class adds a `--no-` spelling for each long option, accepts short aliases, and stores the value of the last occurrence.
 
 Arguments accept the built-in `int` and `float` converters. Integer arguments also support fixed or variable length lists. Literal numeric choices compare converted values; string choices may be a single string of characters, and integer choices may be a literal `range`. Failure to convert an argument reports that option and its original value on stderr. String defaults and constants are converted when used. An integer default or constant on a string argument retains its integer type.
 
@@ -770,6 +798,12 @@ Call `format_help()` or `format_usage()` to obtain a string, including its final
 Use `group = parser.add_argument_group(title, description)` to place arguments in a separate help section. Arguments added to a group bind in the same order and populate the same namespace as arguments added directly to the parser.
 
 A subcommand is optional by default. With `add_subparsers(dest="command")`, the namespace contains `command=None` when omitted. Without `dest`, no command field is added. Use `required=True` or set the group's `required` attribute to require a selection. Each literal `add_parser("name", aliases=["alias"], help="...")` introduces a child parser with its own options. The destination retains the spelling the caller used; child help uses its canonical name. A `match args.command` case or `if args.command == "alias"` branch selects the child's concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
+
+For literal option declarations, a keyword outside the constructor signature of
+`BooleanOptionalAction`, `store_true`, `store_false`, `store_const`, `append_const`,
+or `count` raises `TypeError` at the `add_argument` call. An explicit `--no-` spelling on
+`BooleanOptionalAction` raises `ValueError`. Keyword expressions run before the
+constructor error. If the caller catches it, previously registered options remain usable.
 
 Keep each builder local to a function or method. Declare parent options first, followed by each subparser and its options, then call `parse_args()` or `parse_known_args()`. The latter returns the namespace and a list of unrecognized arguments in order. An explicit list or tuple literal supplies the arguments; a standalone call still checks them and can raise `SystemExit`. Dynamic declarations and nested subcommands are outside this grammar.
 
@@ -996,6 +1030,12 @@ Fixed classes reserve field names beginning with `__`. A fixed class can extend 
 
 An empty tuple or a fixed tuple of homogeneous `str`, `bytes`, `int`, or `bool` supports `in` and `not in`. The needle and all tuple elements evaluate in Python order before the first comparison.
 
+`collections.deque[T]` stores one concrete element type in a native ring. Its
+constructor accepts an iterable and an optional nonnegative `maxlen`. It supports
+append, pop, and extend at either end, clear, shallow copy, equality, length,
+truth testing, and forward or reverse iteration. A saved append or pop method
+keeps its receiver alive. An unannotated empty deque defaults to integer elements.
+
 `list[T]` has one concrete element type, such as `list[str]`, `list[Counter]`, or `list[list[int]]`. Types are invariant: an existing `list[str]` cannot become `list[str | None]` through assignment or a call. Every append and indexed write checks the exact element type. Repetition copies references to the same elements, so `[row] * 3` shares `row` across all three positions. `list[int]` retains its specialized tagged-integer storage and runtime calls; other lists use owned runtime slots.
 
 An unquoted `Sequence[T]` parameter from `collections.abc` or `typing` accepts
@@ -1019,6 +1059,10 @@ the empty dictionary; a `Counter` still returns zero for a missing key, and a
 methods `Counter.clear(mapping)` and `defaultdict.clear(mapping)` do the same.
 
 Unary `+` and `-` select positive counts and negated negative counts. Binary `+`, `-`, `|` and `&` return a fresh Counter with positive counts, preserving the surviving left keys followed by new right keys in insertion order. Augmented assignment to a Counter local mutates the existing object, including when the right operand aliases it.
+
+`mapping.copy()` on a plain typed dictionary returns a fresh dictionary in
+insertion order. Each key and value is shared with the source; inserting or
+deleting an entry in the copy leaves the source dictionary unchanged.
 
 `dict.fromkeys(iterable, value)` builds a fresh dictionary in first-key order.
 It evaluates the value once, defaults it to `None`, and shares that object
@@ -1389,3 +1433,20 @@ The [shared suite runner](../benchmarks/cpython_stdlib/SUITE_RUNNER.md) shows
 which parts of a complete pinned test run natively. The full CPython unittest
 API, dynamic method discovery in a native process, traceback reports, and
 arbitrary assertion operand types are not supported by this implementation.
+
+### Native errno registry
+
+`import errno` exposes the target platform's integer constants and one mutable
+`dict[int, str]` at `errno.errorcode`. Forward aliases stay distinct names;
+the reverse dictionary uses the last registered name for each value.
+Module aliases share the same registry and dictionary. `vars(errno)` and
+`errno.__dict__` provide insertion-ordered key iteration, membership, and lookup.
+The module supports dynamic `hasattr` and `getattr`, including scalar defaults.
+Changing the module namespace and calling bound module descriptors are outside
+this subset. The reverse dictionary supports ordinary insertion, replacement,
+and deletion.
+
+Native `TestCase.assertHasAttr` currently accepts a native module and a string;
+`assertIn` accepts a scalar or native module member and a `dict[int, str]`.
+Both use the normal assertion failure and optional test message. The errno
+suite runs every original method; see the [reference and native evidence](../benchmarks/cpython_stdlib/full/errno/README.md).

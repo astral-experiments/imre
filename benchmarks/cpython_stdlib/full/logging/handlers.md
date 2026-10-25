@@ -20,3 +20,5 @@ The base implementation here covers string names and `None`. The cleanup
 list, shutdown callbacks, filters, locks, and other name key types require
 separate validation. The callable assertion is tracked with the
 [unittest owner](https://github.com/astral-sh/imre/pull/508#issuecomment-6394762377).
+
+The [full suite replay](https://github.com/astral-sh/imre/actions/runs/40187530402) verifies all 272 occurrences at both optimization levels. The HandlerTest.test_name body and assertions run on CPython; the [per-occurrence report](evidence-linux.json) lists its native operations.

@@ -5,7 +5,11 @@ use std::io::{self, Write};
 
 static STDERR: LazyLock<Mutex<Output<io::Stderr>>> = LazyLock::new(|| {
     initialize_io();
-    Mutex::new(Output::with_stream(io::stderr(), true))
+    Mutex::new(Output::with_stream(
+        io::stderr(),
+        super::STDIO_SETTINGS.stderr_capacity,
+        true,
+    ))
 });
 
 fn write_stream<W: Write>(stream: &Mutex<Output<W>>, text: &[u8], newline: bool) -> io::Result<()> {
@@ -13,9 +17,6 @@ fn write_stream<W: Write>(stream: &Mutex<Output<W>>, text: &[u8], newline: bool)
     stream.write_all(text)?;
     if newline {
         stream.write_all(b"\n")?;
-    }
-    if stream.line_buffered && (newline || memchr::memchr2(b'\r', b'\n', text).is_some()) {
-        stream.flush()?;
     }
     Ok(())
 }
@@ -63,11 +64,9 @@ pub(super) fn write_display_line(text: &str) -> bool {
         }
         return true;
     }
-    if let Err(error) = write_stream(&OUTPUT, text.as_bytes(), true) {
-        errno_error(error).raise();
-        false
-    } else {
-        true
+    match write_stream(&OUTPUT, text.as_bytes(), true) {
+        Ok(()) => true,
+        Err(error) => errno_error(error).returning(false),
     }
 }
 

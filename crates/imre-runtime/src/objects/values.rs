@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
+use super::exceptions::Error;
 use super::records::descriptor;
 use super::words::{NULLABLE, WordKind};
 use super::{Bytes, Int, List, Object, Storage, Str, fail, object};
@@ -181,6 +182,13 @@ unsafe fn integer_equal(left: usize, right: usize) -> bool {
 /// Each word is rooted and uses `kind`. All descendant ownership graphs are
 /// acyclic and remain immutable throughout this nonreentrant traversal.
 pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
+    // SAFETY: both words remain rooted under the shared descriptor.
+    unsafe { try_equal(left, right, kind) }.unwrap_or_else(|error| error.returning(false))
+}
+
+/// # Safety
+/// The words must remain rooted and match the same concrete or nullable kind.
+pub(super) unsafe fn try_equal(left: usize, right: usize, kind: WordKind) -> Result<bool, Error> {
     let mut pending = Vec::new();
     let mut current = (left, right, kind, 0);
     loop {
@@ -221,10 +229,10 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
             }
         };
         match step {
-            Comparison::Done(false) => return false,
+            Comparison::Done(false) => return Ok(false),
             Comparison::Done(true) => match pending.pop() {
                 Some(next) => current = next,
-                None => return true,
+                None => return Ok(true),
             },
             Comparison::Child {
                 left: child_left,
@@ -233,6 +241,7 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
                 resume,
             } => {
                 if let Some(position) = resume {
+                    pending.try_reserve(1).map_err(|_| Error::allocation())?;
                     pending.push((left, right, kind, position));
                 }
                 current = (child_left, child_right, child_kind, 0);
@@ -319,10 +328,16 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         resume: (position + 1 < left.values.len()).then_some(position + 1),
                     }
                 }
+                (Storage::ObjectValue(l), Storage::ObjectValue(r)) => Comparison::Done(
+                    super::boxed_values::equal((l.kind, l.word), (r.kind, r.word)),
+                ),
                 (Storage::SimpleNamespace(left), Storage::SimpleNamespace(right)) => {
                     object_element(Rc::as_ptr(left), Rc::as_ptr(right), position)
                 }
                 (Storage::Dictionary(left), Storage::Dictionary(right)) => {
+                    left.compare_entry(right, position)
+                }
+                (Storage::Deque(left), Storage::Deque(right)) => {
                     left.compare_entry(right, position)
                 }
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
@@ -386,6 +401,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 },
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
+                        Storage::ObjectValue(field) => Some(ReprTask::Word(field.word, field.kind)),
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None

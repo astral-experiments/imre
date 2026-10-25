@@ -352,7 +352,11 @@ impl Checker<'_> {
                         self.callback_input(call, element, false)?,
                     )));
                 };
-                if !matches!(converter.id.as_str(), "int" | "str") {
+                if !matches!(converter.id.as_str(), "int" | "str" | "ord")
+                    || (converter.id == "ord"
+                        && (self.names.contains_key("ord")
+                            || self.resolve(&call.arguments.args[0]).is_some()))
+                {
                     return Ok(Some(Iteration::Prepared(
                         self.callback_input(call, element, false)?,
                     )));
@@ -361,7 +365,9 @@ impl Checker<'_> {
                 let source = self.expansion_input(source, None)?;
                 let mut input = self.prepare_iteration(source, call, false)?;
                 let item = self.local(input.value);
-                let converted = if converter.id == "int" {
+                let converted = if converter.id == "ord" {
+                    self.ordinal(item, call)?
+                } else if converter.id == "int" {
                     self.consumer_value(item, true, call)?
                 } else {
                     match item.ty {
@@ -1076,6 +1082,7 @@ impl Checker<'_> {
         });
         let element = self.types.element(iterable.ty)
             .or(set_element)
+            .or_else(|| self.types.deque_element(iterable.ty))
             .or((iterable.ty == Type::Str).then_some(Type::Str))
             .or((iterable.ty == Type::Bytes).then_some(Type::Int))
             .or(tuple_element)
@@ -1219,6 +1226,8 @@ impl Checker<'_> {
                 }
             } else if ty == Type::Bytes {
                 Builtin::BytesIter
+            } else if self.types.deque_element(ty).is_some() {
+                Builtin::DequeIter { reverse }
             } else if set_element.is_some() {
                 Builtin::SetIter
             } else {
@@ -1905,7 +1914,7 @@ impl Checker<'_> {
             step.push(Statement::If(
                 self.local(input.ready),
                 vec![Statement::If(
-                    self.truth_value(operation),
+                    self.test_truth(operation, call)?,
                     vec![Statement::Assign(ready, boolean(true))],
                     vec![Statement::Clear(input.value)],
                 )],
@@ -2250,10 +2259,13 @@ impl Checker<'_> {
             clear.push(captured);
             body.push(Statement::Assign(captured, iterable.clone()));
             for (index, ty) in fields.into_iter().enumerate() {
-                let value = self.truth_value(Expr {
-                    ty,
-                    kind: ExprKind::Field(Box::new(self.local(captured)), index),
-                });
+                let value = self.test_truth(
+                    Expr {
+                        ty,
+                        kind: ExprKind::Field(Box::new(self.local(captured)), index),
+                    },
+                    call,
+                )?;
                 body.push(Statement::If(
                     if all {
                         self.local(result)
@@ -2266,7 +2278,7 @@ impl Checker<'_> {
             }
         } else {
             body.extend(self.expand_items(input, call, |checker, value| {
-                let value = checker.truth_value(value);
+                let value = checker.test_truth(value, call)?;
                 let deciding = if all { not(value) } else { value };
                 Ok(vec![Statement::If(
                     deciding,

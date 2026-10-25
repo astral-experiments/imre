@@ -11,18 +11,23 @@ pub(super) fn displayable(ty: Type) -> bool {
             | Type::StrLiteral(_)
             | Type::Bytes
             | Type::ListInt
-            | Type::ValueView
+            | Type::ObjectValue
     )
 }
 impl Checker<'_> {
     /// Read scalar fields of the immutable startup settings selected for a command.
     pub(super) fn command_flag(&self, attr: &ast::ExprAttribute) -> Result<Option<Expr>, String> {
-        let Some((flags, _)) = &self.graph.command_startup else {
-            return Ok(None);
-        };
         if self.resolve(&attr.value) != Some(Binding::Intrinsic(Intrinsic::SysFlags)) {
             return Ok(None);
         }
+        if attr.attr.as_str() == "optimize" {
+            return Ok(Some(pipelines::integer(i64::from(
+                self.graph.python_optimization(),
+            ))));
+        }
+        let Some((flags, _)) = &self.graph.command_startup else {
+            return Ok(None);
+        };
         if attr.attr.as_str() == "safe_path" {
             return Ok(Some(Expr {
                 ty: Type::Bool,
@@ -409,5 +414,18 @@ pub(super) fn exit_payload_supported(ty: Type, types: &Types) -> bool {
             .iter()
             .all(|&field| exit_payload_supported(field, types)),
         _ => false,
+    }
+}
+
+impl Checker<'_> {
+    pub(super) fn sys_version_info(&self, implementation: bool) -> Expr {
+        Expr {
+            ty: self.types.struct_sequence(
+                "sys.version_info",
+                crate::version::FIELDS,
+                vec![Type::Int, Type::Int, Type::Int, Type::Str, Type::Int],
+            ),
+            kind: ExprKind::Builtin(Builtin::SysVersionInfo { implementation }, vec![]),
+        }
     }
 }
