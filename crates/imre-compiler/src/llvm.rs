@@ -89,6 +89,8 @@ impl Type {
             | Self::TimedFileHandler
             | Self::CacheState(_)
             | Self::ClockTime
+            | Self::PlainObject
+            | Self::StrDescriptor(_)
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -147,6 +149,8 @@ impl Type {
             | Self::TimedFileHandler
             | Self::CacheState(_)
             | Self::ClockTime
+            | Self::PlainObject
+            | Self::StrDescriptor(_)
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -735,6 +739,8 @@ impl Emitter<'_, '_> {
             | Type::TimedFileHandler
             | Type::CacheState(_)
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -3319,6 +3325,8 @@ impl Emitter<'_, '_> {
                 | Type::None
                 | Type::Class(_)
                 | Type::TimedFileHandler
+                | Type::StrDescriptor(_)
+                | Type::PlainObject
                 | Type::Sha256
                 | Type::ZipFile
                 | Type::ZipInfo
@@ -4553,6 +4561,16 @@ impl Emitter<'_, '_> {
                 Type::Sha256,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::StrDescriptor(method) => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @imre_inspect_str_descriptor(i32 {})",
+                    *method as u32
+                )),
+                small_integer: false,
+            },
+            Builtin::NewPlainObject => self.call("imre_plain_object_new", returns, &[]),
+            Builtin::InspectSentinel => self.call("imre_inspect_sentinel", returns, &[]),
             Builtin::HashAvailable => self.call("imre_hash_algorithms_available", returns, &[]),
             Builtin::Sha256New => self.call("imre_sha256_new", Type::Sha256, &[&args[0].value]),
             Builtin::Sha256Update => {
@@ -4739,6 +4757,9 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::ExceptionTupleView => {
+                self.call("imre_exception_tuple_view", returns, &[&args[0].value])
+            }
             Builtin::ExceptionFieldRepr => {
                 self.call("imre_exception_field_repr", returns, &[&args[0].value])
             }
@@ -4767,6 +4788,7 @@ impl Emitter<'_, '_> {
             Builtin::NamedException {
                 kind,
                 message_field,
+                tuple_args,
                 text,
                 repr,
                 dataclass_repr,
@@ -4783,7 +4805,7 @@ impl Emitter<'_, '_> {
                     || "null".into(),
                     |f| format!("@{}", self.output.function_ref(f)),
                 );
-                Value{ty:returns,operand:self.instruction(format!("call ptr @imre_named_exception_record_new(ptr @{desc}, ptr {}, ptr {message}, ptr {text}, ptr {repr}, i32 {})",record.operand,(u32::from(*dataclass_repr) | (u32::from(self.resource_types.contains(&record.ty)) << 1)))),small_integer:false}
+                Value{ty:returns,operand:self.instruction(format!("call ptr @imre_named_exception_record_new(ptr @{desc}, ptr {}, ptr {message}, ptr {text}, ptr {repr}, i32 {})",record.operand,(u32::from(*dataclass_repr) | (u32::from(self.resource_types.contains(&record.ty)) << 1) | (u32::from(*tuple_args) << 2)))),small_integer:false}
             }
             Builtin::ExceptionRecord => {
                 self.call("imre_named_exception_record", returns, &[&args[0].value])
@@ -5603,6 +5625,8 @@ impl Emitter<'_, '_> {
                     | Type::TimedFileHandler
                     | Type::CacheState(_)
                     | Type::ClockTime
+                    | Type::StrDescriptor(_)
+                    | Type::PlainObject
                     | Type::Sha256
                     | Type::ZipFile
                     | Type::ZipInfo
@@ -5849,6 +5873,8 @@ impl Emitter<'_, '_> {
             | Type::TimedFileHandler
             | Type::CacheState(_)
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -5921,6 +5947,8 @@ impl Emitter<'_, '_> {
             | Type::TimedFileHandler
             | Type::CacheState(_)
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -6506,6 +6534,8 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::TimedFileHandler
         | Type::CacheState(_)
         | Type::ClockTime
+        | Type::StrDescriptor(_)
+        | Type::PlainObject
         | Type::Sha256
         | Type::ZipFile
         | Type::ZipInfo
@@ -6801,6 +6831,7 @@ declare ptr @imre_tempdir_new(ptr, ptr, ptr)
 declare void @imre_tempdir_cleanup(ptr)
 declare ptr @imre_path_iter(ptr, ptr)
 declare ptr @imre_path_glob(ptr, ptr, i64, i32, i32)
+declare ptr @imre_path_walk(ptr, i32, i32, ptr)
 declare ptr @imre_path_next(ptr)
 declare i64 @imre_float_box(double)
 declare double @imre_float_unbox(i64)
@@ -6845,6 +6876,9 @@ declare ptr @imre_csv_reader(ptr, i32, i32, i32, i32, i32)
 declare ptr @imre_csv_reader_terminator(ptr, i32, i32, i32, i32, i32, ptr, ptr)
 declare ptr @imre_csv_next(ptr, i32)
 declare i64 @imre_csv_line_number(ptr)
+declare ptr @imre_plain_object_new()
+declare ptr @imre_inspect_sentinel()
+declare ptr @imre_inspect_str_descriptor(i32)
 declare ptr @imre_sha256_new(ptr)
 declare ptr @imre_hash_new(ptr, ptr)
 declare ptr @imre_hash_algorithms_available()
@@ -6900,6 +6934,7 @@ declare ptr @imre_import_error_new(i32, ptr, ptr, i32, i64, i32, i64, i32, i64)
 declare ptr @imre_import_error_field(ptr, i32)
 declare void @imre_import_error_reset(ptr, ptr)
 declare void @imre_import_error_reject_reset(ptr, ptr, ptr)
+declare ptr @imre_exception_tuple_view(ptr)
 declare ptr @imre_exception_field_repr(ptr)
 declare i64 @imre_exception_field_len(ptr)
 declare ptr @imre_exception_field_index(ptr, i64)
