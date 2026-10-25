@@ -1076,6 +1076,7 @@ pub(crate) enum LogOperation {
     Level,
     Root,
     Parent,
+    Children,
     EffectiveLevel,
     SetLevel,
     Enabled,
