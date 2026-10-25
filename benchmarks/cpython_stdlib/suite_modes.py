@@ -1,17 +1,51 @@
 """Run a suite's own evidence entry at O0/O3 in ordinary and reachable mode."""
 import argparse
+from collections import Counter
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
 
 
+FORWARD = '''#!/bin/sh
+case "$1" in
+  build|check)
+    opt=unspecified; previous=; has_reachable=false
+    for arg do
+      if [ "$previous" = --opt-level ]; then opt=$arg; fi
+      case "$arg" in
+        --opt-level=*) opt=${arg#*=} ;;
+        -O[0-3]) opt=${arg#-O} ;;
+        --reachable-only) has_reachable=true ;;
+      esac
+      previous=$arg
+    done
+    if [ "$IMRE_SUITE_MODE" = reachable ]; then
+      if [ "$has_reachable" = false ]; then set -- "$@" --reachable-only; fi
+    elif [ "$has_reachable" = true ]; then
+      echo 'ordinary suite requested a reachable-only compilation' >&2; exit 2
+    fi
+    echo "$1-O$opt" >> "$IMRE_SUITE_LOG" || exit 1 ;;
+esac
+exec "$IMRE_SUITE_COMPILER" "$@"
+'''
+
+
 def sha256(path):
     with path.open("rb") as file:
         return hashlib.file_digest(file, "sha256").hexdigest()
+
+
+def mode_errors(report, reachable):
+    """Check mode fields supplied by owners without inventing fields on older reports."""
+    return [f"{row['id']} occurrence {row['occurrence']} O{part['opt_level']}"
+            for part in json.loads(report.read_bytes()) for row in part["records"]
+            if "reachable_only" in row.get("evidence", {})
+            and row["evidence"]["reachable_only"] is not reachable]
 
 
 def main():
@@ -44,31 +78,42 @@ def main():
                "validator_sha256": sha256(validator), "launcher_sha256": sha256(Path(__file__)),
                "compiler_sha256": sha256(compiler), "runtime_sha256": sha256(runtime),
                "python": sys.version.split()[0], "modes": {}}
+    help_text = subprocess.check_output([sys.executable, entry, "--help"], cwd=root, text=True)
+    has_option = re.search(r"(?m)^\s+--reachable-only(?:\s|,|$)", help_text) is not None
     with tempfile.TemporaryDirectory() as temp:
         # Older owners' runners already take --imre. Forward only Imre's compile
         # commands; the fixture, operations, assertions and result validator are
         # exactly the files at the requested source in both modes.
-        reachable = Path(temp) / "imre"
-        reachable.write_text('#!/bin/sh\ncase "$1" in\n'
-                             '  build|check) for arg do [ "$arg" != --reachable-only ] || '
-                             'exec "$IMRE_SUITE_COMPILER" "$@"; done\n'
-                             '    exec "$IMRE_SUITE_COMPILER" "$@" --reachable-only ;;\n'
-                             '  *) exec "$IMRE_SUITE_COMPILER" "$@" ;;\nesac\n')
-        reachable.chmod(0o700)
-        for mode, executable, report in zip(("ordinary", "reachable"), (compiler, reachable), paths[:2]):
-            command = [sys.executable, str(entry), "--imre", executable,
+        forward = Path(temp) / "imre"
+        forward.write_text(FORWARD)
+        forward.chmod(0o700)
+        for mode, report in zip(("ordinary", "reachable"), paths[:2], strict=True):
+            log = Path(temp) / mode
+            log.touch()
+            command = [sys.executable, str(entry), "--imre", forward,
                        "--runtime", runtime, "--clang", args.clang.resolve(),
                        "--cpython-source", args.cpython_source.resolve(), "--result", report]
+            if has_option and mode == "reachable":
+                command.append("--reachable-only")
             status = subprocess.run(command, cwd=root, env={**os.environ,
-                                    "IMRE_SUITE_COMPILER": str(compiler)}).returncode
-            result = {"runner_status": status, "validation_status": None}
+                                    "IMRE_SUITE_COMPILER": str(compiler), "IMRE_SUITE_MODE": mode,
+                                    "IMRE_SUITE_LOG": str(log)}).returncode
+            commands = Counter(log.read_text().splitlines())
+            result = {"runner_status": status, "validation_status": None,
+                      "runner_mode_flag": has_option and mode == "reachable",
+                      "compiler_commands": dict(commands), "mode_errors": []}
+            for level in (0, 3):
+                if not commands[f"build-O{level}"]:
+                    result["mode_errors"].append(f"no native build observed at O{level}")
             if report.is_file():
                 result["report_sha256"] = sha256(report)
                 result["validation_status"] = subprocess.run(
                     [sys.executable, validator, reference, report], cwd=root).returncode
+                if result["validation_status"] == 0:
+                    result["mode_errors"].extend(mode_errors(report, mode == "reachable"))
             receipt["modes"][mode] = result
             paths[2].write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
-    return int(any(r["runner_status"] != 0 or r["validation_status"] != 0
+    return int(any(r["runner_status"] != 0 or r["validation_status"] != 0 or r["mode_errors"]
                    for r in receipt["modes"].values()))
 
 

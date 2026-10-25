@@ -65,6 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          path: .unittest-launcher
           sparse-checkout: benchmarks/cpython_stdlib/suite_modes.py
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -72,12 +73,17 @@ jobs:
         run: |
           if [[ -n "$SYS_SOURCE" ]]; then echo 'Select one source gate per dispatch.' >&2; exit 1; fi
           [[ "$UNITTEST_SOURCE" =~ ^[0-9a-f]{40}$ ]]
-          cp benchmarks/cpython_stdlib/suite_modes.py "$RUNNER_TEMP/suite_modes.py"
+          cp .unittest-launcher/benchmarks/cpython_stdlib/suite_modes.py "$RUNNER_TEMP/suite_modes.py"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          path: unittest-source
           ref: ${{ inputs.unittest_source }}
           persist-credentials: false
-      - run: test "$(git rev-parse HEAD)" = "$UNITTEST_SOURCE"
+      - name: Check the full compiler checkout
+        working-directory: unittest-source
+        run: |
+          test -f Cargo.toml
+          test "$(git rev-parse HEAD)" = "$UNITTEST_SOURCE"
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
@@ -90,11 +96,13 @@ jobs:
           persist-credentials: false
       - run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18
       - run: cargo build -p imre-compiler -p imre-runtime --release --locked --features imre-compiler/verify-ir -j 2
+        working-directory: unittest-source
       - name: Verify the selected suite at O0 and O3 in both compiler modes
         id: evidence
+        working-directory: unittest-source
         run: |
           dir=benchmarks/cpython_stdlib/full/unittest
-          python3 "$RUNNER_TEMP/suite_modes.py" --source "$UNITTEST_SOURCE" --entry "$dir/run.py" --reference "$dir/reference-linux.json" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --output "$RUNNER_TEMP/unittest-evidence"
+          python3 "$RUNNER_TEMP/suite_modes.py" --source "$UNITTEST_SOURCE" --entry "$dir/run.py" --reference "$dir/reference-linux.json" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source "$GITHUB_WORKSPACE/.cpython-stdlib-reference" --output "$RUNNER_TEMP/unittest-evidence"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ !cancelled() && (steps.evidence.outcome == 'success' || steps.evidence.outcome == 'failure') }}
         with:
