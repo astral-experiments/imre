@@ -825,6 +825,8 @@ Fixed classes reserve field names beginning with `__`. A fixed class can extend 
 
 ## Concrete containers and optional values
 
+An empty tuple or a fixed tuple of homogeneous `str`, `bytes`, `int`, or `bool` supports `in` and `not in`. The needle and all tuple elements evaluate in Python order before the first comparison.
+
 `list[T]` has one concrete element type, such as `list[str]`, `list[Counter]`, or `list[list[int]]`. Types are invariant: an existing `list[str]` cannot become `list[str | None]` through assignment or a call. Every append and indexed write checks the exact element type. Repetition copies references to the same elements, so `[row] * 3` shares `row` across all three positions. `list[int]` retains its specialized tagged-integer storage and runtime calls; other lists use owned runtime slots.
 
 An unquoted `Sequence[T]` parameter from `collections.abc` or `typing` accepts

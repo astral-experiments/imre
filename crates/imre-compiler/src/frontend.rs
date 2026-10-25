@@ -4514,6 +4514,9 @@ impl<'a> Checker<'a> {
                     } else {
                         receiver
                     };
+                    if let Some(fields) = self.types.fields(receiver.ty) {
+                        return self.tuple_contains(key, receiver, &fields, compare);
+                    }
                     let (key_type, builtin) =
                         if let Some((key, _)) = self.types.mapping(receiver.ty) {
                             (key, Builtin::DictContains)

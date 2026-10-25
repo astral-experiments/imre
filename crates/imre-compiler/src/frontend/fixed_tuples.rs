@@ -18,6 +18,77 @@ pub(super) struct Call {
 }
 
 impl Checker<'_> {
+    /// Evaluate the needle and the complete tuple before its first comparison.
+    /// Exact scalar equality has no callbacks or identity-only cases such as NaN.
+    pub(super) fn tuple_contains(
+        &mut self,
+        key: Expr,
+        tuple: Expr,
+        fields: &[Type],
+        comparison: &ast::ExprCompare,
+    ) -> Result<Expr, String> {
+        let key = if let Some(&ty) = fields.first() {
+            if !matches!(ty, Type::Str | Type::Int | Type::Bool | Type::Bytes)
+                || !fields.iter().all(|&field| field == ty)
+            {
+                return Err(error(
+                    self.source,
+                    comparison,
+                    "tuple membership requires homogeneous string, bytes, integer or boolean fields",
+                ));
+            }
+            self.coerce(key, ty, &comparison.operands[0])?
+        } else {
+            key
+        };
+        let key_slot = self.hidden(key.ty);
+        let tuple_slot = self.hidden(tuple.ty);
+        let terms = fields
+            .iter()
+            .enumerate()
+            .map(|(index, &ty)| Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Compare(
+                    vec![
+                        Expr {
+                            ty,
+                            kind: ExprKind::Field(Box::new(self.local(tuple_slot)), index),
+                        },
+                        self.local(key_slot),
+                    ],
+                    vec![Compare::Equal],
+                ),
+            })
+            .collect::<Vec<_>>();
+        let contains = Expr {
+            ty: Type::Bool,
+            kind: if terms.is_empty() {
+                ExprKind::Bool(false)
+            } else {
+                ExprKind::Boolean(false, terms)
+            },
+        };
+        let value = if comparison.ops[0] == ast::CmpOp::NotIn {
+            Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Not(Box::new(contains)),
+            }
+        } else {
+            contains
+        };
+        Ok(Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Scope {
+                body: vec![
+                    Statement::Assign(key_slot, key),
+                    Statement::Assign(tuple_slot, tuple),
+                ],
+                value: Box::new(value),
+                clear: vec![key_slot, tuple_slot],
+            },
+        })
+    }
+
     pub(super) fn list_length_guard(&self, statement: &ast::Stmt) -> Option<Guard> {
         let ast::Stmt::If(branch) = statement else {
             return None;
