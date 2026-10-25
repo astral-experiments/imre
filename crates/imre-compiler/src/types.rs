@@ -955,6 +955,27 @@ impl Types {
         }
     }
 
+    /// A runtime tuple read must agree on ownership and storage for every selectable field.
+    pub(crate) fn homogeneous_tuple_element(&self, ty: Type) -> Option<Type> {
+        let Type::Tuple(id) = ty else {
+            return None;
+        };
+        let shapes = self.0.borrow();
+        let (Shape::Tuple(fields) | Shape::NamedTuple(_, fields)) = &shapes.shapes[id] else {
+            return None;
+        };
+        let widen = |t| match t {
+            Type::StrLiteral(_) => Type::Str,
+            other => other,
+        };
+        // An empty tuple raises before a result can be observed.
+        let element = fields.first().copied().map_or(Type::None, widen);
+        fields
+            .iter()
+            .all(|&field| widen(field) == element)
+            .then_some(element)
+    }
+
     /// Enumerates concrete tuple layouts for native field access and destruction.
     pub(crate) fn tuples(&self) -> Vec<(Type, Vec<Type>)> {
         self.0
