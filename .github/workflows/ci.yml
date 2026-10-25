@@ -125,10 +125,17 @@ jobs:
             --credential-results "$RUNNER_TEMP/credential_children-O0.json" "$RUNNER_TEMP/credential_children-O3.json" \
             --descriptor-results "$RUNNER_TEMP/native_descriptors-O0.json" "$RUNNER_TEMP/host_descriptors-O0.json" "$RUNNER_TEMP/native_descriptors-O3.json" "$RUNNER_TEMP/host_descriptors-O3.json"
       - name: Check sys streams and exits with vendored CPython methods
+        env:
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
+          LC_CTYPE: C.UTF-8
         run: |
+          unset PYTHONUTF8 PYTHONIOENCODING
+          sys_runner=(benchmarks/cpython_stdlib/full/sys/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference)
           python3 benchmarks/cpython_stdlib/native_sys.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
           for opt in 0 3; do
-            python3 -X utf8 benchmarks/cpython_stdlib/full/sys/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/test-sys-O$opt.json" --evidence "$RUNNER_TEMP/sys-evidence-O$opt.json"
+            python3 -B "${sys_runner[@]}" --opt-level "$opt" --result "$RUNNER_TEMP/test-sys-O$opt.json" --evidence "$RUNNER_TEMP/sys-evidence-O$opt.json"
+            python3 -B -X utf8 "${sys_runner[@]}" --opt-level "$opt" --locale-audit "$RUNNER_TEMP/sys-locale-utf8-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/sys/argv_boundary.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt"
           done
           jq -s . "$RUNNER_TEMP/sys-evidence-O0.json" "$RUNNER_TEMP/sys-evidence-O3.json" > "$RUNNER_TEMP/sys-evidence.json"
