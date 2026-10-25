@@ -28,9 +28,14 @@ def main() -> None:
     print(parent.isEnabledFor(logging.WARNING))
     print(cache[logging.WARNING])
     target().disabled = value()
-    print(parent.disabled, detached.disabled, child.disabled)
-    print(parent.isEnabledFor(logging.WARNING), parent.isEnabledFor(logging.ERROR))
-    print(cache is parent._cache, cache[logging.WARNING], logging.ERROR in cache)
+    print(parent.disabled)
+    print(detached.disabled)
+    print(child.disabled)
+    print(parent.isEnabledFor(logging.WARNING))
+    print(parent.isEnabledFor(logging.ERROR))
+    print(cache is parent._cache)
+    print(cache[logging.WARNING])
+    print(logging.ERROR in cache)
     parent.warning("hidden parent")
     child.warning("child propagated through disabled parent")
     detached.warning("detached still enabled")
@@ -39,17 +44,22 @@ def main() -> None:
 
     detached.disabled = True
     parent.disabled = False
-    print(parent.isEnabledFor(logging.WARNING), detached.isEnabledFor(logging.WARNING))
+    print(parent.isEnabledFor(logging.WARNING))
+    print(detached.isEnabledFor(logging.WARNING))
     detached.warning("hidden detached")
     parent.warning("parent enabled again")
     print(sink.getvalue())
     print(own_sink.getvalue())
 
     logging.config.dictConfig({"version": 1})
-    print(parent.disabled, child.disabled, detached.disabled)
+    print(parent.disabled)
+    print(child.disabled)
+    print(detached.disabled)
     logging.config.dictConfig({"version": 1, "incremental": True,
                                "loggers": {"flag.parent": {"level": "INFO"}}})
-    print(parent.disabled, child.disabled, detached.disabled)
+    print(parent.disabled)
+    print(child.disabled)
+    print(detached.disabled)
 
 
 main()
