@@ -1,0 +1,34 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "colorize_blob": "d6673f6692f76151b3b226ebe4d7976456a257e5",
+  "driver_sha256": "eb9a9ee4fe43882cece9153111b14ba0072954d38794a587e59dee32aa0e3ead",
+  "compiler_revision": "73f864ba144c04807ad6d112caedda52a1eb2b53",
+  "upstream_test_occurrences": 0,
+  "modes": {
+    "O0-reachable-0": {
+      "outcome": "compile-blocked",
+      "module_operations": "not-run",
+      "compile_exit": 1,
+      "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:2:1: Imre: <work>/stock_colorize.py:5:1: Imre: unsupported sealed standard-library export dataclasses.Field\n"
+    },
+    "O0-reachable-1": {
+      "outcome": "compile-blocked",
+      "module_operations": "not-run",
+      "compile_exit": 1,
+      "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:2:1: Imre: <work>/stock_colorize.py:5:1: Imre: unsupported sealed standard-library export dataclasses.Field\n"
+    },
+    "O3-reachable-0": {
+      "outcome": "compile-blocked",
+      "module_operations": "not-run",
+      "compile_exit": 1,
+      "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:2:1: Imre: <work>/stock_colorize.py:5:1: Imre: unsupported sealed standard-library export dataclasses.Field\n"
+    },
+    "O3-reachable-1": {
+      "outcome": "compile-blocked",
+      "module_operations": "not-run",
+      "compile_exit": 1,
+      "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:2:1: Imre: <work>/stock_colorize.py:5:1: Imre: unsupported sealed standard-library export dataclasses.Field\n"
+    }
+  },
+  "reference": "True\nuse\nTrue\nTrue\nTrue\nTrue\n13\n['usage', 'prog']\n'absent'\n"
+}

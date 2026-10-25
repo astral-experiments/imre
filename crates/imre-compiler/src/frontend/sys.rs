@@ -89,12 +89,17 @@ impl Checker<'_> {
 
     /// Read scalar fields of the immutable startup settings selected for a command.
     pub(super) fn command_flag(&self, attr: &ast::ExprAttribute) -> Result<Option<Expr>, String> {
-        let Some((flags, _)) = &self.graph.command_startup else {
-            return Ok(None);
-        };
         if self.resolve(&attr.value) != Some(Binding::Intrinsic(Intrinsic::SysFlags)) {
             return Ok(None);
         }
+        if attr.attr.as_str() == "optimize" {
+            return Ok(Some(pipelines::integer(i64::from(
+                self.graph.python_optimization(),
+            ))));
+        }
+        let Some((flags, _)) = &self.graph.command_startup else {
+            return Ok(None);
+        };
         if attr.attr.as_str() == "safe_path" {
             return Ok(Some(Expr {
                 ty: Type::Bool,

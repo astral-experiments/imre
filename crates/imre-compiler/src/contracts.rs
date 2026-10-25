@@ -117,6 +117,9 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::DictContains | Self::DictGetDefault | Self::DictTryGet(_) | Self::SetContains => {
+                Contract::new(true, PreservesLists)
+            }
             Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
@@ -142,6 +145,8 @@ impl Builtin {
                     | PathOperation::WriteUnion { .. }
                     | PathOperation::WriteTypeError
                     | PathOperation::WriteBytes
+                    | PathOperation::Stat { .. }
+                    | PathOperation::CheckStatPath
                     | PathOperation::Mkdir
                     | PathOperation::Unlink
                     | PathOperation::Rmdir
@@ -170,6 +175,8 @@ impl Builtin {
                     | PathOperation::Info
                     | PathOperation::InfoRepr
                     | PathOperation::Query(_) => false,
+                    PathOperation::StatTime(index) => *index == 3,
+                    PathOperation::StatExtraInt(index) => (6..=8).contains(index),
                 },
                 PreservesLists,
             ),
@@ -307,6 +314,7 @@ impl Builtin {
             | Self::SplitLines
             | Self::FreezeStrings
             | Self::SetAdd
+            | Self::SetDiscard
             | Self::CounterUpdate
             | Self::KeySet
             | Self::KeyUnion
@@ -351,6 +359,7 @@ impl Builtin {
             | Self::Slice
             | Self::StringFormat
             | Self::RegexSub(_)
+            | Self::UnittestCompilePattern
             | Self::StringIterationList
             | Self::StringJoin
             | Self::StringReplace
@@ -359,11 +368,8 @@ impl Builtin {
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::Bool
-            | Self::DictContains
-            | Self::DictGetDefault
             | Self::EnumLookup(_)
             | Self::DictSumValues
-            | Self::DictTryGet(_)
             | Self::Encode
             | Self::CsvLineNumber
             | Self::Sha256Hex
@@ -389,6 +395,7 @@ impl Builtin {
             | Self::IsInstance(_)
             | Self::IsBuiltinSubclass
             | Self::IsNone
+            | Self::MockCallList { .. }
             | Self::JsonIsInt
             | Self::Len
             | Self::JsonEmptyObject
@@ -407,11 +414,11 @@ impl Builtin {
             | Self::TextStreamView
             | Self::LiteralStringView
             | Self::RStrip
-            | Self::RegexCompile(_)
+            | Self::RegexCompile { .. }
+            | Self::RegexSpelling
             | Self::RegexSearch
             | Self::RegexMatchStart
             | Self::SequenceGetInBounds
-            | Self::SetContains
             | Self::Split
             | Self::StringListFilter(_)
             | Self::StringListNonempty
@@ -469,6 +476,7 @@ impl Builtin {
             | Self::ZipNamelist
             | Self::ZipClose
             | Self::Input
+            | Self::LengthResult
             | Self::ParseArgs { .. }
             | Self::ArgparseText { .. }
             | Self::DequeAppend { .. }
@@ -530,7 +538,6 @@ impl Builtin {
             | Self::ListDistinct
             | Self::ListExtendUnhinted
             | Self::DequeClear
-            | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
             | Self::SplitLinesIter
