@@ -41,10 +41,23 @@ enum Kind {
     Str,
     Path,
     Bool,
+    Class,
+}
+
+#[derive(Deserialize, Copy, Clone, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum Action {
+    Store,
+    StoreConst,
+    StoreTrue,
+    StoreFalse,
+    BooleanOptional,
+    Count,
 }
 
 #[derive(Deserialize)]
 struct OptionSpec {
+    action: Action,
     flag: String,
     dest: String,
     positional: bool,
@@ -116,7 +129,7 @@ enum Token<'a> {
     Unknown,
     Ambiguous(Vec<&'a str>),
     Help(Option<&'a str>),
-    Option(usize, Option<&'a str>),
+    Option(usize, &'a str, Option<&'a str>),
     Cluster(char, &'a str),
 }
 
@@ -252,12 +265,12 @@ impl Parser {
         let Some(prefix) = chars.next().filter(|&c| self.prefixes.contains(c)) else {
             return Token::Value;
         };
-        let token = |slot, value| match slot {
+        let token = |flag, slot, value| match slot {
             None => Token::Help(value),
-            Some(i) => Token::Option(i, value),
+            Some(i) => Token::Option(i, flag, value),
         };
-        if let Some((_, slot)) = self.flags().find(|(s, _)| *s == arg) {
-            return token(slot, None);
+        if let Some((flag, slot)) = self.flags().find(|(s, _)| *s == arg) {
+            return token(flag, slot, None);
         }
         let Some(second) = chars.next() else {
             return Token::Value;
@@ -266,9 +279,9 @@ impl Parser {
             .split_once('=')
             .map_or((arg, None), |(h, v)| (h, Some(v)));
         if explicit.is_some()
-            && let Some((_, slot)) = self.flags().find(|(s, _)| *s == head)
+            && let Some((flag, slot)) = self.flags().find(|(s, _)| *s == head)
         {
-            return token(slot, explicit);
+            return token(flag, slot, explicit);
         }
         let long = self.prefixes.contains(second);
         let short = &arg[..prefix.len_utf8() + second.len_utf8()];
@@ -277,7 +290,7 @@ impl Parser {
             if !long && flag == short {
                 matches.push((flag, Token::Cluster(prefix, &arg[prefix.len_utf8()..])));
             } else if self.abbrev && flag.starts_with(head) {
-                matches.push((flag, token(slot, explicit)));
+                matches.push((flag, token(flag, slot, explicit)));
             }
         }
         if matches.len() > 1 {
@@ -396,7 +409,7 @@ impl Parser {
             let arg = args[index];
             index += 1;
             let mut clustered_help = false;
-            let (slot, explicit) = match self.token(arg) {
+            let (slot, spelling, explicit) = match self.token(arg) {
                 Token::Help(None) => return Err(Stop::Help(self)),
                 Token::Help(Some(value)) => {
                     return Err(Stop::Error(
@@ -425,22 +438,19 @@ impl Parser {
                         let letter = suffix.chars().next().unwrap();
                         let rest = &suffix[letter.len_utf8()..];
                         let spelling = format!("{prefix}{letter}");
-                        let option = self.options.iter().enumerate().find(|(_, option)| {
-                            !option.positional() && option.flags().any(|s| s == spelling)
-                        });
-                        let help = self
-                            .help_flags
-                            .as_ref()
-                            .is_some_and(|flags| flags[0] == spelling);
-                        if !help && option.is_none() {
+                        let Some((matched, slot)) =
+                            self.flags().find(|(name, _)| *name == spelling)
+                        else {
                             extras.push(Cow::Owned(format!("{prefix}{suffix}")));
                             break;
-                        }
+                        };
+                        let option = slot.map(|slot| (slot, &self.options[slot]));
                         if let Some((slot, option)) = option
-                            && option.kind != Kind::Bool
+                            && option.takes_value()
                         {
                             take = Some((
                                 slot,
+                                matched,
                                 (!rest.is_empty()).then(|| rest.strip_prefix('=').unwrap_or(rest)),
                             ));
                             break;
@@ -465,8 +475,12 @@ impl Parser {
                                 ),
                             ));
                         }
-                        if let Some((slot, _)) = option {
-                            values[slot] = Some(Bound::Bool(true));
+                        if let Some((slot, option)) = option {
+                            values[slot] = Some(
+                                option
+                                    .flag_value(values[slot].take(), matched)
+                                    .map_err(|e| Stop::Error(self, e))?,
+                            );
                         } else {
                             clustered_help = true;
                         }
@@ -480,11 +494,11 @@ impl Parser {
                     };
                     take
                 }
-                Token::Option(slot, value) => (slot, value),
+                Token::Option(slot, spelling, value) => (slot, spelling, value),
             };
             let option = &self.options[slot];
             let taken = if let Some(value) = explicit {
-                if option.kind == Kind::Bool {
+                if !option.takes_value() {
                     return Err(Stop::Error(
                         self,
                         format!(
@@ -505,8 +519,13 @@ impl Parser {
                     ));
                 }
                 vec![value]
-            } else if option.kind == Kind::Bool {
-                Vec::new()
+            } else if !option.takes_value() {
+                values[slot] = Some(
+                    option
+                        .flag_value(values[slot].take(), spelling)
+                        .map_err(|e| Stop::Error(self, e))?,
+                );
+                continue;
             } else {
                 let start = index;
                 let (min, max) = option.nargs.bounds();
@@ -596,6 +615,10 @@ impl Parser {
 }
 
 impl OptionSpec {
+    fn takes_value(&self) -> bool {
+        self.action == Action::Store
+    }
+
     fn flags(&self) -> impl Iterator<Item = &str> {
         std::iter::once(self.flag.as_str()).chain(self.aliases.iter().map(String::as_str))
     }
@@ -680,10 +703,12 @@ pub unsafe extern "C" fn imre_argparse_text(
 /// The compiler roots the inputs. `layout` and each descriptor in `children`
 /// match the inferred fields for that parser. The child table contains one
 /// descriptor per declared subcommand in order, or is null for a flat parser.
+/// For parse_known_args, `pair_layout` describes (namespace, list[str]); otherwise it is null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_argparse_parse(
     layout: *const RecordDescriptor,
     children: *const *const RecordDescriptor,
+    pair_layout: *const RecordDescriptor,
     schema: *const Str,
     description: *const Str,
     argv: *const Object,
@@ -711,7 +736,7 @@ pub unsafe extern "C" fn imre_argparse_parse(
         .map(|value| value.as_str())
         .collect::<Vec<_>>();
     let parsed = match parser.parse(&args).and_then(|parsed| {
-        if parsed.extras.is_empty() {
+        if !pair_layout.is_null() || parsed.extras.is_empty() {
             Ok(parsed)
         } else {
             Err(Stop::Error(
@@ -781,6 +806,21 @@ pub unsafe extern "C" fn imre_argparse_parse(
                 _ => dest.write(word),
             }
         }
-        result
+        if pair_layout.is_null() {
+            return result;
+        }
+        let mut extras = Words::new(3);
+        extras.values.extend(
+            parsed
+                .extras
+                .iter()
+                .map(|value| Rc::into_raw(Rc::new(Str::new(value))) as usize),
+        );
+        let pair = imre_record_new(pair_layout);
+        pair.cast::<*mut usize>().write(result);
+        pair.add(1)
+            .cast::<*const Object>()
+            .write(Rc::into_raw(extras.into_object()));
+        pair
     }
 }

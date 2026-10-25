@@ -24,10 +24,16 @@ impl Targets {
         for function in module.functions.iter().chain([&module.entry]) {
             ir::walk_expressions(&function.body, &mut |value| {
                 if let ExprKind::Callable { function, receiver } = &value.kind {
-                    targets.0.entry(value.ty).or_default().push(Target {
+                    let target = Target {
                         function: *function,
                         bound: receiver.is_some(),
-                    });
+                    };
+                    targets.0.entry(value.ty).or_default().push(target);
+                    if let Some(signature) = module.types.cache_signature(value.ty) {
+                        // A cache can cross a plain Callable parameter or return
+                        // without losing its real invocation target.
+                        targets.0.entry(signature).or_default().push(target);
+                    }
                 }
             });
         }

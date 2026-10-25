@@ -1,0 +1,29 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "source_blob": "e7f185c6b1a1812cbe3db181c41c5a5d43be6984",
+  "denominator": 3,
+  "opt_level": "0",
+  "platform": "linux",
+  "execution": "fresh native process per original method, direct method driver",
+  "tests": {
+    "test.test_errno.ErrnoAttributeTests.test_for_improper_attributes": {
+      "status": "native"
+    },
+    "test.test_errno.ErrnoAttributeTests.test_using_errorcode": {
+      "status": "native"
+    },
+    "test.test_errno.ErrorcodeTests.test_attributes_in_errorcode": {
+      "status": "native"
+    }
+  },
+  "controls": {
+    "missing-code": "matched",
+    "missing-attribute": "matched",
+    "unknown-unused-import": "matched",
+    "absent-target-unused-import": "matched",
+    "close-spelling-import-hint": "matched",
+    "optional-import-hints": "matched",
+    "caught-import-fields": "matched"
+  },
+  "registry_observations": 758
+}

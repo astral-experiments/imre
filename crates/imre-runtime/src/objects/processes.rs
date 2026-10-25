@@ -214,6 +214,17 @@ fn signal_name(signal: i32) -> Option<&'static str> {
     })
 }
 
+/// A traced stop can be reported by waitpid without WUNTRACED. Popen
+/// exposes the negative stop signal just as it exposes a terminating signal.
+fn returncode(status: ExitStatus) -> i32 {
+    status.code().unwrap_or_else(|| {
+        -status
+            .stopped_signal()
+            .or_else(|| status.signal())
+            .unwrap_or(0)
+    })
+}
+
 fn exit_word(returncode: i32) -> usize {
     // Every signed 32-bit exit code fits the signed 63-bit small representation.
     ((returncode as usize) << 1) | 1
@@ -574,6 +585,10 @@ impl Launch {
         descriptors: [RawFd; 3],
         attributes: ChildAttributes,
     ) -> io::Result<Child> {
+        // STDOUT in the stdin slot reaches child descriptor setup as fd -2.
+        if (streams >> 12) & 15 == 5 {
+            return Err(io::Error::from_raw_os_error(libc::EBADF));
+        }
         // Check the original descriptor table before duplicating anything. A
         // duplicate for stdout must not make a closed stderr descriptor valid.
         for fd in descriptors.into_iter().filter(|&fd| fd >= 0) {
@@ -1192,7 +1207,11 @@ unsafe fn spawn_list(
     let cmd = unsafe { WordKind::new(5).acquire(args as usize) };
     let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, streams, 0, true);
     // SAFETY: the original configuration remains rooted while spawn reports any error.
-    unsafe { launch_error::spawn(&cmd, &config, streams, [-1; 3], ChildAttributes::default()) }
+    unsafe {
+        launch_error::spawn(&cmd, &config, streams, [-1; 3], || {
+            Ok(ChildAttributes::default())
+        })
+    }
 }
 
 /// # Safety
@@ -1211,9 +1230,7 @@ pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *c
             raise_process(ProcessError {
                 // SAFETY: the exception acquires the original rooted argv.
                 cmd: unsafe { WordKind::new(5).acquire(args as usize) },
-                returncode: status
-                    .code()
-                    .unwrap_or_else(|| -status.signal().unwrap_or(0)),
+                returncode: returncode(status),
                 // SAFETY: each field transfers one decoded string or no owner.
                 stdout: unsafe {
                     OwnedWord::from_owned(Rc::into_raw(stdout) as usize, WordKind::new(3))
@@ -1253,9 +1270,7 @@ pub unsafe extern "C" fn imre_subprocess_to_stderr(args: *const Object, check: u
         Ok(status) if check != 0 && !status.success() => raise_process(ProcessError {
             // SAFETY: the original list remains rooted while acquiring our owner.
             cmd: unsafe { WordKind::new(5).acquire(args as usize) },
-            returncode: status
-                .code()
-                .unwrap_or_else(|| -status.signal().unwrap_or(0)),
+            returncode: returncode(status),
             stdout: absent(),
             stderr: absent(),
         }),
@@ -1273,7 +1288,12 @@ unsafe fn prepare_process(
     // SAFETY: existing run and asynchronous ABIs accept an exact list.
     let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, 0, 0, true);
     // SAFETY: the legacy arguments have their original word representations.
-    unsafe { prepare_command(&WordKind::new(5).acquire(args as usize), &config) }
+    let (launch, cwd, _) = unsafe {
+        prepare_command(&WordKind::new(5).acquire(args as usize), &config, || {
+            Ok(ChildAttributes::default())
+        })?
+    };
+    Ok((launch, cwd))
 }
 
 /// # Safety
@@ -1281,7 +1301,8 @@ unsafe fn prepare_process(
 unsafe fn prepare_command(
     cmd: &OwnedWord,
     config: &popen::LaunchConfig,
-) -> Result<(Launch, Option<CString>)> {
+    child_attributes: impl FnOnce() -> Result<ChildAttributes>,
+) -> Result<(Launch, Option<CString>, ChildAttributes)> {
     // SAFETY: the caller roots the exact argv, optional directory and environment.
     unsafe {
         // Python selects args[0], validates every environment name, then
@@ -1319,6 +1340,9 @@ unsafe fn prepare_command(
                 "illegal environment variable name",
             ));
         }
+        // _execute_child validates environment names before _fork_exec converts
+        // its integer arguments. Conversion of argv and cwd to C strings follows.
+        let attributes = child_attributes()?;
         let executable = argv::optional_path(config.executable, config.executable_kind)?;
         let mut argv = argv::copy(cmd)?;
         if config.shell {
@@ -1335,7 +1359,11 @@ unsafe fn prepare_command(
             argv.splice(..0, [shell.to_owned(), c"-c".to_owned()]);
         }
         let cwd = argv::optional_path(config.cwd, config.cwd_kind)?;
-        Ok((Launch::with_executable(argv, env, executable)?, cwd))
+        Ok((
+            Launch::with_executable(argv, env, executable)?,
+            cwd,
+            attributes,
+        ))
     }
 }
 
@@ -1421,9 +1449,7 @@ unsafe fn run_process(
         Err(error) => return error.returning(std::ptr::null_mut()),
     };
     let result: Result<_> = (|| {
-        let returncode = status
-            .code()
-            .unwrap_or_else(|| -status.signal().unwrap_or(0));
+        let returncode = returncode(status);
         // SAFETY: the compiler’s four-field descriptor outlives this run.
         let kinds = unsafe { [*(*descriptor).kinds.add(2), *(*descriptor).kinds.add(3)] };
         // Python decodes stdout before stderr, even when check=True would fail.
@@ -1603,6 +1629,25 @@ mod tests {
             }
         }
         result
+    }
+
+    #[test]
+    fn decode_a_real_stopped_child() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "kill -STOP $$; exit 7"])
+            .spawn()
+            .unwrap();
+        let pid = child.id() as libc::pid_t;
+        let mut raw = 0;
+        // SAFETY: this test owns the child, and waitpid writes one int to raw.
+        let stopped = unsafe { libc::waitpid(pid, &mut raw, libc::WUNTRACED) };
+        // Resume and reap before checking the decoded result.
+        // SAFETY: the stopped child has not exited and its PID is still owned.
+        let resumed = unsafe { libc::kill(pid, libc::SIGCONT) };
+        assert_eq!(resumed, 0);
+        assert_eq!(child.wait().unwrap().code(), Some(7));
+        assert_eq!(stopped, pid);
+        assert_eq!(returncode(ExitStatus::from_raw(raw)), -libc::SIGSTOP);
     }
 
     #[test]

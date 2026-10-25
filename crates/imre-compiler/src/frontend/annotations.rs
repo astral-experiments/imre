@@ -4,7 +4,7 @@ use super::*;
 use ruff_python_codegen::{Generator, Mode};
 
 /// Builtin classes form a closed nominal domain, independent of the values they construct.
-pub(super) fn builtin_type(name: &str) -> Option<Expr> {
+pub(super) fn is_builtin_type(name: &str) -> bool {
     matches!(
         name,
         "bool"
@@ -25,7 +25,10 @@ pub(super) fn builtin_type(name: &str) -> Option<Expr> {
             | "tuple"
             | "type"
     )
-    .then(|| Expr {
+}
+
+pub(super) fn builtin_type(name: &str) -> Option<Expr> {
+    is_builtin_type(name).then(|| Expr {
         ty: Type::BuiltinClass,
         kind: ExprKind::Builtin(Builtin::ClassNameView, vec![unpacking::string(name)]),
     })
@@ -383,5 +386,139 @@ impl Checker<'_> {
             lowered.push((unpacking::string(name), value));
         }
         Ok(dict(self.types, element.unwrap_or(Type::Str), lowered))
+    }
+}
+
+fn none_value() -> Expr {
+    Expr {
+        ty: Type::None,
+        kind: ExprKind::None,
+    }
+}
+
+fn bool_value(value: bool) -> Expr {
+    Expr {
+        ty: Type::Bool,
+        kind: ExprKind::Bool(value),
+    }
+}
+
+impl Checker<'_> {
+    /// Bind the real constructor signature before building the immutable owned record.
+    pub(super) fn forward_ref(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let module = self.types.optional(Type::Str);
+        let params = [
+            ("arg", Type::Str, None, ParameterKind::PositionalOrKeyword),
+            (
+                "module",
+                module,
+                Some(Expr {
+                    ty: module,
+                    kind: ExprKind::Absent(Box::new(none_value())),
+                }),
+                ParameterKind::KeywordOnly,
+            ),
+            (
+                "owner",
+                Type::None,
+                Some(none_value()),
+                ParameterKind::KeywordOnly,
+            ),
+            (
+                "is_argument",
+                Type::Bool,
+                Some(bool_value(true)),
+                ParameterKind::KeywordOnly,
+            ),
+            (
+                "is_class",
+                Type::Bool,
+                Some(bool_value(false)),
+                ParameterKind::KeywordOnly,
+            ),
+        ]
+        .map(|(name, ty, default, kind)| Parameter {
+            name: name.into(),
+            ty,
+            default,
+            kind,
+            sign_only: false,
+        });
+        let args =
+            self.arguments_with(call, &params, None, |checker, index, node| match index {
+                0 | 2 => checker.expr(node),
+                _ => checker.expr_expected(node, params[index].ty),
+            })?;
+        let ty = self.types.forward_ref(args.values[args.order[2]].ty);
+        let argument = &args.values[args.order[0]];
+        if argument.ty != Type::Str {
+            let pos = args.order[0];
+            let slot = self.hidden(argument.ty);
+            let mut body = vec![];
+            for (i, value) in args.values.into_iter().enumerate() {
+                if i == pos {
+                    body.push(Statement::Assign(slot, value));
+                } else {
+                    body.push(Statement::Expr(value));
+                }
+            }
+            let val = self.local(slot);
+            if !dataclass_values::can_format(val.ty, self.types, self.classes) {
+                return Err(error(
+                    self.source,
+                    call,
+                    "ForwardRef requires a string or a representable argument for its TypeError",
+                ));
+            }
+            let message = unpacking::concat(
+                unpacking::string("Forward reference must be a string -- got "),
+                Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::Repr, vec![val]),
+                },
+            );
+            let exc = Expr {
+                ty: Type::Exception,
+                kind: ExprKind::Exception {
+                    kind: exception_kind("TypeError").unwrap(),
+                    message: Some(Box::new(message)),
+                },
+            };
+            return Ok(Expr {
+                ty,
+                kind: ExprKind::Scope {
+                    body,
+                    clear: vec![slot],
+                    value: Box::new(Expr {
+                        ty,
+                        kind: ExprKind::Builtin(Builtin::RaiseException, vec![exc]),
+                    }),
+                },
+            });
+        }
+        Ok(self.ordered_builtin(Builtin::NewForwardRef, ty, args))
+    }
+
+    /// Expose only ForwardRef's public compatibility attributes, never tuple operations.
+    pub(super) fn forward_ref_attribute(
+        &self,
+        layout: usize,
+        receiver: Expr,
+        attr: &ast::ExprAttribute,
+    ) -> Result<Expr, String> {
+        let index = match attr.attr.as_str() {
+            "__forward_arg__" => 0,
+            "__forward_module__" => 1,
+            "__owner__" => 2,
+            "__forward_is_argument__" => 3,
+            "__forward_is_class__" => 4,
+            _ => return Err(error(self.source, attr, "unsupported ForwardRef attribute")),
+        };
+        let record = Type::Tuple(layout);
+        let ty = self.types.fields(record).unwrap()[index];
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::ForwardRefField(index), vec![receiver]),
+        })
     }
 }

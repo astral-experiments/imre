@@ -5,7 +5,54 @@ use crate::ir::ProcessOperation;
 
 mod descriptors;
 
+fn shutil_tag(ty: Type) -> u32 {
+    match ty {
+        Type::Str => 0,
+        Type::Bytes => 1,
+        Type::Path => 2,
+        _ => unreachable!(),
+    }
+}
+
 impl Emitter<'_, '_> {
+    /// Keep the callee, bound context, return ownership, and parameter ABI together.
+    fn shutil_copier(&mut self, copy: &Operand) -> (String, String, String, u32, u32) {
+        if copy.value.ty == Type::Str {
+            return (
+                "0".into(),
+                "@imre_shutil_noncallable".into(),
+                copy.value.operand.clone(),
+                0,
+                0,
+            );
+        }
+        if copy.value.ty == Type::Bool {
+            return (
+                self.instruction(format!("zext i1 {} to i32", copy.value.operand)),
+                "null".into(),
+                "null".into(),
+                0,
+                0,
+            );
+        }
+        let (params, result) = self.module.types.signature(copy.value.ty).unwrap();
+        let target = self.instruction(format!("load ptr, ptr {}", copy.value.operand));
+        let slot = self.instruction(format!(
+            "getelementptr %callable, ptr {}, i32 0, i32 1",
+            copy.value.operand
+        ));
+        let context = self.instruction(format!("load ptr, ptr {}", slot));
+        let tagged = u32::from(matches!(params[0], Type::Union(_)))
+            | (u32::from(matches!(params[1], Type::Union(_))) << 1);
+        (
+            "0".into(),
+            target,
+            context,
+            representation_kind(result, &self.module.types),
+            tagged,
+        )
+    }
+
     pub(super) fn process_builtin(
         &mut self,
         operation: ProcessOperation,
@@ -395,9 +442,12 @@ impl Emitter<'_, '_> {
             ProcessOperation::PopenArgs => self.call("imre_popen_args", returns, &[&args[0].value]),
             ProcessOperation::PopenPid => self.call("imre_popen_pid", returns, &[&args[0].value]),
             ProcessOperation::PopenStatus { poll } => {
+                let control = self.instruction(format!(
+                    "call ptr @imre_popen_control(ptr {})",
+                    args[0].value.operand
+                ));
                 let word = self.checked_instruction(format!(
-                    "call i64 @imre_popen_status(ptr {}, i1 {})",
-                    args[0].value.operand,
+                    "call i64 @imre_child_status(ptr {control}, i1 {})",
                     u8::from(poll)
                 ));
                 self.unpack_word(word, returns)
@@ -417,10 +467,14 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::PopenWait => {
+                let control = self.instruction(format!(
+                    "call ptr @imre_popen_control(ptr {})",
+                    args[0].value.operand
+                ));
                 let kind = if args[1].value.ty == Type::Int { 2 } else { 7 };
                 let word = self.checked_instruction(format!(
-                    "call i64 @imre_popen_wait(ptr {}, i32 {kind}, i64 {})",
-                    args[0].value.operand, args[1].value.operand
+                    "call i64 @imre_child_wait(ptr {control}, i32 {kind}, i64 {}, ptr {})",
+                    args[1].value.operand, args[0].value.operand
                 ));
                 self.unpack_word(word, returns)
             }
@@ -432,9 +486,13 @@ impl Emitter<'_, '_> {
                 none()
             }
             ProcessOperation::PopenSignal => {
+                let control = self.instruction(format!(
+                    "call ptr @imre_popen_control(ptr {})",
+                    args[0].value.operand
+                ));
                 self.checked_line(format!(
-                    "call void @imre_popen_signal(ptr {}, i64 {})",
-                    args[0].value.operand, args[1].value.operand
+                    "call void @imre_child_signal(ptr {control}, i64 {})",
+                    args[1].value.operand
                 ));
                 none()
             }
@@ -525,13 +583,93 @@ impl Emitter<'_, '_> {
                 self.checked_line(format!("call void @imre_shutil_rmtree(ptr {ptr}, i32 {tag}, i32 {ignore}, i64 {fd}, i32 {fd_kind}, ptr null, ptr null, ptr null, ptr null)"));
                 none()
             }
-            ProcessOperation::Copy(op) => {
-                let tag = |ty| match ty {
-                    Type::Str => 0,
-                    Type::Bytes => 1,
-                    Type::Path => 2,
-                    _ => unreachable!(),
+            ProcessOperation::IgnorePatterns => {
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_shutil_ignore_patterns_call(ptr {}, ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand, args[2].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::TreeErrorArgs => {
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(returns)));
+                let ptr = self.checked_instruction(format!(
+                    "call ptr @imre_shutil_tree_error_args(ptr {}, ptr @{layout})",
+                    args[0].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand: ptr,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::CopyTree(issue) => {
+                let [src, dst, links, ignore, stat, dangling, existing] = args else {
+                    unreachable!()
                 };
+                let (stat, target, context, repr, tagged) = self.shutil_copier(stat);
+                debug_assert_eq!(tagged, 0);
+                let [links, dangling, existing] = [links, dangling, existing]
+                    .map(|arg| self.instruction(format!("zext i1 {} to i32", arg.value.operand)));
+                let (ignore_target, ignore_context, ignore_set) = if ignore.value.ty == Type::None {
+                    ("null".into(), "null".into(), 0)
+                } else {
+                    let (_, ret) = self.module.types.signature(ignore.value.ty).unwrap();
+                    let target =
+                        self.instruction(format!("load ptr, ptr {}", ignore.value.operand));
+                    let slot = self.instruction(format!(
+                        "getelementptr %callable, ptr {}, i32 0, i32 1",
+                        ignore.value.operand
+                    ));
+                    let context = self.instruction(format!("load ptr, ptr {slot}"));
+                    (
+                        target,
+                        context,
+                        u32::from(self.module.types.set_element(ret).is_some()),
+                    )
+                };
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(issue)));
+                let operand = self.checked_instruction(format!(
+                    "call i64 @imre_shutil_copytree(ptr {}, i32 {}, ptr {}, i32 {}, i32 {links}, i32 {stat}, i32 {dangling}, i32 {existing}, ptr @{layout}, ptr {target}, ptr {context}, i32 {repr}, ptr {ignore_target}, ptr {ignore_context}, i32 {ignore_set})",
+                    src.value.operand, shutil_tag(src.value.ty), dst.value.operand, shutil_tag(dst.value.ty)));
+                self.unpack_word(operand, returns)
+            }
+            ProcessOperation::Move(issue) => {
+                let [src, dst, copy] = args else {
+                    unreachable!()
+                };
+                let (stat, target, context, repr, tagged) = self.shutil_copier(copy);
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(issue)));
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_shutil_move(ptr {}, i32 {}, ptr {}, i32 {}, i32 {stat}, ptr @{layout}, ptr {target}, ptr {context}, i32 {repr}, i32 {tagged})",
+                    src.value.operand,shutil_tag(src.value.ty),dst.value.operand,shutil_tag(dst.value.ty)));
+                self.unpack_word(word, returns)
+            }
+            ProcessOperation::DestInSrc => {
+                let [src, dst] = args else { unreachable!() };
+                let byte = self.checked_instruction(format!(
+                    "call i32 @imre_shutil_destinsrc(ptr {}, i32 {}, ptr {}, i32 {})",
+                    src.value.operand,
+                    shutil_tag(src.value.ty),
+                    dst.value.operand,
+                    shutil_tag(dst.value.ty)
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
+                    small_integer: false,
+                }
+            }
+            ProcessOperation::Copy(op) => {
                 let [src, dst, follow] = args else {
                     unreachable!()
                 };
@@ -540,9 +678,9 @@ impl Emitter<'_, '_> {
                     "call i64 @imre_shutil_copy(i32 {}, ptr {}, i32 {}, ptr {}, i32 {}, i32 {follow})",
                     op as u32,
                     src.value.operand,
-                    tag(src.value.ty),
+                    shutil_tag(src.value.ty),
                     dst.value.operand,
-                    tag(dst.value.ty)
+                    shutil_tag(dst.value.ty)
                 ));
                 self.unpack_word(operand, returns)
             }
