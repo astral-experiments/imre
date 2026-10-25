@@ -187,6 +187,16 @@ impl Checker<'_> {
             ));
         }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
+        let length = self.builtin_len().ty;
+        if [left.ty, right.ty]
+            .iter()
+            .all(|&ty| ty == length || self.types.cache_signature(ty) == Some(length))
+        {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         let wrapper_attributes = matches!((left.ty, right.ty), (Type::Tuple(_), Type::Tuple(_)))
             && [&left, &right].iter().any(|value| {
                 matches!(

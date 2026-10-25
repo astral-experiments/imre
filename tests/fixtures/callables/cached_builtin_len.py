@@ -6,13 +6,9 @@ def call_len(text: str) -> int:
     return len(text)
 
 
-def replacement(text: str) -> int:
-    return 42
-
-
-def rebind_while_evaluating_argument() -> str:
-    builtins.len = replacement
-    return "🐍é"
+def rebind_while_evaluating_argument() -> list[str]:
+    builtins.len = functools.lru_cache(1)(len)
+    return ["🐍", "é"]
 
 
 def exercise() -> None:
@@ -27,8 +23,13 @@ def exercise() -> None:
         print(call_len("a"))
         print(call_len(""))
         print(wrapper.cache_info() == (1, 3, 2, 2))
+        builtins.len = original
         print(len(rebind_while_evaluating_argument()))
-        print(wrapper.cache_info() == (1, 4, 2, 2))
+        try:
+            print(len(["a", "b"]))
+        except TypeError as error:
+            print(str(error))
+        print(wrapper.cache_info() == (1, 3, 2, 2))
         print(call_len("abc"))
         print(original("abc"))
         print(wrapper.__wrapped__ is original)
@@ -40,7 +41,7 @@ def exercise() -> None:
     print(builtins.len is original)
     print(call_len("abc"))
     print(wrapper("🐍é"))
-    print(wrapper.cache_info() == (2, 4, 2, 2))
+    print(wrapper.cache_info() == (1, 4, 2, 2))
 
 
 exercise()

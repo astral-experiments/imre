@@ -158,6 +158,24 @@ fn build_wrapper(
         .map(|(i, &ty)| local(i + usize::from(context.is_some()), ty))
         .collect();
     let mut body = Vec::new();
+    if policy.capacity != 0 {
+        for arg in &args {
+            if types.is_len_argument(arg.ty) {
+                let message = field(arg.clone(), 1, Type::Str);
+                body.push(Statement::If(
+                    builtin(Builtin::Bool, Type::Bool, vec![message.clone()]),
+                    vec![Statement::Raise(Some(Expr {
+                        ty: Type::Exception,
+                        kind: ExprKind::Exception {
+                            kind: exception_kind("TypeError").unwrap(),
+                            message: Some(Box::new(message)),
+                        },
+                    }))],
+                    vec![],
+                ));
+            }
+        }
+    }
     let key = match args.as_slice() {
         [] => pipelines::integer(0),
         [arg] => arg.clone(),

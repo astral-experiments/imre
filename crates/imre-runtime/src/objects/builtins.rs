@@ -45,10 +45,31 @@ pub extern "C" fn imre_builtins_clear() {
     drop(LEN.take());
 }
 
-/// The exact native callback convention includes an unused receiver for the original builtin.
-unsafe extern "C" fn string_len(_receiver: *const usize, value: *const crate::Str) -> usize {
-    // SAFETY: the string callback ABI roots its borrowed argument through the call.
-    unsafe { crate::imre_str_len(value) }
+/// The bracketed value stays rooted, including mutable containers whose length can change.
+unsafe extern "C" fn original_len(_receiver: *const usize, argument: *const usize) -> usize {
+    // SAFETY: the compiler emits [class, hash diagnostic, value] with the concrete field types.
+    unsafe {
+        let class = &*(*argument as *const crate::Str);
+        let value = *argument.add(2);
+        match class.as_bytes() {
+            b"str" => crate::imre_str_len(value as *const crate::Str),
+            b"bytes" => super::bytes::imre_bytes_len(value as *const super::Bytes),
+            b"tuple" => {
+                crate::Int::from_usize(records::descriptor(value as *const usize).length).into_raw()
+            }
+            b"list" if *records::descriptor(argument).kinds.add(2) == 4 => {
+                crate::imre_list_len(value as *const crate::List)
+            }
+            b"list" => super::imre_seq_len(value as *const Object),
+            b"dict" => super::mappings::imre_dict_len(value as *const Object),
+            b"set" => super::mappings::imre_set_len(value as *const Object),
+            _ => Error::new(
+                Kind::TypeError,
+                format!("object of type '{class}' has no len()"),
+            )
+            .returning(0),
+        }
+    }
 }
 
 /// Read a retained snapshot of the binding, creating the original callable on first use.
@@ -67,7 +88,7 @@ pub unsafe extern "C" fn imre_builtins_len(
                 if callable.is_null() {
                     return std::ptr::null();
                 }
-                callable.write(string_len as *const () as usize);
+                callable.write(original_len as *const () as usize);
                 *slot = Some(OwnedWord::from_owned(callable as usize, WordKind::new(6)));
             }
         }

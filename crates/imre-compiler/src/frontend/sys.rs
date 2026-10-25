@@ -18,7 +18,9 @@ impl Checker<'_> {
     /// Return the callable currently bound in the native builtins namespace.
     pub(super) fn builtin_len(&self) -> Expr {
         Expr {
-            ty: self.types.callable(vec![Type::Str], Type::Int),
+            ty: self
+                .types
+                .callable(vec![self.types.len_argument()], Type::Int),
             kind: ExprKind::Builtin(Builtin::BuiltinsLen, vec![]),
         }
     }
@@ -27,6 +29,37 @@ impl Checker<'_> {
         matches!(expr, ast::Expr::Name(name) if name.id == "len" && !self.names.contains_key("len"))
             && self.resolve(expr).is_none()
     }
+    /// Keep the actual argument alive through the cached or original function call.
+    pub(super) fn pack_len_argument(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        let value = self.expr(expression)?;
+        let ty = self.types.len_argument();
+        if value.ty == ty {
+            return Ok(value);
+        }
+        let (class, unhashable) = len_argument_class(self.types, value.ty).ok_or_else(|| {
+            error(
+                self.source,
+                expression,
+                "this live len call requires a supported builtin argument layout",
+            )
+        })?;
+        let diagnostic = unhashable
+            .map(|name| format!("unhashable type: '{name}'"))
+            .unwrap_or_default();
+        let frame = Expr {
+            ty: self.types.tuple(vec![Type::Str, Type::Str, value.ty]),
+            kind: ExprKind::Tuple(vec![
+                unpacking::string(class),
+                unpacking::string(diagnostic),
+                value,
+            ]),
+        };
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::RecordView, vec![frame]),
+        })
+    }
+
     /// Read scalar fields of the immutable startup settings selected for a command.
     pub(super) fn command_flag(&self, attr: &ast::ExprAttribute) -> Result<Option<Expr>, String> {
         let Some((flags, _)) = &self.graph.command_startup else {
@@ -295,6 +328,39 @@ impl Checker<'_> {
             exception
         })
     }
+}
+
+/// The first mutable tuple element supplies the class name in a hashing error.
+fn len_argument_class(types: &Types, ty: Type) -> Option<(&'static str, Option<&'static str>)> {
+    let pair = match ty {
+        Type::Str | Type::StrLiteral(_) => ("str", None),
+        Type::Bytes => ("bytes", None),
+        Type::Int => ("int", None),
+        Type::Bool => ("bool", None),
+        Type::None => ("NoneType", None),
+        Type::ListInt => ("list", Some("list")),
+        Type::List(_) | Type::Dict(_) | Type::Set(_) => {
+            for child in types.children(ty) {
+                len_argument_class(types, child)?;
+            }
+            let class = match ty {
+                Type::List(_) => "list",
+                Type::Dict(_) => "dict",
+                _ => "set",
+            };
+            (class, Some(class))
+        }
+        Type::Tuple(_) if !types.is_partial_frame(ty) && !types.is_len_argument(ty) => {
+            let mut invalid = None;
+            for child in types.fields(ty)? {
+                let (_, child_error) = len_argument_class(types, child)?;
+                invalid = invalid.or(child_error);
+            }
+            ("tuple", invalid)
+        }
+        _ => return None,
+    };
+    Some(pair)
 }
 
 /// Exit payloads that the runtime can retain, compare, and format without boxing away their type.

@@ -2186,6 +2186,9 @@ impl<'a> Checker<'a> {
 
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
+        if self.types.is_len_argument(expected) {
+            return self.pack_len_argument(expression);
+        }
         // A record can carry user fields with distinct types. An expected scalar type
         // permits reading such a field; the runtime checks its actual representation.
         if let ast::Expr::Attribute(attr) = expression
