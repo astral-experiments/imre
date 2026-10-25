@@ -14,6 +14,7 @@ CASES = {
         ["-i", "0" * 4301], ["-i", "\x1c34\x1f"],
         ["-i", "bad", "-i", "1"], ["-i", "bad", "--help"], ["--help", "-i", "bad"],
         ["--scale=-0.0"], ["--scale", "1e-1000"], ["--scale=inf"], ["--scale=nan"],
+        ["--scale=\U00011de0"],
         ["--scale", "1", "--scale", "bad"],
         ["--ids", "-02", "0_4"], ["--ids", "3", "bad"], ["--ids", "3", "2"],
         ["--choice=0.0"], ["--choice=2"], ["--maybe"], ["--maybe=01"], ["--maybe=42"],
@@ -111,6 +112,11 @@ CASES = {
                          ["range", "--big", "4999", "100000000000000000001"],
                          ["radix", str(2**80)], ["radix", str(2**80 + 3)], ["radix", "--help"]],
     "two": [[], ["--help"], ["--mo=lar"], ["--flag"], ["--paths", "one", "two"]],
+    "spellings": [[], ["+h"], ["++help"], ["++hel"], ["--help"], ["++value=x"], ["/v", "v"],
+                  ["+xz"], ["+x+z"], ["+xZ"], ["+"], ["++v", "x"], ["--", "++value"],
+                  ["abbrev"], ["abbrev", "-h"], ["abbrev", "-foo"], ["abbrev", "-foob=x"],
+                  ["abbrev", "-fabc"], ["abbrev", "-foor", "y"], ["abbrev", "-foobar=a"],
+                  ["abbrev", "-3-2"], ["abbrev", "-f", "-2"], ["abbrev", "--help"]],
 }
 REJECTED = {
     "computed_flag": 'parser.add_argument("--" + "item")',
@@ -166,6 +172,8 @@ def main():
             for width in (16, 34, 55, 111):
                 for arguments in (["--help"], ["--not-an-option"]):
                     samples.extend((arguments, width, color) for color in (False, True))
+                if name == "spellings":
+                    samples.extend(([mode, "--unknown"], width, color) for mode in ("bare", "pos") for color in (False, True))
                 if name == "groups":
                     samples.extend((["foo", "check", "--help"], width, color) for color in (False, True))
             for width in (" 34\t", "+3_4", "٣٤", "3__4", "9" * 20, "0" * 4300 + "34"):

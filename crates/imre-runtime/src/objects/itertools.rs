@@ -112,7 +112,35 @@ fn next_item(source: &Object) -> Result<Option<OwnedWord>, Error> {
     })
 }
 
+impl Drop for Adapter {
+    fn drop(&mut self) {
+        let mut source = self.take_source();
+        while let Some(cursor) = source {
+            let Ok(cursor) = Rc::try_unwrap(cursor) else {
+                break;
+            };
+            let Storage::IteratorAdapter(state) = cursor.0.into_inner() else {
+                break;
+            };
+            let Ok(mut state) = Rc::try_unwrap(state) else {
+                break;
+            };
+            // Detach the next owner before this adapter's fields are destroyed.
+            source = state.take_source();
+        }
+    }
+}
+
 impl Adapter {
+    fn take_source(&mut self) -> Option<Rc<Object>> {
+        match self {
+            Self::Tee(fork) => fork.take_source(),
+            Self::Slice(slice) => slice.source.get_mut().take(),
+            Self::Cycle(cycle) => cycle.source.get_mut().take(),
+            _ => None,
+        }
+    }
+
     pub(super) fn write_repr(&self, output: &mut String, owner: *const Object) {
         use std::fmt::Write;
         let name = match self {
@@ -310,4 +338,27 @@ pub unsafe extern "C" fn imre_float_count(start: f64, kind: u32, step: usize) ->
         current: Cell::new(start),
         step,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn releasing_deep_adapters_stops_at_a_shared_cursor() {
+        let cycle = |source| {
+            adapter(Adapter::Cycle(Cycle {
+                source: RefCell::new(source),
+                saved: RefCell::default(),
+                index: Cell::new(0),
+            }))
+        };
+        let shared = cycle(None);
+        let mut cursor = Rc::clone(&shared);
+        for _ in 0..65_536 {
+            cursor = cycle(Some(cursor));
+        }
+        drop(cursor);
+        assert_eq!(Rc::strong_count(&shared), 1);
+    }
 }

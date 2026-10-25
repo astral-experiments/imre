@@ -1,4 +1,7 @@
 import csv
+from collections import namedtuple
+
+Point = namedtuple("GridPoint", ["x", "y"])
 
 
 def rows(marker: str | None) -> None:
@@ -33,6 +36,14 @@ def main() -> None:
     rows(None)
     integer(1)
     integer(None)
+    try:
+        csv.reader(["x"], lineterminator=Point(1, 2))
+    except TypeError as exc:
+        print(str(exc))
+    try:
+        csv.reader(["x"], lineterminator=(1, 2))
+    except TypeError as exc:
+        print(str(exc))
     try:
         csv.reader(["x"], lineterminator=False)
     except TypeError as exc:

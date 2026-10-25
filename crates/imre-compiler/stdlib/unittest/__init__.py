@@ -1,11 +1,15 @@
 """Native unittest operations for Imre's fixed-layout test cases."""
 
 
+from typing import ClassVar
+
+
 class SkipTest(Exception):
     pass
 
 
 class TestCase:
+    failureException: ClassVar[type[Exception]] = AssertionError
     longMessage: bool
 
     def __init__(self) -> None:
@@ -23,8 +27,8 @@ class TestCase:
 
     def fail(self, msg: str | None = None) -> None:
         if msg is None:
-            raise AssertionError("None")
-        raise AssertionError(msg)
+            raise self.failureException("None")
+        raise self.failureException(msg)
 
     def skipTest(self, reason: str) -> None:
         raise SkipTest(reason)
@@ -69,6 +73,37 @@ class TestCase:
 
     def tearDown(self) -> None:
         pass
+
+
+def _checked_expected(kinds: list[int], error: str | None) -> list[int]:
+    if error is not None:
+        raise TypeError(error)
+    return kinds
+
+
+class _AssertRaisesContext:
+    test_case: TestCase
+    msg: str | None
+    _expected: list[int]
+    _label: str
+    _caught: Exception | None
+
+    def __init__(self, case: TestCase, kinds: list[int], label: str, msg: str | None, error: str | None) -> None:
+        self.test_case = case
+        self._expected = _checked_expected(kinds, error)
+        self._label = label
+        self.msg = msg
+        self._caught = None
+
+    def _missing(self) -> None:
+        raise self.test_case.failureException(self.test_case._formatMessage(self.msg, self._label + " not raised"))
+
+    @property
+    def exception(self) -> Exception:
+        caught = self._caught
+        if caught is None:
+            raise AttributeError("'_AssertRaisesContext' object has no attribute 'exception'")
+        return caught
 
 
 class TestResult:

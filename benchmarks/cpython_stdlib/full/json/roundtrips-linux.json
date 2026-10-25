@@ -1,0 +1,115 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "imre_commit": "6bafa669b5af591bfe855168f28505fdac4324dd",
+  "sha256": {
+    "imre": "5f7513e68e11eca8b742a762c394754b6f5a366921ea381f79c7a6161dfac691",
+    "runtime": "0ab3a27da2720fae4070ec1f31cf64545f07eeeda16cec38b74d4382b9874227"
+  },
+  "fixture": "CPython module/class/instance lifecycle; Imre instance, body, JSON operations and assertions",
+  "levels": {
+    "0": {
+      "methods": {
+        "test.test_json.test_pass1.TestPass1.test_parse": {
+          "method_sha256": "e4c8c6b51011b36a83b6e1b911fd98d0eca3f84e28b3fde3434a42594e554a83",
+          "fixture_ids": [
+            "test.test_json.test_pass1.TestCPass1.test_parse",
+            "test.test_json.test_pass1.TestPyPass1.test_parse"
+          ],
+          "inherited_assertion": {
+            "test.test_json.test_pass1.TestCPass1.test_parse": "AssertionError: native exit 1: '' 'TypeError: expected int, got list from JSON\\n'",
+            "test.test_json.test_pass1.TestPyPass1.test_parse": "AssertionError: native exit 1: '' 'TypeError: expected int, got list from JSON\\n'"
+          },
+          "document_assertion": {
+            "compile_error": "<case>/case.py:69:12: Imre: readonly JSON comparisons require == or != with a literal string"
+          },
+          "matching_serialized_output_sha256": "08ac3fcf1f74c3acc3311341de20ee0211837252eafa5b0c7b8fd8bcd9be6509"
+        },
+        "test.test_json.test_pass2.TestPass2.test_parse": {
+          "method_sha256": "e4c8c6b51011b36a83b6e1b911fd98d0eca3f84e28b3fde3434a42594e554a83",
+          "fixture_ids": [
+            "test.test_json.test_pass2.TestCPass2.test_parse",
+            "test.test_json.test_pass2.TestPyPass2.test_parse"
+          ],
+          "inherited_assertion": {
+            "test.test_json.test_pass2.TestCPass2.test_parse": "AssertionError: native exit 1: '' 'TypeError: expected int, got list from JSON\\n'",
+            "test.test_json.test_pass2.TestPyPass2.test_parse": "AssertionError: native exit 1: '' 'TypeError: expected int, got list from JSON\\n'"
+          },
+          "document_assertion": {
+            "compile_error": "<case>/case.py:12:12: Imre: readonly JSON comparisons require == or != with a literal string"
+          },
+          "matching_serialized_output_sha256": "62daa2ed3dffe5597b6bf69c8e113fb11acf3cbbd3552162e45cbac0b2b6a671"
+        },
+        "test.test_json.test_pass3.TestPass3.test_parse": {
+          "method_sha256": "e4c8c6b51011b36a83b6e1b911fd98d0eca3f84e28b3fde3434a42594e554a83",
+          "fixture_ids": [
+            "test.test_json.test_pass3.TestCPass3.test_parse",
+            "test.test_json.test_pass3.TestPyPass3.test_parse"
+          ],
+          "inherited_assertion": {
+            "test.test_json.test_pass3.TestCPass3.test_parse": "AssertionError: native exit 1: '' 'TypeError: expected int, got dict from JSON\\n'",
+            "test.test_json.test_pass3.TestPyPass3.test_parse": "AssertionError: native exit 1: '' 'TypeError: expected int, got dict from JSON\\n'"
+          },
+          "document_assertion": {
+            "compile_error": "<case>/case.py:17:12: Imre: readonly JSON comparisons require == or != with a literal string"
+          },
+          "matching_serialized_output_sha256": "90c0bf31e5c8a33edb89bd2248a59e18a3b75b7b6a2985bc1913f4d87a92a7c6"
+        }
+      },
+      "negative_controls": {
+        "compile_error": "<case>/case.py:5:12: Imre: readonly JSON comparisons require == or != with a literal string"
+      }
+    },
+    "3": {
+      "methods": {
+        "test.test_json.test_pass1.TestPass1.test_parse": {
+          "method_sha256": "e4c8c6b51011b36a83b6e1b911fd98d0eca3f84e28b3fde3434a42594e554a83",
+          "fixture_ids": [
+            "test.test_json.test_pass1.TestCPass1.test_parse",
+            "test.test_json.test_pass1.TestPyPass1.test_parse"
+          ],
+          "inherited_assertion": {
+            "test.test_json.test_pass1.TestCPass1.test_parse": "AssertionError: native exit 1: '' 'TypeError: expected int, got list from JSON\\n'",
+            "test.test_json.test_pass1.TestPyPass1.test_parse": "AssertionError: native exit 1: '' 'TypeError: expected int, got list from JSON\\n'"
+          },
+          "document_assertion": {
+            "compile_error": "<case>/case.py:69:12: Imre: readonly JSON comparisons require == or != with a literal string"
+          },
+          "matching_serialized_output_sha256": "08ac3fcf1f74c3acc3311341de20ee0211837252eafa5b0c7b8fd8bcd9be6509"
+        },
+        "test.test_json.test_pass2.TestPass2.test_parse": {
+          "method_sha256": "e4c8c6b51011b36a83b6e1b911fd98d0eca3f84e28b3fde3434a42594e554a83",
+          "fixture_ids": [
+            "test.test_json.test_pass2.TestCPass2.test_parse",
+            "test.test_json.test_pass2.TestPyPass2.test_parse"
+          ],
+          "inherited_assertion": {
+            "test.test_json.test_pass2.TestCPass2.test_parse": "AssertionError: native exit 1: '' 'TypeError: expected int, got list from JSON\\n'",
+            "test.test_json.test_pass2.TestPyPass2.test_parse": "AssertionError: native exit 1: '' 'TypeError: expected int, got list from JSON\\n'"
+          },
+          "document_assertion": {
+            "compile_error": "<case>/case.py:12:12: Imre: readonly JSON comparisons require == or != with a literal string"
+          },
+          "matching_serialized_output_sha256": "62daa2ed3dffe5597b6bf69c8e113fb11acf3cbbd3552162e45cbac0b2b6a671"
+        },
+        "test.test_json.test_pass3.TestPass3.test_parse": {
+          "method_sha256": "e4c8c6b51011b36a83b6e1b911fd98d0eca3f84e28b3fde3434a42594e554a83",
+          "fixture_ids": [
+            "test.test_json.test_pass3.TestCPass3.test_parse",
+            "test.test_json.test_pass3.TestPyPass3.test_parse"
+          ],
+          "inherited_assertion": {
+            "test.test_json.test_pass3.TestCPass3.test_parse": "AssertionError: native exit 1: '' 'TypeError: expected int, got dict from JSON\\n'",
+            "test.test_json.test_pass3.TestPyPass3.test_parse": "AssertionError: native exit 1: '' 'TypeError: expected int, got dict from JSON\\n'"
+          },
+          "document_assertion": {
+            "compile_error": "<case>/case.py:17:12: Imre: readonly JSON comparisons require == or != with a literal string"
+          },
+          "matching_serialized_output_sha256": "90c0bf31e5c8a33edb89bd2248a59e18a3b75b7b6a2985bc1913f4d87a92a7c6"
+        }
+      },
+      "negative_controls": {
+        "compile_error": "<case>/case.py:5:12: Imre: readonly JSON comparisons require == or != with a literal string"
+      }
+    }
+  }
+}

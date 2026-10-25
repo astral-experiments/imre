@@ -541,6 +541,55 @@
           ]
         }
       }
+    },
+    "test.test_json.test_fail.TestFail.test_failures": {
+      "source_assertions": 34,
+      "fixture_ids": [
+        "test.test_json.test_fail.TestCFail.test_failures",
+        "test.test_json.test_fail.TestPyFail.test_failures"
+      ],
+      "levels": {
+        "0": {
+          "test.test_json.test_fail.TestCFail.test_failures": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "c57a5d1ce5237381f04ee3741a144881e55dd3d788d167ab83503347741e00c6"
+            }
+          ],
+          "test.test_json.test_fail.TestPyFail.test_failures": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "c57a5d1ce5237381f04ee3741a144881e55dd3d788d167ab83503347741e00c6"
+            }
+          ]
+        },
+        "3": {
+          "test.test_json.test_fail.TestCFail.test_failures": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "c57a5d1ce5237381f04ee3741a144881e55dd3d788d167ab83503347741e00c6"
+            }
+          ],
+          "test.test_json.test_fail.TestPyFail.test_failures": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "c57a5d1ce5237381f04ee3741a144881e55dd3d788d167ab83503347741e00c6"
+            }
+          ]
+        }
+      }
     }
   }
 }

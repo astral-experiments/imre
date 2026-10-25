@@ -17,6 +17,9 @@ use ruff_python_literal::escape::{Escape, UnicodeEscape};
 use super::words::{OwnedWord, WordKind};
 use super::{Object, Storage, StorageCell, Str, acquire_rc, fail, object};
 
+mod os;
+pub(super) use os::Filename;
+
 #[repr(C)]
 pub struct NamedDescriptor {
     name: *const u8,
@@ -82,7 +85,11 @@ pub(crate) enum Kind {
 
 impl Kind {
     fn from_raw(kind: u32) -> Self {
-        match kind {
+        Self::try_from_raw(kind).unwrap_or_else(|| fail("SystemError", "invalid exception kind"))
+    }
+
+    fn try_from_raw(kind: u32) -> Option<Self> {
+        Some(match kind {
             0 => Self::BaseException,
             1 => Self::Exception,
             2 => Self::ArithmeticError,
@@ -130,8 +137,8 @@ impl Kind {
             40 => Self::UnboundLocalError,
             41 => Self::ImportError,
             42 => Self::ModuleNotFoundError,
-            _ => fail("SystemError", "invalid exception kind"),
-        }
+            _ => return None,
+        })
     }
 
     fn name(self) -> &'static str {
@@ -301,6 +308,7 @@ enum Payload {
 struct BuiltinArguments {
     message: Rc<Str>,
     args: smallvec::SmallVec<[OwnedWord; 5]>,
+    os_paths: Option<Box<os::Filenames>>,
 }
 
 struct JsonError {
@@ -452,8 +460,42 @@ impl Error {
         unsafe { OwnedWord::from_owned(value.into_raw(), WordKind::new(2)) }
     }
 
-    /// OSError retains its errno and strerror as args; a filename appears only in its message.
-    pub(super) fn from_errno(kind: Kind, errno: i32, description: &str, message: String) -> Self {
+    /// Store errno and strerror in args and retain original path values separately.
+    pub(super) fn from_errno(
+        kind: Kind,
+        errno: i32,
+        description: &str,
+        filename: Option<Filename>,
+        filename2: Option<Filename>,
+    ) -> Self {
+        let mut message = format!("[Errno {errno}] {description}");
+        let os_paths = filename.map(|first| {
+            let paths = Box::new(os::Filenames {
+                first,
+                second: filename2,
+            });
+            paths.append_message(&mut message);
+            paths
+        });
+        Self::errno_arguments(kind, errno, description, message, os_paths)
+    }
+
+    pub(super) fn from_errno_message(
+        kind: Kind,
+        errno: i32,
+        description: &str,
+        message: String,
+    ) -> Self {
+        Self::errno_arguments(kind, errno, description, message, None)
+    }
+
+    fn errno_arguments(
+        kind: Kind,
+        errno: i32,
+        description: &str,
+        message: String,
+        os_paths: Option<Box<os::Filenames>>,
+    ) -> Self {
         let args = [
             Self::int_arg(crate::Int::small(i64::from(errno)).unwrap()),
             Self::string_arg(description),
@@ -463,6 +505,7 @@ impl Error {
             payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
                 message: Rc::new(message.into()),
                 args: args.into_iter().collect(),
+                os_paths,
             }))),
             cause: None,
         }
@@ -491,6 +534,7 @@ impl Error {
             payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
                 message: Rc::new(message.into()),
                 args: args.into_iter().collect(),
+                os_paths: None,
             }))),
             cause: None,
         }
@@ -1513,6 +1557,32 @@ pub unsafe extern "C" fn imre_exception_matches(value: *const Object, expected_k
             u32::from(expected_kind < 256 && e.kind.matches(Kind::from_raw(expected_kind)))
         })
     }
+}
+
+/// Match the categories retained by a previously constructed assertion context.
+///
+/// # Safety
+/// Both arguments must be live handles of their declared types. A category lookup
+/// only reads the exception and cannot run Python or mutate the list during the borrow.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_matches_any(
+    value: *const Object,
+    kinds: *const crate::List,
+) -> u32 {
+    // SAFETY: the pointers are independently rooted throughout these readonly operations.
+    u32::from(unsafe {
+        (*kinds).0.with(|entries| {
+            entries.iter().any(|entry| {
+                entry
+                    .as_small()
+                    .and_then(|n| u32::try_from(n).ok())
+                    .is_some_and(|kind| {
+                        (kind >= 256 || Kind::try_from_raw(kind).is_some())
+                            && imre_exception_matches(value, kind) != 0
+                    })
+            })
+        })
+    })
 }
 
 /// Returns an owned string containing Python's str(exception) representation.
