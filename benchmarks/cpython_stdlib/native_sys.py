@@ -48,6 +48,29 @@ def main():
             subprocess.run([args.imre.resolve(), "build", script, *flags, "-o", exe], check=True)
             return exe
 
+        if Path("/dev/full").exists():
+            code = """import sys
+try:
+    sys.stderr.write("probe\\n")
+    sys.stderr.flush()
+except OSError as error:
+    print(str(error))
+"""
+            with open("/dev/full", "wb") as sink:
+                messages = [subprocess.run(cmd, stdout=subprocess.PIPE, stderr=sink).stdout
+                            for cmd in ([args.python, "-c", code], [native(code)])]
+            if not messages[0] or messages[0] != messages[1]:
+                raise AssertionError(("stderr write error", messages))
+
+            recovery = Path(__file__).parent / "full/sys/stream_errno.py"
+            executable = native(recovery.read_text())
+            for mode in ("stdout-write", "stderr-write", "stdout-flush", "stderr-flush"):
+                stock, actual = [subprocess.run([*cmd, mode], capture_output=True, check=True, timeout=10)
+                                 for cmd in ([args.python, recovery], [executable])]
+                if (actual.stdout, actual.stderr) != (stock.stdout, stock.stderr):
+                    raise AssertionError((mode, stock, actual))
+            print("Matched errno, strerror and recovery for four standard stream failures")
+
         def command(argv):
             if len(argv) != 3 or argv[:2] != [sys.executable, "-c"]:
                 raise ValueError(f"unexpected upstream child invocation: {argv!r}")
