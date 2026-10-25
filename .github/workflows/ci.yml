@@ -9,7 +9,7 @@ on:
       audit:
         description: Source of the requested per-occurrence results
         type: choice
-        options: [logging, removal, properties, text-stream, file-handler, list-clear]
+        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks]
         required: true
 permissions:
   contents: read
@@ -83,6 +83,12 @@ jobs:
               python3 -B tests/paths.py "${ordinary[@]}"
               python3 -B tests/processes.py "${ordinary[@]}"
               ;;
+            null-handler|handler-locks)
+              if [[ "$AUDIT" == handler-locks ]]; then
+                cargo test --locked -p imre-runtime --lib -j 2 only_the_outermost_release_unblocks_another_thread
+              fi
+              PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/null_handler.py "${tools[@]}" --result "$results/null-handler.json"
+              ;;
             list-clear)
               python3 -B tests/primitives.py "${ordinary[@]}"
               ;;
@@ -92,6 +98,12 @@ jobs:
                 "$imre" build tests/fixtures/files/string_io.py --no-cache --opt-level "$opt" --runtime "$runtime" --clang /usr/bin/clang-18 -o "$RUNNER_TEMP/stringio"
                 "$RUNNER_TEMP/stringio" > "$results/stringio-O$opt.txt"
                 diff -u "$results/stringio-reference.txt" "$results/stringio-O$opt.txt"
+              done
+              python3 -I -B tests/fixtures/callables/cache_parameters.py > "$results/cache-reference.txt"
+              for opt in 0 3; do
+                "$imre" build tests/fixtures/callables/cache_parameters.py --no-cache --opt-level "$opt" --runtime "$runtime" --clang /usr/bin/clang-18 -o "$RUNNER_TEMP/cache-parameters"
+                "$RUNNER_TEMP/cache-parameters" > "$results/cache-O$opt.txt"
+                diff -u "$results/cache-reference.txt" "$results/cache-O$opt.txt"
               done
               python3 -B tests/files.py "${ordinary[@]}"
               ;;
