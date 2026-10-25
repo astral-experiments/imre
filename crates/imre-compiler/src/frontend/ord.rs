@@ -11,36 +11,7 @@ impl Checker<'_> {
             self.graph.checked_overload(self.module, call.range());
             return self.ordinal(value, argument);
         }
-        self.graph
-            .checked_missing_argument(self.module, call.range());
-        for kw in &args.keywords {
-            if kw.arg.as_deref() == Some("c") {
-                self.graph
-                    .checked_positional_keyword(self.module, kw.range());
-            }
-        }
-        self.graph
-            .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
-        for argument in args.args.iter().skip(1) {
-            self.graph
-                .checked_excess_argument(self.module, argument.range());
-        }
-        let mut values = Vec::new();
-        for argument in &args.args {
-            values.push(self.expr(argument)?);
-        }
-        for kw in &args.keywords {
-            values.push(self.expr(&kw.value)?);
-        }
-        let message = if args.keywords.is_empty() {
-            format!(
-                "ord() takes exactly one argument ({} given)",
-                args.args.len()
-            )
-        } else {
-            "ord() takes no keyword arguments".to_owned()
-        };
-        Ok(calls::type_error(Type::Int, values, message))
+        self.one_positional_error(call, "ord", "c", Type::Int)
     }
 
     /// Prepare one conversion; the same expression runs on each pull inside map.
