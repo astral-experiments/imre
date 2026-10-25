@@ -1,4 +1,4 @@
-name: Generate the random import row on its resolved native compiler
+name: Check the merged random dependency and all original shutil occurrences
 on: workflow_dispatch
 permissions:
   contents: read
@@ -12,17 +12,16 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 63d44a9302bca0d03a43ad9ed3dab5f89bd881b4
+          ref: f32d79711e52677738f07b0f4cbef6db812759ff
           fetch-depth: 0
-      - name: Prepare and identify the prospective merge source
+      - name: Identify the merged source
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/evidence"
-          test "$(git rev-parse HEAD)" = 63d44a9302bca0d03a43ad9ed3dab5f89bd881b4
-          test "$(git rev-parse HEAD^1)" = 20be271ed7e04490a3728c576f563f706e78b049
-          test "$(git rev-parse HEAD^2)" = 8db1900498bb628fc6112d1c16d1fbcea1592faf
-          test "$(git write-tree)" = b5507b5c5027dc0f9e1626ff337a8617f1765ef4
-          jq -n --arg base 8db1900498bb628fc6112d1c16d1fbcea1592faf --arg head 20be271ed7e04490a3728c576f563f706e78b049 --arg candidate 63d44a9302bca0d03a43ad9ed3dab5f89bd881b4 --arg tree b5507b5c5027dc0f9e1626ff337a8617f1765ef4 '{base:$base,head:$head,candidate:$candidate,tree:$tree}' | tee "$RUNNER_TEMP/evidence/source.json"
+          test "$(git rev-parse HEAD)" = f32d79711e52677738f07b0f4cbef6db812759ff
+          test "$(git rev-parse HEAD^)" = 200abdcdfdb971f42b546d9ff365a243bd639a69
+          test "$(git rev-parse HEAD^{tree})" = 869be37b18d149ad9916397a357705b9f13b8178
+          jq -n --arg commit f32d79711e52677738f07b0f4cbef6db812759ff --arg head 7e81e1525fa3996a7098e0b5855c061d03750ba2 --arg tree 869be37b18d149ad9916397a357705b9f13b8178 '{commit:$commit,head:$head,tree:$tree}' | tee "$RUNNER_TEMP/evidence/source.json"
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
@@ -55,32 +54,6 @@ jobs:
             python -B "benchmarks/cpython_stdlib/full/shutil/$control.py" "${args[@]}" | tee "$RUNNER_TEMP/evidence/$control.log"
           done
           sha256sum target/debug/imre target/debug/libimre_runtime.a > "$RUNNER_TEMP/evidence/binaries.sha256"
-      - name: Check iterator and packed values against CPython on this compiler
-        if: always() && hashFiles('target/debug/imre') != ''
-        run: |
-          out="$RUNNER_TEMP/evidence"
-          set -euo pipefail
-          test "$(python -c 'import sys;print(sys.version.split()[0])')" = 3.14.5
-          cargo test --locked -j 2 -p imre-compiler --lib effects::tests::local_and_final_analysis_agree_on_packed_list_allocations -- --exact > "$out/effects-test.log"
-          grep -F '1 passed; 0 failed;' "$out/effects-test.log"
-          work=$(mktemp -d "$RUNNER_TEMP/effects-XXXXXX")
-          : > "$out/effects-fixtures.tsv"
-          for fixture in tests/fixtures/iterator_pipelines/source_generator.py tests/fixtures/dataclasses/value_struct.py; do
-            name=$(basename "$fixture" .py)
-            PYTHONPATH="$PWD/stdlib" python -B "$fixture" > "$work/$name.ref" 2> "$work/$name.referr"
-            for mode in ordinary reachable; do
-              flags=()
-              if [[ "$mode" == reachable ]]; then flags+=(--reachable-only); fi
-              for level in 0 3; do
-                target/debug/imre build "$fixture" -o "$work/probe" --no-cache --opt-level "$level" --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 "${flags[@]}"
-                "$work/probe" > "$work/$name.native" 2> "$work/$name.stderr"
-                cmp "$work/$name.ref" "$work/$name.native"
-                cmp "$work/$name.referr" "$work/$name.stderr"
-                printf '%s\t-O%s\t%s\t%s\t%s\n' "$name" "$level" "$mode" "$(wc -l < "$work/$name.native")" "$(sha256sum "$work/$name.native" | cut -d' ' -f1)" >> "$out/effects-fixtures.tsv"
-              done
-            done
-          done
-          test "$(wc -l < "$out/effects-fixtures.tsv")" -eq 8
       - name: Run original text and bytes missing-PATH fixtures on this source
         if: always() && hashFiles('target/debug/imre') != ''
         run: |
@@ -106,75 +79,54 @@ jobs:
           Path(sys.argv[4]).write_text(json.dumps(rows,indent=2)+'\n')
           print([(level,len(values)) for level,values in rows.items()])
           PY
-      - name: Check native POSIX poll/select with its descriptor and upstream controls
+      - name: Run the unchanged unittest.mock fixture and verify chdir restoration
         if: always() && hashFiles('target/debug/imre') != ''
         run: |
           set -euo pipefail
-          PYTHONPATH="$PWD/.cpython/Lib" python -B tests/posix_readiness.py --compiler target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --host-original | tee "$RUNNER_TEMP/evidence/posix-readiness.log"
-      - name: Check the compiler features merged in the same batch
+          python -IB benchmarks/cpython_stdlib/full/shutil/mock_startup.py --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --compiler-tree "$(git rev-parse HEAD^{tree})" --cpython-source .cpython --result "$RUNNER_TEMP/evidence/mock-startup.json"
+          jq -e '.denominator==223 and .oracle.suite.tests_run==223 and (.oracle.suite.failures|length)==0 and (.oracle.suite.errors|length)==0 and (.oracle["patch-restore"]|contains("real chdir restored after exceptional exit"))' "$RUNNER_TEMP/evidence/mock-startup.json"
+      - name: Attempt every original shutil occurrence with its original fixture at O0 and O3
         if: always() && hashFiles('target/debug/imre') != ''
         run: |
+          set -euo pipefail
+          dir=benchmarks/cpython_stdlib
           out="$RUNNER_TEMP/evidence"
-          set -euo pipefail
-          work=$(mktemp -d "$RUNNER_TEMP/random-conflicts-XXXXXX")
-          : > "$out/batch-fixtures.tsv"
-          for fixture in tests/fixtures/callables/annotations_deferred.py tests/fixtures/classes/subclass_guard_fields.py tests/fixtures/containers/dict_setdefault.py tests/fixtures/processes/list2cmdline.py; do
-            name=$(basename "$fixture" .py)
-            env -u PYTHONPATH PYTHONHASHSEED=0 python -B "$fixture" > "$work/$name.ref" 2> "$work/$name.referr"
-            for level in 0 3; do
-              target/debug/imre build "$fixture" -o "$work/probe" --no-cache --opt-level "$level" --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18
-              PYTHONHASHSEED=0 "$work/probe" > "$work/$name.native" 2> "$work/$name.stderr"
-              cmp "$work/$name.ref" "$work/$name.native"
-              cmp "$work/$name.referr" "$work/$name.stderr"
-              printf '%s\t-O%s\t%s\t%s\n' "$name" "$level" "$(wc -l < "$work/$name.native")" "$(sha256sum "$work/$name.native" | cut -d' ' -f1)" >> "$out/batch-fixtures.tsv"
-            done
-          done
-          test "$(wc -l < "$out/batch-fixtures.tsv")" -eq 8
-          python -B - "$out/warnings-cross.log" <<'PY'
-          from pathlib import Path
-          import sys,tempfile
-          sys.path.insert(0,str(Path('benchmarks/cpython_stdlib').resolve()))
-          sys.path.insert(0,str(Path('benchmarks/cpython_stdlib/full/warnings').resolve()))
-          from suite_native import Toolchain
-          from display import operation_cases
-          with Path(sys.argv[1]).open('w') as log:
-              for level in (0,3):
-                  tc=Toolchain(Path('target/debug/imre'),Path('target/debug/libimre_runtime.a'),Path('/usr/bin/clang-18'),level)
-                  with tempfile.TemporaryDirectory() as td: operation_cases(tc,Path(td))
-                  print(f'-O{level}: native warning formatting, live source, StringIO writes and write failures matched CPython',file=log)
-          PY
-      - name: Generate and check the table with the resolved compiler and pinned CPython
+          python -B "$dir/suite_inventory.py" "$dir/full/shutil/UPSTREAM.json" --result "$out/reference-linux.json"
+          python -B "$dir/full/shutil/attempt_methods.py" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --compiler-tree "$(git rev-parse HEAD^{tree})" --reference "$out/reference-linux.json" --result "$out/method-attempts-linux.json"
+      - name: Validate native and assisted classifications for all 223 IDs at both levels
         if: always() && hashFiles('target/debug/imre') != ''
         run: |
           set -euo pipefail
-          dir=benchmarks/cpython_stdlib/full
-          evidence="$RUNNER_TEMP/evidence"
-          docs=$(jq -r .base "$evidence/source.json")
-          git cat-file -e "$docs:$dir/support_table.py"
-          git cat-file -e "$docs:docs/stdlib.md"
-          git diff --exit-code "$docs" HEAD -- "$dir/support_table.py"
-          echo "$docs" > "$evidence/table-source.txt"
-          git cat-file -e "HEAD:$dir/api_examples.toml"
-          python -B "$dir/support_table.py" --imre target/debug/imre
-          python -B "$dir/support_table.py" --imre target/debug/imre --check
-          git diff HEAD -- docs/stdlib.md > "$evidence/table-difference.patch"
-          git diff --exit-code HEAD -- "$dir/api_examples.toml"
-          cp docs/stdlib.md "$dir/api_examples.toml" "$evidence/"
-          python - <<'PY'
+          out="$RUNNER_TEMP/evidence"
+          dir=benchmarks/cpython_stdlib
+          python -B - "$out" <<'PY'
+          import json, sys, tempfile
           from pathlib import Path
-          rows = [s for s in Path('docs/stdlib.md').read_text().splitlines() if s.startswith(('| `random` |', '| `shutil` |'))]
-          assert len(rows) == 2 and any(s.startswith('| `random` | Yes |') for s in rows)
-          print(*rows, sep='\n')
+          from types import SimpleNamespace
+          from contextlib import chdir
+          out=Path(sys.argv[1]).resolve(); d=Path('benchmarks/cpython_stdlib/full/shutil').resolve(); sys.path.insert(0,str(d))
+          import evidence as e
+          source=Path('.cpython/Lib').resolve(); sys.path.insert(0,str(source))
+          man=json.loads((d/'UPSTREAM.json').read_text()); ref=json.loads((out/'reference-linux.json').read_text())
+          assert man['commit']==ref['cpython_commit'] and len(ref['reference'])==223
+          e.verify_files(e.STDLIB/'upstream',man['files']);e.verify_interpreter_tests(man)
+          import test
+          test.__path__.insert(0,str(e.SOURCE.parent))
+          from test import test_shutil
+          assert Path(test_shutil.__file__).resolve()==e.SOURCE
+          args=SimpleNamespace(imre=Path('target/debug/imre').resolve(),runtime=Path('target/debug/libimre_runtime.a').resolve(),clang=Path('/usr/bin/clang-18'),method_attempts=out/'method-attempts-linux.json')
+          reports=[]
+          for level in (0,3):
+           with tempfile.TemporaryDirectory() as tmp,chdir(tmp):reports.append(e.run_level(args,test_shutil,ref,level,Path(tmp)))
+          e.write_reports(out/'evidence-linux.json',reports,ref)
+          for report in reports:print(report['opt_level'],report['counts'])
+          sys.exit(int(any(r['counts'].get(k,0) for r in reports for k in ('failed','unexpected-skip'))))
           PY
-      - name: Run the unchanged shared I/O checks and retain any canonical failure
-        if: always() && hashFiles('target/debug/imre') != ''
-        run: |
-          set -euo pipefail
-          python -B tests/io.py --compiler target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 | tee "$RUNNER_TEMP/evidence/io.log"
+          python -B "$dir/suite_evidence.py" "$out/reference-linux.json" "$out/evidence-linux.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: shutil-random-canonical
+          name: shutil-merged-985
           path: ${{ runner.temp }}/evidence
           if-no-files-found: error
           retention-days: 7
