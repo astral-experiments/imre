@@ -109,7 +109,7 @@ def run(args, level, root):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level, args.reachable_only)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
-    for name in ["equality_protocol", "mock_protocol", "mock_reset", "mock_globals", "callable_protocol", "bound_assertions",
+    for name in ["truth_protocol", "equality_protocol", "mock_protocol", "mock_reset", "mock_globals", "callable_protocol", "bound_assertions",
                  "callable_binding", "context_regex", *("context_" + family for family in families)]:
         control = root / name
         if (HERE / name).is_dir():

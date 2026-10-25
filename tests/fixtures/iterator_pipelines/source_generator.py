@@ -17,6 +17,38 @@ def stopping() -> Iterator[int]:
         yield index
 
 
+def checked(value: int) -> int:
+    if value == 9:
+        raise StopIteration("element")
+    return value
+
+
+def source() -> list[int]:
+    raise StopIteration("source")
+
+
+def expression_failure(mode: int) -> None:
+    try:
+        if mode == 0:
+            values = list(checked(x) for x in [1, 9, 3])
+        elif mode == 1:
+            values = list(x for x in [1, 9, 3] if checked(x))
+        elif mode == 2:
+            values = list(x for _ in [1] for x in source())
+        elif mode == 3:
+            values = list(x for x in source())
+        else:
+            values = list(x for x in map(checked, [1, 9, 3]))
+        print(repr(values))
+    except RuntimeError as error:
+        print(str(error))
+        cause = error.__cause__
+        if cause is not None:
+            print(str(cause))
+    except StopIteration as error:
+        print(str(error))
+
+
 def opened() -> Iterator[int]:
     file = open("/dev/null", "rb")
     for index in range(2):
@@ -63,3 +95,7 @@ def main() -> None:
 
 
 main()
+for mode in range(5):
+    expression_failure(mode)
+print(repr(list(map(checked, [1, 9, 3]))))
+print(repr(list(filter(checked, [1, 9, 3]))))
