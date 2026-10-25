@@ -646,6 +646,32 @@ impl Types {
         matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::UnreadArgument))
     }
 
+    /// These operands carry the exact scalar tags consumed by percent formatting.
+    pub(crate) fn percent_operand(&self, ty: Type) -> bool {
+        match ty {
+            Type::Int | Type::Str => true,
+            Type::Tuple(id) => {
+                let storage = self.0.borrow();
+                let Shape::Tuple(fields) = &storage.shapes[id] else {
+                    return false;
+                };
+                fields.iter().all(|ty| {
+                    matches!(
+                        ty,
+                        Type::None
+                            | Type::Bool
+                            | Type::Int
+                            | Type::Float
+                            | Type::Str
+                            | Type::StrLiteral(_)
+                            | Type::Bytes
+                    )
+                })
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn declare_namedtuple(&self, definition: DefinitionId, declaration: NamedTuple) {
         self.0
             .borrow_mut()

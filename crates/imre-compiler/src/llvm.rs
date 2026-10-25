@@ -4098,11 +4098,12 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_time_sleep", &[&args[0].value]);
                 none()
             }
-            Builtin::PercentScalar => self.call(
-                if args[1].value.ty == Type::Str {
-                    "imre_str_percent_text"
-                } else {
-                    "imre_str_percent_int"
+            Builtin::PercentFormat => self.call(
+                match args[1].value.ty {
+                    Type::Tuple(_) => "imre_str_percent_tuple",
+                    Type::Str => "imre_str_percent_text",
+                    Type::Int => "imre_str_percent_int",
+                    _ => unreachable!("checked percent format operand"),
                 },
                 Type::Str,
                 &[&args[0].value, &args[1].value],
@@ -6858,6 +6859,7 @@ declare double @imre_wall_time()
 declare void @imre_time_sleep(double)
 declare ptr @imre_str_percent_int(ptr,i64)
 declare ptr @imre_str_percent_text(ptr,ptr)
+declare ptr @imre_str_percent_tuple(ptr,ptr)
 declare ptr @imre_async_group()
 declare void @imre_async_group_enter(ptr)
 declare ptr @imre_async_create_task(ptr, ptr)

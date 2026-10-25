@@ -179,7 +179,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::TimeSleep | Self::PercentScalar => Contract::new(true, PreservesLists),
+            Self::TimeSleep | Self::PercentFormat => Contract::new(true, PreservesLists),
             Self::Formatter(_) => Contract::new(true, PreservesLists),
             Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
@@ -560,6 +560,9 @@ impl Builtin {
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
+            Self::PercentFormat => {
+                matches!(args, [fmt, rhs] if fmt.ty == Type::Str && types.percent_operand(rhs.ty) && result == Type::Str)
+            }
             Self::CallableContext => {
                 matches!(args, [callable] if types.cached_function(callable.ty).map(|c| c.frame)
                     .or_else(|| types.dispatcher(callable.ty).map(|d| d.frame)) == Some(result))

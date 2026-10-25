@@ -775,7 +775,7 @@ pub extern "C" fn imre_logrecord_set_flag(mask: usize, value: bool) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_percent_int(fmt: *const Str, integer: usize) -> *const Str {
     // SAFETY: the caller roots both precise input representations for the whole operation.
-    unsafe { percent_scalar(&*fmt, WordKind::new(2).acquire(integer)) }
+    unsafe { percent_operand(&*fmt, WordKind::new(2).acquire(integer)) }
 }
 
 /// Format an exact text operand using the same conversions as a log message.
@@ -785,10 +785,21 @@ pub unsafe extern "C" fn imre_str_percent_int(fmt: *const Str, integer: usize) -
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_percent_text(fmt: *const Str, text: *const Str) -> *const Str {
     // SAFETY: the caller roots the format and the exact string allocation.
-    unsafe { percent_scalar(&*fmt, WordKind::new(3).acquire(text as usize)) }
+    unsafe { percent_operand(&*fmt, WordKind::new(3).acquire(text as usize)) }
 }
 
-fn percent_scalar(fmt: &Str, value: OwnedWord) -> *const Str {
+/// # Safety
+/// The caller roots the format and an exact positional tuple for the entire call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_percent_tuple(
+    fmt: *const Str,
+    tuple: *const usize,
+) -> *const Str {
+    // SAFETY: the tuple owns all operands, and its descriptor supplies their kinds.
+    unsafe { percent_operand(&*fmt, WordKind::new(6).acquire(tuple as usize)) }
+}
+
+fn percent_operand(fmt: &Str, value: OwnedWord) -> *const Str {
     finish(
         format_arguments(fmt.as_str(), &value).map(|s| Rc::into_raw(Rc::new(Str::from(s)))),
         std::ptr::null(),
