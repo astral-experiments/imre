@@ -321,7 +321,7 @@ pub unsafe extern "C" fn imre_str_list_filter(
                     return lines.filter(first, second, exclude, strip as usize);
                 }
                 if strip == 0 && exclude.is_none() && both_signs(first, second) {
-                    return Words::deferred(plan.signed());
+                    return Ok(Words::deferred(plan.signed()));
                 }
                 if same_sign(first, second) {
                     let origin;
@@ -342,27 +342,30 @@ pub unsafe extern "C" fn imre_str_list_filter(
                             (&**rows, originals)
                         }
                     };
-                    return filter(
+                    return Ok(filter(
                         rows,
                         first,
                         second,
                         exclude,
                         strip as usize,
                         originals.as_deref(),
-                    );
+                    ));
                 }
             }
-            filter(
+            Ok(filter(
                 words.resolved(),
                 first,
                 second,
                 exclude,
                 strip as usize,
                 None,
-            )
+            ))
         })
     };
-    Rc::into_raw(result.into_object())
+    super::finish(
+        result.map(|words| Rc::into_raw(words.into_object())),
+        std::ptr::null(),
+    )
 }
 
 /// Stable ordering by the suffix starting at a fixed nonnegative scalar index.

@@ -478,8 +478,6 @@ impl Builtin {
             | Self::RegexMatchStart
             | Self::SequenceGetInBounds
             | Self::Split
-            | Self::JoinedSplitLines
-            | Self::StringListFilter(_)
             | Self::StringListNonempty
             | Self::Str
             | Self::SourceModule
@@ -512,6 +510,8 @@ impl Builtin {
             | Self::BinaryReadSize
             | Self::Ndiff
             | Self::StringListCopy
+            | Self::StringListFilter(_)
+            | Self::JoinedSplitLines
             | Self::StringListSortSuffix(_)
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
@@ -972,6 +972,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_regex_groupdict"
                 | "imre_bytes_decode_splitlines"
                 | "imre_str_splitlines"
+                | "imre_splitlines_joined_tail"
                 | "imre_str_splitlines_options"
                 | "imre_str_translate"
                 | "imre_mapping_object_get"

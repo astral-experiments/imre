@@ -6807,7 +6807,7 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("inttoptr i64 {} to ptr", args[3].value.operand));
                 Value {
                     ty: returns,
-                    operand: self.instruction(format!(
+                    operand: self.checked_instruction(format!(
                         "call ptr @imre_str_list_filter(ptr {}, ptr {}, ptr {second}, ptr {exclude}, i32 {strip})",
                         args[0].value.operand, args[1].value.operand
                     )),
