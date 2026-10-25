@@ -62,7 +62,11 @@ fn timeout_field_type(graph: &SourceGraph) -> Option<Type> {
         fn visit_expr(&mut self, expr: &'ast ast::Expr) {
             if let ast::Expr::Call(call) = expr
                 && let Some(deadline) = match self.graph.resolve(self.module, &call.func) {
-                    Some(Binding::Intrinsic(Intrinsic::SubprocessRun)) => timeout_argument(call),
+                    Some(Binding::Intrinsic(
+                        Intrinsic::SubprocessRun
+                        | Intrinsic::SubprocessCall
+                        | Intrinsic::SubprocessCheckCall,
+                    )) => timeout_argument(call),
                     _ if matches!(&*call.func, ast::Expr::Attribute(a) if a.attr.as_str() == "wait") => {
                         timeout_argument(call)
                             .or_else(|| call.arguments.args.first())
@@ -200,7 +204,10 @@ pub(super) fn process_error_view(
                 };
                 (capture, types.list(Type::Str))
             }
-            ExprKind::Builtin(Builtin::Process(ProcessOperation::PopenWait), _) => {
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::PopenWait | ProcessOperation::Call { .. }),
+                _,
+            ) => {
                 timed = true;
                 (
                     ProcessCapture {
@@ -324,6 +331,9 @@ fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: boo
         fn visit_expr(&mut self, expression: &'ast ast::Expr) {
             if let ast::Expr::Call(call) = expression {
                 let ty = match self.graph.resolve(self.module, &call.func) {
+                    Some(Binding::Intrinsic(
+                        Intrinsic::SubprocessCall | Intrinsic::SubprocessCheckCall,
+                    )) => Some(Type::None),
                     Some(Binding::Intrinsic(Intrinsic::CheckOutput)) => {
                         self.check_output = true;
                         Some(if self.stdout { Type::Str } else { Type::None })
@@ -671,7 +681,12 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Which), returns, args))
     }
 
-    pub(super) fn popen(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+    /// call and check_call accept the same Popen arguments with an extra wait deadline.
+    pub(super) fn popen(
+        &mut self,
+        call: &ast::ExprCall,
+        check_call: Option<bool>,
+    ) -> Result<Expr, String> {
         let directory = self.types.optional(Type::Str);
         let environment = self.types.optional(self.types.dict(Type::Str, Type::Str));
         let (streams, capture) = stream_plan(self.graph, self.module, call)
@@ -701,7 +716,7 @@ impl Checker<'_> {
             ty: Type::Int,
             kind: ExprKind::Int("-1".into()),
         };
-        let params = [
+        let mut params = [
             ("args", self.types.list(Type::Str), None),
             ("bufsize", Type::Int, Some(default_bufsize())),
             ("cwd", directory, Some(absent(directory))),
@@ -727,19 +742,33 @@ impl Checker<'_> {
             },
         })
         .collect::<Vec<_>>();
+        if check_call.is_some() {
+            let deadline = self.types.optional(Type::Float);
+            params.push(Parameter {
+                name: "timeout".into(),
+                ty: deadline,
+                default: Some(absent(deadline)),
+                sign_only: false,
+                kind: ParameterKind::KeywordOnly,
+            });
+        }
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
             match index {
                 1 if matches!(arg, ast::Expr::NoneLiteral(_)) => Ok(default_bufsize()),
                 2 => checker.optional_path_argument(arg),
                 4..=8 => Ok(boolean(false)), // effect-free literals checked by stream_plan
+                10 => checker.deadline_value(arg),
                 _ => checker.expr_expected(arg, params[index].ty),
             }
         })?;
-        Ok(self.ordered_builtin(
-            Builtin::Process(ProcessOperation::Popen { streams }),
-            Type::Popen(capture, stdin == 1),
-            args,
-        ))
+        let (op, ty) = match check_call {
+            Some(check) => (ProcessOperation::Call { streams, check }, Type::Int),
+            None => (
+                ProcessOperation::Popen { streams },
+                Type::Popen(capture, stdin == 1),
+            ),
+        };
+        Ok(self.ordered_builtin(Builtin::Process(op), ty, args))
     }
 
     pub(super) fn popen_attribute(
