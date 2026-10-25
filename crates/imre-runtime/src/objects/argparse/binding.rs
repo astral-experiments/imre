@@ -8,7 +8,7 @@ use num_traits::{Signed, Zero};
 use serde::{Deserialize, Deserializer};
 
 use super::{
-    Action, Error, Kind, OptionSpec, Parser, Stop, Str, Words, imre_path_new, string_repr,
+    Action, Error, Kind, OptionSpec, Parser, Stop, Words, imre_path_new, owned_text, string_repr,
 };
 use crate::{Int, List, floats, parse_decimal_int};
 
@@ -122,14 +122,14 @@ impl<'a> Scalar<'a> {
         ))
     }
 
-    fn word(self, kind: Kind, optional: bool) -> usize {
-        match self {
+    fn word(self, kind: Kind, optional: bool) -> Result<usize, Error> {
+        Ok(match self {
             Self::Int(value) if kind == Kind::Str => super::super::unions::integer(value),
             Self::Int(value) => value.into_raw(),
             Self::Float(value) if optional => floats::imre_float_box(value),
             Self::Float(value) => value.to_bits() as usize,
             Self::Text(value) => {
-                let text = Rc::new(Str::new(value));
+                let text = owned_text(value)?;
                 if kind == Kind::Path {
                     // SAFETY: the source remains live until Path takes an owner or normalizes it.
                     unsafe { imre_path_new(Rc::as_ptr(&text)) as usize }
@@ -137,7 +137,7 @@ impl<'a> Scalar<'a> {
                     Rc::into_raw(text) as usize
                 }
             }
-        }
+        })
     }
 }
 
@@ -251,7 +251,7 @@ impl OptionSpec {
             Bound::Absent => 0,
             Bound::Enum(member) => (member << 3) | 5,
             Bound::Bool(value) => usize::from(value) + usize::from(self.optional),
-            Bound::Scalar(value) => value.word(self.kind, self.optional),
+            Bound::Scalar(value) => value.word(self.kind, self.optional)?,
             Bound::List(values) if self.kind == Kind::Int => {
                 let mut ints = Vec::new();
                 ints.try_reserve_exact(values.len())
@@ -273,9 +273,9 @@ impl OptionSpec {
                     .values
                     .try_reserve_exact(values.len())
                     .map_err(|_| Error::allocation())?;
-                words
-                    .values
-                    .extend(values.into_iter().map(|value| value.word(self.kind, false)));
+                for value in values {
+                    words.values.push(value.word(self.kind, false)?);
+                }
                 let word = Rc::into_raw(words.into_object()) as usize;
                 // The closed str | list[str] union reserves tag 2 for the list.
                 if self.list_default { word | 2 } else { word }
