@@ -112,6 +112,7 @@ mod unittest_equality;
 mod unittest_loader;
 mod unittest_main;
 mod unittest_mock;
+mod unittest_patch;
 mod unittest_setup;
 mod unpacking;
 mod warnings;
@@ -4463,6 +4464,11 @@ impl<'a> Checker<'a> {
         }
         if self.types.payload(manager.ty).unwrap_or(manager.ty) == Type::HandlerLock {
             return self.handler_lock_scope(item, remaining, body, manager);
+        }
+        if let Type::Class(class) = manager.ty
+            && self.bundled_mock_class(class, "_DictionaryPatch")
+        {
+            return self.mock_dictionary_scope(item, remaining, body, class, manager);
         }
         if manager.ty == Type::GeneratorContext {
             return self.generator_scope(item, remaining, body, manager);
