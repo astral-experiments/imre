@@ -83,3 +83,20 @@ Running regrtest again with `-u cpu -m '*test_leaking_fds_on_error'` passes
 both previously gated IDs on CPython, each performing 1,024 failed launches.
 They remain eligible for native execution. This supplemental run does not
 change the results of the default reference command.
+
+## Pipes and communication
+
+The same native-body command now executes 11 unchanged methods (the keys
+under `fully_native` in its result) at both levels. It covers stdin writes,
+stdout/stderr reads, merged output, EOF/closed state, and `communicate` with
+zero or one pipe. `ProcessTestCase.test_communicate_stdout` and
+`test_communicate_stderr` now have native-parent evidence as well as the older
+child-only observation. The native body of
+`test_post_timeout_communicate_sends_input` is attempted and reported under
+`blocked`: the compiler does not infer that its exception handler calling
+`self.fail()` cannot return. The original body is not rewritten.
+
+The differential `tests/fixtures/processes/popen_pipes.py` fixture also checks
+a 200,000-byte exchange on all three pipes, recovery after a zero deadline,
+rejection of new input, repeated output, text newline conversion, and shared
+descriptor/close state. It is not another upstream ID.

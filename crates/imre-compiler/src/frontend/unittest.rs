@@ -51,9 +51,8 @@ impl Checker<'_> {
                 class.and_then(|class| records[class].exception_aliases.get(attr.attr.as_str()));
         }
         let kind = match alias {
-            Some(crate::classes::ExceptionAlias::Builtin(kind)) => {
-                let name = *BUILTIN_EXCEPTION_NAMES.get(*kind as usize)?;
-                return Some((*kind, name.into(), name.into()));
+            Some(crate::classes::ExceptionAlias::Builtin { kind, name }) => {
+                return Some((*kind, name.clone(), name.clone()));
             }
             Some(crate::classes::ExceptionAlias::Named(def)) => {
                 definition = Some(*def);
@@ -82,20 +81,34 @@ impl Checker<'_> {
             return Some((kind, name, qualified));
         }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(value) {
-            let (module, name) = match symbol {
-                Intrinsic::CancelledError => ("asyncio.exceptions", "CancelledError"),
-                Intrinsic::UnsupportedOperation => ("io", "UnsupportedOperation"),
-                Intrinsic::SubprocessError => ("subprocess", "SubprocessError"),
-                Intrinsic::CalledProcessError => ("subprocess", "CalledProcessError"),
-                Intrinsic::TimeoutExpired => ("subprocess", "TimeoutExpired"),
-                Intrinsic::BadGzipFile => ("gzip", "BadGzipFile"),
-                Intrinsic::BadZipFile => ("zipfile", "BadZipFile"),
-                Intrinsic::ZlibError => ("zlib", "error"),
-                Intrinsic::TomlDecodeError => ("tomllib", "TOMLDecodeError"),
-                Intrinsic::JsonDecodeError => ("json.decoder", "JSONDecodeError"),
-                _ => return None,
+            // These are CPython display names. Identity comes exclusively from
+            // exception_category and the module export, including sparse ABI IDs.
+            // A module supplied by another owner is unavailable until it ships.
+            let (export, name) = [
+                ("asyncio", "CancelledError"),
+                ("io", "UnsupportedOperation"),
+                ("subprocess", "SubprocessError"),
+                ("subprocess", "CalledProcessError"),
+                ("subprocess", "TimeoutExpired"),
+                ("gzip", "BadGzipFile"),
+                ("zipfile", "BadZipFile"),
+                ("shutil", "Error"),
+                ("shutil", "SameFileError"),
+                ("shutil", "SpecialFileError"),
+                ("zlib", "error"),
+                ("tomllib", "TOMLDecodeError"),
+                ("json", "JSONDecodeError"),
+                ("csv", "Error"),
+            ]
+            .into_iter()
+            .find(|(module, name)| symbol.exported_by(module, name))?;
+            let origin = match export {
+                "asyncio" => "asyncio.exceptions",
+                "json" => "json.decoder",
+                "csv" => "_csv",
+                other => other,
             };
-            return Some((kind, name.into(), format!("{module}.{name}")));
+            return Some((kind, name.into(), format!("{origin}.{name}")));
         }
         let name = value.as_name_expr()?.id.as_str();
         (self.resolve(value).is_none()

@@ -1,4 +1,5 @@
 {
+  "module": "collections",
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
   "platform": "linux",
   "denominator": 659,

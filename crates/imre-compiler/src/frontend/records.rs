@@ -637,6 +637,11 @@ impl Checker<'_> {
     /// Static receiver attributes must not accidentally resolve through an
     /// identically named module import or global binding.
     pub(super) fn resolve(&self, expression: &ast::Expr) -> Option<Binding> {
+        if let ast::Expr::Attribute(attr) = expression
+            && let Some(binding) = self.fixed_class_binding(attr)
+        {
+            return Some(binding);
+        }
         let mut root = expression;
         while let ast::Expr::Attribute(attribute) = root {
             root = &attribute.value;
@@ -653,6 +658,38 @@ impl Checker<'_> {
             }
             binding
         }
+    }
+
+    /// Resolve a read from an initialized local or a class name. A receiver
+    /// expression with effects must still be evaluated by ordinary attribute lowering.
+    fn fixed_class_binding(&self, attr: &ast::ExprAttribute) -> Option<Binding> {
+        if let ast::Expr::Attribute(parent) = &*attr.value {
+            let Binding::IntrinsicModule(module) = self.fixed_class_binding(parent)? else {
+                return None;
+            };
+            return module.symbol(attr.attr.as_str());
+        }
+        let name = attr.value.as_name_expr()?.id.as_str();
+        let class = if self.is_class_receiver(&attr.value) {
+            self.class?
+        } else if let Some(&slot) = self.names.get(name) {
+            if !self.assigned.contains(&slot) {
+                return None;
+            }
+            let Type::Class(class) = self.locals[slot] else {
+                return None;
+            };
+            class
+        } else {
+            let Binding::Definition(id) = self.graph.resolve(self.module, &attr.value)? else {
+                return None;
+            };
+            *self.classes.declarations.ids.get(&id)?
+        };
+        let owner = &self.classes.declarations.definitions[class];
+        let binding = *owner.static_bindings.get(attr.attr.as_str())?;
+        self.class_reads.borrow_mut().insert(owner.definition);
+        Some(binding)
     }
 
     /// The class binding is usable in static dispatch, never as a runtime value.
@@ -706,17 +743,17 @@ impl Checker<'_> {
             return Ok(None);
         }
         let direct = |checker: &mut Self, id: usize| -> Result<Expr, String> {
-            match checker.classes.declarations.definitions[id].exception_aliases[attr.attr.as_str()]
+            match &checker.classes.declarations.definitions[id].exception_aliases
+                [attr.attr.as_str()]
             {
-                crate::classes::ExceptionAlias::Builtin(kind) => {
-                    checker.simple_exception(call, kind)
+                crate::classes::ExceptionAlias::Builtin { kind, .. } => {
+                    checker.simple_exception(call, *kind)
                 }
                 crate::classes::ExceptionAlias::Named(def) => {
-                    if let Some(&layout) = checker.classes.declarations.ids.get(&def) {
+                    if let Some(&layout) = checker.classes.declarations.ids.get(def) {
                         checker.construct(call, layout)
                     } else {
-                        checker
-                            .simple_exception(call, checker.classes.declarations.exceptions[&def])
+                        checker.simple_exception(call, checker.classes.declarations.exceptions[def])
                     }
                 }
             }

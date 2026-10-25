@@ -15,10 +15,13 @@ pub(super) fn alias(
         Some(Binding::Definition(def)) if ids.contains_key(&def) => {
             Some(ExceptionAlias::Named(def))
         }
-        None => value
-            .as_name_expr()
-            .and_then(|n| crate::frontend::exception_kind(n.id.as_str()))
-            .map(ExceptionAlias::Builtin),
+        None => value.as_name_expr().and_then(|n| {
+            let kind = crate::frontend::exception_kind(n.id.as_str())?;
+            Some(ExceptionAlias::Builtin {
+                kind,
+                name: n.id.to_string(),
+            })
+        }),
         _ => None,
     }
 }

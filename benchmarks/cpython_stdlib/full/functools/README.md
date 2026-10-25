@@ -1,8 +1,10 @@
 # CPython 3.14.5 functools
 
-The pinned CPython tree contains one suite, `Lib/test/test_functools.py`, and
-no `test_functools/` package. The test and PSF license are byte-for-byte
-copies of the Git blobs recorded in `UPSTREAM.json`.
+The primary suite is `Lib/test/test_functools.py`; there is no
+`test_functools/` package. The separate free-threading package contains four
+companion cases. [Per-occurrence evidence](EVIDENCE.md) records both suites
+at both optimization levels. The tests and PSF license are byte-for-byte
+copies of the Git blobs in `UPSTREAM.json` and `FREE_THREADING.json`.
 
 | Result on Linux | IDs |
 | --- | ---: |

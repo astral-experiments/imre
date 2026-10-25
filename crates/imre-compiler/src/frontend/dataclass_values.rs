@@ -33,8 +33,9 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::GeneratorContext
         | Type::DirectoryContext(_)
         | Type::Semaphore
-        | Type::Popen(_)
+        | Type::Popen(..)
         | Type::AsyncProcess(_)
+        | Type::LogRecord
         | Type::Logger
         | Type::TimedFileHandler
         | Type::ClockTime
@@ -131,6 +132,7 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
         Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::LogRecord
             | Type::Sha256
             | Type::RegexPattern
             | Type::RegexMatch

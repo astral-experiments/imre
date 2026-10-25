@@ -1,5 +1,8 @@
 """Differential control for context semantics; this is not an upstream test ID."""
 import unittest
+import shutil
+import tempfile
+from pathlib import Path
 
 
 class Problem(ValueError):
@@ -93,3 +96,44 @@ unbound = UnboundLocalError("unassigned")
 with unittest.TestCase().assertRaises(NameError) as name_error:
     raise unbound
 print(name_error.exception is unbound)
+
+case = unittest.TestCase()
+missing = KeyError("key")
+with case.assertRaises(LookupError) as lookup:
+    with case.assertRaises(NameError):
+        raise missing
+print(lookup.exception is missing)
+
+special = shutil.SpecialFileError("special")
+with case.assertRaises(OSError) as os_error:
+    with case.assertRaises(shutil.Error):
+        raise special
+print(os_error.exception is special)
+with case.assertRaises(shutil.SpecialFileError) as exact_special:
+    raise special
+print(exact_special.exception is special)
+
+with tempfile.TemporaryDirectory() as directory:
+    target = Path(directory) / "identity.txt"
+    try:
+        target.write_text("é", encoding="ascii")
+    except UnicodeEncodeError as encoding:
+        with case.assertRaises((LookupError, UnicodeError)) as family:
+            with case.assertRaises(shutil.Error):
+                raise encoding
+        with case.assertRaises(UnicodeEncodeError) as exact_encoding:
+            raise encoding
+        print(family.exception is encoding)
+        print(exact_encoding.exception is encoding)
+    else:
+        raise AssertionError("a strict ASCII write did not raise")
+    target.write_text("original")
+    try:
+        shutil.copyfile(str(target), str(target))
+    except shutil.SameFileError as same:
+        with case.assertRaises(shutil.Error) as copy_error:
+            with case.assertRaises(UnicodeError):
+                raise same
+        print(copy_error.exception is same)
+    else:
+        raise AssertionError("copying a file onto itself did not raise")

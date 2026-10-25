@@ -185,7 +185,8 @@ yields keys in insertion order. Select a value into a concrete scalar or
 `dict[str, Any]` at a checked boundary. The latter is a read-only JSON view,
 with literal-key `.get()`, scalar or empty-list defaults, and nested iteration.
 Original array roots keep their mutable list identity. Malformed JSON raises
-`json.JSONDecodeError`, and nesting is limited to 128 containers. Strings use
+`json.JSONDecodeError`, with the original decoded `doc`, short `msg`, character
+offset `pos`, and one-based `lineno` and `colno`. Nesting is limited to 128 containers. Strings use
 Unicode scalar values. Integers retain their exact precision. The standard
 reader also recognizes `NaN`, `Infinity`, and `-Infinity`.
 
@@ -276,6 +277,8 @@ The complete document is parsed before schema conversion. Unknown record fields 
 The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as for typed JSON. Python 3.15+ uses its TOML 1.1 `tomllib`; earlier versions require `tomli>=2.4`, for example `python -m pip install 'tomli>=2.4'`. Native compilation uses the pinned Rust TOML parser and links no Python interpreter or compatibility module. This boundary currently provides decoding only.
 
 ## Native text operations
+
+`str.lower()` uses Unicode 16 full lowercase mappings, including expanding characters and contextual Greek final sigma.
 
 `str.split(sep=None, maxsplit=-1)` and `str.rsplit(sep=None, maxsplit=-1)` accept both positional and named arguments. With no separator, they group Python whitespace and omit empty fields; an explicit string separator preserves empty fields and must be nonempty. The split limit follows Python's left or right scanning rules. `str.strip([chars])`, `str.lstrip([chars])`, and `str.rstrip([chars])` accept an optional positional string or `None`: omitted/`None` removes Python whitespace, while a string names a set of Unicode scalar values to remove.
 
@@ -548,7 +551,9 @@ A string template can substitute named `str` and `int` arguments, as in `url.for
 
 Indexing uses exact integer indexes, including negative indexes, and returns an `int` in 0 through 255. Out-of-range indexes raise `IndexError`. Slicing follows the sequence rules above and returns bytes. Iteration, comprehensions, and loop-head `enumerate` yield integers in byte order while retaining the original immutable source independently of rebinding. Concatenation requires two byte values; repetition accepts bytes and an exact integer in either order. Repetition converts the count to a native signed index even for empty input and rejects an overflowing result. All six comparisons use unsigned-byte lexicographic order. `print`, `str`, and scalar f-strings use Python's `b'...'` representation, including quote selection and hexadecimal escaping.
 
-`text.encode()` produces UTF-8 bytes; `data.decode()` performs strict UTF-8 decoding. They accept no arguments or keywords in this milestone. Decode errors raise `UnicodeDecodeError`, including Python's byte positions/ranges and invalid-start, invalid-continuation, or truncated-sequence message. Existing strings contain only Unicode scalar values, so encoding is always valid. Mutable `bytearray`, memory views, implicit text/byte conversions, additional codecs, error policies, and other byte methods are not supported.
+`base64.urlsafe_b64encode(data)` accepts immutable bytes and returns padded bytes using the URL-safe alphabet.
+
+`text.encode()` produces UTF-8 bytes; `data.decode()` performs strict UTF-8 decoding. The optional positional encoding may be a literal UTF-8 spelling; `data.decode("ascii")` also supports strict ASCII, reporting the first non-ASCII byte and its position. Other encoding or error arguments are outside this subset. Decode errors raise `UnicodeDecodeError`, including Python's byte positions/ranges and invalid-start, invalid-continuation, or truncated-sequence message. Existing strings contain only Unicode scalar values, so encoding is always valid. Mutable `bytearray`, memory views, implicit text/byte conversions, additional codecs, error policies, and other byte methods are not supported.
 
 ## Native paths and directory traversal
 
@@ -573,7 +578,9 @@ for path in sorted(root.glob("*.json"), key=lambda path: path.name):
     print(path.read_text())
 ```
 
-`exists()`, `is_file()`, and `is_dir()` follow symlinks and return false for failed filesystem queries, matching Python 3.14, including invalid NUL-containing paths. `read_text()` reads and closes a file with strict UTF-8 decoding and universal-newline translation, regardless of the process locale. An explicit `encoding="utf-8"` has the same effect. `write_text(text)` creates or truncates the file, writes UTF-8, closes it, and returns the Unicode scalar count. It also accepts an explicit `encoding="utf-8"`. Both methods use the same catchable exception categories as `open` for access and close failures. Argument evaluation completes before opening a file, so an argument failure cannot truncate the output.
+`exists()`, `is_file()`, and `is_dir()` follow symlinks and return false for failed filesystem queries, matching Python 3.14, including invalid NUL-containing paths.
+
+`Path.read_text(encoding=None, errors=None, newline=None)` and `write_text(data, encoding=None, errors=None, newline=None)` use the same native file backend as binary reads and writes. UTF-8 is the default; UTF-8 with signature, Latin-1 and ASCII are also supported. Strict, ignore, replace and backslash-replace error modes work for these encodings; single-byte writes also support XML character references. With no newline override, reads translate CRLF and CR to LF. Empty or explicit newline strings keep the input line endings; on POSIX, write-side CR and CRLF overrides replace each LF. Writes return the number of input Unicode scalars, independent of encoded length. Data of the wrong type raises `TypeError` before opening the target. An invalid newline or codec name on an otherwise valid write is diagnosed after opening and truncating the file.
 
 `mkdir(mode=0o777, parents=False, exist_ok=False)` creates a directory. The mode is an exact integer within the signed C-int range; larger values raise `OverflowError`. Boolean options require exact booleans. The process umask applies, and missing parents use mode `0o777` independently of the leaf mode. `exist_ok=True` accepts an existing directory, including a symlink to one, without changing its permissions. `unlink(missing_ok=False)` removes a file or symlink; its flag suppresses only `FileNotFoundError`. `rmdir()` removes an empty directory. These methods return `None` and preserve their normal filesystem error categories.
 
@@ -667,9 +674,12 @@ Use `group = parser.add_argument_group(title, description)` to place arguments i
 
 A parser can require a subcommand with `add_subparsers(dest="command", required=True)`. Each literal `add_parser("name", help="...")` introduces a child parser with its own options. The namespace carries the selected command and that child's fields. A `match args.command` case or `if args.command == "name"` branch selects its concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
 
-Keep each builder local. Declare parent options first, followed by each subparser and its options, then assign or return `parse_args()`. Dynamic declarations and nested or optional subcommands are outside this grammar.
+Keep each builder local to a function or method. Declare parent options first, followed by each subparser and its options, then call `parse_args()`. An explicit list or tuple literal supplies the arguments; a standalone call still checks them and can raise `SystemExit`. Dynamic declarations and nested or optional subcommands are outside this grammar.
 
 ## Standard logging
+
+
+`logging.LogRecord` and `makeLogRecord` retain named scalar and container fields. `getMessage()` formats positional and mapping arguments when called. A record captures its creation time and thread/process metadata; changes to `logging.logThreads`, `logProcesses` or `logMultiprocessing` affect subsequent records. An annotated scalar read can fetch an extra field (for example, `request_id: str = record.request_id`).
 
 `logging.getLogger(name=None)` returns the same native logger for each name. Omitted, None, empty, and `"root"` names refer to `logging.root`. Loggers expose `name`, `level`, `root`, `parent`, `setLevel(int)`, `getEffectiveLevel()`, and `isEnabledFor(int)`. Named levels inherit through dot-separated parents. Integer levels retain Python's full precision.
 
@@ -864,6 +874,8 @@ Fixed classes reserve field names beginning with `__`. A fixed class can extend 
 
 ## Concrete containers and optional values
 
+An empty tuple or a fixed tuple of homogeneous `str`, `bytes`, `int`, or `bool` supports `in` and `not in`. The needle and all tuple elements evaluate in Python order before the first comparison.
+
 `list[T]` has one concrete element type, such as `list[str]`, `list[Counter]`, or `list[list[int]]`. Types are invariant: an existing `list[str]` cannot become `list[str | None]` through assignment or a call. Every append and indexed write checks the exact element type. Repetition copies references to the same elements, so `[row] * 3` shares `row` across all three positions. `list[int]` retains its specialized tagged-integer storage and runtime calls; other lists use owned runtime slots.
 
 An unquoted `Sequence[T]` parameter from `collections.abc` or `typing` accepts
@@ -887,7 +899,7 @@ Direct `mapping.keys()` operands and sets of the same key type support `|`, incl
 
 Sets with the same checked element type support equality, inequality and f-string display. Union (`|`), intersection (`&`) and difference (`-`) on sets or dictionary key views return a fresh set. Symmetric difference, subset/superset comparisons, `remove`, `pop`, and `clear` are unsupported.
 
-Tuple types name each position, for example `tuple[str, int, list[Counter]]`; `tuple[()]` is empty. A tuple's slots cannot be reassigned, but a referenced list or instance can still be mutated. Indexes must be in-range integer literals, optionally negative. Variable indexes, computed indexes, variadic tuple annotations, tuple concatenation, and tuple repetition are rejected. Tuple equality and inequality require the same concrete immutable shape accepted for dictionary keys. Ordered scalar tuple shapes additionally support lexicographic `<`, `<=`, `>`, and `>=`, including nested tuples and fields whose exact type is `None`. Nullable tuple fields permit equality but exclude ordering. Lists of matching immutable scalar tuples support `==` and `!=`. They compare lengths and then tuple values in order. Mutable tuple fields and float fields are outside this comparison.
+After a terminating guard such as `if len(row) != 3: raise ValueError(...)`, `tuple(row)` can materialize a fixed tuple from a scalar list. A checked replacement of a list element preserves the length; a resize, rebinding, or unknown call invalidates it. Tuple types name each position, for example `tuple[str, int, list[Counter]]`; `tuple[()]` is empty. A tuple's slots cannot be reassigned, but a referenced list or instance can still be mutated. Indexes must be in-range integer literals, optionally negative. Variable indexes, computed indexes, variadic tuple annotations, tuple concatenation, and tuple repetition are rejected. Tuple equality and inequality require the same concrete immutable shape accepted for dictionary keys. Ordered scalar tuple shapes additionally support lexicographic `<`, `<=`, `>`, and `>=`, including nested tuples and fields whose exact type is `None`. Nullable tuple fields permit equality but exclude ordering. Lists of matching immutable scalar tuples support `==` and `!=`. They compare lengths and then tuple values in order. Mutable tuple fields and float fields are outside this comparison.
 
 Fixed tuples, lists, strings, and bytes support the nested and starred assignment patterns described in [assignment and container expansion](#assignment-and-container-expansion). Concrete list lengths are checked at runtime; fixed-tuple shapes are checked during compilation.
 

@@ -90,6 +90,7 @@ pub(crate) enum IntrinsicModule {
     Io,
     Gzip,
     Hashlib,
+    Base64,
     Zipfile,
     Re,
     Enum,
@@ -114,6 +115,9 @@ pub(crate) enum Intrinsic {
     AddLevelName,
     LevelNamesMapping,
     LevelMap { names: bool },
+    LogRecord,
+    MakeLogRecord,
+    LogRecordFlag(u8),
     BasicConfig,
     LogLevel(i64),
     Abc,
@@ -177,6 +181,7 @@ pub(crate) enum Intrinsic {
     Iterator,
     UnsupportedOperation,
     GzipOpen,
+    UrlsafeB64encode,
     Sha256,
     HashNew,
     HashAvailable,
@@ -227,6 +232,10 @@ pub(crate) enum Intrinsic {
     Path,
     PurePath(crate::ir::PathFlavor),
     Which,
+    CopyFile,
+    ShutilError,
+    SameFileError,
+    SpecialFileError,
     TemporaryDirectory,
     Popen,
     SubprocessRun,
@@ -242,6 +251,14 @@ pub(crate) enum Intrinsic {
     FsPath,
     PosixPath(PosixPathOperation),
     Unquote,
+}
+
+impl Intrinsic {
+    /// Resolve the actual public export, including when the caller imported it under an alias.
+    pub(crate) fn exported_by(self, module: &str, name: &str) -> bool {
+        IntrinsicModule::named(module).and_then(|m| m.symbol(name))
+            == Some(Binding::Intrinsic(self))
+    }
 }
 
 impl IntrinsicModule {
@@ -283,6 +300,7 @@ impl IntrinsicModule {
             "io" => Some(Self::Io),
             "gzip" => Some(Self::Gzip),
             "hashlib" => Some(Self::Hashlib),
+            "base64" => Some(Self::Base64),
             "zipfile" => Some(Self::Zipfile),
             "re" => Some(Self::Re),
             "enum" => Some(Self::Enum),
@@ -296,7 +314,7 @@ impl IntrinsicModule {
         }
     }
 
-    fn symbol(self, name: &str) -> Option<Binding> {
+    pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
         if self == Self::Logging && name == "handlers" {
             return Some(Binding::IntrinsicModule(Self::LoggingHandlers));
         }
@@ -317,6 +335,12 @@ impl IntrinsicModule {
         }
         let symbol = match (self, name) {
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
+            (Self::Logging, "LogRecord") => Intrinsic::LogRecord,
+            (Self::Logging, "logThreads") => Intrinsic::LogRecordFlag(1),
+            (Self::Logging, "logProcesses") => Intrinsic::LogRecordFlag(2),
+            (Self::Logging, "logMultiprocessing") => Intrinsic::LogRecordFlag(4),
+            (Self::Logging, "logAsyncioTasks") => Intrinsic::LogRecordFlag(8),
+            (Self::Logging, "makeLogRecord") => Intrinsic::MakeLogRecord,
             (Self::Logging, "getLogger") => Intrinsic::GetLogger,
             (Self::Logging, "getLevelName") => Intrinsic::GetLevelName,
             (Self::Logging, "addLevelName") => Intrinsic::AddLevelName,
@@ -408,6 +432,7 @@ impl IntrinsicModule {
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
+            (Self::Base64, "urlsafe_b64encode") => Intrinsic::UrlsafeB64encode,
             (Self::Hashlib, "new") => Intrinsic::HashNew,
             (Self::Hashlib, "algorithms_available") => Intrinsic::HashAvailable,
             (Self::Zipfile, "ZipFile") => Intrinsic::ZipFile,
@@ -457,6 +482,10 @@ impl IntrinsicModule {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
             (Self::Shutil, "which") => Intrinsic::Which,
+            (Self::Shutil, "copyfile") => Intrinsic::CopyFile,
+            (Self::Shutil, "Error") => Intrinsic::ShutilError,
+            (Self::Shutil, "SameFileError") => Intrinsic::SameFileError,
+            (Self::Shutil, "SpecialFileError") => Intrinsic::SpecialFileError,
             (Self::Tempfile, "TemporaryDirectory") => Intrinsic::TemporaryDirectory,
             (Self::Subprocess, "STDOUT") => Intrinsic::SubprocessStdout,
             (Self::Subprocess, "Popen") => Intrinsic::Popen,

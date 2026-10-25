@@ -111,6 +111,8 @@ fn decode(bytes: &[u8]) -> Result<Cow<'_, str>, Error> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_json_loads_bytes(bytes: *const Bytes) -> *const Object {
     // SAFETY: the caller supplies live immutable bytes until the parse completes.
-    let result = decode(unsafe { &*bytes }).and_then(|text| super::readonly::loads(&text));
+    let result = decode(unsafe { &*bytes }).and_then(|text| {
+        super::readonly::loads(&text, || std::rc::Rc::new(crate::Str::from(text.as_ref())))
+    });
     finish(result, std::ptr::null())
 }

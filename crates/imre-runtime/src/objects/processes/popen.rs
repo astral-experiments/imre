@@ -3,17 +3,23 @@
 
 use super::*;
 use crate::StorageCell;
+use crate::objects::files::{FileState, errno_error};
 use std::cell::RefCell;
+use std::os::fd::OwnedFd;
+
+mod communicate;
+
+type Pipes = [Option<Rc<Object>>; 3];
 
 thread_local! {
     // Like subprocess._active: dropping the last handle neither kills a live
     // child nor blocks. A subsequent launch collects its status and pipes.
-    static ACTIVE: RefCell<Vec<Child>> = const { RefCell::new(Vec::new()) };
+    static ACTIVE: RefCell<Vec<(Child, Pipes)>> = const { RefCell::new(Vec::new()) };
 }
 
 pub(super) fn cleanup() {
     ACTIVE.with_borrow_mut(|children| {
-        children.retain_mut(|child| !matches!(poll_child(child), Ok(Some(_))));
+        children.retain_mut(|(child, _)| !matches!(poll_child(child), Ok(Some(_))));
     });
 }
 
@@ -36,6 +42,8 @@ pub(in crate::objects) struct Popen {
     args: Rc<Object>,
     child: Option<Child>,
     status: Option<i32>,
+    pipes: Pipes,
+    communication: communicate::Communication,
 }
 
 impl Popen {
@@ -85,7 +93,9 @@ impl Drop for Popen {
     fn drop(&mut self) {
         if self.status.is_none() && !matches!(self.poll(), Ok(Some(_))) {
             let child = self.child.take().expect("owned child");
-            ACTIVE.with_borrow_mut(|children| children.push(child));
+            ACTIVE.with_borrow_mut(|children| {
+                children.push((child, std::mem::take(&mut self.pipes)))
+            });
         }
     }
 }
@@ -112,6 +122,33 @@ pub unsafe extern "C" fn imre_popen(
     env: *const Object,
     streams: u32,
 ) -> *const Object {
+    // SAFETY: the legacy ABI uses the normal default buffer and closes inherited fds.
+    unsafe { imre_popen_pipes(args, cwd, env, streams, (-1_isize as usize) << 1 | 1, true) }
+}
+
+/// # Safety
+/// As imre_popen, with a rooted buffer size integer and statically selected stream modes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_popen_pipes(
+    args: *const Object,
+    cwd: *const Str,
+    env: *const Object,
+    streams: u32,
+    bufsize: usize,
+    close_fds: bool,
+) -> *const Object {
+    // SAFETY: the buffer size is a rooted canonical integer.
+    let Some(bufsize) = (unsafe { Int::borrow(bufsize) })
+        .as_small()
+        .and_then(|n| i32::try_from(n).ok())
+    else {
+        return Error::new(
+            Kind::OverflowError,
+            "Python int too large to convert to C int",
+        )
+        .returning(std::ptr::null());
+    };
+    let streams = streams | (u32::from(!close_fds) << 17);
     if streams & 15 == 5 {
         return Error::new(Kind::ValueError, "STDOUT can only be used for stderr")
             .returning(std::ptr::null());
@@ -119,18 +156,42 @@ pub unsafe extern "C" fn imre_popen(
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
     let result = unsafe { prepare_process(args, cwd, env) }
         .and_then(|(launch, cwd)| launch.spawn(cwd.as_ref(), streams).map_err(os_error))
-        .map(|child| {
+        .map(|mut child| {
+            let text = streams & (1 << 16) != 0;
+            let pipe = |fd: OwnedFd, read| FileState::pipe(fd.into(), read, text, bufsize);
+            let pipes = [
+                child.stdin.take().map(|fd| pipe(fd.into(), false)),
+                child.stdout.take().map(|fd| pipe(fd.into(), true)),
+                child.stderr.take().map(|fd| pipe(fd.into(), true)),
+            ];
             let process = Popen {
+                pipes,
                 // SAFETY: the original argv stays rooted while we acquire it.
                 args: unsafe { acquire_rc(args as usize) },
                 child: Some(child),
                 status: None,
+                communication: Default::default(),
             };
             Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Popen(Box::new(
                 process,
             ))))))
         });
     finish(result, std::ptr::null())
+}
+
+/// # Safety
+/// The handle is rooted. A present pipe returns an independent reference to
+/// the same file, including buffered data and closed state.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_popen_pipe(handle: *const Object, index: u32) -> *const Object {
+    // SAFETY: the statically captured pipe belongs to this handle.
+    unsafe {
+        with_process(handle, |p| {
+            p.pipes[index as usize]
+                .as_ref()
+                .map_or(std::ptr::null(), |file| Rc::into_raw(file.clone()))
+        })
+    }
 }
 
 /// # Safety
@@ -220,11 +281,16 @@ pub unsafe extern "C" fn imre_popen_exit(handle: *const Object) {
     // SAFETY: closing the native pipe ends and reaping cannot invoke language code.
     let result = unsafe {
         with_process(handle, |p| {
-            let child = p.child();
-            drop(child.stdout.take());
-            drop(child.stderr.take());
-            drop(child.stdin.take());
-            p.wait(None).map(|_| ())
+            let mut failure = None;
+            for index in [1, 2, 0] {
+                if let Some(file) = &p.pipes[index]
+                    && let Err(err) = file.0.with_mut(|s| s.file_mut().close())
+                {
+                    failure = Some(errno_error(err));
+                }
+            }
+            p.wait(None)?;
+            failure.map_or(Ok(()), Err)
         })
     };
     finish(result, ());
