@@ -56,6 +56,7 @@ mod local_functions;
 mod logging;
 mod logging_formatters;
 mod logging_records;
+mod mapping_abc;
 mod matching;
 mod module_values;
 mod namedtuples;
@@ -151,11 +152,12 @@ impl ClassInfo {
                 .iter()
                 .enumerate()
                 .filter_map(|(id, class)| {
-                    class
-                        .methods
-                        .iter()
-                        .any(|method| method.name.as_str() == "__bool__")
-                        .then_some(id)
+                    (class.mapping
+                        || class
+                            .methods
+                            .iter()
+                            .any(|method| method.name.as_str() == "__bool__"))
+                    .then_some(id)
                 })
                 .collect(),
         );
@@ -403,6 +405,7 @@ const RESERVED: &[&str] = &[
     "None",
     "True",
     "False",
+    "__debug__",
     "__name__",
     "__doc__",
     "__file__",
@@ -1579,8 +1582,10 @@ fn annotation_with_aliases(
         },
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
         ast::Expr::Subscript(subscript)
-            if graph.resolve_type(module, &subscript.value)
-                == Some(Binding::Intrinsic(Intrinsic::Mapping)) =>
+            if matches!(
+                graph.resolve_type(module, &subscript.value),
+                Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+            ) =>
         {
             if let ast::Expr::Tuple(types) = &*subscript.slice
                 && let [key, value] = types.elts.as_slice()
@@ -2026,7 +2031,7 @@ impl<'a> Checker<'a> {
 
     /// Reuses a slot only at its original type and prevents rebinding fixed call targets.
     fn declare(&mut self, name: &str, ty: Type, node: &impl Ranged) -> Result<usize, String> {
-        if reserved(name)
+        if (name != "__doc__" && reserved(name))
             || self.graph.modules[self.module].bindings.contains_key(name)
             || self.local_functions.contains_key(name)
             || self.class_receiver.as_deref() == Some(name)
@@ -4055,6 +4060,7 @@ impl<'a> Checker<'a> {
                     false,
                 ));
             }
+            ast::Stmt::Assert(_) if self.graph.python_optimization() > 0 => None,
             ast::Stmt::Assert(assert) => {
                 let test = self.condition(&assert.test)?;
                 let successful = self.local_state();
@@ -5149,9 +5155,16 @@ impl<'a> Checker<'a> {
             ast::Expr::Named(value) => return self.named_expression(value, None),
             ast::Expr::If(value) => return self.conditional(value, None),
             ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
-            ast::Expr::Name(name) if name.id == "__doc__" => {
+            ast::Expr::Name(name) if name.id == "__debug__" => (
+                Type::Bool,
+                ExprKind::Bool(self.graph.python_optimization() == 0),
+            ),
+            ast::Expr::Name(name)
+                if name.id == "__doc__" && !self.names.contains_key("__doc__") =>
+            {
                 let module = &self.graph.modules[self.module];
-                if let Some(ast::Stmt::Expr(doc)) = module.parsed.syntax().body.first()
+                if self.graph.python_optimization() < 2
+                    && let Some(ast::Stmt::Expr(doc)) = module.parsed.syntax().body.first()
                     && let ast::Expr::StringLiteral(text) = &*doc.value
                 {
                     check_string(text, self.source)?;
@@ -5362,6 +5375,17 @@ impl<'a> Checker<'a> {
                     } else {
                         receiver
                     };
+                    if self.mapping_class(receiver.ty).is_some() {
+                        let found = self.mapping_membership(key, receiver, expression)?;
+                        return Ok(if compare.ops[0] == ast::CmpOp::NotIn {
+                            Expr {
+                                ty: Type::Bool,
+                                kind: ExprKind::Not(Box::new(found)),
+                            }
+                        } else {
+                            found
+                        });
+                    }
                     if receiver.ty == Type::Bytes {
                         return self.bytes_membership(key, receiver, compare.ops[0], expression);
                     }
@@ -5717,6 +5741,10 @@ impl<'a> Checker<'a> {
                     }
                 }
                 let list = Self::enum_text(self.expr(&subscript.value)?);
+                if self.mapping_class(list.ty).is_some() {
+                    let key = self.expr(&subscript.slice)?;
+                    return self.mapping_primitive(list, "__getitem__", &[key], expression);
+                }
                 if list.ty == Type::BuiltinClass {
                     // Python evaluates type arguments before invoking __class_getitem__.
                     self.expr(&subscript.slice)?;
@@ -7044,6 +7072,11 @@ impl<'a> Checker<'a> {
         if gzip || matches!(&*call.func, ast::Expr::Name(name) if name.id == "open") {
             return self.open(call, gzip);
         }
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "issubclass" && !self.names.contains_key("issubclass") && self.resolve(&call.func).is_none())
+            && let Some(answer) = self.mapping_issubclass(call)?
+        {
+            return Ok(answer);
+        }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "isinstance") {
             return self.isinstance(call);
         }
@@ -8007,6 +8040,12 @@ impl<'a> Checker<'a> {
                     }
                 });
             }
+        }
+        if name.id == "len"
+            && let [value] = args.as_slice()
+            && self.mapping_class(value.ty).is_some()
+        {
+            return self.mapping_length(value.clone(), call);
         }
         if name.id.as_str() == "len"
             && matches!(args.as_slice(), [m] if m.ty == Type::ReadOnlyObjectMapping)
