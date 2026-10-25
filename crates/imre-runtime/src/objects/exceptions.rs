@@ -89,6 +89,7 @@ pub(crate) enum Kind {
     // Warning exception identities use a separate block from module errors and filter categories.
     Warning = 80,
     RuntimeWarning = 81,
+    DeprecationWarning = 82,
 }
 
 impl Kind {
@@ -148,6 +149,7 @@ impl Kind {
             43 => Self::RecursionError,
             80 => Self::Warning,
             81 => Self::RuntimeWarning,
+            82 => Self::DeprecationWarning,
             _ => return None,
         })
     }
@@ -204,13 +206,17 @@ impl Kind {
             Self::RecursionError => "RecursionError",
             Self::Warning => "Warning",
             Self::RuntimeWarning => "RuntimeWarning",
+            Self::DeprecationWarning => "DeprecationWarning",
         }
     }
 
     fn matches(self, expected: Self) -> bool {
         match expected {
             Self::BaseException => true,
-            Self::Warning => matches!(self, Self::Warning | Self::RuntimeWarning),
+            Self::Warning => matches!(
+                self,
+                Self::Warning | Self::RuntimeWarning | Self::DeprecationWarning
+            ),
             Self::NameError => matches!(self, Self::NameError | Self::UnboundLocalError),
             Self::Exception => !matches!(
                 self,
@@ -882,23 +888,37 @@ pub(super) fn kind_of(error: &Object) -> Kind {
     unsafe { error.0.with(Storage::exception_kind) }
 }
 
-/// PEP 479 converts a StopIteration escaping the generator into RuntimeError.
-pub(super) fn generator_stop(cause: Rc<Object>) -> Rc<Object> {
-    let error = new_exception(
+/// PEP 479 converts an escaping StopIteration into RuntimeError at the generator boundary.
+pub(super) fn generator_error(error: Rc<Object>) -> Rc<Object> {
+    if kind_of(&error) != Kind::StopIteration {
+        return error;
+    }
+    exception_with_cause(
         Kind::RuntimeError,
         Payload::Message(Rc::new("generator raised StopIteration".into())),
-    );
-    // SAFETY: the fresh wrapper has not escaped and cannot occur in its cause.
-    unsafe {
-        error.0.with_mut(|storage| {
-            let Storage::Exception(value) = storage else {
-                unreachable!()
-            };
-            value.details_mut().cause = Some(cause);
-            value.suppress_context = true;
-        });
+        Some(error),
+    )
+}
+
+/// A generator context manager lets the with-body propagate its original exception,
+/// including a StopIteration returned as the cause of a RuntimeError.
+pub(super) fn propagates_context_exception(raised: &Rc<Object>, injected: &Rc<Object>) -> bool {
+    if Rc::ptr_eq(raised, injected) {
+        return true;
     }
-    error
+    if kind_of(injected) != Kind::StopIteration {
+        return false;
+    }
+    // SAFETY: both exceptions remain rooted throughout the cause identity check.
+    unsafe {
+        raised.0.with(|storage| {
+            let exception = storage.exception();
+            exception.kind.matches(Kind::RuntimeError)
+                && exception
+                    .cause()
+                    .is_some_and(|cause| Rc::ptr_eq(cause, injected))
+        })
+    }
 }
 
 pub(super) fn task_group_errors(errors: Vec<Rc<Object>>) -> Rc<Object> {

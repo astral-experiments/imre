@@ -2,7 +2,6 @@
 
 import subprocess
 import sys
-from importlib.util import cache_from_source
 from pathlib import Path
 
 from suite_native import NativeCompileError
@@ -28,6 +27,16 @@ def check(lang, root):
             "import importlib\nprint(importlib.machinery.ModuleSpec('x', None).name)",
             "AttributeError",
             "import importlib.machinery before",
+        ),
+        (
+            "import importlib\nprint(importlib.util.cache_from_source('x.py'))",
+            "AttributeError",
+            "import importlib.util before",
+        ),
+        (
+            "import sys\nfrom sys import pycache_prefix as old\nsys.pycache_prefix = 'now'\nprint(old is None)",
+            "True",
+            "from-importing mutable sys.pycache_prefix",
         ),
         (prefix + "print(a == b)", "True", "ModuleSpec rich comparison"),
         (prefix + "print((a,) == (b,))", "True", "ModuleSpec rich comparison"),
@@ -70,32 +79,24 @@ def check(lang, root):
         else:
             raise AssertionError(f"lost explicit unsupported operation: {source}")
 
-    # Source bytecode requires an interpreter cache tag, not a guessed filename.
-    source = (
-        prefix
-        + """a.origin = 'dir/mod.py'
+    # Imre has no native bytecode, so select the same tag for the peer processes.
+    source = "import sys\nfrom importlib.util import cache_from_source\n" + prefix + """sys.implementation.cache_tag = None
+a.origin = 'dir/mod.py'
 a.has_location = True
+print(a.cached is None)
 try:
-    path = a.cached
-    if path is None:
-        raise AssertionError('unexpected absent path')
-    print(path)
+    print(cache_from_source('dir/mod.py'))
 except NotImplementedError as exc:
     print(str(exc))
+sys.implementation.cache_tag = 'target-314'
+path = a.cached
+if path is not None:
+    print(path)
+print(cache_from_source('dir/mod.py'))
 """
-    )
     directory = root / "source-cache"
     directory.mkdir()
-    ref = subprocess.run(
-        [sys.executable, "-I", "-S", "-c", source],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    assert ref.stdout.strip() == cache_from_source("dir/mod.py")
+    ref = subprocess.run([sys.executable, "-I", "-S", "-c", source], check=True, capture_output=True)
     binary = lang.build(source.encode(), directory)
-    actual = subprocess.run([binary], check=True, capture_output=True, text=True)
-    assert (actual.stdout, actual.stderr) == (
-        "source cache paths require a bytecode cache tag\n",
-        "",
-    )
+    actual = subprocess.run([binary], check=True, capture_output=True)
+    assert (actual.stdout, actual.stderr) == (ref.stdout, ref.stderr), (actual, ref)

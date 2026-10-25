@@ -11,6 +11,8 @@ pub(crate) enum Type {
     BuiltinClass,
     /// An immutable annotation reference with a known layout for its owner.
     ForwardRef(usize),
+    /// One of the exact values returned by a heterogeneous annotation dictionary.
+    AnnotationValue(usize),
     Str,
     /// A closed domain of strings with ordinary string storage and ownership.
     StrLiteral(usize),
@@ -59,6 +61,7 @@ pub(crate) enum Type {
     /// A sealed UTF-8 text stream; aliases share its open/closed state.
     TextIO,
     StringIO,
+    HandlerLock,
     /// A sealed byte stream; aliases share its open/closed state.
     BinaryIO,
     /// One live imported module from the closed source graph.
@@ -72,6 +75,8 @@ pub(crate) enum Type {
     CompletedProcess(ProcessCapture, Option<usize>),
     /// A synchronous child with statically known captured stream types.
     Popen(ProcessCapture, bool, usize),
+    /// An original Popen from _active. Its stream and argv types vary by launch.
+    ActivePopen,
     /// Async process handle, with bits for the captured stdout and stderr slots.
     AsyncProcess(u8),
     Coroutine(usize),
@@ -199,6 +204,7 @@ impl std::fmt::Display for Type {
             Self::Bool => "bool",
             Self::BuiltinClass => "type",
             Self::ForwardRef(_) => "annotationlib.ForwardRef",
+            Self::AnnotationValue(_) => "annotation value",
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
@@ -215,6 +221,7 @@ impl std::fmt::Display for Type {
             Self::StringIterable => "Iterable[str]",
             Self::TextIO => "typing.TextIO",
             Self::StringIO => "io.StringIO",
+            Self::HandlerLock => "_thread.RLock",
             Self::BinaryIO => "typing.BinaryIO",
             Self::SourceModule => "module",
             Self::Path => "pathlib.Path",
@@ -225,7 +232,7 @@ impl std::fmt::Display for Type {
                 "subprocess.CompletedProcess[str]"
             }
             Self::CompletedProcess(..) => "subprocess.CompletedProcess[bytes]",
-            Self::Popen(..) => "subprocess.Popen",
+            Self::Popen(..) | Self::ActivePopen => "subprocess.Popen",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
             Self::Coroutine(_) => "Coroutine",
             Self::EventLoop => "asyncio.AbstractEventLoop",
@@ -279,6 +286,8 @@ impl std::fmt::Display for Type {
 }
 
 pub(crate) struct Module {
+    /// Interpreter-style -I commands ignore Python process environment variables at startup.
+    pub ignore_python_environment: bool,
     /// Exact storage shapes survive checking so lowering need not erase them to
     /// generic tagged slots. Class identities index `class_fields`; container
     /// identities refer to this compilation's interned type universe.
@@ -352,19 +361,28 @@ impl Module {
 
     /// Capture arguments, the original invocation, and source search paths only
     /// for modules that use them; a bare import needs no runtime state.
-    pub(crate) fn startup_usage(&self) -> (bool, bool, bool) {
+    pub(crate) fn startup_usage(&self) -> (bool, bool, bool, bool) {
         let mut linecache = false;
+        let mut cache_paths = false;
         let mut argv = false;
         let mut original = false;
         for function in self.functions.iter().chain([&self.entry]) {
-            walk_expressions(&function.body, &mut |value| match value.kind {
+            walk_expressions(&function.body, &mut |value| match &value.kind {
                 ExprKind::Builtin(Builtin::SysArgv, _) => argv = true,
                 ExprKind::Builtin(Builtin::SysOrigArgv, _) => original = true,
                 ExprKind::Builtin(Builtin::Linecache(..), _) => linecache = true,
+                ExprKind::Builtin(Builtin::CachePath(_) | Builtin::ModuleCacheFromOrigin, _) => {
+                    cache_paths = true
+                }
+                ExprKind::Builtin(Builtin::WarningFormat { .. }, args)
+                    if args[5].ty != Type::Str =>
+                {
+                    linecache = true
+                }
                 _ => {}
             });
         }
-        (argv || original, original, linecache)
+        (argv || original, original, linecache, cache_paths)
     }
 }
 
@@ -594,6 +612,16 @@ pub(crate) enum ArgparseOutput {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum CachePathOperation {
+    Get(bool),
+    Set(bool),
+    Tag,
+    Forward,
+    Reverse,
+    Debug,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum LinecacheOperation {
     Getline,
     Getlines,
@@ -641,6 +669,11 @@ pub(crate) enum Builtin {
     ClassNameView,
     NewForwardRef,
     ForwardRefField(usize),
+    BoxAnnotation(usize),
+    AnnotationMember(usize),
+    AnnotationRef,
+    AnnotationIs,
+    StaticFunction(usize),
     StrEnumValue,
     EnumLookup(usize),
     EnumString,
@@ -677,6 +710,8 @@ pub(crate) enum Builtin {
     SysVersionInfo {
         implementation: bool,
     },
+    SysIntern,
+    SysIsInterned,
     OsName,
     DocCaptureStart,
     DocCaptureTake,
@@ -703,6 +738,13 @@ pub(crate) enum Builtin {
         invalid: u32,
     },
     WarningReset,
+    WarningFormat {
+        entry: Type,
+        environment: bool,
+    },
+    WarningWrite {
+        stdout: bool,
+    },
     PercentFormat,
     Logging(LogOperation),
     Timed(TimedOperation),
@@ -904,6 +946,7 @@ pub(crate) enum Builtin {
     StringListNonempty,
     RStrip,
     SysArgv,
+    OptionalStrConcat,
     SysOrigArgv,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
@@ -1020,6 +1063,7 @@ pub(crate) enum Builtin {
     DictFromKeysTarget,
     ModuleParentPrefix,
     ModuleCacheFromOrigin,
+    CachePath(CachePathOperation),
     NamespaceWrap,
     NamespaceDict,
     NamespaceGet,
@@ -1048,6 +1092,11 @@ pub(crate) enum Builtin {
     ChainMapNew,
     ChainMapMaps,
     ChainMapSetMaps,
+    ChainMapGetItem,
+    ChainMapSetItem,
+    ChainMapContains,
+    /// The stored type may be promoted to an optional result on a hit.
+    ChainMapGet(Type),
     CounterTotal,
     CounterMostCommon,
     CounterUpdate,
@@ -1222,6 +1271,7 @@ pub(crate) enum TextOperation {
     SplitLineEnds,
     ExpandTabs,
     Lower,
+    Upper,
     Capitalize,
     /// True splits from the right.
     Split(bool),
@@ -1422,6 +1472,16 @@ pub(crate) enum LogRecordOperation {
 pub(crate) enum LogOperation {
     Get,
     HandlerRename,
+    LockNew,
+    LockAcquire,
+    LockAcquireInt,
+    LockRelease,
+    LockCount,
+    LockOwned,
+    LockLocked,
+    LockEnter,
+    LockExit,
+    LockReset,
     HandlerLookup,
     PrintActiveException,
     AddLevel,
@@ -1522,6 +1582,9 @@ pub(crate) enum ProcessOperation {
         check: bool,
     },
     PopenPid,
+    PopenActive,
+    PopenCleanup,
+    PopenIdentity,
     PopenArgs,
     PopenPipe(u8),
     PopenStatus {

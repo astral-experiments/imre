@@ -133,6 +133,10 @@ impl Types {
             Type::ForwardRef(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::Tuple(fields)) if fields.len() == 5)
             }
+            Type::AnnotationValue(id) => {
+                matches!(storage.shapes.get(id), Some(Shape::Tuple(fields))
+                if fields.iter().all(|t| matches!(t, Type::BuiltinClass | Type::Str | Type::None | Type::ForwardRef(_))))
+            }
             Type::Callable(id) => matches!(
                 storage.shapes.get(id),
                 Some(Shape::Callable(..) | Shape::DeclaredCache(..) | Shape::CachedCallable(_))
@@ -170,11 +174,13 @@ impl Types {
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::StringIO
+            | Type::HandlerLock
             | Type::SourceModule
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
             | Type::CompletedProcess(_, None)
+            | Type::ActivePopen
             | Type::EventLoop
             | Type::TaskGroup
             | Type::GeneratorContext
@@ -576,6 +582,7 @@ impl Types {
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::StringIO
+            | Type::HandlerLock
             | Type::Path
             | Type::PurePath(_)
             | Type::CompletedProcess(..)
@@ -588,6 +595,7 @@ impl Types {
             | Type::DirectoryContext(_)
             | Type::Semaphore
             | Type::Popen(..)
+            | Type::ActivePopen
             | Type::AsyncProcess(_)
             | Type::NativeModule
             | Type::ModuleNamespace
@@ -947,6 +955,13 @@ impl Types {
         Type::ChainMap(self.intern(Shape::Dict(key, value)))
     }
 
+    /// Look through the ChainMap's dictionary shape without treating its
+    /// owner as a dictionary in ordinary dictionary operations.
+    pub(crate) fn chainmap_entries(&self, ty: Type) -> Option<(Type, Type)> {
+        let Type::ChainMap(id) = ty else { return None };
+        self.mapping(Type::Dict(id))
+    }
+
     pub(crate) fn dict(&self, key: Type, value: Type) -> Type {
         Type::Dict(self.intern(Shape::Dict(key, value)))
     }
@@ -1114,10 +1129,12 @@ impl Types {
                 Type::Cursor(_)
                 | Type::TextIO
                 | Type::StringIO
+                | Type::HandlerLock
                 | Type::BinaryIO
                 | Type::CsvReader
                 | Type::ZipFile
                 | Type::Popen(..)
+                | Type::ActivePopen
                 | Type::AsyncProcess(_)
                 | Type::DirectoryContext(_)
                 | Type::GeneratorContext
@@ -1139,7 +1156,7 @@ impl Types {
 
     /// Enumerates stored types for the class-field acyclicity check.
     pub(crate) fn children(&self, ty: Type) -> Vec<Type> {
-        if let Type::ForwardRef(id) = ty {
+        if let Type::ForwardRef(id) | Type::AnnotationValue(id) = ty {
             return self.fields(Type::Tuple(id)).unwrap();
         }
         if let Type::ModuleSpec(id) = ty {
