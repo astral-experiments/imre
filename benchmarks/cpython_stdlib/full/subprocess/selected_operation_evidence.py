@@ -132,10 +132,14 @@ def selected(report, attempts, revision, tree):
     for name, [case] in pipes.items():
         op = case["observed"]
         assert case["body_attempt"]["status"] == "blocked"
+        interrupted = name.endswith(".test_communicate_eintr")
         assert case["roles"] == dict(
-            body="cpython", assertions="cpython", operation="imre", fixture="mixed"
+            body="cpython",
+            assertions="cpython",
+            operation="imre" if interrupted else "mixed",
+            fixture="mixed",
         )
-        if name.endswith(".test_communicate_eintr"):
+        if interrupted:
             assert (
                 op["native_deliveries"]
                 == op["original_handler_calls"]
@@ -167,8 +171,9 @@ def selected(report, attempts, revision, tree):
             assert (
                 op["native_stream_closed"]
                 and op["same_open_file_description"] == "SCM_RIGHTS"
+                and op["host_select_returned_original_stream"]
             )
-            operation = "native unbuffered read consumed four bytes; FIONREAD found one remaining byte on the same open file description"
+            operation = "native unbuffered read consumed four bytes; host select returned the original stream with one byte remaining on the same open file description"
             fixture = (
                 host
                 + "; host select/cleanup and assertions, native read/close/wait and SCM_RIGHTS descriptor fixture"

@@ -437,6 +437,17 @@ def unbuffered(tc, site, root, case, orig, upstream):
     binary = build(tc, root, site, raw_source(0))
     host = []
     observed = {}
+    readiness = []
+    real_select = select.select
+
+    def watch(readers, writers, exceptional, timeout=None):
+        result = real_select(readers, writers, exceptional, timeout)
+        if host and readers == [host[0].stdout]:
+            stream = host[0].stdout
+            assert (writers, exceptional, timeout) == ([], [], 0.0)
+            assert len(result[0]) == 1 and result[0][0] is stream
+            readiness.append(queued(stream.fd))
+        return result
 
     def launch(args, **kw):
         assert (
@@ -459,6 +470,7 @@ def unbuffered(tc, site, root, case, orig, upstream):
                 p.waits == [0]
                 and f.reads == [(4, b"appl")]
                 and f.remaining == 1
+                and readiness == [1]
                 and closed_by_original
             )
             assert any(
@@ -469,6 +481,7 @@ def unbuffered(tc, site, root, case, orig, upstream):
                 read_bytes=4,
                 remaining_kernel_bytes=f.remaining,
                 same_open_file_description="SCM_RIGHTS",
+                host_select_returned_original_stream=True,
                 native_stream_closed=True,
                 native_reaps=1,
             )
@@ -477,8 +490,11 @@ def unbuffered(tc, site, root, case, orig, upstream):
         case.addCleanup(finish_after_original_close)
         return p
 
-    with patch.object(
-        upstream, "subprocess", SimpleNamespace(Popen=launch, PIPE=subprocess.PIPE)
+    with (
+        patch.object(
+            upstream, "subprocess", SimpleNamespace(Popen=launch, PIPE=subprocess.PIPE)
+        ),
+        patch.object(select, "select", watch),
     ):
         orig()
     return observed
@@ -524,7 +540,7 @@ def main():
                 roles=dict(
                     body="cpython",
                     assertions="cpython",
-                    operation="imre",
+                    operation="imre" if case.id() in EINTR else "mixed",
                     fixture="mixed",
                 ),
                 observed=op,
