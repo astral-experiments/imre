@@ -543,6 +543,7 @@ impl SourceModule {
 pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
+    deferred_names: std::cell::RefCell<Vec<Vec<TextRange>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -665,6 +666,10 @@ impl SourceGraph {
         self.checked_calls.borrow_mut()[module].push(call);
     }
 
+    pub(crate) fn deferred_name(&self, module: ModuleId, name: TextRange) {
+        self.deferred_names.borrow_mut()[module].push(name);
+    }
+
     /// Source ranges where the reachable profile or native lowering handles diagnostics.
     pub(crate) fn diagnostic_scopes(
         &self,
@@ -703,6 +708,12 @@ impl SourceGraph {
                         calls.sort_unstable_by_key(|range| (range.start(), range.end()));
                         calls.dedup();
                         calls.into_iter().map(CheckedOverload::Call)
+                    })
+                    .chain({
+                        let mut names = self.deferred_names.borrow()[id].clone();
+                        names.sort_unstable_by_key(|range| (range.start(), range.end()));
+                        names.dedup();
+                        names.into_iter().map(CheckedOverload::DeferredName)
                     })
                     .collect()
             })
@@ -1012,6 +1023,7 @@ impl<'a> Loader<'a> {
         let mut graph = SourceGraph {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            deferred_names: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?

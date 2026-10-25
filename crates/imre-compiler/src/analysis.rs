@@ -419,13 +419,16 @@ struct CheckedFile<'db> {
 pub(crate) enum CheckedOverload {
     Decorator(TextRange),
     Call(TextRange),
+    DeferredName(TextRange),
 }
 
 impl CheckedOverload {
-    fn covers(self, range: TextRange) -> bool {
-        match self {
-            Self::Decorator(decorator) => decorator.contains_range(range),
-            Self::Call(call) => call == range,
+    fn covers(self, rule: &str, range: TextRange) -> bool {
+        match (rule, self) {
+            ("no-matching-overload", Self::Decorator(decorator)) => decorator.contains_range(range),
+            ("no-matching-overload", Self::Call(call)) => call == range,
+            ("unresolved-reference", Self::DeferredName(name)) => name == range,
+            _ => false,
         }
     }
 }
@@ -452,8 +455,9 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
-                            || (diagnostic.id().as_str() == "no-matching-overload"
-                                && overloads.iter().any(|scope| scope.covers(range)))
+                            || overloads
+                                .iter()
+                                .any(|scope| scope.covers(diagnostic.id().as_str(), range))
                     })
         })
         .map(|diagnostic| {
