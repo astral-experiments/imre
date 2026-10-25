@@ -6,16 +6,19 @@ unset GH_TOKEN
 out="$RUNNER_TEMP/stringio-869"
 mkdir "$out"
 cat > "$out/whence.py" <<'PY'
-from io import StringIO
+import io
 
-stream = StringIO("x")
+stream = io.StringIO("x")
 for whence in [0, 1, 2, 3, -1, (1 << 31) - 1, 1 << 31, -1 - (1 << 31), 1 << 100]:
+    print(whence)
     try:
-        print(whence, stream.seek(0, whence))
+        print(stream.seek(0, whence))
     except OverflowError as error:
-        print(whence, "OverflowError", str(error))
+        print("OverflowError")
+        print(str(error))
     except ValueError as error:
-        print(whence, "ValueError", str(error))
+        print("ValueError")
+        print(str(error))
 PY
 deadline=$((SECONDS + 4200))
 known=
