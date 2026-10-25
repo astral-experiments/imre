@@ -161,9 +161,9 @@ impl Builtin {
                     | PathOperation::Stem
                     | PathOperation::Suffix
                     | PathOperation::IsAbsolute
-                    | PathOperation::Exists
-                    | PathOperation::IsFile
-                    | PathOperation::IsDir => false,
+                    | PathOperation::Info
+                    | PathOperation::InfoRepr
+                    | PathOperation::Query(_) => false,
                 },
                 PreservesLists,
             ),
@@ -182,7 +182,9 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::TimeSleep | Self::PercentScalar => Contract::new(true, PreservesLists),
+            Self::TimeSleep | Self::PercentScalar | Self::WarningFilter(_) => {
+                Contract::new(true, PreservesLists)
+            }
             Self::Formatter(_) => Contract::new(true, PreservesLists),
             Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
@@ -307,6 +309,7 @@ impl Builtin {
             | Self::NamespaceDict
             | Self::NamespaceGet
             | Self::DictCopy
+            | Self::DictFromKeysTarget
             | Self::DeepCopy
             | Self::RecordCopy
             | Self::JsonDecode(_)
@@ -386,6 +389,7 @@ impl Builtin {
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum
             | Self::DirectoryContextView
+            | Self::TextStreamView
             | Self::LiteralStringView
             | Self::RStrip
             | Self::RegexCompile(_)
@@ -429,6 +433,7 @@ impl Builtin {
             | Self::FileReadline
             | Self::GzipOpen
             | Self::BytesIo
+            | Self::StringIo(_)
             | Self::BinarySeek
             | Self::BinaryTell
             | Self::ZipOpenFile
@@ -483,6 +488,7 @@ impl Builtin {
             | Self::CounterTotal
             | Self::DictAsBase
             | Self::DictClear
+            | Self::ListClear
             | Self::DictIter(_)
             | Self::ExceptionWithCause
             | Self::GlobalSet(_)
@@ -869,6 +875,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_text_flush"
                 | "imre_text_close"
                 | "imre_bytes_io"
+                | "imre_string_io"
+                | "imre_string_io_value"
+                | "imre_string_io_read"
+                | "imre_string_io_seek"
+                | "imre_string_io_position"
                 | "imre_binary_seek"
                 | "imre_binary_tell"
                 | "imre_zip_open_file"
@@ -909,6 +920,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_list_copy"
                 | "imre_record_shallow_copy"
                 | "imre_dict_copy"
+                | "imre_dict_fromkeys_target"
                 | "imre_dict_get"
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"

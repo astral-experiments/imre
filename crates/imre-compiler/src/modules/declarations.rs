@@ -13,7 +13,6 @@ pub(super) fn module(name: &str) -> Option<&'static str> {
         "email.policy",
         "importlib",
         "importlib.resources",
-        "warnings",
     ]
     .into_iter()
     .find(|&known| known == name)
@@ -37,7 +36,7 @@ pub(super) fn symbol(owner: IntrinsicModule, name: &str) -> Option<Binding> {
         (M::Declaration("email.parser"), "FeedParser") => "email.parser.FeedParser",
         (M::Declaration("email.policy"), "compat32") => "email.policy.compat32",
         (M::Declaration("importlib.resources"), "files") => "importlib.resources.files",
-        (M::Declaration("warnings"), "warn") => "warnings.warn",
+        (M::Warnings, "warn") => "warnings.warn",
         (M::CollectionsAbc, "Collection") => "collections.abc.Collection",
         (M::CollectionsAbc, "Mapping") => "collections.abc.Mapping",
         _ => return None,

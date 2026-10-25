@@ -9,6 +9,8 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "argparse"
 CASES = {
+    "class_constants": [[], ["--as-class"], ["--optional"], ["--as-class", "--optional"],
+                        ["--help"], ["--as-class=value"], ["--text", "<class 'tuple'>"]],
     "numbers": [
         [], ["--help"], ["-i", "１２_３"], ["-i", "123456789012345678901234567890"],
         ["-i", "0" * 4301], ["-i", "\x1c34\x1f"],
@@ -274,11 +276,15 @@ def main():
         # The successful guard relies on a stable receiver and a read-only field.
         source = Path(directory) / "bad_field.py"
         prelude = "from argparse import ArgumentParser\nfrom pathlib import Path\ndef read():\n    p = ArgumentParser()\n    p.add_argument('--out', type=Path)\n    return p.parse_args()\na = read()\n"
-        for statement in [
+        invalid_field_reads = [
             "a.out = Path('else')",
             "print(a.out.name)",
             "if a.out:\n    a = read()\n    print(a.out.name)",
-        ]:
+            "if a.out is None:\n    print(a.out.name)",
+            "if None is not a.out:\n    a = read()\n    print(a.out.name)",
+            "if a.out is None:\n    pass\nelse:\n    a = read()\n    print(a.out.name)",
+        ]
+        for statement in invalid_field_reads:
             source.write_text(prelude + statement + "\n")
             check = subprocess.run(
                 [args.compiler, "check", source], capture_output=True, check=False
@@ -310,7 +316,7 @@ def main():
         if checked.returncode == 0 or b"argparse.Namespace requires" not in checked.stderr:
             raise AssertionError(checked.stderr)
     print(
-        f"Validated {checks} argparse process comparisons and {len(REJECTED) + 8} compile-time rejections"
+        f"Validated {checks} argparse process comparisons and {len(REJECTED) + len(invalid_field_reads) + 5} compile-time rejections"
     )
 
 
