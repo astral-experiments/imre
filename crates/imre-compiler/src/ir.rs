@@ -24,6 +24,8 @@ pub(crate) enum Type {
     ListInt,
     /// Native storage for a private append-only integer list consumed by bytes().
     ByteOutput,
+    /// Private, owning accumulator for a tuple display with runtime arity.
+    TupleBuffer,
     Class(usize),
     List(usize),
     Dict(usize),
@@ -34,6 +36,7 @@ pub(crate) enum Type {
     /// The immutable top-level string keys of a private TOML document.
     StringKeys,
     Tuple(usize),
+    VarTuple(usize),
     /// An exact positional signature carried by an owned callable record.
     Callable(usize),
     /// Private state retained by an independently constructed function cache.
@@ -101,13 +104,14 @@ pub(crate) enum Type {
     PlainObject,
     /// An exact immutable method descriptor on the builtin str class.
     StrDescriptor(StrDescriptor),
+    ProcessSelectorClass,
     /// A live namespace wrapper; the interned shape describes its string-keyed backing dict.
     SimpleNamespace(usize),
     /// Nominal ModuleSpec backed by a record whose loader and state keep their exact types.
     ModuleSpec(usize),
+    CodecInfo,
     /// A POSIX IPv4 stream socket with shared descriptor ownership.
     Socket,
-    CodecInfo,
     CodecWriterClass,
     CodecWriter,
     Sha256,
@@ -247,6 +251,7 @@ impl std::fmt::Display for Type {
             Self::Set(id) => return write!(f, "set#{id}"),
             Self::Deque(id) => return write!(f, "deque#{id}"),
             Self::Tuple(id) => return write!(f, "tuple#{id}"),
+            Self::VarTuple(id) => return write!(f, "variable-tuple#{id}"),
             Self::Callable(id) => return write!(f, "callable#{id}"),
             Self::Optional(id) => return write!(f, "optional#{id}"),
             Self::Union(id) => return write!(f, "union#{id}"),
@@ -264,6 +269,7 @@ impl std::fmt::Display for Type {
             Self::StringKeys => "collections.abc.Set[str]",
             Self::ListInt => "list[int]",
             Self::ByteOutput => "private byte output",
+            Self::TupleBuffer => "private tuple buffer",
             Self::CacheState(_) => "private function cache",
             Self::None => "None",
             Self::Iterator => "iterator",
@@ -308,11 +314,12 @@ impl std::fmt::Display for Type {
             Self::Calendar(CalendarType::Zone) => "datetime.timezone",
             Self::PlainObject => "object",
             Self::StrDescriptor(_) => "method_descriptor",
+            Self::ProcessSelectorClass => "subprocess selector class",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::ModuleSpec(_) => "importlib.machinery.ModuleSpec",
+            Self::CodecInfo => "codecs.CodecInfo",
             Self::Poll => "select.poll",
             Self::Socket => "socket.socket",
-            Self::CodecInfo => "codecs.CodecInfo",
             Self::CodecWriterClass => "type[codecs.StreamWriter]",
             Self::CodecWriter => "codecs.StreamWriter",
             Self::Sha256 => "SHA-256 hash",
@@ -338,6 +345,7 @@ impl std::fmt::Display for Type {
             | Self::Set(_)
             | Self::Deque(_)
             | Self::Tuple(_)
+            | Self::VarTuple(_)
             | Self::Callable(_)
             | Self::Optional(_)
             | Self::Union(_) => {
@@ -694,8 +702,21 @@ pub(crate) enum LinecacheOperation {
     Cache,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RandomOperation {
+    Seed,
+    Float,
+    Bits,
+    ChoiceIndex,
+    Randint,
+    Randrange,
+    RandrangeOne,
+    ChoiceRange,
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    Random(RandomOperation),
     Linecache(LinecacheOperation, Type, bool),
     Repeat,
     WrapperAttributes(WrapperAttributes),
@@ -705,6 +726,10 @@ pub(crate) enum Builtin {
     },
     Islice,
     Tee,
+    TupleIndex,
+    TupleBufferNew,
+    TupleBufferPush,
+    TupleBufferFinish,
     Cycle,
     SysDisplayHook,
     BuiltinsLast,
@@ -769,6 +794,10 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    SysThreadInfo,
+    SysThreadText {
+        version: bool,
+    },
     SysVersionInfo {
         implementation: bool,
     },
@@ -777,7 +806,7 @@ pub(crate) enum Builtin {
     OsName,
     DocCaptureStart,
     DocCaptureTake,
-    DocAscii,
+    AsciiEscape,
     MockCallList {
         mark: bool,
     },
@@ -950,11 +979,11 @@ pub(crate) enum Builtin {
     Decode,
     DecodeAscii,
     UrlsafeB64encode,
-    Socket(SocketOp),
     CodecLookup,
     CodecName,
     CodecEncode,
     CodecDecode,
+    Socket(SocketOp),
     CodecWriter(WriterOperation),
     Sha256Hex,
     Sha256New,
@@ -1656,6 +1685,8 @@ pub(crate) enum ErrnoOperation {
 
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
+    SelectorClass(Option<bool>),
+    SetSelector,
     Executable,
     RunToStderr,
     CheckOutput {
@@ -1772,11 +1803,33 @@ pub(crate) enum ProcessOperation {
     TimeoutField(u32),
 }
 
+/// Binary pipe handles have one static type but may own either a raw or a
+/// buffered stream. The Python class still distinguishes them after close.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum IoBase {
+    Any,
+    Raw,
+    Buffered,
+    Text,
+}
+
+impl IoBase {
+    pub(crate) fn matches(self, ty: Type) -> Option<bool> {
+        match (self, ty) {
+            (Self::Raw | Self::Buffered, Type::BinaryIO) => None,
+            (Self::Any, Type::TextIO | Type::StringIO | Type::BinaryIO)
+            | (Self::Text, Type::TextIO | Type::StringIO) => Some(true),
+            _ => Some(false),
+        }
+    }
+}
+
 /// Sealed Python runtime categories; parameterized container annotations are
 /// never runtime classes, and exception categories use their existing hierarchy.
 #[derive(Clone, Copy)]
 pub(crate) enum InstanceType {
     Exact(Type),
+    IoBase(IoBase),
     ForwardRef,
     SimpleNamespace,
     ModuleSpec,
@@ -1791,6 +1844,7 @@ pub(crate) enum InstanceType {
 impl InstanceType {
     pub(crate) fn accepts(self, ty: Type) -> bool {
         match self {
+            Self::IoBase(base) => base.matches(ty) != Some(false),
             Self::Exact(Type::CompletedProcess(..)) => matches!(ty, Type::CompletedProcess(..)),
             Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool),
             Self::Exact(Type::Str) => {

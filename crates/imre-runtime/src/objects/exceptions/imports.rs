@@ -1,4 +1,5 @@
 //! ImportError retains its positional arguments separately from its named attributes.
+use crate::StrOwner;
 mod suggestions;
 
 use super::*;
@@ -16,7 +17,7 @@ pub(super) struct Import {
 }
 
 impl Import {
-    pub(super) fn message(&self) -> Rc<Str> {
+    pub(super) fn message(&self) -> StrOwner {
         if self.msg.kind.raw() == 3 {
             word_text(self.msg.kind, self.msg.word, false)
         } else {
@@ -55,9 +56,9 @@ impl Positional {
         unsafe { tuple_item(self.0.word, index) }
     }
 
-    pub(super) fn message(&self) -> Rc<Str> {
+    pub(super) fn message(&self) -> StrOwner {
         match self.len() {
-            0 => Rc::new(Str::new("")),
+            0 => StrOwner::new(Str::new("")),
             1 => {
                 let (kind, word) = self.item(0);
                 word_text(kind, word, false)
@@ -144,10 +145,10 @@ pub unsafe extern "C" fn imre_exception_keyword_message(
             })
             .collect();
         match suggestions::declaration_order((&*wrong).as_str(), &choices) {
-            Some(spelling) => Rc::into_raw(Rc::new(
+            Some(spelling) => crate::StrOwner::into_raw(crate::StrOwner::new(
                 format!("{}. Did you mean '{spelling}'?", *prefix).into(),
             )),
-            None => Rc::into_raw(acquire_rc(prefix as usize)),
+            None => crate::StrOwner::into_raw(crate::StrOwner::acquire_word(prefix as usize)),
         }
     }
 }
@@ -175,7 +176,7 @@ pub unsafe extern "C" fn imre_exception_formatter_result(
     let (kind, word) = unsafe { exit_word(value) };
     if kind.raw() == 3 {
         // SAFETY: representation 3 is a live native string.
-        Rc::into_raw(unsafe { acquire_rc(word) })
+        crate::StrOwner::into_raw(unsafe { crate::StrOwner::acquire_word(word) })
     } else {
         Error::new(
             Kind::TypeError,
@@ -440,8 +441,8 @@ pub unsafe extern "C" fn imre_exception_field_index(
         match kind.raw() {
             3 => {
                 let ch = (&*(word as *const Str)).chars().nth(i).unwrap();
-                let s = Rc::new(Str::from(ch.to_string()));
-                view(WordKind::new(3), Rc::as_ptr(&s) as usize)
+                let s = StrOwner::new(Str::from(ch.to_string()));
+                view(WordKind::new(3), StrOwner::as_ptr(&s) as usize)
             }
             4..=6 => {
                 let (k, w) = sequence_item(kind, word, i);

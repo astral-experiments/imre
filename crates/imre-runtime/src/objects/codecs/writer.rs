@@ -1,18 +1,19 @@
 //! The codec class is shared across registry aliases; each instance owns its stream state.
 use super::*;
+use crate::StrOwner;
 use crate::objects::{acquire_rc, files::close_stream};
 use std::cell::Cell;
 
 pub(in crate::objects) struct WriterClass {
     codec: Codec,
-    encoding: RefCell<Option<Rc<Str>>>,
+    encoding: RefCell<Option<StrOwner>>,
 }
 
 pub(in crate::objects) struct Writer {
     class: Rc<Object>,
     pub(in crate::objects) stream: Rc<Object>,
-    errors: RefCell<Rc<Str>>,
-    encoding: RefCell<Option<Rc<Str>>>,
+    errors: RefCell<StrOwner>,
+    encoding: RefCell<Option<StrOwner>>,
     first: Cell<bool>,
 }
 
@@ -58,7 +59,7 @@ pub unsafe extern "C" fn imre_codec_writer_new(
         (
             acquire_rc(class as usize),
             acquire_rc(stream as usize),
-            acquire_rc(errors as usize),
+            StrOwner::acquire_word(errors as usize),
         )
     };
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::CodecWriter(
@@ -77,7 +78,7 @@ impl Writer {
     pub(in crate::objects) fn write(
         &self,
         text: &str,
-        error_input: impl FnOnce() -> Rc<Str>,
+        error_input: impl FnOnce() -> Result<StrOwner>,
     ) -> Result<()> {
         let mut codec = inspect(&self.class, |s| match s {
             Storage::CodecWriterClass(class) => class.codec,
@@ -108,7 +109,7 @@ pub unsafe extern "C" fn imre_codec_writer_write(writer: *const Object, text: *c
     let result = inspect(writer, |s| match s {
         Storage::CodecWriter(w) => w.write(text, || {
             // SAFETY: the generated caller retains this exact input for the whole write.
-            unsafe { acquire_rc(text as *const Str as usize) }
+            Ok(unsafe { StrOwner::acquire_word(text as *const Str as usize) })
         }),
         _ => unreachable!(),
     });
@@ -169,7 +170,7 @@ pub unsafe extern "C" fn imre_codec_writer_encoding(owner: *const Object) -> *co
     });
     finish(
         result
-            .map(Rc::into_raw)
+            .map(StrOwner::into_raw)
             .map_err(|msg| Error::new(Kind::AttributeError, msg)),
         std::ptr::null(),
     )
@@ -180,7 +181,7 @@ pub unsafe extern "C" fn imre_codec_writer_encoding(owner: *const Object) -> *co
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_codec_writer_set_encoding(text: *const Str, owner: *const Object) {
     // SAFETY: the owned string outlives the store; the receiver stays rooted.
-    let (text, owner) = unsafe { (acquire_rc(text as usize), object(owner)) };
+    let (text, owner) = unsafe { (StrOwner::acquire_word(text as usize), object(owner)) };
     inspect(owner, |s| match s {
         Storage::CodecWriterClass(c) => *c.encoding.borrow_mut() = Some(text),
         Storage::CodecWriter(w) => *w.encoding.borrow_mut() = Some(text),
@@ -205,7 +206,7 @@ pub unsafe extern "C" fn imre_codec_writer_stream(writer: *const Object) -> *con
 pub unsafe extern "C" fn imre_codec_writer_errors(writer: *const Object) -> *const Str {
     // SAFETY: the type checker only emits this read for a writer instance.
     inspect(unsafe { object(writer) }, |s| match s {
-        Storage::CodecWriter(w) => Rc::into_raw(w.errors.borrow().clone()),
+        Storage::CodecWriter(w) => StrOwner::into_raw(w.errors.borrow().clone()),
         _ => unreachable!(),
     })
 }
@@ -215,7 +216,7 @@ pub unsafe extern "C" fn imre_codec_writer_errors(writer: *const Object) -> *con
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_codec_writer_set_errors(text: *const Str, owner: *const Object) {
     // SAFETY: acquire the RHS before replacing the receiver's previous value.
-    let (text, owner) = unsafe { (acquire_rc(text as usize), object(owner)) };
+    let (text, owner) = unsafe { (StrOwner::acquire_word(text as usize), object(owner)) };
     inspect(owner, |s| match s {
         Storage::CodecWriter(w) => *w.errors.borrow_mut() = text,
         _ => unreachable!(),

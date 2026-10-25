@@ -114,6 +114,20 @@ impl ForwardingInitializer {
                     if field.value.as_name_expr()?.id != receiver || !is_parameter(input) {
                         return None;
                     }
+                    // These assignments invoke inherited data descriptors, even inside __init__.
+                    if matches!(
+                        field.attr.as_str(),
+                        "args"
+                            | "__cause__"
+                            | "__context__"
+                            | "__traceback__"
+                            | "__suppress_context__"
+                            | "__dict__"
+                            | "__class__"
+                            | "__weakref__"
+                    ) {
+                        return None;
+                    }
                     stores.push((field.attr.to_string(), input.to_owned()));
                 }
                 ast::Stmt::Expr(e) => {

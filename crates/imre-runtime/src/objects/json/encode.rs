@@ -1,5 +1,6 @@
 //! Writes typed storage directly, without constructing a dynamic JSON tree.
 
+use crate::StrOwner;
 use num_traits::ToPrimitive;
 use std::cmp::Ordering;
 
@@ -14,7 +15,41 @@ const PATH: u32 = 14;
 const JSON_VIEW: u32 = 15;
 const DOCUMENT: u32 = 16;
 
-type Separator<'a, T> = Result<T, &'a str>;
+#[derive(Clone, Copy)]
+struct InvalidSeparator<'a> {
+    kind: u32,
+    name: &'a str,
+}
+
+impl InvalidSeparator<'_> {
+    fn concatenate(self) -> Error {
+        let message = match self.kind {
+            LIST => "can only concatenate list (not \"str\") to list".to_owned(),
+            TUPLE => "can only concatenate tuple (not \"str\") to tuple".to_owned(),
+            BYTES => "can't concat str to bytes".to_owned(),
+            _ => {
+                let name = &self.name[..self.name.floor_char_boundary(100)];
+                format!("unsupported operand type(s) for +: '{name}' and 'str'")
+            }
+        };
+        Error::new(Kind::TypeError, message)
+    }
+
+    fn argument_name(&self) -> &str {
+        if self.kind == NONE { "None" } else { self.name }
+    }
+
+    fn write(self) -> Error {
+        let name = self.argument_name();
+        let name = &name[..name.floor_char_boundary(50)];
+        Error::new(
+            Kind::TypeError,
+            format!("write() argument must be str, not {name}"),
+        )
+    }
+}
+
+type Separator<'a, T> = Result<T, InvalidSeparator<'a>>;
 type Separators<'a, T> = (Separator<'a, T>, Separator<'a, T>);
 
 #[derive(Clone, Copy)]
@@ -27,7 +62,7 @@ enum Indent<'a> {
 struct StandardOptions<'a> {
     allow_nan: bool,
     sort_keys: bool,
-    separators: Option<Separators<'a, Rc<Str>>>,
+    separators: Option<Separators<'a, StrOwner>>,
 }
 
 fn length(size: usize) -> Result<(), Error> {
@@ -49,7 +84,7 @@ fn length(size: usize) -> Result<(), Error> {
 unsafe fn separators(
     word: usize,
     schema: &Schema,
-) -> Result<Option<Separators<'_, Rc<Str>>>, Error> {
+) -> Result<Option<Separators<'_, StrOwner>>, Error> {
     fn typename(kind: u32) -> &'static str {
         match kind {
             NONE => "NoneType",
@@ -82,23 +117,32 @@ unsafe fn separators(
         }
         typename(schema.kind)
     }
-    fn part(word: usize, kind: u32) -> Separator<'static, Rc<Str>> {
+    fn part(word: usize, kind: u32) -> Separator<'static, crate::StrOwner> {
         if kind == STRING {
             // SAFETY: the descriptor identifies a string rooted by the container.
-            Ok(unsafe { crate::objects::acquire_rc(word) })
+            Ok(unsafe { StrOwner::acquire_word(word) })
         } else {
-            Err(typename(kind))
+            Err(InvalidSeparator {
+                kind,
+                name: typename(kind),
+            })
         }
     }
-    fn field(word: usize, schema: &Schema) -> Separator<'_, Rc<Str>> {
+    fn field(word: usize, schema: &Schema) -> Separator<'_, crate::StrOwner> {
         if schema.kind == OPTIONAL {
             if word == 0 {
-                return Err("NoneType");
+                return Err(InvalidSeparator {
+                    kind: NONE,
+                    name: "NoneType",
+                });
             }
             return field(word, schema.child());
         }
         if schema.kind == RECORD {
-            Err(name(schema))
+            Err(InvalidSeparator {
+                kind: RECORD,
+                name: name(schema),
+            })
         } else {
             part(word, schema.kind)
         }
@@ -114,10 +158,10 @@ unsafe fn separators(
                 let mut chars = (&*(word as *const Str)).chars();
                 length(chars.clone().count())?;
                 Ok(Some((
-                    Ok(Rc::new(Str::new(
+                    Ok(StrOwner::new(Str::new(
                         chars.next().unwrap().encode_utf8(&mut [0; 4]),
                     ))),
-                    Ok(Rc::new(Str::new(
+                    Ok(StrOwner::new(Str::new(
                         chars.next().unwrap().encode_utf8(&mut [0; 4]),
                     ))),
                 )))
@@ -195,7 +239,7 @@ struct Encoder<'a> {
     sort_keys: bool,
     separators: Option<Separators<'a, &'a str>>,
     /// A compact list combines the separator with a primitive only after rendering it.
-    pending_item_error: Option<&'a str>,
+    pending_item_error: Option<InvalidSeparator<'a>>,
     /// The first-party schema encoder rejects all non-finite numbers.
     allow_nan: Option<bool>,
     stream: Option<&'a mut FileState>,
@@ -227,7 +271,7 @@ fn plain_ascii(bytes: &[u8]) -> bool {
 impl Encoder<'_> {
     fn emit(&mut self) -> Result<(), Error> {
         if let Some(ty) = self.pending_item_error {
-            return Err(Self::separator_error(ty));
+            return Err(ty.concatenate());
         }
         if let Some(stream) = &mut self.stream
             && !self.output.is_empty()
@@ -405,12 +449,13 @@ impl Encoder<'_> {
         Ok(())
     }
 
-    /// Report a non-text separator once a streaming chunk actually needs it.
-    fn separator_error(ty: &str) -> Error {
-        Error::new(
-            Kind::TypeError,
-            format!("JSON separator must be str, not {ty}"),
-        )
+    /// Iterencode yields a separator by itself before entering a container
+    /// or calling the default handler. A text stream rejects that chunk.
+    fn emit_prefix(&mut self) -> Result<(), Error> {
+        if let Some(invalid) = self.pending_item_error {
+            return Err(invalid.write());
+        }
+        self.emit()
     }
 
     fn separator(&mut self, index: usize, depth: usize, object: bool) -> Result<(), Error> {
@@ -422,9 +467,9 @@ impl Encoder<'_> {
                 if object && index == 0 {
                     self.emit()?;
                 }
-                return Err(Self::separator_error(ty));
+                return Err(ty.concatenate());
             }
-            Err(ty) if index != 0 && object => return Err(Self::separator_error(ty)),
+            Err(ty) if index != 0 && object => return Err(ty.write()),
             Err(ty) if index != 0 => self.pending_item_error = Some(ty),
             _ => {}
         }
@@ -439,7 +484,7 @@ impl Encoder<'_> {
             Ok(key) => self.append(key),
             Err(ty) => {
                 self.emit()?;
-                Err(Self::separator_error(ty))
+                Err(ty.write())
             }
         }
     }
@@ -533,10 +578,13 @@ impl Encoder<'_> {
         let node = &view.nodes[index];
         match node {
             Node::Null => self.append("null"),
-            Node::Datetime(_) => Err(Error::new(
-                Kind::TypeError,
-                "Object of type datetime is not JSON serializable",
-            )),
+            Node::Datetime(_) => {
+                self.emit_prefix()?;
+                Err(Error::new(
+                    Kind::TypeError,
+                    "Object of type datetime is not JSON serializable",
+                ))
+            }
             Node::Bool(value) => self.append(if *value { "true" } else { "false" }),
             Node::String(text) => self.string(text),
             Node::Integer(value) => self.integer(value),
@@ -547,7 +595,7 @@ impl Encoder<'_> {
                 self.document(v, v.index, depth)
             }
             Node::Array(children) => {
-                self.emit()?;
+                self.emit_prefix()?;
                 self.begin('[', depth)?;
                 let nonempty = if index == view.index
                     && let Some(items) = view.nodes.root_items()
@@ -581,7 +629,7 @@ impl Encoder<'_> {
                 self.end(']', nonempty, depth)
             }
             Node::Object(fields) => {
-                self.emit()?;
+                self.emit_prefix()?;
                 self.begin('{', depth)?;
                 let nonempty = self.ordered(
                     readonly::keys(fields),
@@ -613,7 +661,7 @@ impl Encoder<'_> {
                 NONE | BOOLEAN | INTEGER | FLOAT | STRING | OPTIONAL | JSON_VIEW
             )
         {
-            self.emit()?;
+            self.emit_prefix()?;
         }
         // SAFETY: each branch reads only the schema's exact rooted representation.
         unsafe {
@@ -754,21 +802,21 @@ impl Encoder<'_> {
 ///
 /// # Safety
 /// The caller roots the value described by the schema for this lookup.
-unsafe fn root_string(word: usize, schema: &Schema) -> Option<Rc<Str>> {
+unsafe fn root_string(word: usize, schema: &Schema) -> Option<StrOwner> {
     // SAFETY: the concrete schema identifies the rooted string, optional, or document.
     unsafe {
         match schema.kind {
-            STRING => Some(crate::objects::acquire_rc(word)),
+            STRING => Some(StrOwner::acquire_word(word)),
             OPTIONAL if word != 0 => root_string(word, schema.child()),
             JSON_VIEW | DOCUMENT => object(word as *const Object)
                 .0
                 .with(|storage| match storage {
                     Storage::Json(view) => match &view.nodes[view.index] {
-                        readonly::Node::String(text) => Some(Rc::clone(text)),
+                        readonly::Node::String(text) => Some(StrOwner::clone(text)),
                         _ => None,
                     },
                     Storage::Document(readonly::document::Value::String(text)) => {
-                        Some(Rc::clone(text))
+                        Some(StrOwner::clone(text))
                     }
                     _ => None,
                 }),
@@ -827,7 +875,7 @@ unsafe fn encode(
         .as_ref()
         .and_then(|o| o.separators.as_ref())
         .map(|(item, key)| {
-            fn text<'a>(value: &'a Separator<'_, Rc<Str>>) -> Separator<'a, &'a str> {
+            fn text<'a>(value: &'a Separator<'_, StrOwner>) -> Separator<'a, &'a str> {
                 value.as_ref().map(|s| s.as_str()).map_err(|&ty| ty)
             }
             (text(item), text(key))
@@ -842,7 +890,8 @@ unsafe fn encode(
                 // and decodes the complete diagnostic as UTF-8.
                 let mut message =
                     format!("make_encoder() argument {field} must be str, not ").into_bytes();
-                message.extend_from_slice(&ty.as_bytes()[..ty.len().min(50)]);
+                let name = ty.argument_name();
+                message.extend_from_slice(&name.as_bytes()[..name.len().min(50)]);
                 return Err(match String::from_utf8(message) {
                     Ok(text) => Error::new(Kind::TypeError, text),
                     Err(error) => {
@@ -880,7 +929,7 @@ pub unsafe extern "C" fn imre_json_encode(
     // SAFETY: the compiler supplies the exact rooted schema and indentation.
     let result = unsafe { encode(word, schema, indent, false, ensure_ascii, None, None) };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(Str::from(text)))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(Str::from(text)))),
         std::ptr::null(),
     )
 }
@@ -918,7 +967,7 @@ pub unsafe extern "C" fn imre_json_dumps(
         })
     };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(Str::from(text)))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(Str::from(text)))),
         std::ptr::null(),
     )
 }

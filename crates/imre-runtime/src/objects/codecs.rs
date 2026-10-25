@@ -5,6 +5,7 @@ use super::bytes::{ascii_decode_error, decode_error, owned_input};
 use super::charmaps::Charmap;
 use super::exceptions::Result;
 use super::{Bytes, Error, Kind, Object, Rc, Storage, StorageCell, Str, finish, object};
+use crate::StrOwner;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -19,7 +20,7 @@ static CP1251_ENCODE: LazyLock<HashMap<char, u8>> = LazyLock::new(|| {
 
 thread_local! {
     static REGISTRY: RefCell<HashMap<String, Rc<Object>>> = RefCell::default();
-    static NAMES: [Rc<Str>; 5] = ["ascii", "iso8859-1", "utf-8", "utf-8-sig", "cp1251"].map(|s| Rc::new(Str::new(s)));
+    static NAMES: [StrOwner; 5] = ["ascii", "iso8859-1", "utf-8", "utf-8-sig", "cp1251"].map(|s| StrOwner::new(Str::new(s)));
 }
 
 /// Collapse non-ASCII-alphanumeric separators, retaining dots in codec names.
@@ -92,7 +93,7 @@ unsafe fn codec(info: *const Object) -> Codec {
 pub unsafe extern "C" fn imre_codec_name(info: *const Object) -> *const Str {
     // SAFETY: the codec info was returned by the registry.
     let index = unsafe { codec(info) }.index();
-    NAMES.with(|names| Rc::into_raw(names[index].clone()))
+    NAMES.with(|names| StrOwner::into_raw(names[index].clone()))
 }
 
 /// # Safety
@@ -104,8 +105,11 @@ pub unsafe extern "C" fn imre_codec_encode(
     errors: *const Str,
 ) -> *const Bytes {
     // SAFETY: the typed operands stay live until conversion is complete.
-    let result =
-        unsafe { codec(info).encode(&*text, Some(&*errors), || super::acquire_rc(text as usize)) };
+    let result = unsafe {
+        codec(info).encode(&*text, Some(&*errors), || {
+            Ok(StrOwner::acquire_word(text as usize))
+        })
+    };
     finish(
         result.map(|b| Rc::into_raw(Rc::new(b.into_owned()))),
         std::ptr::null(),
@@ -123,7 +127,11 @@ pub unsafe extern "C" fn imre_codec_decode(
     // SAFETY: the generated call retains all three operands.
     let result = unsafe { codec(info).decode(&*bytes, Some(&*errors)) };
     finish(
-        result.map(|s| Rc::into_raw(Rc::new(s.into()))),
+        result.and_then(|s| {
+            StrOwner::try_new(s.into())
+                .map(StrOwner::into_raw)
+                .map_err(|_| Error::allocation())
+        }),
         std::ptr::null(),
     )
 }
@@ -265,7 +273,7 @@ impl Codec {
         self,
         text: &'a str,
         errors: Option<&str>,
-        error_input: impl FnOnce() -> Rc<Str>,
+        error_input: impl FnOnce() -> Result<StrOwner>,
     ) -> Result<Cow<'a, [u8]>> {
         let (codec, reason) = match self {
             Self::Utf8 { signature: false } => return Ok(Cow::Borrowed(text.as_bytes())),
@@ -326,7 +334,7 @@ impl Codec {
                     };
                     return Err(Error::unicode_encode(
                         codec,
-                        error_input(),
+                        error_input()?,
                         start..end + 1,
                         reason,
                         format!("'{codec}' codec can't encode {at}: {reason}"),
@@ -403,16 +411,18 @@ mod tests {
     fn strict_registry_errors_retain_text_and_copy_bytes() {
         let name = Str::new("ascii");
         let policy = Str::new("strict");
-        let text = Rc::new(Str::new("xé€"));
+        let text = StrOwner::new(Str::new("xé€"));
         let bytes = Rc::new(vec![b'a', 0xff]);
         // SAFETY: all ABI operands remain live until the returned owners are released.
         unsafe {
             let codec = Rc::from_raw(imre_codec_lookup(&name));
-            assert!(imre_codec_encode(Rc::as_ptr(&codec), Rc::as_ptr(&text), &policy).is_null());
+            assert!(
+                imre_codec_encode(Rc::as_ptr(&codec), StrOwner::as_ptr(&text), &policy).is_null()
+            );
             let error = super::super::exceptions::take_pending().unwrap();
-            assert_eq!(Rc::strong_count(&text), 2);
+            assert_eq!(StrOwner::strong_count(&text), 2);
             drop(error);
-            assert_eq!(Rc::strong_count(&text), 1);
+            assert_eq!(StrOwner::strong_count(&text), 1);
             assert!(imre_codec_decode(Rc::as_ptr(&codec), Rc::as_ptr(&bytes), &policy).is_null());
             let _error = super::super::exceptions::take_pending().unwrap();
             assert_eq!(Rc::strong_count(&bytes), 1);

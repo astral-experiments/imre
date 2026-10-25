@@ -88,6 +88,7 @@ impl FileState {
     pub(in crate::objects) fn memory(data: Rc<Bytes>) -> Rc<Object> {
         Self {
             fd: None,
+            raw: false,
             name: None,
             kind: FileKind::Memory,
             stream: Some(Stream::Memory(Memory { data, position: 0 })),
@@ -98,6 +99,7 @@ impl FileState {
     pub(in crate::objects) fn member(member: Member) -> Rc<Object> {
         Self {
             fd: None,
+            raw: false,
             name: Some(member.name().clone()),
             kind: FileKind::Member,
             stream: Some(Stream::Member(Box::new(member))),

@@ -92,6 +92,7 @@ pub(crate) enum IntrinsicModule {
     Tomli,
     TomliW,
     Shutil,
+    Random,
     Sysconfig,
     Signal,
     Opcode,
@@ -100,6 +101,7 @@ pub(crate) enum IntrinsicModule {
     Shlex,
     Tempfile,
     Subprocess,
+    Selectors,
     Os,
     Posix,
     PosixPath,
@@ -114,8 +116,8 @@ pub(crate) enum IntrinsicModule {
     Textwrap,
     Io,
     Gzip,
-    Socket,
     Codecs,
+    Socket,
     Hashlib,
     Types,
     Base64,
@@ -144,6 +146,7 @@ pub(crate) enum Intrinsic {
     AnnotationFormat(i64),
     Declaration(&'static str),
     BuiltinsLast,
+    BuiltinsAscii,
     SysDisplayHook,
     ArgumentParser,
     ArgparseNamespace,
@@ -225,6 +228,7 @@ pub(crate) enum Intrinsic {
     SysPycachePrefix,
     SysPlatform,
     SysVersionInfo,
+    SysThreadInfo,
     SysVersion,
     SysHexversion,
     SysEncoding(&'static str),
@@ -286,6 +290,7 @@ pub(crate) enum Intrinsic {
     ZipFile,
     ZipInfo,
     BytesIo,
+    IoBase(crate::ir::IoBase),
     StringIo,
     BadZipFile,
     BadGzipFile,
@@ -349,12 +354,16 @@ pub(crate) enum Intrinsic {
     DestInSrc,
     IgnorePatterns,
     ShutilError,
+    RandomChoice,
+    Random(crate::ir::RandomOperation),
     SameFileError,
     SpecialFileError,
     TemporaryDirectory,
     Popen,
     PopenActive,
     PopenCleanup,
+    PopenSelector,
+    SelectorClass(bool),
     SubprocessRun,
     SubprocessCall,
     SubprocessCheckCall,
@@ -416,6 +425,7 @@ impl IntrinsicModule {
             "tomli" => Some(Self::Tomli),
             "tomli_w" => Some(Self::TomliW),
             "shutil" => Some(Self::Shutil),
+            "random" => Some(Self::Random),
             "sysconfig" => Some(Self::Sysconfig),
             "signal" => Some(Self::Signal),
             "_opcode" => Some(Self::Opcode),
@@ -433,6 +443,7 @@ impl IntrinsicModule {
             "shlex" => Some(Self::Shlex),
             "tempfile" => Some(Self::Tempfile),
             "subprocess" => Some(Self::Subprocess),
+            "selectors" => Some(Self::Selectors),
             "os" => Some(Self::Os),
             "posix" if cfg!(unix) => Some(Self::Posix),
             "os.path" | "posixpath" => Some(Self::PosixPath),
@@ -451,8 +462,8 @@ impl IntrinsicModule {
             "io" => Some(Self::Io),
             "gzip" => Some(Self::Gzip),
             "types" => Some(Self::Types),
-            "socket" => Some(Self::Socket),
             "codecs" => Some(Self::Codecs),
+            "socket" => Some(Self::Socket),
             "hashlib" => Some(Self::Hashlib),
             "base64" => Some(Self::Base64),
             "zipfile" => Some(Self::Zipfile),
@@ -640,6 +651,7 @@ impl IntrinsicModule {
             (Self::Sys, "pycache_prefix") => Intrinsic::SysPycachePrefix,
             (Self::Sys, "dont_write_bytecode") => Intrinsic::SysDontWriteBytecode,
             (Self::Sys, "version_info") => Intrinsic::SysVersionInfo,
+            (Self::Sys, "thread_info") => Intrinsic::SysThreadInfo,
             (Self::Sys, "version") => Intrinsic::SysVersion,
             (Self::Sys, "hexversion") => Intrinsic::SysHexversion,
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
@@ -660,6 +672,7 @@ impl IntrinsicModule {
                 Intrinsic::RawDescriptionHelpFormatter
             }
             (Self::Builtins, "_") => Intrinsic::BuiltinsLast,
+            (Self::Builtins, "ascii") => Intrinsic::BuiltinsAscii,
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Sys, "orig_argv") => Intrinsic::OrigArgv,
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
@@ -716,6 +729,13 @@ impl IntrinsicModule {
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
             (Self::Types, "ModuleType") => Intrinsic::ModuleType,
             (Self::Types, "SimpleNamespace") => Intrinsic::SimpleNamespace,
+            (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
+            (Self::Codecs, "lookup") => Intrinsic::CodecLookup,
+            (Self::Codecs, "BOM_UTF8") => Intrinsic::CodecBom(b"\xef\xbb\xbf"),
+            (Self::Codecs, "BOM_UTF16_LE") => Intrinsic::CodecBom(b"\xff\xfe"),
+            (Self::Codecs, "BOM_UTF16_BE") => Intrinsic::CodecBom(b"\xfe\xff"),
+            (Self::Codecs, "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
+            (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
             (Self::Socket, "socket") => Intrinsic::Socket,
             (Self::Socket, "gaierror") => Intrinsic::GaiError,
             (Self::Socket, name) => Intrinsic::SocketConstant(match name {
@@ -733,14 +753,7 @@ impl IntrinsicModule {
 
                 _ => return None,
             }),
-            (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
-            (Self::Codecs, "lookup") => Intrinsic::CodecLookup,
             (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
-            (Self::Codecs, "BOM_UTF8") => Intrinsic::CodecBom(b"\xef\xbb\xbf"),
-            (Self::Codecs, "BOM_UTF16_LE") => Intrinsic::CodecBom(b"\xff\xfe"),
-            (Self::Codecs, "BOM_UTF16_BE") => Intrinsic::CodecBom(b"\xfe\xff"),
-            (Self::Codecs, "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
-            (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
             (Self::Base64, "urlsafe_b64encode") => Intrinsic::UrlsafeB64encode,
             (Self::Hashlib, "new") => Intrinsic::HashNew,
@@ -748,6 +761,10 @@ impl IntrinsicModule {
             (Self::Zipfile, "ZipFile") => Intrinsic::ZipFile,
             (Self::Zipfile, "ZipInfo") => Intrinsic::ZipInfo,
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
+            (Self::Io, "IOBase") => Intrinsic::IoBase(crate::ir::IoBase::Any),
+            (Self::Io, "RawIOBase") => Intrinsic::IoBase(crate::ir::IoBase::Raw),
+            (Self::Io, "BufferedIOBase") => Intrinsic::IoBase(crate::ir::IoBase::Buffered),
+            (Self::Io, "TextIOBase") => Intrinsic::IoBase(crate::ir::IoBase::Text),
             (Self::Io, "StringIO") => Intrinsic::StringIo,
             (Self::Zipfile, "BadZipFile") => Intrinsic::BadZipFile,
             (Self::Csv, "reader") => Intrinsic::CsvReader,
@@ -807,6 +824,12 @@ impl IntrinsicModule {
             (Self::Pathlib, "PureWindowsPath") => {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
+            (Self::Random, "choice") => Intrinsic::RandomChoice,
+            (Self::Random, "seed") => Intrinsic::Random(crate::ir::RandomOperation::Seed),
+            (Self::Random, "random") => Intrinsic::Random(crate::ir::RandomOperation::Float),
+            (Self::Random, "getrandbits") => Intrinsic::Random(crate::ir::RandomOperation::Bits),
+            (Self::Random, "randint") => Intrinsic::Random(crate::ir::RandomOperation::Randint),
+            (Self::Random, "randrange") => Intrinsic::Random(crate::ir::RandomOperation::Randrange),
             (Self::Shutil, "rmtree") => Intrinsic::RmTree,
             (Self::Shutil, "copytree") => Intrinsic::CopyTree,
             (Self::Shutil, "move") => Intrinsic::Move,
@@ -827,6 +850,9 @@ impl IntrinsicModule {
             (Self::Subprocess, "Popen") => Intrinsic::Popen,
             (Self::Subprocess, "_active") => Intrinsic::PopenActive,
             (Self::Subprocess, "_cleanup") => Intrinsic::PopenCleanup,
+            (Self::Subprocess, "_PopenSelector") => Intrinsic::PopenSelector,
+            (Self::Selectors, "SelectSelector") => Intrinsic::SelectorClass(true),
+            (Self::Selectors, "PollSelector") => Intrinsic::SelectorClass(false),
             (Self::Subprocess, "run") => Intrinsic::SubprocessRun,
             (Self::Subprocess, "call") => Intrinsic::SubprocessCall,
             (Self::Subprocess, "check_call") => Intrinsic::SubprocessCheckCall,
@@ -1087,6 +1113,12 @@ impl SourceGraph {
     pub(crate) fn checked_optional_lock_context(&self, module: ModuleId, expr: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::OptionalLockContext(expr));
+    }
+
+    /// This operand is evaluated by a tuple display that raises a native TypeError.
+    pub(crate) fn checked_non_iterable_spread(&self, module: ModuleId, value: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::NonIterableSpread(value));
     }
 
     pub(crate) fn checked_keywords(

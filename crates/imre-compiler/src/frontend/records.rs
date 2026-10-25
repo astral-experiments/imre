@@ -845,31 +845,66 @@ impl Checker<'_> {
         }
     }
 
-    /// Fixed record types resolve `__str__` to an ordinary native method call.
-    /// Records without an override use their existing Python representation.
     pub(super) fn record_text(&mut self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
+        self.record_display(value, at, "__str__")
+    }
+
+    pub(super) fn record_repr(&mut self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
+        self.record_display(value, at, "__repr__")
+    }
+
+    fn record_display(
+        &mut self,
+        value: Expr,
+        at: &impl Ranged,
+        method: &'static str,
+    ) -> Result<Expr, String> {
         if let Type::Class(class) = value.ty
             && self.classes.has_concrete_subclasses(class)
         {
             return self.dispatch_record(class, value, at, |checker, _, receiver| {
-                checker.direct_record_text(receiver, at)
+                checker.direct_record_display(receiver, at, method)
             });
         }
-        self.direct_record_text(value, at)
+        self.direct_record_display(value, at, method)
     }
 
-    fn direct_record_text(&mut self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
-        let kind = if let Type::Class(class) = value.ty
-            && let Some(method) = self.classes.methods[class].get("__str__")
-        {
-            self.calls.insert(method.id);
-            ExprKind::Call(method.id, ir::CallArgs::positional(vec![value]))
+    fn direct_record_display(
+        &mut self,
+        value: Expr,
+        at: &impl Ranged,
+        method_name: &str,
+    ) -> Result<Expr, String> {
+        let method = if let Type::Class(id) = value.ty {
+            let methods = &self.classes.methods[id];
+            if method_name == "__str__"
+                && let Some(method) = methods.get("__str__")
+            {
+                Some(method.id)
+            } else if self.classes.has_repr_override(id) {
+                let method = methods.get("__repr__").ok_or_else(|| {
+                    error(
+                        self.source,
+                        at,
+                        "this representation requires a reachable __repr__ implementation",
+                    )
+                })?;
+                Some(method.id)
+            } else {
+                None
+            }
         } else {
-            if !dataclass_values::can_format(value.ty, self.types, self.classes) {
+            None
+        };
+        let kind = if let Some(id) = method {
+            self.calls.insert(id);
+            ExprKind::Call(id, ir::CallArgs::positional(vec![value]))
+        } else {
+            if !dataclass_values::can_format_concrete(value.ty, self.types, self.classes) {
                 return Err(error(
                     self.source,
                     at,
-                    "generated repr cannot format resource or callable fields",
+                    "generated repr cannot format resource, callable, or custom-repr fields",
                 ));
             }
             ExprKind::Builtin(Builtin::Repr, vec![value])
