@@ -4,7 +4,6 @@ import argparse
 from contextlib import chdir
 import json
 from pathlib import Path
-import re
 import subprocess
 import sys
 import tempfile
@@ -23,7 +22,13 @@ import sys
 try:
     print(os.lseek(int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])))
 except OSError as error:
-    print("OSError: " + str(error))
+    number = error.errno
+    reason = error.strerror
+    if number is None or reason is None:
+        raise AssertionError("kernel seek error has no errno or strerror")
+    print("error")
+    print(number)
+    print(reason)
 '''
 
 
@@ -54,10 +59,11 @@ def main():
                                        text=True, check=True, timeout=30)
                     if p.stderr:
                         raise AssertionError(p.stderr)
-                    if error := re.fullmatch(r"OSError: \[Errno (\d+)\] (.+)\n", p.stdout):
-                        number = int(error[1])
+                    if p.stdout.startswith("error\n"):
+                        _, code, reason = p.stdout.splitlines()
+                        number = int(code)
                         calls.append({"position": pos, "whence": whence, "errno": number})
-                        raise OSError(number, error[2])
+                        raise OSError(number, reason)
                     offset = int(p.stdout)
                     calls.append({"position": pos, "whence": whence, "result": offset})
                     return offset
