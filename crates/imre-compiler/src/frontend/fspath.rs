@@ -53,11 +53,16 @@ impl Checker<'_> {
             }
         };
         let value = self.expr(path)?;
-        let result = self.fspath_protocol(value, path, None, None)?;
+        let result = self.fspath(value, path)?;
         // The stubs omit invalid descriptors. The native operation above checks
         // their binding and return type, so its own outer overload is accounted for.
         self.graph.checked_overload(self.module, call.range());
         Ok(result)
+    }
+
+    /// Resolve one path-like value, preserving its return type and any user exception.
+    pub(super) fn fspath(&mut self, value: Expr, at: &ast::Expr) -> Result<Expr, String> {
+        self.fspath_protocol(value, at, None, None)
     }
 
     /// OS path converters name the operation and parameter if the protocol is missing.
