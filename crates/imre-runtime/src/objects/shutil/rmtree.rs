@@ -12,11 +12,13 @@ use std::rc::Rc;
 
 use super::super::exceptions::{Error, Filename, Kind, replace_pending, swap_active, take_pending};
 use super::super::files::{close_file, errno_with_filenames};
-use super::super::tempdirs::scan_entries;
+use super::super::tempdirs::scan_names;
 use super::super::{Object, Str, acquire_rc, paths};
 use super::Int;
 use num_traits::ToPrimitive;
-use rustix::fs::{AtFlags, CWD, Dir, Mode, OFlags, fstat, openat, statat, unlinkat};
+use rustix::fs::{
+    AtFlags, CWD, Dir, FileType, Mode, OFlags, Stat, fstat, openat, statat, unlinkat,
+};
 
 fn path_error(filename: Filename, error: io::Error) -> Error {
     errno_with_filenames(error, Some(filename), None)
@@ -50,8 +52,13 @@ struct Entry {
     root: bool,
 }
 
+/// The two stat fields used by os.path.samestat on the held descriptor.
+fn identity(stat: &Stat) -> (rustix::fs::Dev, u64) {
+    (stat.st_dev, stat.st_ino)
+}
+
 enum Step {
-    Visit(Entry),
+    Visit(Entry, Option<(rustix::fs::Dev, u64)>),
     Close(Rc<OwnedFd>, PathBuf),
     Rmdir(Entry),
 }
@@ -109,8 +116,8 @@ where
     }
 
     fn step(&mut self, step: Step) -> std::result::Result<(), E> {
-        let entry = match step {
-            Step::Visit(entry) => entry,
+        let (entry, cached_identity) = match step {
+            Step::Visit(entry, cached_identity) => (entry, cached_identity),
             Step::Close(fd, path) => return self.close(fd, &path),
             Step::Rmdir(entry) => {
                 return match unlinkat(
@@ -124,7 +131,13 @@ where
             }
         };
         let parent = parent_fd(&entry.parent);
-        let original = match statat(parent, entry.name.as_c_str(), AtFlags::SYMLINK_NOFOLLOW) {
+        let original = match cached_identity.map_or_else(
+            || {
+                statat(parent, entry.name.as_c_str(), AtFlags::SYMLINK_NOFOLLOW)
+                    .map(|st| identity(&st))
+            },
+            Ok,
+        ) {
             Ok(st) => st,
             Err(e) => return self.io_error(Operation::Lstat, &entry.path, e.into(), !entry.root),
         };
@@ -141,9 +154,7 @@ where
         let path = entry.path.clone();
         let root = entry.root;
         let checked = fstat(&*fd);
-        let same = checked
-            .as_ref()
-            .is_ok_and(|st| st.st_dev == original.st_dev && st.st_ino == original.st_ino);
+        let same = checked.as_ref().is_ok_and(|st| identity(st) == original);
         if same {
             self.stack.push(Step::Rmdir(entry));
         }
@@ -163,22 +174,34 @@ where
         let entries = fd
             .try_clone()
             .and_then(|scan| Ok(Dir::new(scan)?))
-            .and_then(|scan| scan_entries(&fd, scan));
+            .and_then(|scan| scan_names(scan).collect::<io::Result<Vec<_>>>());
         let entries = match entries {
             Ok(entries) => entries,
             Err(e) => return self.io_error(Operation::ScanDir, &path, e, !root),
         };
-        for entry in entries {
-            let basename = Path::new(OsStr::from_bytes(entry.name.to_bytes()));
+        for (name, kind) in entries {
+            let basename = Path::new(OsStr::from_bytes(name.to_bytes()));
             let full = path.join(basename);
-            if entry.directory {
-                self.stack.push(Step::Visit(Entry {
-                    parent: Some(Rc::clone(&fd)),
-                    name: entry.name,
-                    path: full,
-                    root: false,
-                }));
-            } else if let Err(e) = unlinkat(&*fd, entry.name.as_c_str(), AtFlags::empty()) {
+            // DirEntry.is_dir() caches its stat when the directory omits d_type.
+            let cached_identity = if kind == FileType::Unknown {
+                statat(&*fd, name.as_c_str(), AtFlags::SYMLINK_NOFOLLOW)
+                    .ok()
+                    .filter(|st| FileType::from_raw_mode(st.st_mode) == FileType::Directory)
+                    .map(|st| identity(&st))
+            } else {
+                None
+            };
+            if kind == FileType::Directory || cached_identity.is_some() {
+                self.stack.push(Step::Visit(
+                    Entry {
+                        parent: Some(Rc::clone(&fd)),
+                        name,
+                        path: full,
+                        root: false,
+                    },
+                    cached_identity,
+                ));
+            } else if let Err(e) = unlinkat(&*fd, name.as_c_str(), AtFlags::empty()) {
                 if e == rustix::io::Errno::NOENT {
                     continue;
                 }
@@ -259,7 +282,7 @@ fn remove_with<E: From<Error>>(
         path: path.to_owned(),
         root: true,
     };
-    walk.stack.push(Step::Visit(root));
+    walk.stack.push(Step::Visit(root, None));
     walk.run()
 }
 

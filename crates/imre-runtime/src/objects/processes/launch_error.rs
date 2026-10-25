@@ -145,6 +145,11 @@ pub(super) unsafe fn spawn(
     if oversized_fd {
         return Err(c_int_overflow());
     }
+    let streams = if attributes.keep.is_empty() {
+        streams
+    } else {
+        streams & !(1 << 17) // pass_fds closes all other inherited descriptors
+    };
     launch
         .spawn_tagged(cwd.as_ref(), streams, fds, attributes)
         .map_err(|err| {

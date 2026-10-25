@@ -59,33 +59,42 @@ impl Builtin {
         match self {
             Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
             Self::Str
-                if args
-                    .first()
-                    .is_some_and(|e| matches!(e.ty, Type::Exception | Type::NamedException(_))) =>
+                if args.first().is_some_and(|e| {
+                    matches!(
+                        e.ty,
+                        Type::Exception | Type::NamedException(_) | Type::ObjectValue
+                    )
+                }) =>
             {
                 Contract::new(true, Unknown)
-            }
-            Self::Str if args.first().is_some_and(|e| e.ty == Type::ObjectValue) => {
-                Contract::new(true, PreservesOwners)
             }
             Self::Linecache(..) => Contract::new(true, Unknown),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
             | Self::ImportErrorField(_)
+            | Self::ExceptionArgs
             | Self::ExceptionFieldLen
-            | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
+            | Self::ExceptionFieldIndex
+            | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
             Self::MappingObjectGet => Contract::new(true, PreservesOwners),
-            Self::BoxValue | Self::ExceptionTupleView => Contract::new(false, PreservesOwners),
-            Self::ExceptionFieldRepr => Contract::new(true, PreservesOwners),
-            Self::ExceptionRepr
+            Self::BoxValue
+            | Self::ExceptionTupleView
+            | Self::ObjectRecordProject(_)
+            | Self::ObjectRecordIdentity { .. }
+            | Self::ExceptionTupleIdentity
+            | Self::ExceptionKeywordSuggestion
+            | Self::ExceptionRecordFields => Contract::new(false, PreservesOwners),
+            // Formatting a projected task-group member may call its own __repr__.
+            Self::ExceptionFieldRepr
+            | Self::ExceptionRepr
             | Self::ExceptionMessage
             | Self::Logging(crate::ir::LogOperation::PrintActiveException) => {
                 Contract::new(true, Unknown)
             }
-            Self::ExceptionArgument(_) | Self::NamedException { .. } => {
-                Contract::new(false, PreservesLists)
-            }
+            Self::SystemExitFromTuple
+            | Self::ExceptionArgument(_)
+            | Self::NamedException { .. } => Contract::new(false, PreservesLists),
             // Even a zero-argument call may mutate a retained native list or reenter Python.
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
@@ -100,8 +109,7 @@ impl Builtin {
                     | TextOperation::Unquote
                     | TextOperation::ShlexSplit
                     | TextOperation::ShlexQuote => true,
-                    TextOperation::IsSpace
-                    | TextOperation::IsUpper
+                    TextOperation::Predicate(_)
                     | TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
@@ -200,7 +208,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::TimeSleep
-            | Self::PercentScalar
+            | Self::PercentFormat
             | Self::WarningFilter { .. }
             | Self::WarningReset => Contract::new(true, PreservesLists),
             Self::Formatter(_) => Contract::new(true, PreservesLists),
@@ -276,6 +284,7 @@ impl Builtin {
                 | ProcessOperation::CredentialId { .. }
                 | ProcessOperation::OsErrorField(_)
                 | ProcessOperation::Strerror
+                | ProcessOperation::QuoteCommandArgument
                 | ProcessOperation::Which
                 | ProcessOperation::RmTree
                 | ProcessOperation::CopyTree(_)
@@ -322,6 +331,7 @@ impl Builtin {
             | Self::SetAdd
             | Self::SetDiscard
             | Self::CounterUpdate
+            | Self::DictUpdate
             | Self::KeySet
             | Self::KeyUnion
             | Self::KeyIntersection
@@ -330,6 +340,8 @@ impl Builtin {
             | Self::RegexFindIter
             | Self::Errno(_)
             | Self::DictGet
+            | Self::ModuleParentPrefix
+            | Self::ModuleCacheFromOrigin
             | Self::NamespaceWrap
             | Self::NamespaceDict
             | Self::NamespaceGet
@@ -357,6 +369,7 @@ impl Builtin {
             | Self::JsonIter
             | Self::JsonLen
             | Self::JsonSelect(_)
+            | Self::TupleGet
             | Self::ListGet
             | Self::ListGetBounded { .. }
             | Self::CacheProbe(_)
@@ -442,6 +455,7 @@ impl Builtin {
             | Self::StrEnumValue
             | Self::EnumString
             | Self::StringListContains
+            | Self::StructListContains
             | Self::StringContains
             | Self::BytesContains
             | Self::UnionInject
@@ -458,11 +472,13 @@ impl Builtin {
             | Self::BytesValidateUtf8
             | Self::BytesContainsInt
             | Self::DequeNew
+            | Self::DequeReset
             | Self::DequeCopy
             | Self::DequeExtendSource
             | Self::NamespaceDelete
             | Self::DictDelete
             | Self::DictPop
+            | Self::DictSetDefault
             | Self::DictTryPop(_)
             | Self::DictGatherBytesInt
             | Self::DictGatherStrInt
@@ -505,6 +521,7 @@ impl Builtin {
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
+            | Self::ExceptionFieldIdentity { .. }
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::OsName
@@ -586,6 +603,9 @@ impl Builtin {
         };
         let valid = match self {
             Self::RecordCopy => matches!(result, Type::Class(_)) && signature(&[result], result),
+            Self::TupleGet => {
+                matches!(args, [tuple, index] if index.ty == Type::Int && types.homogeneous_tuple_element(tuple.ty) == Some(result))
+            }
             Self::ListGetI32 => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::ListGetBounded { min, max } | Self::ListGetBoundedInBounds { min, max } => {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
@@ -834,6 +854,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_time_sleep"
                 | "imre_str_percent_int"
                 | "imre_str_percent_text"
+                | "imre_str_percent_tuple"
                 | "imre_formatter_format"
                 | "imre_formatter_time"
                 | "imre_formatter_message"
@@ -863,6 +884,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_concat"
                 | "imre_bytes_repeat"
                 | "imre_counter_update"
+                | "imre_dict_update"
                 | "imre_key_union"
                 | "imre_key_intersection"
                 | "imre_key_difference"
@@ -876,6 +898,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_system_exit_code_equal"
                 | "imre_system_exit_code_text"
                 | "imre_exception_field_index"
+                | "imre_exception_formatter_result"
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
                 | "imre_bytes_decode_ascii"
@@ -970,6 +993,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_expandtabs"
                 | "imre_str_lower"
                 | "imre_str_capitalize"
+                | "imre_module_cache_from_origin"
                 | "imre_str_slice"
                 | "imre_str_int_list"
                 | "imre_seq_get"
@@ -977,6 +1001,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_seq_get_index"
                 | "imre_seq_set_index"
                 | "imre_deque_new"
+                | "imre_deque_reset"
                 | "imre_deque_append"
                 | "imre_deque_copy"
                 | "imre_deque_extend_source"

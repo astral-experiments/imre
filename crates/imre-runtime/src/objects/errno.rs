@@ -375,7 +375,30 @@ pub(super) fn with_nonscalar_member<T>(owner: &Object, f: impl FnOnce(&Member) -
     }
 }
 impl Member {
-    fn type_name(&self) -> &'static str {
+    /// Compare two rooted dynamic module members at the top level or inside a tuple.
+    pub(super) fn equal_member(&self, other: &Self) -> bool {
+        if let (Some(a), Some(b)) = (self.scalar(), other.scalar()) {
+            return scalar_equal(a, b);
+        }
+        match (self, other) {
+            // SAFETY: both dictionary members remain rooted through value comparison.
+            (Member::Dictionary(a), Member::Dictionary(b)) => unsafe {
+                values::equal(
+                    Rc::as_ptr(a) as usize,
+                    Rc::as_ptr(b) as usize,
+                    WordKind::new(5),
+                )
+            },
+            (Member::Loader, Member::Loader)
+            | (Member::Spec, Member::Spec)
+            | (Member::Class, Member::Class) => true,
+            (Member::Bound(a, x), Member::Bound(b, y)) => a == b && x == y,
+            (Member::Namespace(a), Member::Namespace(b)) => Rc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+
+    pub(super) fn type_name(&self) -> &'static str {
         match self {
             Self::Dictionary(_) | Self::Namespace(_) => "dict",
             Self::Loader | Self::Class => "type",
@@ -568,27 +591,7 @@ pub unsafe extern "C" fn imre_errno_member_equal(
 ) -> u32 {
     let a = with_member(left, Clone::clone);
     let eq = if kind == 16 {
-        with_member(word as *const Object, |b| {
-            if let (Some(a), Some(b)) = (a.scalar(), b.scalar()) {
-                return scalar_equal(a, b);
-            }
-            match (&a, b) {
-                // SAFETY: both dictionary members remain rooted through value comparison.
-                (Member::Dictionary(a), Member::Dictionary(b)) => unsafe {
-                    values::equal(
-                        Rc::as_ptr(a) as usize,
-                        Rc::as_ptr(b) as usize,
-                        WordKind::new(5),
-                    )
-                },
-                (Member::Loader, Member::Loader)
-                | (Member::Spec, Member::Spec)
-                | (Member::Class, Member::Class) => true,
-                (Member::Bound(a, x), Member::Bound(b, y)) => a == b && x == y,
-                (Member::Namespace(a), Member::Namespace(b)) => Rc::ptr_eq(a, b),
-                _ => false,
-            }
-        })
+        with_member(word as *const Object, |b| a.equal_member(b))
     } else if kind == 5 {
         // SAFETY: the compiler supplies a live dict[int,str], and the member owns its dictionary.
         matches!(&a, Member::Dictionary(d) if unsafe { values::equal(Rc::as_ptr(d) as usize,word,WordKind::new(5)) })

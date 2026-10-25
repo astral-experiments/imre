@@ -1,7 +1,8 @@
 //! Static collections.namedtuple declarations specialize ordinary immutable tuple layouts.
 
 use super::*;
-use crate::types::NamedTuple;
+use crate::types::{CACHE_INFO, NamedTuple, TupleOrigin};
+use std::rc::Rc;
 
 pub(super) fn collect(graph: &SourceGraph, types: &Types) -> Result<(), String> {
     for (module_id, module) in graph.modules.iter().enumerate() {
@@ -84,6 +85,19 @@ pub(super) fn annotation(
 }
 
 impl Checker<'_> {
+    /// Resolve the same declaration for a namedtuple constructor and its class attributes.
+    pub(super) fn namedtuple_factory(
+        &self,
+        expr: &ast::Expr,
+    ) -> Option<(TupleOrigin, Rc<NamedTuple>)> {
+        let origin = match self.resolve(expr)? {
+            Binding::Definition(id) => TupleOrigin::Declaration(id),
+            Binding::Intrinsic(Intrinsic::CacheInfo) => CACHE_INFO,
+            _ => return None,
+        };
+        Some((origin, self.types.namedtuple_metadata(origin)?))
+    }
+
     /// Read immutable attributes from a static namedtuple factory.
     pub(super) fn namedtuple_class_attribute(
         &self,
@@ -113,7 +127,10 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         if attribute.attr.as_str() == "__match_args__"
             || (attribute.attr.as_str() == "_fields"
-                && self.types.namedtuple_definition(receiver.ty).is_some())
+                && !matches!(
+                    self.types.tuple_origin(receiver.ty),
+                    Some(TupleOrigin::StructSequence(..))
+                ))
         {
             let fields = self.namedtuple_fields(declaration);
             return Ok(Expr {
@@ -153,7 +170,7 @@ impl Checker<'_> {
 
     pub(super) fn namedtuple_call(
         &mut self,
-        definition: DefinitionId,
+        origin: TupleOrigin,
         declaration: &NamedTuple,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
@@ -200,7 +217,7 @@ impl Checker<'_> {
             .ok_or_else(|| error(self.source, call, "missing namedtuple field argument"))?;
         let ty = self
             .types
-            .namedtuple_layout(definition, fields.iter().map(|field| field.ty).collect());
+            .namedtuple_layout(origin, fields.iter().map(|field| field.ty).collect());
         Ok(scope.finish(Expr {
             ty,
             kind: ExprKind::Tuple(fields),

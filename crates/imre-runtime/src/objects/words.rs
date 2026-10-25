@@ -22,6 +22,7 @@ pub(super) struct WordKind(u16);
 impl WordKind {
     // Private to Words. A deferred list stores a plan instead of element words.
     const DEFERRED: Self = Self(u16::MAX);
+    const STRUCT_ROWS: Self = Self(u16::MAX - 1);
 
     pub(super) fn new(kind: u32) -> Self {
         if kind & !NULLABLE > 12 {
@@ -234,6 +235,28 @@ impl Words {
         words
     }
 
+    pub(super) fn from_rows(rows: super::structs::Rows) -> Self {
+        let mut words = Self::new(6);
+        words.kind = WordKind::STRUCT_ROWS;
+        words.values.push(Box::into_raw(Box::new(rows)) as usize);
+        words.update_header();
+        words
+    }
+
+    pub(super) fn rows(&self) -> Option<&super::structs::Rows> {
+        (self.kind == WordKind::STRUCT_ROWS).then(|| {
+            // SAFETY: only from_rows installs this sentinel and owned box.
+            unsafe { &*(self.values[0] as *const super::structs::Rows) }
+        })
+    }
+
+    pub(super) fn rows_mut(&mut self) -> Option<&mut super::structs::Rows> {
+        (self.kind == WordKind::STRUCT_ROWS).then(|| {
+            // SAFETY: the unique Words borrow exclusively owns this box.
+            unsafe { &mut *(self.values[0] as *mut super::structs::Rows) }
+        })
+    }
+
     pub(super) fn plan(&self) -> Option<&Deferred> {
         if self.kind == WordKind::DEFERRED {
             debug_assert_eq!(self.header, u32::MAX);
@@ -246,13 +269,18 @@ impl Words {
     }
 
     pub(super) fn resolved(&self) -> &Self {
+        if let Some(rows) = self.rows() {
+            return rows.boxed();
+        }
         self.plan().map_or(self, Deferred::ordered)
     }
 
     /// A mutating alias gets its own ordinary buffer. Copies share only the
     /// immutable snapshot and retain independent list identities and contents.
     pub(super) fn resolve_mut(&mut self) {
-        if let Some(plan) = self.plan() {
+        if let Some(rows) = self.rows_mut() {
+            *self = rows.take_boxed();
+        } else if let Some(plan) = self.plan() {
             *self = plan.ordered().copy_strings();
         }
     }
@@ -298,11 +326,32 @@ impl Words {
     }
 
     pub(super) fn is_sorting_empty(&self) -> bool {
-        self.header == 0 && !self.values.spilled()
+        self.header == 0 && self.values.is_empty() && !self.values.spilled()
     }
 
     /// Publish a fully initialized buffer after bulk initialization by a decoder or splitter.
+    /// Bulk producers build initialized, owned record words before publication.
+    /// Convert homogeneous struct outputs too, including schema-decoded lists.
+    pub(super) fn pack_structs(&mut self) {
+        if self.kind.raw() != 6 || self.values.is_empty() {
+            return;
+        }
+        // SAFETY: kind six guarantees initialized, rooted native record payloads.
+        let layout = unsafe { records::descriptor(self.values[0] as *const usize) };
+        if !layout.is_value_struct() {
+            return;
+        }
+        let mut rows = super::structs::Rows::new(layout);
+        for &word in &self.values {
+            // SAFETY: all words share the immutable exact class and are rooted by self.
+            rows.append(unsafe { rows.payload(word as *const usize) })
+                .unwrap_or_else(|_| fail("MemoryError", "struct list allocation failed"));
+        }
+        *self = Self::from_rows(rows);
+    }
+
     pub(super) fn into_object(mut self) -> Rc<Object> {
+        self.pack_structs();
         if self.kind != WordKind::DEFERRED {
             self.update_header();
         }
@@ -314,7 +363,11 @@ impl Words {
     /// A saturated header defers to the full-width buffer length in the runtime.
     pub(super) fn update_header(&mut self) {
         debug_assert_ne!(self.kind, WordKind::DEFERRED);
-        self.header = Self::header_for(self.values.len(), !self.values.spilled());
+        self.header = if let Some(rows) = self.rows() {
+            Self::header_for(rows.len(), false)
+        } else {
+            Self::header_for(self.values.len(), !self.values.spilled())
+        };
     }
 
     fn header_for(length: usize, inline: bool) -> u32 {
@@ -426,6 +479,11 @@ fn sequence_layout() -> SequenceLayout {
 
 impl Drop for Words {
     fn drop(&mut self) {
+        if self.kind == WordKind::STRUCT_ROWS {
+            // SAFETY: the sentinel transfers the unique Rows allocation back to Box.
+            drop(unsafe { Box::from_raw(self.values[0] as *mut super::structs::Rows) });
+            return;
+        }
         if self.kind == WordKind::DEFERRED {
             // SAFETY: the deferred header owns exactly this one boxed plan.
             drop(unsafe { Box::from_raw(self.values[0] as *mut Deferred) });

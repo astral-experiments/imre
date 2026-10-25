@@ -49,6 +49,35 @@ pub struct RecordSemantics {
 }
 
 impl RecordDescriptor {
+    /// Class and tuple records share storage but have distinct Python protocols.
+    pub(super) fn class_semantics(&self) -> Option<&RecordSemantics> {
+        // SAFETY: generated semantics are immutable and outlive the descriptor.
+        unsafe { self.semantics.as_ref() }.filter(|s| s.kind == 0)
+    }
+
+    /// Codegen units may own different descriptors for one Python class.
+    pub(super) fn same_class(&self, other: &Self) -> bool {
+        let Some((left, right)) = self.class_semantics().zip(other.class_semantics()) else {
+            return false;
+        };
+        if std::ptr::eq(self, other) {
+            return true;
+        }
+        if left.qualified_name_len == 0 || left.qualified_name_len != right.qualified_name_len {
+            return false;
+        }
+        // SAFETY: generated class descriptors root nonempty immutable UTF-8 identifiers.
+        unsafe {
+            std::slice::from_raw_parts(left.qualified_name, left.qualified_name_len)
+                == std::slice::from_raw_parts(right.qualified_name, right.qualified_name_len)
+        }
+    }
+
+    pub(super) fn is_value_struct(&self) -> bool {
+        // SAFETY: the compiler emits immutable metadata for the lifetime of the program.
+        unsafe { self.semantics.as_ref().is_some_and(|s| s.flags & 8 != 0) }
+    }
+
     /// Only records with a pure TOML hash reserve an extra untraced cache word.
     pub(super) fn has_toml_hash(&self) -> bool {
         // SAFETY: every descriptor used by the runtime owns static metadata or null.
@@ -157,19 +186,8 @@ pub unsafe extern "C" fn imre_record_has_type(
     payload: *const usize,
     expected: *const RecordDescriptor,
 ) -> u32 {
-    // SAFETY: class descriptors and their qualified names outlive the program.
-    unsafe {
-        let actual = descriptor(payload);
-        if std::ptr::eq(actual, expected) {
-            return 1;
-        }
-        let left = &*actual.semantics;
-        let right = &*(*expected).semantics;
-        u32::from(
-            std::slice::from_raw_parts(left.qualified_name, left.qualified_name_len)
-                == std::slice::from_raw_parts(right.qualified_name, right.qualified_name_len),
-        )
-    }
+    // SAFETY: the caller supplies a rooted class and an immutable class descriptor.
+    unsafe { u32::from(descriptor(payload).same_class(&*expected)) }
 }
 
 /// Initializes caller-owned scratch for a tuple used only by a read-only lookup.

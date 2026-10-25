@@ -297,10 +297,8 @@ pub(super) fn decode_utf8_text(bytes: Vec<u8>) -> Result<Str> {
 
 fn decode_text(bytes: Vec<u8>, preserve_newlines: bool) -> Result<Str> {
     let text = String::from_utf8(bytes).map_err(|error| {
-        Error::new(
-            Kind::UnicodeDecodeError,
-            format!("invalid UTF-8 at byte {}", error.utf8_error().valid_up_to()),
-        )
+        let bounds = error.utf8_error();
+        super::bytes::decode_owned_error(Rc::new(error.into_bytes()), bounds)
     })?;
     if preserve_newlines || !text.contains('\r') {
         return Ok(Str::from(text));

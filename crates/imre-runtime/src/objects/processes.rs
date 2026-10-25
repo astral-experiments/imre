@@ -25,6 +25,7 @@ use super::{Bytes, Int, Object, Storage, Str, fail, object};
 mod argv;
 mod asynchronous;
 mod launch_error;
+mod pass_fds;
 mod popen;
 pub(super) use asynchronous::AsyncProcess;
 pub(super) use popen::Popen;
@@ -38,6 +39,7 @@ unsafe extern "C" {
 /// Its sealed string and path elements cannot point back to the exception.
 #[derive(Clone)]
 pub(super) struct ProcessError {
+    positional_streams: bool,
     cmd: OwnedWord,
     returncode: i32,
     stdout: OwnedWord,
@@ -45,6 +47,20 @@ pub(super) struct ProcessError {
 }
 
 impl ProcessError {
+    /// run(check=True) passes output by keyword; CompletedProcess.check_returncode uses positional streams.
+    pub(super) fn arguments(&self) -> smallvec::SmallVec<[OwnedWord; 5]> {
+        let mut fields = smallvec::smallvec![
+            OwnedWord {
+                kind: WordKind::new(2),
+                word: exit_word(self.returncode)
+            },
+            self.cmd.clone()
+        ];
+        if self.positional_streams {
+            fields.extend([self.stdout.clone(), self.stderr.clone()]);
+        }
+        fields
+    }
     pub(super) fn field(&self, field: u32, tagged: bool) -> usize {
         match field {
             0 => self.cmd.clone().into_word(),
@@ -124,11 +140,30 @@ impl Deadline {
 pub(super) struct TimeoutError {
     cmd: OwnedWord,
     timeout: Deadline,
+    // communicate resets .timeout after the final wait; args keeps that wait's budget.
+    wait_budget: Option<f64>,
     stdout: Option<Rc<Bytes>>,
     stderr: Option<Rc<Bytes>>,
 }
 
 impl TimeoutError {
+    pub(super) fn arguments(&self) -> smallvec::SmallVec<[OwnedWord; 5]> {
+        let timeout = match (&self.timeout, self.wait_budget) {
+            (_, Some(n)) => OwnedWord {
+                kind: WordKind::new(7),
+                word: n.to_bits() as usize,
+            },
+            (Deadline::Integer(n), None) => OwnedWord {
+                kind: WordKind::new(2),
+                word: n.clone().into_raw(),
+            },
+            (Deadline::Float(n), None) => OwnedWord {
+                kind: WordKind::new(7),
+                word: n.to_bits() as usize,
+            },
+        };
+        smallvec::smallvec![self.cmd.clone(), timeout]
+    }
     /// The compiler proves the numeric field's exact kind at every read.
     pub(super) fn field(&self, field: u32) -> usize {
         match field {
@@ -427,11 +462,11 @@ impl PathSearch {
     }
 }
 
-#[derive(Clone, Copy)]
 struct ChildAttributes {
     new_session: bool,
     group: libc::pid_t,
     mask: Option<libc::mode_t>,
+    keep: Vec<RawFd>,
 }
 
 impl Default for ChildAttributes {
@@ -440,6 +475,7 @@ impl Default for ChildAttributes {
             new_session: false,
             group: -1,
             mask: None,
+            keep: Vec::new(),
         }
     }
 }
@@ -448,7 +484,7 @@ impl ChildAttributes {
     /// A negative group other than -1 skips setpgid, but still selects CPython's
     /// fork/exec path and preserves the caller's executable object on failure.
     fn requires_fork(&self) -> bool {
-        self.new_session || self.group != -1 || self.mask.is_some()
+        self.new_session || self.group != -1 || self.mask.is_some() || !self.keep.is_empty()
     }
 }
 
@@ -508,7 +544,7 @@ impl Launch {
     unsafe fn exec_child(
         &mut self,
         close_fds: bool,
-        attributes: ChildAttributes,
+        attributes: &ChildAttributes,
     ) -> io::Result<()> {
         if let Some(mask) = attributes.mask {
             // SAFETY: this is the forked child; umask never fails.
@@ -535,6 +571,8 @@ impl Launch {
         if close_fds {
             // SAFETY: the forked child owns its descriptor table.
             unsafe { self.descriptors.apply()? };
+            // SAFETY: this runs only after fork. No allocator or callback is used.
+            unsafe { pass_fds::inherit(&attributes.keep)? };
         }
         let mut saved_error = None;
         let mut last_error = libc::ENOENT;
@@ -589,6 +627,14 @@ impl Launch {
         // STDOUT in the stdin slot reaches child descriptor setup as fd -2.
         if (streams >> 12) & 15 == 5 {
             return Err(io::Error::from_raw_os_error(libc::EBADF));
+        }
+        // Check before opening any stdio or launch-error pipes: an invalid caller
+        // fd must not accidentally become valid when Command allocates a pipe.
+        for &fd in &attributes.keep {
+            // SAFETY: F_GETFD validates the supplied fd without changing it.
+            if unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0 {
+                return Err(io::Error::last_os_error());
+            }
         }
         // Check the original descriptor table before duplicating anything. A
         // duplicate for stdout must not make a closed stderr descriptor valid.
@@ -651,7 +697,7 @@ impl Launch {
                 if stderr == 5 && libc::dup2(libc::STDOUT_FILENO, libc::STDERR_FILENO) < 0 {
                     return Err(io::Error::last_os_error());
                 }
-                self.exec_child(streams & (1 << 17) == 0, attributes)
+                self.exec_child(streams & (1 << 17) == 0, &attributes)
             })
         };
         command.spawn()
@@ -713,7 +759,7 @@ impl ChildGuard {
 /// Timeout capture stops at the deadline rather than waiting for descendant pipes.
 enum Captured {
     Completed(ExitStatus, Vec<u8>, Vec<u8>),
-    TimedOut(Option<Vec<u8>>, Option<Vec<u8>>),
+    TimedOut(Option<Vec<u8>>, Option<Vec<u8>>, Option<f64>),
 }
 
 fn poll_milliseconds(timeout: f64) -> Result<i32> {
@@ -791,6 +837,7 @@ fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
             return Ok(Captured::TimedOut(
                 observed[0].then_some(stdout),
                 observed[1].then_some(stderr),
+                None,
             ));
         }
         let milliseconds = ((deadline - now).as_secs_f64() * 1000.0).ceil() as i32;
@@ -855,6 +902,7 @@ fn wait_timeout(
     timeout: f64,
     outputs: [Vec<u8>; 2],
 ) -> Result<Captured> {
+    let wait_budget = timeout - started.elapsed().as_secs_f64();
     let mut delay = Duration::from_millis(1);
     loop {
         if let Some(status) = child.try_wait().map_err(os_error)? {
@@ -864,7 +912,7 @@ fn wait_timeout(
         let remaining = timeout - started.elapsed().as_secs_f64();
         if remaining <= 0.0 {
             child.terminate().map_err(os_error)?;
-            return Ok(Captured::TimedOut(None, None));
+            return Ok(Captured::TimedOut(None, None, Some(wait_budget)));
         }
         let sleep = Duration::try_from_secs_f64(remaining).unwrap_or(delay);
         std::thread::sleep(delay.min(sleep));
@@ -1230,6 +1278,7 @@ pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *c
         Ok((status, stdout)) if status.success() => StrOwner::into_raw(stdout),
         Ok((status, stdout)) => {
             raise_process(ProcessError {
+                positional_streams: false,
                 // SAFETY: the exception acquires the original rooted argv.
                 cmd: unsafe { WordKind::new(5).acquire(args as usize) },
                 returncode: returncode(status),
@@ -1270,6 +1319,7 @@ pub unsafe extern "C" fn imre_subprocess_to_stderr(args: *const Object, check: u
     };
     match run() {
         Ok(status) if check != 0 && !status.success() => raise_process(ProcessError {
+            positional_streams: false,
             // SAFETY: the original list remains rooted while acquiring our owner.
             cmd: unsafe { WordKind::new(5).acquire(args as usize) },
             returncode: returncode(status),
@@ -1446,11 +1496,12 @@ unsafe fn run_process(
     });
     let (status, stdout, stderr) = match captured {
         Ok(Captured::Completed(status, stdout, stderr)) => (status, stdout, stderr),
-        Ok(Captured::TimedOut(stdout, stderr)) => {
+        Ok(Captured::TimedOut(stdout, stderr, wait_budget)) => {
             raise_timeout(TimeoutError {
                 // SAFETY: the original argv stays rooted across launch and capture.
                 cmd: unsafe { WordKind::new(5).acquire(args as usize) },
                 timeout: timeout.expect("only a deadline produces a timeout"),
+                wait_budget,
                 stdout: stdout.map(Rc::new),
                 stderr: stderr.map(Rc::new),
             });
@@ -1478,6 +1529,7 @@ unsafe fn run_process(
     let args = unsafe { WordKind::new(5).acquire(args as usize) };
     if check != 0 && returncode != 0 {
         raise_process(ProcessError {
+            positional_streams: false,
             cmd: args,
             returncode,
             stdout,
@@ -1541,6 +1593,7 @@ pub unsafe extern "C" fn imre_subprocess_check(record: *const usize) {
             kind.acquire(kind.read_record_field(record.add(index)))
         };
         ProcessError {
+            positional_streams: true,
             cmd: acquire_stream(0),
             returncode,
             stdout: acquire_stream(2),
@@ -1942,7 +1995,7 @@ mod tests {
         let stdout = child.stdout.as_mut().unwrap();
         stdout.read_exact(&mut ready).unwrap();
         assert_eq!(ready, [b'!']);
-        let Ok(Captured::TimedOut(Some(stdout), Some(stderr))) =
+        let Ok(Captured::TimedOut(Some(stdout), Some(stderr), None)) =
             capture_timeout(child, &Deadline::Float(1.0))
         else {
             panic!("expected a timeout with both output streams");
@@ -2089,7 +2142,10 @@ mod tests {
             true,
         );
         assert_kind(&error, Kind::UnicodeDecodeError);
-        assert_eq!(message(&error).as_str(), "invalid UTF-8 at byte 3");
+        assert_eq!(
+            message(&error).as_str(),
+            "'utf-8' codec can't decode byte 0xff in position 3: invalid start byte"
+        );
         let split = success(
             &args(&[
                 "/usr/bin/python3",

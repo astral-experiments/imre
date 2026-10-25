@@ -297,21 +297,23 @@ pub(super) fn scan_entries(
     scan: Dir,
 ) -> io::Result<std::vec::IntoIter<Entry>> {
     let mut result = Vec::new();
-    for entry in scan {
-        let entry = entry?;
-        let name = entry.file_name();
-        if matches!(name.to_bytes(), b"." | b"..") {
-            continue;
-        }
-        let directory = entry.file_type() == FileType::Directory
-            || entry.file_type() == FileType::Unknown
-                && file_type_at(descriptor, name) == Ok(FileType::Directory);
-        result.push(Entry {
-            name: name.to_owned(),
-            directory,
-        });
+    for item in scan_names(scan) {
+        let (name, kind) = item?;
+        let directory = kind == FileType::Directory
+            || kind == FileType::Unknown
+                && file_type_at(descriptor, &name) == Ok(FileType::Directory);
+        result.push(Entry { name, directory });
     }
     Ok(result.into_iter())
+}
+
+/// Yield the kernel's names and type hints without resolving unknown entries.
+pub(super) fn scan_names(scan: Dir) -> impl Iterator<Item = io::Result<(CString, FileType)>> {
+    scan.filter_map(|entry| match entry {
+        Err(error) => Some(Err(error.into())),
+        Ok(entry) if matches!(entry.file_name().to_bytes(), b"." | b"..") => None,
+        Ok(entry) => Some(Ok((entry.file_name().to_owned(), entry.file_type()))),
+    })
 }
 
 fn remove_at(parent: &OwnedFd, name: &CStr, flags: AtFlags) -> io::Result<()> {

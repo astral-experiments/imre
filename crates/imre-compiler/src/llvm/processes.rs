@@ -363,12 +363,19 @@ impl Emitter<'_, '_> {
                     }
                 }
                 if child_options {
-                    let start = args.len() - 3;
+                    let pass_fds = streams & (1 << 19) != 0;
+                    let start = args.len() - 3 - usize::from(pass_fds);
                     fields.extend([
                         ("i64", args[start].value.operand.clone()),
                         ("i64", args[start + 1].value.operand.clone()),
                         ("i1", args[start + 2].value.operand.clone()),
                     ]);
+                    if pass_fds {
+                        fields.extend([
+                            ("i64", self.word(&args[start + 3].value)),
+                            ("i32", kind(start + 3).to_string()),
+                        ]);
+                    }
                 }
                 let layout = format!(
                     "{{{}}}",
@@ -753,6 +760,18 @@ impl Emitter<'_, '_> {
                     args[0].value.operand
                 ));
                 self.unpack_word(word, returns)
+            }
+            ProcessOperation::QuoteCommandArgument => {
+                let word = self.word(&args[0].value);
+                let kind = representation_kind(args[0].value.ty, &self.module.types);
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_subprocess_quote_argument(i64 {word}, i32 {kind})"
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
             }
             ProcessOperation::Strerror => {
                 let operand = self.checked_instruction(format!(

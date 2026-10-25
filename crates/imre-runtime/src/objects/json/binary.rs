@@ -57,8 +57,11 @@ fn decode(bytes: &Rc<Bytes>) -> Result<Cow<'_, str>, Error> {
         } else {
             format!("bytes in position {start}-{}", end - 1)
         };
-        Error::new(
-            Kind::UnicodeDecodeError,
+        Error::unicode_decode(
+            codec,
+            bytes.clone(),
+            start..end,
+            reason,
             format!("'{codec}' codec can't decode {location}: {reason}"),
         )
     };
