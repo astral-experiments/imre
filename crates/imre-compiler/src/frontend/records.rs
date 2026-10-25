@@ -743,17 +743,17 @@ impl Checker<'_> {
             return Ok(None);
         }
         let direct = |checker: &mut Self, id: usize| -> Result<Expr, String> {
-            match checker.classes.declarations.definitions[id].exception_aliases[attr.attr.as_str()]
+            match &checker.classes.declarations.definitions[id].exception_aliases
+                [attr.attr.as_str()]
             {
-                crate::classes::ExceptionAlias::Builtin(kind) => {
-                    checker.simple_exception(call, kind)
+                crate::classes::ExceptionAlias::Builtin { kind, .. } => {
+                    checker.simple_exception(call, *kind)
                 }
                 crate::classes::ExceptionAlias::Named(def) => {
-                    if let Some(&layout) = checker.classes.declarations.ids.get(&def) {
+                    if let Some(&layout) = checker.classes.declarations.ids.get(def) {
                         checker.construct(call, layout)
                     } else {
-                        checker
-                            .simple_exception(call, checker.classes.declarations.exceptions[&def])
+                        checker.simple_exception(call, checker.classes.declarations.exceptions[def])
                     }
                 }
             }
@@ -940,6 +940,13 @@ impl Checker<'_> {
                 call,
                 "special methods cannot be called directly",
             ));
+        }
+        if attribute.attr.as_str() == "assertRaises"
+            && !self.classes.methods[class].contains_key("assertRaises")
+            && let Some(receiver) = &receiver
+            && let Some(context) = self.unittest_assert_raises(call, class, receiver)?
+        {
+            return Ok(context);
         }
         let signature = self.classes.methods[class]
             .get(attribute.attr.as_str())

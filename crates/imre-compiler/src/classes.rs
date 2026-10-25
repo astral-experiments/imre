@@ -31,9 +31,9 @@ pub(crate) struct Classes {
     pub(crate) ids: HashMap<DefinitionId, usize>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) enum ExceptionAlias {
-    Builtin(u32),
+    Builtin { kind: u32, name: String },
     Named(DefinitionId),
 }
 

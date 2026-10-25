@@ -36,18 +36,18 @@ argparse companion test module. The earlier [generated parse](NATIVE.md) and
 | --- | ---: | ---: |
 | Fully native, including fixtures | 0 | 0 |
 | Native body and operation with host fixtures | 4 | 4 |
-| Host body and assertions with native operations | 463 | 463 |
+| Host body and assertions with native operations | 571 | 571 |
 | Completed with no parser operation (empty input table) | 12 | 12 |
-| Blocked | 1,414 | 1,414 |
+| Blocked | 1,306 | 1,306 |
 | Failed, skipped or excluded | 0 | 0 |
 | **Total** | **1,893** | **1,893** |
 
 The compiler and runtime for this report both come from
-`eb1c6be0617e8d4a187760f082ebc8706a7735f2`. All 417 source-defined
+`80aecec2d89cf4e2e13ed13309bbf1ae2ec1b3e2`. All 417 source-defined
 methods and all 1,476 generated methods (1,236 parsing and 240 formatting)
-have an observation. Each of the four native bodies unconditionally calls
+have an observation; no test or fixture was excluded. Each of the four native bodies unconditionally calls
 `parse_args` with no explicit assertion; CPython runs the enclosing fixtures.
-The 463 host-driven routines make 1,735 native parser calls at each level.
+[Native numeric conversion](https://github.com/astral-sh/imre/pull/647) brings the host-driven count from 463 to 571, with 2,101 native parser calls at each level.
 The independent process oracle compares exit status, stdout, and stderr; the
 original assertions receive the native result. A host-driven source method
 retains the whole-body compiler diagnostic in its evidence. An unsupported
@@ -60,7 +60,7 @@ unchanged CPython reference before combining it with other suites.
 ```sh
 python3.14 -B benchmarks/cpython_stdlib/full/argparse/evidence.py \
   --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang clang-18 \
-  --imre-revision eb1c6be0617e8d4a187760f082ebc8706a7735f2 --result /tmp/argparse-evidence.json
+  --imre-revision 80aecec2d89cf4e2e13ed13309bbf1ae2ec1b3e2 --result /tmp/argparse-evidence.json
 python3 benchmarks/cpython_stdlib/suite_evidence.py \
   benchmarks/cpython_stdlib/full/argparse/reference-linux.json /tmp/argparse-evidence.json
 ```
