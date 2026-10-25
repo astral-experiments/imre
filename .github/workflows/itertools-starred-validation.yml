@@ -1,0 +1,114 @@
+name: Verify starred tuples and every original itertools occurrence
+on:
+  push:
+    branches: [codex/itertools-starred-validation]
+permissions:
+  contents: read
+jobs:
+  iterator-audit:
+    runs-on: github-ubuntu-24.04-x86_64-4
+    timeout-minutes: 50
+    env:
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify tested source matches the intended feature tree
+        run: |
+          git rev-parse HEAD^ HEAD
+          git diff --exit-code HEAD^ HEAD -- crates Cargo.lock Cargo.toml
+      - id: gil
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.14.5'
+      - name: Install Clang 18
+        run: sudo apt-get update && sudo apt-get install -y clang-18
+      - name: Build the combined compiler and runtime
+        id: build
+        run: |
+          cargo fmt --all -- --check
+          cargo build --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: python/cpython
+          ref: 5607950ef232dad16d75c0cf53101d9649d89115
+          path: .cpython-stdlib-reference
+          sparse-checkout: |
+            Lib
+            Modules/itertoolsmodule.c
+          persist-credentials: false
+      - name: Run every complete original primary method, checking operations and fixture roles
+        id: primary
+        run: |
+          dir=benchmarks/cpython_stdlib/full/itertools
+          python3 -B "$dir/coverage.py" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --baseline "$dir/evidence-linux.json" --result "$RUNNER_TEMP/itertools-all.json"
+          python3 -B benchmarks/cpython_stdlib/suite_evidence.py "$dir/reference-linux.json" "$RUNNER_TEMP/itertools-all.json"
+      - name: Save the exact per-occurrence report
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: |
+          python3 - "$RUNNER_TEMP/itertools-all.json" <<'PY'
+          import base64,gzip,hashlib,pathlib,sys
+          data=pathlib.Path(sys.argv[1]).read_bytes()
+          encoded=base64.b64encode(gzip.compress(data,mtime=0)).decode()
+          print('ITERTOOLS_REPORT_SHA256='+hashlib.sha256(data).hexdigest())
+          for i in range(0,len(encoded),3000): print('ITERTOOLS_REPORT_PART='+encoded[i:i+3000])
+          PY
+      - name: Compare four native tuple executions and the untouched original entry points
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: |
+          dir=benchmarks/cpython_stdlib/full/itertools
+          python3 -B "$dir/tuple_spread_audit.py" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-git .cpython-stdlib-reference --result "$RUNNER_TEMP/tuple-spreads.json"
+          python3 -c 'import base64,gzip,pathlib,sys; print("ITERTOOLS_TUPLE_RECEIPT="+base64.b64encode(gzip.compress(pathlib.Path(sys.argv[1]).read_bytes(),mtime=0)).decode())' "$RUNNER_TEMP/tuple-spreads.json"
+      - name: Verify every stored occurrence against the tested integration source
+        if: "${{ !cancelled() && steps.primary.outcome == 'success' }}"
+        run: |
+          dir=benchmarks/cpython_stdlib/full/itertools
+          diff -u "$dir/evidence-linux.json" "$RUNNER_TEMP/itertools-all.json" || true
+          cmp "$dir/evidence-linux.json" "$RUNNER_TEMP/itertools-all.json"
+      - name: Compare native tuple ownership under ASan and LSan
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: |
+          src=benchmarks/cpython_stdlib/full/itertools/tuple_spreads.py
+          python3 -B "$src" > "$RUNNER_TEMP/starred-ref"
+          for opt in 0 3; do
+            target/debug/imre build "$src" --quiet --no-cache --sanitize --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt" -o "$RUNNER_TEMP/starred"
+            ASAN_OPTIONS=detect_leaks=1 "$RUNNER_TEMP/starred" > "$RUNNER_TEMP/starred-out"
+            diff -u "$RUNNER_TEMP/starred-ref" "$RUNNER_TEMP/starred-out"
+          done
+      - name: Compare ordinary iterable and restricted source-generator fixtures
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: |
+          failed=0
+          for suite in iterables iterator_pipelines unpacking unittest_main; do
+            python3 -B "tests/$suite.py" --compiler target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --opt-levels 0 3 || failed=1
+          done
+          exit "$failed"
+      - name: Check native tuple ownership and all compiler/runtime unit tests
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: |
+          cargo test --locked -j 2 -p imre-compiler -p imre-runtime --lib
+          cargo clippy --locked -j 2 -p imre-compiler -p imre-runtime --all-targets -- -D warnings
+      - name: Check the merged native weak logging registry and Template operands
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: |
+          for opt in 0 3; do
+            python3 -B benchmarks/cpython_stdlib/full/logging/native_handlers.py --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-weak-$opt.json"
+          done
+          python3 -B benchmarks/cpython_stdlib/full/string/native_core.py --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-levels 0 3 --evidence "$RUNNER_TEMP/templates.json"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        id: freethreaded
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        with:
+          python-version: '3.14.5t'
+      - name: Verify the separate free-threaded companion with its GIL guard
+        if: "${{ !cancelled() && steps.freethreaded.outcome == 'success' }}"
+        env:
+          GIL_INTERPRETER: "${{ steps.gil.outputs.python-path }}"
+        run: |
+          dir=benchmarks/cpython_stdlib/full/itertools
+          PYTHONPATH="$PWD/.cpython-stdlib-reference/Lib" python3 -B "$dir/free_threading.py" --gil-python "$GIL_INTERPRETER" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/itertools-companion.json"
+          python3 -B benchmarks/cpython_stdlib/suite_evidence.py "$dir/reference-free-threading-linux.json" "$RUNNER_TEMP/itertools-companion.json"
+          python3 -c 'import json,sys;print("ITERTOOLS_COMPANION="+json.dumps(json.load(open(sys.argv[1])),sort_keys=True,separators=(",",":")))' "$RUNNER_TEMP/itertools-companion.json"
