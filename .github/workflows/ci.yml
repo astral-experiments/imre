@@ -108,6 +108,9 @@ jobs:
           python3 benchmarks/cpython_stdlib/full/test_stage_tests.py
           python3 benchmarks/cpython_stdlib/full/stage_tests.py "$RUNNER_TEMP/imre-cpython-fixtures"
           python3 -B benchmarks/cpython_stdlib/full/discover_staged.py "$RUNNER_TEMP/imre-cpython-fixtures"
+          PYTHONPATH="$RUNNER_TEMP/imre-cpython-fixtures/Lib" python3 -B benchmarks/cpython_stdlib/suite_inventory.py \
+            benchmarks/cpython_stdlib/full/inspect/UPSTREAM.json --result "$RUNNER_TEMP/inspect-staged-reference.json"
+          cmp benchmarks/cpython_stdlib/full/inspect/reference-linux.json "$RUNNER_TEMP/inspect-staged-reference.json"
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked

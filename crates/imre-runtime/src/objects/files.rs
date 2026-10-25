@@ -129,6 +129,7 @@ impl FileState {
         let stream = if read {
             Stream::Read(Input::pipe(file, !text, capacity))
         } else {
+            crate::initialize_io();
             Stream::Write(Output::pipe(file, capacity, text && bufsize == 1))
         };
         let kind = if text {
