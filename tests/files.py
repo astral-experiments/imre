@@ -372,6 +372,7 @@ class Group:
     first: Leaf
     direct: BinaryIO
     nested: list[Leaf]
+    mapped: dict[tuple[int, int], Leaf]
     pair: tuple[Leaf, Leaf]
     last: Leaf
 
@@ -384,7 +385,10 @@ def group(shared: bool) -> Group:
     first = Leaf(writer(b"A"))
     last = first if shared else Leaf(writer(b"D"))
     nested = [Leaf(writer(b"C")), Leaf(writer(b"E")), Leaf(writer(b"H")), Leaf(writer(b"I"))]
-    return Group(first, writer(b"B"), nested,
+    mapped: dict[tuple[int, int], Leaf] = {}
+    for i, mark in enumerate([b"J", b"K", b"L", b"M"]):
+        mapped[(i, i + 1)] = Leaf(writer(mark))
+    return Group(first, writer(b"B"), nested, mapped,
                  (Leaf(writer(b"F")), Leaf(writer(b"G"))), last)
 
 def discard(shared: bool) -> None:
