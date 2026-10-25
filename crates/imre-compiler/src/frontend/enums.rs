@@ -158,6 +158,19 @@ impl Checker<'_> {
             ));
         }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
+        if types == [Type::BuiltinClass; 2] {
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Compare(
+                    vec![left, right],
+                    vec![if op == ast::CmpOp::Is {
+                        Compare::Equal
+                    } else {
+                        Compare::NotEqual
+                    }],
+                ),
+            });
+        }
         if types.contains(&Type::StringIterable) && types == [left.ty, right.ty] {
             // Both operands must reach identity with the same pointer tag.
             let left = self.coerce(left, Type::StringIterable, node)?;
@@ -183,9 +196,10 @@ impl Checker<'_> {
             || types.iter().all(|ty| {
                 matches!(
                     ty,
-                    Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_)
+                    Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_) | Type::Class(_)
                 )
             })
+            || types == [Type::Str; 2]
             || types == [Type::LogRecord; 2]
             || types.iter().all(|ty| matches!(ty, Type::Cursor(_)))
             || types == [Type::Logger; 2]

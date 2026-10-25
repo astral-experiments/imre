@@ -115,6 +115,7 @@ def main():
     parser.add_argument("--real-wheel", type=Path, default=os.environ.get("IMRE_REAL_WHEEL"),
                         help="defaults to IMRE_REAL_WHEEL, then the reference interpreter's bundled pip wheel")
     parser.add_argument("--reference-only", action="store_true")
+    parser.add_argument("--sanitize", action="store_true", help="build native code with AddressSanitizer")
     args = parser.parse_args()
     if not args.reference_only and not (args.compiler and args.runtime):
         parser.error("native checks require --compiler and --runtime")
@@ -160,7 +161,7 @@ def main():
             binary = root / ("validate-O" + level)
             subprocess.run([args.compiler.resolve(), "build", entry, "--module-root", module_root,
                             "--reachable-only", "--no-cache", "--quiet", "--runtime", args.runtime.resolve(),
-                            "--clang", args.clang, "--opt-level", level, "-o", binary],
+                            "--clang", args.clang, "--opt-level", level, *(["--sanitize"] if args.sanitize else []), "-o", binary],
                            cwd=root, check=True, timeout=240)
             for (path, _, _), expected in zip(cases, reference, strict=True):
                 actual = observe([binary], path)

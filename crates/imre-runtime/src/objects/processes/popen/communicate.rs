@@ -17,6 +17,124 @@ enum Exchange {
     Timeout([Option<Vec<u8>>; 2]),
 }
 
+/// Decode the rooted input using the stream mode chosen at the call site.
+unsafe fn input_bytes<'a>(input: *const (), text: bool) -> &'a [u8] {
+    if input.is_null() {
+        &[]
+    } else if text {
+        // SAFETY: the caller roots an exact native string for this borrow.
+        unsafe { (&*input.cast::<Str>()).as_bytes() }
+    } else {
+        // SAFETY: the caller roots an exact byte buffer for this borrow.
+        unsafe { (&*input.cast::<Bytes>()).as_slice() }
+    }
+}
+
+/// Capture stdout, keep checked failures' streams, and reap the direct child
+/// before exposing a timeout. Descendants may still hold the far pipe ends.
+///
+/// # Safety
+/// The launch configuration, deadline word and optional input have the layouts
+/// selected by the compiler and stay rooted until the call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_check_output_config(
+    config: *const LaunchConfig,
+    deadline_kind: u32,
+    deadline: usize,
+    input: usize,
+    validation: u32,
+    errors: u32,
+) -> *const () {
+    let invalid = match validation {
+        0 => None,
+        1 => Some("stdout argument not allowed, it will be overridden."),
+        2 => Some("check argument not allowed, it will be overridden."),
+        3 => Some("stdin and input arguments may not both be used."),
+        4 => Some("stdout and stderr arguments may not be used with capture_output."),
+        5 => return Error::new(Kind::SubprocessError, "Cannot disambiguate when both text and universal_newlines are supplied but different. Pass one or the other.").returning(std::ptr::null()),
+        _ => fail("SystemError", "unknown check_output validation"),
+    };
+    if let Some(message) = invalid {
+        return Error::new(Kind::ValueError, message).returning(std::ptr::null());
+    }
+    // SAFETY: the caller roots the configuration and its typed launch fields;
+    // the timeout representation and input type were selected at the same call site.
+    let (config, timeout, input, process) = unsafe {
+        let config = &*config;
+        (
+            config,
+            Deadline::from_word(deadline_kind, deadline),
+            input_bytes(input as *const (), config.streams & (1 << 16) != 0),
+            spawn(config),
+        )
+    };
+    let kind = if config.streams & (1 << 16) != 0 {
+        3
+    } else {
+        8
+    };
+    let stream = |bytes: Vec<u8>, kind| {
+        let bytes = if kind == 3 && errors != 0 {
+            match errors {
+                1 => bytes
+                    .utf8_chunks()
+                    .flat_map(|chunk| chunk.valid().bytes())
+                    .collect(),
+                2 => String::from_utf8_lossy(&bytes).into_owned().into_bytes(),
+                _ => fail("SystemError", "unknown process decoding policy"),
+            }
+        } else {
+            bytes
+        };
+        completed_stream(bytes, WordKind::new(kind))
+    };
+    let result = process.and_then(|mut p| {
+        // No caller can have consumed the freshly opened streams. Decode them
+        // once after communication so timeouts keep their original raw bytes.
+        let exchange = p.communicate(input, timeout.as_ref(), false);
+        let killed = if matches!(exchange, Ok(Exchange::Done(_))) {
+            Ok(())
+        } else {
+            p.signal(|| Ok(libc::SIGKILL))
+        };
+        p.close_wait()?;
+        killed?;
+        match exchange? {
+            Exchange::Done([stdout, stderr]) => {
+                let stdout = stream(stdout, kind)?;
+                let stderr_kind = if (config.streams >> 4) & 15 == 1 {
+                    kind
+                } else {
+                    0
+                };
+                let stderr = stream(stderr, stderr_kind)?;
+                let code = p.status.expect("communicate reaped the child");
+                if code != 0 {
+                    raise_process(ProcessError {
+                        cmd: p.args.clone(),
+                        returncode: code,
+                        stdout,
+                        stderr,
+                    });
+                    Ok(std::ptr::null())
+                } else {
+                    Ok(stdout.into_word() as *const ())
+                }
+            }
+            Exchange::Timeout([stdout, stderr]) => {
+                raise_timeout(TimeoutError {
+                    cmd: p.args.clone(),
+                    timeout: timeout.expect("timed communication"),
+                    stdout: stdout.map(Rc::new),
+                    stderr: stderr.map(Rc::new),
+                });
+                Ok(std::ptr::null())
+            }
+        }
+    });
+    finish(result, std::ptr::null())
+}
+
 fn file<T>(owner: &Object, f: impl FnOnce(&mut FileState) -> T) -> T {
     // SAFETY: the rooted pipe is a sealed file, and no callback reenters a borrow.
     unsafe { owner.0.with_mut(|s| f(s.file_mut())) }
@@ -193,13 +311,7 @@ pub unsafe extern "C" fn imre_popen_communicate(
     // SAFETY: all storage types follow the call site's sealed Popen signature.
     unsafe {
         let timeout = Deadline::from_word(deadline_kind, deadline);
-        let bytes = if input.is_null() {
-            &[][..]
-        } else if text {
-            (&*input.cast::<Str>()).as_bytes()
-        } else {
-            (&*input.cast::<Bytes>()).as_slice()
-        };
+        let bytes = input_bytes(input, text);
         let result = with_process(handle, |p| -> Result<_> {
             match p.communicate(bytes, timeout.as_ref(), text)? {
                 Exchange::Done([stdout, stderr]) => {

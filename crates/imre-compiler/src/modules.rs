@@ -9,7 +9,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::analysis::{CheckedDiagnostic, Session};
-use crate::ir::{CopyOperation, PosixPathOperation};
+use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation};
 use crate::watch::FileSystem;
 
 mod declarations;
@@ -56,6 +56,8 @@ pub(crate) enum Binding {
 /// Sealed namespaces expose only compiler-known symbols, never module values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IntrinsicModule {
+    AnnotationLib,
+    AnnotationFormat,
     Declaration(&'static str),
     Argparse,
     Future,
@@ -64,12 +66,14 @@ pub(crate) enum IntrinsicModule {
     Dataclasses,
     Difflib,
     Logging,
+    LoggingConfig,
     LoggingHandlers,
     Datetime,
     Abc,
     Asyncio,
     Contextlib,
     Functools,
+    Fnmatch,
     Time,
     Tomli,
     TomliW,
@@ -109,6 +113,9 @@ pub(crate) enum IntrinsicModule {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
+    GetAnnotations,
+    AnnotationTypeRepr,
+    AnnotationFormat(i64),
     Declaration(&'static str),
     ArgumentParser,
     ArgparseNamespace,
@@ -127,6 +134,8 @@ pub(crate) enum Intrinsic {
     ClockConverter(bool),
     LogRecordFlag(u8),
     BasicConfig,
+    DictConfig,
+    FileConfig,
     LogLevel(i64),
     Abc,
     AbstractMethod,
@@ -273,6 +282,7 @@ pub(crate) enum Intrinsic {
     OpenFlag(&'static str),
     FsPath,
     PosixPath(PosixPathOperation),
+    Fnmatch(FnmatchOperation),
     Unquote,
 }
 
@@ -287,14 +297,17 @@ impl Intrinsic {
 impl IntrinsicModule {
     fn named(name: &str) -> Option<Self> {
         match name {
+            "annotationlib" => Some(Self::AnnotationLib),
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
+            "logging.config" => Some(Self::LoggingConfig),
             "logging.handlers" => Some(Self::LoggingHandlers),
             "datetime" => Some(Self::Datetime),
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
+            "fnmatch" => Some(Self::Fnmatch),
             "time" => Some(Self::Time),
             "tomli" => Some(Self::Tomli),
             "tomli_w" => Some(Self::TomliW),
@@ -340,8 +353,14 @@ impl IntrinsicModule {
     }
 
     pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::AnnotationLib && name == "Format" {
+            return Some(Binding::IntrinsicModule(Self::AnnotationFormat));
+        }
         if self == Self::Logging && name == "handlers" {
             return Some(Binding::IntrinsicModule(Self::LoggingHandlers));
+        }
+        if self == Self::Logging && name == "config" {
+            return Some(Binding::IntrinsicModule(Self::LoggingConfig));
         }
         if self == Self::Os {
             if name == "path" {
@@ -364,6 +383,12 @@ impl IntrinsicModule {
             return Some(Binding::IntrinsicModule(Self::ImreToml));
         }
         let symbol = match (self, name) {
+            (Self::AnnotationLib, "get_annotations") => Intrinsic::GetAnnotations,
+            (Self::AnnotationLib, "type_repr") => Intrinsic::AnnotationTypeRepr,
+            (Self::AnnotationFormat, "VALUE") => Intrinsic::AnnotationFormat(1),
+            (Self::AnnotationFormat, "VALUE_WITH_FAKE_GLOBALS") => Intrinsic::AnnotationFormat(2),
+            (Self::AnnotationFormat, "FORWARDREF") => Intrinsic::AnnotationFormat(3),
+            (Self::AnnotationFormat, "STRING") => Intrinsic::AnnotationFormat(4),
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
             (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
@@ -381,6 +406,8 @@ impl IntrinsicModule {
             (Self::Logging, "_nameToLevel") => Intrinsic::LevelMap { names: true },
             (Self::Logging, "_levelToName") => Intrinsic::LevelMap { names: false },
             (Self::Logging, "basicConfig") => Intrinsic::BasicConfig,
+            (Self::LoggingConfig, "dictConfig") => Intrinsic::DictConfig,
+            (Self::LoggingConfig, "fileConfig") => Intrinsic::FileConfig,
             (Self::Logging, "DEBUG") => Intrinsic::LogLevel(10),
             (Self::Logging, "INFO") => Intrinsic::LogLevel(20),
             (Self::Abc, "ABC") => Intrinsic::Abc,
@@ -406,6 +433,18 @@ impl IntrinsicModule {
             (Self::Typing, "NewType") => Intrinsic::NewType,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
+            (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
+                Intrinsic::Fnmatch(FnmatchOperation::Match {
+                    normcase: name == "fnmatch",
+                })
+            }
+            (Self::Fnmatch, "filter" | "filterfalse") => {
+                Intrinsic::Fnmatch(FnmatchOperation::Filter {
+                    inverse: name == "filterfalse",
+                })
+            }
+            (Self::Fnmatch, "translate") => Intrinsic::Fnmatch(FnmatchOperation::Translate),
+            (Self::Fnmatch, "_translate") => Intrinsic::Fnmatch(FnmatchOperation::Parts),
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
             (Self::Functools, "partial") => Intrinsic::Partial,
             (Self::Functools, "Placeholder") => Intrinsic::Placeholder,
@@ -611,9 +650,7 @@ impl SourceModule {
 
 pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
-    checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
-    checked_keywords: std::cell::RefCell<Vec<Vec<TextRange>>>,
-    checked_tuple_reads: std::cell::RefCell<Vec<Vec<TextRange>>>,
+    checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -739,7 +776,13 @@ impl SourceGraph {
     /// Record only this call's overload diagnostic. Nested arguments still get
     /// their own diagnostics, including calls with the same method name.
     pub(crate) fn checked_overload(&self, module: ModuleId, call: TextRange) {
-        self.checked_calls.borrow_mut()[module].push(call);
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
+    }
+
+    /// Mark the precise call where lowering raises Python's missing-argument TypeError.
+    pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::MissingArgument(call));
     }
 
     pub(crate) fn checked_keywords(
@@ -747,14 +790,16 @@ impl SourceGraph {
         module: ModuleId,
         keywords: impl Iterator<Item = TextRange>,
     ) {
-        self.checked_keywords.borrow_mut()[module].extend(keywords);
+        self.checked_diagnostics.borrow_mut()[module]
+            .extend(keywords.map(CheckedDiagnostic::Keyword));
     }
 
     /// Record the exact list read proved by lowering a fixed-width tuple spread.
     /// Other diagnostics at this index or inside the receiver remain visible.
     pub(crate) fn checked_tuple_list_read(&self, module: ModuleId, read: TextRange) {
         if self.session.has_tuple_spreads(module) {
-            self.checked_tuple_reads.borrow_mut()[module].push(read);
+            self.checked_diagnostics.borrow_mut()[module]
+                .push(CheckedDiagnostic::TupleListRead(read));
         }
     }
 
@@ -792,22 +837,10 @@ impl SourceGraph {
                         .then_some(CheckedDiagnostic::Decorator(decorator.range()))
                     })
                     .chain({
-                        let mut calls = self.checked_calls.borrow()[id].clone();
-                        calls.sort_unstable_by_key(|range| (range.start(), range.end()));
-                        calls.dedup();
-                        calls.into_iter().map(CheckedDiagnostic::Call)
-                    })
-                    .chain({
-                        let mut keywords = self.checked_keywords.borrow()[id].clone();
-                        keywords.sort_unstable_by_key(|range| (range.start(), range.end()));
-                        keywords.dedup();
-                        keywords.into_iter().map(CheckedDiagnostic::Keyword)
-                    })
-                    .chain({
-                        let mut reads = self.checked_tuple_reads.borrow()[id].clone();
-                        reads.sort_unstable_by_key(|range| (range.start(), range.end()));
-                        reads.dedup();
-                        reads.into_iter().map(CheckedDiagnostic::TupleListRead)
+                        let mut diagnostics = self.checked_diagnostics.borrow()[id].clone();
+                        diagnostics.sort_unstable_by_key(|note| note.sort_key());
+                        diagnostics.dedup();
+                        diagnostics
                     })
                     .collect()
             })
@@ -1182,9 +1215,7 @@ impl<'a> Loader<'a> {
         self.inputs.missing.dedup();
         let mut graph = SourceGraph {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
-            checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
-            checked_keywords: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
-            checked_tuple_reads: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            checked_diagnostics: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
@@ -1582,6 +1613,11 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
+            "string" => Some((
+                "string/__init__.py",
+                include_str!("../stdlib/string/__init__.py"),
+                true,
+            )),
             "unittest" => Some((
                 "unittest/__init__.py",
                 include_str!("../stdlib/unittest/__init__.py"),
