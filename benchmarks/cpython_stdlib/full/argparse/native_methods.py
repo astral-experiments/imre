@@ -29,6 +29,11 @@ OPERATIONS = {
 OPERATIONS["test.test_argparse.TestBooleanOptionalAction.test_invalid_name"] = (
     "argparse.ArgumentParser.add_argument", "imre")
 
+OPERATIONS[
+    "test.test_argparse.TestHelpUsageNoWhitespaceCrash."
+    "test_mutex_groups_with_mixed_optionals_positionals_wrap"
+] = ("argparse.ArgumentParser.format_usage", "imre")
+
 
 class Fixtures:
     """Keep argparse's source-defined helpers with the methods that use them."""

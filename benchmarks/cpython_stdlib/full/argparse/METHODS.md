@@ -39,6 +39,19 @@ python3.14 -B benchmarks/cpython_stdlib/full/argparse/native_methods.py \
   --imre-revision "$(git rev-parse HEAD)" --result /tmp/argparse-methods.json
 ```
 
+## Native usage under the original fixture
+
+The [wrapped usage control](wrapped-usage-linux.json) records the unchanged
+`TestHelpUsageNoWhitespaceCrash.test_mutex_groups_with_mixed_optionals_positionals_wrap`
+on `4aa16ea86ca21be024b520a995e0675fb6f8b762`. The original instance
+setup supplied `COLUMNS=80`; the child constructed the parser and its mutually
+exclusive group, called `format_usage()`, and compared the result with the
+original expected string. At O0 and O3 the emitted IR contains one call to
+`imre_argparse_text` with the usage flag set. The normal native binary, the
+binary built while emitting that IR, and pinned CPython all printed the
+completion marker, exited zero, and wrote nothing to stderr. This verifies
+the native operation and assertion under a CPython fixture.
+
 ## Whole-file startup
 
 The original entry point at main `76d74f9` still hit the pre-parser complexity
