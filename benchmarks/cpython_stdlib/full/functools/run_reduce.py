@@ -2,12 +2,14 @@
 import argparse
 from collections import Counter
 import json
+from operator import add
 from pathlib import Path
 import select
 import subprocess
 import sys
 import tempfile
 from unittest.mock import patch
+import warnings
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
@@ -73,7 +75,7 @@ def native_call(binary, mode, function, source, initial, counts):
     return objects[int(line.removeprefix("result "))]
 
 
-def adapter(binary, counts):
+def adapter(binary, counts, *, pure):
     missing = object()
 
     def invoke(function, iterable, /, *args, initial=missing):
@@ -84,15 +86,61 @@ def adapter(binary, counts):
         mode = "unseeded" if initial is missing else "keyword"
         return native_call(binary, mode, function, iterable, initial, counts)
 
+    def reduce(function, sequence, initial=missing):
+        return invoke(function, sequence, initial=initial)
+
     def entry(*args, **kwargs):
         before = counts["native_calls"]
+        deprecated = pure and ("function" in kwargs or "sequence" in kwargs)
         try:
+            if deprecated:
+                # The unaccelerated 3.14 wrapper warns before its Python argument
+                # binder runs. The bound arguments still go to the native fold.
+                counts["host_binding"] += 1
+                counts["host_warnings"] += 1
+                warnings.warn('Calling functools.reduce with keyword arguments '
+                              '"function" or "sequence" is deprecated in Python 3.14 '
+                              'and will be forbidden in Python 3.16.',
+                              DeprecationWarning, stacklevel=2)
+                return reduce(*args, **kwargs)
             return invoke(*args, **kwargs)
         finally:
-            if counts["native_calls"] == before:
+            if not deprecated and counts["native_calls"] == before:
                 counts["host_binding"] += 1
 
     return staticmethod(entry)
+
+
+def keyword_controls(binary, module):
+    """Compare the two original variants with the adapters before patching either one."""
+    values = [1, 2, 3, 4, 5]
+    calls = {
+        "function_and_sequence": ((), dict(function=add, sequence=values, initial=1)),
+        "sequence": ((add,), dict(sequence=values, initial=1)),
+        "initial": ((add, values), dict(initial=1)),
+    }
+
+    def observe(fn, args, kwargs):
+        with warnings.catch_warnings(record=True) as events:
+            warnings.simplefilter("always")
+            try:
+                result = {"value": fn(*args, **kwargs)}
+            except TypeError as exc:
+                result = {"exception": type(exc).__name__}
+        return {**result, "warnings": [(w.category.__name__, str(w.message)) for w in events]}
+
+    rows = {}
+    for name, fn, pure in (("python", module.py_functools.reduce, True),
+                           ("accelerator", module.c_functools.reduce, False)):
+        rows[name] = {}
+        for spelling, (args, kwargs) in calls.items():
+            counts = Counter()
+            reference = observe(fn, args, kwargs)
+            actual = observe(adapter(binary, counts, pure=pure).__func__, args, kwargs)
+            if actual != reference:
+                raise AssertionError((name, spelling, reference, actual))
+            rows[name][spelling] = {"reference": reference, "adapter": actual, "counts": dict(counts)}
+    return rows
 
 
 def main():
@@ -107,7 +155,7 @@ def main():
     verify_interpreter_tests(manifest)
     inventory = json.loads((HERE / "reference-linux.json").read_text())
     report = {"module": manifest["module"], "cpython_commit": manifest["commit"],
-              "denominator": inventory["denominator"], "optimization_levels": {}}
+              "denominator": inventory["denominator"], "optimization_levels": {}, "keyword_controls": {}}
     with tempfile.TemporaryDirectory() as temp:
         for level in (0, 3):
             binary = Path(temp) / f"reduce-{level}"
@@ -117,6 +165,8 @@ def main():
             discovered = {case.id(): case for case in cases(load_suite(manifest["module"]))}
             if discovered.keys() != inventory["reference"].keys():
                 raise ValueError("suite IDs differ from the pinned reference")
+            module = sys.modules[manifest["module"]]
+            report["keyword_controls"][str(level)] = keyword_controls(binary, module)
             selected = {n: c for n, c in discovered.items()
                         if n.split(".")[-2] in {"TestReduceC", "TestReducePy"}}
             tools = Toolchain(args.imre, args.runtime, args.clang, level)
@@ -147,7 +197,8 @@ def main():
             counts = {n: Counter() for n in selected if n not in results}
             def exercise(case, original):
                 counter = counts[case.id()]
-                with patch.object(type(case), "reduce", adapter(binary, counter)):
+                pure = case.reduce is module.py_functools.reduce
+                with patch.object(type(case), "reduce", adapter(binary, counter, pure=pure)):
                     original()
                 if not counter["native_calls"]:
                     raise ValueError(f"no native operation: {case.id()}")

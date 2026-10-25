@@ -515,7 +515,7 @@ impl Emitter<'_, '_> {
                 let bytes = u8::from(args[0].value.ty == Type::Bytes);
                 let path_bytes =
                     u8::from(self.module.types.payload(args[2].value.ty) == Some(Type::Bytes));
-                let pointer = self.checked_instruction(format!("call ptr @imre_shutil_which(ptr {}, i64 {}, ptr {path}, i32 {bytes}, i32 {path_bytes})", args[0].value.operand, args[1].value.operand));
+                let pointer = self.checked_instruction(format!("call ptr @imre_shutil_which(ptr {}, i64 {}, ptr {path}, i32 {bytes}, i32 {path_bytes}, ptr @imre_shutil_confstr_cs_path, ptr @imre_shutil_os_defpath)", args[0].value.operand, args[1].value.operand));
                 let operand = self.instruction(format!("ptrtoint ptr {pointer} to i64"));
                 self.owned(Value {
                     ty: returns,
@@ -537,6 +537,24 @@ impl Emitter<'_, '_> {
                     args[0].value.operand
                 ));
                 none()
+            }
+            ProcessOperation::OsErrorField(field) => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_os_error_field(ptr {}, i32 {field})",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            ProcessOperation::Strerror => {
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_os_strerror(i64 {})",
+                    args[0].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
             }
             ProcessOperation::ErrorField(field) => {
                 let tagged = matches!(

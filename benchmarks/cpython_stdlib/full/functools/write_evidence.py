@@ -48,6 +48,8 @@ def observe(name, level, body, body_rev, probes):
             native = counts.get("native_calls", 0)
             host = counts.get("host_binding", 0)
             detail = f"Imre evaluated {native} folds; {host} calls reached the host argument binder."
+            if warnings := counts.get("host_warnings"):
+                detail += f" The host emitted {warnings} deprecation warnings for the pure variant."
         else:
             native = counts.get("lookups", 0) + counts.get("clears", 0) + counts.get("snapshots", 0)
             host = sum(v for k, v in counts.items() if k.startswith("host_"))

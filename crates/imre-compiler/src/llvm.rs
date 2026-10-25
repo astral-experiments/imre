@@ -4256,6 +4256,22 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::ArgparseText { usage, output } => {
+                let file = args.get(2).map_or("null", |file| &file.value.operand);
+                let text = self.checked_instruction(format!(
+                    "call ptr @imre_argparse_text(ptr {}, ptr {}, i1 {usage}, i32 {}, ptr {file})",
+                    args[0].value.operand, args[1].value.operand, *output as u32
+                ));
+                if returns == Type::None {
+                    none()
+                } else {
+                    Value {
+                        ty: Type::Str,
+                        operand: text,
+                        small_integer: false,
+                    }
+                }
+            }
             Builtin::ParseArgs {
                 children,
                 process_argv,
@@ -5097,6 +5113,22 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::CounterTotal => self.call("imre_counter_total", returns, &[&args[0].value]),
+            Builtin::CounterMostCommon => {
+                let pair = self.module.types.element(returns).unwrap();
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(pair)));
+                let limit = self.word(&args[1].value);
+                let operand = self.checked_pointer(format!(
+                    "call ptr @imre_counter_most_common(ptr {}, i64 {limit}, ptr @{layout})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::DefaultListDict => {
                 let (key, list) = self.module.types.mapping(returns).unwrap();
                 let element = self.module.types.element(list).unwrap();
@@ -6521,6 +6553,8 @@ declare ptr @imre_environ_get(ptr, ptr)
 declare ptr @imre_getcwd()
 declare void @imre_os_close(i64)
 declare i64 @imre_os_open(ptr, i32, i64, i64, i64)
+declare i64 @imre_os_error_field(ptr, i32)
+declare ptr @imre_os_strerror(i64)
 @imre_os_o_rdonly = external constant i64
 @imre_os_o_wronly = external constant i64
 @imre_os_o_rdwr = external constant i64
@@ -6540,7 +6574,9 @@ declare i32 @imre_os_get_blocking(i64)
 declare void @imre_os_set_blocking(i64, i64)
 declare i32 @imre_os_get_inheritable(i64)
 declare void @imre_os_set_inheritable(i64, i64)
-declare ptr @imre_shutil_which(ptr, i64, ptr, i32, i32)
+declare ptr @imre_shutil_which(ptr, i64, ptr, i32, i32, ptr, ptr)
+declare ptr @imre_shutil_confstr_cs_path()
+declare ptr @imre_shutil_os_defpath()
 declare i64 @imre_shutil_copy(i32, ptr, i32, ptr, i32, i32)
 declare void @imre_subprocess_check(ptr)
 declare i64 @imre_subprocess_error_field(ptr, i32)
@@ -6813,6 +6849,7 @@ declare void @imre_counter_update(ptr, ptr)
 declare ptr @imre_counter_math(ptr, ptr, i32, i32)
 declare i64 @imre_dict_sum_values(ptr, i64)
 declare i64 @imre_counter_total(ptr)
+declare ptr @imre_counter_most_common(ptr, i64, ptr)
 declare i32 @imre_counter_subset(ptr, ptr, i32)
 declare ptr @imre_key_union(ptr, ptr)
 declare ptr @imre_key_difference(ptr, ptr)
@@ -6892,6 +6929,7 @@ declare i32 @imre_text_flush(ptr)
 declare i32 @imre_text_close(ptr)
 declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
+declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_orig_argv()
