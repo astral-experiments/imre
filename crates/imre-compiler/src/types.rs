@@ -174,6 +174,7 @@ impl Types {
             | Type::Path
             | Type::PurePath(_)
             | Type::CompletedProcess(_, None)
+            | Type::ActivePopen
             | Type::EventLoop
             | Type::TaskGroup
             | Type::GeneratorContext
@@ -587,6 +588,7 @@ impl Types {
             | Type::DirectoryContext(_)
             | Type::Semaphore
             | Type::Popen(..)
+            | Type::ActivePopen
             | Type::AsyncProcess(_)
             | Type::NativeModule
             | Type::ModuleNamespace
@@ -1116,6 +1118,7 @@ impl Types {
                 | Type::CsvReader
                 | Type::ZipFile
                 | Type::Popen(..)
+                | Type::ActivePopen
                 | Type::AsyncProcess(_)
                 | Type::DirectoryContext(_)
                 | Type::GeneratorContext

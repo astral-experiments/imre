@@ -89,6 +89,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::DirectoryContext(_)
         | Type::Semaphore
         | Type::Popen(..)
+        | Type::ActivePopen
         | Type::AsyncProcess(_)
         | Type::NativeModule
         | Type::ModuleNamespace

@@ -5073,6 +5073,15 @@ impl<'a> Checker<'a> {
 
     /// Keep the large general frame off recursive left- and right-hand arithmetic.
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::PopenActive)) {
+            return Ok(Expr {
+                ty: self.types.list(Type::ActivePopen),
+                kind: ExprKind::Builtin(
+                    Builtin::Process(ir::ProcessOperation::PopenActive),
+                    Vec::new(),
+                ),
+            });
+        }
         if let ast::Expr::Attribute(attr) = expression
             && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) =
                 self.resolve(&attr.value)
@@ -6207,7 +6216,7 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::AsyncProcess(_)) {
                     return self.async_returncode(receiver, attribute);
                 }
-                if matches!(receiver.ty, Type::Popen(..)) {
+                if matches!(receiver.ty, Type::Popen(..) | Type::ActivePopen) {
                     return self.popen_attribute(receiver, attribute);
                 }
                 if matches!(receiver.ty, Type::CompletedProcess(..)) {
@@ -7009,6 +7018,16 @@ impl<'a> Checker<'a> {
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call, None),
+            Some(Binding::Intrinsic(Intrinsic::PopenCleanup)) => {
+                self.arguments(call, &[], None)?;
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(
+                        Builtin::Process(ir::ProcessOperation::PopenCleanup),
+                        vec![],
+                    ),
+                });
+            }
             Some(Binding::Intrinsic(Intrinsic::SubprocessCall)) => {
                 return self.popen(call, Some(false));
             }
@@ -7394,7 +7413,7 @@ impl<'a> Checker<'a> {
             if receiver.ty.is_path() || receiver.ty == Type::PathInfo {
                 return self.path_method(receiver, attribute, call);
             }
-            if matches!(receiver.ty, Type::Popen(..)) {
+            if matches!(receiver.ty, Type::Popen(..) | Type::ActivePopen) {
                 return self.popen_method(receiver, attribute, call);
             }
             if matches!(receiver.ty, Type::CompletedProcess(..)) {
@@ -8251,6 +8270,16 @@ impl<'a> Checker<'a> {
                     ty: Type::Str,
                     kind: ExprKind::Str(String::new()),
                 });
+            }
+            "id" if args.len() == 1
+                && !self.names.contains_key("id")
+                && self.resolve(&call.func).is_none()
+                && matches!(args[0].ty, Type::Popen(..) | Type::ActivePopen) =>
+            {
+                (
+                    Builtin::Process(ir::ProcessOperation::PopenIdentity),
+                    Type::Int,
+                )
             }
             "str"
                 if args.len() == 1

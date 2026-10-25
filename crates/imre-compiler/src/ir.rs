@@ -70,6 +70,8 @@ pub(crate) enum Type {
     CompletedProcess(ProcessCapture, Option<usize>),
     /// A synchronous child with statically known captured stream types.
     Popen(ProcessCapture, bool, usize),
+    /// An original Popen from _active. Its stream and argv types vary by launch.
+    ActivePopen,
     /// Async process handle, with bits for the captured stdout and stderr slots.
     AsyncProcess(u8),
     Coroutine(usize),
@@ -222,7 +224,7 @@ impl std::fmt::Display for Type {
                 "subprocess.CompletedProcess[str]"
             }
             Self::CompletedProcess(..) => "subprocess.CompletedProcess[bytes]",
-            Self::Popen(..) => "subprocess.Popen",
+            Self::Popen(..) | Self::ActivePopen => "subprocess.Popen",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
             Self::Coroutine(_) => "Coroutine",
             Self::EventLoop => "asyncio.AbstractEventLoop",
@@ -1513,6 +1515,9 @@ pub(crate) enum ProcessOperation {
         check: bool,
     },
     PopenPid,
+    PopenActive,
+    PopenCleanup,
+    PopenIdentity,
     PopenArgs,
     PopenPipe(u8),
     PopenStatus {

@@ -89,6 +89,7 @@ impl Type {
             | Self::DirectoryContext(_)
             | Self::Semaphore
             | Self::Popen(..)
+            | Self::ActivePopen
             | Self::AsyncProcess(_)
             | Self::TextIO
             | Self::StringIO
@@ -160,6 +161,7 @@ impl Type {
             | Self::DirectoryContext(_)
             | Self::Semaphore
             | Self::Popen(..)
+            | Self::ActivePopen
             | Self::AsyncProcess(_)
             | Self::TextIO
             | Self::StringIO
@@ -786,6 +788,7 @@ impl Emitter<'_, '_> {
             | Type::DirectoryContext(_)
             | Type::Semaphore
             | Type::Popen(..)
+            | Type::ActivePopen
             | Type::AsyncProcess(_)
             | Type::NativeModule
             | Type::ModuleNamespace
@@ -3526,6 +3529,7 @@ impl Emitter<'_, '_> {
                 | Type::DirectoryContext(_)
                 | Type::Semaphore
                 | Type::Popen(..)
+                | Type::ActivePopen
                 | Type::AsyncProcess(_)
                 | Type::NativeModule
                 | Type::ModuleNamespace
@@ -6449,6 +6453,7 @@ impl Emitter<'_, '_> {
                     | Type::DirectoryContext(_)
                     | Type::Semaphore
                     | Type::Popen(..)
+                    | Type::ActivePopen
                     | Type::AsyncProcess(_)
                     | Type::NativeModule
                     | Type::ModuleNamespace
@@ -6715,6 +6720,7 @@ impl Emitter<'_, '_> {
             | Type::DirectoryContext(_)
             | Type::Semaphore
             | Type::Popen(..)
+            | Type::ActivePopen
             | Type::AsyncProcess(_)
             | Type::NativeModule
             | Type::ModuleNamespace
@@ -6800,6 +6806,7 @@ impl Emitter<'_, '_> {
             | Type::DirectoryContext(_)
             | Type::Semaphore
             | Type::Popen(..)
+            | Type::ActivePopen
             | Type::AsyncProcess(_)
             | Type::NativeModule
             | Type::ModuleNamespace
@@ -7404,6 +7411,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::DirectoryContext(_)
         | Type::Semaphore
         | Type::Popen(..)
+        | Type::ActivePopen
         | Type::AsyncProcess(_)
         | Type::NativeModule
         | Type::ModuleNamespace
@@ -7610,6 +7618,9 @@ declare i64 @imre_call_config(ptr, i32, i64, i1 zeroext)
 declare ptr @imre_popen_pipe(ptr, i32)
 declare i64 @imre_file_fileno(ptr)
 declare i64 @imre_popen_pid(ptr)
+declare ptr @imre_popen_active()
+declare void @imre_popen_cleanup()
+declare i64 @imre_popen_identity(ptr)
 declare ptr @imre_popen_args(ptr)
 declare ptr @imre_popen_control(ptr)
 declare i64 @imre_child_status(ptr, i1 zeroext)
