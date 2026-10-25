@@ -4652,19 +4652,25 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::Tee => {
+                let source = &args[0].value;
+                let mode = iterable_mode(source.ty);
+                let word = self.word(source);
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(returns)));
+                let operand = self.checked_pointer(format!(
+                    "call ptr @imre_tee(i32 {mode}, i64 {word}, ptr @{layout})"
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::Islice | Builtin::Cycle => {
                 let source = &args[0].value;
-                let mode = match source.ty {
-                    Type::Cursor(_) => 0,
-                    Type::Str => 1,
-                    Type::Bytes => 2,
-                    Type::ListInt => 3,
-                    Type::List(_) => 4,
-                    Type::Tuple(_) => 5,
-                    Type::Dict(_) => 6,
-                    Type::Set(_) => 7,
-                    _ => unreachable!("checked iterable"),
-                };
+                let mode = iterable_mode(source.ty);
                 let word = self.word(source);
                 let operand = if args.len() == 1 {
                     self.instruction(format!("call ptr @imre_cycle(i32 {mode}, i64 {word})"))
@@ -5885,6 +5891,21 @@ fn integer_string_argument(expression: &Expr) -> Option<&Expr> {
     }
 }
 
+/// Selects a concrete iterator constructor without inspecting a dynamic Python object.
+fn iterable_mode(ty: Type) -> u32 {
+    match ty {
+        Type::Cursor(_) => 0,
+        Type::Str => 1,
+        Type::Bytes => 2,
+        Type::ListInt => 3,
+        Type::List(_) => 4,
+        Type::Tuple(_) => 5,
+        Type::Dict(_) => 6,
+        Type::Set(_) => 7,
+        _ => unreachable!("checked iterable"),
+    }
+}
+
 /// Must match the descriptor kinds in the runtime. Nullable words preserve the
 /// payload's ownership operation, with bit 8 allowing the absent zero value.
 fn representation_kind(ty: Type, types: &Types) -> u32 {
@@ -6504,6 +6525,7 @@ declare ptr @imre_str_get(ptr, i64)
 declare ptr @imre_str_slice(ptr, i64, i64, i64)
 declare ptr @imre_float_count(double, i32, i64)
 declare ptr @imre_progression(i64, i64, i64)
+declare ptr @imre_tee(i32, i64, ptr)
 declare ptr @imre_islice(i32, i64, i64, i64, i64)
 declare ptr @imre_cycle(i32, i64)
 declare i64 @imre_cursor_length_hint(ptr, i64)
