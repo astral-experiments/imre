@@ -108,6 +108,35 @@ jobs:
           Path(sys.argv[4]).write_text(json.dumps(rows,indent=2)+'\n')
           print([(level,len(values)) for level,values in rows.items()])
           PY
+      - name: Generate and check the table with the resolved compiler and pinned CPython
+        run: |
+          set -euo pipefail
+          dir=benchmarks/cpython_stdlib/full
+          evidence="$RUNNER_TEMP/evidence"
+          docs=$(jq -r .base "$evidence/source.json")
+          git cat-file -e "$docs:$dir/support_table.py"
+          git cat-file -e "$docs:docs/stdlib.md"
+          git diff --exit-code "$docs" HEAD -- "$dir/support_table.py"
+          echo "$docs" > "$evidence/table-source.txt"
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+          assert sys.version_info[:3] == (3, 14, 5)
+          p = Path('benchmarks/cpython_stdlib/full/api_examples.toml')
+          s = p.read_text()
+          assert '\nrandom = ' not in s and s.count('\nre = ') == 1
+          row = 'random = ["Seed the shared generator and draw floats, bits, integer ranges, and choices from supported sequences.","benchmarks/cpython_stdlib/full/shutil/random.md"]'
+          p.write_text(s.replace('\nre = ', '\n' + row + '\nre = '))
+          PY
+          python -B "$dir/support_table.py" --imre target/debug/imre
+          python -B "$dir/support_table.py" --imre target/debug/imre --check
+          cp docs/stdlib.md "$dir/api_examples.toml" "$evidence/"
+          python - <<'PY'
+          from pathlib import Path
+          rows = [s for s in Path('docs/stdlib.md').read_text().splitlines() if s.startswith(('| `random` |', '| `shutil` |'))]
+          assert len(rows) == 2 and any(s.startswith('| `random` | Yes |') for s in rows)
+          print(*rows, sep='\n')
+          PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
