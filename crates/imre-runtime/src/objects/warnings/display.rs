@@ -66,11 +66,13 @@ pub unsafe extern "C" fn imre_warning_format(
 pub unsafe extern "C" fn imre_warning_write(file: *const Object, text: *const Str, stdout: u32) {
     // SAFETY: exact file and immutable text live until the synchronous write finishes.
     unsafe {
-        if file.is_null() {
-            let _ = crate::sys::write_standard_stream(stdout == 0, (&*text).as_str());
-        } else if let Err(e) = object(file)
-            .0
-            .with_mut(|s| s.file_mut().write((&*text).as_str()))
+        let text = (&*text).as_str();
+        let result = if file.is_null() {
+            crate::sys::write_standard_stream(stdout == 0, text).map_err(super::super::errno_error)
+        } else {
+            object(file).0.with_mut(|s| s.file_mut().write(text))
+        };
+        if let Err(e) = result
             && !e.is_kind(Kind::OSError)
             && !e.is_kind(Kind::UnsupportedOperation)
         {

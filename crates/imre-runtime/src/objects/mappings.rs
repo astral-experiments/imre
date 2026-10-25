@@ -254,21 +254,21 @@ impl ScalarKey for StrOwner {
         StrOwner::into_raw(self) as usize
     }
 }
-impl ScalarKey for Rc<Bytes> {
+impl ScalarKey for crate::BytesOwner {
     const KIND: u32 = 8;
     fn word(&self) -> usize {
-        Rc::as_ptr(self) as usize
+        crate::BytesOwner::as_ptr(self) as usize
     }
     unsafe fn borrow(word: usize) -> ManuallyDrop<Self> {
         // SAFETY: the caller roots an exact bytes handle; ManuallyDrop does not consume it.
-        ManuallyDrop::new(unsafe { Rc::from_raw(word as *const Bytes) })
+        ManuallyDrop::new(unsafe { crate::BytesOwner::from_raw(word as *const Bytes) })
     }
     unsafe fn from_owned(word: usize) -> Self {
         // SAFETY: the caller transfers an independently acquired bytes owner.
-        unsafe { Rc::from_raw(word as *const Bytes) }
+        unsafe { crate::BytesOwner::from_raw(word as *const Bytes) }
     }
     fn into_word(self) -> usize {
-        Rc::into_raw(self) as usize
+        crate::BytesOwner::into_raw(self) as usize
     }
 }
 
@@ -591,18 +591,23 @@ impl<K: ScalarKey> Table<K, usize> {
             }
             Missing::List(element) => element,
         };
-        let list = if element.raw() == 2 {
-            crate::imre_list_new() as usize
-        } else {
-            super::imre_seq_new(element.raw()) as usize
-        };
-        // SAFETY: the factory transfers one fresh list owner. Keep it guarded
-        // until reservation succeeds and the table owns its word.
-        let list = unsafe { OwnedWord::from_owned(list, kind) };
+        let list = default_list(element);
+        debug_assert_eq!(list.kind, kind);
         self.insert_absent(hash, (*key).clone(), list.word)?;
         // SAFETY: the table now roots the published value.
         Ok(Some(unsafe { kind.acquire(list.into_word()) }))
     }
+}
+
+/// Allocate the list factory's result before transferring any owner to a table.
+fn default_list(element: WordKind) -> OwnedWord {
+    let (word, kind) = if element.raw() == 2 {
+        (crate::imre_list_new() as usize, 4)
+    } else {
+        (super::imre_seq_new(element.raw()) as usize, 5)
+    };
+    // SAFETY: both constructors return a fresh strong owner of the selected kind.
+    unsafe { OwnedWord::from_owned(word, WordKind::new(kind)) }
 }
 
 enum Tables<V> {
@@ -610,7 +615,7 @@ enum Tables<V> {
     Enum(Table<usize, V>),
     Str(Table<StrOwner, V>),
     Object(Table<ObjectKey, V>),
-    Bytes(Table<Rc<Bytes>, V>),
+    Bytes(Table<crate::BytesOwner, V>),
     Tuple(Table<TupleKey, V>),
 }
 
@@ -1954,6 +1959,70 @@ pub extern "C" fn imre_default_list_dict_new(key_kind: u32, element_kind: u32) -
         TableOwner::new(mapping),
     )))))
 }
+
+/// # Safety
+/// The caller roots a closed list-valued defaultdict.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_defaultdict_has_factory(value: *const Object) -> u32 {
+    // SAFETY: only a flag leaves this immutable storage borrow.
+    u32::from(unsafe {
+        object(value)
+            .0
+            .with(|s| matches!(s.dictionary().missing, Missing::List(_)))
+    })
+}
+
+/// # Safety
+/// The caller roots a defaultdict with the given list element kind.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_defaultdict_set_factory(
+    value: *const Object,
+    element: u32,
+    enabled: u32,
+) {
+    let policy = if enabled == 0 {
+        Missing::NoFactory
+    } else {
+        Missing::List(WordKind::new(element))
+    };
+    // SAFETY: a factory change preserves both the table's representations and its entries.
+    unsafe {
+        object(value)
+            .0
+            .with_mut(|s| s.dictionary_mut().missing = policy)
+    };
+}
+
+/// An explicit call runs the factory before checking the table, even for an existing key.
+///
+/// # Safety
+/// The caller roots the mapping and a key of its exact representation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_defaultdict_missing(value: *const Object, key: usize) -> usize {
+    // SAFETY: only copied factory metadata escapes the borrow.
+    let policy = unsafe { object(value).0.with(|s| s.dictionary().missing) };
+    match policy {
+        Missing::NoFactory => {
+            // SAFETY: the key remains rooted until the exception owns it.
+            unsafe { missing_key(value, key) }.returning(0)
+        }
+        Missing::List(element) => {
+            let list = default_list(element);
+            // SAFETY: the rooted default matches the table's values. On a hit
+            // the unused factory result drops after the stored value is retained.
+            unsafe { imre_dict_setdefault(value, key, list.word) }
+        }
+        Missing::Raise | Missing::Zero => {
+            let class = if matches!(policy, Missing::Zero) {
+                "Counter"
+            } else {
+                "dict"
+            };
+            Error::new(Kind::TypeError, format!("descriptor '__missing__' for 'collections.defaultdict' objects doesn't apply to a '{class}' object")).returning(0)
+        }
+    }
+}
+
 /// # Safety
 /// `value` is a rooted dictionary.
 #[unsafe(no_mangle)]
@@ -2884,19 +2953,22 @@ mod tests {
             }
             for source in ["", "aaa", "aaé😺"] {
                 let text = Str::new(source);
-                let bytes = Rc::new(source.as_bytes().to_vec());
-                let validated = Rc::from_raw(super::super::bytes::imre_bytes_validate_utf8(
-                    Rc::as_ptr(&bytes),
-                ));
+                let bytes = crate::BytesOwner::new(source.as_bytes().to_vec());
+                let validated =
+                    crate::BytesOwner::from_raw(super::super::bytes::imre_bytes_validate_utf8(
+                        crate::BytesOwner::as_ptr(&bytes),
+                    ));
                 let from_text = Rc::from_raw(imre_dict_gather_str_int(&text, pointer));
-                let from_bytes =
-                    Rc::from_raw(imre_dict_gather_bytes_int(Rc::as_ptr(&validated), pointer));
+                let from_bytes = Rc::from_raw(imre_dict_gather_bytes_int(
+                    crate::BytesOwner::as_ptr(&validated),
+                    pointer,
+                ));
                 let words = |list: &List| {
                     list.0
                         .with(|values| values.iter().map(|value| value.0).collect::<Vec<_>>())
                 };
                 assert_eq!(words(&from_bytes), words(&from_text));
-                assert_eq!(Rc::strong_count(&bytes), 2);
+                assert_eq!(crate::BytesOwner::strong_count(&bytes), 2);
             }
         }
         assert_eq!(imre_error_pending(), 0);

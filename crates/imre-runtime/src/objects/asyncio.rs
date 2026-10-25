@@ -58,6 +58,7 @@ struct CoroutineFrame {
 pub(super) struct Task {
     frame: Rc<CoroutineFrame>,
     ready: RefCell<Option<Ready>>,
+    context: RefCell<Option<Rc<super::contextvars::State>>>,
     outcome: RefCell<Option<Outcome>>,
     scheduled: Cell<bool>,
     cancelled: Cell<bool>,
@@ -108,6 +109,7 @@ impl Task {
         Rc::new(Self {
             frame,
             ready: RefCell::new(None),
+            context: RefCell::new(None),
             outcome: RefCell::new(None),
             scheduled: Cell::new(false),
             cancelled: Cell::new(false),
@@ -122,6 +124,7 @@ impl Task {
         if self.scheduled.replace(true) {
             return;
         }
+        *self.context.borrow_mut() = super::contextvars::capture();
         if let Some(call) = self.frame.call.take() {
             *self.frame.fiber.borrow_mut() = Some(Coroutine::new(
                 move |yielder, cancellation: Option<Cancellation>| {
@@ -150,6 +153,7 @@ impl Task {
         if !self.cancelled.get() && self.ready.borrow().as_ref().is_some_and(|ready| !ready()) {
             return false;
         }
+        super::contextvars::swap_task(&mut self.context.borrow_mut());
         let waiting = self.ready.take().is_some();
         let cancellation = self.cancelled.replace(false).then_some(if waiting {
             Cancellation::Waiter
@@ -168,6 +172,7 @@ impl Task {
         };
         CURRENT_TASK.take();
         swap_active(&mut self.frame.active.borrow_mut());
+        super::contextvars::swap_task(&mut self.context.borrow_mut());
         match step {
             CoroutineResult::Yield(ready) => {
                 *self.ready.borrow_mut() = Some(ready);
@@ -641,13 +646,20 @@ pub unsafe extern "C" fn imre_async_permit(handle: *const Object, acquire: bool)
 /// Keeps the partial gather output on success and releases its only owner on failure.
 ///
 /// # Safety
-/// `output` transfers one exact list owner when `status` is zero.
-unsafe fn finish_gather_append(output: *const (), status: i32) -> bool {
+/// `output` transfers one list owner of the given element kind when `status` is zero.
+unsafe fn finish_gather_append(output: *const (), kind: u32, status: i32) -> bool {
     if status != 0 {
         return true;
     }
-    // SAFETY: gather has not transferred or registered this fresh output owner.
-    unsafe { imre_object_release(output.cast()) };
+    // SAFETY: gather retains the fresh owner and uses the element kind to select
+    // the same list representation that it allocated.
+    unsafe {
+        if kind == 2 {
+            crate::imre_list_release(output.cast());
+        } else {
+            imre_object_release(output.cast());
+        }
+    }
     false
 }
 
@@ -740,15 +752,14 @@ pub unsafe extern "C" fn imre_async_gather(
         // reference for the returned sequence before that owner is released.
         let status = unsafe {
             if kind == 2 {
-                crate::imre_list_append(output.cast(), word);
-                1
+                crate::imre_list_append(output.cast(), word)
             } else {
                 imre_seq_append(output.cast(), word, kind)
             }
         };
         // SAFETY: output still owns every element acquired so far. Failure consumes
         // that one partial owner while preserving the pending allocation error.
-        if unsafe { !finish_gather_append(output, status) } {
+        if unsafe { !finish_gather_append(output, kind, status) } {
             return std::ptr::null();
         }
     }
@@ -789,8 +800,24 @@ mod tests {
             );
             assert_eq!(crate::StrOwner::strong_count(&text), 2);
             let output: *const () = Rc::into_raw(output).cast();
-            assert!(!finish_gather_append(output, 0));
+            assert!(!finish_gather_append(output, 3, 0));
         }
         assert_eq!(crate::StrOwner::strong_count(&text), 1);
+    }
+
+    #[test]
+    fn failed_integer_gather_append_releases_partial_output() {
+        let integer = Rc::new(num_bigint::BigInt::from(1_u8) << 100_u32);
+        // SAFETY: the fresh integer list acquires a reference to the rooted BigInt.
+        unsafe {
+            let output = crate::imre_list_new();
+            assert_eq!(
+                crate::imre_list_append(output, Rc::as_ptr(&integer) as usize),
+                1,
+            );
+            assert_eq!(Rc::strong_count(&integer), 2);
+            assert!(!finish_gather_append(output.cast(), 2, 0));
+        }
+        assert_eq!(Rc::strong_count(&integer), 1);
     }
 }

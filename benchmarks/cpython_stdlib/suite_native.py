@@ -117,7 +117,8 @@ def _pinned_imports(tree, module, names):
             single = type(stmt)(**{field: [alias] if field == "names" else getattr(stmt, field)
                                    for field in stmt._fields})
             imports[binding] = ast.unparse(single)
-    for name in names - imports.keys():
+    # Keep missing fixture globals reproducible across Python processes.
+    for name in sorted(names - imports.keys()):
         if name in vars(module) or not hasattr(builtins, name):
             raise NativeFixtureError(f"upstream module global needs its original definition: {name}")
     return list(imports.values())

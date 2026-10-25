@@ -19,6 +19,7 @@ mod record_copies;
 mod reductions;
 #[cfg(test)]
 mod slice_sum_validation;
+mod sorted_rows;
 mod tuples;
 mod types;
 #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
@@ -361,6 +362,8 @@ fn checked_lower_with(
 
 fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
     verify_after(module, "lowering")?;
+    sorted_rows::specialize(module);
+    verify_after(module, "sorted record rows")?;
     let reader_origins = record_copies::scalarize(module);
     verify_after(module, "record copy scalarization")?;
     tuples::scalarize(module);

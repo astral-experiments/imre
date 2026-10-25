@@ -13,6 +13,49 @@ fn op(operation: Readiness, ty: Type, args: Vec<Expr>) -> Expr {
 }
 
 impl Checker<'_> {
+    /// Clamp integer selector timeouts before conversion: even a huge negative
+    /// number is an immediate wait, while a positive overflow remains an error.
+    pub(super) fn selector_seconds(&mut self, value: Expr) -> Expr {
+        if !matches!(value.ty, Type::Int | Type::Bool) {
+            return value;
+        }
+        let mut scope = calls::ArgumentScope::default();
+        let value = if value.ty == Type::Bool {
+            Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+            }
+        } else {
+            value
+        };
+        let value = scope.hold(self, value);
+        let positive = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Compare(
+                vec![
+                    value.clone(),
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Int("0".into()),
+                    },
+                ],
+                vec![ir::Compare::Greater],
+            ),
+        };
+        let seconds = Expr {
+            ty: Type::Float,
+            kind: ExprKind::Builtin(Builtin::Float, vec![value]),
+        };
+        let zero = Expr {
+            ty: Type::Float,
+            kind: ExprKind::Float(0.0),
+        };
+        scope.finish(Expr {
+            ty: Type::Float,
+            kind: ExprKind::Conditional(Box::new(positive), Box::new(seconds), Box::new(zero)),
+        })
+    }
+
     fn readiness_timeout(&mut self, arg: Option<&ast::Expr>) -> Result<Expr, String> {
         let Some(arg) = arg else {
             return Ok(Expr {
