@@ -910,6 +910,19 @@ except KeyError:
 }
 
 REJECTED = {
+    **{
+        f"forwarding_exception_descriptor_{name}": f"""
+class Problem(Exception):
+    def __init__(self, value, *rest):
+        super().__init__(value, *rest)
+        self.{name} = value
+Problem("ab")
+"""
+        for name in (
+            "args", "__cause__", "__context__", "__traceback__",
+            "__suppress_context__", "__dict__", "__class__", "__weakref__",
+        )
+    },
     "separate_payload_layouts": """
 class Left(ValueError):
     def __init__(self, x: int) -> None:
