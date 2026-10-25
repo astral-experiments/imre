@@ -57,7 +57,7 @@ impl Builtin {
         match self {
             Self::FunctionWrappedSet => Contract::new(false, Unknown),
             Self::FunctionWrappedGet => Contract::new(true, PreservesLists),
-            Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
+            Self::Repr => Contract::new(true, Unknown),
             Self::Str
                 if args.first().is_some_and(|e| {
                     matches!(
@@ -71,6 +71,7 @@ impl Builtin {
             Self::Str if args.first().is_some_and(|e| e.ty == Type::Int) => {
                 Contract::new(true, PreservesOwners)
             }
+            Self::Str => Contract::new(true, PreservesLists),
             Self::Linecache(..) | Self::CachePath(_) => Contract::new(true, Unknown),
             Self::Calendar(op) => Contract::new(
                 matches!(
@@ -493,7 +494,6 @@ impl Builtin {
             | Self::SequenceGetInBounds
             | Self::Split
             | Self::StringListNonempty
-            | Self::Str
             | Self::SourceModule
             | Self::SourceModuleAttribute { .. }
             | Self::NominalIdentity

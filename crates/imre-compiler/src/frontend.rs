@@ -34,6 +34,7 @@ mod consuming_lists;
 mod contexts;
 mod contextvars;
 mod copying;
+mod count_elements;
 mod counter;
 mod csv;
 mod dataclass_values;
@@ -2754,6 +2755,9 @@ impl<'a> Checker<'a> {
                 });
             }
             return self.coerce(value, expected, expression);
+        }
+        if self.types.is_unread_argument(expected) {
+            return self.unread_argument(expression, expected);
         }
         // A record can carry user fields with distinct types. An expected scalar type
         // permits reading such a field; the runtime checks its actual representation.
@@ -7933,6 +7937,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Deque)) => return self.deque_new(call, None),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::ChainMap)) => return self.chainmap(call, None),
+            Some(Binding::Intrinsic(Intrinsic::CountElements)) => return self.count_elements(call),
             Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
                 return self.cursor_length_hint(call);
             }

@@ -566,6 +566,7 @@ pub(crate) enum CheckedDiagnostic {
     CheckedIndexRead(TextRange),
     MissingArgument(TextRange),
     BuiltinImport(TextRange),
+    BuiltinAttribute(TextRange),
     ExcessArgument(TextRange),
     PositionalKeyword(TextRange),
     ArgumentType(TextRange),
@@ -586,13 +587,14 @@ impl CheckedDiagnostic {
             Self::DictDeletion(range) => (range, 8),
             Self::MissingArgument(range) => (range, 4),
             Self::BuiltinImport(range) => (range, 5),
+            Self::BuiltinAttribute(range) => (range, 14),
             Self::ExcessArgument(range) => (range, 6),
             Self::InertReturn(range) => (range, 13),
             Self::PositionalKeyword(range) => (range, 7),
             Self::DeferredName(range) => (range, 9),
             Self::NonIterableSpread(range) => (range, 10),
             Self::RuntimeOverload(range) => (range, 12),
-            Self::ArgumentType(range) => (range, 14),
+            Self::ArgumentType(range) => (range, 15),
         };
         (range.start(), range.end(), kind)
     }
@@ -623,6 +625,7 @@ impl CheckedDiagnostic {
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
             Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
             Self::ArgumentType(arg) => diagnostic == "invalid-argument-type" && arg == range,
+            Self::BuiltinAttribute(name) => diagnostic == "unresolved-attribute" && name == range,
             Self::ExcessArgument(arg) => {
                 diagnostic == "too-many-positional-arguments" && arg == range
             }

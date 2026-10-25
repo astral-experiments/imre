@@ -81,8 +81,37 @@ def decorated() -> None:
     print(choose.__wrapped__("original"))
 
 
+def numbers(fail: bool) -> list[int]:
+    print("evaluate numbers")
+    if fail:
+        raise ValueError("from argument")
+    return [1, 2, 3]
+
+
+def heterogeneous() -> None:
+    @singledispatch
+    def classify(item):
+        return "other"
+
+    def integer(item):
+        return "integer"
+
+    print(classify.register(int, integer) is integer)
+    print(classify("s"))
+    print(classify(9))
+    print(classify(True))
+    print(classify(numbers(False)))
+    print(integer(numbers(False)))
+    print(classify.dispatch(int)(b"direct"))
+    try:
+        print(classify(numbers(True)))
+    except ValueError as exc:
+        print(str(exc))
+
+
 exercise(True)
 exercise(False)
 local_registry()
 decorated()
 decorated()
+heterogeneous()
