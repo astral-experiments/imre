@@ -1,9 +1,66 @@
 //! An integer-valued Counter keeps a concrete key representation. Construction
-//! and update share the iterator consumer so each source item is applied in order.
+//! and updates share the iterator consumer so each source item is applied in order.
 
 use super::*;
 
 impl Checker<'_> {
+    /// Root all evaluated call arguments until the catchable argument error.
+    fn counter_call_error(
+        &mut self,
+        call: &ast::ExprCall,
+        mut values: Vec<Expr>,
+        message: String,
+    ) -> Result<Expr, String> {
+        for keyword in &call.arguments.keywords {
+            if keyword.arg.is_none() {
+                return Err(error(
+                    self.source,
+                    keyword,
+                    "Counter keyword unpacking is unsupported",
+                ));
+            }
+            values.push(self.expr(&keyword.value)?);
+        }
+        values.push(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("TypeError").unwrap(),
+                message: Some(Box::new(unpacking::string(message))),
+            },
+        });
+        Ok(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::RaiseException, values),
+        })
+    }
+
+    pub(super) fn counter_unbound_update(
+        &mut self,
+        call: &ast::ExprCall,
+        operation: Binary,
+        name: &str,
+    ) -> Result<Expr, String> {
+        let Some((receiver, arguments)) = call.arguments.args.split_first() else {
+            self.graph.checked_overload(self.module, call.range());
+            return self.counter_call_error(
+                call,
+                vec![],
+                format!("Counter.{name}() missing 1 required positional argument: 'self'"),
+            );
+        };
+        let receiver = self.expr(receiver)?;
+        if !self.types.is_counter(receiver.ty) {
+            return Err(error(
+                self.source,
+                call,
+                "an unbound Counter method requires a typed Counter receiver",
+            ));
+        }
+        let mut bound = call.clone();
+        bound.arguments.args = arguments.to_vec().into();
+        self.counter_counts(&bound, Some(receiver), None, operation)
+    }
+
     fn counter_input(
         &mut self,
         source: &ast::Expr,
@@ -67,13 +124,60 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         hint: Option<Type>,
     ) -> Result<Expr, String> {
+        self.counter_counts(call, receiver, hint, Binary::Add)
+    }
+
+    pub(super) fn counter_counts(
+        &mut self,
+        call: &ast::ExprCall,
+        receiver: Option<Expr>,
+        hint: Option<Type>,
+        operation: Binary,
+    ) -> Result<Expr, String> {
+        if receiver.is_some() {
+            self.graph.checked_overload(self.module, call.range());
+        }
         let hint = receiver
             .as_ref()
             .and_then(|v| self.types.mapping(v.ty))
             .map(|(key, _)| key)
             .or(hint);
+        if call.arguments.args.len() > 1
+            && let Some(receiver) = receiver.as_ref()
+        {
+            let mut values = vec![receiver.clone()];
+            for argument in &call.arguments.args {
+                let value = if matches!(argument, ast::Expr::Dict(dict) if dict.items.is_empty()) {
+                    self.expr_expected(argument, self.types.dict(hint.unwrap(), Type::Int))?
+                } else {
+                    self.expr(argument)?
+                };
+                values.push(value);
+            }
+            let name = if matches!(operation, Binary::Subtract) {
+                "subtract"
+            } else {
+                "update"
+            };
+            return self.counter_call_error(
+                call,
+                values,
+                format!(
+                    "Counter.{name}() takes from 1 to 2 positional arguments but {} were given",
+                    call.arguments.args.len() + 1
+                ),
+            );
+        }
         let (receiver, input) = match call.arguments.args.as_ref() {
+            [ast::Expr::NoneLiteral(_)] => (receiver, None),
             [source] => match (receiver, self.counter_input(source, hint)?) {
+                (Some(receiver), Iteration::Container { iterable, .. })
+                    if matches!(iterable.ty, Type::Int | Type::Bool | Type::Float) =>
+                {
+                    let message =
+                        format!("'{}' object is not iterable", self.type_name(iterable.ty));
+                    return self.counter_call_error(call, vec![receiver, iterable], message);
+                }
                 (
                     Some(receiver),
                     Iteration::Container {
@@ -81,7 +185,8 @@ impl Checker<'_> {
                         items: false,
                         start: None,
                     },
-                ) if call.arguments.keywords.is_empty()
+                ) if matches!(operation, Binary::Add)
+                    && call.arguments.keywords.is_empty()
                     && self.types.mapping(iterable.ty) == self.types.mapping(receiver.ty) =>
                 {
                     return Ok(Expr {
@@ -162,7 +267,7 @@ impl Checker<'_> {
                     Ok(vec![Statement::AugmentItem(
                         checker.local(target),
                         element,
-                        Binary::Add,
+                        operation,
                         delta,
                     )])
                 })?,
@@ -177,7 +282,7 @@ impl Checker<'_> {
                     ty: Type::Str,
                     kind: ExprKind::Str(name),
                 },
-                Binary::Add,
+                operation,
                 self.local(slot),
             ));
         }

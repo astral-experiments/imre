@@ -8,7 +8,7 @@ use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
-use crate::analysis::Session;
+use crate::analysis::{CheckedOverload, Session};
 use crate::ir::PosixPathOperation;
 use crate::watch::FileSystem;
 
@@ -514,6 +514,7 @@ impl SourceModule {
 
 pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
+    checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -630,9 +631,17 @@ impl SourceGraph {
         }
     }
 
-    /// Source ranges where the reachable profile or supported decorators replace ty diagnostics.
-    pub(crate) fn diagnostic_scopes(&self) -> (Option<Vec<Vec<TextRange>>>, Vec<Vec<TextRange>>) {
-        let context_decorators: Vec<Vec<_>> = self
+    /// Record only this call's overload diagnostic. Nested arguments still get
+    /// their own diagnostics, including calls with the same method name.
+    pub(crate) fn checked_overload(&self, module: ModuleId, call: TextRange) {
+        self.checked_calls.borrow_mut()[module].push(call);
+    }
+
+    /// Source ranges where the reachable profile or native lowering handles diagnostics.
+    pub(crate) fn diagnostic_scopes(
+        &self,
+    ) -> (Option<Vec<Vec<TextRange>>>, Vec<Vec<CheckedOverload>>) {
+        let overloads: Vec<Vec<_>> = self
             .modules
             .iter()
             .enumerate()
@@ -659,14 +668,20 @@ impl SourceGraph {
                         };
                         (self.resolve(id, &decorator.expression)
                             == Some(Binding::Intrinsic(Intrinsic::ContextManager)))
-                        .then_some(decorator.range())
+                        .then_some(CheckedOverload::Decorator(decorator.range()))
+                    })
+                    .chain({
+                        let mut calls = self.checked_calls.borrow()[id].clone();
+                        calls.sort_unstable_by_key(|range| (range.start(), range.end()));
+                        calls.dedup();
+                        calls.into_iter().map(CheckedOverload::Call)
                     })
                     .collect()
             })
             .collect();
         (
             self.reachable.as_ref().map(|r| r.skipped.clone()),
-            context_decorators,
+            overloads,
         )
     }
 
@@ -964,6 +979,7 @@ impl<'a> Loader<'a> {
         self.inputs.missing.dedup();
         let mut graph = SourceGraph {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
+            checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
