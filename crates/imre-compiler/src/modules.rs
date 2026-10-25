@@ -242,7 +242,7 @@ pub(crate) enum Intrinsic {
     Literal,
     Callable,
     Sequence,
-    Mapping,
+    Mapping { typing_alias: bool },
     Iterable,
     Iterator,
     UnsupportedOperation,
@@ -330,6 +330,7 @@ pub(crate) enum Intrinsic {
     GetEnv,
     GetCwd,
     Strerror,
+    StatResult,
     Fd(crate::ir::FdOperation),
     DescriptorConstant(&'static str),
     FsPath,
@@ -624,7 +625,9 @@ impl IntrinsicModule {
             (Self::Typing, "cast") => Intrinsic::Cast,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
             (Self::Typing | Self::CollectionsAbc, "Sequence") => Intrinsic::Sequence,
-            (Self::Typing | Self::CollectionsAbc, "Mapping") => Intrinsic::Mapping,
+            (Self::Typing | Self::CollectionsAbc, "Mapping") => Intrinsic::Mapping {
+                typing_alias: self == Self::Typing,
+            },
             (Self::Typing | Self::CollectionsAbc, "Iterable") => Intrinsic::Iterable,
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
@@ -943,6 +946,12 @@ impl SourceGraph {
             .push(CheckedDiagnostic::PositionalKeyword(keyword));
     }
 
+    /// The native binder raises for this keyword because the receiver was already bound.
+    pub(crate) fn checked_repeated_keyword(&self, module: ModuleId, keyword: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::RepeatedKeyword(keyword));
+    }
+
     pub(crate) fn checked_keywords(
         &self,
         module: ModuleId,
@@ -969,6 +978,12 @@ impl SourceGraph {
     /// The native table is an actual dict, including errno.errorcode (a Mapping in typeshed).
     pub(crate) fn checked_dict_deletion(&self, module: ModuleId, target: TextRange) {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::DictDeletion(target));
+    }
+
+    /// Native construction raises TypeError at this abstract class call.
+    pub(crate) fn checked_abstract_class_call(&self, module: ModuleId, call: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::AbstractClassCall(call));
     }
 
     /// Source ranges where the reachable profile or native lowering handles diagnostics.
