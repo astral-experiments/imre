@@ -7,22 +7,29 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from native_cases import Blocked, Driver, Parser, arguments, completed
+from native_cases import Blocked, Driver, Group, Parser, arguments, completed
 from suite_inventory import cases, load_suite
 
 
-class Commands:
-    def __init__(self, declarations):
-        self.declarations = declarations
-
+class Commands(Group):
     def add_parser(self, *args, **kwargs):
-        self.declarations.append(f"child{len(self.declarations)} = commands.add_parser({arguments(args, kwargs)})")
+        child = f"child{len(self.declarations)}"
+        self.declarations.append(f"{child} = {self.name}.add_parser({arguments(args, kwargs)})")
+        return Group(self.declarations, child)
+
+    @property
+    def required(self):
+        raise Blocked("reading the native subparser action is unsupported")
+
+    @required.setter
+    def required(self, value):
+        self.declarations.append(f"{self.name}.required = {value!r}")
 
 
 class HelpParser(Parser):
     def add_subparsers(self, *args, **kwargs):
         self.declarations.append(f"commands = parser.add_subparsers({arguments(args, kwargs)})")
-        return Commands(self.declarations)
+        return Commands(self.declarations, "commands")
 
     def run(self, method):
         declarations = "\n    ".join(self.declarations)

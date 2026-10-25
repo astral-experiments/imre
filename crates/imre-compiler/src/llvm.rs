@@ -73,7 +73,7 @@ impl Type {
             | Self::TimeoutExpired
             | Self::Path
             | Self::PurePath(_)
-            | Self::CompletedProcess(_)
+            | Self::CompletedProcess(..)
             | Self::EventLoop
             | Self::Coroutine(_)
             | Self::Task(_)
@@ -91,6 +91,9 @@ impl Type {
             | Self::TimedFileHandler
             | Self::CacheState(_)
             | Self::ClockTime
+            | Self::PlainObject
+            | Self::StrDescriptor(_)
+            | Self::SimpleNamespace(_)
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -133,7 +136,7 @@ impl Type {
             | Self::TimeoutExpired
             | Self::Path
             | Self::PurePath(_)
-            | Self::CompletedProcess(_)
+            | Self::CompletedProcess(..)
             | Self::EventLoop
             | Self::Coroutine(_)
             | Self::Task(_)
@@ -151,6 +154,9 @@ impl Type {
             | Self::TimedFileHandler
             | Self::CacheState(_)
             | Self::ClockTime
+            | Self::PlainObject
+            | Self::StrDescriptor(_)
+            | Self::SimpleNamespace(_)
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -712,7 +718,7 @@ impl Emitter<'_, '_> {
             | Type::Callable(_)
             | Type::ForwardRef(_)
             | Type::AnnotationValue(_)
-            | Type::CompletedProcess(_) => "record",
+            | Type::CompletedProcess(..) => "record",
             Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
@@ -744,6 +750,9 @@ impl Emitter<'_, '_> {
             | Type::TimedFileHandler
             | Type::CacheState(_)
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
+            | Type::SimpleNamespace(_)
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -3269,7 +3278,12 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {result}, 0"))
                 }
-                Type::Path | Type::PurePath(_) | Type::List(_) | Type::Dict(_) | Type::Set(_) => {
+                Type::Path
+                | Type::PurePath(_)
+                | Type::List(_)
+                | Type::Dict(_)
+                | Type::Set(_)
+                | Type::SimpleNamespace(_) => {
                     let operation = if left.ty.is_path() {
                         "path"
                     } else {
@@ -3345,6 +3359,8 @@ impl Emitter<'_, '_> {
                 | Type::None
                 | Type::Class(_)
                 | Type::TimedFileHandler
+                | Type::StrDescriptor(_)
+                | Type::PlainObject
                 | Type::Sha256
                 | Type::ZipFile
                 | Type::ZipInfo
@@ -3355,7 +3371,7 @@ impl Emitter<'_, '_> {
                 | Type::ImportException
                 | Type::TimeoutExpired
                 | Type::TextIO
-                | Type::CompletedProcess(_)
+                | Type::CompletedProcess(..)
                 | Type::BinaryIO => self.instruction(format!(
                     "icmp {predicate} {} {}, {}",
                     left.ty.llvm(),
@@ -3568,7 +3584,7 @@ impl Emitter<'_, '_> {
         if let Builtin::BoxAnnotation(layout) = builtin {
             return Value {
                 ty: returns,
-                ..self.fresh_record(Type::Tuple(*layout), expressions)
+                ..self.record_from_fields(Type::Tuple(*layout), expressions)
             };
         }
         if let Builtin::ForwardRefField(index) = builtin {
@@ -3593,7 +3609,7 @@ impl Emitter<'_, '_> {
             };
             return Value {
                 ty: returns,
-                ..self.fresh_record(Type::Tuple(id), expressions)
+                ..self.record_from_fields(Type::Tuple(id), expressions)
             };
         }
         if matches!(
@@ -3742,14 +3758,25 @@ impl Emitter<'_, '_> {
             | Builtin::DirectoryContextView => {
                 unreachable!("representation-preserving views transfer the operand owner directly")
             }
-            Builtin::StringContains | Builtin::ExceptionMatchesAny => {
-                let name = if matches!(builtin, Builtin::ExceptionMatchesAny) {
-                    "imre_exception_matches_any"
-                } else {
-                    "imre_str_contains"
+            Builtin::StringContains | Builtin::BytesContains | Builtin::ExceptionMatchesAny => {
+                let name = match builtin {
+                    Builtin::BytesContains => "imre_bytes_contains",
+                    Builtin::ExceptionMatchesAny => "imre_exception_matches_any",
+                    _ => "imre_str_contains",
                 };
                 let found = self.instruction(format!(
                     "call i32 @{name}(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {found}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::BytesContainsInt => {
+                let found = self.checked_instruction(format!(
+                    "call i32 @imre_bytes_contains_int(i64 {}, ptr {})",
                     args[0].value.operand, args[1].value.operand
                 ));
                 Value {
@@ -3918,6 +3945,11 @@ impl Emitter<'_, '_> {
                     NamesCopy => "imre_log_names_copy",
                     Configure => "imre_log_config",
                     ConfigureName => "imre_log_config_named",
+                    DictConfig => "imre_log_dict_config",
+                    DictConfigTyped => "imre_log_typed_dict_config",
+                    FileConfig => "imre_log_file_config",
+                    Disabled => "imre_log_disabled",
+                    Propagate => "imre_log_propagate",
                     Name => "imre_log_name",
                     Parent => "imre_log_parent",
                     Children => "imre_log_children",
@@ -3925,8 +3957,8 @@ impl Emitter<'_, '_> {
                     Level => "imre_log_level",
                     EffectiveLevel => "imre_log_effective_level",
                     SetLevel => "imre_log_set_level",
-                    Enabled => "imre_log_enabled",
-                    Emit => "imre_log_emit",
+                    Enabled => "imre_log_is_enabled",
+                    Emit => "imre_log_routed_emit",
                 };
                 let values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
                 if returns == Type::None {
@@ -4006,13 +4038,72 @@ impl Emitter<'_, '_> {
             }
             Builtin::Path(operation) => self.path_builtin(*operation, &args, returns),
             Builtin::PosixPath(operation) => self.posix_path_builtin(*operation, &args, returns),
+            Builtin::Fnmatch(operation) => {
+                use crate::ir::FnmatchOperation;
+                let first = &args[0].value;
+                match operation {
+                    FnmatchOperation::Parts => {
+                        let tuple = self.record(returns);
+                        self.line(format!(
+                            "call void @imre_fnmatch_parts(ptr {}, ptr {}, ptr {}, ptr {})",
+                            first.operand,
+                            args[1].value.operand,
+                            args[2].value.operand,
+                            tuple.operand
+                        ));
+                        tuple
+                    }
+                    FnmatchOperation::Translate => {
+                        let name = if first.ty == Type::Bytes {
+                            "imre_fnmatch_translate_bytes"
+                        } else {
+                            "imre_fnmatch_translate"
+                        };
+                        self.call(name, returns, &[first])
+                    }
+                    FnmatchOperation::Match { .. } => {
+                        let pat = &args[1].value;
+                        let value = self.checked_instruction(format!(
+                            "call i32 @imre_fnmatch(ptr {}, ptr {}, i32 {}, i32 {})",
+                            first.operand,
+                            pat.operand,
+                            u32::from(first.ty == Type::Bytes),
+                            u32::from(pat.ty == Type::Bytes)
+                        ));
+                        Value {
+                            ty: Type::Bool,
+                            operand: self.instruction(format!("icmp ne i32 {value}, 0")),
+                            small_integer: false,
+                        }
+                    }
+                    FnmatchOperation::Filter { inverse } => {
+                        let pat = &args[1].value;
+                        let operand = self.checked_instruction(format!(
+                            "call ptr @imre_fnmatch_filter(ptr {}, ptr {}, i32 {}, i32 {})",
+                            first.operand,
+                            pat.operand,
+                            u32::from(pat.ty == Type::Bytes),
+                            u32::from(*inverse)
+                        ));
+                        self.owned(Value {
+                            ty: returns,
+                            operand,
+                            small_integer: false,
+                        })
+                    }
+                }
+            }
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
             Builtin::TimeSleep => {
                 self.void_call("imre_time_sleep", &[&args[0].value]);
                 none()
             }
-            Builtin::PercentInteger => self.call(
-                "imre_str_percent_int",
+            Builtin::PercentScalar => self.call(
+                if args[1].value.ty == Type::Str {
+                    "imre_str_percent_text"
+                } else {
+                    "imre_str_percent_int"
+                },
                 Type::Str,
                 &[&args[0].value, &args[1].value],
             ),
@@ -4416,17 +4507,40 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::ArgparseText { usage, output } => {
+                let file = args.get(2).map_or("null", |file| &file.value.operand);
+                let text = self.checked_instruction(format!(
+                    "call ptr @imre_argparse_text(ptr {}, ptr {}, i1 {usage}, i32 {}, ptr {file})",
+                    args[0].value.operand, args[1].value.operand, *output as u32
+                ));
+                if returns == Type::None {
+                    none()
+                } else {
+                    Value {
+                        ty: Type::Str,
+                        operand: text,
+                        small_integer: false,
+                    }
+                }
+            }
             Builtin::ParseArgs {
+                namespace,
                 children,
                 process_argv,
             } => {
-                let Type::Class(class) = returns else {
-                    unreachable!()
+                let pair_layout = if matches!(returns, Type::Tuple(_)) {
+                    format!(
+                        "@{}",
+                        self.output
+                            .global_ref(format!("layout_{}", record_name(returns)))
+                    )
+                } else {
+                    "null".to_owned()
                 };
                 let [schema, description, argv] = args.as_slice() else {
                     unreachable!()
                 };
-                let layout = self.output.global_ref(format!("layout_class_{class}"));
+                let layout = self.output.global_ref(format!("layout_class_{namespace}"));
                 let child_layouts = if children.is_empty() {
                     "null".to_owned()
                 } else {
@@ -4448,7 +4562,7 @@ impl Emitter<'_, '_> {
                 Value {
                     ty: returns,
                     operand: self.checked_instruction(format!(
-                        "call ptr @imre_argparse_parse(ptr @{layout}, ptr {child_layouts}, ptr {}, ptr {}, ptr {}, i1 {process_argv})",
+                        "call ptr @imre_argparse_parse(ptr @{layout}, ptr {child_layouts}, ptr {pair_layout}, ptr {}, ptr {}, ptr {}, i1 {process_argv})",
                         schema.value.operand, description.value.operand, argv.value.operand,
                     )),
                     small_integer: false,
@@ -4578,6 +4692,16 @@ impl Emitter<'_, '_> {
                 Type::Sha256,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::StrDescriptor(method) => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @imre_inspect_str_descriptor(i32 {})",
+                    *method as u32
+                )),
+                small_integer: false,
+            },
+            Builtin::NewPlainObject => self.call("imre_plain_object_new", returns, &[]),
+            Builtin::InspectSentinel => self.call("imre_inspect_sentinel", returns, &[]),
             Builtin::HashAvailable => self.call("imre_hash_algorithms_available", returns, &[]),
             Builtin::Sha256New => self.call("imre_sha256_new", Type::Sha256, &[&args[0].value]),
             Builtin::Sha256Update => {
@@ -4764,6 +4888,9 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::ExceptionTupleView => {
+                self.call("imre_exception_tuple_view", returns, &[&args[0].value])
+            }
             Builtin::ExceptionFieldRepr => {
                 self.call("imre_exception_field_repr", returns, &[&args[0].value])
             }
@@ -4792,6 +4919,7 @@ impl Emitter<'_, '_> {
             Builtin::NamedException {
                 kind,
                 message_field,
+                tuple_args,
                 text,
                 repr,
                 dataclass_repr,
@@ -4808,7 +4936,7 @@ impl Emitter<'_, '_> {
                     || "null".into(),
                     |f| format!("@{}", self.output.function_ref(f)),
                 );
-                Value{ty:returns,operand:self.instruction(format!("call ptr @imre_named_exception_record_new(ptr @{desc}, ptr {}, ptr {message}, ptr {text}, ptr {repr}, i32 {})",record.operand,(u32::from(*dataclass_repr) | (u32::from(self.resource_types.contains(&record.ty)) << 1)))),small_integer:false}
+                Value{ty:returns,operand:self.instruction(format!("call ptr @imre_named_exception_record_new(ptr @{desc}, ptr {}, ptr {message}, ptr {text}, ptr {repr}, i32 {})",record.operand,(u32::from(*dataclass_repr) | (u32::from(self.resource_types.contains(&record.ty)) << 1) | (u32::from(*tuple_args) << 2)))),small_integer:false}
             }
             Builtin::ExceptionRecord => {
                 self.call("imre_named_exception_record", returns, &[&args[0].value])
@@ -5243,6 +5371,40 @@ impl Emitter<'_, '_> {
                 returns,
                 &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
             ),
+            Builtin::DeepCopy => {
+                let source = self.word(&args[0].value);
+                let kind = representation_kind(returns, &self.module.types);
+                let result = self.checked_instruction(format!(
+                    "call i64 @imre_deep_copy(i64 {source}, i32 {kind})"
+                ));
+                self.decode_word(result, returns)
+            }
+            Builtin::RecordCopy => {
+                self.call("imre_record_shallow_copy", returns, &[&args[0].value])
+            }
+            Builtin::NamespaceWrap | Builtin::NamespaceDict => self.call(
+                if matches!(builtin, Builtin::NamespaceWrap) {
+                    "imre_namespace_wrap"
+                } else {
+                    "imre_namespace_dict"
+                },
+                returns,
+                &[&args[0].value],
+            ),
+            Builtin::NamespaceGet => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_namespace_get(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                self.decode_word(word, returns)
+            }
+            Builtin::NamespaceDelete => {
+                self.checked_line(format!(
+                    "call void @imre_namespace_delete(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                none()
+            }
             Builtin::DictCopy => self.call("imre_dict_copy", returns, &[&args[0].value]),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
             Builtin::CounterNew => {
@@ -5416,6 +5578,13 @@ impl Emitter<'_, '_> {
                     operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
                     small_integer: false,
                 }
+            }
+            Builtin::DictClear => {
+                self.line(format!(
+                    "call void @imre_dict_clear(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
             }
             Builtin::DictDelete => {
                 let key = self.key_word(&args[1].value);
@@ -5612,6 +5781,9 @@ impl Emitter<'_, '_> {
                     | Type::TimedFileHandler
                     | Type::CacheState(_)
                     | Type::ClockTime
+                    | Type::StrDescriptor(_)
+                    | Type::PlainObject
+                    | Type::SimpleNamespace(_)
                     | Type::Sha256
                     | Type::ZipFile
                     | Type::ZipInfo
@@ -5622,7 +5794,7 @@ impl Emitter<'_, '_> {
                     | Type::JsonObject
                     | Type::RegexMatch
                     | Type::BinaryIO
-                    | Type::CompletedProcess(_)
+                    | Type::CompletedProcess(..)
                     | Type::Tuple(_)
                     | Type::Optional(_)
                     | Type::Callable(_)
@@ -5860,6 +6032,9 @@ impl Emitter<'_, '_> {
             | Type::TimedFileHandler
             | Type::CacheState(_)
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
+            | Type::SimpleNamespace(_)
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -5869,7 +6044,7 @@ impl Emitter<'_, '_> {
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
-            | Type::CompletedProcess(_)
+            | Type::CompletedProcess(..)
             | Type::Tuple(_) => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
         }
     }
@@ -5934,6 +6109,9 @@ impl Emitter<'_, '_> {
             | Type::TimedFileHandler
             | Type::CacheState(_)
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
+            | Type::SimpleNamespace(_)
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -5943,7 +6121,7 @@ impl Emitter<'_, '_> {
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
-            | Type::CompletedProcess(_)
+            | Type::CompletedProcess(..)
             | Type::Tuple(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
         };
         Value {
@@ -6489,7 +6667,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Bytes => 8,
         Type::Union(_) | Type::StringIterable => 9,
         Type::ListInt => 4,
-        Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(_) => 6,
+        Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(..) => 6,
         Type::List(_)
         | Type::Dict(_)
         | Type::Set(_)
@@ -6521,6 +6699,9 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::TimedFileHandler
         | Type::CacheState(_)
         | Type::ClockTime
+        | Type::StrDescriptor(_)
+        | Type::PlainObject
+        | Type::SimpleNamespace(_)
         | Type::Sha256
         | Type::ZipFile
         | Type::ZipInfo
@@ -6540,10 +6721,13 @@ fn record_name(ty: Type) -> String {
         Type::Class(id) => format!("class_{id}"),
         Type::Tuple(id) => format!("tuple_{id}"),
         Type::Callable(_) => "callable".to_owned(),
-        Type::CompletedProcess(c) if c == crate::ir::ProcessCapture::TEXT => {
+        Type::CompletedProcess(c, None) if c == crate::ir::ProcessCapture::TEXT => {
             "completed_process".to_owned()
         }
-        Type::CompletedProcess(c) => format!(
+        Type::CompletedProcess(c, Some(id)) => {
+            format!("{}_args_{id}", record_name(Type::CompletedProcess(c, None)))
+        }
+        Type::CompletedProcess(c, None) => format!(
             "completed_process_{}{}{}",
             u8::from(c.text),
             u8::from(c.stdout),
@@ -6573,24 +6757,24 @@ fn record_layouts(module: &Module, output: &mut Output) {
         .iter()
         .enumerate()
         .map(|(id, fields)| (Type::Class(id), fields.clone()));
-    let mut captures = std::collections::BTreeSet::from([crate::ir::ProcessCapture::TEXT]);
+    let mut captures = std::collections::BTreeSet::from([(crate::ir::ProcessCapture::TEXT, None)]);
     for function in module.functions.iter().chain([&module.entry]) {
         for ty in function.locals.iter().chain([&function.returns]) {
-            if let Type::CompletedProcess(c) = ty {
-                captures.insert(*c);
+            if let Type::CompletedProcess(c, cmd) = ty {
+                captures.insert((*c, *cmd));
             }
         }
         crate::ir::walk_expressions(&function.body, &mut |value| {
-            if let Type::CompletedProcess(c) = value.ty {
-                captures.insert(c);
+            if let Type::CompletedProcess(c, cmd) = value.ty {
+                captures.insert((c, cmd));
             }
         });
     }
-    let processes = captures.into_iter().map(|c| {
+    let processes = captures.into_iter().map(|(c, cmd)| {
         (
-            Type::CompletedProcess(c),
+            Type::CompletedProcess(c, cmd),
             vec![
-                module.types.list(Type::Str),
+                module.types.completed_command(cmd),
                 Type::Int,
                 c.stream(true),
                 c.stream(false),
@@ -6651,8 +6835,7 @@ fn none() -> Value {
 fn write_declarations(units: &mut Output) {
     units.common().push_str(
         r#"
-declare ptr @imre_subprocess_check_output(ptr)
-declare ptr @imre_subprocess_run_modes(ptr, ptr, ptr, i32, i32, i32, i64, ptr)
+declare ptr @imre_run_config(ptr, i32, i64, i64, i32, i32, i1, ptr)
 declare ptr @imre_async_coroutine(ptr, ptr, i32)
 declare ptr @imre_context_new(ptr, ptr)
 declare void @imre_context_enter(ptr)
@@ -6674,6 +6857,7 @@ declare i32 @imre_async_cancel(ptr)
 declare double @imre_wall_time()
 declare void @imre_time_sleep(double)
 declare ptr @imre_str_percent_int(ptr,i64)
+declare ptr @imre_str_percent_text(ptr,ptr)
 declare ptr @imre_async_group()
 declare void @imre_async_group_enter(ptr)
 declare ptr @imre_async_create_task(ptr, ptr)
@@ -6730,6 +6914,12 @@ declare ptr @imre_os_strerror(i64)
 @imre_os_o_directory = external constant i64
 @imre_os_o_nofollow = external constant i64
 @imre_os_o_nonblock = external constant i64
+@imre_os_seek_set = external constant i64
+@imre_os_seek_cur = external constant i64
+@imre_os_seek_end = external constant i64
+@imre_os_seek_data = external constant i64
+@imre_os_seek_hole = external constant i64
+declare i64 @imre_os_lseek(i64, i64, i64)
 declare i64 @imre_os_dup(i64)
 declare i64 @imre_os_dup2(i64, i64, i64)
 declare void @imre_os_pipe(ptr)
@@ -6738,8 +6928,12 @@ declare i32 @imre_os_get_blocking(i64)
 declare void @imre_os_set_blocking(i64, i64)
 declare i32 @imre_os_get_inheritable(i64)
 declare void @imre_os_set_inheritable(i64, i64)
-declare ptr @imre_shutil_which(ptr, i64, ptr, i32, i32)
+declare ptr @imre_shutil_which(ptr, i64, ptr, i32, i32, ptr, ptr)
+declare ptr @imre_shutil_confstr_cs_path()
+declare ptr @imre_shutil_os_defpath()
+declare void @imre_shutil_rmtree(ptr, i32, i32, i64, i32, ptr, ptr, ptr, ptr)
 declare i64 @imre_shutil_copy(i32, ptr, i32, ptr, i32, i32)
+declare void @imre_os_unlink(ptr, i32, i64, i32)
 declare void @imre_subprocess_check(ptr)
 declare i64 @imre_subprocess_error_field(ptr, i32)
 declare i64 @imre_subprocess_timeout_field(ptr, i32)
@@ -6749,6 +6943,10 @@ declare ptr @imre_path_text(ptr)
 declare ptr @imre_path_name(ptr)
 declare i64 @imre_path_count_part(ptr, ptr)
 declare ptr @imre_path_with_name(ptr, ptr)
+declare ptr @imre_path_change_extension(ptr, ptr, i32)
+declare ptr @imre_path_suffixes(ptr)
+declare i32 @imre_path_is_relative_to(ptr, ptr)
+declare ptr @imre_path_relative_to(ptr, ptr, i32)
 declare ptr @imre_path_stem(ptr)
 declare ptr @imre_path_suffix(ptr)
 declare ptr @imre_path_parent(ptr)
@@ -6773,6 +6971,11 @@ declare i32 @imre_path_text_exists(ptr)
 declare i32 @imre_path_exists(ptr)
 declare i32 @imre_path_is_file(ptr)
 declare i32 @imre_path_match(ptr, ptr, i64, i32)
+declare i32 @imre_fnmatch(ptr, ptr, i32, i32)
+declare ptr @imre_fnmatch_filter(ptr, ptr, i32, i32)
+declare ptr @imre_fnmatch_translate(ptr)
+declare ptr @imre_fnmatch_translate_bytes(ptr)
+declare void @imre_fnmatch_parts(ptr, ptr, ptr, ptr)
 declare i32 @imre_path_match_object(ptr, ptr, i64, i32)
 declare ptr @imre_pure_path_new(i32)
 declare ptr @imre_path_join_object(ptr, ptr)
@@ -6797,6 +7000,7 @@ declare ptr @imre_tempdir_new(ptr, ptr, ptr)
 declare void @imre_tempdir_cleanup(ptr)
 declare ptr @imre_path_iter(ptr, ptr)
 declare ptr @imre_path_glob(ptr, ptr, i64, i32, i32)
+declare ptr @imre_path_walk(ptr, i32, i32, ptr)
 declare ptr @imre_path_next(ptr)
 declare i64 @imre_float_box(double)
 declare double @imre_float_unbox(i64)
@@ -6818,6 +7022,8 @@ declare ptr @imre_bytes_str(ptr)
 declare void @imre_print_bytes(ptr)
 declare i64 @imre_bytes_len(ptr)
 declare i32 @imre_bytes_compare(ptr, ptr)
+declare i32 @imre_bytes_contains(ptr, ptr)
+declare i32 @imre_bytes_contains_int(i64, ptr)
 declare i64 @imre_bytes_get(ptr, i64)
 declare i64 @imre_bytes_get_index(ptr, i64)
 declare ptr @imre_bytes_slice(ptr, i64, i64, i64)
@@ -6839,6 +7045,9 @@ declare ptr @imre_csv_reader(ptr, i32, i32, i32, i32, i32)
 declare ptr @imre_csv_reader_terminator(ptr, i32, i32, i32, i32, i32, ptr, ptr)
 declare ptr @imre_csv_next(ptr, i32)
 declare i64 @imre_csv_line_number(ptr)
+declare ptr @imre_plain_object_new()
+declare ptr @imre_inspect_sentinel()
+declare ptr @imre_inspect_str_descriptor(i32)
 declare ptr @imre_sha256_new(ptr)
 declare ptr @imre_hash_new(ptr, ptr)
 declare ptr @imre_hash_algorithms_available()
@@ -6894,6 +7103,7 @@ declare ptr @imre_import_error_new(i32, ptr, ptr, i32, i64, i32, i64, i32, i64)
 declare ptr @imre_import_error_field(ptr, i32)
 declare void @imre_import_error_reset(ptr, ptr)
 declare void @imre_import_error_reject_reset(ptr, ptr, ptr)
+declare ptr @imre_exception_tuple_view(ptr)
 declare ptr @imre_exception_field_repr(ptr)
 declare i64 @imre_exception_field_len(ptr)
 declare ptr @imre_exception_field_index(ptr, i64)
@@ -7010,7 +7220,13 @@ define internal i64 @imre_seq_borrow_index_proven_fast(ptr %sequence, i64 %index
 }
 declare ptr @imre_seq_repeat(ptr, i64)
 declare ptr @imre_dict_new(i32, i32)
+declare ptr @imre_namespace_wrap(ptr)
+declare ptr @imre_namespace_dict(ptr)
+declare i64 @imre_namespace_get(ptr, ptr)
+declare void @imre_namespace_delete(ptr, ptr)
 declare ptr @imre_dict_copy(ptr)
+declare i64 @imre_deep_copy(i64, i32)
+declare ptr @imre_record_shallow_copy(ptr)
 declare ptr @imre_default_list_dict_new(i32, i32)
 declare ptr @imre_counter_new(i32)
 declare void @imre_counter_update(ptr, ptr)
@@ -7035,6 +7251,7 @@ declare i64 @imre_dict_pop(ptr, i64, i64, i32)
 declare i64 @imre_dict_get_default(ptr, i64, i64)
 declare void @imre_dict_set(ptr, i64, i64)
 declare void @imre_dict_delete(ptr, i64)
+declare void @imre_dict_clear(ptr)
 declare ptr @imre_dict_iter(ptr, i32)
 declare ptr @imre_set_new(i32)
 declare i64 @imre_set_len(ptr)
@@ -7057,11 +7274,14 @@ declare ptr @imre_str_rsplit_last(ptr, ptr)
 declare ptr @imre_str_unquote_rsplit_last(ptr, ptr)
 declare ptr @imre_str_strip(ptr, ptr, i32)
 declare ptr @imre_str_lower(ptr)
+declare ptr @imre_str_capitalize(ptr)
 declare i32 @imre_str_affix(ptr, ptr, i32)
 declare i64 @imre_str_find(ptr, ptr, i64)
 declare void @imre_str_partition(ptr, ptr, ptr)
 declare ptr @imre_str_unquote(ptr)
 declare ptr @imre_str_splitlines(ptr)
+declare ptr @imre_str_splitlines_options(ptr, i32)
+declare i32 @imre_str_isspace(ptr)
 declare ptr @imre_str_splitlines_iter(ptr)
 declare ptr @imre_ndiff_deferred(ptr, ptr)
 declare ptr @imre_str_list_copy(ptr)
@@ -7077,7 +7297,8 @@ declare ptr @imre_str_join(ptr, ptr)
 declare ptr @imre_str_format(ptr, ptr, i64)
 declare ptr @imre_str_replace(ptr, ptr, ptr)
 declare ptr @imre_str_dedent(ptr)
-declare ptr @imre_shlex_split(ptr)
+declare ptr @imre_shlex_split_options(ptr, i32, i32)
+declare ptr @imre_shlex_quote(ptr)
 declare ptr @imre_sys_executable()
 declare void @imre_subprocess_to_stderr(ptr, i32)
 declare ptr @imre_float_format(double, i32, i32)
@@ -7097,7 +7318,8 @@ declare i32 @imre_text_flush(ptr)
 declare i32 @imre_text_close(ptr)
 declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
-declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, i1)
+declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
+declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_orig_argv()
 declare { i64, i64 } @imre_seq_layout_with_orig_argv()
@@ -7180,6 +7402,13 @@ declare void @imre_log_config_named(ptr, i64, i64, i1)
 declare i64 @imre_union_from_int(i64)
 declare i64 @imre_union_into_int(i64)
 declare void @imre_log_config(i64, i64, i64, i1)
+declare void @imre_log_dict_config(ptr)
+declare void @imre_log_typed_dict_config(ptr, i64)
+declare void @imre_log_file_config(ptr, i8, i1, i64)
+declare i1 @imre_log_disabled(ptr)
+declare i1 @imre_log_propagate(ptr)
+declare i1 @imre_log_is_enabled(ptr, i64)
+declare void @imre_log_routed_emit(ptr, i64, ptr)
 declare ptr @imre_log_name(ptr)
 declare i64 @imre_log_parent(ptr)
 declare ptr @imre_log_root(ptr)

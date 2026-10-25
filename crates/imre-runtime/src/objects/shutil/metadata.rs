@@ -7,20 +7,21 @@ use rustix::fs::{AtFlags, CWD, Mode, Timespec, Timestamps, chmodat, utimensat};
 use std::fs::{self, Metadata};
 use std::os::unix::fs::MetadataExt;
 
-fn follow_links(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> bool {
+fn follow_links(src: &Name, dst: &Name, follow: bool) -> bool {
     follow || !(src.path().is_symlink() && dst.path().is_symlink())
 }
 
-fn stat(src: &Name<'_>, follow: bool) -> Result<Metadata> {
+fn stat(src: &Name, follow: bool) -> Result<Metadata> {
+    let path = src.checked_path()?;
     if follow {
-        fs::metadata(src.path())
+        fs::metadata(path)
     } else {
-        fs::symlink_metadata(src.path())
+        fs::symlink_metadata(path)
     }
     .map_err(|e| src.error(e))
 }
 
-fn chmod(dst: &Name<'_>, st: &Metadata, follow: bool) -> Result<()> {
+fn chmod(dst: &Name, st: &Metadata, follow: bool) -> Result<()> {
     // CPython has no lchmod on Linux, and never changes the symlink target's mode here.
     if !follow && cfg!(target_os = "linux") {
         return Ok(());
@@ -32,19 +33,19 @@ fn chmod(dst: &Name<'_>, st: &Metadata, follow: bool) -> Result<()> {
     };
     chmodat(
         CWD,
-        dst.path(),
+        dst.checked_path()?,
         Mode::from_raw_mode((st.mode() & 0o7777) as _),
         flags,
     )
     .map_err(|e| dst.error(e.into()))
 }
 
-pub(super) fn copymode(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<()> {
+pub(super) fn copymode(src: &Name, dst: &Name, follow: bool) -> Result<()> {
     let follow = follow_links(src, dst, follow);
     chmod(dst, &stat(src, follow)?, follow)
 }
 
-pub(super) fn copystat(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<()> {
+pub(super) fn copystat(src: &Name, dst: &Name, follow: bool) -> Result<()> {
     let follow = follow_links(src, dst, follow);
     let st = stat(src, follow)?;
     let flags = if follow {
@@ -62,7 +63,7 @@ pub(super) fn copystat(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<(
             tv_nsec: st.mtime_nsec(),
         },
     };
-    utimensat(CWD, dst.path(), &times, flags).map_err(|e| dst.error(e.into()))?;
+    utimensat(CWD, dst.checked_path()?, &times, flags).map_err(|e| dst.error(e.into()))?;
     copyxattr(src, dst, follow)?;
     chmod(dst, &st, follow)?;
     #[cfg(target_os = "macos")]
@@ -90,7 +91,7 @@ pub(super) fn copystat(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<(
 }
 
 #[cfg(target_os = "linux")]
-pub(super) fn copyxattr(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<()> {
+pub(super) fn copyxattr(src: &Name, dst: &Name, follow: bool) -> Result<()> {
     use rustix::fs::{XattrFlags, getxattr, lgetxattr, listxattr, llistxattr, lsetxattr, setxattr};
     use rustix::io::Errno;
     use std::ffi::OsStr;
@@ -113,11 +114,12 @@ pub(super) fn copyxattr(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<
             }
         }
     }
+    let src_path = src.checked_path()?;
     let names = match read(|buf| {
         if follow {
-            listxattr(src.path(), buf)
+            listxattr(src_path, buf)
         } else {
-            llistxattr(src.path(), buf)
+            llistxattr(src_path, buf)
         }
     }) {
         Ok(names) => names,
@@ -128,9 +130,9 @@ pub(super) fn copyxattr(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<
         let name = OsStr::from_bytes(name);
         let value = match read(|buf| {
             if follow {
-                getxattr(src.path(), name, buf)
+                getxattr(src_path, name, buf)
             } else {
-                lgetxattr(src.path(), name, buf)
+                lgetxattr(src_path, name, buf)
             }
         }) {
             Ok(value) => value,
@@ -140,10 +142,11 @@ pub(super) fn copyxattr(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<
             Err(e) => return Err(src.error(e.into())),
         };
         let flags = XattrFlags::empty();
+        let dst_path = dst.checked_path()?;
         match if follow {
-            setxattr(dst.path(), name, &value, flags)
+            setxattr(dst_path, name, &value, flags)
         } else {
-            lsetxattr(dst.path(), name, &value, flags)
+            lsetxattr(dst_path, name, &value, flags)
         } {
             Ok(())
             | Err(Errno::PERM | Errno::NOTSUP | Errno::NODATA | Errno::INVAL | Errno::ACCESS) => {}
@@ -154,7 +157,7 @@ pub(super) fn copyxattr(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<
 }
 
 #[cfg(not(target_os = "linux"))]
-pub(super) fn copyxattr(_src: &Name<'_>, _dst: &Name<'_>, _follow: bool) -> Result<()> {
+pub(super) fn copyxattr(_src: &Name, _dst: &Name, _follow: bool) -> Result<()> {
     // CPython only exposes the os.*xattr functions on Linux.
     Ok(())
 }

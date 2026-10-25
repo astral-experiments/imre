@@ -390,7 +390,11 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
                 let Some(position) = iterator.upgrade() else {
                     return false;
                 };
-                position.set(self.entries[..position.get()].iter().flatten().count());
+                // After clear, a cursor can still be past the end of a smaller
+                // replacement table. Remove only vacant slots before its index.
+                let original = position.get();
+                let prefix = original.min(self.entries.len());
+                position.set(original - prefix + self.entries[..prefix].iter().flatten().count());
                 true
             }),
             // Eviction leaves only empty slots before the private cache cursor.
@@ -686,6 +690,42 @@ enum Missing {
     Zero,
 }
 
+pub(super) trait ReleaseEntries {
+    fn needs_queue(&self) -> bool;
+    fn release_next(&mut self, next: &mut usize) -> bool;
+}
+
+/// Keeps the existing allocation available for incremental destruction.
+pub(super) struct TableOwner<T: ReleaseEntries + 'static>(Option<Box<T>>);
+
+impl<T: ReleaseEntries + 'static> TableOwner<T> {
+    pub(super) fn new(table: T) -> Self {
+        Self(Some(Box::new(table)))
+    }
+}
+
+impl<T: ReleaseEntries + 'static> std::ops::Deref for TableOwner<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        self.0.as_deref().expect("table present until drop")
+    }
+}
+
+impl<T: ReleaseEntries + 'static> std::ops::DerefMut for TableOwner<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        self.0.as_deref_mut().expect("table present until drop")
+    }
+}
+
+impl<T: ReleaseEntries + 'static> Drop for TableOwner<T> {
+    fn drop(&mut self) {
+        let table = self.0.take().expect("table present until drop");
+        if table.needs_queue() {
+            super::records::release_table(table);
+        }
+    }
+}
+
 pub(super) struct Mapping {
     tables: Tables<usize>,
     value_kind: WordKind,
@@ -700,6 +740,52 @@ pub(super) struct Set {
 }
 
 impl Mapping {
+    /// Render an unquoted attribute label and borrow its value from the rooted dictionary.
+    pub(super) fn namespace_repr_entry(
+        &self,
+        output: &mut String,
+        position: usize,
+    ) -> Option<(usize, usize, WordKind)> {
+        if position == 0 {
+            output.push_str("namespace(");
+        }
+        let mut cursor = position;
+        while let Some((next, key, value)) = self.tables.next(cursor) {
+            cursor = next;
+            // SAFETY: namespace constructors only accept exact string keys.
+            let label = unsafe { (&*(key.word as *const Str)).as_str() };
+            if label.is_empty() {
+                continue;
+            }
+            if position != 0 {
+                output.push_str(", ");
+            }
+            output.push_str(label);
+            output.push('=');
+            return Some((next, value, self.value_kind));
+        }
+        output.push(')');
+        None
+    }
+
+    /// Copies entries in insertion order, retains immutable keys, and lets the
+    /// caller choose whether each value is shared or copied through a memo.
+    pub(super) fn copy_values(
+        &self,
+        mut value_copy: impl FnMut(OwnedWord) -> Result<OwnedWord, Error>,
+    ) -> Result<Self, Error> {
+        let mut copy = Self::new(self.tables.key_kind(), self.value_kind.raw());
+        copy.missing = self.missing;
+        let mut position = 0;
+        while let Some((next, key, value)) = self.tables.next(position) {
+            // SAFETY: the source mapping roots this value of the exact kind.
+            let value = value_copy(unsafe { self.value_kind.acquire(value) })?;
+            copy.insert(key, value)?;
+            position = next;
+        }
+        Ok(copy)
+    }
+
     /// Borrows entries in Python insertion order. The caller must keep the
     /// enclosing storage borrow live and cannot mutate or invoke user code.
     pub(super) fn string_entries(&self) -> impl Iterator<Item = (&Str, usize)> {
@@ -972,6 +1058,20 @@ impl Mapping {
         }
     }
 
+    /// Detach entries and cached values before releasing any key or value. A
+    /// live cursor keeps its numeric position if the dictionary is refilled.
+    fn take_contents(&mut self) -> Self {
+        let mut empty = Self::new(self.tables.key_kind(), self.value_kind.raw());
+        empty.missing = self.missing;
+        let cursors = table!(&mut self.tables, table => {
+            std::mem::replace(&mut table.cursors, Cursors::Iterators(Vec::new()))
+        });
+        if matches!(cursors, Cursors::Iterators(_)) {
+            table!(&mut empty.tables, table => table.cursors = cursors);
+        }
+        std::mem::replace(self, empty)
+    }
+
     /// Updates only an already-built cache. Other dictionary representations
     /// neither allocate a cache nor reinterpret their keys as strings.
     ///
@@ -991,6 +1091,13 @@ impl Mapping {
 }
 
 impl Set {
+    /// Deep-copy admission proves each set member is unchanged by deepcopy.
+    pub(super) fn copy_keys(&self) -> Result<Self, Error> {
+        let mut tables = Tables::new(self.tables.key_kind());
+        self.tables.copy_keys(&mut tables)?;
+        Ok(Self { tables })
+    }
+
     /// # Safety
     /// Both sets remain rooted and immutable for the entire comparison.
     pub(super) unsafe fn equal(&self, other: &Self) -> bool {
@@ -1029,6 +1136,59 @@ impl Set {
         })
     }
 }
+fn release_next_key<K, V>(entries: &mut [Option<Entry<K, V>>], next: &mut usize) -> bool {
+    for slot in &mut entries[*next..] {
+        *next += 1;
+        if slot.take().is_some() {
+            return true;
+        }
+    }
+    false
+}
+
+impl ReleaseEntries for Mapping {
+    fn needs_queue(&self) -> bool {
+        self.tables.len() > 3
+            && (self.value_kind.can_queue_release() || matches!(self.tables, Tables::Tuple(_)))
+    }
+
+    fn release_next(&mut self, next: &mut usize) -> bool {
+        let tuple_keys = matches!(self.tables, Tables::Tuple(_));
+        table!(&mut self.tables, table => {
+            let len = table.entries.len();
+            while *next < len {
+                let slot = &mut table.entries[*next];
+                *next += 1;
+                if let Some(entry) = slot {
+                    // SAFETY: zero marks the dictionary owner as transferred.
+                    unsafe { self.value_kind.release(std::mem::take(&mut entry.value)) };
+                    if self.value_kind.can_queue_release() {
+                        return true;
+                    }
+                }
+            }
+            // Dictionary values precede keys, both in insertion order.
+            let mut key = *next - len;
+            let pending = tuple_keys && release_next_key(&mut table.entries, &mut key);
+            *next = len + key;
+            pending
+        })
+    }
+}
+
+impl ReleaseEntries for Set {
+    fn needs_queue(&self) -> bool {
+        self.tables.len() > 3 && matches!(self.tables, Tables::Tuple(_))
+    }
+
+    fn release_next(&mut self, next: &mut usize) -> bool {
+        let Tables::Tuple(table) = &mut self.tables else {
+            unreachable!()
+        };
+        release_next_key(&mut table.entries, next)
+    }
+}
+
 impl Drop for Mapping {
     fn drop(&mut self) {
         table!(&mut self.tables, table => {
@@ -1396,7 +1556,7 @@ pub unsafe extern "C" fn imre_cache_clear(state: *const Object, key: u32, value:
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_dict_new(key_kind: u32, value_kind: u32) -> *const Object {
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
-        Box::new(Mapping::new(key_kind, value_kind)),
+        TableOwner::new(Mapping::new(key_kind, value_kind)),
     )))))
 }
 
@@ -1410,22 +1570,14 @@ pub unsafe extern "C" fn imre_dict_copy(value: *const Object) -> *const Object {
     // SAFETY: the source owns every copied word; insertion in the fresh table
     // hashes only closed immutable keys and cannot reenter the source.
     let result = unsafe {
-        object(value).0.with(|storage| {
-            let source = storage.dictionary();
-            let mut copy = Mapping::new(source.tables.key_kind(), source.value_kind.raw());
-            copy.missing = source.missing;
-            let mut position = 0;
-            while let Some((next, key, value)) = source.tables.next(position) {
-                copy.insert(key, source.value_kind.acquire(value))?;
-                position = next;
-            }
-            Ok(copy)
-        })
+        object(value)
+            .0
+            .with(|storage| storage.dictionary().copy_values(Ok))
     };
     super::exceptions::finish(
         result.map(|copy| {
             Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
-                Box::new(copy),
+                TableOwner::new(copy),
             )))))
         }),
         std::ptr::null(),
@@ -1438,7 +1590,7 @@ pub extern "C" fn imre_counter_new(key_kind: u32) -> *const Object {
     let mut mapping = Mapping::new(key_kind, 2);
     mapping.missing = Missing::Zero;
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
-        Box::new(mapping),
+        TableOwner::new(mapping),
     )))))
 }
 
@@ -1527,7 +1679,7 @@ pub extern "C" fn imre_default_list_dict_new(key_kind: u32, element_kind: u32) -
     let mut mapping = Mapping::new(key_kind, if element_kind == 2 { 4 } else { 5 });
     mapping.missing = Missing::List(WordKind::new(element_kind));
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
-        Box::new(mapping),
+        TableOwner::new(mapping),
     )))))
 }
 /// # Safety
@@ -1862,6 +2014,21 @@ pub unsafe extern "C" fn imre_dict_delete(value: *const Object, key: usize) {
     }
     drop(old);
 }
+
+/// # Safety
+/// The caller roots an exact dictionary owner throughout the mutation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_clear(value: *const Object) {
+    // SAFETY: all stored words transfer to the detached table. Destruction
+    // happens after the exclusive storage borrow ends.
+    let previous = unsafe {
+        object(value)
+            .0
+            .with_mut(|s| s.dictionary_mut().take_contents())
+    };
+    drop(previous);
+}
+
 /// # Safety
 /// Root a dictionary. Mode0 yields keys, mode1 items. Release the internal
 /// iterator on every loop exit and never store it in a user container.
@@ -1898,11 +2065,11 @@ unsafe fn new_iterator(value: *const Object, kind: IteratorKind) -> *const Objec
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_set_new(kind: u32) -> *const Object {
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Set(Box::new(
-        Set {
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Set(
+        TableOwner::new(Set {
             tables: Tables::new(kind),
-        },
-    ))))))
+        }),
+    )))))
 }
 
 /// Reads distinct string keys directly from their source indexes and sorts the
@@ -2003,9 +2170,9 @@ pub unsafe extern "C" fn imre_key_union(
             return error.returning(std::ptr::null());
         }
     }
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Set(Box::new(
-        Set { tables: result },
-    ))))))
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Set(
+        TableOwner::new(Set { tables: result }),
+    )))))
 }
 /// Builds an intersection directly from two key views or sets. The output owns
 /// each selected key, including when the inputs alias each other.

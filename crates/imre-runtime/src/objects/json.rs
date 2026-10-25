@@ -367,7 +367,7 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
                 }
             }
             let pointer = Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
-                Box::new(mapping),
+                crate::objects::mappings::TableOwner::new(mapping),
             ))))) as usize;
             // SAFETY: the new dictionary owns every successfully decoded entry.
             return Ok(unsafe { OwnedWord::from_owned(pointer, self.0.storage()) });

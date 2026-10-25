@@ -42,12 +42,79 @@
       ]
     },
     "test.test_sys.SysModuleTest.test_ioencoding_nonascii": {
+      "status": "upstream-skip",
+      "reason": "requires FS encoding to match locale"
+    },
+    "test.test_sys.SysModuleTest.test_orig_argv": {
       "status": "pass",
       "execution": "host-driven-native",
-      "body": "CPython; child source: Imre",
+      "body": "CPython; original child: Imre",
       "assertions": "CPython",
       "fixture_execution": "CPython module/class/instance hooks",
-      "child_sha256": "1a63a0572c34482cedb75d0835392866200128b18a4bd5365f26954c3cc12c94"
+      "calls": [
+        "sys.argv",
+        "sys.orig_argv"
+      ]
+    },
+    "test.test_sys.TestSysJIT.test_jit_is_available": {
+      "status": "pass",
+      "execution": "mixed",
+      "body": "CPython; both child sources: Imre",
+      "assertions": "Imre in each child; CPython checks child status",
+      "fixture_execution": "CPython unittest hooks and original assert_python_ok",
+      "calls": [
+        "sys._jit.is_available"
+      ],
+      "children": [
+        {
+          "sha256": "b4654be9dbe8607862a7d048c249a3423760d11ba065f50bd5070c6d9455e0dd",
+          "PYTHON_JIT": "0",
+          "fixture_options": [
+            "-X",
+            "faulthandler"
+          ],
+          "launch": "compile the original -c source directly"
+        },
+        {
+          "sha256": "b4654be9dbe8607862a7d048c249a3423760d11ba065f50bd5070c6d9455e0dd",
+          "PYTHON_JIT": "1",
+          "fixture_options": [
+            "-X",
+            "faulthandler"
+          ],
+          "launch": "compile the original -c source directly"
+        }
+      ]
+    },
+    "test.test_sys.TestSysJIT.test_jit_is_enabled": {
+      "status": "pass",
+      "execution": "mixed",
+      "body": "CPython; both child sources: Imre",
+      "assertions": "Imre in each child; CPython checks child status",
+      "fixture_execution": "CPython unittest hooks and original assert_python_ok",
+      "calls": [
+        "sys._jit.is_available"
+      ],
+      "children": [
+        {
+          "sha256": "45282e21eb881778d38af07d9dbcfe98dd065230a8af7524f500a8c6a9ecaeb2",
+          "PYTHON_JIT": "0",
+          "fixture_options": [
+            "-X",
+            "faulthandler"
+          ],
+          "launch": "compile the original -c source directly"
+        },
+        {
+          "sha256": "45282e21eb881778d38af07d9dbcfe98dd065230a8af7524f500a8c6a9ecaeb2",
+          "PYTHON_JIT": "1",
+          "fixture_options": [
+            "-X",
+            "faulthandler"
+          ],
+          "launch": "compile the original -c source directly"
+        }
+      ]
     }
   }
 }

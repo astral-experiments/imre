@@ -81,6 +81,7 @@ pub(crate) enum Kind {
     UnboundLocalError = 40,
     ImportError = 41,
     ModuleNotFoundError = 42,
+    RecursionError = 43,
 }
 
 impl Kind {
@@ -137,6 +138,7 @@ impl Kind {
             40 => Self::UnboundLocalError,
             41 => Self::ImportError,
             42 => Self::ModuleNotFoundError,
+            43 => Self::RecursionError,
             _ => return None,
         })
     }
@@ -190,6 +192,7 @@ impl Kind {
             Self::UnboundLocalError => "UnboundLocalError",
             Self::ImportError => "ImportError",
             Self::ModuleNotFoundError => "ModuleNotFoundError",
+            Self::RecursionError => "RecursionError",
         }
     }
 
@@ -229,7 +232,10 @@ impl Kind {
                     Self::SubprocessError | Self::CalledProcessError | Self::TimeoutExpired
                 )
             }
-            Self::RuntimeError => matches!(self, Self::RuntimeError | Self::NotImplementedError),
+            Self::RuntimeError => matches!(
+                self,
+                Self::RuntimeError | Self::NotImplementedError | Self::RecursionError
+            ),
             Self::ShutilError => matches!(self, Self::ShutilError | Self::SameFileError),
             Self::OSError => matches!(
                 self,
@@ -298,6 +304,7 @@ enum Payload {
     Key(OwnedWord),
     Exit(Option<OwnedWord>),
     Import(Box<imports::Import>),
+    Positional(imports::Positional),
     Process(Box<super::processes::ProcessError>),
     Timeout(Box<super::processes::TimeoutError>),
     Group(Box<[GroupMember]>),
@@ -478,15 +485,6 @@ impl Error {
             paths
         });
         Self::errno_arguments(kind, errno, description, message, os_paths)
-    }
-
-    pub(super) fn from_errno_message(
-        kind: Kind,
-        errno: i32,
-        description: &str,
-        message: String,
-    ) -> Self {
-        Self::errno_arguments(kind, errno, description, message, None)
     }
 
     fn errno_arguments(
@@ -1046,6 +1044,7 @@ impl Storage {
     fn exception_message(&self) -> Rc<Str> {
         match &self.exception().payload {
             Payload::Import(err) => err.message(),
+            Payload::Positional(args) => args.message(),
             Payload::Exit(code) => exit_text(code.as_ref(), ""),
             Payload::Empty => Rc::new(Str::new("")),
             Payload::Message(message) => Rc::clone(message),
@@ -1375,12 +1374,13 @@ pub unsafe extern "C" fn imre_exception_argument(
 ///
 /// # Safety
 /// The descriptor and method addresses are static. The compiler supplies a rooted
-/// complete record, its string argument (or null), and unary record-to-str methods.
+/// complete record and unary record-to-str methods. When flag 4 is set, the
+/// argument is a rooted view of the positional tuple; otherwise it is a string or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_named_exception_record_new(
     descriptor: *const NamedDescriptor,
     record: *const usize,
-    message: *const Str,
+    argument: *const (),
     text: Option<Formatter>,
     repr: Option<Formatter>,
     display_flags: u32,
@@ -1388,7 +1388,20 @@ pub unsafe extern "C" fn imre_named_exception_record_new(
     // SAFETY: the fresh exception cannot yet alias user code and its payload
     // acquires the exact native record before the caller releases that owner.
     unsafe {
-        let value = imre_named_exception_new(descriptor, message);
+        let tuple = display_flags & 4 != 0;
+        let value = imre_named_exception_new(
+            descriptor,
+            if tuple {
+                std::ptr::null()
+            } else {
+                argument.cast()
+            },
+        );
+        let positional = tuple.then(|| {
+            let (kind, word) = exit_word(argument.cast());
+            debug_assert_eq!(kind.raw(), 6);
+            imports::Positional(kind.acquire(word))
+        });
         let payload = NamedPayload {
             record: WordKind::new(6).acquire(record as usize),
             text,
@@ -1400,6 +1413,9 @@ pub unsafe extern "C" fn imre_named_exception_record_new(
             let Storage::Exception(e) = s else {
                 unreachable!()
             };
+            if let Some(args) = positional {
+                e.payload = Payload::Positional(args);
+            }
             e.details_mut().layout = Some(Rc::new(payload));
         });
         value
@@ -1465,7 +1481,8 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
             }
             let e = s.exception();
             let arg = match &e.payload {
-                Payload::Import(err) => err.repr_args(),
+                Payload::Import(err) => err.args.repr_args(),
+                Payload::Positional(args) => args.repr_args(),
                 Payload::Empty => Str::new(""),
                 Payload::Arguments(arguments) => {
                     let mut result = String::new();
