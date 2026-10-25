@@ -249,6 +249,7 @@ pub(crate) enum Intrinsic {
     GroupBy,
     Chain,
     AbstractSet,
+    MappingAbc,
     TomllibLoad,
     TomlDecodeError,
     Dedent,
@@ -573,6 +574,7 @@ impl IntrinsicModule {
             (Self::Itertools, "groupby") => Intrinsic::GroupBy,
             (Self::Itertools, "chain") => Intrinsic::Chain,
             (Self::CollectionsAbc, "Set") => Intrinsic::AbstractSet,
+            (Self::CollectionsAbc, "Mapping") => Intrinsic::MappingAbc,
             (Self::Tomllib, "load") => Intrinsic::TomllibLoad,
             (Self::Tomllib, "TOMLDecodeError") => Intrinsic::TomlDecodeError,
             (Self::Textwrap, "dedent") => Intrinsic::Dedent,
@@ -822,19 +824,22 @@ impl SourceGraph {
     /// Record only this call's overload diagnostic. Nested arguments still get
     /// their own diagnostics, including calls with the same method name.
     pub(crate) fn checked_overload(&self, module: ModuleId, call: TextRange) {
-        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
+        self.checked_diagnostic(module, "no-matching-overload", call);
+    }
+
+    /// Native lowering handled this specific diagnostic at this precise span.
+    pub(crate) fn checked_diagnostic(&self, module: ModuleId, id: &'static str, range: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Exact(id, range));
     }
 
     /// Mark the precise call where lowering raises Python's missing-argument TypeError.
     pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
-        self.checked_diagnostics.borrow_mut()[module]
-            .push(CheckedDiagnostic::MissingArgument(call));
+        self.checked_diagnostic(module, "missing-argument", call);
     }
 
     /// This exact operand is excessive for a resolved native method that raises TypeError.
     pub(crate) fn checked_excess_argument(&self, module: ModuleId, argument: TextRange) {
-        self.checked_diagnostics.borrow_mut()[module]
-            .push(CheckedDiagnostic::ExcessArgument(argument));
+        self.checked_diagnostic(module, "too-many-positional-arguments", argument);
     }
 
     pub(crate) fn checked_keywords(
@@ -843,15 +848,14 @@ impl SourceGraph {
         keywords: impl Iterator<Item = TextRange>,
     ) {
         self.checked_diagnostics.borrow_mut()[module]
-            .extend(keywords.map(CheckedDiagnostic::Keyword));
+            .extend(keywords.map(|range| CheckedDiagnostic::Exact("unknown-argument", range)));
     }
 
     /// Record the exact list read proved by lowering a fixed-width tuple spread.
     /// Other diagnostics at this index or inside the receiver remain visible.
     pub(crate) fn checked_tuple_list_read(&self, module: ModuleId, read: TextRange) {
         if self.session.has_tuple_spreads(module) {
-            self.checked_diagnostics.borrow_mut()[module]
-                .push(CheckedDiagnostic::TupleListRead(read));
+            self.checked_diagnostic(module, "not-subscriptable", read);
         }
     }
 
@@ -1322,7 +1326,7 @@ impl<'a> Loader<'a> {
         self.inputs.missing.dedup();
         let mut checked_diagnostics = vec![Vec::new(); self.modules.len()];
         for (id, name) in self.checked_builtin_imports {
-            checked_diagnostics[id].push(CheckedDiagnostic::BuiltinImport(name));
+            checked_diagnostics[id].push(CheckedDiagnostic::Exact("unresolved-import", name));
         }
         let mut graph = SourceGraph {
             command_startup: None,

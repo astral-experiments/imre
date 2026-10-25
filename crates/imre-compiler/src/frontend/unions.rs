@@ -96,6 +96,19 @@ impl Checker<'_> {
         if let Some(kind) = self.exception_category(expression) {
             return Ok(vec![InstanceType::Exception(kind)]);
         }
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::MappingAbc)) {
+            let mut classes = vec![InstanceType::Dict];
+            classes.extend(
+                self.classes
+                    .declarations
+                    .definitions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, class)| class.mapping)
+                    .map(|(id, _)| InstanceType::Exact(Type::Class(id))),
+            );
+            return Ok(classes);
+        }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StrEnum)) {
             return Ok(vec![InstanceType::StrEnum]);
         }

@@ -509,24 +509,14 @@ struct CheckedFile<'db> {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
-    Call(TextRange),
-    Keyword(TextRange),
-    TupleListRead(TextRange),
-    MissingArgument(TextRange),
-    BuiltinImport(TextRange),
-    ExcessArgument(TextRange),
+    Exact(&'static str, TextRange),
 }
 
 impl CheckedDiagnostic {
-    pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
+    pub(crate) fn sort_key(self) -> (TextSize, TextSize, &'static str) {
         let (range, kind) = match self {
-            Self::Decorator(range) => (range, 0),
-            Self::Call(range) => (range, 1),
-            Self::Keyword(range) => (range, 2),
-            Self::TupleListRead(range) => (range, 3),
-            Self::MissingArgument(range) => (range, 4),
-            Self::BuiltinImport(range) => (range, 5),
-            Self::ExcessArgument(range) => (range, 6),
+            Self::Decorator(range) => (range, ""),
+            Self::Exact(kind, range) => (range, kind),
         };
         (range.start(), range.end(), kind)
     }
@@ -536,14 +526,7 @@ impl CheckedDiagnostic {
             Self::Decorator(decorator) => {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }
-            Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
-            Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
-            Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
-            Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
-            Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
-            Self::ExcessArgument(arg) => {
-                diagnostic == "too-many-positional-arguments" && arg == range
-            }
+            Self::Exact(id, checked) => diagnostic == id && range == checked,
         }
     }
 }
