@@ -47,6 +47,7 @@ mod string_enums;
 mod structs;
 mod tempdirs;
 mod text;
+mod typing;
 pub(crate) use text::short_string;
 mod unions;
 mod values;

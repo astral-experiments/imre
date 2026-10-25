@@ -96,6 +96,10 @@ pub(crate) enum Type {
     ClockTime,
     /// An exact instance of Python's plain, identity-only object.
     PlainObject,
+    /// A source function from a heterogeneous overload list.
+    FunctionRef,
+    /// The shared failing function returned by typing.overload.
+    OverloadStub,
     /// An exact immutable method descriptor on the builtin str class.
     StrDescriptor(StrDescriptor),
     /// A live namespace wrapper; the interned shape describes its string-keyed backing dict.
@@ -152,6 +156,20 @@ impl ProcessCapture {
 pub(crate) enum PathFlavor {
     Posix,
     Windows,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TypingOperation {
+    Register,
+    Get,
+    RegisterBuiltin,
+    GetBuiltin,
+    Clear,
+    CallStub,
+    Attr(u32),
+    SetAttr(u32),
+    RegistryLen,
+    Dummy,
 }
 
 impl Type {
@@ -247,6 +265,7 @@ impl std::fmt::Display for Type {
             Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
             Self::ClockTime => "datetime.time",
             Self::PlainObject => "object",
+            Self::FunctionRef | Self::OverloadStub => "function",
             Self::StrDescriptor(_) => "method_descriptor",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::ModuleSpec(_) => "importlib.machinery.ModuleSpec",
@@ -866,6 +885,7 @@ pub(crate) enum Builtin {
     Sha256New,
     HashNew,
     NewPlainObject,
+    Typing(TypingOperation),
     StrDescriptor(StrDescriptor),
     InspectSentinel,
     HashAvailable,

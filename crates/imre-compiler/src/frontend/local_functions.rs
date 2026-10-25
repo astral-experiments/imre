@@ -15,7 +15,8 @@ pub(super) struct Function {
 
 #[derive(Clone)]
 pub(super) struct Binding {
-    site: TextRange,
+    sites: Vec<TextRange>,
+    pub(super) overload_stub: bool,
     function: Option<Function>,
     pub(super) generic: Option<Rc<ast::StmtFunctionDef>>,
     instances: HashMap<Type, Function>,
@@ -118,11 +119,18 @@ impl Checker<'_> {
     /// Only an unconditional definition in the enclosing function's suite can
     /// introduce a fixed call target. Reserve its spelling throughout the suite.
     pub(super) fn collect_local_functions(&mut self, stmts: &[ast::Stmt]) -> Result<(), String> {
+        let mut in_suite = HashSet::new();
         for (index, statement) in stmts.iter().enumerate() {
             let Some(function) = statement.as_function_def_stmt() else {
                 continue;
             };
             let name = function.name.as_str();
+            if !in_suite.insert(name.to_owned()) {
+                let binding = self.local_functions.get_mut(name).unwrap();
+                binding.sites.push(function.range);
+                binding.value_read |= reads_function_value(&stmts[index + 1..], name);
+                continue;
+            }
             if reserved(name)
                 || self.names.contains_key(name)
                 || self.graph.modules[self.module].bindings.contains_key(name)
@@ -138,7 +146,8 @@ impl Checker<'_> {
             self.local_functions.insert(
                 name.to_owned(),
                 Binding {
-                    site: function.range,
+                    sites: vec![function.range],
+                    overload_stub: false,
                     function: None,
                     generic: None,
                     value_read: reads_function_value(&stmts[index + 1..], name),
@@ -163,7 +172,7 @@ impl Checker<'_> {
         if !self
             .local_functions
             .get(name)
-            .is_some_and(|binding| binding.site == definition.range && binding.function.is_none())
+            .is_some_and(|binding| binding.sites.contains(&definition.range))
         {
             return Err(error(
                 self.source,
@@ -171,6 +180,18 @@ impl Checker<'_> {
                 "local definitions must appear directly in the enclosing function's suite",
             ));
         }
+        let overload = matches!(definition.decorator_list.as_slice(),[d] if self.resolve(&d.expression) == Some(crate::modules::Binding::Intrinsic(Intrinsic::Overload)));
+        let plain;
+        let definition = if overload {
+            plain = {
+                let mut def = definition.clone();
+                typing::strip_overload(&mut def);
+                def
+            };
+            &plain
+        } else {
+            definition
+        };
         if (definition.returns.is_none() && !annotations::inert_body(definition))
             || definition
                 .parameters
@@ -182,6 +203,14 @@ impl Checker<'_> {
                 definition,
                 "local functions require annotated parameters and return types",
             ));
+        }
+        {
+            let old = self.local_functions.get_mut(name).unwrap();
+            old.function = None;
+            old.generic = None;
+            old.instances.clear();
+            old.value_slot = None;
+            old.overload_stub = overload;
         }
         if self.generic_awaitable_wrapper(definition) {
             self.local_functions.get_mut(name).unwrap().generic = Some(Rc::new(definition.clone()));
@@ -197,11 +226,22 @@ impl Checker<'_> {
             &inference::Inference::default(),
         )?;
         let function = self.lift_local(definition, signature)?;
-        let object = if self.local_functions[name].value_read {
+        let object = if self.local_functions[name].value_read || overload {
             function
                 .callback(self.types, self.source, definition)
                 .ok()
                 .map(|value| {
+                    let value = if overload {
+                        Expr {
+                            ty: Type::OverloadStub,
+                            kind: ExprKind::Builtin(
+                                Builtin::Typing(ir::TypingOperation::Register),
+                                vec![value],
+                            ),
+                        }
+                    } else {
+                        value
+                    };
                     let slot = self.hidden(value.ty);
                     self.assigned.insert(slot);
                     self.calls.insert(function.signature.id);
@@ -210,6 +250,17 @@ impl Checker<'_> {
         } else {
             None
         };
+        if overload {
+            self.graph
+                .runtime_overload(self.module, definition.name.range());
+        }
+        if overload && object.is_none() {
+            return Err(error(
+                self.source,
+                definition,
+                "overloaded local functions must be plain noncapturing declarations",
+            ));
+        }
         let binding = self.local_functions.get_mut(name).unwrap();
         binding.function = Some(function);
         binding.value_slot = object.as_ref().map(|(slot, _)| *slot);
@@ -299,6 +350,11 @@ impl Checker<'_> {
         mut signature: Signature,
     ) -> Result<Function, String> {
         signature.id = self.helpers.reserve();
+        self.types.bind_function_site(
+            self.module,
+            definition.name.range().start().to_u32(),
+            signature.id,
+        );
         let omitted_free = self.unbound_assert_captures();
         let mut helper = Checker::new(
             self.graph,

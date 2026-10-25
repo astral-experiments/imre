@@ -599,6 +599,7 @@ impl Builtin {
             | Self::SortedRecordRows { .. }
             | Self::SortedStringKeys
             | Self::TupleCacheNew
+            | Self::Typing(_)
             | Self::TupleCacheResult => Contract::new(true, Unknown),
         }
     }
@@ -839,6 +840,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
             "int_floordiv"
                 | "imre_chr"
                 | "imre_annotation_ref"
+                | "imre_typing_call_stub"
                 | "imre_int_pow"
                 | "imre_int_modpow"
                 | "imre_int_negative_pow"

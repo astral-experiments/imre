@@ -24,7 +24,7 @@ impl WordKind {
     const STRUCT_ROWS: Self = Self(u16::MAX - 1);
 
     pub(super) fn new(kind: u32) -> Self {
-        if kind & !NULLABLE > 13 {
+        if kind & !NULLABLE > 14 {
             fail("SystemError", "invalid concrete word representation");
         }
         Self(kind as u16)
@@ -35,7 +35,7 @@ impl WordKind {
     }
 
     pub(super) fn can_queue_release(self) -> bool {
-        matches!(self.base(), 5 | 6 | 9)
+        matches!(self.base(), 5 | 6 | 9 | 14)
     }
 
     pub(super) fn base(self) -> u32 {
@@ -51,7 +51,7 @@ impl WordKind {
     /// `field` is an aligned, readable record slot stored using this descriptor's
     /// LLVM representation, or its initial all-zero state.
     pub(super) unsafe fn read_record_field(self, field: *const usize) -> usize {
-        if matches!(self.0, 3..=6 | 8 | 11..=13) {
+        if matches!(self.0, 3..=6 | 8 | 11..=14) {
             // SAFETY: this exact descriptor denotes a pointer-typed field.
             unsafe { field.cast::<*const ()>().read() as usize }
         } else if self.0 == 7 {
@@ -70,7 +70,7 @@ impl WordKind {
         let valid = match self.base() {
             0 => word == 0,
             1 => word <= if nullable { 2 } else { 1 },
-            2..=6 | 8..=13 => word != 0 || nullable,
+            2..=6 | 8..=14 => word != 0 || nullable,
             7 => true,
             _ => unreachable!(),
         };
@@ -107,7 +107,7 @@ impl WordKind {
                 3 | 11 => Rc::increment_strong_count(word as *const Str),
                 4 => Rc::increment_strong_count(word as *const List),
                 5 => Rc::increment_strong_count(word as *const Object),
-                6 | 12 | 13 => records::imre_record_retain(word as *const usize),
+                6 | 12 | 13 | 14 => records::imre_record_retain(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::increment_strong_count(word as *const f64),
                 7 => {}
                 8 => Rc::increment_strong_count(word as *const Bytes),
@@ -132,7 +132,7 @@ impl WordKind {
                 3 | 11 => Rc::decrement_strong_count(word as *const Str),
                 4 => crate::imre_list_release(word as *const List),
                 5 => records::release_object_word(Rc::from_raw(word as *const Object)),
-                6 | 12 | 13 => records::imre_record_release(word as *const usize),
+                6 | 12 | 13 | 14 => records::imre_record_release(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::decrement_strong_count(word as *const f64),
                 7 => {}
                 8 => Rc::decrement_strong_count(word as *const Bytes),
@@ -160,7 +160,7 @@ impl OwnedWord {
         // SAFETY: this is the inverse of WordKind::read_record_field.
         unsafe {
             match kind {
-                3..=6 | 8 => field.cast::<*const ()>().write(word as *const ()),
+                3..=6 | 8 | 14 => field.cast::<*const ()>().write(word as *const ()),
                 7 => field.cast::<f64>().write(f64::from_bits(word as u64)),
                 _ => field.write(word),
             }
