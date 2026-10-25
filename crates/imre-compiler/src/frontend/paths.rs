@@ -3,6 +3,8 @@
 use super::*;
 use crate::ir::PathOperation;
 
+mod stat;
+
 pub(super) fn operation(kind: PathOperation, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
@@ -299,6 +301,54 @@ impl Checker<'_> {
         Ok(operation(kind, ty, vec![receiver]))
     }
 
+    /// CPython's tuple contains integral seconds, while its time attributes use the subsecond stat data.
+    pub(super) fn stat_result_attribute(
+        &self,
+        receiver: Expr,
+        attribute: &ast::ExprAttribute,
+        declaration: &crate::types::NamedTuple,
+    ) -> Result<Expr, String> {
+        let name = attribute.attr.as_str();
+        if name == "__match_args__" {
+            // The three indexed timestamps are unnamed in CPython's struct sequence.
+            let positional = crate::types::NamedTuple {
+                name: declaration.name.clone(),
+                fields: declaration.fields[..7].to_vec(),
+            };
+            return self.namedtuple_instance_attribute(attribute, receiver, &positional);
+        }
+        let times = ["st_atime", "st_mtime", "st_ctime", "st_birthtime"];
+        if let Some(index) = times.iter().position(|field| *field == name) {
+            return Ok(operation(
+                PathOperation::StatTime(index as u32),
+                Type::Float,
+                vec![receiver],
+            ));
+        }
+        let fields = [
+            "st_atime_ns",
+            "st_mtime_ns",
+            "st_ctime_ns",
+            "st_blksize",
+            "st_blocks",
+            "st_rdev",
+            "st_flags",
+            "st_gen",
+            "st_birthtime_ns",
+            "n_fields",
+            "n_sequence_fields",
+            "n_unnamed_fields",
+        ];
+        if let Some(index) = fields.iter().position(|field| *field == name) {
+            return Ok(operation(
+                PathOperation::StatExtraInt(index as u32),
+                Type::Int,
+                vec![receiver],
+            ));
+        }
+        self.namedtuple_instance_attribute(attribute, receiver, declaration)
+    }
+
     pub(super) fn path_method(
         &mut self,
         receiver: Expr,
@@ -306,6 +356,9 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if receiver.ty == Type::Path && matches!(name, "stat" | "lstat") {
+            return self.path_stat(receiver, name, call);
+        }
         if matches!(receiver.ty, Type::Path | Type::PathInfo) {
             let info = receiver.ty == Type::PathInfo;
             use ir::PathQuery;
