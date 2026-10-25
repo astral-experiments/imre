@@ -136,7 +136,7 @@ impl Types {
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
-            | Type::ExceptionField
+            | Type::ValueView
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::TextIO
@@ -158,6 +158,7 @@ impl Types {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -539,6 +540,7 @@ impl Types {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo

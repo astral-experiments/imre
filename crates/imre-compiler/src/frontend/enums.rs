@@ -288,6 +288,7 @@ impl Checker<'_> {
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
             || types == [Type::PathInfo; 2]
+            || types == [Type::CodecInfo; 2]
             || types == [Type::Sha256; 2])
         {
             return Err(error(

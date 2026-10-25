@@ -1,169 +1,7 @@
 //! Whole-file text conversion uses the same descriptor, buffering, and close path as binary I/O.
 
-use std::borrow::Cow;
-
-use super::super::bytes::decode_error;
+use super::super::codecs::Codec;
 use super::{Error, Int, Kind, Object, Rc, Result, Str, finish, object, with_path_file};
-
-#[derive(Clone, Copy)]
-enum Codec {
-    Utf8 { signature: bool },
-    Latin1,
-    Ascii,
-}
-
-impl Codec {
-    fn lookup(name: Option<&str>) -> Result<Self> {
-        let value = name.unwrap_or("utf-8");
-        let key = value.to_ascii_lowercase().replace(['-', ' '], "_");
-        match key.as_str() {
-            "utf8" | "utf_8" | "u8" | "utf" | "utf8_ucs2" | "utf8_ucs4" | "cp65001" | "locale" => {
-                Ok(Self::Utf8 { signature: false })
-            }
-            "utf_8_sig" => Ok(Self::Utf8 { signature: true }),
-            "latin1" | "latin" | "iso8859" | "latin_1" | "l1" | "iso8859_1" | "iso_8859_1"
-            | "iso_8859_1_1987" | "8859" | "cp819" | "ibm819" | "iso_ir_100" | "csisolatin1" => {
-                Ok(Self::Latin1)
-            }
-            "ascii" | "us" | "us_ascii" | "646" | "ansi_x3.4_1968" | "ansi_x3_4_1968"
-            | "ansi_x3.4_1986" | "cp367" | "csascii" | "ibm367" | "iso646_us"
-            | "iso_646.irv_1991" | "iso_ir_6" => Ok(Self::Ascii),
-            _ => Err(Error::new(
-                Kind::LookupError,
-                format!("unknown encoding: {value}"),
-            )),
-        }
-    }
-
-    fn decode(self, data: &[u8], errors: Option<&str>) -> Result<String> {
-        match self {
-            Self::Latin1 => Ok(data.iter().copied().map(char::from).collect()),
-            Self::Ascii => {
-                let mut text = String::with_capacity(data.len());
-                for (index, &byte) in data.iter().enumerate() {
-                    if byte.is_ascii() {
-                        text.push(char::from(byte));
-                    } else {
-                        decoding_error(&mut text, errors, &[byte], || {
-                            Error::new(
-                                Kind::UnicodeDecodeError,
-                                format!(
-                                    "'ascii' codec can't decode byte 0x{byte:02x} in position {index}: ordinal not in range(128)"
-                                ),
-                            )
-                        })?;
-                    }
-                }
-                Ok(text)
-            }
-            Self::Utf8 { signature } => {
-                let data = if signature {
-                    data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data)
-                } else {
-                    data
-                };
-                let mut remaining = data;
-                let mut text = String::with_capacity(data.len());
-                loop {
-                    match std::str::from_utf8(remaining) {
-                        Ok(valid) => {
-                            text.push_str(valid);
-                            return Ok(text);
-                        }
-                        Err(error) => {
-                            let valid = error.valid_up_to();
-                            text.push_str(std::str::from_utf8(&remaining[..valid]).unwrap());
-                            let end = error.error_len().map_or(remaining.len(), |len| valid + len);
-                            decoding_error(&mut text, errors, &remaining[valid..end], || {
-                                decode_error(data, error)
-                            })?;
-                            remaining = &remaining[end..];
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn encode<'a>(self, text: &'a str, errors: Option<&str>) -> Result<Cow<'a, [u8]>> {
-        let (codec, limit) = match self {
-            Self::Utf8 { signature: false } => return Ok(Cow::Borrowed(text.as_bytes())),
-            Self::Utf8 { signature: true } => {
-                return Ok(Cow::Owned([b"\xef\xbb\xbf", text.as_bytes()].concat()));
-            }
-            Self::Ascii => ("ascii", 128),
-            Self::Latin1 => ("latin-1", 256),
-        };
-        let mut out = Vec::with_capacity(text.len());
-        let mut chars = text.chars().enumerate().peekable();
-        while let Some((start, ch)) = chars.next() {
-            if u32::from(ch) < limit {
-                out.push(ch as u8);
-                continue;
-            }
-            match errors.unwrap_or("strict") {
-                "ignore" => (),
-                "replace" => out.push(b'?'),
-                "backslashreplace" => out.extend(escaped(ch).as_bytes()),
-                "xmlcharrefreplace" => out.extend(format!("&#{};", u32::from(ch)).as_bytes()),
-                "strict" | "surrogatepass" | "surrogateescape" => {
-                    let mut end = start;
-                    while let Some((i, _)) = chars.next_if(|(_, c)| u32::from(*c) >= limit) {
-                        end = i;
-                    }
-                    let at = if start == end {
-                        format!("character '{}' in position {start}", escaped(ch))
-                    } else {
-                        format!("characters in position {start}-{end}")
-                    };
-                    return Err(Error::new(
-                        Kind::UnicodeEncodeError,
-                        format!("'{codec}' codec can't encode {at}: ordinal not in range({limit})"),
-                    ));
-                }
-                name => return Err(unknown_handler(name)),
-            }
-        }
-        Ok(Cow::Owned(out))
-    }
-}
-
-fn escaped(ch: char) -> String {
-    let code = u32::from(ch);
-    match code {
-        0..=255 => format!("\\x{code:02x}"),
-        256..=65535 => format!("\\u{code:04x}"),
-        _ => format!("\\U{code:08x}"),
-    }
-}
-
-fn unknown_handler(name: &str) -> Error {
-    Error::new(
-        Kind::LookupError,
-        format!("unknown error handler name '{name}'"),
-    )
-}
-
-fn decoding_error(
-    text: &mut String,
-    errors: Option<&str>,
-    bytes: &[u8],
-    strict: impl FnOnce() -> Error,
-) -> Result<()> {
-    match errors.unwrap_or("strict") {
-        "strict" | "surrogatepass" => return Err(strict()),
-        "replace" => text.push('\u{fffd}'),
-        "ignore" => (),
-        "backslashreplace" => {
-            for byte in bytes {
-                use std::fmt::Write;
-                write!(text, "\\x{byte:02x}").unwrap();
-            }
-        }
-        name => return Err(unknown_handler(name)),
-    }
-    Ok(())
-}
 
 fn options(encoding: Option<&str>, newline: Option<&str>) -> Result<Codec> {
     if let Some(value) = newline
@@ -174,7 +12,10 @@ fn options(encoding: Option<&str>, newline: Option<&str>) -> Result<Codec> {
             format!("illegal newline value: {value}"),
         ));
     }
-    Codec::lookup(encoding)
+    match encoding {
+        None | Some("locale") => Ok(Codec::Utf8 { signature: false }),
+        Some(name) => Codec::lookup(name),
+    }
 }
 
 // An optional native string is an owned pointer word, or zero for None.
