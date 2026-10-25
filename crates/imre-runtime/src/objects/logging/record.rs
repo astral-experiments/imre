@@ -33,15 +33,32 @@ pub(super) fn float(n: f64) -> OwnedWord {
     owned(n.to_bits() as usize, 7)
 }
 
-pub(super) fn display(v: &OwnedWord, repr: bool) -> String {
-    if !repr && v.kind.raw() & !NULLABLE == 3 && v.word != 0 {
-        // SAFETY: v owns this exact string.
-        return unsafe { &*(v.word as *const Str) }.to_string();
+fn exact_text(v: &OwnedWord) -> Option<&str> {
+    if v.kind.raw() & !NULLABLE == 3 && v.word != 0 {
+        // SAFETY: v owns this exact string for the duration of the borrow.
+        Some(unsafe { &*(v.word as *const Str) }.as_str())
+    } else {
+        None
     }
+}
+
+pub(super) fn write_display(out: &mut String, v: &OwnedWord) -> Result<()> {
+    if let Some(s) = exact_text(v) {
+        return append(out, s);
+    }
+    // SAFETY: v keeps the value graph rooted until the entire field is written.
+    unsafe { values::try_write_repr(&mut values::ReprWriter(out), v.word, v.kind) }
+        .map_err(|_| Error::allocation())
+}
+
+pub(super) fn display(v: &OwnedWord) -> Result<String> {
     let mut out = String::new();
-    // SAFETY: v keeps the full value graph alive until formatting returns.
-    unsafe { values::write_repr(&mut out, v.word, v.kind) };
-    out
+    write_display(&mut out, v)?;
+    Ok(out)
+}
+
+pub(super) fn owned_string(s: String) -> OwnedWord {
+    owned(Rc::into_raw(Rc::new(Str::from(s))) as usize, 3)
 }
 
 pub(super) fn tuple_len(v: &OwnedWord) -> Option<usize> {
@@ -97,7 +114,7 @@ pub(super) fn truth(v: &OwnedWord) -> bool {
         1 => v.word != 0,
         // SAFETY: the discriminant establishes a rooted native integer.
         2 => unsafe { Int::borrow(v.word) }.as_small() != Some(0),
-        3 => !display(v, false).is_empty(),
+        3 => exact_text(v).is_some_and(|s| !s.is_empty()),
         7 => f64::from_bits(v.word as u64) != 0.0,
         _ if tuple_len(v).is_some() => tuple_len(v) != Some(0),
         _ if is_dict(v) => {
@@ -130,7 +147,9 @@ fn milliseconds(ct: i128) -> (f64, f64) {
 }
 
 impl Record {
-    fn new([name, level, path, line, msg, mut args, exc, func, stack]: [OwnedWord; 9]) -> Self {
+    fn new(
+        [name, level, path, line, msg, mut args, exc, func, stack]: [OwnedWord; 9],
+    ) -> Result<Self> {
         static START: OnceLock<i128> = OnceLock::new();
         let start = *START.get_or_init(nanos);
         let ct = nanos();
@@ -141,8 +160,7 @@ impl Record {
                 args = item;
             }
         }
-        let (filename, module) = if path.kind.raw() == 3 {
-            let path = display(&path, false);
+        let (filename, module) = if let Some(path) = exact_text(&path) {
             let base = path.rsplit('/').next().unwrap();
             // POSIX splitext preserves leading dots and strips only the last suffix.
             let cut = base
@@ -153,6 +171,11 @@ impl Record {
         } else {
             (path.clone(), string("Unknown module"))
         };
+        let unknown_level = || -> Result<OwnedWord> {
+            let mut out = String::from("Level ");
+            write_display(&mut out, &level)?;
+            Ok(owned_string(out))
+        };
         let levelname = match level.kind.raw() {
             2 => {
                 // SAFETY: level owns this Int until lookup finishes.
@@ -162,12 +185,12 @@ impl Record {
             3 => {
                 // SAFETY: level is a rooted exact string.
                 let name = unsafe { &*(level.word as *const Str) };
-                super::levels::number_for(name).map_or_else(
-                    || string(&format!("Level {name}")),
-                    |n| owned(n.into_raw(), 2),
-                )
+                match super::levels::number_for(name) {
+                    Some(n) => owned(n.into_raw(), 2),
+                    None => unknown_level()?,
+                }
             }
-            _ => string(&format!("Level {}", display(&level, false))),
+            _ => unknown_level()?,
         };
         // SAFETY: pthread_self has no preconditions and does not transfer ownership.
         let thread = unsafe { libc::pthread_self() } as usize;
@@ -223,30 +246,44 @@ impl Record {
             ),
             ("taskName", owned(0, 0)),
         ];
-        Self {
+        Ok(Self {
             fields: fields.into_iter().map(|(k, v)| (k.to_owned(), v)).collect(),
+        })
+    }
+
+    fn repr(&self) -> Result<String> {
+        let mut out = String::from("<LogRecord: ");
+        for (field, after) in [
+            ("name", ", "),
+            ("levelno", ", "),
+            ("pathname", ", "),
+            ("lineno", ", \""),
+            ("msg", "\">"),
+        ] {
+            write_display(&mut out, &self.fields[field])?;
+            append(&mut out, after)?;
         }
+        Ok(out)
     }
 
-    fn repr(&self) -> String {
-        let get = |k: &str| display(&self.fields[k], false);
-        format!(
-            "<LogRecord: {}, {}, {}, {}, \"{}\">",
-            get("name"),
-            get("levelno"),
-            get("pathname"),
-            get("lineno"),
-            get("msg")
-        )
-    }
-
-    pub(super) fn message(&self) -> Result<String> {
-        let msg = display(&self.fields["msg"], false);
+    pub(super) fn message(&self) -> Result<OwnedWord> {
+        let msg = &self.fields["msg"];
         let args = &self.fields["args"];
         if !truth(args) {
-            return Ok(msg);
+            return if exact_text(msg).is_some() {
+                Ok(msg.clone())
+            } else {
+                display(msg).map(owned_string)
+            };
         }
-        format_arguments(&msg, args)
+        let rendered;
+        let fmt = if let Some(s) = exact_text(msg) {
+            s
+        } else {
+            rendered = display(msg)?;
+            &rendered
+        };
+        format_arguments(fmt, args).map(owned_string)
     }
 }
 
@@ -299,7 +336,7 @@ fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
     Ok(out)
 }
 
-fn append(out: &mut String, text: &str) -> Result<()> {
+pub(super) fn append(out: &mut String, text: &str) -> Result<()> {
     values::ReprWriter(out)
         .write_str(text)
         .map_err(|_| Error::allocation())
@@ -312,9 +349,7 @@ fn percent_text(value: &OwnedWord, conversion: char, precision: Option<usize>) -
             .map_or(s.len(), |(i, _)| i)
     };
     let mut text = String::new();
-    if conversion == 's' && value.kind.raw() & !NULLABLE == 3 && value.word != 0 {
-        // SAFETY: the exact string stays rooted by the format argument.
-        let s = unsafe { &*(value.word as *const Str) }.as_str();
+    if let Some(s) = exact_text(value).filter(|_| conversion == 's') {
         append(&mut text, &s[..end(s)])?;
         return Ok(text);
     }
@@ -525,8 +560,7 @@ fn percent_value_in<'a>(
             format!("{sign}{prefix}{digits}")
         }
         'c' => {
-            if value.kind.raw() == 3 {
-                let s = display(value, false);
+            if let Some(s) = exact_text(value) {
                 let count = s.chars().count();
                 if count != 1 {
                     return Err(Error::new(
@@ -536,7 +570,7 @@ fn percent_value_in<'a>(
                         ),
                     ));
                 }
-                s
+                s.to_owned()
             } else if matches!(value.kind.raw(), 1 | 2) {
                 let code = if value.kind.raw() == 1 {
                     Some(value.word as u32)
@@ -647,9 +681,14 @@ pub unsafe extern "C" fn imre_logrecord_new(
     ];
     // SAFETY: the caller roots each value under the matching descriptor until it has been acquired.
     let record = Record::new(fields.map(|(v, k)| unsafe { WordKind::new(k).acquire(v) }));
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::LogRecord(
-        Box::new(record),
-    )))))
+    finish(
+        record.map(|record| {
+            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::LogRecord(
+                Box::new(record),
+            )))))
+        }),
+        std::ptr::null(),
+    )
 }
 
 /// Accesses a rooted record for the duration of a nonreentrant operation.
@@ -764,7 +803,7 @@ pub unsafe extern "C" fn imre_logrecord_message(record: *const Object) -> *const
     // SAFETY: this only reads owned values from the live record.
     let result = unsafe { with_record(record, Record::message) };
     finish(
-        result.map(|s| Rc::into_raw(Rc::new(Str::from(s)))),
+        result.map(|text| text.into_word() as *const Str),
         std::ptr::null(),
     )
 }
@@ -775,7 +814,10 @@ pub unsafe extern "C" fn imre_logrecord_message(record: *const Object) -> *const
 pub unsafe extern "C" fn imre_logrecord_repr(record: *const Object) -> *const Str {
     // SAFETY: display only reads the live record and its rooted fields.
     let text = unsafe { with_record(record, Record::repr) };
-    Rc::into_raw(Rc::new(Str::from(text.as_str())))
+    finish(
+        text.map(|s| Rc::into_raw(Rc::new(Str::from(s)))),
+        std::ptr::null(),
+    )
 }
 
 /// Reads the current module flag selected by a compiler-emitted mask.
