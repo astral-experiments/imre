@@ -80,6 +80,16 @@ Publish the commit to this repository, then supply its full SHA as the
 as pull request CI. Its `sys-evidence-linux` artifact records the tested Git
 commit and tree alongside both reports. Pull request checks run separately.
 
+## Native stack introspection
+
+`test_getframemodulename` remains blocked at native unittest equality between a
+string and an optional string; the later loop needs real frame objects and their
+`f_back` links. A [separate program](frame_names.py) and its [imported functions](frame_names_owner.py)
+compare native and stock module names for nested calls, index conversion and exception
+unwinding. On [source 92c7e5e](https://github.com/astral-sh/imre/commit/92c7e5e5d447a5e02d6ab879c8ff48849da48696),
+all 20 output lines matched pinned CPython at O0 and O3. Each blocked occurrence
+records the separate control and zero operations in the unchanged method.
+
 ## Two process-boundary cases
 
 `test.test_sys.SysModuleTest.test_ioencoding_nonascii` compares the spelling of two codec names before it launches a child. The [locale audit](locale-audit-linux.json) runs the unchanged method against both subjects in each host configuration. Only the canonical row enters the 97-occurrence report.

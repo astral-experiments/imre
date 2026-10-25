@@ -8,10 +8,10 @@ use crate::ir::{
 /// Checks identities before layouts, then validates statements and expression shapes.
 pub(crate) fn module(module: &Module) -> Result<(), String> {
     require(
-        module.recursion_frames.is_empty()
-            || (module.recursion_frames.len() == module.functions.len() + 1
-                && module.recursion_frames.last() == Some(&true)),
-        "recursion frame metadata must cover the functions and module entry",
+        module.source_frames.is_empty()
+            || (module.source_frames.len() == module.functions.len() + 1
+                && module.source_frames.last().is_some_and(Option::is_some)),
+        "source frame metadata must cover the functions and module entry",
     )?;
     let classes = module.class_fields.len();
     module.types.verify_shapes(classes)?;
@@ -606,7 +606,7 @@ mod tests {
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
-            recursion_frames: Vec::new(),
+            source_frames: Vec::new(),
             functions: Vec::new(),
             entry: Function {
                 params: Vec::new(),

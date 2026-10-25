@@ -11,8 +11,8 @@ use crate::contracts::{
 };
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
-    Binary, Builtin, CallArgs, Compare, ExceptHandler, Expr, ExprKind, Function, InstanceType,
-    Module, RegexCapture, Statement, TUPLE_PROBE_ARITY, Type,
+    self, Binary, Builtin, CallArgs, Compare, ExceptHandler, Expr, ExprKind, Function,
+    InstanceType, Module, RegexCapture, Statement, TUPLE_PROBE_ARITY, Type,
 };
 use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
@@ -377,7 +377,7 @@ fn emit_program(
             emitter.next_value = 0;
             emitter.next_label = 0;
         }
-        let frame = module.recursion_frames.get(id).copied().unwrap_or(false);
+        let frame = module.source_frames.get(id).and_then(Option::as_ref);
         let params = emitter.function(function, entry, frame, &borrows[id])?;
         bodies.push((params, std::mem::take(&mut emitter.code)));
     }
@@ -1674,7 +1674,7 @@ impl Emitter<'_, '_> {
         &mut self,
         function: &Function,
         entry: bool,
-        frame: bool,
+        frame: Option<&ir::SourceFrame>,
         borrows: &FunctionBorrows,
     ) -> Result<String, String> {
         self.entry_allocas.clear();
@@ -1812,9 +1812,22 @@ impl Emitter<'_, '_> {
         if entry && self.uses_sys_argv {
             self.line("call void @imre_args_init(i32 %argc, ptr %argv)");
         }
-        if frame {
-            self.checked_line("call void @imre_recursion_enter()");
-        }
+        let leave_frame = match frame {
+            Some(ir::SourceFrame::Module(name)) => {
+                let name = self.pooled_literal(name.as_bytes(), Type::Str);
+                // The frame takes this reference, including on a rejected entry.
+                self.checked_line(format!(
+                    "call void @imre_named_frame_enter(ptr {})",
+                    name.operand
+                ));
+                Some("call void @imre_named_frame_leave()")
+            }
+            Some(ir::SourceFrame::Depth) => {
+                self.checked_line("call void @imre_recursion_enter()");
+                Some("call void @imre_recursion_leave()")
+            }
+            None => None,
+        };
         self.block(&function.body);
         if !self.terminated {
             self.jump(&self.return_exit.clone());
@@ -1824,8 +1837,8 @@ impl Emitter<'_, '_> {
             out.line(format!("call void @imre_object_release(ptr {frame})"));
         });
         self.cleanup(&cleanup_slots);
-        if frame {
-            self.line("call void @imre_recursion_leave()");
+        if let Some(leave) = leave_frame {
+            self.line(leave);
         }
         if entry {
             if self.has_extensions {
@@ -1865,8 +1878,8 @@ impl Emitter<'_, '_> {
             ));
         });
         self.cleanup(&cleanup_slots);
-        if frame {
-            self.line("call void @imre_recursion_leave()");
+        if let Some(leave) = leave_frame {
+            self.line(leave);
         }
         if entry {
             if self.has_extensions {
@@ -4652,6 +4665,9 @@ impl Emitter<'_, '_> {
             ),
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
+            Builtin::SysGetFrameModuleName => {
+                self.call("imre_sys_getframemodulename", returns, &[&args[0].value])
+            }
             Builtin::SysVersionInfo { implementation } => {
                 let root = if *implementation {
                     "sys_implementation_version"
@@ -8055,6 +8071,9 @@ declare ptr @imre_sys_argv()
 declare ptr @imre_sys_orig_argv()
 declare void @imre_recursion_enter()
 declare void @imre_recursion_leave()
+declare void @imre_named_frame_enter(ptr)
+declare void @imre_named_frame_leave()
+declare i64 @imre_sys_getframemodulename(i64)
 declare i64 @imre_sys_getrecursionlimit()
 declare void @imre_sys_setrecursionlimit(i64)
 declare { i64, i64 } @imre_seq_layout_with_orig_argv()

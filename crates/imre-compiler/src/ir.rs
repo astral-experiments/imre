@@ -272,6 +272,12 @@ impl std::fmt::Display for Type {
     }
 }
 
+/// The information an actual Python call must keep until it returns or unwinds.
+pub(crate) enum SourceFrame {
+    Depth,
+    Module(String),
+}
+
 pub(crate) struct Module {
     /// Exact storage shapes survive checking so lowering need not erase them to
     /// generic tagged slots. Class identities index `class_fields`; container
@@ -284,8 +290,8 @@ pub(crate) struct Module {
     pub json_records: Vec<JsonRecordSchema>,
     /// Fixed module bindings own their exact storage until process cleanup.
     pub globals: Vec<Type>,
-    /// Source frames subject to the process recursion limit, including the entry.
-    pub recursion_frames: Vec<bool>,
+    /// Source functions and entry in emission order. Synthetic helpers have no frame.
+    pub source_frames: Vec<Option<SourceFrame>>,
     pub functions: Vec<Function>,
     pub entry: Function,
 }
@@ -879,6 +885,7 @@ pub(crate) enum Builtin {
     RStrip,
     SysArgv,
     SysOrigArgv,
+    SysGetFrameModuleName,
     SysGetRecursionLimit,
     SysSetRecursionLimit,
     /// The child layout descriptors follow the literal subcommand order.
