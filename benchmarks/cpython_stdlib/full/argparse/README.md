@@ -18,3 +18,6 @@ python3.14 -B benchmarks/cpython_stdlib/suite_inventory.py \
 
 Existing native CLI differential fixtures compare exit status, stdout and stderr
 with CPython. They are regression checks, not executions of these unittest IDs.
+
+[Source-defined methods](METHODS.md) records the unchanged native bodies, host fixtures,
+per-ID blockers and the whole-module startup dependency.
