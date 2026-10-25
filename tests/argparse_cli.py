@@ -9,6 +9,7 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "argparse"
 CASES = {
+    "explicit_args": [[], ["first"], ["--", "-x"], ["first", "extra"], ["--help"]],
     "reader": [
         [],
         ["--help"],

@@ -112,6 +112,7 @@ impl Types {
             | Type::Logger
             | Type::Sha256
             | Type::ZipFile
+            | Type::ZipInfo
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::JsonRoot
@@ -420,6 +421,7 @@ impl Types {
             | Type::Logger
             | Type::Sha256
             | Type::ZipFile
+            | Type::ZipInfo
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::BinaryIO => Some(true),
