@@ -1,5 +1,6 @@
 from itertools import accumulate, batched, chain, count, cycle, islice, tee
 from csv import reader, Error
+from io import StringIO
 
 def guarded(total: int, value: int) -> int:
     if value == 2:
@@ -42,6 +43,7 @@ try:
     next(invalid)
 except TypeError as exc:
     print(str(exc))
+
 try:
     next(invalid)
 except TypeError as exc:
@@ -122,3 +124,17 @@ try:
     accumulate(func=choose_addition(), iterable=8, initial=initial_value())
 except TypeError as exc:
     print(str(exc))
+
+stream = StringIO('ab\ncd\nef')
+text_totals = accumulate(stream, initial='>')
+print(repr(next(text_totals)))
+print(repr(stream.readline()))
+print(repr(next(text_totals)))
+stream.seek(0)
+print(repr(next(text_totals)))
+stream.close()
+for _ in range(2):
+    try:
+        next(text_totals)
+    except ValueError as exc:
+        print(str(exc))
