@@ -48,6 +48,17 @@ impl SliceIndices {
         !self.reverse && self.remaining == length
     }
 
+    /// Maps an original slot to its position in this slice without walking skipped slots.
+    pub(super) fn position_of(&self, source: usize) -> Option<usize> {
+        let delta = if self.reverse {
+            self.at.checked_sub(source)?
+        } else {
+            source.checked_sub(self.at)?
+        };
+        let pos = delta / self.stride;
+        (pos < self.remaining && delta.is_multiple_of(self.stride)).then_some(pos)
+    }
+
     /// Normalizes against the length at the time of access. Omitted negative
     /// stops stay at -1; an explicit -1 first counts backward from the length.
     ///
@@ -358,6 +369,9 @@ pub unsafe extern "C" fn imre_seq_slice(
     // leave storage. A normalization failure is raised after the borrow ends.
     let result = unsafe {
         object(value).0.with(|storage| {
+            if let Some(rows) = storage.sequence_storage().rows() {
+                return rows.slice(SliceIndices::new(rows.len(), start, stop, step)?);
+            }
             let values = storage.sequence();
             let slice = SliceIndices::new(values.values.len(), start, stop, step)?;
             let mut result = Words::new(values.kind.raw());

@@ -70,7 +70,8 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
             };
             let flags = u32::from(metadata.dataclass_eq)
                 | (u32::from(metadata.dataclass_repr) << 1)
-                | (u32::from(metadata.toml_hash) << 2);
+                | (u32::from(metadata.toml_hash) << 2)
+                | (u32::from(metadata.value_struct) << 3);
             let layout = metadata.fields.iter().map(|field| {
                 (
                     field.name.as_str(),
