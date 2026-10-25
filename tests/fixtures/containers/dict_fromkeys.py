@@ -56,12 +56,12 @@ def main() -> None:
     print(events)
     print(source)
     # An error from the value argument precedes the first pull.
-    events.clear()
+    early_events: list[int] = []
     try:
-        print(dict.fromkeys((visit(k, events) for k in before(source, events)), visit(3, events)))
+        print(dict.fromkeys((visit(k, early_events) for k in before(source, early_events)), visit(3, early_events)))
     except ValueError as error:
         print(error)
-    print(events)
+    print(early_events)
 
     try:
         print(dict.fromkeys(3))
