@@ -567,6 +567,9 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    SysVersionInfo {
+        implementation: bool,
+    },
     OsName,
     SystemExitNew {
         omit_none: bool,
