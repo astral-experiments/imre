@@ -395,6 +395,8 @@ whose capture or empty-match behavior falls outside this dialect.
 
 `str | bytes` and `typing.Union[str, bytes]` denote the same sealed two-member type; either can additionally include `None`. Function, return, local, field, tuple, and container storage enforce those exact members. Concrete strings and bytes promote into union storage without copying or allocating a wrapper. This does not allow arbitrary unions or heterogeneous untyped containers.
 
+`bool | int` stores either boolean singleton or an arbitrary-precision integer, optionally alongside `None`. A mutable field can switch between `False` and `0` without losing the distinction. Both compare equal numerically, but only the boolean is identical to `False`. Tests against `int` accept either member, as in Python.
+
 `isinstance(value, type)` accepts supported concrete type categories and the sealed builtin exception hierarchy. Tests against `str` or `bytes` narrow a local union in the matching branch and exclude that member in the other branch. Reassignments invalidate those facts; mutable field or container reads do not become stable local facts. Custom metaclass tests and runtime type objects remain unsupported.
 
 Integer bit operations preserve Python's arbitrary-precision signed semantics. Negative shifts raise `ValueError`; large right shifts saturate to zero or minus one. A nonzero left shift too large to represent raises `OverflowError`, while zero shifted by an arbitrarily large nonnegative count stays zero. Resource exhaustion may still terminate the process. `divmod(a, b)` evaluates each integer argument once and returns the fixed tuple `(a // b, a % b)`, including Python's signed quotient/remainder rules and zero-division category. Runtime diagnostic wording can differ across CPython releases.
@@ -912,6 +914,12 @@ Use `typing.assert_never(member)` as a statement to check that every alternative
 `Literal["added", "removed"]` accepts exactly the listed strings in parameters, returns, defaults, fields, and typed containers. A smaller set of allowed values can flow to a larger one or to `str`. A direct equality check against a fixed string can narrow a plain string local. Reassigning the local discards that proof. These annotations retain ordinary string storage and operations. Mutable containers keep their declared element types to protect writes through aliases.
 
 ## Fixed classes
+
+Class bodies may bind a string literal or a fixed tuple of up to 1024 string
+literals. A tuple may alias an earlier tuple in the same class or concatenate
+it with a literal suffix. Reads through the class, an instance, and an
+inheriting class share the stored value. These attributes cannot be reassigned
+or shadowed by an instance field or a subclass.
 
 A class has one nominal identity and a fixed set of declared fields. Import aliases and package re-exports preserve that identity; another class with identical fields remains a different type. Fields may store any supported scalar, concrete container, optional value, or another fixed class. Class names and module-qualified class names are accepted in annotations, including quoted type expressions. Quote forward references when the class is not yet defined, including a method's reference to its own class.
 
