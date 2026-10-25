@@ -1,6 +1,7 @@
 //! Native parsing for a fixed declaration of long options. Parsing checks all
 //! input before constructing the compiler-described, owned namespace record.
 
+use crate::StrOwner;
 use std::borrow::Cow;
 use std::collections::{HashSet, TryReserveError};
 use std::io::{self, Write};
@@ -20,10 +21,11 @@ mod nargs;
 use binding::{Bound, IntegerRange};
 use nargs::{Nargs, positional_counts};
 
-fn owned_text(value: &str) -> Result<Rc<Str>, Error> {
+fn owned_text(value: &str) -> Result<crate::StrOwner, Error> {
     Str::try_new(value)
-        .map(Rc::new)
-        .map_err(|_| Error::allocation())
+        .ok()
+        .and_then(|text| StrOwner::try_new(text).ok())
+        .ok_or_else(Error::allocation)
 }
 
 /// Large decimal conversions obey the interpreter's configured digit limit,
@@ -727,7 +729,7 @@ pub unsafe extern "C" fn imre_argparse_text(
     }
     .into();
     match output {
-        0 => return Rc::into_raw(Rc::new(text)),
+        0 => return StrOwner::into_raw(StrOwner::new(text)),
         1 | 2 => {
             // SAFETY: the native stream borrows the live string. A successful
             // write returns an owned character count; zero indicates failure.
@@ -790,7 +792,7 @@ pub unsafe extern "C" fn imre_argparse_parse(
             let words = sequence.values.iter().skip(usize::from(process_argv));
             owners.try_reserve_exact(words.len())?;
             args.try_reserve_exact(words.len())?;
-            owners.extend(words.map(|&word| super::acquire_rc::<Str>(word)));
+            owners.extend(words.map(|&word| crate::StrOwner::acquire_word(word)));
             Ok::<_, std::collections::TryReserveError>(())
         })
     };
@@ -861,7 +863,7 @@ pub unsafe extern "C" fn imre_argparse_parse(
                 Ok(text) => text,
                 Err(error) => return error.returning(std::ptr::null_mut()),
             };
-            extras.values.push(Rc::into_raw(text) as usize);
+            extras.values.push(StrOwner::into_raw(text) as usize);
         }
     }
     // SAFETY: every slot receives exactly one owner of its declared kind. All
@@ -877,7 +879,7 @@ pub unsafe extern "C" fn imre_argparse_parse(
             let word = match field {
                 Word::Option(option, values) => option.word(values),
                 Word::Command(value) => value.map_or(Ok(0), |name| {
-                    owned_text(name).map(|text| Rc::into_raw(text) as usize)
+                    owned_text(name).map(|text| StrOwner::into_raw(text) as usize)
                 }),
             };
             let word = match word {

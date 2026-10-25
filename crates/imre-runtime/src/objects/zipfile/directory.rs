@@ -1,8 +1,8 @@
 //! Locate and decode the central directory. It records every name in archive order;
 //! a map-based ZIP index would erase duplicate members.
 
+use crate::StrOwner;
 use std::io::{BufReader, Read, Seek, SeekFrom};
-use std::rc::Rc;
 
 use super::super::{
     Str, bytes,
@@ -179,7 +179,7 @@ fn parse_extra(raw: &[u8], mut extra: &[u8], info: &mut Info) -> Result<()> {
                 let text = std::str::from_utf8(&data[5..]).map_err(|_| {
                     bad("Corrupt unicode path extra field (0x7075): invalid utf-8 bytes")
                 })?;
-                info.filename = Rc::new(
+                info.filename = StrOwner::new(
                     Str::try_new(text.split('\0').next().unwrap())
                         .map_err(|_| Error::allocation())?,
                 );
@@ -218,7 +218,7 @@ pub(super) fn entries(reader: &mut (impl Read + Seek)) -> Result<Vec<Info>> {
         remaining -= n as u64;
         let raw = &buf[..name_len.min(n)];
         let flags = u16_at(&header, 8);
-        let original = Rc::new(name(raw, flags & (1 << 11) != 0)?);
+        let original = StrOwner::new(name(raw, flags & (1 << 11) != 0)?);
         let version = header[6];
         if version > 63 {
             return Err(Error::new(
@@ -227,7 +227,7 @@ pub(super) fn entries(reader: &mut (impl Read + Seek)) -> Result<Vec<Info>> {
             ));
         }
         let filename = if let Some((prefix, _)) = original.split_once('\0') {
-            Rc::new(Str::try_new(prefix).map_err(|_| Error::allocation())?)
+            StrOwner::new(Str::try_new(prefix).map_err(|_| Error::allocation())?)
         } else {
             original.clone()
         };

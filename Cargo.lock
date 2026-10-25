@@ -683,6 +683,7 @@ dependencies = [
 name = "imre-runtime"
 version = "0.1.2"
 dependencies = [
+ "allocator-api2",
  "base64",
  "cc",
  "compact_str",

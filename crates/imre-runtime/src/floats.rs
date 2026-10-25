@@ -3,6 +3,7 @@
 //! `Rc<f64>`. A nullable pointer preserves every bit pattern without reserving a
 //! NaN payload or conflating signed zero with absence.
 
+use crate::StrOwner;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::rc::Rc;
@@ -49,7 +50,7 @@ pub unsafe extern "C" fn imre_float_box_release(value: usize) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_float_str(value: f64) -> *const Str {
-    Rc::into_raw(Rc::new(render(value)))
+    StrOwner::into_raw(StrOwner::new(render(value)))
 }
 
 #[unsafe(no_mangle)]

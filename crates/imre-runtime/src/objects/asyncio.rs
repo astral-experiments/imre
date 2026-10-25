@@ -774,19 +774,23 @@ mod tests {
 
     #[test]
     fn failed_gather_append_releases_partial_output() {
-        let text = Rc::new(Str::new("owned by the partial result"));
+        let text = crate::StrOwner::new(Str::new("owned by the partial result"));
         // SAFETY: the exact list and string remain rooted until failure consumes
         // the list's only raw owner.
         unsafe {
             let output = Rc::<Object>::from_raw(imre_seq_new(3));
             assert_eq!(
-                imre_seq_append(Rc::as_ptr(&output), Rc::as_ptr(&text) as usize, 3),
+                imre_seq_append(
+                    Rc::as_ptr(&output),
+                    crate::StrOwner::as_ptr(&text) as usize,
+                    3
+                ),
                 1,
             );
-            assert_eq!(Rc::strong_count(&text), 2);
+            assert_eq!(crate::StrOwner::strong_count(&text), 2);
             let output: *const () = Rc::into_raw(output).cast();
             assert!(!finish_gather_append(output, 0));
         }
-        assert_eq!(Rc::strong_count(&text), 1);
+        assert_eq!(crate::StrOwner::strong_count(&text), 1);
     }
 }
