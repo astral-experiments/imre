@@ -42,7 +42,10 @@ impl Checker<'_> {
             return literals::view(value, ty);
         }
         if self.types.payload(value.ty).unwrap_or(value.ty) == Type::Exception
-            && matches!(ty, Type::TimeoutExpired | Type::NamedException(_))
+            && matches!(
+                ty,
+                Type::ImportException | Type::TimeoutExpired | Type::NamedException(_)
+            )
         {
             let value = if value.ty == Type::Exception {
                 value
@@ -213,7 +216,7 @@ impl Checker<'_> {
     /// Tests for derived records or exception kinds can require runtime inspection.
     /// A stored builtin exception can be either a SystemExit or an Exception.
     fn instance_member_matches(&self, ty: Type, classes: &[InstanceType]) -> Option<bool> {
-        if ty == Type::ExitCode || ty == Type::StringIterable {
+        if matches!(ty, Type::ExceptionField | Type::StringIterable) {
             return None;
         }
         let mut unknown = false;
@@ -225,6 +228,17 @@ impl Checker<'_> {
             {
                 // A base view can contain either this derived layout or another one.
                 unknown = true;
+            }
+            if let InstanceType::Exception(kind) = class
+                && ty == Type::ImportException
+            {
+                if matches!(kind, 0 | 1 | 41) {
+                    return Some(true);
+                }
+                if kind == 42 || kind >= 256 {
+                    unknown = true;
+                }
+                continue;
             }
             if let InstanceType::Exception(kind) = class
                 && ty == Type::TimeoutExpired
@@ -352,6 +366,9 @@ impl Checker<'_> {
                     self.instance_member_matches(ty, classes)
                         .is_none_or(|matches| matches == *truth)
                 });
+                if *truth && !classes.is_empty() && classes.iter().all(|c| matches!(c, InstanceType::Exception(kind) if self.is_import_error(*kind))) {
+                    for member in &mut members { if *member==Type::Exception { *member=Type::ImportException; } }
+                }
                 // A positive exact timeout category test establishes the byte
                 // payload contract even when the value was stored as Exception.
                 if *truth
