@@ -94,6 +94,7 @@ pub(super) enum Adapter {
     Tee(tee::Fork),
     Cycle(Cycle),
     PathWalk(paths::Walker),
+    Format(format_cursors::Cursor),
 }
 
 pub(super) fn adapter(state: Adapter) -> Rc<Object> {
@@ -174,6 +175,7 @@ impl Adapter {
             Self::Tee(_) => "itertools._tee",
             Self::Slice(_) => "itertools.islice",
             Self::Cycle(_) => "itertools.cycle",
+            Self::Format(cursor) => cursor.name(),
             Self::PathWalk(_) => {
                 write!(output, "<generator object Path.walk at {owner:p}>").unwrap();
                 return;
@@ -254,6 +256,7 @@ impl Adapter {
             }
             Self::Tee(_) | Self::Slice(_) | Self::Cycle(_) => self.next_composed(),
             Self::PathWalk(walk) => walk.next(),
+            Self::Format(cursor) => cursor.next(),
         }
     }
 }
