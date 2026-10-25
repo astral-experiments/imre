@@ -15,7 +15,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bindings import Boundary, Probe
 from reference import BENCH, COMMIT, routine, verify
-from sweep import diagnostic, prepare
+from sweep import diagnostic, digest, prepare
 sys.path.insert(0, str(BENCH))
 from native_json_values import Native
 from suite_inventory import cases, load_suite
@@ -57,6 +57,35 @@ class NativeCase(unittest.TestCase):
 
 """
     return prefix + method_bytes(SOURCE, "TestDecode", "check_keys_reuse").decode()
+
+
+def native_identity_control(tools, directory):
+    """The same native assertion must reject equal keys from separate scans."""
+    directory.mkdir()
+    fixture = typed_body_fixture(string_identity=True)
+    program = fixture + "\n" + method_bytes(SOURCE, "TestDecode", "test_keys_reuse").decode() + '''
+case = NativeCase()
+case.test_keys_reuse()
+left = case.loads('[{"same_owner_spelling": 1}]')
+right = case.loads(' [{"same_owner_spelling": 2}]')
+first, second = sorted(left[0])[0], sorted(right[0])[0]
+if first != second or first is second:
+    raise ValueError("expected equal keys from independent native scans")
+try:
+    case.assertIs(first, second)
+except AssertionError:
+    print("rejected distinct owners")
+else:
+    raise ValueError("the identity assertion accepted distinct native owners")
+'''
+    try:
+        binary = tools.build(program.encode(), directory)
+    except NativeCompileError as exc:
+        return {"outcome": "blocked", "diagnostic": diagnostic(exc, directory)}
+    child = subprocess.run([binary], capture_output=True, text=True, timeout=60)
+    if child.returncode or child.stderr or child.stdout != "rejected distinct owners\n":
+        return {"outcome": "failed", "exit": child.returncode, "stdout": child.stdout, "stderr": child.stderr}
+    return {"outcome": "pass", "operation": "assertIs on equal native strings from independent scans"}
 
 
 def component_checks(compiler):
@@ -256,7 +285,7 @@ def run(tools, work):
         if failed or skipped or set(complete) != set(ids):
             raise ValueError((failed, skipped, complete))
         results[mode] = {name: records[0] for name, records in complete.items()}
-    # Both complete-body attempts use the original helper and test method.
+    # Each complete-body attempt uses the original helper and test method.
     # An unshadowed fixture import isolates passing self.loads as a callable.
     owner, method = "TestDecode", "test_keys_reuse"
     general = prepare(SOURCE, owner, method)
@@ -270,12 +299,16 @@ def run(tools, work):
         directory = work / name
         directory.mkdir()
         try:
-            body = native_method(tools, directory, SOURCE, owner, ids[0], fixture)
+            body = native_method(tools, directory, SOURCE, owner, ids[0], fixture, operation=(
+                "imre", "json.loads, JSONDecoder.decode, sorted decoded keys, identity and memo truth"))
         except NativeCompileError as exc:
             attempts[name] = {"outcome": "blocked", "diagnostic": diagnostic(exc, directory)}
         else:
             passed, failed, skipped = run_in_fixtures(load_suite("test.test_json"), dict.fromkeys(ids, body))
-            attempts[name] = {"passed": list(passed), "failed": failed, "skipped": skipped}
+            attempts[name] = {"passed": list(passed), "failed": failed, "skipped": skipped,
+                              "observations": {key: [r["observation"] for r in rows] for key, rows in passed.items()}}
+        attempts[name]["fixture_sha256"] = hashlib.sha256(fixture.encode()).hexdigest()
+    results["native-distinct-owner-control"] = native_identity_control(tools, work / "distinct-owners")
     return results
 
 
@@ -293,6 +326,8 @@ def main():
         raise ValueError("host projection conflated distinct native owners")
     report = {"cpython_commit": COMMIT, "method": METHOD,
               "method_sha256": hashlib.sha256(method_bytes(SOURCE, "TestDecode", "test_keys_reuse")).hexdigest(),
+              "helper_sha256": hashlib.sha256(method_bytes(SOURCE, "TestDecode", "check_keys_reuse")).hexdigest(),
+              "sha256": {"imre": digest(args.imre), "runtime": digest(args.runtime)},
               "fixture": "CPython module, class, instance, unmodified method, sorted and identity assertions",
               "operation": "Imre json.loads and a live JSONDecoder instance; key owner comparisons in Imre",
               "distinct-owner-negative-control": "passed",
