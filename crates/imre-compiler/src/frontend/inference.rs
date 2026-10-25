@@ -250,11 +250,13 @@ impl Inference {
                 }
             }
             let before = self.revision.get();
-            let helpers = Helpers::new(definitions.len() + graph.initializers().count());
+            let class_globals = classes.declarations.owns_class_tuples(graph.entry);
+            let helpers =
+                Helpers::new(definitions.len() + graph.initializers(class_globals).count());
             let globals = ModuleValues::default();
             let mut available = HashSet::new();
             let mut errors = Vec::new();
-            for (module, range) in graph.initializers() {
+            for (module, range) in graph.initializers(class_globals) {
                 let mut checker = Checker::new(
                     graph, module, signatures, classes, types, &helpers, &globals,
                 );

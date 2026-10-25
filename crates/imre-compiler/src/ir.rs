@@ -52,11 +52,14 @@ pub(crate) enum Type {
     TimeoutExpired,
     /// A sealed UTF-8 text stream; aliases share its open/closed state.
     TextIO,
+    StringIO,
     /// A sealed byte stream; aliases share its open/closed state.
     BinaryIO,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
     Path,
     PurePath(PathFlavor),
+    /// The shared, independently retained metadata view of an exact concrete Path.
+    PathInfo,
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture, Option<usize>),
     /// A synchronous child with statically known captured stream types.
@@ -194,8 +197,10 @@ impl std::fmt::Display for Type {
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
             Self::StringIterable => "Iterable[str]",
             Self::TextIO => "typing.TextIO",
+            Self::StringIO => "io.StringIO",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
+            Self::PathInfo => "pathlib.types.PathInfo",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
             Self::CompletedProcess(capture, _) if capture.text => {
@@ -573,6 +578,7 @@ pub(crate) enum Builtin {
     Tee,
     Cycle,
     DirectoryContextView,
+    TextStreamView,
     Document(DocumentOp),
     /// Runs the static archive's module initializer in ordinary import order.
     ExtensionImport(String),
@@ -630,6 +636,7 @@ pub(crate) enum Builtin {
     RaiseException,
     WallTime,
     TimeSleep,
+    WarningFilter(u32),
     PercentScalar,
     Logging(LogOperation),
     Timed(TimedOperation),
@@ -767,6 +774,7 @@ pub(crate) enum Builtin {
     },
     Sha256Copy,
     BytesIo,
+    StringIo(StringIoOperation),
     BinarySeek,
     BinaryTell,
     ZipOpenFile,
@@ -788,6 +796,7 @@ pub(crate) enum Builtin {
     Slice,
     Append,
     Pop,
+    ListClear,
     IsNone,
     /// Promotes an exact str/bytes owner without allocating or changing identity.
     UnionInject,
@@ -910,6 +919,7 @@ pub(crate) enum Builtin {
     FileFileno,
     DictGet,
     DictCopy,
+    DictFromKeysTarget,
     NamespaceWrap,
     NamespaceDict,
     NamespaceGet,
@@ -986,6 +996,16 @@ impl Builtin {
 }
 
 pub(crate) const TUPLE_PROBE_ARITY: std::ops::RangeInclusive<usize> = 1..=16;
+
+/// Operations specific to Unicode text held in native memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StringIoOperation {
+    New,
+    Value,
+    Read,
+    Seek,
+    Position,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum DocumentShape {
@@ -1089,6 +1109,20 @@ pub(crate) enum TextOperation {
     ShlexQuote,
 }
 
+/// Numeric selectors for the runtime's imre_path_query ABI.
+#[derive(Clone, Copy)]
+#[repr(u32)]
+pub(crate) enum PathQuery {
+    Exists = 0,
+    Directory = 1,
+    File = 2,
+    Symlink = 3,
+    Fifo = 4,
+    Socket = 5,
+    BlockDevice = 6,
+    CharDevice = 7,
+}
+
 /// Native path operations keep their exact result types in the checked IR.
 #[derive(Clone, Copy)]
 pub(crate) enum PathOperation {
@@ -1120,9 +1154,9 @@ pub(crate) enum PathOperation {
     IsAbsolute,
     Absolute,
     Resolve,
-    Exists,
-    IsFile,
-    IsDir,
+    Info,
+    InfoRepr,
+    Query(PathQuery),
     ReadText,
     ReadBytes,
     WriteText,
