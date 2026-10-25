@@ -19,8 +19,10 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
 sys.path[:0] = [str(HERE), str(STDLIB)]
+import native_filters
 import native_levels
 import native_logging
+import native_records
 import native_timed
 from suite_evidence import roles, write_reports
 from suite_inventory import cases, load_suite, verify_files
@@ -144,6 +146,19 @@ def known_cases(toolchain, work, original):
         return native_method(toolchain, directory("native-daily"), SOURCE, owner, daily, fixture,
             operation=("imre", "Native handler construction, calendar rollover and close"))(case, method)
     executions[daily] = native_daily
+    executions.update(native_filters.filter_cases(toolchain, directory("name-filter")))
+    record_binary = toolchain.build((HERE / "record_driver.py").read_bytes(), directory("records"))
+    def optional(case, method):
+        with native_records.native_flags(record_binary) as (driver, calls), patch.object(original, "logging", driver):
+            method()
+        if not calls:
+            raise AssertionError("no native record operation")
+        return observation("cpython", "cpython", "cpython", "Native record construction, flag writes and field reads",
+                           "Original CPython hooks, body and assertions", toolchain.level, native_calls=calls)
+    executions[PREFIX + "LogRecordTest.test_optional"] = optional
+    representation = PREFIX + "LogRecordTest.test_str_rep"
+    executions[representation] = native_method(toolchain, directory("record-repr"), SOURCE, "LogRecordTest",
+        representation, native_records.REPR_FIXTURE, operation=("imre", "Native LogRecord construction and repr"))
     return executions
 
 
