@@ -18,6 +18,10 @@ def captures(values: list[int]) -> tuple[int, ...]:
     return (mark(1), *values, mutate(values), *values, mark(2))
 
 
+def shared_capture(shared: list[int]) -> tuple[int, ...]:
+    return (*shared, mutate(shared), *shared)
+
+
 def arguments(args: list[int]) -> tuple[int, ...]:
     return (*args,)
 
@@ -104,4 +108,4 @@ bad(7)
 nested([[1], [2]])
 wide(list(range(1025)))
 shared = [4, 6]
-print(repr((*shared, mutate(shared), *shared)))
+print(repr(shared_capture(shared)))

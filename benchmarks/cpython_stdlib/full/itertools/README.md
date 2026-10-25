@@ -70,8 +70,10 @@ The pinned [threading helper](../shared/upstream/Lib/test/support/threading_help
 constructs `(func, *args)` before it calls `threading.Thread`. On Imre
 `c5d2fe7`, both the import and the runner stopped on that display, with or
 without `--reachable-only` ([baseline](tuple-spread-startup-before-linux.json)).
-With runtime tuple spreads, all four advance to the unsupported `import _thread`
-at line 1. These are compilation checks: **zero upstream methods executed**.
+With runtime tuple spreads in function bodies, all four advance to the
+unsupported `import _thread` at line 1. The compiler retains its existing
+restriction on starred tuple displays in module initializers, class fields,
+and parameter defaults. These are compilation checks: **zero upstream methods executed**.
 
 [tuple_spread_audit.py](tuple_spread_audit.py) verifies the helper against its
 pinned Git blob and repeats all four checks with the vendored and original
