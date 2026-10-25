@@ -7,14 +7,14 @@ it obtains a platform encoding from `os.device_encoding(0)` and asserts that
 the inherited environment mapping tests have no direct codec lookup.
 
 On [the shared registry in #691](https://github.com/astral-sh/imre/pull/691)
-at [624d69d6](https://github.com/astral-sh/imre/commit/624d69d664944054951e727b0e30ff313325e5c0),
-all four unchanged [grouped entry checks](observations/624d69d6/whole-suite-startup-linux.json)
+at [aaf044ff](https://github.com/astral-sh/imre/commit/aaf044ffc38c1c0925e37d19504e1f52546383b1),
+all four unchanged [grouped entry checks](observations/aaf044ff/whole-suite-startup-linux.json)
 advance past `import codecs` and stop on `import decimal` at line 8. The same
 four entries also fail at that import when built at O0 and O3. The only use of
 `decimal` is [Decimal(-1) in the chown argument test](upstream/Lib/test/test_os.py#L2030).
 **No whole-suite occurrence executed: 0 of 579 at each optimization level.**
 
-The [independent entry checks](observations/624d69d6/suite-startup-linux.json)
+The [independent entry checks](observations/aaf044ff/suite-startup-linux.json)
 expose the companion failures that the first import in the grouped entry masks:
 
 | Suite | Linux occurrences | First diagnostic on the shared registry |
@@ -23,11 +23,11 @@ expose the companion failures that the first import in the grouped entry masks:
 | test_posix | 179 | Line 1845: the starred tuple element requires a bounded, unmodified sequence |
 | test_genericpath | 25 | Line 5: unsupported `genericpath` import; inventory only |
 
-The OS comparison reruns [the registry owner's fixture](https://github.com/astral-sh/imre/blob/624d69d664944054951e727b0e30ff313325e5c0/benchmarks/cpython_stdlib/full/sys/codec_device.py)
+The OS comparison reruns [the registry owner's fixture](https://github.com/astral-sh/imre/blob/aaf044ffc38c1c0925e37d19504e1f52546383b1/benchmarks/cpython_stdlib/full/sys/codec_device.py)
 against this exact compiler. In a PTY, CPython runs the original fixture, body,
 assertion, and `os.device_encoding`; Imre resolves `UTF-8` to the `utf-8` entry
 and evaluates its truth. With redirected stdin the original method skips and
-no lookup runs. The [O0/O3 results](observations/624d69d6/shared-codec-consumer-linux.json)
+no lookup runs. The [O0/O3 results](observations/aaf044ff/shared-codec-consumer-linux.json)
 are byte-identical to the registry owner's release receipt. This observation
 adds no native OS operation or additional suite occurrence.
 
@@ -58,6 +58,10 @@ done
 
 For the separate suites, run [check_suite_startup.py](../check_suite_startup.py)
 with `--compiler "$IMRE" --cpython-git "$CPYTHON_GIT" test.test_os test.test_posix test.test_genericpath`.
-The [provenance](observations/624d69d6/registry-provenance-linux.json) records the
+The [provenance](observations/aaf044ff/registry-provenance-linux.json) records the
 release test tree, individual blobs and license, entry scripts, compiler, runtime,
 and report hashes.
+
+The [previous registry run](observations/624d69d6/registry-provenance-linux.json)
+records the same startup blockers and mixed consumer result before #691 was
+rebased onto main `abe82df8`. Both receipts retain the unchanged entry hashes.
