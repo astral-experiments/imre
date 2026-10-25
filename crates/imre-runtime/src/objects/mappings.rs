@@ -751,7 +751,7 @@ pub(super) struct Mapping {
     /// Only subscription consults this policy; membership and get inspect stored keys.
     missing: Missing,
     /// An OrderedDict iterator detects key changes even if its size is restored.
-    order_version: Option<u64>,
+    order_version: Option<usize>,
     /// Present only after a string-to-integer gather. Words borrow current table
     /// values; ASCII mutation updates the corresponding slot before old owners drop.
     ascii_int: Option<Box<AsciiIntCache>>,
@@ -1275,8 +1275,8 @@ enum IteratorKind {
 }
 pub(super) struct MappingIterator {
     owner: Rc<Object>,
-    expected_len: usize,
-    order_version: Option<u64>,
+    /// Size for a dict or set; key version for an OrderedDict.
+    expected: usize,
     position: Rc<Cell<usize>>,
     remaining: usize,
     kind: IteratorKind,
@@ -1287,20 +1287,23 @@ impl MappingIterator {
     /// Checks current size and snapshots owners before returning to a loop body.
     /// Exhaustion is permanent; size failures stay sticky after size restoration.
     fn next(&mut self) -> Result<Option<(OwnedWord, Option<OwnedWord>)>, IterationError> {
-        if self.exhausted || (self.order_version.is_some() && self.remaining == 0) {
+        if self.exhausted {
             return Ok(None);
         }
         // SAFETY: the iterator and rooted mapping are distinct allocations;
         // snapshot acquisition cannot reenter and no storage reference escapes.
         let result = unsafe {
             self.owner.0.with(|storage| {
-                if self.order_version.is_some()
-                    && self.order_version != storage.dictionary().order_version
+                if self.kind != IteratorKind::Set
+                    && let Some(version) = storage.dictionary().order_version
                 {
-                    return Err(IterationError::OrderedDictMutation);
-                }
-                let length = storage.iteration_len(self.kind);
-                if length != self.expected_len {
+                    if self.remaining == 0 {
+                        return Ok(None);
+                    }
+                    if version != self.expected {
+                        return Err(IterationError::OrderedDictMutation);
+                    }
+                } else if storage.iteration_len(self.kind) != self.expected {
                     return Err(if self.kind == IteratorKind::Set {
                         IterationError::SetSize
                     } else {
@@ -1339,7 +1342,7 @@ impl MappingIterator {
                 ) {
                     self.exhausted = true;
                 } else {
-                    self.expected_len = usize::MAX;
+                    self.expected = usize::MAX;
                 }
                 return Err(error);
             }
@@ -2170,19 +2173,19 @@ unsafe fn new_iterator(value: *const Object, kind: IteratorKind) -> *const Objec
     // SAFETY: acquire an independent root before reading mutable cursor metadata.
     let owner = unsafe { acquire_rc::<Object>(value as usize) };
     // SAFETY: the independent owner roots storage; only an owned cursor and size escape.
-    let (position, length, order_version) = unsafe {
+    let (position, length, expected) = unsafe {
         owner.0.with_mut(|s| {
-            let version = match kind {
-                IteratorKind::Set => None,
-                _ => s.dictionary().order_version,
+            let length = s.iteration_len(kind);
+            let expected = match kind {
+                IteratorKind::Set => length,
+                _ => s.dictionary().order_version.unwrap_or(length),
             };
-            (s.iteration_position(kind), s.iteration_len(kind), version)
+            (s.iteration_position(kind), length, expected)
         })
     };
     let iterator = MappingIterator {
         owner,
-        expected_len: length,
-        order_version,
+        expected,
         position,
         remaining: length,
         kind,
