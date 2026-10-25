@@ -16,9 +16,9 @@ jobs:
       - name: Check out the exact prospective merge, without this validation workflow
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: f969a330482f0b75c22c5e09b2bcb8298fd56bb4
+          ref: 037180a2841fb9d4961f4b5139a156117a6cef53
           persist-credentials: false
-      - run: test "$(git rev-parse 'HEAD^{tree}')" = 67fb669d3fe24e595bf836e2736b77d2a059ba7b
+      - run: test "$(git rev-parse 'HEAD^{tree}')" = e9e41272d95c5d059d8638aec6dabd317f753fba
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
@@ -116,3 +116,8 @@ jobs:
         run: |
           python3 -B tests/text_line_methods_upstream.py --compiler "$PWD/target/debug/imre" --runtime "$PWD/target/debug/libimre_runtime.a" --clang /usr/bin/clang-18
           python3 -B benchmarks/cpython_stdlib/full/shutil/native_rmtree.py --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/rmtree.json"
+      - name: Compare native pure path construction with CPython
+        run: |
+          for opt in 0 3; do
+            python3 -B benchmarks/cpython_stdlib/native_paths.py --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt" --result "$RUNNER_TEMP/pure-path-$opt.json"
+          done
