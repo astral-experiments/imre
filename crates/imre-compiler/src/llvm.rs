@@ -3578,7 +3578,7 @@ impl Emitter<'_, '_> {
             };
             return Value {
                 ty: returns,
-                ..self.tuple(Type::Tuple(id), expressions)
+                ..self.record_from_fields(Type::Tuple(id), expressions)
             };
         }
         if matches!(

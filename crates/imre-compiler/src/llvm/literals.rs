@@ -100,12 +100,7 @@ impl Emitter<'_, '_> {
             None
         };
 
-        let object = self.record(ty);
-        for (field, value) in values.iter().enumerate() {
-            let value = self.operand(value);
-            self.set_field(&object, field, &value.value);
-            self.release_operand(&value);
-        }
+        let object = self.record_from_fields(ty, values);
         let Some((root, ready)) = cache else {
             return object;
         };
@@ -122,6 +117,17 @@ impl Emitter<'_, '_> {
         };
         self.retain(&value);
         value
+    }
+
+    /// Construct a new owner, even when all field values are literals.
+    pub(super) fn record_from_fields(&mut self, ty: Type, values: &[Expr]) -> Value {
+        let object = self.record(ty);
+        for (field, value) in values.iter().enumerate() {
+            let value = self.operand(value);
+            self.set_field(&object, field, &value.value);
+            self.release_operand(&value);
+        }
+        object
     }
 
     /// Main releases the literal roots after locals/globals on either exit.
