@@ -30,6 +30,7 @@ mod enums;
 mod expansions;
 mod fixed_tuples;
 mod fnmatch;
+mod fspath;
 mod function_caches;
 mod functools;
 mod hashlib;
@@ -107,6 +108,20 @@ impl ClassInfo {
     fn new(graph: &SourceGraph, types: &Types) -> Result<Self, String> {
         let mut declarations = Classes::collect(graph)?;
         types.set_exception_declarations(declarations.exception_declarations.clone());
+        types.set_pathlike_records(
+            declarations
+                .definitions
+                .iter()
+                .enumerate()
+                .filter_map(|(id, class)| {
+                    class
+                        .methods
+                        .iter()
+                        .any(|method| method.name.as_str() == "__fspath__")
+                        .then_some(id)
+                })
+                .collect(),
+        );
         types.set_custom_truth(
             declarations
                 .definitions
@@ -4592,6 +4607,15 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::GlobalGet(slot), Vec::new()),
             });
         }
+        if let ast::Expr::Attribute(attr) = expression
+            && attr.attr.as_str() == "avoids_symlink_attacks"
+            && self.resolve(&attr.value) == Some(Binding::Intrinsic(Intrinsic::RmTree))
+        {
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Bool(true),
+            });
+        }
         if let Some(Binding::Intrinsic(Intrinsic::AccessMode(mode))) = self.resolve(expression) {
             return Ok(Expr {
                 ty: Type::Int,
@@ -4995,15 +5019,16 @@ impl<'a> Checker<'a> {
                         },
                     });
                 }
+                let scalar = |ty| match self.types.payload(ty).unwrap_or(ty) {
+                    Type::StrLiteral(_) => Type::Str,
+                    ty => ty,
+                };
                 if let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
-                    && [Type::Str, Type::Int].into_iter().any(|ty| {
-                        values
-                            .iter()
-                            .any(|value| self.types.payload(value.ty) == Some(ty))
-                            && values
-                                .iter()
-                                .all(|value| self.types.payload(value.ty).unwrap_or(value.ty) == ty)
-                    })
+                    && let [left, right] = values.as_slice()
+                    && (self.types.payload(left.ty).is_some()
+                        || self.types.payload(right.ty).is_some())
+                    && matches!(scalar(left.ty), Type::Str | Type::Int)
+                    && scalar(left.ty) == scalar(right.ty)
                 {
                     let operation = if *op == ast::CmpOp::Eq {
                         Compare::Equal
@@ -5455,7 +5480,9 @@ impl<'a> Checker<'a> {
                                 "strerror" => (1, Type::Str),
                                 _ => (
                                     if name == "filename" { 2 } else { 3 },
-                                    self.types.union(&[Type::Str, Type::Bytes]).unwrap(),
+                                    self.types
+                                        .union(&[Type::Str, Type::Bytes, Type::Path])
+                                        .unwrap(),
                                 ),
                             };
                             (
@@ -5914,6 +5941,7 @@ impl<'a> Checker<'a> {
                 return self.cursor_length_hint(call);
             }
             Some(Binding::Intrinsic(Intrinsic::ShallowCopy)) => return self.shallow_copy(call),
+            Some(Binding::Intrinsic(Intrinsic::DeepCopy)) => return self.deep_copy(call),
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Tee)) => return self.tee_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Count)) => return self.count_cursor(call),
@@ -5957,13 +5985,10 @@ impl<'a> Checker<'a> {
                 return self.popen(call, Some(true));
             }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
+            Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
             Some(Binding::Intrinsic(Intrinsic::Copy(op))) => return self.shutil_copy(op, call),
-            Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
-                self.reject_builtin_keywords(call)?;
-                let [path] = call.arguments.args.as_ref() else {
-                    return Err(error(self.source, call, "os.fspath requires one path"));
-                };
-                return self.fspath_argument(path);
+            Some(Binding::Intrinsic(symbol @ (Intrinsic::FsPath | Intrinsic::PosixNormcase))) => {
+                return self.public_fspath(call, symbol == Intrinsic::PosixNormcase);
             }
             Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return self.log_formatter(call),
             Some(Binding::Intrinsic(Intrinsic::MakeLogRecord)) => {
