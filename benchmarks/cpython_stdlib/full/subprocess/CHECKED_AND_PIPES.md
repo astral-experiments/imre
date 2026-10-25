@@ -2,7 +2,8 @@
 
 The [full method attempts](method-attempts-linux.json) record every one of the
 353 Linux occurrences at both optimization levels. The compiler/runtime was
-`44030132616437faa91f9fd2edebda8ff806bd6f`. The original CPython fixture
+[`12a645f`](https://github.com/astral-sh/imre/commit/12a645f666187b35ebfaa4c53ad152187bb356d7),
+tree `3d7be7793cd60f833814e5fb0ebdb7e23d2f4c26`. The original CPython fixture
 runner supplies the module, class and instance hooks; the compiled body uses a
 native case instance. No upstream method, expected result or skip was changed.
 
@@ -12,6 +13,11 @@ failure-cleanup cases; the default reference and canonical reports retain
 all **41** original skips. The six checked-output methods in each poll variant
 need typed membership assertions. They completed separately and do not overlap
 the 38: **50 native bodies with host fixtures**, zero fully native occurrences.
+The earlier typed subclasses of `unittest.TestCase` no longer compiled once
+`assertIn` gained a dictionary parameter. The local case now uses native
+`bytes in bytes` or `str in str` and calls the bundled `TestCase.assertTrue`
+or `assertFalse`. Each case runs the original assertion call and body. See
+the [unittest handoff](https://github.com/astral-sh/imre/pull/508#issuecomment-6397252339).
 
 [Selected operations](selected-operations-linux.json) records the evidence
 that changes 25 rows. Nine complete methods check validation, checked exits

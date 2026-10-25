@@ -1,7 +1,7 @@
 {
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
-  "imre_revision": "44030132616437faa91f9fd2edebda8ff806bd6f",
-  "tested_tree": "77c1fdb4074b0962333652dd08acb40a7f56bc16",
+  "imre_revision": "12a645f666187b35ebfaa4c53ad152187bb356d7",
+  "tested_tree": "3d7be7793cd60f833814e5fb0ebdb7e23d2f4c26",
   "reports": [
     {
       "opt_level": 0,
@@ -57,7 +57,7 @@
         },
         "test.test_subprocess.MiscTests.test__all__": {
           "status": "compile-blocked",
-          "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"types\""
+          "reason": "case.py:11:24: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.MiscTests.test_call_keyboardinterrupt_no_kill": {
           "status": "compile-blocked",
@@ -141,19 +141,19 @@
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_close": {
           "status": "compile-blocked",
-          "reason": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\""
+          "reason": "case.py:13:20: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_close_with_timeout": {
           "status": "compile-blocked",
-          "reason": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\""
+          "reason": "case.py:15:20: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_flush": {
           "status": "compile-blocked",
-          "reason": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\""
+          "reason": "case.py:16:20: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_write": {
           "status": "compile-blocked",
-          "reason": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\""
+          "reason": "case.py:13:20: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_repeated_call_after_stdout_close": {
           "status": "body-completed-needs-operation-review",
@@ -305,7 +305,7 @@
         },
         "test.test_subprocess.POSIXProcessTestCase.test_send_signal_race2": {
           "status": "compile-blocked",
-          "reason": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\""
+          "reason": "case.py:19:14: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_shell_sequence": {
           "status": "compile-blocked",
@@ -329,7 +329,7 @@
         },
         "test.test_subprocess.POSIXProcessTestCase.test_start_new_session": {
           "status": "compile-blocked",
-          "reason": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+          "reason": "case.py:17:21: Imre: unexpected keyword argument \"start_new_session\""
         },
         "test.test_subprocess.POSIXProcessTestCase.test_stderr_stdin_are_single_inout_fd": {
           "status": "compile-blocked",
@@ -453,11 +453,11 @@
         },
         "test.test_subprocess.ProcessTestCase.test_check_output": {
           "status": "compile-blocked",
-          "reason": "case.py:12:9: Imre: unknown class method"
+          "reason": "case.py:12:32: Imre: expected dict[int, str], got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_input_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:14:9: Imre: unknown class method"
+          "reason": "case.py:14:32: Imre: expected dict[int, str], got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_input_none": {
           "status": "compile-blocked",
@@ -465,7 +465,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_input_none_encoding_errors": {
           "status": "compile-blocked",
-          "reason": "case.py:12:9: Imre: unknown class method"
+          "reason": "case.py:12:30: Imre: expected dict[int, str], got str; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_input_none_text": {
           "status": "compile-blocked",
@@ -485,7 +485,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_stderr": {
           "status": "compile-blocked",
-          "reason": "case.py:13:9: Imre: unknown class method"
+          "reason": "case.py:13:32: Imre: expected dict[int, str], got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_stdin_arg": {
           "status": "compile-blocked",
@@ -497,7 +497,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_stdout_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:15:9: Imre: unknown class method"
+          "reason": "case.py:15:33: Imre: unsupported exception attribute"
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_timeout": {
           "status": "body-completed-needs-operation-review",
@@ -509,7 +509,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_class_getitems": {
           "status": "compile-blocked",
-          "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"types\""
+          "reason": "case.py:9:9: Imre: unknown class method"
         },
         "test.test_subprocess.ProcessTestCase.test_communicate": {
           "status": "compile-blocked",
@@ -845,7 +845,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_timeout_exception": {
           "status": "compile-blocked",
-          "reason": "case.py:12:13: Imre: unknown class method"
+          "reason": "case.py:12:41: Imre: expected dict[int, str], got str; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_universal_newlines_and_text": {
           "status": "compile-blocked",
@@ -857,7 +857,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_universal_newlines_communicate_encodings": {
           "status": "compile-blocked",
-          "reason": "case.py:16:21: Imre: arithmetic requires int or float operands"
+          "reason": "case.py:23:21: Imre: process encoding requires literal 'utf-8'"
         },
         "test.test_subprocess.ProcessTestCase.test_universal_newlines_communicate_input_none": {
           "status": "compile-blocked",
@@ -885,7 +885,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_wait_timeout": {
           "status": "compile-blocked",
-          "reason": "case.py:14:9: Imre: unknown class method"
+          "reason": "case.py:14:33: Imre: expected dict[int, str], got str; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_win32_duplicate_envs": {
           "status": "reference-skip",
@@ -928,7 +928,7 @@
           "method_sha256": "7fe6dbce6c124c584b2e229b432d7a2fcdccd5c63784a56e887e00c6d3fe7bb6",
           "selector_parents": [
             {
-              "binary_sha256": "d27121d59ac07138d4c01b6909e819772a0065131b09b28d6bbcf1825a29f115",
+              "binary_sha256": "263353523279629bcece0bf0bad4efd9f889af3231851721932bff934c30ed9f",
               "native_parent_syscalls": {}
             }
           ]
@@ -942,7 +942,7 @@
           "method_sha256": "fd5e05b723660dfbc18a04861156ff8b895de24dfdeca7df9137d74da6912456",
           "selector_parents": [
             {
-              "binary_sha256": "be8389600df16647d68e0d754f9d79eca9750382586edde7cd4be312a7d37bc2",
+              "binary_sha256": "79273c4d0af95098a0e99f66abf2460ccc6eefa9c8b078f83ebf7e15271ab308",
               "native_parent_syscalls": {}
             }
           ]
@@ -960,7 +960,7 @@
           "method_sha256": "9ff46ab62ba1550ee55186ec52d2e0df16b383c1ee120a3a4f795d96ea5e0b95",
           "selector_parents": [
             {
-              "binary_sha256": "6fcd1213d078e97d05499594e32739f24ad819663dff136fc0796361f72618ef",
+              "binary_sha256": "18ac3c2a380ec858ba43d90c787f27eaf425080c6fe2906f099e7de0e9acb427",
               "native_parent_syscalls": {}
             }
           ]
@@ -974,18 +974,18 @@
           "method_sha256": "eb9e4e32882aede3b02500d8becc00d459666c137e77470d6e4dd16417c3edcd",
           "selector_parents": [
             {
-              "binary_sha256": "f957cebe7c4f220412fcae539a92c989720aa8f56c67897432ff6732be52eaf9",
+              "binary_sha256": "80611672f7885836dd346ed933541f0dd95d706cc053173cb0510a934e7b5be2",
               "native_parent_syscalls": {}
             }
           ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output": {
           "status": "compile-blocked",
-          "reason": "case.py:13:9: Imre: unknown class method"
+          "reason": "case.py:13:32: Imre: expected dict[int, str], got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:15:9: Imre: unknown class method"
+          "reason": "case.py:15:32: Imre: expected dict[int, str], got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none": {
           "status": "compile-blocked",
@@ -993,7 +993,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none_encoding_errors": {
           "status": "compile-blocked",
-          "reason": "case.py:13:9: Imre: unknown class method"
+          "reason": "case.py:13:30: Imre: expected dict[int, str], got str; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none_text": {
           "status": "compile-blocked",
@@ -1012,14 +1012,14 @@
           "method_sha256": "471340b9db4c094ede2eb0b7f7cd8091993a42700fcfd8b4bc540c9099bab219",
           "selector_parents": [
             {
-              "binary_sha256": "af0a281f25a10af0d727c89a473a4c6441ca03ec12293f07fd7101e6031a9661",
+              "binary_sha256": "983673e9e1537d0eefd69f5fb76d3ad6a601eef4aaa1f5d7ba871c86d6222437",
               "native_parent_syscalls": {}
             }
           ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stderr": {
           "status": "compile-blocked",
-          "reason": "case.py:14:9: Imre: unknown class method"
+          "reason": "case.py:14:32: Imre: expected dict[int, str], got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stdin_arg": {
           "status": "compile-blocked",
@@ -1031,7 +1031,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stdout_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:16:9: Imre: unknown class method"
+          "reason": "case.py:16:33: Imre: unsupported exception attribute"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_timeout": {
           "status": "body-completed-needs-operation-review",
@@ -1042,7 +1042,7 @@
           "method_sha256": "dab34ef13e89a41ed1950fe3263dbeacf0c8ccf3cd18aed38d657ea3dd4cd0c3",
           "selector_parents": [
             {
-              "binary_sha256": "751857b28eb5351138a2d9ce624ac9587d71711f24e31d0b9d2fdd19e082334b",
+              "binary_sha256": "e4365aabe125fea1fcbf86ce7e2dca5ebd2b32fb4c778eecaa064c17ded1ba32",
               "native_parent_syscalls": {
                 "pselect6": 1
               }
@@ -1051,7 +1051,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_class_getitems": {
           "status": "compile-blocked",
-          "reason": "case.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"types\""
+          "reason": "case.py:10:9: Imre: unknown class method"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate": {
           "status": "compile-blocked",
@@ -1098,7 +1098,7 @@
           "method_sha256": "9268e8036ce63337675e2a26cd1c00b71cdfd5eddb510a921bbf5401363946fb",
           "selector_parents": [
             {
-              "binary_sha256": "50b83a8007ad6b7f0e49d581e478d9208b9fa327411414118975ae2ef8617220",
+              "binary_sha256": "d2a0e183495cf14f5ed8626a4b257addad5ef50dbaf67cd6accf2c02cb594013",
               "native_parent_syscalls": {}
             }
           ]
@@ -1112,7 +1112,7 @@
           "method_sha256": "d26e8c51d429ecd45589fb980f2c07805e81349c23d357a7d78b2cf703f882ea",
           "selector_parents": [
             {
-              "binary_sha256": "7b2dcc698d8092a85508be21e56313383fee5cf3dbb4f9b0171555e07849fb9c",
+              "binary_sha256": "b3f36c081e81f73ee95ebf61104528fb103368ca15d871370451fe9ba1ed8b7b",
               "native_parent_syscalls": {}
             }
           ]
@@ -1126,7 +1126,7 @@
           "method_sha256": "3e4af7f35b67768d0ab540fc19d472be0441519fc7fe279e86dc97bdc86c61c4",
           "selector_parents": [
             {
-              "binary_sha256": "173558924a745eac0b5602e9775b8aa62422e28c6c543d31be9052048f827d5d",
+              "binary_sha256": "7bba26965dc0ec7b779ae2efa25884162a67df4612ad4e4520ac28ae0371727e",
               "native_parent_syscalls": {}
             }
           ]
@@ -1144,7 +1144,7 @@
           "method_sha256": "1c6f5f200cfd3b1438be8d1b1195f88da5226b4e27b3d81553a7815fb473b7a2",
           "selector_parents": [
             {
-              "binary_sha256": "fd084e2339a8cad6fc2cb111e0222ba06d6122c1229dbf966c59281374e29865",
+              "binary_sha256": "e807fc80a085911d3b2665cf56439c33e2ddfd9d65e3e9a0738a4f5fcf9c6285",
               "native_parent_syscalls": {}
             }
           ]
@@ -1250,7 +1250,7 @@
           "method_sha256": "2c624dbefb8e0170b1b93696e7a5f891da573a3c795e902924d32f1ac99d6a9f",
           "selector_parents": [
             {
-              "binary_sha256": "36ec21abec3666e516765f3ca989dd97707e8cc12b403d4eaf0e8f728df14287",
+              "binary_sha256": "04b888cec6a01afeefb144304dd418d6a6295bff7e7f5396b101390e40355c2c",
               "native_parent_syscalls": {}
             }
           ]
@@ -1344,7 +1344,7 @@
           "method_sha256": "3faa8fd08713ebcce3dd422f216a5c5c98c207d4dd3eeb5eeaa9241341d4a710",
           "selector_parents": [
             {
-              "binary_sha256": "0a0115a303f0588b9863859d2c939fda512211de83ede23b2fc551adfd2c3471",
+              "binary_sha256": "352c865abbe3c7c0f688f1081e9a110b79b18897417576ffd0f2e0bce0b30bce",
               "native_parent_syscalls": {}
             }
           ]
@@ -1378,7 +1378,7 @@
           "method_sha256": "4be91d3e38077c5299349478ad299dacfbf1766c558c379dd7faf7633392c090",
           "selector_parents": [
             {
-              "binary_sha256": "1d78cda9baebf9008ba6d1646d30616df955023d6abcf95ad6de171b0c789acb",
+              "binary_sha256": "81a0646a3a5aee68334a88aaeec07d06c569fa9de8b28f24647989d6256549d0",
               "native_parent_syscalls": {}
             }
           ]
@@ -1412,7 +1412,7 @@
           "method_sha256": "80819fcbb79ff23f90e6f6d74fa70d78feb227db1ed979ad6d9745818b7bbd3d",
           "selector_parents": [
             {
-              "binary_sha256": "a34cd211a436faae402bd454a8e475a6ed360f5f1be95522653b0a3e936a3559",
+              "binary_sha256": "179f41aa36504caf2d129c46e6bf5502165aac3367c43919be525099a2316701",
               "native_parent_syscalls": {}
             }
           ]
@@ -1430,7 +1430,7 @@
           "method_sha256": "c2c8f9bf6c3ffaab945ce0001f38561a32034a731ab88ef1e0b6f40dcfe863f6",
           "selector_parents": [
             {
-              "binary_sha256": "b3fc168129ffbf33cab8dd7d605212151af2ea701174ee7d0b723756395fc9e0",
+              "binary_sha256": "a14092bb563fcfe8750784f57c3a0d5df8ed2d4569512d6548494997ed7a705a",
               "native_parent_syscalls": {}
             }
           ]
@@ -1441,7 +1441,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_timeout_exception": {
           "status": "compile-blocked",
-          "reason": "case.py:13:13: Imre: unknown class method"
+          "reason": "case.py:13:41: Imre: expected dict[int, str], got str; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_and_text": {
           "status": "compile-blocked",
@@ -1453,7 +1453,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_communicate_encodings": {
           "status": "compile-blocked",
-          "reason": "case.py:17:21: Imre: arithmetic requires int or float operands"
+          "reason": "case.py:24:21: Imre: process encoding requires literal 'utf-8'"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_communicate_input_none": {
           "status": "compile-blocked",
@@ -1476,7 +1476,7 @@
           "method_sha256": "53a051cf04fa9d22cc0d33d41dc96b4393a3c4f4fe2ac2d71846908ee77575d2",
           "selector_parents": [
             {
-              "binary_sha256": "86a7733a723c98f981028ee7099a4a10352afdb1e7a0e10baf3031057f19b269",
+              "binary_sha256": "bf7a65b2e31e328a5ad75efb7bf07a28af7b867c63e16fa712d4ce34942537f7",
               "native_parent_syscalls": {}
             }
           ]
@@ -1487,7 +1487,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_wait_timeout": {
           "status": "compile-blocked",
-          "reason": "case.py:15:9: Imre: unknown class method"
+          "reason": "case.py:15:33: Imre: expected dict[int, str], got str; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_duplicate_envs": {
           "status": "reference-skip",
@@ -1725,7 +1725,7 @@
         },
         "test.test_subprocess.MiscTests.test__all__": {
           "status": "compile-blocked",
-          "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"types\""
+          "reason": "case.py:11:24: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.MiscTests.test_call_keyboardinterrupt_no_kill": {
           "status": "compile-blocked",
@@ -1809,19 +1809,19 @@
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_close": {
           "status": "compile-blocked",
-          "reason": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\""
+          "reason": "case.py:13:20: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_close_with_timeout": {
           "status": "compile-blocked",
-          "reason": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\""
+          "reason": "case.py:15:20: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_flush": {
           "status": "compile-blocked",
-          "reason": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\""
+          "reason": "case.py:16:20: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_write": {
           "status": "compile-blocked",
-          "reason": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\""
+          "reason": "case.py:13:20: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_repeated_call_after_stdout_close": {
           "status": "body-completed-needs-operation-review",
@@ -1973,7 +1973,7 @@
         },
         "test.test_subprocess.POSIXProcessTestCase.test_send_signal_race2": {
           "status": "compile-blocked",
-          "reason": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\""
+          "reason": "case.py:19:14: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_shell_sequence": {
           "status": "compile-blocked",
@@ -1997,7 +1997,7 @@
         },
         "test.test_subprocess.POSIXProcessTestCase.test_start_new_session": {
           "status": "compile-blocked",
-          "reason": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+          "reason": "case.py:17:21: Imre: unexpected keyword argument \"start_new_session\""
         },
         "test.test_subprocess.POSIXProcessTestCase.test_stderr_stdin_are_single_inout_fd": {
           "status": "compile-blocked",
@@ -2121,11 +2121,11 @@
         },
         "test.test_subprocess.ProcessTestCase.test_check_output": {
           "status": "compile-blocked",
-          "reason": "case.py:12:9: Imre: unknown class method"
+          "reason": "case.py:12:32: Imre: expected dict[int, str], got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_input_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:14:9: Imre: unknown class method"
+          "reason": "case.py:14:32: Imre: expected dict[int, str], got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_input_none": {
           "status": "compile-blocked",
@@ -2133,7 +2133,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_input_none_encoding_errors": {
           "status": "compile-blocked",
-          "reason": "case.py:12:9: Imre: unknown class method"
+          "reason": "case.py:12:30: Imre: expected dict[int, str], got str; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_input_none_text": {
           "status": "compile-blocked",
@@ -2153,7 +2153,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_stderr": {
           "status": "compile-blocked",
-          "reason": "case.py:13:9: Imre: unknown class method"
+          "reason": "case.py:13:32: Imre: expected dict[int, str], got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_stdin_arg": {
           "status": "compile-blocked",
@@ -2165,7 +2165,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_stdout_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:15:9: Imre: unknown class method"
+          "reason": "case.py:15:33: Imre: unsupported exception attribute"
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_timeout": {
           "status": "body-completed-needs-operation-review",
@@ -2177,7 +2177,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_class_getitems": {
           "status": "compile-blocked",
-          "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"types\""
+          "reason": "case.py:9:9: Imre: unknown class method"
         },
         "test.test_subprocess.ProcessTestCase.test_communicate": {
           "status": "compile-blocked",
@@ -2513,7 +2513,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_timeout_exception": {
           "status": "compile-blocked",
-          "reason": "case.py:12:13: Imre: unknown class method"
+          "reason": "case.py:12:41: Imre: expected dict[int, str], got str; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_universal_newlines_and_text": {
           "status": "compile-blocked",
@@ -2525,7 +2525,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_universal_newlines_communicate_encodings": {
           "status": "compile-blocked",
-          "reason": "case.py:16:21: Imre: arithmetic requires int or float operands"
+          "reason": "case.py:23:21: Imre: process encoding requires literal 'utf-8'"
         },
         "test.test_subprocess.ProcessTestCase.test_universal_newlines_communicate_input_none": {
           "status": "compile-blocked",
@@ -2553,7 +2553,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_wait_timeout": {
           "status": "compile-blocked",
-          "reason": "case.py:14:9: Imre: unknown class method"
+          "reason": "case.py:14:33: Imre: expected dict[int, str], got str; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_win32_duplicate_envs": {
           "status": "reference-skip",
@@ -2596,7 +2596,7 @@
           "method_sha256": "7fe6dbce6c124c584b2e229b432d7a2fcdccd5c63784a56e887e00c6d3fe7bb6",
           "selector_parents": [
             {
-              "binary_sha256": "44440533012bee7773babf952af6dec88f8b52c7ae4303fa76895d212ac7ab86",
+              "binary_sha256": "4276868a3317c1c90ba857eec3b3d5dba0705c60257e578b0fbe2cbc8462c436",
               "native_parent_syscalls": {}
             }
           ]
@@ -2610,7 +2610,7 @@
           "method_sha256": "fd5e05b723660dfbc18a04861156ff8b895de24dfdeca7df9137d74da6912456",
           "selector_parents": [
             {
-              "binary_sha256": "cb59bc1f91018a4b5f3467c4c99388e6818c107fbb2b27e35f679c2e760682f4",
+              "binary_sha256": "52391d6d4ccd94bb9d9f9ed1e3e819a44ec2c460c49e1a412f1c10b1950a5598",
               "native_parent_syscalls": {}
             }
           ]
@@ -2628,7 +2628,7 @@
           "method_sha256": "9ff46ab62ba1550ee55186ec52d2e0df16b383c1ee120a3a4f795d96ea5e0b95",
           "selector_parents": [
             {
-              "binary_sha256": "5e4b060fa2eed027be5e1d18beb4d36fa92ac6118a09e4a54d2876cd6010be84",
+              "binary_sha256": "8ea14833ea390b400c2154e0b5cbaf9079e6540c0a9098f5e304397f981f750c",
               "native_parent_syscalls": {}
             }
           ]
@@ -2642,18 +2642,18 @@
           "method_sha256": "eb9e4e32882aede3b02500d8becc00d459666c137e77470d6e4dd16417c3edcd",
           "selector_parents": [
             {
-              "binary_sha256": "cb8f54d1a68ca3d88c99763fcceb7bff0b7c02682a6b2163dd982806f4c71c51",
+              "binary_sha256": "f7b210dfe0719b6b2aa873b47123c218a9cfcfea72527ad3dc91f1d9fad5fe30",
               "native_parent_syscalls": {}
             }
           ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output": {
           "status": "compile-blocked",
-          "reason": "case.py:13:9: Imre: unknown class method"
+          "reason": "case.py:13:32: Imre: expected dict[int, str], got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:15:9: Imre: unknown class method"
+          "reason": "case.py:15:32: Imre: expected dict[int, str], got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none": {
           "status": "compile-blocked",
@@ -2661,7 +2661,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none_encoding_errors": {
           "status": "compile-blocked",
-          "reason": "case.py:13:9: Imre: unknown class method"
+          "reason": "case.py:13:30: Imre: expected dict[int, str], got str; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none_text": {
           "status": "compile-blocked",
@@ -2680,14 +2680,14 @@
           "method_sha256": "471340b9db4c094ede2eb0b7f7cd8091993a42700fcfd8b4bc540c9099bab219",
           "selector_parents": [
             {
-              "binary_sha256": "791c15cbbd7994552b769f3d0580feae465febcc396c4a89b1b92fe61411daa0",
+              "binary_sha256": "dfd878c42e47d61969cbdee5863f31f79462eb64fb96d3015511a6ff4aef5b7d",
               "native_parent_syscalls": {}
             }
           ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stderr": {
           "status": "compile-blocked",
-          "reason": "case.py:14:9: Imre: unknown class method"
+          "reason": "case.py:14:32: Imre: expected dict[int, str], got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stdin_arg": {
           "status": "compile-blocked",
@@ -2699,7 +2699,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stdout_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:16:9: Imre: unknown class method"
+          "reason": "case.py:16:33: Imre: unsupported exception attribute"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_timeout": {
           "status": "body-completed-needs-operation-review",
@@ -2710,7 +2710,7 @@
           "method_sha256": "dab34ef13e89a41ed1950fe3263dbeacf0c8ccf3cd18aed38d657ea3dd4cd0c3",
           "selector_parents": [
             {
-              "binary_sha256": "7debf381c0cf1d21b49b666eba5fb18d42389ca117790935acefcc59505ee28f",
+              "binary_sha256": "67d62e72ac7dcc11f371306413732f5546a581a4be37956bdc0974627775388f",
               "native_parent_syscalls": {
                 "pselect6": 1
               }
@@ -2719,7 +2719,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_class_getitems": {
           "status": "compile-blocked",
-          "reason": "case.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"types\""
+          "reason": "case.py:10:9: Imre: unknown class method"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate": {
           "status": "compile-blocked",
@@ -2766,7 +2766,7 @@
           "method_sha256": "9268e8036ce63337675e2a26cd1c00b71cdfd5eddb510a921bbf5401363946fb",
           "selector_parents": [
             {
-              "binary_sha256": "8288f67daedfce3bbbdb4e47b9c1475ca063d127539c1520141e06d2dfd64de0",
+              "binary_sha256": "e8429f4decf506c10ca5e10223b811e9640e3e39a8dc8beb1d25e59a6bd7a413",
               "native_parent_syscalls": {}
             }
           ]
@@ -2780,7 +2780,7 @@
           "method_sha256": "d26e8c51d429ecd45589fb980f2c07805e81349c23d357a7d78b2cf703f882ea",
           "selector_parents": [
             {
-              "binary_sha256": "d4e9c72f43eebe7682f032c722229021563ef2be12056a5ccd3bc8b7b764225d",
+              "binary_sha256": "ac9284768685e83f6ee013ecb04f9bbd26e87045745e282b9da3843853737cc3",
               "native_parent_syscalls": {}
             }
           ]
@@ -2794,7 +2794,7 @@
           "method_sha256": "3e4af7f35b67768d0ab540fc19d472be0441519fc7fe279e86dc97bdc86c61c4",
           "selector_parents": [
             {
-              "binary_sha256": "2a629b5c2478a4357f0ae6fb7a6017d848f363508bfaf43acc3416866bbb7e16",
+              "binary_sha256": "5855f2f20fff988a3b02a225dfdee58cbfe1eb59f10adb03e759ba475913dceb",
               "native_parent_syscalls": {}
             }
           ]
@@ -2812,7 +2812,7 @@
           "method_sha256": "1c6f5f200cfd3b1438be8d1b1195f88da5226b4e27b3d81553a7815fb473b7a2",
           "selector_parents": [
             {
-              "binary_sha256": "2ab614097d824082dc2291e7fd1661489b9e913e5fac05953366d34d945a04c1",
+              "binary_sha256": "28c40363637e4b9ccf754ba4da80774498768a355f48f4f778af4e2bba9c5aca",
               "native_parent_syscalls": {}
             }
           ]
@@ -2918,7 +2918,7 @@
           "method_sha256": "2c624dbefb8e0170b1b93696e7a5f891da573a3c795e902924d32f1ac99d6a9f",
           "selector_parents": [
             {
-              "binary_sha256": "4ee44f31c5a9624c1c9bc70f9decd9f8e744a9199f2ee6ca0414fdf2ac8e8465",
+              "binary_sha256": "4149ae954a39c95cbad43716b56a340a9f98be98b28eaaefefc3e960e49fd0d5",
               "native_parent_syscalls": {}
             }
           ]
@@ -3012,7 +3012,7 @@
           "method_sha256": "3faa8fd08713ebcce3dd422f216a5c5c98c207d4dd3eeb5eeaa9241341d4a710",
           "selector_parents": [
             {
-              "binary_sha256": "4ed9a5a26a453e6bd7e944ef437ce2681d838091b148c2dbfaf8e9445116c82c",
+              "binary_sha256": "37ce2287374d620132f180ab618a3f9a6299258b41de2f5f2ef6b098ac66adf9",
               "native_parent_syscalls": {}
             }
           ]
@@ -3046,7 +3046,7 @@
           "method_sha256": "4be91d3e38077c5299349478ad299dacfbf1766c558c379dd7faf7633392c090",
           "selector_parents": [
             {
-              "binary_sha256": "6ab00239c6866ee29fdf5c31df7ed31da9dbdc675737a18b0bb44553f572b60b",
+              "binary_sha256": "67368049b6800f39cdfe4b07ecabf1fd0b32b683db921a9ad6dcaa267beff199",
               "native_parent_syscalls": {}
             }
           ]
@@ -3080,7 +3080,7 @@
           "method_sha256": "80819fcbb79ff23f90e6f6d74fa70d78feb227db1ed979ad6d9745818b7bbd3d",
           "selector_parents": [
             {
-              "binary_sha256": "7a3b4e9cf2e7439aac5a53174e986016d6232dcc040af083563c1deb1d643e60",
+              "binary_sha256": "2040722d954cbc8e4f2d2510a4e534fc87a4be8f076de7d8bb45e9833847f376",
               "native_parent_syscalls": {}
             }
           ]
@@ -3098,7 +3098,7 @@
           "method_sha256": "c2c8f9bf6c3ffaab945ce0001f38561a32034a731ab88ef1e0b6f40dcfe863f6",
           "selector_parents": [
             {
-              "binary_sha256": "26c43ed57d3654595de479b74baa6a6ae5e08fff2fa37e4786606cbff6d67888",
+              "binary_sha256": "88eaeb53c9b593bef86a550a0006a41b0e3d1ac8150bfb53bde3233299d13034",
               "native_parent_syscalls": {}
             }
           ]
@@ -3109,7 +3109,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_timeout_exception": {
           "status": "compile-blocked",
-          "reason": "case.py:13:13: Imre: unknown class method"
+          "reason": "case.py:13:41: Imre: expected dict[int, str], got str; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_and_text": {
           "status": "compile-blocked",
@@ -3121,7 +3121,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_communicate_encodings": {
           "status": "compile-blocked",
-          "reason": "case.py:17:21: Imre: arithmetic requires int or float operands"
+          "reason": "case.py:24:21: Imre: process encoding requires literal 'utf-8'"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_communicate_input_none": {
           "status": "compile-blocked",
@@ -3144,7 +3144,7 @@
           "method_sha256": "53a051cf04fa9d22cc0d33d41dc96b4393a3c4f4fe2ac2d71846908ee77575d2",
           "selector_parents": [
             {
-              "binary_sha256": "884ad19a39fa5b18b8679e5c9220a7fdc9c5a75b8ad21aab272018cb1feb7b34",
+              "binary_sha256": "428621aac995741020ac324e8ab1376979ac18c72149b44ff8acdf98b626db72",
               "native_parent_syscalls": {}
             }
           ]
@@ -3155,7 +3155,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_wait_timeout": {
           "status": "compile-blocked",
-          "reason": "case.py:15:9: Imre: unknown class method"
+          "reason": "case.py:15:33: Imre: expected dict[int, str], got str; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_duplicate_envs": {
           "status": "reference-skip",

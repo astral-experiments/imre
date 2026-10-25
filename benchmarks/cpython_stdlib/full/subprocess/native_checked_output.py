@@ -9,10 +9,6 @@ import tempfile
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE), str(HERE.parents[1])]
-from selector_fixture import ParentTrace, selected_entry, verify_binding
-from suite_inventory import load_suite, verify_files, verify_interpreter_tests
-from suite_native import Toolchain, native_method, run_in_fixtures
 
 METHODS = {
     "test_check_output_stderr": (
@@ -45,22 +41,21 @@ PREAMBLE = """import subprocess
 import sys
 import unittest
 
-class NativeCase(unittest.TestCase):
-    def contains(self, member: TYPE, container: TYPE) -> bool:
-        for start in range(len(container) - len(member) + 1):
-            if container[start:start + len(member)] == member:
-                return True
-        return False
-
+class NativeCase:
     def assertIn(self, member: TYPE, container: TYPE) -> None:
-        self.assertTrue(self.contains(member, container))
+        unittest.TestCase().assertTrue(member in container)
 
     def assertNotIn(self, member: TYPE, container: TYPE) -> None:
-        self.assertFalse(self.contains(member, container))
+        unittest.TestCase().assertFalse(member in container)
 """
 
 
 def main():
+    sys.path[:0] = [str(HERE), str(HERE.parents[1])]
+    from selector_fixture import ParentTrace, selected_entry, verify_binding
+    from suite_inventory import load_suite, verify_files, verify_interpreter_tests
+    from suite_native import Toolchain, native_method, run_in_fixtures
+
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + flag, type=Path, required=True)
