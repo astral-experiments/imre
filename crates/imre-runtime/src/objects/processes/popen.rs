@@ -26,12 +26,6 @@ pub(super) fn cleanup() {
     });
 }
 
-fn returncode(status: ExitStatus) -> i32 {
-    status
-        .code()
-        .unwrap_or_else(|| -status.signal().unwrap_or(0))
-}
-
 pub(in crate::objects) struct Popen {
     args: OwnedWord,
     control: Arc<ChildControl>,
@@ -66,6 +60,11 @@ impl Popen {
 
 impl Drop for Popen {
     fn drop(&mut self) {
+        // The public warning is about an unobserved returncode. Even a child
+        // which has already exited can still be waiting for its parent to reap it.
+        if self.control.status().is_none() {
+            crate::objects::warnings::unobserved_child(self.control.pid);
+        }
         if !matches!(self.control.poll(), Ok(Some(_))) {
             ACTIVE.with_borrow_mut(|children| {
                 children.push((self.control.clone(), std::mem::take(&mut self.pipes)))
