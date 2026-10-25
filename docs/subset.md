@@ -11,6 +11,13 @@ recently used key; zero disables storage, and `None` keeps all results.
 `cache_clear()` resets entries and counters. `cache_info()` supports unpacking
 and indexing the four snapshot fields.
 
+`functools.partial` retains positional arguments for a synchronous callable with
+a fixed signature. Calls fill positional `functools.Placeholder` slots first.
+The partial can be returned, called repeatedly, or passed as a callback. Bound
+methods retain their receiver; captured mutable arguments keep their identity.
+Passing a placeholder last or as a keyword raises `TypeError`. Binding keyword
+defaults and inspecting a partial's attributes are not yet supported.
+
 | Area | Supported behavior |
 | --- | --- |
 | Modules | Closed UTF-8 source graph; imports can follow literal exports in imported modules; entry definitions precede executable statements; imported initializers run once in dependency/source order; optional docstrings |
