@@ -651,7 +651,8 @@ impl Checker<'_> {
         } else {
             let binding = self.graph.resolve(self.module, expression);
             if let Some(Binding::Definition(definition)) = binding
-                && self.classes.declarations.ids.contains_key(&definition)
+                && (self.classes.declarations.ids.contains_key(&definition)
+                    || self.types.namedtuple(definition).is_some())
             {
                 // Static dispatch and constant folding can erase the class name from the IR.
                 self.class_reads.borrow_mut().insert(definition);
@@ -849,7 +850,10 @@ impl Checker<'_> {
         expected: Option<Type>,
     ) -> Result<Expr, String> {
         if attribute.attr.starts_with("__")
-            && !matches!(attribute.attr.as_str(), "__str__" | "__post_init__")
+            && !matches!(
+                attribute.attr.as_str(),
+                "__str__" | "__post_init__" | "__copy__"
+            )
         {
             return Err(error(
                 self.source,
@@ -933,13 +937,23 @@ impl Checker<'_> {
             ));
         }
         if attribute.attr.starts_with("__")
-            && !matches!(attribute.attr.as_str(), "__str__" | "__post_init__")
+            && !matches!(
+                attribute.attr.as_str(),
+                "__str__" | "__post_init__" | "__copy__"
+            )
         {
             return Err(error(
                 self.source,
                 call,
                 "special methods cannot be called directly",
             ));
+        }
+        if matches!(attribute.attr.as_str(), "assertEqual" | "assertListEqual")
+            && let Some(receiver) = &receiver
+            && let Some(checked) =
+                self.unittest_equality(call, attribute.attr.as_str(), class, receiver)?
+        {
+            return Ok(checked);
         }
         if attribute.attr.as_str() == "assertRaises"
             && !self.classes.methods[class].contains_key("assertRaises")
@@ -1113,6 +1127,8 @@ impl Checker<'_> {
                     Builtin::NamedException {
                         kind,
                         message_field: decl.fields.len() - 1,
+                        tuple_args: self.classes.fields[class].last()
+                            == Some(&Type::ExceptionField),
                         text,
                         repr,
                         dataclass_repr: decl.dataclass.is_some_and(|d| d.repr),
@@ -1122,6 +1138,79 @@ impl Checker<'_> {
             });
         }
         Ok(record)
+    }
+
+    /// Install the native message slot used by the exception's args and formatting.
+    fn set_exception_message(&mut self, class: usize, message: &ast::Expr) -> Result<Expr, String> {
+        let ty = self.types.optional(Type::Str);
+        let message_value = self.expr_expected(message, Type::Str)?;
+        let value = self.coerce(message_value, ty, message)?;
+        Ok(self.store_exception_arguments(class, value))
+    }
+
+    /// Materialize all base arguments before exposing the tuple through the exception.
+    fn set_exception_arguments(
+        &mut self,
+        class: usize,
+        nodes: &[ast::Expr],
+    ) -> Result<Expr, String> {
+        let mut values = Vec::with_capacity(nodes.len());
+        for node in nodes {
+            let value = Self::string_value(self.expr(node)?);
+            if !self.import_argument_supported(value.ty) {
+                return Err(error(
+                    self.source,
+                    node,
+                    "unsupported native exception argument type",
+                ));
+            }
+            values.push(value);
+        }
+        let tuple = Expr {
+            ty: self.types.tuple(values.iter().map(|v| v.ty).collect()),
+            kind: ExprKind::Tuple(values),
+        };
+        let args = Expr {
+            ty: Type::ExceptionField,
+            kind: ExprKind::Builtin(Builtin::ExceptionTupleView, vec![tuple]),
+        };
+        Ok(self.store_exception_arguments(class, args))
+    }
+
+    fn store_exception_arguments(&self, class: usize, value: Expr) -> Expr {
+        let field = self.classes.fields[class].len() - 1;
+        Expr {
+            ty: Type::None,
+            kind: ExprKind::Scope {
+                body: vec![Statement::SetField(self.local(0), field, value)],
+                value: Box::new(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                }),
+                clear: Vec::new(),
+            },
+        }
+    }
+
+    pub(super) fn explicit_exception_initializer(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Option<Expr>, String> {
+        if self.super_initializer.is_some()
+            && self.names.get("self") == Some(&0)
+            && let Some(class) = self.class
+            && self
+                .classes
+                .declarations
+                .exceptions
+                .contains_key(&self.classes.declarations.definitions[class].definition)
+            && let Some((base, args)) =
+                crate::classes::explicit_message_initializer(&self.graph.modules[self.module], call)
+            && !self.names.contains_key(base)
+        {
+            return self.set_exception_arguments(class, args).map(Some);
+        }
+        Ok(None)
     }
 
     pub(super) fn call_super_initializer(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -1136,6 +1225,11 @@ impl Checker<'_> {
                 .bindings
                 .contains_key("super")
         {
+            if self.classes.fields[class].last() == Some(&Type::ExceptionField)
+                && call.arguments.keywords.is_empty()
+            {
+                return self.set_exception_arguments(class, &call.arguments.args);
+            }
             let [message] = call.arguments.args.as_ref() else {
                 return Err(error(
                     self.source,
@@ -1150,21 +1244,7 @@ impl Checker<'_> {
                     "exception messages do not accept keyword arguments",
                 ));
             }
-            let ty = self.types.optional(Type::Str);
-            let message_value = self.expr_expected(message, Type::Str)?;
-            let value = self.coerce(message_value, ty, message)?;
-            let field = self.classes.fields[class].len() - 1;
-            return Ok(Expr {
-                ty: Type::None,
-                kind: ExprKind::Scope {
-                    body: vec![Statement::SetField(self.local(0), field, value)],
-                    value: Box::new(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    }),
-                    clear: Vec::new(),
-                },
-            });
+            return self.set_exception_message(class, message);
         }
         // An initializer defined at the root of a checked record lineage finds
         // object.__init__, including when that initializer runs on a subclass.

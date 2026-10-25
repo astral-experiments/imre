@@ -51,7 +51,7 @@ class Bridge:
             raise RuntimeError('native fixture needs to follow the upstream cwd change')
         for i, value in enumerate(args):
             with open(os.path.join(self.directory, str(i)), 'wb') as out:
-                out.write(str(value).encode())
+                out.write(value if isinstance(value, bytes) else str(value).encode())
         self.process.stdin.write(name + '\n')
         self.process.stdin.flush()
         output = self.read_line()
@@ -64,7 +64,7 @@ class Bridge:
             kind, message = output[1:].split(' ', 1)
             raise {'OSError': OSError, 'FileNotFoundError': FileNotFoundError,
                    'NotADirectoryError': NotADirectoryError, 'PermissionError': PermissionError,
-                   'ValueError': ValueError,
+                   'TypeError': TypeError, 'ValueError': ValueError,
                    'NotImplementedError': NotImplementedError}[kind](ast.literal_eval(message))
         return ast.literal_eval(output)
 
@@ -232,23 +232,27 @@ class NativeCase:
                          operation=('imre', 'Path.glob and Path.rglob across suspended cursors'))(case, original)
 
 
-def native_registered_rglob(tools, directory, case, original):
-    # Both decorators register the unchanged function by name and return it.
-    # PathTest.setUp has already checked the registered platform/symlink gate.
-    name, ctor = case._testMethodName, case.cls.__name__
-    posix = name == 'test_rglob_posix'
-    gate = 'posix' if posix else 'symlinks'
+def registered_body(case, original, owner_name, gate):
+    """The original fixture checks this identity decorator's registered gate in setUp."""
+    name = case._testMethodName
     module = inspect.getmodule(original)
-    if (original.__func__ is not vars(module.PathTest)[name]
+    if (original.__func__ is not vars(getattr(module, owner_name))[name]
             or name not in getattr(module, '_tests_needing_' + gate)
-            or not (case.cls.parser is posixpath if posix else case.can_symlink)):
+            or not (case.cls.parser is posixpath if gate == 'posix' else case.can_symlink)):
         raise ValueError(f'original {gate} fixture did not select {case.id()}')
     data = MODULE.read_bytes()
-    owner, = [c for c in ast.parse(data).body if isinstance(c, ast.ClassDef) and c.name == 'PathTest']
+    owner, = [c for c in ast.parse(data).body if isinstance(c, ast.ClassDef) and c.name == owner_name]
     method, = [m for m in owner.body if isinstance(m, ast.FunctionDef) and m.name == name]
     if [ast.unparse(d) for d in method.decorator_list] != ['needs_' + gate]:
         raise ValueError(f'unexpected decorator on {name}')
-    body = b''.join(data.splitlines(keepends=True)[method.lineno - 1:method.end_lineno])
+    return b''.join(data.splitlines(keepends=True)[method.lineno - 1:method.end_lineno])
+
+
+def native_registered_rglob(tools, directory, case, original):
+    name, ctor = case._testMethodName, case.cls.__name__
+    posix = name == 'test_rglob_posix'
+    gate = 'posix' if posix else 'symlinks'
+    body = registered_body(case, original, 'PathTest', gate)
     parameters, arguments = ('value: str, child: str', 'value, child') if posix else ('value: str', 'value')
     fixture = f'''from pathlib import {ctor}
 class NativeCase:

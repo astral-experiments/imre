@@ -218,6 +218,13 @@ impl Checker<'_> {
                 signature.returns
             },
         );
+        let ty = if receiver.is_none()
+            && let Some(&policy) = self.classes.cached.get(&signature.id)
+        {
+            self.types.declared_cache(ty, signature.id, policy)
+        } else {
+            ty
+        };
         Ok(Expr {
             ty,
             kind: ExprKind::Callable {
@@ -379,6 +386,9 @@ impl Checker<'_> {
 
     /// Callable types contain positional types, not parameter names or defaults.
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
+        if let Type::StrDescriptor(method) = callable.ty {
+            return self.invoke_descriptor(call, callable, method);
+        }
         let (params, returns) = self.types.signature(callable.ty).ok_or_else(|| {
             error(
                 self.source,

@@ -38,3 +38,36 @@ with open("sorted.json", "w") as sink:
               sort_keys=True, separators=(",", ":"))
 with open("sorted.json") as source:
     print(source.read())
+
+indents: list[int | None] = [None, 2]
+for doc in ["[]", "[1]", "[1,2]", "[1,NaN]", '{"x":1}', '{"x":[1,2]}']:
+    for indentation in indents:
+        with open("partial.json", "w") as sink:
+            try:
+                json.dump(json.loads(doc), sink, separators=(False, ":"), indent=indentation,
+                          allow_nan=False)
+            except TypeError:
+                print("TypeError")
+            except ValueError:
+                print("ValueError")
+        with open("partial.json") as source:
+            print(repr(source.read()))
+
+with open("partial.json", "w") as sink:
+    try:
+        json.dump({"x": 1}, sink, separators=(",", False))
+    except TypeError:
+        print("TypeError")
+with open("partial.json") as source:
+    print(repr(source.read()))
+
+print(json.dumps("é", separators=(False, ":"), indent=1 << 80))
+print(json.dumps(json.loads('"é"'), separators=(False, ":"), ensure_ascii=False))
+try:
+    json.dumps("x", separators=(False,))
+except ValueError:
+    print("ValueError")
+try:
+    json.dumps([], separators=(False, ":"), indent=1 << 80)
+except OverflowError:
+    print("OverflowError")

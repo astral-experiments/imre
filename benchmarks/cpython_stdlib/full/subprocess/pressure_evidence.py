@@ -55,7 +55,7 @@ def update(previous, observed, reference):
             )
             if case["selector_calls"].keys() - want:
                 raise ValueError(("wrong selector", row["id"]))
-            old = row.get("evidence", {})
+            assert case["body_attempt"]["status"] == "blocked"
             row.pop("reason", None)
             row.update(
                 outcome="pass",
@@ -68,8 +68,8 @@ def update(previous, observed, reference):
                     "each child exited zero and the entire original descriptor table was unchanged after every wait",
                     fixture=f"unchanged CPython body, assertions and hooks; {case['fixture_selector']} in the native parent; "
                     f"{case['pressure_fds']} original file descriptions, original numbers and CLOEXEC, ten free slots",
-                    native_body_diagnostic=old.get("native_body_diagnostic"),
-                    source="pressure-linux.json",
+                    native_body_diagnostic=case["body_attempt"]["reason"],
+                    source="pressure-replay-linux.json",
                 ),
             )
             row["classification"] = classification(row)
@@ -88,5 +88,5 @@ if __name__ == "__main__":
     args = p.parse_args()
     read = lambda path: json.loads(path.read_text())
     previous, reference = read(args.previous), read(HERE / "reference-linux.json")
-    update(previous, read(HERE / "pressure-linux.json"), reference)
+    update(previous, read(HERE / "pressure-replay-linux.json"), reference)
     write_reports(args.result, previous, reference)

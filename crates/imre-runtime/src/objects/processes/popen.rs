@@ -5,7 +5,6 @@ use super::*;
 use crate::StorageCell;
 use crate::objects::files::{FileState, errno_error};
 use std::cell::RefCell;
-use std::os::fd::OwnedFd;
 
 mod communicate;
 
@@ -145,6 +144,7 @@ unsafe fn with_process<T>(handle: *const Object, work: impl FnOnce(&mut Popen) -
 /// Borrowed launch settings, filled by the compiler in parameter order after
 /// evaluating all Python expressions. All referenced values are rooted by the caller.
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct LaunchConfig {
     args: *const (),
     pub(super) cwd: *const (),
@@ -159,7 +159,34 @@ pub struct LaunchConfig {
     pub(super) shell: bool,
 }
 
+/// The existing ABI prefix is sufficient for fixed streams. Only callers
+/// supplying a borrowed descriptor (6) or file (7) append the three words.
+#[repr(C)]
+struct RedirectConfig {
+    launch: LaunchConfig,
+    words: [usize; 3],
+}
+
 impl LaunchConfig {
+    fn has_redirects(streams: u32) -> bool {
+        [12, 0, 4]
+            .iter()
+            .any(|shift| matches!((streams >> shift) & 15, 6 | 7))
+    }
+
+    /// # Safety
+    /// A configuration requesting mode 6 or 7 must be the first field of a
+    /// RedirectConfig. Older callers use only fixed modes and need no trailer.
+    unsafe fn redirect_words(config: *const Self) -> [usize; 3] {
+        // SAFETY: the launch prefix is present for either ABI layout.
+        let streams = unsafe { (*config).streams };
+        if Self::has_redirects(streams) {
+            // SAFETY: the mode proves that the caller provided the trailer.
+            unsafe { (*config.cast::<RedirectConfig>()).words }
+        } else {
+            [0; 3]
+        }
+    }
     pub(super) fn basic(
         args: *const (),
         arg_kind: u32,
@@ -169,6 +196,12 @@ impl LaunchConfig {
         bufsize: usize,
         close_fds: bool,
     ) -> Self {
+        if Self::has_redirects(streams) {
+            fail(
+                "SystemError",
+                "borrowed descriptors require a launch configuration trailer",
+            );
+        }
         Self {
             args,
             arg_kind,
@@ -232,10 +265,11 @@ pub unsafe extern "C" fn imre_popen_command(
 
 /// # Safety
 /// The settings and the owners of every argument must live through spawn.
+/// A stream of mode 6 or 7 requires the RedirectConfig trailer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_popen_config(config: *const LaunchConfig) -> *const Object {
     // SAFETY: the compiler supplies the exact settings layout and rooted owners.
-    let result = unsafe { spawn(&*config) }.map(|child| {
+    let result = unsafe { spawn(&*config, LaunchConfig::redirect_words(config)) }.map(|child| {
         Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Popen(Box::new(
             child,
         ))))))
@@ -247,7 +281,7 @@ pub unsafe extern "C" fn imre_popen_config(config: *const LaunchConfig) -> *cons
 ///
 /// # Safety
 /// The caller roots the argv, optional directory/environment and buffer size.
-unsafe fn spawn(config: &LaunchConfig) -> Result<Popen> {
+unsafe fn spawn(config: &LaunchConfig, words: [usize; 3]) -> Result<Popen> {
     // SAFETY: settings describe the rooted command, path and integer representations.
     let args = unsafe { WordKind::new(config.arg_kind).acquire(config.args as usize) };
     // SAFETY: the buffer size is a rooted canonical integer.
@@ -267,25 +301,48 @@ unsafe fn spawn(config: &LaunchConfig) -> Result<Popen> {
             "STDOUT can only be used for stderr",
         ));
     }
+    if (streams >> 12) & 15 == 5 {
+        return Err(errno_error(io::Error::from_raw_os_error(libc::EBADF)));
+    }
+    let mut descriptors = [-1; 3];
+    for (i, shift) in [12, 0, 4].into_iter().enumerate() {
+        descriptors[i] = match (streams >> shift) & 15 {
+            // SAFETY: mode 6 denotes a rooted integer in Python word representation.
+            6 => unsafe { Int::borrow(words[i]) }
+                .as_small()
+                .and_then(|n| i32::try_from(n).ok())
+                .ok_or_else(|| {
+                    Error::new(
+                        Kind::OverflowError,
+                        "Python int too large to convert to C int",
+                    )
+                })?,
+            // SAFETY: mode 7 denotes a rooted native file; only its fd escapes the borrow.
+            7 => unsafe {
+                object(words[i] as *const Object)
+                    .0
+                    .with(|s| s.file().fileno())
+            }?,
+            _ => -1,
+        };
+    }
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
-    unsafe { prepare_command(&args, config) }
-        .and_then(|(launch, cwd)| launch.spawn(cwd.as_ref(), streams).map_err(os_error))
-        .map(|mut child| {
-            let text = streams & (1 << 16) != 0;
-            let pipe = |fd: OwnedFd, read| FileState::pipe(fd.into(), read, text, bufsize);
-            let pipes = [
-                child.stdin.take().map(|fd| pipe(fd.into(), false)),
-                child.stdout.take().map(|fd| pipe(fd.into(), true)),
-                child.stderr.take().map(|fd| pipe(fd.into(), true)),
-            ];
-            Popen {
-                pipes,
-                args,
-                child: Some(child),
-                status: None,
-                communication: Default::default(),
-            }
-        })
+    unsafe { launch_error::spawn(&args, config, streams, descriptors) }.map(|mut child| {
+        let text = streams & (1 << 16) != 0;
+        let pipe = |fd: OwnedFd, read| FileState::pipe(fd.into(), read, text, bufsize);
+        let pipes = [
+            child.stdin.take().map(|fd| pipe(fd.into(), false)),
+            child.stdout.take().map(|fd| pipe(fd.into(), true)),
+            child.stderr.take().map(|fd| pipe(fd.into(), true)),
+        ];
+        Popen {
+            pipes,
+            args,
+            child: Some(child),
+            status: None,
+            communication: Default::default(),
+        }
+    })
 }
 
 /// Wait without draining pipes, as call() does. A failed or expired wait
@@ -343,7 +400,8 @@ pub unsafe extern "C" fn imre_call_command(
 }
 
 /// # Safety
-/// The rooted settings and deadline word must match the compiler's layouts.
+/// The rooted settings (including any RedirectConfig trailer) and deadline word
+/// must match the compiler's layouts.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_call_config(
     config: *const LaunchConfig,
@@ -352,43 +410,44 @@ pub unsafe extern "C" fn imre_call_config(
     check: bool,
 ) -> usize {
     // SAFETY: the settings and the values to which they point are rooted.
-    let result = unsafe { spawn(&*config) }.and_then(|mut p| {
-        // SAFETY: the deadline kind was selected for this rooted word by the compiler.
-        let timeout = unsafe { Deadline::from_word(kind, word) };
-        let waited = p.wait(timeout.as_ref());
-        let killed = if matches!(waited, Ok(Some(_))) {
-            Ok(())
-        } else {
-            p.signal(|| Ok(libc::SIGKILL))
-        };
-        p.close_wait()?;
-        killed?;
-        match waited? {
-            Some(code) if check && code != 0 => {
-                let absent = || OwnedWord {
-                    word: 0,
-                    kind: WordKind::new(0),
-                };
-                raise_process(ProcessError {
-                    cmd: p.args.clone(),
-                    returncode: code,
-                    stdout: absent(),
-                    stderr: absent(),
-                });
-                Ok(0)
+    let result =
+        unsafe { spawn(&*config, LaunchConfig::redirect_words(config)) }.and_then(|mut p| {
+            // SAFETY: the deadline kind was selected for this rooted word by the compiler.
+            let timeout = unsafe { Deadline::from_word(kind, word) };
+            let waited = p.wait(timeout.as_ref());
+            let killed = if matches!(waited, Ok(Some(_))) {
+                Ok(())
+            } else {
+                p.signal(|| Ok(libc::SIGKILL))
+            };
+            p.close_wait()?;
+            killed?;
+            match waited? {
+                Some(code) if check && code != 0 => {
+                    let absent = || OwnedWord {
+                        word: 0,
+                        kind: WordKind::new(0),
+                    };
+                    raise_process(ProcessError {
+                        cmd: p.args.clone(),
+                        returncode: code,
+                        stdout: absent(),
+                        stderr: absent(),
+                    });
+                    Ok(0)
+                }
+                Some(code) => Ok(exit_word(code)),
+                None => {
+                    raise_timeout(TimeoutError {
+                        cmd: p.args.clone(),
+                        timeout: timeout.expect("timed wait"),
+                        stdout: None,
+                        stderr: None,
+                    });
+                    Ok(0)
+                }
             }
-            Some(code) => Ok(exit_word(code)),
-            None => {
-                raise_timeout(TimeoutError {
-                    cmd: p.args.clone(),
-                    timeout: timeout.expect("timed wait"),
-                    stdout: None,
-                    stderr: None,
-                });
-                Ok(0)
-            }
-        }
-    });
+        });
     finish(result, 0)
 }
 

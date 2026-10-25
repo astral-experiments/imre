@@ -287,6 +287,17 @@ main()
 # Every rejected program must reach the checker. Cycle cases additionally require
 # the ownership-graph diagnostic, rather than an unsupported-annotation rejection.
 REJECTED = {
+    "deepcopy_explicit_memo": "from copy import deepcopy\nx = [1]\nmemo: dict[int, list[int]] = {}\ny = deepcopy(x, memo)\n",
+    "deepcopy_live_resource": "from copy import deepcopy\nwith open('input.txt') as f:\n    x = deepcopy([f])\n",
+    "deepcopy_unproved_cycle": "from copy import deepcopy\nx = []\nx.append(x)\ny = deepcopy(x)\n",
+    "namedtuple_duplicate_field": 'from collections import namedtuple\nPair = namedtuple("Pair", "x x")\n',
+    "namedtuple_private_field": 'from collections import namedtuple\nPair = namedtuple("Pair", "_x")\n',
+    "namedtuple_unchecked_options": 'from collections import namedtuple\nPair = namedtuple("Pair", "x", rename=True)\n',
+    "namedtuple_missing_argument": 'from collections import namedtuple\nPair = namedtuple("Pair", "x y")\nprint(Pair(1))\n',
+    "namedtuple_repeated_argument": 'from collections import namedtuple\nPair = namedtuple("Pair", "x")\nprint(Pair(1, x=2))\n',
+    "namedtuple_readonly_field": 'from collections import namedtuple\nPair = namedtuple("Pair", "x")\np = Pair(1)\np.x = 2\n',
+    "namedtuple_wrong_annotated_class": 'from collections import namedtuple\nA = namedtuple("A", "x")\nB = namedtuple("B", "x")\ndef f() -> A:\n    return B(1)\nprint(f().x)\n',
+
     "counter_wrong_key": "from collections import Counter\nc = Counter[int]()\nc.update(['str'])",
     "counter_wrong_count": "from collections import Counter\nc = Counter({'key': 'not an int'})",
     "counter_wrong_generic": "from collections import Counter\nc = Counter[bytes]()",

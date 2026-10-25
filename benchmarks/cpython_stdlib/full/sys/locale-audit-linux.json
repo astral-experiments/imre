@@ -1,0 +1,204 @@
+[
+  {
+    "id": "test.test_sys.SysModuleTest.test_ioencoding_nonascii",
+    "occurrence": 1,
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "opt_level": 0,
+    "method_sha256": "a02bda4d6f6371df3f52cf66d1f6dd9f3a903f5755a1b0a4aa0659c358710697",
+    "host": {
+      "LC_CTYPE": "C.UTF-8",
+      "utf8_mode": 0,
+      "filesystem_encoding": "utf-8",
+      "preferred_encoding": "UTF-8",
+      "environment": {
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "LC_CTYPE": "C.UTF-8",
+        "PYTHONUTF8": null,
+        "PYTHONIOENCODING": null
+      }
+    },
+    "observations": {
+      "cpython": {
+        "status": "skip",
+        "reason": "requires FS encoding to match locale",
+        "child": null
+      },
+      "imre": {
+        "status": "skip",
+        "reason": "requires FS encoding to match locale",
+        "child": null
+      }
+    }
+  },
+  {
+    "id": "test.test_sys.SysModuleTest.test_ioencoding_nonascii",
+    "occurrence": 1,
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "opt_level": 3,
+    "method_sha256": "a02bda4d6f6371df3f52cf66d1f6dd9f3a903f5755a1b0a4aa0659c358710697",
+    "host": {
+      "LC_CTYPE": "C.UTF-8",
+      "utf8_mode": 0,
+      "filesystem_encoding": "utf-8",
+      "preferred_encoding": "UTF-8",
+      "environment": {
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "LC_CTYPE": "C.UTF-8",
+        "PYTHONUTF8": null,
+        "PYTHONIOENCODING": null
+      }
+    },
+    "observations": {
+      "cpython": {
+        "status": "skip",
+        "reason": "requires FS encoding to match locale",
+        "child": null
+      },
+      "imre": {
+        "status": "skip",
+        "reason": "requires FS encoding to match locale",
+        "child": null
+      }
+    }
+  },
+  {
+    "id": "test.test_sys.SysModuleTest.test_ioencoding_nonascii",
+    "occurrence": 1,
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "opt_level": 0,
+    "method_sha256": "a02bda4d6f6371df3f52cf66d1f6dd9f3a903f5755a1b0a4aa0659c358710697",
+    "host": {
+      "LC_CTYPE": "C.UTF-8",
+      "utf8_mode": 1,
+      "filesystem_encoding": "utf-8",
+      "preferred_encoding": "utf-8",
+      "environment": {
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "LC_CTYPE": "C.UTF-8",
+        "PYTHONUTF8": null,
+        "PYTHONIOENCODING": null
+      }
+    },
+    "observations": {
+      "cpython": {
+        "status": "pass",
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "cpython",
+          "fixture": "cpython"
+        },
+        "evidence": {
+          "operation": "child prints the original non-ASCII value through stdout",
+          "fixture": "original CPython locale/subprocess decorators, child environment and pipes",
+          "assertions": "original CPython comparison with os.fsencode",
+          "method_sha256": "a02bda4d6f6371df3f52cf66d1f6dd9f3a903f5755a1b0a4aa0659c358710697",
+          "child": {
+            "source": "print('\\xe6')",
+            "sha256": "1a63a0572c34482cedb75d0835392866200128b18a4bd5365f26954c3cc12c94",
+            "PYTHONIOENCODING": "",
+            "stdout_hex": "c3a60a",
+            "returncode": 0
+          }
+        }
+      },
+      "imre": {
+        "status": "pass",
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "cpython"
+        },
+        "evidence": {
+          "operation": "child prints the original non-ASCII value through stdout",
+          "fixture": "original CPython locale/subprocess decorators, child environment and pipes",
+          "assertions": "original CPython comparison with os.fsencode",
+          "method_sha256": "a02bda4d6f6371df3f52cf66d1f6dd9f3a903f5755a1b0a4aa0659c358710697",
+          "child": {
+            "source": "print('\\xe6')",
+            "sha256": "1a63a0572c34482cedb75d0835392866200128b18a4bd5365f26954c3cc12c94",
+            "PYTHONIOENCODING": "",
+            "stdout_hex": "c3a60a",
+            "returncode": 0
+          },
+          "native_calls": 1,
+          "child_sha256": "1a63a0572c34482cedb75d0835392866200128b18a4bd5365f26954c3cc12c94",
+          "opt_level": 0
+        }
+      }
+    }
+  },
+  {
+    "id": "test.test_sys.SysModuleTest.test_ioencoding_nonascii",
+    "occurrence": 1,
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "opt_level": 3,
+    "method_sha256": "a02bda4d6f6371df3f52cf66d1f6dd9f3a903f5755a1b0a4aa0659c358710697",
+    "host": {
+      "LC_CTYPE": "C.UTF-8",
+      "utf8_mode": 1,
+      "filesystem_encoding": "utf-8",
+      "preferred_encoding": "utf-8",
+      "environment": {
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "LC_CTYPE": "C.UTF-8",
+        "PYTHONUTF8": null,
+        "PYTHONIOENCODING": null
+      }
+    },
+    "observations": {
+      "cpython": {
+        "status": "pass",
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "cpython",
+          "fixture": "cpython"
+        },
+        "evidence": {
+          "operation": "child prints the original non-ASCII value through stdout",
+          "fixture": "original CPython locale/subprocess decorators, child environment and pipes",
+          "assertions": "original CPython comparison with os.fsencode",
+          "method_sha256": "a02bda4d6f6371df3f52cf66d1f6dd9f3a903f5755a1b0a4aa0659c358710697",
+          "child": {
+            "source": "print('\\xe6')",
+            "sha256": "1a63a0572c34482cedb75d0835392866200128b18a4bd5365f26954c3cc12c94",
+            "PYTHONIOENCODING": "",
+            "stdout_hex": "c3a60a",
+            "returncode": 0
+          }
+        }
+      },
+      "imre": {
+        "status": "pass",
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "cpython"
+        },
+        "evidence": {
+          "operation": "child prints the original non-ASCII value through stdout",
+          "fixture": "original CPython locale/subprocess decorators, child environment and pipes",
+          "assertions": "original CPython comparison with os.fsencode",
+          "method_sha256": "a02bda4d6f6371df3f52cf66d1f6dd9f3a903f5755a1b0a4aa0659c358710697",
+          "child": {
+            "source": "print('\\xe6')",
+            "sha256": "1a63a0572c34482cedb75d0835392866200128b18a4bd5365f26954c3cc12c94",
+            "PYTHONIOENCODING": "",
+            "stdout_hex": "c3a60a",
+            "returncode": 0
+          },
+          "native_calls": 1,
+          "child_sha256": "1a63a0572c34482cedb75d0835392866200128b18a4bd5365f26954c3cc12c94",
+          "opt_level": 3
+        }
+      }
+    }
+  }
+]

@@ -1,23 +1,56 @@
 //! POSIX descriptors are integers in the program's descriptor table. A call
 //! can observe a closed number or a number subsequently reused by the kernel.
 
-use super::exceptions::{Error, Kind, Result, finish};
-use super::files::errno_error;
+use super::exceptions::{Error, Filename, Kind, Result, finish};
+use super::files::{errno_error, errno_with_filenames};
 use super::{Bytes, Int, Str};
+use num_traits::ToPrimitive;
 use std::ffi::CString;
 use std::io;
+use std::rc::Rc;
 
-macro_rules! open_flags {
+macro_rules! descriptor_constants {
     ($($name:ident = $flag:ident),* $(,)?) => {$(
         #[unsafe(no_mangle)]
         pub static $name: usize = ((libc::$flag as usize) << 1) | 1;
     )*};
 }
-open_flags! {
+descriptor_constants! {
     imre_os_o_rdonly = O_RDONLY, imre_os_o_wronly = O_WRONLY, imre_os_o_rdwr = O_RDWR,
     imre_os_o_append = O_APPEND, imre_os_o_creat = O_CREAT, imre_os_o_excl = O_EXCL,
     imre_os_o_trunc = O_TRUNC, imre_os_o_cloexec = O_CLOEXEC, imre_os_o_directory = O_DIRECTORY,
     imre_os_o_nofollow = O_NOFOLLOW, imre_os_o_nonblock = O_NONBLOCK,
+    imre_os_seek_set = SEEK_SET, imre_os_seek_cur = SEEK_CUR, imre_os_seek_end = SEEK_END,
+    imre_os_seek_data = SEEK_DATA, imre_os_seek_hole = SEEK_HOLE,
+}
+
+/// Return a kernel path and the filesystem-protocol value to keep on OSError.
+///
+/// # Safety
+/// `value` is the rooted str, bytes or Path selected by `tag`.
+unsafe fn syscall_path(value: *const (), tag: u32, function: &str) -> Result<(CString, Filename)> {
+    let terminated = |bytes: &[u8]| {
+        CString::new(bytes).map_err(|_| {
+            Error::new(
+                Kind::ValueError,
+                format!("{function}: embedded null character in path"),
+            )
+        })
+    };
+    if tag == 1 {
+        // SAFETY: the caller roots this bytes handle through conversion.
+        let bytes: Rc<Bytes> = unsafe { super::acquire_rc(value as usize) };
+        return Ok((terminated(&bytes)?, Filename::Bytes(bytes)));
+    }
+    // SAFETY: exact str is borrowed; Path.__fspath__ supplies an owned str.
+    let text = unsafe {
+        match tag {
+            0 => super::acquire_rc::<Str>(value as usize),
+            2 => Rc::from_raw(super::paths::imre_path_text(value.cast())),
+            _ => unreachable!(),
+        }
+    };
+    Ok((terminated(text.as_bytes())?, Filename::Str(text)))
 }
 
 /// Open relative to an optional directory fd. Set close-on-exec atomically.
@@ -32,26 +65,14 @@ pub unsafe extern "C" fn imre_os_open(
     mode: usize,
     dir_fd: usize,
 ) -> usize {
-    // SAFETY: the caller's representation tag describes this rooted path.
-    let path: &[u8] = unsafe {
-        if bytes == 0 {
-            (&*path.cast::<Str>()).as_bytes()
-        } else {
-            &*path.cast::<Bytes>()
-        }
-    };
     finish(
         (|| {
-            let name = CString::new(path).map_err(|_| {
-                Error::new(Kind::ValueError, "open: embedded null character in path")
-            })?;
+            // SAFETY: the caller's representation tag describes this rooted path.
+            let (name, path) = unsafe { syscall_path(path, bytes, "open") }?;
             let flags = c_int(flags)? | libc::O_CLOEXEC;
             let mode = c_int(mode)?;
-            let dir_fd = if dir_fd == 0 {
-                libc::AT_FDCWD
-            } else {
-                c_int(dir_fd)?
-            };
+            // SAFETY: dir_fd is a rooted optional integer according to the ABI.
+            let dir_fd = unsafe { directory_fd(dir_fd) }?;
             loop {
                 // SAFETY: the path is terminated and the variadic mode is promoted to int.
                 let fd = unsafe { libc::openat(dir_fd, name.as_ptr(), flags, mode) };
@@ -60,17 +81,7 @@ pub unsafe extern "C" fn imre_os_open(
                 }
                 let error = io::Error::last_os_error();
                 if error.kind() != io::ErrorKind::Interrupted {
-                    return Err(super::files::errno_with_paths(error, |message| {
-                        message.push_str(": ");
-                        if bytes == 0 {
-                            super::exceptions::push_string_repr(
-                                std::str::from_utf8(path).expect("Str is UTF-8"),
-                                message,
-                            );
-                        } else {
-                            super::bytes::write_repr(message, path);
-                        }
-                    }));
+                    return Err(errno_with_filenames(error, Some(path), None));
                 }
             }
         })(),
@@ -78,8 +89,55 @@ pub unsafe extern "C" fn imre_os_open(
     )
 }
 
+/// Remove the entry itself, using the raw spelling even for trailing slashes.
+/// Validate the path before converting the optional directory descriptor.
+///
+/// # Safety
+/// The caller roots the path for its static tag and the optional integer word.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_os_unlink(value: *const (), tag: u32, fd: usize, remove: u32) {
+    let result = (|| {
+        let function = if remove == 0 { "unlink" } else { "remove" };
+        // SAFETY: the path's owner stays live through the syscall and error rendering.
+        let (path, name) = unsafe { syscall_path(value, tag, function) }?;
+        // SAFETY: fd is a rooted optional integer.
+        let dir_fd = unsafe { directory_fd(fd) }?;
+        // SAFETY: the zero-terminated path is owned until unlinkat returns.
+        if unsafe { libc::unlinkat(dir_fd, path.as_ptr(), 0) } == -1 {
+            return Err(errno_with_filenames(
+                io::Error::last_os_error(),
+                Some(name),
+                None,
+            ));
+        }
+        Ok(())
+    })();
+    finish(result, ());
+}
+
+/// Convert a rooted optional directory descriptor after validating the path.
+unsafe fn directory_fd(fd: usize) -> Result<libc::c_int> {
+    Ok(if fd == 0 {
+        libc::AT_FDCWD
+    } else {
+        // SAFETY: a nonzero optional integer has the native tagged-int ABI.
+        let integer = unsafe { Int::borrow(fd) };
+        let n = integer.big();
+        n.to_i32().ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                if n.sign() == num_bigint::Sign::Minus {
+                    "fd is less than minimum"
+                } else {
+                    "fd is greater than maximum"
+                },
+            )
+        })?
+    })
+}
+
 // All C ints fit in the immediate representation. Heap integers cannot fit.
-fn c_int(word: usize) -> Result<libc::c_int> {
+pub(super) fn c_int(word: usize) -> Result<libc::c_int> {
     (word & 1 != 0)
         .then_some((word as i64) >> 1)
         .and_then(|n| libc::c_int::try_from(n).ok())
@@ -97,6 +155,61 @@ fn checked(ret: libc::c_int) -> Result<libc::c_int> {
     } else {
         Ok(ret)
     }
+}
+
+/// Like strerror(3), describe known and unknown target errno values.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_strerror(code: usize) -> *const Str {
+    finish(
+        c_int(code).and_then(|code| {
+            // SAFETY: copy libc's terminated string before any further calls.
+            let message = unsafe { libc::strerror(code) };
+            if message.is_null() {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    "strerror() argument out of range",
+                ));
+            }
+            // SAFETY: the non-null pointer returned above remains live during this copy.
+            let text = unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy();
+            Ok(Rc::into_raw(Rc::new(Str::from(text.as_ref()))))
+        }),
+        std::ptr::null(),
+    )
+}
+
+/// Move the shared open-file offset, retaining the kernel's errors for pipes,
+/// closed descriptors, and unsupported sparse-file seeks.
+///
+/// # Safety
+/// All arguments are rooted tagged Python integers for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_os_lseek(fd: usize, position: usize, whence: usize) -> usize {
+    finish(
+        (|| {
+            let fd = c_int(fd)?;
+            // SAFETY: the compiler retains the exact integer for the call.
+            let position = unsafe { Int::borrow(position) };
+            let position = position
+                .as_small()
+                .or_else(|| position.big().to_i64())
+                .ok_or_else(|| {
+                    Error::new(
+                        Kind::OverflowError,
+                        "Python int too large to convert to C long",
+                    )
+                })?;
+            let whence = c_int(whence)?;
+            // SAFETY: lseek takes integer values and retains no pointers.
+            let offset = unsafe { libc::lseek(fd, position, whence) };
+            if offset < 0 {
+                Err(errno_error(io::Error::last_os_error()))
+            } else {
+                Ok(Int::from_usize(offset as usize).into_raw())
+            }
+        })(),
+        0,
+    )
 }
 
 /// Close exactly once: retrying an interrupted close can close a reused fd.

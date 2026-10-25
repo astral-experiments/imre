@@ -14,6 +14,7 @@ pub(super) struct Reachable {
     pub(super) methods: HashSet<(ModuleId, TextSize)>,
     pub(super) skipped: Vec<Vec<TextRange>>,
     pub(super) unused_literals: HashSet<DefinitionId>,
+    unittest_classes: HashSet<DefinitionId>,
     value_reads: HashSet<DefinitionId>,
     attributes: HashSet<String>,
     properties: HashSet<String>,
@@ -40,16 +41,40 @@ impl<'a> Visitor<'a> for References<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        if let ast::Expr::Call(call) = expr
+            && self.graph.resolve(self.module, &call.func)
+                == Some(Binding::Intrinsic(Intrinsic::ShallowCopy))
+        {
+            self.found.attributes.insert("__copy__".to_owned());
+            self.found.instance_attributes.insert("__copy__".to_owned());
+        }
         if !matches!(expr, ast::Expr::Name(n) if n.ctx == ast::ExprContext::Store)
             && let Some(Binding::Value(id)) = self.graph.resolve(self.module, expr)
         {
             self.found.value_reads.insert(id);
         }
-        if let Some(Binding::Definition(id)) = self.graph.resolve_type(self.module, expr) {
-            self.found.definitions.insert(id);
+        if let Some(Binding::Definition(id)) = self.graph.resolve_type(self.module, expr)
+            && self.found.definitions.insert(id)
+            && self.graph.is_unittest_main(id)
+        {
+            self.found.root_unittest(self.graph, id.module);
         }
         if let ast::Expr::Attribute(attr) = expr {
             let name = attr.attr.to_string();
+            if matches!(name.as_str(), "assertEqual" | "assertListEqual") {
+                self.found.attributes.extend(
+                    [
+                        "_baseAssertEqual",
+                        "assertMultiLineEqual",
+                        "assertListEqual",
+                        "_assertTextListEqual",
+                        "_assertBytesListEqual",
+                        "_assertIntListEqual",
+                    ]
+                    .into_iter()
+                    .map(str::to_owned),
+                );
+            }
             if name == "assertRaises"
                 && let Some(module) = self
                     .graph
@@ -76,6 +101,47 @@ impl<'a> Visitor<'a> for References<'_> {
 }
 
 impl Reachable {
+    /// Default unittest discovery observes all TestCase class bindings in the entry module,
+    /// including imported aliases; their test methods have no source call sites.
+    fn root_unittest(&mut self, graph: &SourceGraph, module: ModuleId) {
+        let unit = &graph.modules[module].bindings;
+        let (Some(Binding::Definition(base)), Some(Binding::Definition(runner))) =
+            (unit.get("TestCase"), unit.get("_MainRunner"))
+        else {
+            return;
+        };
+        self.definitions.insert(*runner);
+        self.unittest_classes.insert(*runner);
+        for value in graph.modules[graph.entry].bindings.values() {
+            let Binding::Definition(id) = *value else {
+                continue;
+            };
+            let mut pending = vec![id];
+            let mut chain = HashSet::new();
+            while let Some(def) = pending.pop() {
+                if !chain.insert(def) {
+                    continue;
+                }
+                if let ast::Stmt::ClassDef(c) =
+                    &graph.modules[def.module].parsed.syntax().body[def.statement]
+                    && let Some(args) = &c.arguments
+                {
+                    for arg in &args.args {
+                        if let Some(Binding::Definition(parent)) =
+                            graph.resolve_type(def.module, arg)
+                        {
+                            pending.push(parent);
+                        }
+                    }
+                }
+            }
+            if id != *base && chain.contains(base) {
+                self.definitions.extend(chain.iter().copied());
+                self.unittest_classes.extend(chain);
+            }
+        }
+    }
+
     pub(super) fn inherited_class_method(&self, owner: DefinitionId, name: &str) -> bool {
         self.instance_attributes.contains(name)
             || self.class_attributes.contains(&(owner, name.to_owned()))
@@ -146,7 +212,27 @@ impl Reachable {
                                 && source.name == "unittest"
                                 && class.name.as_str() == "_AssertRaisesContext"
                                 && name == "_missing";
+                            let unittest_method = refs.found.unittest_classes.contains(&id)
+                                && (name.starts_with("test")
+                                    || matches!(
+                                        name,
+                                        "setUp"
+                                            | "tearDown"
+                                            | "setUpClass"
+                                            | "tearDownClass"
+                                            | "runTest"
+                                            | "run"
+                                            | "__call__"
+                                            | "doCleanups"
+                                            | "doClassCleanups"
+                                            | "shortDescription"
+                                            | "defaultTestResult"
+                                    )
+                                    || (source.bundled
+                                        && class.name.as_str() == "_MainRunner"
+                                        && matches!(name, "_start" | "_run" | "_finish")));
                             if (property
+                                || unittest_method
                                 || assertion_exit
                                 || refs.found.attributes.contains(name)
                                 || matches!(
@@ -155,6 +241,7 @@ impl Reachable {
                                         | "__post_init__"
                                         | "__hash__"
                                         | "__bool__"
+                                        | "__fspath__"
                                         | "__iter__"
                                         | "__str__"
                                 )

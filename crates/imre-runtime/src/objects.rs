@@ -11,16 +11,20 @@ mod args;
 mod asyncio;
 mod bytes;
 mod contexts;
+mod copying;
 mod csv;
 mod deferred_diff;
 mod difflib;
 pub(crate) mod exceptions;
 mod files;
+mod fnmatch;
 mod hashlib;
+mod inspect;
 mod itertools;
 mod json;
 mod logging;
 mod mappings;
+mod namespaces;
 mod os;
 mod paths;
 pub(crate) mod posixpath;
@@ -51,9 +55,12 @@ use words::{OwnedWord, Words};
 pub struct Object(StorageCell<Storage>);
 
 enum Storage {
+    Plain,
+    StrDescriptor(u32),
     Sequence(Words),
-    Dictionary(Box<mappings::Mapping>),
-    Set(Box<mappings::Set>),
+    Dictionary(mappings::TableOwner<mappings::Mapping>),
+    FunctionCache(Box<mappings::FunctionCache>),
+    Set(mappings::TableOwner<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
     Repeat(itertools::Repeat),
@@ -61,6 +68,7 @@ enum Storage {
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
+    SimpleNamespace(Rc<Object>),
     Sha256(Box<sha2::Sha256>),
     CsvReader(Box<csv::Reader>),
     Exception(exceptions::Exception),
@@ -1116,10 +1124,48 @@ pub unsafe extern "C" fn imre_str_splitlines_iter(value: *const Str) -> *const O
 /// `value` must be rooted. Returns an owned string sequence or null on error.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_splitlines(value: *const Str) -> *const Object {
+    // SAFETY: the receiver stays rooted through the default collector.
+    unsafe { split_string_lines::<false>(value) }
+}
+
+/// Splits at the same boundaries as the no-argument and fused paths. The
+/// caller truth-tests the flag before entering the collector.
+///
+/// # Safety
+/// The immutable receiver stays rooted throughout the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_splitlines_options(
+    value: *const Str,
+    keep: u32,
+) -> *const Object {
+    // SAFETY: both paths use the same rooted source and return a fresh list.
+    unsafe {
+        if keep == 0 {
+            imre_str_splitlines(value)
+        } else {
+            split_string_lines::<true>(value)
+        }
+    }
+}
+
+/// Reuse the collector and its ownership logic for either boundary policy.
+/// The caller roots `value` until the list owns every returned slice.
+unsafe fn split_string_lines<const KEEP: bool>(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { std::mem::ManuallyDrop::new(Rc::from_raw(value)) };
     finish(
-        split_lines(&value, |range| owned_line(&value, range)),
+        split_lines(&value, |mut range| {
+            // The shared scanner has already found the boundary. Its first
+            // scalar supplies the width; only CRLF has two scalars. This
+            // branch disappears from the legacy no-argument specialization.
+            if KEEP && let Some(ending) = value[range.end..].chars().next() {
+                range.end += ending.len_utf8();
+                if ending == '\r' && value.as_bytes().get(range.end) == Some(&b'\n') {
+                    range.end += 1;
+                }
+            }
+            owned_line(&value, range)
+        }),
         std::ptr::null(),
     )
 }

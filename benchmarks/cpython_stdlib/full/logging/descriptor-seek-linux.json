@@ -1,0 +1,181 @@
+{
+  "imre_revision": "24762f2e88255849ad28680b18dcd4f4f4f8f7dd",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "logging_occurrences": 0,
+  "optimization_levels": {
+    "0": {
+      "test.test_os.TestInvalidFD.test_lseek": {
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
+        },
+        "native_lseek": [
+          {
+            "position": 0,
+            "whence": 0,
+            "errno": 9
+          }
+        ]
+      },
+      "test.test_posix.PosixTester.test_fs_holes": {
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
+        },
+        "native_lseek": [
+          {
+            "position": 0,
+            "whence": 3,
+            "result": 0
+          },
+          {
+            "position": 0,
+            "whence": 4,
+            "result": 5
+          },
+          {
+            "position": 1,
+            "whence": 3,
+            "result": 1
+          },
+          {
+            "position": 1,
+            "whence": 4,
+            "result": 5
+          },
+          {
+            "position": 2,
+            "whence": 3,
+            "result": 2
+          },
+          {
+            "position": 2,
+            "whence": 4,
+            "result": 5
+          },
+          {
+            "position": 3,
+            "whence": 3,
+            "result": 3
+          },
+          {
+            "position": 3,
+            "whence": 4,
+            "result": 5
+          },
+          {
+            "position": 4,
+            "whence": 3,
+            "result": 4
+          },
+          {
+            "position": 4,
+            "whence": 4,
+            "result": 5
+          },
+          {
+            "position": 5,
+            "whence": 3,
+            "errno": 6
+          },
+          {
+            "position": 5,
+            "whence": 4,
+            "errno": 6
+          }
+        ]
+      }
+    },
+    "3": {
+      "test.test_os.TestInvalidFD.test_lseek": {
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
+        },
+        "native_lseek": [
+          {
+            "position": 0,
+            "whence": 0,
+            "errno": 9
+          }
+        ]
+      },
+      "test.test_posix.PosixTester.test_fs_holes": {
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
+        },
+        "native_lseek": [
+          {
+            "position": 0,
+            "whence": 3,
+            "result": 0
+          },
+          {
+            "position": 0,
+            "whence": 4,
+            "result": 5
+          },
+          {
+            "position": 1,
+            "whence": 3,
+            "result": 1
+          },
+          {
+            "position": 1,
+            "whence": 4,
+            "result": 5
+          },
+          {
+            "position": 2,
+            "whence": 3,
+            "result": 2
+          },
+          {
+            "position": 2,
+            "whence": 4,
+            "result": 5
+          },
+          {
+            "position": 3,
+            "whence": 3,
+            "result": 3
+          },
+          {
+            "position": 3,
+            "whence": 4,
+            "result": 5
+          },
+          {
+            "position": 4,
+            "whence": 3,
+            "result": 4
+          },
+          {
+            "position": 4,
+            "whence": 4,
+            "result": 5
+          },
+          {
+            "position": 5,
+            "whence": 3,
+            "errno": 6
+          },
+          {
+            "position": 5,
+            "whence": 4,
+            "errno": 6
+          }
+        ]
+      }
+    }
+  }
+}

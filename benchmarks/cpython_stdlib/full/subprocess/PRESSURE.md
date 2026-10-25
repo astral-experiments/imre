@@ -19,6 +19,12 @@ NoPoll parent used pselect6. This is evidence for two host-driven native
 operations per level. The recorded build combines [the selector implementation](https://github.com/astral-sh/imre/pull/682)
 with main `fce4734`; these counts do not imply fully native fixtures.
 
+The [repeat on the later selector compiler](pressure-replay-linux.json)
+checks all 15 leak-free launches in each variant again and attempts each full
+method at O0 and O3. The raw result includes its compiler diagnostic alongside
+the observed native operation. The two rows are applied to the canonical report
+that already includes all 14 descriptor-redirection occurrences.
+
 Run the pinned interpreter with `pressure_fixture.py --imre ... --runtime ...
 --clang ... --opt-level 0 --result ...`, then repeat at O3 on Linux with
 `strace` and procfs. `pressure_evidence.py PREVIOUS RESULT` updates only

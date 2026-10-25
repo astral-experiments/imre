@@ -65,11 +65,13 @@ impl Checker<'_> {
         }
         let source = self.types.payload(value.ty).unwrap_or(value.ty);
         let target = self.types.payload(ty).unwrap_or(ty);
-        let kind = if self
-            .types
-            .members(source)
-            .is_some_and(|members| members.contains(&target))
-        {
+        let kind = if self.types.members(source).is_some_and(|members| {
+            members.contains(&target)
+                || self
+                    .types
+                    .members(target)
+                    .is_some_and(|subset| subset.iter().all(|member| members.contains(member)))
+        }) {
             ExprKind::Builtin(Builtin::UnionProject, vec![value])
         } else {
             debug_assert_eq!(self.types.payload(value.ty), Some(ty));
@@ -81,6 +83,9 @@ impl Checker<'_> {
     /// Class arguments are static builtin/nominal classes or tuples of them;
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::SimpleNamespace)) {
+            return Ok(vec![InstanceType::SimpleNamespace]);
+        }
         if let ast::Expr::Tuple(tuple) = expression {
             let mut result = Vec::new();
             for value in &tuple.elts {
@@ -106,7 +111,19 @@ impl Checker<'_> {
         ) {
             return Ok(vec![InstanceType::Exact(Type::CompletedProcess(
                 crate::ir::ProcessCapture::TEXT,
+                None,
             ))]);
+        }
+        if let Some(Binding::Definition(definition)) = self.resolve(expression)
+            && self.types.namedtuple(definition).is_some()
+        {
+            return Ok(self
+                .types
+                .tuples()
+                .into_iter()
+                .filter(|(ty, _)| self.types.namedtuple_definition(*ty) == Some(definition))
+                .map(|(ty, _)| InstanceType::Exact(ty))
+                .collect());
         }
         if let Some(Binding::Definition(definition)) = self.resolve(expression)
             && let Some(&class) = self.classes.declarations.ids.get(&definition)

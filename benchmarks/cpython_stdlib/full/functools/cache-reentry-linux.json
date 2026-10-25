@@ -1,0 +1,297 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_functools",
+  "cache_occurrences_per_level": 64,
+  "regression": {
+    "compiler_commit": "08761095d9a555174f2f3a77e29a3503aca31334",
+    "build_sha256": {
+      "imre": "7717e692b50664629d11621980a8c157349c890cdb166623d65bd03f0a22065f",
+      "libimre_runtime.a": "c70a3e140b4dc56edd23afd5f9f4695f1bd5f83deeb6db81470e43c2eb9f7243"
+    },
+    "cause": "The compiler interpreted an ellipsis in a linked C extension declaration as an executable Python body returning None. The extension rejected its real integer result at a reentrant callback."
+  },
+  "corrected": {
+    "compiler_commit": "cf9401d5ef4a3e49656080a9251fa6910f51381a",
+    "build_sha256": {
+      "imre": "02c9bdbf75d710bbc669e68d5207ad7fba8f0f395f8a2d380cbb03a6378947c4",
+      "libimre_runtime.a": "49808aa44defc11d755eb21b2c9d18271ccfddb0d5232fb50568e1cf2f38e948"
+    }
+  },
+  "transport_control": {
+    "opt_level": 0,
+    "runner_commit": "cf9401d5ef4a3e49656080a9251fa6910f51381a",
+    "failing_compiler_commit": "08761095d9a555174f2f3a77e29a3503aca31334",
+    "failing_child": {
+      "id": "test.test_functools.TestCacheC.test_cache",
+      "evidence": {},
+      "failures": [
+        [
+          "test.test_functools.TestCacheC.test_cache",
+          "RuntimeError: native cache fixture exit 1: TypeError: extension result does not match its declared type"
+        ]
+      ],
+      "skips": [],
+      "counts": {
+        "lookups": 4,
+        "callback_calls": 3
+      }
+    },
+    "working_compiler_commit": "c4e986c3ca540bb770bf1ab81b46fdbb433419b1",
+    "working_child": {
+      "id": "test.test_functools.TestCacheC.test_cache",
+      "evidence": {
+        "test.test_functools.TestCacheC.test_cache": [
+          {
+            "status": "host_driven_native_operation",
+            "lookups": 44,
+            "callback_calls": 16,
+            "snapshots": 2,
+            "clears": 1
+          }
+        ]
+      },
+      "failures": [],
+      "skips": [],
+      "counts": {
+        "lookups": 44,
+        "callback_calls": 16,
+        "snapshots": 2,
+        "clears": 1
+      }
+    }
+  },
+  "optimization_levels": {
+    "0": [
+      {
+        "id": "test.test_functools.TestCacheC.test_cache",
+        "before": {
+          "status": "failed",
+          "lookups": 5,
+          "callback_calls": 3,
+          "diagnostic": "BrokenPipeError: [Errno 32] Broken pipe"
+        },
+        "after": {
+          "status": "host_driven_native_operation",
+          "lookups": 44,
+          "callback_calls": 16,
+          "snapshots": 2,
+          "clears": 1
+        }
+      },
+      {
+        "id": "test.test_functools.TestCachePy.test_cache",
+        "before": {
+          "status": "failed",
+          "lookups": 5,
+          "callback_calls": 3,
+          "diagnostic": "BrokenPipeError: [Errno 32] Broken pipe"
+        },
+        "after": {
+          "status": "host_driven_native_operation",
+          "lookups": 44,
+          "callback_calls": 16,
+          "snapshots": 2,
+          "clears": 1
+        }
+      },
+      {
+        "id": "test.test_functools.TestLRUC.test_lru_bug_35780",
+        "before": {
+          "status": "failed",
+          "lookups": 17,
+          "callback_calls": 17,
+          "snapshots": 1,
+          "host_named_fields": 1,
+          "diagnostic": "BrokenPipeError: [Errno 32] Broken pipe"
+        },
+        "after": {
+          "status": "mixed",
+          "lookups": 17,
+          "callback_calls": 17,
+          "snapshots": 2,
+          "host_named_fields": 2
+        }
+      },
+      {
+        "id": "test.test_functools.TestLRUC.test_lru_with_maxsize_none",
+        "before": {
+          "status": "failed",
+          "lookups": 4,
+          "callback_calls": 3,
+          "diagnostic": "BrokenPipeError: [Errno 32] Broken pipe"
+        },
+        "after": {
+          "status": "host_driven_native_operation",
+          "lookups": 44,
+          "callback_calls": 16,
+          "snapshots": 2,
+          "clears": 1
+        }
+      },
+      {
+        "id": "test.test_functools.TestLRUPy.test_lru_bug_35780",
+        "before": {
+          "status": "failed",
+          "lookups": 17,
+          "callback_calls": 17,
+          "snapshots": 1,
+          "host_named_fields": 1,
+          "diagnostic": "BrokenPipeError: [Errno 32] Broken pipe"
+        },
+        "after": {
+          "status": "mixed",
+          "lookups": 17,
+          "callback_calls": 17,
+          "snapshots": 2,
+          "host_named_fields": 2
+        }
+      },
+      {
+        "id": "test.test_functools.TestLRUPy.test_lru_recursion",
+        "before": {
+          "status": "failed",
+          "lookups": 101,
+          "callback_calls": 100,
+          "diagnostic": "BrokenPipeError: [Errno 32] Broken pipe"
+        },
+        "after": {
+          "status": "host_driven_native_operation",
+          "lookups": 199,
+          "callback_calls": 101
+        }
+      },
+      {
+        "id": "test.test_functools.TestLRUPy.test_lru_with_maxsize_none",
+        "before": {
+          "status": "failed",
+          "lookups": 4,
+          "callback_calls": 3,
+          "diagnostic": "BrokenPipeError: [Errno 32] Broken pipe"
+        },
+        "after": {
+          "status": "host_driven_native_operation",
+          "lookups": 44,
+          "callback_calls": 16,
+          "snapshots": 2,
+          "clears": 1
+        }
+      }
+    ],
+    "3": [
+      {
+        "id": "test.test_functools.TestCacheC.test_cache",
+        "before": {
+          "status": "failed",
+          "lookups": 5,
+          "callback_calls": 3,
+          "diagnostic": "BrokenPipeError: [Errno 32] Broken pipe"
+        },
+        "after": {
+          "status": "host_driven_native_operation",
+          "lookups": 44,
+          "callback_calls": 16,
+          "snapshots": 2,
+          "clears": 1
+        }
+      },
+      {
+        "id": "test.test_functools.TestCachePy.test_cache",
+        "before": {
+          "status": "failed",
+          "lookups": 5,
+          "callback_calls": 3,
+          "diagnostic": "BrokenPipeError: [Errno 32] Broken pipe"
+        },
+        "after": {
+          "status": "host_driven_native_operation",
+          "lookups": 44,
+          "callback_calls": 16,
+          "snapshots": 2,
+          "clears": 1
+        }
+      },
+      {
+        "id": "test.test_functools.TestLRUC.test_lru_bug_35780",
+        "before": {
+          "status": "failed",
+          "lookups": 17,
+          "callback_calls": 17,
+          "snapshots": 1,
+          "host_named_fields": 1,
+          "diagnostic": "RuntimeError: native cache fixture exit 1: '' ''"
+        },
+        "after": {
+          "status": "mixed",
+          "lookups": 17,
+          "callback_calls": 17,
+          "snapshots": 2,
+          "host_named_fields": 2
+        }
+      },
+      {
+        "id": "test.test_functools.TestLRUC.test_lru_with_maxsize_none",
+        "before": {
+          "status": "failed",
+          "lookups": 5,
+          "callback_calls": 3,
+          "diagnostic": "BrokenPipeError: [Errno 32] Broken pipe"
+        },
+        "after": {
+          "status": "host_driven_native_operation",
+          "lookups": 44,
+          "callback_calls": 16,
+          "snapshots": 2,
+          "clears": 1
+        }
+      },
+      {
+        "id": "test.test_functools.TestLRUPy.test_lru_bug_35780",
+        "before": {
+          "status": "failed",
+          "lookups": 17,
+          "callback_calls": 17,
+          "snapshots": 1,
+          "host_named_fields": 1,
+          "diagnostic": "BrokenPipeError: [Errno 32] Broken pipe"
+        },
+        "after": {
+          "status": "mixed",
+          "lookups": 17,
+          "callback_calls": 17,
+          "snapshots": 2,
+          "host_named_fields": 2
+        }
+      },
+      {
+        "id": "test.test_functools.TestLRUPy.test_lru_recursion",
+        "before": {
+          "status": "failed",
+          "lookups": 101,
+          "callback_calls": 100,
+          "diagnostic": "BrokenPipeError: [Errno 32] Broken pipe"
+        },
+        "after": {
+          "status": "host_driven_native_operation",
+          "lookups": 199,
+          "callback_calls": 101
+        }
+      },
+      {
+        "id": "test.test_functools.TestLRUPy.test_lru_with_maxsize_none",
+        "before": {
+          "status": "failed",
+          "lookups": 5,
+          "callback_calls": 3,
+          "diagnostic": "BrokenPipeError: [Errno 32] Broken pipe"
+        },
+        "after": {
+          "status": "host_driven_native_operation",
+          "lookups": 44,
+          "callback_calls": 16,
+          "snapshots": 2,
+          "clears": 1
+        }
+      }
+    ]
+  }
+}

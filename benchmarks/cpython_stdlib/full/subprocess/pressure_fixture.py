@@ -18,8 +18,9 @@ from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1])]
+from attempt_bodies import SOURCE, fixture
 from suite_inventory import load_suite, verify_files, verify_interpreter_tests
-from suite_native import Toolchain, run_in_fixtures
+from suite_native import Toolchain, native_method, run_in_fixtures
 
 IDS = {
     f"test.test_subprocess.{cls}.test_no_leaking"
@@ -298,13 +299,30 @@ def main():
         def execute(case, original):
             directory = Path(tmp) / type(case).__name__
             directory.mkdir()
+            body = directory / "body"
+            body.mkdir()
+            try:
+                owner, preamble = fixture(case, body)
+                run = native_method(tc, body, SOURCE, owner, case.id(), preamble)
+            except (RuntimeError, ValueError) as exc:
+                attempt = dict(
+                    status="blocked",
+                    reason=str(exc)
+                    .replace(str(body), "<case>")
+                    .strip()
+                    .splitlines()[-1],
+                )
+            else:
+                attempt = dict(status="completed", **run(case, original))
             binding = (
                 "subprocess._PopenSelector = selectors.SelectSelector"
                 if type(case).__name__.endswith("NoPoll")
                 else ""
             )
             binary = tc.build(ACTOR.replace("SELECTOR", binding).encode(), directory)
-            return exercise(binary, directory, case, original)
+            result = exercise(binary, directory, case, original)
+            result["body_attempt"] = attempt
+            return result
 
         rows, failed, skipped = run_in_fixtures(
             load_suite(manifest["module"]), dict.fromkeys(IDS, execute)
