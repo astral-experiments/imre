@@ -1,6 +1,11 @@
 name: Argparse 1145 prospective runtime
 on:
   workflow_dispatch:
+    inputs:
+      repair:
+        description: Merged main commit of the iterator effects repair
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
@@ -8,6 +13,7 @@ jobs:
     runs-on: github-ubuntu-24.04-x86_64-4
     timeout-minutes: 90
     env:
+      REPAIR: ${{ inputs.repair }}
       CARGO_BUILD_JOBS: 2
       CARGO_PROFILE_DEV_DEBUG: 0
       CARGO_PROFILE_DEV_INCREMENTAL: false
@@ -255,9 +261,86 @@ jobs:
            summary['modes'][str(level)]={'outcomes':dict(result),'calls':dict(total),'rows':rows}
            (out/'original-methods.json').write_text(json.dumps(summary,indent=2)+'\n')
           PY
+          cat > "$RUNNER_TEMP/wrapped-usage.py" <<'PY'
+          from pathlib import Path
+          import hashlib,json,os,re,shutil,subprocess,sys,tempfile,unittest
+          root=Path.cwd();prefix=root/'benchmarks/cpython_stdlib';target=root/'target/debug'
+          rev=sys.argv[1]
+          def git(*args):return subprocess.check_output(['git',*args],text=True).strip()
+          def digest(p):
+           with p.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
+          assert git('rev-parse','HEAD')==rev
+          receipt={'tree':git('rev-parse','HEAD^{tree}'),'artifact_sha256':{n:digest(target/n) for n in ('imre','libimre_runtime.a')}}
+          sys.path[:0]=[str(prefix/'full/argparse'),str(prefix)]
+          from suite_inventory import cases,load_suite,verify_files
+          from suite_native import native_method,method_bytes,Toolchain,run_in_fixtures
+          from native_methods import Fixtures
+          from test import test_argparse as upstream
+          testid='test.test_argparse.TestHelpUsageNoWhitespaceCrash.test_mutex_groups_with_mixed_optionals_positionals_wrap'
+          module=prefix/'full/argparse';m=json.loads((module/'UPSTREAM.json').read_bytes());source=Path(upstream.__file__).resolve();verify_files(source.parents[2],m['files']|m['reference_files']);assert source.read_bytes()==(module/'upstream/Lib/test/test_argparse.py').read_bytes()
+          ids=[c.id() for c in cases(load_suite(m['module']))];assert len(ids)==1893 and ids.count(testid)==1
+          def first():return next(c for c in cases(load_suite(m['module'])) if c.id()==testid)
+          case=first();fixtures=Fixtures(source);owner=fixtures.owner(type(case),case._testMethodName);node=fixtures.methods[owner,case._testMethodName];body=method_bytes(source,owner,case._testMethodName);assert b'self.assertEqual(parser.format_usage(), usage)' in body and node.decorator_list==[]
+          proof=dict(compiler=rev,tree=receipt['tree'],artifacts=receipt['artifact_sha256'],source=m['files']['Lib/test/test_argparse.py'],id=testid,method_sha256=hashlib.sha256(body).hexdigest(),modes={})
+          def observe(cmd):
+           p=subprocess.run(cmd,capture_output=True,timeout=60);return dict(exit=p.returncode,stdout=p.stdout.decode(),stderr=p.stderr.decode())
+          with tempfile.TemporaryDirectory(prefix='imre-argparse-wrapped-usage-',dir=os.environ['RUNNER_TEMP']) as tmp:
+           work=Path(tmp);os.environ['TMPDIR']=tmp;os.environ['IMRE_CACHE_DIR']=str(work/'cache');os.environ['PYTHONDONTWRITEBYTECODE']='1'
+           for n,h in proof['artifacts'].items():
+            shutil.copy2(target/n,work/n)
+            with (work/n).open('rb') as fi:assert hashlib.file_digest(fi,'sha256').hexdigest()==h
+           for lv in (0,3):
+            dest=work/str(lv);dest.mkdir();tc=Toolchain(work/'imre',work/'libimre_runtime.a',Path('/usr/bin/clang-18'),lv)
+            run=native_method(tc,dest,source,owner,testid,fixtures.fixture(type(case),node),operation=('imre','argparse.ArgumentParser.format_usage'),assertions='imre')
+            staged=dest/'case.py';assert staged.read_bytes().count(body)==1
+            ir=dest/'captured.ll';cmd=[tc.imre,'build',staged,'-o',dest/'inspected','--quiet','--no-cache','--opt-level',str(lv),'--clang',tc.clang,'--runtime',tc.runtime,'--emit-llvm',ir];subprocess.run(cmd,check=True)
+            lines=ir.read_text().splitlines()
+            calls=[line.strip() for line in lines if re.search(r'call ptr @imre_argparse_text[^ (]*\(',line)]
+            assert len(calls)==1 and 'i1 true' in calls[0],calls
+            result={}
+            def traced(case,original):
+             obs=run(case,original);a=observe([dest/'case']);b=observe([sys.executable,'-B',staged]);extra=observe([dest/'inspected']);assert a==b==extra==dict(exit=0,stdout='completed '+testid+'\n',stderr='')
+             result.update(native=a,reference=b,inspected=extra,columns=os.environ.get('COLUMNS'),llvm_calls=calls,llvm_sha256=hashlib.sha256(ir.read_bytes()).hexdigest(),runner=obs['observation']);return obs
+            rows,fail,skips=run_in_fixtures(unittest.TestSuite([first()]),{testid:traced});assert not fail and not skips and len(rows[testid])==1,(fail,skips)
+            proof['modes'][str(lv)]=result;print(lv,result['columns'],calls[0],result['native'],flush=True)
+          out=Path(os.environ['RUNNER_TEMP'],'argparse-extra-receipts','wrapped-'+rev+'.json');out.write_text(json.dumps(proof,indent=2)+'\n')
+          PY
+          cat > "$RUNNER_TEMP/repair-cross.py" <<'PY'
+          """Exercise the runtime lane's two iterator/packed-value controls on the prospective compiler."""
+          from pathlib import Path
+          import hashlib,json,os,subprocess,sys,tempfile
+          root=Path.cwd(); imre=root/'target/debug/imre'; runtime=root/'target/debug/libimre_runtime.a'
+          dest=Path(sys.argv[1]);dest.mkdir(parents=True,exist_ok=True)
+          sources={'tests/fixtures/iterator_pipelines/source_generator.py':27,'tests/fixtures/dataclasses/value_struct.py':39}
+          def observe(args,env=None):
+           p=subprocess.run(args,capture_output=True,env=env,timeout=90)
+           return dict(exit=p.returncode,stdout=p.stdout.decode(),stderr=p.stderr.decode())
+          data={}
+          with tempfile.TemporaryDirectory() as folder:
+           for path,lines in sources.items():
+            source=root/path
+            reference=observe([sys.executable,'-B',source],{**os.environ,'PYTHONPATH':str(root/'stdlib')})
+            assert reference['exit']==0 and not reference['stderr'] and len(reference['stdout'].splitlines())==lines,(path,reference)
+            row={'source_sha256':hashlib.sha256(source.read_bytes()).hexdigest(),'reference':reference,'native':{}}
+            for lv in (0,3):
+             for reach in (False,True):
+              binary=Path(folder)/('case-'+str(lv)+'-'+str(int(reach)))
+              command=[imre,'build',source,'--no-cache','--quiet','--opt-level',str(lv),'--runtime',runtime,'--clang','/usr/bin/clang-18','-o',binary]
+              if reach:command+=['--reachable-only']
+              subprocess.run(command,check=True,timeout=150);actual=observe([binary])
+              row['native'][f'O{lv}-reachable-{int(reach)}']=actual;assert actual==reference,(path,lv,reach,actual,reference)
+            data[path]=row
+            print(path,lines,'output lines; ordinary/reachable-only match CPython stdout, stderr and exit at O0/O3',flush=True)
+          (dest/'repair-controls.json').write_text(json.dumps(data,indent=2)+'\n')
+          PY
+          [[ "$REPAIR" =~ ^[0-9a-f]{40}$ ]]
+          mkdir -p "$RUNNER_TEMP/argparse-extra-receipts"
+          cargo build --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
+          PYTHONPATH="$base_checkout/.cpython-argparse/Lib" python3 -B "$RUNNER_TEMP/wrapped-usage.py" "$pr"
           for attempt in 1 2 3 4 5; do
             git fetch --no-tags origin refs/heads/main
             base=$(git rev-parse FETCH_HEAD)
+            git merge-base --is-ancestor "$REPAIR" "$base"
             tree=$(git merge-tree --write-tree "$base" "$pr")
             candidate=$(git -c user.name='Argparse preflight' -c user.email='noreply@github.com' commit-tree "$tree" -p "$base" -p "$pr" -m 'Hosted validation of PR #1145')
             git checkout --detach "$base"
@@ -268,6 +351,12 @@ jobs:
             echo "Attempt $attempt: base=$base pr=$pr tree=$tree"
             cargo build --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
             python3 -B "$RUNNER_TEMP/argparse-stock.py" "$candidate" prospective
+            extra="$RUNNER_TEMP/argparse-extra-receipts/$candidate"
+            mkdir -p "$extra"
+            cargo test --locked -j 2 -p imre-compiler --lib | tee "$extra/compiler-tests.log"
+            grep -F 'test effects::tests::local_and_final_analysis_agree_on_packed_list_allocations ... ok' "$extra/compiler-tests.log"
+            python3 -B "$RUNNER_TEMP/repair-cross.py" "$extra"
+            PYTHONPATH="$base_checkout/.cpython-argparse/Lib" python3 -B "$RUNNER_TEMP/wrapped-usage.py" "$candidate"
             cargo test --locked -j 2 -p imre-runtime --lib
             python3 tests/argparse_cli.py --compiler "$RUNNER_TEMP/argparse-driver" --runtime "$base_checkout/target/debug/libimre_runtime.a" --python "$(command -v python3)" --clang /usr/bin/clang-18 --opt-levels 0 3
             python3 tests/io.py --compiler "$base_checkout/target/debug/imre" --runtime "$base_checkout/target/debug/libimre_runtime.a" --python "$(command -v python3)" --clang /usr/bin/clang-18 --opt-levels 0 3
@@ -286,7 +375,7 @@ jobs:
             echo "Passed: base=$base pr=$pr tree=$tree (-O0 and -O3 stdout, stderr and exit; runtime ownership)." >> "$GITHUB_STEP_SUMMARY"
             git fetch --no-tags origin refs/heads/main
             latest=$(git rev-parse FETCH_HEAD)
-            inputs=(benchmarks/cpython_stdlib/suite_native.py benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/suite_inventory.py benchmarks/cpython_stdlib/full/argparse/mutex_cases.py benchmarks/cpython_stdlib/full/argparse/native_cases.py benchmarks/cpython_stdlib/full/argparse/subparser_cases.py benchmarks/cpython_stdlib/full/argparse/native_methods.py tests/fixtures/classes/mapping_abc.py tests/fixtures/classes/mapping_alias.py benchmarks/cpython_stdlib/full/collections/theme_section.py benchmarks/cpython_stdlib/full/argparse/UPSTREAM.json benchmarks/cpython_stdlib/full/functools/optimization_mode.py tests/classes.py tests/fixtures/containers/defaultdict_factory_arguments.py tests/exceptions.py tests/fixtures/exceptions/warning_hierarchy.py tests/fixtures/files/nonblocking_write.py benchmarks/cpython_stdlib/full/unittest/context_regex.py benchmarks/cpython_stdlib/full/logging/null_handler.py benchmarks/cpython_stdlib/full/logging/UPSTREAM.json tests/paths.py tests/files.py tests/fixtures/paths tests/fixtures/sys/streams_exit.py benchmarks/cpython_stdlib/native_sys.py benchmarks/cpython_stdlib/upstream.py benchmarks/cpython_stdlib/UPSTREAM.json benchmarks/cpython_stdlib/upstream benchmarks/cpython_stdlib/full/sys/stream_errno.py benchmarks/cpython_stdlib/full/sys/exit_payloads.py benchmarks/cpython_stdlib/full/unittest/mock_reset.py tests/fixtures/containers/dict_method_copy.py tests/io.py tests/unittest_main.py tests/fixtures/unittest_main crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse
+            inputs=(benchmarks/cpython_stdlib/suite_native.py benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/suite_inventory.py benchmarks/cpython_stdlib/full/argparse/mutex_cases.py benchmarks/cpython_stdlib/full/argparse/native_cases.py benchmarks/cpython_stdlib/full/argparse/subparser_cases.py benchmarks/cpython_stdlib/full/argparse/native_methods.py tests/fixtures/classes/mapping_abc.py tests/fixtures/classes/mapping_alias.py benchmarks/cpython_stdlib/full/collections/theme_section.py benchmarks/cpython_stdlib/full/argparse/UPSTREAM.json benchmarks/cpython_stdlib/full/functools/optimization_mode.py tests/classes.py tests/fixtures/containers/defaultdict_factory_arguments.py tests/exceptions.py tests/fixtures/exceptions/warning_hierarchy.py tests/fixtures/files/nonblocking_write.py benchmarks/cpython_stdlib/full/unittest/context_regex.py benchmarks/cpython_stdlib/full/logging/null_handler.py benchmarks/cpython_stdlib/full/logging/UPSTREAM.json tests/paths.py tests/files.py tests/fixtures/paths tests/fixtures/sys/streams_exit.py benchmarks/cpython_stdlib/native_sys.py benchmarks/cpython_stdlib/upstream.py benchmarks/cpython_stdlib/UPSTREAM.json benchmarks/cpython_stdlib/upstream benchmarks/cpython_stdlib/full/sys/stream_errno.py benchmarks/cpython_stdlib/full/sys/exit_payloads.py benchmarks/cpython_stdlib/full/unittest/mock_reset.py tests/fixtures/containers/dict_method_copy.py tests/io.py tests/unittest_main.py tests/fixtures/unittest_main crates/imre-compiler/src/frontend/argparse.rs crates/imre-compiler/src/frontend/argparse crates/imre-runtime/src/objects/argparse.rs crates/imre-runtime/src/objects/argparse crates/imre-compiler/src/effects.rs crates/imre-compiler/src/frontend/pipelines.rs tests/fixtures/iterator_pipelines/source_generator.py tests/fixtures/dataclasses/value_struct.py stdlib/imre Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse
                     tests/fixtures/paths/walking.py tests/fixtures/processes/file_redirects.py tests/fixtures/text/line_methods.py
                     benchmarks/cpython_stdlib/full/types/namespaces.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py
                     tests/fixtures/module_values/wrapper_attributes benchmarks/cpython_stdlib/full/logging/hierarchy_values.py
@@ -310,4 +399,12 @@ jobs:
           name: argparse-1145-stock-mapping
           path: ${{ runner.temp }}/argparse-stock-receipts/
           if-no-files-found: error
+          retention-days: 14
+      - name: Preserve formatter and repaired iterator evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: argparse-1145-extra-controls
+          path: ${{ runner.temp }}/argparse-extra-receipts/
+          if-no-files-found: warn
           retention-days: 14
