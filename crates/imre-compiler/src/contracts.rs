@@ -364,6 +364,9 @@ impl Builtin {
             | Self::Decode
             | Self::DecodeAscii
             | Self::UrlsafeB64encode
+            | Self::CodecLookup
+            | Self::CodecEncode
+            | Self::CodecDecode
             | Self::HashNew
             | Self::DecodeSplitLines
             | Self::SplitLines
@@ -435,6 +438,7 @@ impl Builtin {
             | Self::DictSumValues
             | Self::Encode
             | Self::CsvLineNumber
+            | Self::CodecName
             | Self::Sha256Hex
             | Self::Sha256New
             | Self::StrDescriptor(_)
@@ -1033,6 +1037,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_fnmatch_translate"
                 | "imre_fnmatch_translate_bytes"
                 | "imre_urlsafe_b64encode"
+                | "imre_codec_lookup"
+                | "imre_codec_encode"
+                | "imre_codec_decode"
                 | "imre_hash_new"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"

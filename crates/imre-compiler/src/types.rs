@@ -276,6 +276,7 @@ impl Types {
             | Type::OverloadStub
             | Type::PlainObject
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Poll
             | Type::Socket
             | Type::Sha256
@@ -737,6 +738,7 @@ impl Types {
             | Type::OverloadStub
             | Type::PlainObject
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Poll
             | Type::Socket
             | Type::Sha256
