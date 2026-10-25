@@ -1,4 +1,4 @@
-"""Complete payout reports on Relar, CPython and independent Rust."""
+"""Complete payout reports on Imre, CPython and independent Rust."""
 
 import argparse
 import itertools
@@ -77,7 +77,7 @@ def measure(workload, commands, directory, args):
     summaries = {name: shared.summary(phases["samples"], name) for name in commands}
     return {**workload, "gates": gates, **phases, "summary": summaries,
             **{f"{left}_over_{right}": summaries[left]["median_seconds"] / summaries[right]["median_seconds"]
-               for left, right in (("cpython", "relar"), ("relar", "rust"), ("cpython", "rust"))}}
+               for left, right in (("cpython", "imre"), ("imre", "rust"), ("cpython", "rust"))}}
 
 
 def source_paths(args):
@@ -103,9 +103,9 @@ def source_paths(args):
     assert rust_record["llvm_budget"] == (1000 if args.lto_linker else None)
     if args.lto_linker:
         paths["lto_linker"] = args.lto_linker.resolve(strict=True)
-    if args.relar_build_record:
-        paths["relar_build_record"] = args.relar_build_record.resolve(strict=True)
-        build = json.loads(paths["relar_build_record"].read_text())
+    if args.imre_build_record:
+        paths["imre_build_record"] = args.imre_build_record.resolve(strict=True)
+        build = json.loads(paths["imre_build_record"].read_text())
         assert build["sha256"]["compiler"] == shared.sha256(paths["compiler"])
         key = "thinlto_runtime" if args.lto_linker else "normal_runtime"
         assert build["sha256"][key] == shared.sha256(paths["runtime"])
@@ -126,7 +126,7 @@ def prepare(args, paths, hashes, rust_record, revision, dirty):
         command += ["--lto-linker", str(paths["lto_linker"])]
     targets.run_checked(command)
     assert targets.elf_target(binary) == targets.elf_target(paths["rust"])
-    commands = {"relar": [str(binary)], "cpython": validator.python_command(str(paths["python"])), "rust": [str(paths["rust"])]}
+    commands = {"imre": [str(binary)], "cpython": validator.python_command(str(paths["python"])), "rust": [str(paths["rust"])]}
     validation = validator.validate_commands(commands, args.timeout)
     validation_path = artifact / "validation.json"
     validation_path.write_text(json.dumps(validation, indent=2) + "\n")
@@ -160,7 +160,7 @@ def main():
     parser.add_argument("--python", default="python3")
     parser.add_argument("--clang", default="clang-18")
     parser.add_argument("--rust-build-record", type=Path)
-    parser.add_argument("--relar-build-record", type=Path)
+    parser.add_argument("--imre-build-record", type=Path)
     parser.add_argument("--target")
     parser.add_argument("--lto-linker", type=Path)
     parser.add_argument("--prepare-only", action="store_true")
@@ -201,7 +201,7 @@ def main():
         cpu = shared.pin_cpu(args.cpu)
         python_info = json.loads(targets.run_checked([str(paths["python"]), "-I", "-c", shared.PYTHON_INFO]))
         assert python_info["implementation"] == "cpython"
-        commands = {"relar": [prepared["binary"]], "cpython": validator.python_command(str(paths["python"])), "rust": [str(paths["rust"])]}
+        commands = {"imre": [prepared["binary"]], "cpython": validator.python_command(str(paths["python"])), "rust": [str(paths["rust"])]}
         control = describe(validator.case("empty-control", [], repetitions=1), 0)
         record = {"schema": 1, "kind": "record-benchmark", "started_at_utc": datetime.now(timezone.utc).isoformat(),
                   "revision": revision, "dirty": dirty, "preparation": prepared,
@@ -219,7 +219,7 @@ def main():
                                                      for name, summary in measured["summary"].items()}
             record["workloads"].append(measured)
             args.output.write_text(json.dumps(record, indent=2) + "\n")
-            print(f"{measured['label']}: CPython/Relar={measured['cpython_over_relar']:.3f}, Relar/Rust={measured['relar_over_rust']:.3f}", flush=True)
+            print(f"{measured['label']}: CPython/Imre={measured['cpython_over_imre']:.3f}, Imre/Rust={measured['imre_over_rust']:.3f}", flush=True)
     assert hashes == {name: shared.sha256(path) for name, path in paths.items()}
     verify(prepared, paths, hashes, args, revision, dirty)
     if args.prepared_record:

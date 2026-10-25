@@ -1,0 +1,12 @@
+{
+  "module": "test.test_free_threading.test_functools",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 4,
+  "reference": {
+    "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_bounded": "pass",
+    "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_unbounded": "pass",
+    "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_bounded": "pass",
+    "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_unbounded": "pass"
+  }
+}

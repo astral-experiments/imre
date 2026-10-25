@@ -18,6 +18,14 @@ for name in ["short.gz", "crc.gz", "invalid-block.gz", "invalid-text.gz", "rows.
         print("invalid text")
     print(text.closed)
 
+for name, size in [("partial.gz", 131071), ("bulk.gz", 262144)]:
+    with gzip_open(name, "rb") as stream:
+        for n in [size, 131072]:
+            try:
+                print(len(stream.read(n)))
+            except DeflateError:
+                print("invalid deflate stream")
+
 with gzip_open("rows.gz", "rb") as stream:
     try:
         stream.read(999999999999999999999999)
@@ -28,6 +36,12 @@ try:
     stream.read(0)
 except ValueError:
     print("closed")
+
+with gzip_open("long-header.gz", "rb") as stream:
+    try:
+        print(stream.read(1))
+    except DeflateError:
+        print("invalid deflate stream after extra field")
 
 with open("rows.txt", "r", encoding="utf-8") as text:
     try:

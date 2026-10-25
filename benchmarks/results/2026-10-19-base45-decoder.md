@@ -1,16 +1,16 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # Reducing the native Base45 decoding gap
 
-With python-base45 unchanged, decoding is **10.43–15.10× faster than the previous Relar executable** in a same-session comparison. Sustained decoding now takes **3.57–4.61× Rust's time**; the 16 KiB bytes case takes **3.62×**. This substantially narrows the gap, but does not establish Rust parity. ThinLTO decoding is **19.16–24.64× faster than CPython** in the shorter three-engine comparisons.
+With python-base45 unchanged, decoding is **10.43–15.10× faster than the previous Imre executable** in a same-session comparison. Sustained decoding now takes **3.57–4.61× Rust's time**; the 16 KiB bytes case takes **3.62×**. This substantially narrows the gap, but does not establish Rust parity. ThinLTO decoding is **19.16–24.64× faster than CPython** in the shorter three-engine comparisons.
 
-The [compiler/runtime change](https://github.com/viarius-experiments/relar/pull/51) follows PR #50 in GitHub Stack 4. The current compiler and runtime were built from clean commit **7c1e378625d6760b30e68025fe2299b29287cedc**. Application, harness, and Rust reference source bytes match that revision; the unchanged Rust binaries were retained from their recorded earlier builds. The [previous encoder report](2026-10-19-base45-string-reuse.md) and its evidence remain intact.
+The [compiler/runtime change](https://github.com/viarius-experiments/imre/pull/51) follows PR #50 in GitHub Stack 4. The current compiler and runtime were built from clean commit **7c1e378625d6760b30e68025fe2299b29287cedc**. Application, harness, and Rust reference source bytes match that revision; the unchanged Rust binaries were retained from their recorded earlier builds. The [previous encoder report](2026-10-19-base45-string-reuse.md) and its evidence remain intact.
 
 ## Sustained comparison with Rust
 
-Each process handles **64 MiB of raw data** through repeated calls on the indicated payload. Values are median milliseconds with inclusive quartiles in brackets. **Relar / Rust is a time ratio: lower is better.** Both native executables use ThinLTO, with matched LLVM import and inline budgets of 1,000. Twenty balanced AB/BA measured rounds follow two balanced warmup rounds.
+Each process handles **64 MiB of raw data** through repeated calls on the indicated payload. Values are median milliseconds with inclusive quartiles in brackets. **Imre / Rust is a time ratio: lower is better.** Both native executables use ThinLTO, with matched LLVM import and inline budgets of 1,000. Twenty balanced AB/BA measured rounds follow two balanced warmup rounds.
 
-| Operation / raw bytes per call | Relar ms [Q1–Q3] | Rust ms [Q1–Q3] | Relar / Rust |
+| Operation / raw bytes per call | Imre ms [Q1–Q3] | Rust ms [Q1–Q3] | Imre / Rust |
 |---|---:|---:|---:|
 | encode-64 | 466.563 [465.258–471.927] | 192.020 [191.107–193.685] | 2.430× |
 | decode-bytes-64 | 411.743 [409.244–412.809] | 97.856 [97.549–98.370] | 4.208× |
@@ -24,11 +24,11 @@ Each process handles **64 MiB of raw data** through repeated calls on the indica
 
 Encoding is included as a regression control. These longer native batches reduce startup's share of each sample and are the primary assessment of the remaining Rust gap. The [Rust reference](../reference/base45_codec/README.md) is unchanged: a fixed lookup table, preallocated output, direct arithmetic, complete output and checksum checks, and black-box barriers around repeated work. Both implementations handle identical inputs and repetition counts. Their storage strategies differ: the unchanged Python decoder materializes integer lists, while Rust streams lookup and output production and defers range errors to preserve lookup-error priority.
 
-## Same-session comparison with previous Relar
+## Same-session comparison with previous Imre
 
 Retained previous and current ThinLTO executables were interleaved on CPU 0 with identical inputs and **2 MiB of raw data per process**. Twenty balanced AB/BA measured rounds follow two warmup rounds. The codec and driver hashes match; every complete result and checksum is checked. Only the native executable changes within this control.
 
-| Operation / raw bytes per call | Previous Relar ms [Q1–Q3] | Current Relar ms [Q1–Q3] | Previous / current |
+| Operation / raw bytes per call | Previous Imre ms [Q1–Q3] | Current Imre ms [Q1–Q3] | Previous / current |
 |---|---:|---:|---:|
 | encode-64 | 17.850 [17.755–18.002] | 17.959 [17.914–18.105] | 0.994× |
 | decode-bytes-64 | 178.927 [177.854–180.311] | 16.499 [16.309–16.697] | 10.845× |
@@ -42,11 +42,11 @@ Retained previous and current ThinLTO executables were interleaved on CPU 0 with
 
 This is the direct before/after measurement. Comparing separately collected historical medians would mix the compiler change with host conditions. The new Rust comparisons independently establish the remaining native gap.
 
-## Ordinary linking: Relar, Rust, and CPython
+## Ordinary linking: Imre, Rust, and CPython
 
-Each process handles **2 MiB of raw data**. Six balanced warmup rounds precede 24 measured rounds covering all six engine orders four times. **CPython / Relar is a speedup ratio: higher is better.**
+Each process handles **2 MiB of raw data**. Six balanced warmup rounds precede 24 measured rounds covering all six engine orders four times. **CPython / Imre is a speedup ratio: higher is better.**
 
-| Operation / raw bytes per call | Relar ms [Q1–Q3] | Rust ms [Q1–Q3] | CPython ms [Q1–Q3] | Relar / Rust | CPython / Relar |
+| Operation / raw bytes per call | Imre ms [Q1–Q3] | Rust ms [Q1–Q3] | CPython ms [Q1–Q3] | Imre / Rust | CPython / Imre |
 |---|---:|---:|---:|---:|---:|
 | encode-64 | 22.950 [22.715–23.150] | 9.224 [9.135–9.299] | 327.714 [326.297–330.426] | 2.488× | 14.279× |
 | decode-bytes-64 | 29.372 [28.962–29.949] | 7.509 [7.172–7.828] | 329.292 [325.502–335.081] | 3.912× | 11.211× |
@@ -58,9 +58,9 @@ Each process handles **2 MiB of raw data**. Six balanced warmup rounds precede 2
 | decode-bytes-16384 | 22.507 [22.243–22.675] | 6.399 [6.174–6.623] | 318.052 [313.256–320.557] | 3.517× | 14.131× |
 | decode-text-16384 | 22.756 [22.531–22.995] | 6.578 [6.304–6.804] | 314.891 [310.496–317.713] | 3.459× | 13.838× |
 
-## ThinLTO: Relar, Rust, and CPython
+## ThinLTO: Imre, Rust, and CPython
 
-| Operation / raw bytes per call | Relar ms [Q1–Q3] | Rust ms [Q1–Q3] | CPython ms [Q1–Q3] | Relar / Rust | CPython / Relar |
+| Operation / raw bytes per call | Imre ms [Q1–Q3] | Rust ms [Q1–Q3] | CPython ms [Q1–Q3] | Imre / Rust | CPython / Imre |
 |---|---:|---:|---:|---:|---:|
 | encode-64 | 18.705 [18.122–19.143] | 9.527 [9.371–9.798] | 333.151 [327.682–339.172] | 1.963× | 17.811× |
 | decode-bytes-64 | 16.607 [16.076–16.900] | 6.684 [6.434–7.079] | 326.328 [323.243–332.766] | 2.485× | 19.651× |
@@ -90,28 +90,28 @@ Fresh, separate DHAT and Callgrind runs compare the previous executable, current
 
 | Operation / raw bytes per call / engine | Allocated bytes | Allocation blocks | Peak live bytes | Instructions |
 |---|---:|---:|---:|---:|
-| decode-bytes-64 / previous Relar | 7,430,350 | 116,821 | 14,434 | 74,633,000 |
-| decode-bytes-64 / current Relar | 215,539 | 4,185 | 16,775 | 6,328,141 |
+| decode-bytes-64 / previous Imre | 7,430,350 | 116,821 | 14,434 | 74,633,000 |
+| decode-bytes-64 / current Imre | 215,539 | 4,185 | 16,775 | 6,328,141 |
 | decode-bytes-64 / Rust | 69,758 | 1,042 | 2,158 | 1,883,230 |
-| decode-bytes-1024 / previous Relar | 7,278,194 | 100,053 | 33,198 | 70,908,970 |
-| decode-bytes-1024 / current Relar | 120,983 | 345 | 38,379 | 4,846,856 |
+| decode-bytes-1024 / previous Imre | 7,278,194 | 100,053 | 33,198 | 70,908,970 |
+| decode-bytes-1024 / current Imre | 120,983 | 345 | 38,379 | 4,846,856 |
 | decode-bytes-1024 / Rust | 71,200 | 82 | 5,520 | 1,626,948 |
-| decode-bytes-16384 / previous Relar | 7,291,636 | 98,525 | 455,600 | 70,614,162 |
-| decode-bytes-16384 / current Relar | 444,025 | 105 | 391,125 | 4,768,792 |
+| decode-bytes-16384 / previous Imre | 7,291,636 | 98,525 | 455,600 | 70,614,162 |
+| decode-bytes-16384 / current Imre | 444,025 | 105 | 391,125 | 4,768,792 |
 | decode-bytes-16384 / Rust | 94,241 | 22 | 59,281 | 1,611,555 |
-| decode-text-64 / previous Relar | 7,332,220 | 115,800 | 14,432 | 74,731,019 |
-| decode-text-64 / current Relar | 256,673 | 5,212 | 16,773 | 6,566,864 |
+| decode-text-64 / previous Imre | 7,332,220 | 115,800 | 14,432 | 74,731,019 |
+| decode-text-64 / current Imre | 256,673 | 5,212 | 16,773 | 6,566,864 |
 | decode-text-64 / Rust | 69,755 | 1,042 | 2,155 | 1,818,746 |
-| decode-text-1024 / previous Relar | 7,181,504 | 99,992 | 34,772 | 70,658,236 |
-| decode-text-1024 / current Relar | 125,157 | 412 | 38,377 | 4,823,991 |
+| decode-text-1024 / previous Imre | 7,181,504 | 99,992 | 34,772 | 70,658,236 |
+| decode-text-1024 / current Imre | 125,157 | 412 | 38,377 | 4,823,991 |
 | decode-text-1024 / Rust | 71,197 | 82 | 5,517 | 1,577,530 |
-| decode-text-16384 / previous Relar | 7,217,986 | 98,524 | 480,214 | 70,823,342 |
-| decode-text-16384 / current Relar | 468,839 | 112 | 415,739 | 4,763,551 |
+| decode-text-16384 / previous Imre | 7,217,986 | 98,524 | 480,214 | 70,823,342 |
+| decode-text-16384 / current Imre | 468,839 | 112 | 415,739 | 4,763,551 |
 | decode-text-16384 / Rust | 94,238 | 22 | 59,278 | 1,573,117 |
 
 For 16 KiB bytes decoding, cumulative allocated bytes fall from **7,291,636 to 444,025** (16.4× lower), allocation blocks fall from **98,525 to 105**, and instrumented instructions fall from **70,614,162 to 4,768,792** (14.8× lower). Peak live allocation changes from **455,600 to 391,125 bytes** (-14.2%). Cumulative allocation is not peak memory or RSS; bounded buffer retention trades some idle memory for fewer allocations across calls.
 
-The remaining gap is principally the work still expressed by the Python algorithm: gather an integer list, prove its element range, build another integer list, validate/copy it into bytes, and manage those objects. Rust produces output directly. The named decoder accounts for **63.9% of current process instructions** in the large-bytes profile; current Relar still executes **2.96× Rust's instructions** and requests **4.71× its cumulative allocation**. The next large opportunity appears to be eliminating intermediate containers or fusing their consumers while preserving eager evaluation and error priority.
+The remaining gap is principally the work still expressed by the Python algorithm: gather an integer list, prove its element range, build another integer list, validate/copy it into bytes, and manage those objects. Rust produces output directly. The named decoder accounts for **63.9% of current process instructions** in the large-bytes profile; current Imre still executes **2.96× Rust's instructions** and requests **4.71× its cumulative allocation**. The next large opportunity appears to be eliminating intermediate containers or fusing their consumers while preserving eager evaluation and error priority.
 
 The [reviewed assembly breakdown](2026-10-19-base45-decoder-profile-hotspots.json) identifies the largest remaining regions in the 16 KiB bytes case:
 
@@ -133,13 +133,13 @@ The codec, py.typed, upstream tests, and BSD-2-Clause license match all four has
 
 At each of five configurations—ordinary O0/O3, ThinLTO O3, and AddressSanitizer/LeakSanitizer O0/O1—the unchanged upstream methods cover **323 native calls**, followed by **289 CPython differential cases** and **two compile-time type rejections**. Those last two reject upstream calls passing integer 42 to typed APIs; they are not runtime TypeError tests. Checks cover full values, exact error messages, causes, suppression, unchanged output on failure, malformed/odd/empty inputs, Unicode, all bytes, alias mutation, and recovery.
 
-All **143 Rust unit tests**, strict workspace Clippy, formatting, and focused Ruff checks pass. The full matrix passes **81 jobs**, including **3,931 non-Base45 language checks** across the five configurations. All six existing application oracle suites pass at ordinary O3. Each retained Rust Base45 reference passes **295 checks**. Four recorded Unicode repr boundaries permit different character quoting in Rust while still checking error category, cause, suppression and unchanged output; Relar retains exact CPython message checking. Sanitizers cover generated code and the custom runtime; the prebuilt Rust standard library is uninstrumented.
+All **143 Rust unit tests**, strict workspace Clippy, formatting, and focused Ruff checks pass. The full matrix passes **81 jobs**, including **3,931 non-Base45 language checks** across the five configurations. All six existing application oracle suites pass at ordinary O3. Each retained Rust Base45 reference passes **295 checks**. Four recorded Unicode repr boundaries permit different character quoting in Rust while still checking error category, cause, suppression and unchanged output; Imre retains exact CPython message checking. Sanitizers cover generated code and the custom runtime; the prebuilt Rust standard library is uninstrumented.
 
 The first matrix attempt was interrupted after its temporary runner misparsed the successful imports-suite summary; that child exited zero. The second attempt passed all ordinary, ThinLTO, reference and application jobs, but LeakSanitizer could not inspect processes under the sandbox's ptrace tracing. The complete successful matrix reran outside tracing with leak detection enabled and the same frozen binaries. Both earlier attempts are retained and excluded from final counts. The [validation index](2026-10-19-base45-decoder-validation.json), [summary](2026-10-19-base45-decoder-validation-summary.json), and [build/check record](2026-10-19-base45-decoder-build-validation.json) retain exact commands, statuses and provenance.
 
 ## Measurement and evidence
 
-Timing ran on October 19, 2026, on an AMD EPYC-Milan host pinned to CPU 0, outside tracing. CPython 3.14.5 has PGO and LTO enabled, the GIL enabled, and JIT disabled. Relar uses Clang 18 at O3; the Rust reference uses Ohm 1.98.1 and LLVM 22.1.8. ThinLTO uses LLVM 22 LLD and linker-plugin runtime bitcode. The [frozen build record](2026-10-19-base45-decoder-build.json) identifies exact tools, source, commands, archives and executables. Source was committed before the recorded builds.
+Timing ran on October 19, 2026, on an AMD EPYC-Milan host pinned to CPU 0, outside tracing. CPython 3.14.5 has PGO and LTO enabled, the GIL enabled, and JIT disabled. Imre uses Clang 18 at O3; the Rust reference uses Ohm 1.98.1 and LLVM 22.1.8. ThinLTO uses LLVM 22 LLD and linker-plugin runtime bitcode. The [frozen build record](2026-10-19-base45-decoder-build.json) identifies exact tools, source, commands, archives and executables. Source was committed before the recorded builds.
 
 Timing includes startup, imports, one input read, all repeated codec calls, checksum work, one complete final output write, and exit. Compilation, preparation, hashing and verification are outside the clock. OS caches are warm, output is not fsynced, and task-owned builds, tests and profiles were stopped during timing. Host frequency and unrelated shared-host activity remain uncontrolled. Timed inputs have valid even lengths; separate correctness checks cover other cases.
 

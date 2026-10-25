@@ -1,12 +1,14 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Ruff’s conformance summary
 
-Relar compiles Ruff’s `render_summary`, `diff_format`, and `Statistics` unchanged. The summary uses the checkout revision supplied to the reporter. When both ty versions agree, Ruff prints a compact summary by default. Passing `--force-summary-table` also prints the metrics table. When the new analyzer has no true positives, the assertion prints the first five grouped cases. [Ruff’s summary and metric formatting](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/conformance.py#L859-L1010) · [Ruff’s statistics](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/conformance.py#L415-L433)
+Imre compiles Ruff’s `render_summary`, `diff_format`, and `Statistics` unchanged. The summary uses the checkout revision supplied to the reporter. When both ty versions agree, Ruff prints a compact summary by default. Passing `--force-summary-table` also prints the metrics table. When the new analyzer has no true positives, the assertion prints the first five grouped cases. [Ruff’s summary and metric formatting](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/conformance.py#L859-L1010) · [Ruff’s statistics](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/conformance.py#L415-L433)
 
 ## Full reports
 
-Relar took **1.34–1.43× Rust’s time on frozen reports** and **1.01–1.03× on live checkouts**, including both ty processes. All 880 warmup and timed runs produced the same bytes as pinned Ruff on CPython.
+Imre took **1.34–1.43× Rust’s time on frozen reports** and **1.01–1.03× on live checkouts**, including both ty processes. All 880 warmup and timed runs produced the same bytes as pinned Ruff on CPython.
 
-| Files and workload | CPython (ms) | Codon (ms) | Relar #132 (ms) | Relar (ms) | Rust (ms) | Relar / Rust | Bytes |
+| Files and workload | CPython (ms) | Codon (ms) | Imre #132 (ms) | Imre (ms) | Rust (ms) | Imre / Rust | Bytes |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 146, changed, GitHub | 163.8 | 73.0 | 38.1 | 38.6 | 27.0 | 1.43× | 109,258 |
 | 146, changed, diff | 161.9 | 72.5 | 37.0 | 37.6 | 26.8 | 1.40× | 96,947 |
@@ -27,7 +29,7 @@ Relar took **1.34–1.43× Rust’s time on frozen reports** and **1.01–1.03×
 
 The 1× capture contains 146 files. The 10× capture repeats them with distinct filenames and diagnostic locations. Changed captures compare ty 0.0.60 with 0.0.90. Unchanged captures compare identical analyzer outputs. Live changed cases run both ty versions from the real checkout. Live compact cases run ty 0.0.90 twice. Diff uses real checkout paths in live mode, which accounts for its different byte count.
 
-The table gives medians of ten fresh processes per engine and workload after one warmup. The run order balances positions and neighboring engines. Times include startup, filesystem reads, report computation, and output. Frozen runs used one CPU and live runs used two on the same AMD EPYC-Milan Linux host. Both Relar reporters use the same compiler built on top of #134, the default seven-module build, and the same system-allocator runtime. Compiling the #132 Python port with its earlier compiler reproduced all seven application objects and the complete linked executable byte for byte.
+The table gives medians of ten fresh processes per engine and workload after one warmup. The run order balances positions and neighboring engines. Times include startup, filesystem reads, report computation, and output. Frozen runs used one CPU and live runs used two on the same AMD EPYC-Milan Linux host. Both Imre reporters use the same compiler built on top of #134, the default seven-module build, and the same system-allocator runtime. Compiling the #132 Python port with its earlier compiler reproduced all seven application objects and the complete linked executable byte for byte.
 
 CPython 3.14.5 runs the pinned script through the repository’s input adapter. Native Codon 0.20.4 uses the shared summary body with its own dedent implementation and Python-style record representations. The independent Rust release build uses its system allocator. [Codon adapters](../codon_native/README.md#live-conformance-workflow) · [Rust reference](../reference/conformance_report/src/report.rs)
 
@@ -35,16 +37,16 @@ CPython 3.14.5 runs the pinned script through the repository’s input adapter. 
 
 The unforced, unchanged report is 469 bytes at 1× and 471 bytes at 10×. Its forced counterpart is 1,489 and 1,503 bytes respectively. We compared both formats and both flag settings against Ruff on changed and unchanged captures. We also checked the full and compact forms with a multiline revision whose interpolation changes the common indent. The independent Rust reference matched Ruff on 156 report outputs across ordinary and multiline inputs. Codon’s dedent matched CPython on 192 direct inputs, including all 29 Python whitespace code points and differing tab and space prefixes.
 
-The zero-true-positive fixture contains seven groups. Ruff’s assertion displays the first five in order, with the enclosing lists, nested dataclasses, Unicode paths, quoted descriptions and enum members. Relar, Codon and Rust matched the full exception text, 3,064 bytes at the recorded paths including the exception name and final newline, and preserved the existing output file. The previous port omitted the sampled records. The validator checks the complete message separately from interpreter traceback decorations and rejects an extra line or a truncated record. ASan/LSan and ThinLTO each passed 18 full-output and error checks. [Conformance validator](../conformance_validate.py) · [Source fidelity check](../../tests/classes.py)
+The zero-true-positive fixture contains seven groups. Ruff’s assertion displays the first five in order, with the enclosing lists, nested dataclasses, Unicode paths, quoted descriptions and enum members. Imre, Codon and Rust matched the full exception text, 3,064 bytes at the recorded paths including the exception name and final newline, and preserved the existing output file. The previous port omitted the sampled records. The validator checks the complete message separately from interpreter traceback decorations and rejects an extra line or a truncated record. ASan/LSan and ThinLTO each passed 18 full-output and error checks. [Conformance validator](../conformance_validate.py) · [Source fidelity check](../../tests/classes.py)
 
 ## Reproduce
 
-Prepare captures with `--scales 1 10`. Build both the current reporter and the #132 Python port with the current Relar compiler, linking the same system runtime into both. Build the Codon and Rust references, then run the comparison below. The measurement record retains inputs, executable hashes, commands, balanced execution order, every timing sample, output hashes and comparator build identities. [Fixture preparation](../../examples/conformance_report/README.md#replay-a-captured-comparison) · [Native Codon builder](../codon_native/build.py) · [Rust builder](../reference/conformance_report/build.py) · [Measurement record](2026-10-23-conformance-summary.json.gz)
+Prepare captures with `--scales 1 10`. Build both the current reporter and the #132 Python port with the current Imre compiler, linking the same system runtime into both. Build the Codon and Rust references, then run the comparison below. The measurement record retains inputs, executable hashes, commands, balanced execution order, every timing sample, output hashes and comparator build identities. [Fixture preparation](../../examples/conformance_report/README.md#replay-a-captured-comparison) · [Native Codon builder](../codon_native/build.py) · [Rust builder](../reference/conformance_report/build.py) · [Measurement record](2026-10-23-conformance-summary.json.gz)
 
 ```sh
 "$CPYTHON" benchmarks/conformance_render_benchmark.py --full-matrix --compact \
   --fixtures "$FIXTURES" --python "$CPYTHON" --previous "$PREVIOUS" \
-  --relar "$RELAR_REPORT" --codon "$CODON_REPORT" --rust "$RUST_REPORT" --cpu 8 \
+  --imre "$IMRE_REPORT" --codon "$CODON_REPORT" --rust "$RUST_REPORT" --cpu 8 \
   --live "$TYPING/conformance" "$OLD_TY" "$NEW_TY" --live-cpus 20 21 \
   --output measurements.json.gz
 ```

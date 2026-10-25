@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use relar_benchmark_platform as platform;
+use imre_benchmark_platform as platform;
 
 use crate::parse::SourceText;
 use crate::{Error, Result};
@@ -205,7 +205,7 @@ pub fn run(arguments: &[String]) -> Result<()> {
     } else {
         Some(Workspace(platform::temporary_directory(
             parent,
-            ".relar-conformance-",
+            ".imre-conformance-",
         )?))
     };
     let sources = discover(&suite)?;

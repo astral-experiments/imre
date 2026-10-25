@@ -13,10 +13,10 @@ SOURCE = Path(__file__).parent / "fixtures" / "containers" / "guarded_list_lengt
 def instrument(ir: str, force_distinct: bool) -> str:
     # Only scan() has this loop version. Restrict the mutation to its definition.
     bodies = re.findall(r"^define [^\n]+\{\n.*?^\}", ir, re.MULTILINE | re.DOTALL)
-    (body,) = [body for body in bodies if "call i32 @relar_list_all_i32(" in body]
+    (body,) = [body for body in bodies if "call i32 @imre_list_all_i32(" in body]
     guard = r"icmp ne ptr %v\d+, %v\d+"
     (comparison,) = re.findall(guard, body)
-    fast = "  call void @relar_list_reserve_range("
+    fast = "  call void @imre_list_reserve_range("
     assert body.count(fast) == 1
     # One byte on stderr per fast-arm entry, without affecting the program output.
     traced = body.replace(

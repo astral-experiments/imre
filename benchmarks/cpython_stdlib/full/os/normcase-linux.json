@@ -1,0 +1,199 @@
+{
+  "format": "posix-normcase-v1",
+  "runs": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "fnmatch_policy": {
+        "IGNORECASE": false,
+        "NORMSEP": false,
+        "execution": "native import-time assignments",
+        "source_sha256": "54c73b98deb86ffbe296dc2b90208bc438bb26bc50af149cfcfecc38333e0d24"
+      },
+      "format": "posix-normcase-v1",
+      "occurrences": {
+        "test.test_posixpath.PathLikeTests.test_path_normcase": [
+          {
+            "assertions": "imre",
+            "body": "imre",
+            "calls": 2,
+            "classification": "native-body-host-fixture",
+            "fixture": "cpython",
+            "helper_sha256": "1de3f8afdd59f0da6bcf36e76c3b8bff7accdf82f4aca1b0b6759c542aca36d4",
+            "method_sha256": "c1452a7cfdf0ca0a55e7424b49e803b058e927e7aeeab8bdcc72be9a51c6f2ab",
+            "operation": "imre"
+          }
+        ],
+        "test.test_posixpath.PosixCommonTest.test_normcase": [
+          {
+            "assertions": "cpython",
+            "body": "cpython",
+            "calls": [
+              {
+                "input": "str",
+                "operation": "imre"
+              },
+              {
+                "input": "str",
+                "operation": "imre"
+              },
+              {
+                "input": "bytes",
+                "operation": "imre"
+              },
+              {
+                "input": "bytes",
+                "operation": "imre"
+              },
+              {
+                "input": "str",
+                "operation": "imre"
+              },
+              {
+                "input": "bytes",
+                "operation": "imre"
+              },
+              {
+                "input": "NoneType",
+                "operation": "imre"
+              },
+              {
+                "input": "bool",
+                "operation": "imre"
+              },
+              {
+                "input": "int",
+                "operation": "imre"
+              },
+              {
+                "input": "float",
+                "operation": "imre"
+              },
+              {
+                "input": "list",
+                "operation": "imre"
+              },
+              {
+                "blocker": "<fixture>/common-9/case.py:2:9: Imre: unknown function or unsupported builtin arguments",
+                "input": "bytearray",
+                "operation": "cpython"
+              },
+              {
+                "input": "set",
+                "operation": "imre"
+              }
+            ],
+            "classification": "mixed",
+            "fixture": "cpython",
+            "method_sha256": "644f7d805c43d925589aefd92004dedfeb6d061ee011efc54cc62dbfae43bfd4",
+            "operation": "mixed",
+            "whole_compile_blocker": "<fixture>/common-whole/case.py:14:32: Imre: expected str, got bytes; annotations are enforced contracts"
+          }
+        ]
+      },
+      "optimization": 0,
+      "platform": "linux",
+      "reference": {
+        "test.test_posixpath.PathLikeTests.test_path_normcase": "pass",
+        "test.test_posixpath.PosixCommonTest.test_normcase": "pass"
+      },
+      "selected_posixpath_occurrences": 2
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "fnmatch_policy": {
+        "IGNORECASE": false,
+        "NORMSEP": false,
+        "execution": "native import-time assignments",
+        "source_sha256": "54c73b98deb86ffbe296dc2b90208bc438bb26bc50af149cfcfecc38333e0d24"
+      },
+      "format": "posix-normcase-v1",
+      "occurrences": {
+        "test.test_posixpath.PathLikeTests.test_path_normcase": [
+          {
+            "assertions": "imre",
+            "body": "imre",
+            "calls": 2,
+            "classification": "native-body-host-fixture",
+            "fixture": "cpython",
+            "helper_sha256": "1de3f8afdd59f0da6bcf36e76c3b8bff7accdf82f4aca1b0b6759c542aca36d4",
+            "method_sha256": "c1452a7cfdf0ca0a55e7424b49e803b058e927e7aeeab8bdcc72be9a51c6f2ab",
+            "operation": "imre"
+          }
+        ],
+        "test.test_posixpath.PosixCommonTest.test_normcase": [
+          {
+            "assertions": "cpython",
+            "body": "cpython",
+            "calls": [
+              {
+                "input": "str",
+                "operation": "imre"
+              },
+              {
+                "input": "str",
+                "operation": "imre"
+              },
+              {
+                "input": "bytes",
+                "operation": "imre"
+              },
+              {
+                "input": "bytes",
+                "operation": "imre"
+              },
+              {
+                "input": "str",
+                "operation": "imre"
+              },
+              {
+                "input": "bytes",
+                "operation": "imre"
+              },
+              {
+                "input": "NoneType",
+                "operation": "imre"
+              },
+              {
+                "input": "bool",
+                "operation": "imre"
+              },
+              {
+                "input": "int",
+                "operation": "imre"
+              },
+              {
+                "input": "float",
+                "operation": "imre"
+              },
+              {
+                "input": "list",
+                "operation": "imre"
+              },
+              {
+                "blocker": "<fixture>/common-9/case.py:2:9: Imre: unknown function or unsupported builtin arguments",
+                "input": "bytearray",
+                "operation": "cpython"
+              },
+              {
+                "input": "set",
+                "operation": "imre"
+              }
+            ],
+            "classification": "mixed",
+            "fixture": "cpython",
+            "method_sha256": "644f7d805c43d925589aefd92004dedfeb6d061ee011efc54cc62dbfae43bfd4",
+            "operation": "mixed",
+            "whole_compile_blocker": "<fixture>/common-whole/case.py:14:32: Imre: expected str, got bytes; annotations are enforced contracts"
+          }
+        ]
+      },
+      "optimization": 3,
+      "platform": "linux",
+      "reference": {
+        "test.test_posixpath.PathLikeTests.test_path_normcase": "pass",
+        "test.test_posixpath.PosixCommonTest.test_normcase": "pass"
+      },
+      "selected_posixpath_occurrences": 2
+    }
+  ]
+}

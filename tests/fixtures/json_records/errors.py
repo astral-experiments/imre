@@ -1,4 +1,4 @@
-from relar.json import decode
+from imre.json import decode
 
 
 class Item:
@@ -103,6 +103,18 @@ for length in [127, 128, 129]:
         print("unexpected malformed success")
     except ValueError as error:
         assert str(error).startswith("JSON nesting exceeds 128") == (length > 128)
+
+rejected_string = '"' + repeat("x", 2048) + '"'
+try:
+    decode(rejected_string, Item)
+    print("unexpected record success")
+except ValueError as error:
+    assert len(str(error)) < 256
+try:
+    decode("[" + rejected_string + "]", list[bool])
+    print("unexpected boolean success")
+except ValueError as error:
+    assert len(str(error)) < 256
 
 shared = decode(r'["shared","shared","\u0073hared","different","additional tag","shared"]' + repeat(" ", 512), list[str])
 changed = shared[0]

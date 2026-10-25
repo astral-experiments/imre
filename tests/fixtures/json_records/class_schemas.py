@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Self, Union as Nullable
 
-from relar.json import decode
+from imre.json import decode
 
 
 @dataclass

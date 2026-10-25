@@ -1,6 +1,7 @@
 """Compare exception propagation and cleanup with CPython, including sanitizer runs."""
 
 import argparse
+import ast
 import os
 import subprocess
 import sys
@@ -8,7 +9,233 @@ import tempfile
 from pathlib import Path
 from textwrap import dedent
 
+
+def upstream_support_payloads() -> str:
+    """Run the original CPython exception classes, including their constructors and methods."""
+    tests = Path(__file__).resolve().parent
+    support = tests.parent / "benchmarks/cpython_stdlib/full/shared/upstream/Lib/test/support/__init__.py"
+    source = support.read_text()
+    names = ["Error", "TestFailed", "TestFailedWithDetails", "TestDidNotRun"]
+    classes = [node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name in names]
+    assert [node.name for node in classes] == names
+    fragments = [ast.get_source_segment(source, node) for node in classes]
+    calls = (tests / "fixtures/exceptions/support_payload_calls.py").read_text()
+    return "\n\n".join([*fragments, calls])
+
+
 ACCEPTED = {
+    "upstream_support_payloads": upstream_support_payloads(),
+    "boxed_payload": (Path(__file__).parent / "fixtures/exceptions/boxed_payload.py").read_text(),
+    "inherited_payload": (Path(__file__).parent / "fixtures/exceptions/inherited_payload.py").read_text(),
+    "warning_hierarchy": (Path(__file__).parent / "fixtures/exceptions/warning_hierarchy.py").read_text(),
+    **{
+        name: (Path(__file__).parent / f"fixtures/exceptions/{name}.py").read_text()
+        for name in ("generic_args", "generic_args_processes", "generic_args_groups", "generic_args_records")
+    },
+    "explicit_base": (Path(__file__).parent / "fixtures/exceptions/explicit_base.py").read_text(),
+    "import_error": (Path(__file__).parent / "fixtures/exceptions/import_error.py").read_text(),
+    "classvar_exception_constructor": """
+from typing import ClassVar
+
+class ValidationProblem(ValueError):
+    def __init__(self, issues: list[str]) -> None:
+        super().__init__("failed")
+        self.issues = issues
+    def __repr__(self) -> str:
+        return f"ValidationProblem(issues={self.issues!r})"
+
+class Reader:
+    error: ClassVar[type[Exception]] = ValueError
+    def fail(self, issues: list[str]) -> None:
+        raise self.error(issues)
+
+class Child(Reader):
+    error = ValidationProblem
+
+def check(reader: Reader) -> None:
+    values = ["a"]
+    try:
+        reader.fail(values)
+    except ValueError as err:
+        values.append("b")
+        print(str(err))
+        print(repr(err))
+        print(isinstance(err, ValidationProblem))
+
+class ExitPolicy:
+    error: ClassVar[type[BaseException]] = SystemExit
+
+check(Reader())
+check(Child())
+try:
+    raise ExitPolicy.error(7)
+except SystemExit as error:
+    print(error.code == 7)
+
+print(repr(Reader.error(1)))
+print(str(Child.error(["x"])))
+""",
+    "exception_record_fields_and_mro": """
+from dataclasses import dataclass
+from collections.abc import Iterable
+
+class InputError(Exception):
+    pass
+
+@dataclass(frozen=True)
+class BadRow(Exception):
+    elements: Iterable[str]
+    issues: Iterable[str]
+    def __post_init__(self) -> None:
+        super().__init__(", ".join(self.issues))
+
+class InvalidInput(ValueError, InputError):
+    def __init__(self, *, filename: str | None, issues: list[str]) -> None:
+        super().__init__(repr(issues))
+        self.filename = filename
+        self.issues = issues
+    def __str__(self) -> str:
+        return f"{self.filename!r}: {self.issues!r}"
+    def __repr__(self) -> str:
+        return f"InvalidInput(issues={self.issues!r})"
+
+class Reader:
+    error = InvalidInput
+    def fail(self, items: list[str]) -> None:
+        raise self.error(filename=None, issues=items)
+
+def exercise() -> None:
+    issues = ["first"]
+    issue = BadRow(issues=issues, elements=["field"])
+    issues.append("later")
+    try:
+        raise issue
+    except BadRow as caught:
+        print(caught is issue)
+        print(repr(caught.issues))
+        print(repr(caught.args))
+        print(str(caught))
+        print(repr(caught))
+    try:
+        Reader().fail(issues)
+    except InputError as err:
+        print(isinstance(err, ValueError))
+        print(isinstance(err, BadRow))
+        print(str(err))
+        print(repr(err))
+    try:
+        raise Reader.error(filename="source", issues=issues)
+    except ValueError as err:
+        print(isinstance(err, InputError))
+        print(str(err))
+exercise()
+""",
+    "exception_field_conversions": """
+from dataclasses import dataclass
+
+@dataclass
+class InvalidRow(Exception):
+    issues: list[str]
+    def __post_init__(self) -> None:
+        super().__init__(", ".join(self.issues))
+
+class Report(ValueError):
+    def __init__(self, text: str) -> None:
+        self.text = text
+        super().__init__("base message")
+    def __str__(self) -> str:
+        return f"reported {self.text}"
+    def __repr__(self) -> str:
+        return f"Report(detail={self.text!r})"
+
+def show(err: Exception) -> None:
+    try:
+        raise err
+    except Exception as caught:
+        print(f"detail: {caught!r} | {caught!s} | {caught}")
+        print(repr(caught))
+
+show(ValueError("can't open"))
+show(KeyError("field"))
+show(ValueError(["count", "hash"]))
+show(InvalidRow(["bad hash", "size"]))
+show(Report("item"))
+""",
+    "exception_generated_arguments": r"""
+def show_bytes(data: bytes) -> None:
+    try:
+        print(data.decode("utf-8"))
+    except Exception as err:
+        print(f"{err!r}")
+        print(f"{err!s}")
+
+def show_path() -> None:
+    try:
+        with open("missing-assignable-file", "rb") as stream:
+            print(stream.read())
+    except OSError as err:
+        print(f"{err!r}")
+        print(str(err))
+
+show_bytes(b"prefix\xffabc")
+show_bytes(b"\xe3\x80")
+show_bytes(b"x\xc0\xa0")
+show_bytes(b"x\xe2\x82x")
+show_path()
+""",
+    "exception_display_raises": """
+class RenderError(ValueError):
+    def __init__(self, key: str) -> None:
+        super().__init__(key)
+        self.key = key
+    def __str__(self) -> str:
+        raise TypeError(self.key)
+    def __repr__(self) -> str:
+        raise ValueError("repr: " + self.key)
+def run() -> None:
+    try:
+        raise RenderError("render failed")
+    except Exception as error:
+        try:
+            print(str(error))
+        except TypeError as rendering:
+            print(str(rendering))
+        try:
+            print(f"{error!r}")
+        except ValueError as rendering:
+            print(str(rendering))
+run()
+""",
+    "checked_unbound_local": (Path(__file__).parent / "fixtures/exceptions/unbound_local.py").read_text(),
+    "nominal_exception_hierarchy": """
+class ParseError(ValueError):
+    "A failure while reading input."
+
+class MissingField(ParseError):
+    pass
+
+class InvalidField(ParseError):
+    pass
+
+try:
+    try:
+        raise InvalidField("unknown key")
+    except ParseError as original:
+        raise MissingField("missing name") from original
+except InvalidField:
+    raise AssertionError("a sibling matched the handler")
+except ParseError as error:
+    print(str(error))
+    print(isinstance(error, MissingField))
+    print(isinstance(error, InvalidField))
+    print(isinstance(error, ValueError))
+    print(error.__suppress_context__)
+    cause = error.__cause__
+    assert cause is not None
+    print(str(cause))
+    print(isinstance(cause, InvalidField))
+    print(isinstance(cause, MissingField))
+""",
     "explicit_causes": """
 def show(error: Exception) -> None:
     print(str(error))
@@ -683,6 +910,108 @@ except KeyError:
 }
 
 REJECTED = {
+    **{
+        f"forwarding_exception_descriptor_{name}": f"""
+class Problem(Exception):
+    def __init__(self, value, *rest):
+        super().__init__(value, *rest)
+        self.{name} = value
+Problem("ab")
+"""
+        for name in (
+            "args", "__cause__", "__context__", "__traceback__",
+            "__suppress_context__", "__dict__", "__class__", "__weakref__",
+        )
+    },
+    "separate_payload_layouts": """
+class Left(ValueError):
+    def __init__(self, x: int) -> None:
+        self.x = x
+        super().__init__(x)
+class Right(ValueError):
+    def __init__(self, y: str) -> None:
+        self.y = y
+        super().__init__(y)
+class Both(Left, Right):
+    pass
+""",
+    "exception_binder_adjacent_error": """
+class Basic(Exception):
+    def __init__(self, item, *tail):
+        self.item = item
+        super().__init__(item, *tail)
+def annotated(value: str) -> str:
+    return value
+Basic("original", item=annotated(37))
+""",
+    "exception_recursive_dynamic_list": """
+class E(Exception):
+    def __init__(self, value, *args):
+        self.value = value
+        super().__init__(value, *args)
+
+
+def exercise() -> None:
+    values: list[object] = []
+    error = E(values)
+    values.append(error.value)
+    print(repr(error.value))
+
+
+exercise()
+""",
+    "exception_forwarding_object": """
+class Box:
+    def __init__(self, item: int) -> None:
+        self.item = item
+class Report(Exception):
+    def __init__(self, msg, *args):
+        self.msg = msg
+        super().__init__(msg, *args)
+print(Report(Box(1)))
+""",
+    "exception_mutable_default": """
+class Shared(Exception):
+    def __init__(self, item=[], *tail):
+        self.item = item
+        super().__init__(item, *tail)
+print(Shared())
+""",
+    "exception_shadowed_super": """
+class Report(Exception):
+    def __init__(self, super, *tail):
+        self.value = super
+        super().__init__(super, *tail)
+print(Report("argument"))
+""",
+    "exception_intercepted_field": """
+class Report(Exception):
+    def __setattr__(self, key: str, value: str) -> None:
+        raise TypeError(key)
+    def __init__(self, message, *tail):
+        self.message = message
+        super().__init__(message, *tail)
+print(Report("message"))
+""",
+    "explicit_base_missing_inherited_field": """
+        class Parent(Exception):
+            def __init__(self, text: str):
+                super().__init__(text)
+                self.text = text
+        class Child(Parent):
+            def __init__(self, text: str):
+                BaseException.__init__(self, text)
+        print(Child("error"))
+    """,
+    "explicit_base_shadowed": """
+        class Problem(Exception):
+            def __init__(self, Exception: str):
+                Exception.__init__(self, "wrong receiver")
+        print(Problem("shadow"))
+    """,
+    "import_error_unsupported_argument": "ImportError([1, 2])",
+    "import_error_expanded_keywords": "ImportError(**{'name': 'pkg'})",
+    "import_error_unnarrowed_field": "def f(e: Exception) -> None:\n    print(e.name)\n",
     "handler_uninitialized": """
 try:
     value = int(input())
@@ -754,7 +1083,6 @@ try:
 finally:
     print(value + 1)
 """,
-    "integer_message": "raise ValueError(1)",
     "multiple_messages": 'raise ValueError("a", "b")',
     "subclass_annotation": 'value: ValueError = ValueError("error")',
     "existing_exception_cause": 'error = ValueError("error")\nraise error from None',
@@ -763,7 +1091,27 @@ finally:
     "writable_exception_suppression": 'error = ValueError("error")\nerror.__suppress_context__ = True',
     "exception_group": "try:\n    raise ValueError()\nexcept* ValueError:\n    pass\n",
     "dynamic_handler": "kind = ValueError\ntry:\n    pass\nexcept kind:\n    pass\n",
-    "custom_exception": "class Custom(Exception):\n    pass\n",
+    "implicit_exception_constructor_args": """
+from dataclasses import dataclass
+@dataclass
+class Payload(Exception):
+    field: str
+raise Payload("x")
+""",
+    "inconsistent_exception_mro": """
+class First(Exception):
+    pass
+class Second(First):
+    pass
+class Reversed(First, Second):
+    pass
+raise Reversed()
+""",
+    "exception_subclass_method": """
+class WithMethod(Exception):
+    def describe(self) -> str:
+        return "extra behavior"
+""",
 }
 
 ERRORS = {
@@ -858,13 +1206,21 @@ def main() -> None:
     if args.sanitize:
         flags += ["--sanitize"]
     passed = 0
-    with tempfile.TemporaryDirectory(prefix="relar-exceptions-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-exceptions-") as directory:
         temporary = Path(directory)
         for name, source in REJECTED.items():
             path = temporary / f"{name}.py"
             path.write_text(dedent(source), encoding="utf-8")
             result = run([compiler, "check", str(path)])
             assert result.returncode > 0 and result.stderr, (name, result)
+            if name == "exception_subclass_method":
+                assert "exception payload needs an explicit initializer" in result.stderr, result
+            if name == "separate_payload_layouts":
+                assert "multiple independent exception payload layouts" in result.stderr, result
+            if name == "exception_binder_adjacent_error":
+                assert "str" in result.stderr and "int" in result.stderr, result
+            if name in {"exception_forwarding_object", "exception_recursive_dynamic_list"}:
+                assert "forwarding exception fields require" in result.stderr, result
             passed += 1
         cases = [(name, source, None) for name, source in ACCEPTED.items()]
         cases += [

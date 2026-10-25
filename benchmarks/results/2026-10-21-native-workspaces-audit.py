@@ -25,12 +25,12 @@ import tempfile
 if sys.flags.optimize:
     raise SystemExit('audit requires assertions; do not use -O')
 sys.dont_write_bytecode = True
-ROOT = Path('/home/dev-user/code/oss/relar-workspaces-20261021')
+ROOT = Path('/home/dev-user/code/oss/imre-workspaces-20261021')
 REVISION = '7c5c426f9a890b8a805ffd1155ffd3371673ed04'
 BUILD_REVISION = '2e0eac85ad0eea462be9c4feeffa76497773822c'
-ENGINES = ('relar', 'original', 'rust')
-VALIDATION_ENGINES = ('relar', 'port', 'original', 'rust')
-ASAN_ENGINES = ('original', 'port', 'relar', 'rust')
+ENGINES = ('imre', 'original', 'rust')
+VALIDATION_ENGINES = ('imre', 'port', 'original', 'rust')
+ASAN_ENGINES = ('original', 'port', 'imre', 'rust')
 INPUTS = {}
 GIT = {}
 
@@ -199,7 +199,7 @@ def check_row(validator, row, description, case, commands, *, samples, warmups,
         seconds[engine] = summary['median_seconds']
         spreads[engine] = quartiles[2] - quartiles[0]
     ratios = {f'{left}_over_{right}': seconds[left] / seconds[right]
-              for left, right in [('original', 'relar'), ('relar', 'rust'), ('original', 'rust')]}
+              for left, right in [('original', 'imre'), ('imre', 'rust'), ('original', 'rust')]}
     assert {key: value for key, value in row.items() if '_over_' in key} == ratios
     if compute and row['rounds']:
         assert row['amortized_seconds'] == {engine: seconds[engine] / row['rounds'] for engine in engines}
@@ -256,7 +256,7 @@ def check_preparation(prepared, mode):
         with Path(name).open('rb') as stream:
             header = stream.read(20)
         assert header[:6] == b'\x7fELF\x02\x01' and struct.unpack('<H', header[18:20])[0] == 62
-    build = load(paths['relar_build_record'])
+    build = load(paths['imre_build_record'])
     assert build['revision'] == BUILD_REVISION and build['source_matches_revision'] and build['input_guards_passed']
     assert len(build['source_sha256']) == 74
     assert build['sha256']['compiler'] == hashes['compiler'] and build['sha256'][mode + '_runtime'] == hashes['runtime']
@@ -532,7 +532,7 @@ def check_workload_gates(validator, process_api, prepared, cases, timing_directo
 
 
 def check_asan(benchmark, validator, process_api, prepared, cases, counts):
-    directory = Path('/home/dev-user/.cache/relar-workspaces-20261021/asan-application')
+    directory = Path('/home/dev-user/.cache/imre-workspaces-20261021/asan-application')
     record = load(directory / 'record.json')
     assert record['revision'] == REVISION and record['input_guards_passed'] and record['status'] == 'passed'
     assert record['build_revision'] == BUILD_REVISION and record['compiler_runtime_sources_match']
@@ -543,10 +543,10 @@ def check_asan(benchmark, validator, process_api, prepared, cases, counts):
     assert set(record['artifacts']) == {path.relative_to(directory).as_posix()
         for path in directory.rglob('*') if path.is_file() and path != directory / 'record.json'}
     expected_hashes = {**prepared['source_and_tool_sha256'],
-                       'asan_runtime': guard('/home/dev-user/.cache/relar-workspaces-20261021/build/asan_runtime.a'),
-                       'prepared_record': guard('/home/dev-user/.cache/relar-workspaces-20261021/benchmark-normal-prepared.json')}
+                       'asan_runtime': guard('/home/dev-user/.cache/imre-workspaces-20261021/build/asan_runtime.a'),
+                       'prepared_record': guard('/home/dev-user/.cache/imre-workspaces-20261021/benchmark-normal-prepared.json')}
     assert record['source_and_tool_sha256'] == expected_hashes
-    build = load(prepared['source_and_tool_paths']['relar_build_record'])
+    build = load(prepared['source_and_tool_paths']['imre_build_record'])
     assert build['sha256']['asan_runtime'] == expected_hashes['asan_runtime']
     step = next(step for step in build['steps'] if step['name'] == 'asan')
     assert step['overrides']['RUSTFLAGS'] == '-Zsanitizer=address -Cforce-frame-pointers=yes'
@@ -558,16 +558,16 @@ def check_asan(benchmark, validator, process_api, prepared, cases, counts):
         guard(path, prepared['source_and_tool_sha256'][name])
     commands = []
     for name, entry in [('memory-report', '__main__.py'), ('memory-compute', 'compute.py')]:
-        commands.append(['/home/dev-user/.cache/relar-workspaces-20261021/build/relar', 'build', str(ROOT / 'examples/memory_report' / entry),
+        commands.append(['/home/dev-user/.cache/imre-workspaces-20261021/build/imre', 'build', str(ROOT / 'examples/memory_report' / entry),
                          '--module-root', str(ROOT / 'examples'), '-o', str(directory / name),
-                         '--runtime', '/home/dev-user/.cache/relar-workspaces-20261021/build/asan_runtime.a', '--clang', executable_paths['clang'],
+                         '--runtime', '/home/dev-user/.cache/imre-workspaces-20261021/build/asan_runtime.a', '--clang', executable_paths['clang'],
                          '--opt-level', '1', '--sanitize', '--emit-llvm', str(directory / (name + '.ll'))])
         commands.append(['/usr/bin/nm', str(directory / name)])
         assert 'sanitize_address' in (directory / (name + '.ll')).read_text()
         binary = (directory / name).read_bytes()
         assert b'__asan_init' in binary and b'__asan_report_load' in binary
         assert (directory / (name + '-compile.log')).read_text() == ''
-    commands.append(['/usr/bin/nm', '-u', '/home/dev-user/.cache/relar-workspaces-20261021/build/asan_runtime.a'])
+    commands.append(['/usr/bin/nm', '-u', '/home/dev-user/.cache/imre-workspaces-20261021/build/asan_runtime.a'])
     symbols = (directory / 'runtime-symbols.log').read_text()
     assert '__asan_report_load' in symbols and '__asan_report_store' in symbols
     commands.append([executable_paths['python'], str(ROOT / 'benchmarks/memory_validate.py'),
@@ -594,7 +594,7 @@ def check_asan(benchmark, validator, process_api, prepared, cases, counts):
         assert capture['command'] == [str(directory / ('memory-compute' if computed else 'memory-report')), *case.arguments]
         expected = (validator.compute_oracle(case) if computed else
                     validator.oracle(case) if filesystem else process_api.oracle(case))
-        check_capture(validator, case, expected, capture, 'relar', compute=computed, prepared_process=not computed and not filesystem)
+        check_capture(validator, case, expected, capture, 'imre', compute=computed, prepared_process=not computed and not filesystem)
         counts['asan_workload_executions'] += 1
     assert (record['ordinary_cases'], record['ordinary_executions'], record['compute_cases'], record['compute_executions'],
             record['process_cases'], record['process_executions'], record['workload_cases']) == (
@@ -604,7 +604,7 @@ def check_asan(benchmark, validator, process_api, prepared, cases, counts):
     assert 'AddressSanitizer' not in json.dumps(validation) and 'LeakSanitizer' not in json.dumps(validation)
     guard(directory.parent / 'application-pipeline.log')
     check_real_captures(benchmark, validator, prepared, prepared['source_and_tool_paths'], cases[0][1],
-        {'relar': [str(directory / 'memory-report')]}, counts,
+        {'imre': [str(directory / 'memory-report')]}, counts,
         guarded_bytes, lambda path: path,
         pointer=record['real_capture_validation'], count_key='asan_real_capture_executions')
 
@@ -624,8 +624,8 @@ def check_timing_command(command, prepared, timing_path, prepared_path, mode, ar
         else:
             assert key is not None
             options[key].append(argument)
-    expected = {'--rust-build-record': paths['rust_build_record'], '--relar-build-record': paths['relar_build_record'],
-                '--ruff-source': '/home/dev-user/.cache/relar-workspaces-20261021/input-sources/ruff-scripts', '--artifact-dir': str(timing_path.with_suffix('')),
+    expected = {'--rust-build-record': paths['rust_build_record'], '--imre-build-record': paths['imre_build_record'],
+                '--ruff-source': '/home/dev-user/.cache/imre-workspaces-20261021/input-sources/ruff-scripts', '--artifact-dir': str(timing_path.with_suffix('')),
                 '--output': str(timing_path), '--prepared-record': str(prepared_path), '--cpu': '31', '--samples': '48', '--warmups': '2'}
     tools = ['compiler', 'runtime', 'rust', 'python', 'clang', 'old_ty', 'new_ty']
     if mode == 'thinlto':
@@ -642,7 +642,7 @@ def check_timing_command(command, prepared, timing_path, prepared_path, mode, ar
 
 def check_timing_context_data(context, read_json, read_bytes, bind):
     """Bind readiness and serial windows without trusting stored summary ratios."""
-    cache = Path('/home/dev-user/.cache/relar-workspaces-20261021')
+    cache = Path('/home/dev-user/.cache/imre-workspaces-20261021')
     assert context['revision'] == REVISION and context['cwd'] == str(ROOT)
     assert context['status'] == 'passed' and context['outside_tool_sandbox']
     assert context['cpu'] == 31 and 31 in context['available_cpu_affinity']
@@ -691,7 +691,7 @@ def check_language_data(read_json, read_bytes, bind, source_bytes):
     def option(command, name):
         return command[command.index(name) + 1]
 
-    cache = Path('/home/dev-user/.cache/relar-workspaces-20261021')
+    cache = Path('/home/dev-user/.cache/imre-workspaces-20261021')
     build_path = cache / 'build/build-record.json'
     build = read_json(build_path)
     assert build['revision'] == BUILD_REVISION and build['source_matches_revision'] and build['input_guards_passed']
@@ -782,7 +782,7 @@ def check_language_data(read_json, read_bytes, bind, source_bytes):
     old_command = old_result['command']
     assert option(old_command, '--workers') == '4'
     assert old_command[old_command.index('--suites') + 1:old_command.index('--')] == suites
-    assert option(old_command, '--compiler') == str(build_path.parent / 'relar')
+    assert option(old_command, '--compiler') == str(build_path.parent / 'imre')
     assert option(old_command, '--runtime') == str(build_path.parent / 'normal_runtime.a')
 
     expected_logs = {'ordinary': {}, 'affected': {}}
@@ -812,7 +812,7 @@ def check_language_data(read_json, read_bytes, bind, source_bytes):
         assert datetime.fromisoformat(result['started_at']) < datetime.fromisoformat(result['finished_at'])
         command = result['command']
         assert command == language['commands'][mode]
-        assert option(command, '--compiler') == str(build_path.parent / 'relar')
+        assert option(command, '--compiler') == str(build_path.parent / 'imre')
         runtime = 'normal' if mode == 'processes-retry' else mode
         assert option(command, '--runtime') == str(build_path.parent / (runtime + '_runtime.a'))
         data = read_bytes(result['log'])
@@ -847,7 +847,7 @@ def check_language_data(read_json, read_bytes, bind, source_bytes):
                 assert f'O{level}: Passed 323 upstream native calls, 289 differential cases, and 2 compile-time type rejections' in log
         elif suite == 'luhn':
             for level in (0, 3):
-                assert f'O{level}: relar: 15 upstream calls, 1144 differential cases' in log
+                assert f'O{level}: imre: 15 upstream calls, 1144 differential cases' in log
         else:
             pattern = r'(\d+) import checks passed' if suite == 'imports' else r'Passed (\d+) '
             count = int(re.search(pattern, log).group(1))
@@ -877,22 +877,22 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--timings-complete', required=True, action='store_true')
     parser.add_argument('--output', type=Path, default=Path('/tmp/2026-10-21-native-workspaces-audit.json'))
-    parser.add_argument('--context', type=Path, default=Path('/home/dev-user/.cache/relar-workspaces-20261021/timing-context.json'))
+    parser.add_argument('--context', type=Path, default=Path('/home/dev-user/.cache/imre-workspaces-20261021/timing-context.json'))
     args = parser.parse_args()
     guard(__file__)
     context = load(args.context)
     check_timing_context_data(context, load, guarded_bytes, guard)
     counts, modes, identities = collections.Counter(), {}, {}
-    first = load('/home/dev-user/.cache/relar-workspaces-20261021/benchmark-normal-prepared.json')
+    first = load('/home/dev-user/.cache/imre-workspaces-20261021/benchmark-normal-prepared.json')
     previous = datetime.fromisoformat(context['started_at'])
-    with tempfile.TemporaryDirectory(prefix='relar-workspaces-data-audit-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='imre-workspaces-data-audit-') as temporary:
         oracle_root = Path(temporary)
         benchmark, validator = reconstruct_oracle(first, oracle_root)
         process_api = benchmark['process_api']
         for mode in ('normal', 'thinlto'):
-            timing_path = Path(f'/home/dev-user/.cache/relar-workspaces-20261021/timing-{mode}.json')
+            timing_path = Path(f'/home/dev-user/.cache/imre-workspaces-20261021/timing-{mode}.json')
             timing = load(timing_path)
-            prepared_path = Path(f'/home/dev-user/.cache/relar-workspaces-20261021/benchmark-{mode}-prepared.json')
+            prepared_path = Path(f'/home/dev-user/.cache/imre-workspaces-20261021/benchmark-{mode}-prepared.json')
             prepared = load(prepared_path, timing['preparation_record_sha256'])
             assert timing['preparation'] == prepared and timing['revision'] == REVISION and not timing['dirty']
             assert timing['kind'] == 'memory-process-benchmark' and timing['input_guards_passed']
@@ -973,19 +973,19 @@ def main():
               'compiler_build_revision': BUILD_REVISION, 'equivalent_compiler_runtime_inputs': 74,
               'scope': 'Independent replay of every process/compute/preload capture, retained filesystem, preparation/ASan result, balanced order, raw statistic, and Git/build/tool/source identity; no engine execution.',
               'counts': dict(counts), 'modes': modes, 'identities': identities, 'validation_suites': validation_suites,
-              'all_captured_process_cases_at_most_twice_rust': all(row['relar_over_rust'] <= 2 for row in processes),
-              'all_persisted_capture_cases_at_most_twice_rust': all(row['relar_over_rust'] <= 2 for row in persisted),
-              'all_atomic_filesystem_cases_at_most_twice_rust': all(row['relar_over_rust'] <= 2 for row in filesystem),
-              'all_repeated_compute_cases_at_most_twice_rust': all(row['relar_over_rust'] <= 2 for row in compute),
-              'all_real_ty_cases_at_most_twice_rust': all(row['relar_over_rust'] <= 2 for row in real),
+              'all_captured_process_cases_at_most_twice_rust': all(row['imre_over_rust'] <= 2 for row in processes),
+              'all_persisted_capture_cases_at_most_twice_rust': all(row['imre_over_rust'] <= 2 for row in persisted),
+              'all_atomic_filesystem_cases_at_most_twice_rust': all(row['imre_over_rust'] <= 2 for row in filesystem),
+              'all_repeated_compute_cases_at_most_twice_rust': all(row['imre_over_rust'] <= 2 for row in compute),
+              'all_real_ty_cases_at_most_twice_rust': all(row['imre_over_rust'] <= 2 for row in real),
               'audit_script_sha256': INPUTS[str(Path(__file__).absolute())], 'guarded_inputs': INPUTS,
               'limits': 'Reuses independently reviewed frozen oracles. Captures cannot prove historical host isolation or instruction execution. Real-workflow timings include complete ty checking. Repeated-compute estimates include preload/startup/final output and subtract no control. Upstream ties are checked semantically using retained Markdown, then their exact bytes are bound to every capture.'}
     with args.output.open('x') as stream:
         json.dump(result, stream, indent=2)
         stream.write('\n')
     print(json.dumps({'output': str(args.output), 'counts': dict(counts),
-                      'process_relar_over_rust': [row['relar_over_rust'] for row in processes],
-                      'compute_relar_over_rust': [row['relar_over_rust'] for row in compute]}, indent=2))
+                      'process_imre_over_rust': [row['imre_over_rust'] for row in processes],
+                      'compute_imre_over_rust': [row['imre_over_rust'] for row in compute]}, indent=2))
 
 
 if __name__ == '__main__':

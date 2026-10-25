@@ -1,8 +1,10 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Native allocation in Ruff’s diagnostic grouping
 
-For Ruff’s isolated grouping pass over 1,460 files, Relar built with `--allocator jemalloc` used 1.066×–1.172× the time of Rust with the same allocator in the four ordinary/ThinLTO and short/long checkout combinations. That is 43.6–49.3% of the time taken by the same Relar application compiled from identical LLVM IR with the System heap. The largest ratio in the six-engine matrix was 1.545× for per-file statistics on 146 files (Ordinary) against system-allocator Rust. The largest against matched jemalloc Rust was 1.565× for per-file statistics on 146 files (Ordinary).
+For Ruff’s isolated grouping pass over 1,460 files, Imre built with `--allocator jemalloc` used 1.066×–1.172× the time of Rust with the same allocator in the four ordinary/ThinLTO and short/long checkout combinations. That is 43.6–49.3% of the time taken by the same Imre application compiled from identical LLVM IR with the System heap. The largest ratio in the six-engine matrix was 1.545× for per-file statistics on 146 files (Ordinary) against system-allocator Rust. The largest against matched jemalloc Rust was 1.565× for per-file statistics on 146 files (Ordinary).
 
-The measured Relar source is `aa24071e3bd7d2ad7b0051a7d873d0b405ac70e5`. The Python reporter, pinned Ruff upstream and both original comparator programs retain the preceding study’s 56 source identities. Linux native builds default to the System archive. `relar build script.py --allocator jemalloc` selects the separate self-contained archive used for the performance results below. The System archive contains the ordinary Rust system allocator. The separate jemalloc archive uses `tikv-jemallocator 0.6.1` with the same `background_threads_runtime_support` feature as the matched Rust reference. The application’s complete emitted grouping, report and compute LLVM modules are byte-identical to the preceding system-heap build in both link modes. ASan and macOS use the System archive. These timing measurements were taken on Linux x86-64. [Previous grouping study](2026-10-23-diagnostic-grouping.md) · [Pinned native allocator source](https://github.com/astral-sh/relar/blob/aa24071e3bd7d2ad7b0051a7d873d0b405ac70e5/crates/relar-runtime-jemalloc/src/lib.rs)
+The measured Imre source is `aa24071e3bd7d2ad7b0051a7d873d0b405ac70e5`. The Python reporter, pinned Ruff upstream and both original comparator programs retain the preceding study’s 56 source identities. Linux native builds default to the System archive. `imre build script.py --allocator jemalloc` selects the separate self-contained archive used for the performance results below. The System archive contains the ordinary Rust system allocator. The separate jemalloc archive uses `tikv-jemallocator 0.6.1` with the same `background_threads_runtime_support` feature as the matched Rust reference. The application’s complete emitted grouping, report and compute LLVM modules are byte-identical to the preceding system-heap build in both link modes. ASan and macOS use the System archive. These timing measurements were taken on Linux x86-64. [Previous grouping study](2026-10-23-diagnostic-grouping.md) · [Pinned native allocator source](https://github.com/astral-sh/imre/blob/aa24071e3bd7d2ad7b0051a7d873d0b405ac70e5/crates/imre-runtime-jemalloc/src/lib.rs)
 
 The release CLI was checked at `e483582`. Its relevant source trees match the integrated `e78c84a` checkout used for the live reporter. Rebuilding the 15 System, jemalloc and ASan program combinations with the recorded temporary LLVM filename reproduced their complete ELF bytes and emitted IR. The recorded filename preserves the ELF input-file metadata.
 
@@ -10,24 +12,24 @@ The release CLI was checked at `e483582`. Its relevant source trees match the in
 
 The same-host admission compares the preceding Ruff program on the System heap, the current program, original Rust and Rust using the identical allocator. The input has 12,690 diagnostic groups, 1,460 distinct source filenames and a separately checked, fully ordered diagnostic stream. The long and short checkouts have 71 and 24 shared path-prefix bytes respectively at this scale. Every median is the in-process work per pass from a fresh paired zero/12-round process observation. The eight engine/path treatments rotate through 16 balanced orders.
 
-| Link | Checkout | Prior Relar ms | Relar ms | Rust System ms | Rust jemalloc ms | Relar / Rust System | Relar / Rust jemalloc |
+| Link | Checkout | Prior Imre ms | Imre ms | Rust System ms | Rust jemalloc ms | Imre / Rust System | Imre / Rust jemalloc |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Ordinary | long | 39.873 | 19.647 | 20.114 | 16.803 | 0.977× | 1.169× |
 | Ordinary | short | 38.400 | 18.591 | 18.092 | 15.860 | 1.028× | 1.172× |
 | ThinLTO | long | 35.955 | 15.663 | 17.382 | 14.689 | 0.901× | 1.066× |
 | ThinLTO | short | 33.598 | 14.764 | 15.461 | 13.283 | 0.955× | 1.112× |
 
-The default System heap reached 2.280× on the prior short-root ThinLTO treatment, above the 2× target. The current default reproduces every file-backed mapped ELF section of all six prior grouping, report and compute binaries except the 20-byte GNU build ID. Packed-record and borrowed-key experiments retained that limit and were excluded. The opt-in allocator’s 1,460-file complete report times in the eight same-schedule change-state, root and mode combinations were 0.838×–0.888× the time of the prior system-heap Relar. The archive contains that earlier candidate’s failed admission, the intermediate selector’s completed ordinary panel, four grouping comparisons and eight full-report comparisons across both checkout roots and link modes.
+The default System heap reached 2.280× on the prior short-root ThinLTO treatment, above the 2× target. The current default reproduces every file-backed mapped ELF section of all six prior grouping, report and compute binaries except the 20-byte GNU build ID. Packed-record and borrowed-key experiments retained that limit and were excluded. The opt-in allocator’s 1,460-file complete report times in the eight same-schedule change-state, root and mode combinations were 0.838×–0.888× the time of the prior system-heap Imre. The archive contains that earlier candidate’s failed admission, the intermediate selector’s completed ordinary panel, four grouping comparisons and eight full-report comparisons across both checkout roots and link modes.
 
-The prior typed-string port skipped filesystem resolution in `collect_file_stats`. With two path aliases for one source its validator produces five file rows where Ruff, current Relar and Rust produce four. The current grouping and statistics implementations and the Rust comparator resolve the filesystem paths on each measured pass. [Codon adapters](../codon_native/README.md) · [Ruff grouping comparison](2026-10-23-diagnostic-grouping.md)
+The prior typed-string port skipped filesystem resolution in `collect_file_stats`. With two path aliases for one source its validator produces five file rows where Ruff, current Imre and Rust produce four. The current grouping and statistics implementations and the Rust comparator resolve the filesystem paths on each measured pass. [Codon adapters](../codon_native/README.md) · [Ruff grouping comparison](2026-10-23-diagnostic-grouping.md)
 
 ## Six engines across both link modes
 
-Times are milliseconds. CPython runs the original Ruff implementations and the current typed port. Relar before uses the genuine prior typed-string program at `1784527`. Native Codon 0.20.4 uses concrete lists and dictionaries, native JSON, RE2, native `Path` resolution and signed 64-bit integers. The original Rust implementation uses its normal System heap. Changed runs compare ty 0.0.60 with 0.0.90, and unchanged runs compare 0.0.90 with itself. All engines process the same source and analyzer records. Every complete report and ordered diagnostic dump is checked against Ruff. Each panel includes a warmup and 12 balanced measured observations per implementation. The two six-engine matrices retain 3,744 individual process runs, the matched three-engine matrices 1,872, and the two-root admission another 1,088. Kernel/repeated-compute timings subtract interleaved input/preload controls. Complete reports start a fresh CLI, read the saved analyzer outputs and source files, and publish the report. The live-checkout panel below measures running both ty analyzers as well. The matched-Rust ratio in the last column comes from an independent three-engine panel, with a fresh Relar numerator and both Rust heap choices.
+Times are milliseconds. CPython runs the original Ruff implementations and the current typed port. Imre before uses the genuine prior typed-string program at `1784527`. Native Codon 0.20.4 uses concrete lists and dictionaries, native JSON, RE2, native `Path` resolution and signed 64-bit integers. The original Rust implementation uses its normal System heap. Changed runs compare ty 0.0.60 with 0.0.90, and unchanged runs compare 0.0.90 with itself. All engines process the same source and analyzer records. Every complete report and ordered diagnostic dump is checked against Ruff. Each panel includes a warmup and 12 balanced measured observations per implementation. The two six-engine matrices retain 3,744 individual process runs, the matched three-engine matrices 1,872, and the two-root admission another 1,088. Kernel/repeated-compute timings subtract interleaved input/preload controls. Complete reports start a fresh CLI, read the saved analyzer outputs and source files, and publish the report. The live-checkout panel below measures running both ty analyzers as well. The matched-Rust ratio in the last column comes from an independent three-engine panel, with a fresh Imre numerator and both Rust heap choices.
 
 ### Ordinary
 
-| Scale | Workload | Upstream CPython | Typed CPython | Relar before | Relar | Codon | Rust System | Relar / Rust System | Relar / Rust jemalloc |
+| Scale | Workload | Upstream CPython | Typed CPython | Imre before | Imre | Codon | Rust System | Imre / Rust System | Imre / Rust jemalloc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1× | Group diagnostic records | 3.938 | 3.659 | 5.960 | 1.631 | 6.819 | 1.750 | 0.932× | 1.128× |
 | 1× | Compare diagnostics | 1.458 | 1.464 | 0.127 | 0.106 | 1.767 | 0.092 | 1.146× | 1.305× |
@@ -48,7 +50,7 @@ Times are milliseconds. CPython runs the original Ruff implementations and the c
 
 ### ThinLTO
 
-| Scale | Workload | Upstream CPython | Typed CPython | Relar before | Relar | Codon | Rust System | Relar / Rust System | Relar / Rust jemalloc |
+| Scale | Workload | Upstream CPython | Typed CPython | Imre before | Imre | Codon | Rust System | Imre / Rust System | Imre / Rust jemalloc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1× | Group diagnostic records | 3.874 | 3.511 | 4.662 | 1.202 | 6.851 | 1.503 | 0.799× | 0.996× |
 | 1× | Compare diagnostics | 1.480 | 1.462 | 0.079 | 0.059 | 1.750 | 0.063 | 0.941× | 1.302× |
@@ -67,11 +69,11 @@ Times are milliseconds. CPython runs the original Ruff implementations and the c
 | 10× | Complete report unchanged diff | 893.632 | 1,915.750 | 280.760 | 241.274 | 591.333 | 215.800 | 1.118× | 1.200× |
 | 10× | Repeat full report computation | 700.186 | 1,675.845 | 167.801 | 133.121 | 478.087 | 138.112 | 0.964× | 0.966× |
 
-The primary and matched panels ran serially on CPU 31 of the same AMD EPYC-Milan Linux x86-64 host. Relar and Rust used clang 18.1.3 and Rust 1.99.0-dev (Ohm 1.99.0-7). The comparison engines included CPython 3.14.5 and AOT-native Codon 0.20.4. The matched three-engine panels retained the exact paired sample ordering, executable identities and both absolute native Rust denominators.
+The primary and matched panels ran serially on CPU 31 of the same AMD EPYC-Milan Linux x86-64 host. Imre and Rust used clang 18.1.3 and Rust 1.99.0-dev (Ohm 1.99.0-7). The comparison engines included CPython 3.14.5 and AOT-native Codon 0.20.4. The matched three-engine panels retained the exact paired sample ordering, executable identities and both absolute native Rust denominators.
 
 **Ordinary matched native milliseconds**
 
-| Case | Relar | Rust System | Rust jemalloc | Relar / Rust jemalloc |
+| Case | Imre | Rust System | Rust jemalloc | Imre / Rust jemalloc |
 | --- | --- | --- | --- | --- |
 | 1x/changed-github/group | 1.614 | 1.759 | 1.431 | 1.128× |
 | 10x/changed-github/group | 19.849 | 20.269 | 16.916 | 1.173× |
@@ -80,7 +82,7 @@ The primary and matched panels ran serially on CPU 31 of the same AMD EPYC-Milan
 
 **ThinLTO matched native milliseconds**
 
-| Case | Relar | Rust System | Rust jemalloc | Relar / Rust jemalloc |
+| Case | Imre | Rust System | Rust jemalloc | Imre / Rust jemalloc |
 | --- | --- | --- | --- | --- |
 | 1x/changed-github/group | 1.222 | 1.511 | 1.228 | 0.996× |
 | 10x/changed-github/group | 16.077 | 17.719 | 14.896 | 1.079× |
@@ -91,7 +93,7 @@ The primary and matched panels ran serially on CPU 31 of the same AMD EPYC-Milan
 
 Peak process RSS was measured separately for the complete changed GitHub report. Every engine published the same file in each of six measured fresh processes plus a warmup per input and link mode. Values below are MiB (KiB / 1,024).
 
-| Link | Scale | Older typed port | Prior Relar System | Relar jemalloc | Rust System | Upstream CPython | Typed CPython | Codon |
+| Link | Scale | Older typed port | Prior Imre System | Imre jemalloc | Rust System | Upstream CPython | Typed CPython | Codon |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Ordinary | 1× | 9.5 | 9.7 | 10.2 | 7.7 | 27.0 | 23.8 | 19.5 |
 | Ordinary | 10× | 46.7 | 46.2 | 44.5 | 54.7 | 91.7 | 74.1 | 115.0 |
@@ -100,16 +102,16 @@ Peak process RSS was measured separately for the complete changed GitHub report.
 
 In the separate three-engine native RSS panel, all 84 published files matched the upstream oracle. Each cell is the median of six fresh processes after one warmup, using the same GNU time executable and isolated CPU.
 
-| Native RSS, MiB | Scale | Relar jemalloc | Rust System | Rust jemalloc |
+| Native RSS, MiB | Scale | Imre jemalloc | Rust System | Rust jemalloc |
 | --- | --- | --- | --- | --- |
 | Ordinary | 1× | 10.1 | 7.7 | 9.0 |
 | Ordinary | 10× | 44.6 | 54.7 | 60.5 |
 | ThinLTO | 1× | 11.5 | 8.2 | 9.5 |
 | ThinLTO | 10× | 46.0 | 55.2 | 58.8 |
 
-On a separate Linux host, all four live programs and their subprocesses shared the same two cores. The genuine 146-file checkout ran both pinned ty versions, 0.0.60 and 0.0.90, for each complete process. Across 12 balanced measurements per engine, upstream CPython took 781.61 ms, default System Relar took 724.21 ms, Relar with jemalloc took 716.74 ms and Rust took 711.44 ms (1.018× and 1.007× respectively). Each of the 52 warmup/measured runs published the complete 109,258-byte changed GitHub output. All four genuine changed/unchanged GitHub/diff files also matched by byte across the four programs.
+On a separate Linux host, all four live programs and their subprocesses shared the same two cores. The genuine 146-file checkout ran both pinned ty versions, 0.0.60 and 0.0.90, for each complete process. Across 12 balanced measurements per engine, upstream CPython took 781.61 ms, default System Imre took 724.21 ms, Imre with jemalloc took 716.74 ms and Rust took 711.44 ms (1.018× and 1.007× respectively). Each of the 52 warmup/measured runs published the complete 109,258-byte changed GitHub output. All four genuine changed/unchanged GitHub/diff files also matched by byte across the four programs.
 
-On the separate profiling host, ordinary Callgrind counted 170,194,324 guest instructions per 10× grouping pass on the old Relar System build and 143,359,872 on this Relar jemalloc build. The unchanged Rust System and matched Rust jemalloc took 169,523,366 and 145,405,522. The zero/four-round profiles directly count zero/four calls to the grouping function. The profiles count instructions and the RSS study measures process high-water. Statically linked jemalloc serves allocations internally, beyond libc-based DHAT interception. In the preceding System-heap DHAT runs the same pass allocated 126,670 blocks and 12.84 MiB in Relar, versus 172,695 blocks and 20.51 MiB in Rust.
+On the separate profiling host, ordinary Callgrind counted 170,194,324 guest instructions per 10× grouping pass on the old Imre System build and 143,359,872 on this Imre jemalloc build. The unchanged Rust System and matched Rust jemalloc took 169,523,366 and 145,405,522. The zero/four-round profiles directly count zero/four calls to the grouping function. The profiles count instructions and the RSS study measures process high-water. Statically linked jemalloc serves allocations internally, beyond libc-based DHAT interception. In the preceding System-heap DHAT runs the same pass allocated 126,670 blocks and 12.84 MiB in Imre, versus 172,695 blocks and 20.51 MiB in Rust.
 
 ## Effects on other programs
 

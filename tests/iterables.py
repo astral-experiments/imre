@@ -9,6 +9,10 @@ from assignments import main
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "iterables"
 
 REJECTED = {
+    "ndiff_escape": 'from difflib import ndiff\nrows = ndiff(["a"], ["b"])\n',
+    "ndiff_element_type": 'from difflib import ndiff\nrows = list(ndiff([1], [2]))\n',
+    "generator_mapping_alias": 'from collections.abc import Iterator\nclass Example:\n    def __init__(self) -> None:\n        self.rows: dict[str, int] = {"a": 1}\n    def rows_view(self) -> Iterator[tuple[str, int]]:\n        yield from self.rows.items()\nprint(len(list(Example().rows_view())))\n',
+    "generator_early_return": 'from collections.abc import Iterator\nclass Example:\n    def __init__(self) -> None:\n        pass\n    def values(self, stop: bool) -> Iterator[int]:\n        if stop:\n            return [2]\n        yield from [1]\nprint(len(list(Example().values(True))))\n',
     "list_scalar": "print(len(list(1)))\n",
     "list_none": "print(len(list(None)))\n",
     "list_extra": "values = list([1], [2])\n",

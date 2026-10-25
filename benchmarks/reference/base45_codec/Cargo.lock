@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "relar-base45-reference"
+name = "imre-base45-reference"
 version = "0.1.0"

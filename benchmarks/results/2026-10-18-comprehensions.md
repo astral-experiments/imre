@@ -1,12 +1,12 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # Typed comprehensions and inventory reconciliation
 
-Relar now compiles eager typed list, dictionary, and set comprehensions, including nested `for` clauses and ordered filters. This is the next capability milestone because it builds directly on existing iteration, containers, concrete layouts, and exception cleanup. It makes filtering, flattening, and constructing typed collections practical in ordinary application code.
+Imre now compiles eager typed list, dictionary, and set comprehensions, including nested `for` clauses and ordered filters. This is the next capability milestone because it builds directly on existing iteration, containers, concrete layouts, and exception cleanup. It makes filtering, flattening, and constructing typed collections practical in ordinary application code.
 
-The new inventory reconciler runs unchanged on CPython and Relar. With matched ThinLTO, its two 16,384-positive-request workloads run **1.79–2.24× faster than CPython** and take **1.56–1.57× Rust BigInt's time**. Ordinary builds run **1.29–1.58× faster than CPython** and take **1.90–2.00× Rust's time**. Rust remains faster on these substantial workloads. The unchanged incremental-planner controls have overlapping interquartile ranges and median changes below 0.9% in both modes.
+The new inventory reconciler runs unchanged on CPython and Imre. With matched ThinLTO, its two 16,384-positive-request workloads run **1.79–2.24× faster than CPython** and take **1.56–1.57× Rust BigInt's time**. Ordinary builds run **1.29–1.58× faster than CPython** and take **1.90–2.00× Rust's time**. Rust remains faster on these substantial workloads. The unchanged incremental-planner controls have overlapping interquartile ranges and median changes below 0.9% in both modes.
 
-The compiler implementation is `615aa4175280a2a0cedf7f549720a2578e246d4e`. The application, Rust reference, oracle, benchmark harness, and clean measured checkout are `edbbab93b26ccca638c7bf74336baef0d0fab4cd`. The tool build predates the application commit and records its then-untracked files; every compiled source hash matches both commits. The preserved control executable comes from the [concrete-layout comparison](2026-10-18-concrete-layouts.md), whose implementation is `6d0db50ab7851f4321704e6f97b79a2d92d58606`. The compiler and example continue the existing PR stack in [PR 25](https://github.com/viarius-experiments/relar/pull/25) and [PR 26](https://github.com/viarius-experiments/relar/pull/26).
+The compiler implementation is `615aa4175280a2a0cedf7f549720a2578e246d4e`. The application, Rust reference, oracle, benchmark harness, and clean measured checkout are `edbbab93b26ccca638c7bf74336baef0d0fab4cd`. The tool build predates the application commit and records its then-untracked files; every compiled source hash matches both commits. The preserved control executable comes from the [concrete-layout comparison](2026-10-18-concrete-layouts.md), whose implementation is `6d0db50ab7851f4321704e6f97b79a2d92d58606`. The compiler and example continue the existing PR stack in [PR 25](https://github.com/viarius-experiments/imre/pull/25) and [PR 26](https://github.com/viarius-experiments/imre/pull/26).
 
 ## Capability and semantics
 
@@ -39,7 +39,7 @@ Dense cases repeat 64 stock SKUs. Sparse cases include many unique and unknown S
 
 ## Measurement method
 
-Each mode measures six inventory workloads with CPython, Relar, and Rust BigInt, and separately compares five unchanged incremental workloads with CPython, preserved Relar, and new Relar. The recorded execution order is controls followed by inventory. Every workload has 30 measured rounds containing all six engine permutations five times, plus two warmups per engine. Positions and directed within-round predecessors are balanced; cross-round predecessors and workload order are not. Across both modes, all **1,980 measured executions and 132 warmups** passed complete output checks, with no discarded samples.
+Each mode measures six inventory workloads with CPython, Imre, and Rust BigInt, and separately compares five unchanged incremental workloads with CPython, preserved Imre, and new Imre. The recorded execution order is controls followed by inventory. Every workload has 30 measured rounds containing all six engine permutations five times, plus two warmups per engine. Positions and directed within-round predecessors are balanced; cross-round predecessors and workload order are not. Across both modes, all **1,980 measured executions and 132 warmups** passed complete output checks, with no discarded samples.
 
 Every sample starts a fresh process pinned to CPU 0. Inventory runs use fresh temporary directories. Timing includes startup/imports, input open/read/decode/parse, eager collection construction, fulfillment, full report rendering and writes, explicit flush/close, and exit. Builds, oracle execution, fixture preparation, comparison/hashing, and deletion are outside the timer. Inputs and executable pages are warm, output is not fsynced, and CPython uses its normal warmed bytecode cache. Full validation precedes timing; the session record verifies the 12 application/control package cache headers against source and preserves identical before/after cache hashes. It does not inventory the entire Python standard-library cache.
 
@@ -47,11 +47,11 @@ Ordinary and ThinLTO sessions ran sequentially outside ptrace after the task's b
 
 ## Inventory results
 
-Times are median milliseconds with observed Q1–Q3 in brackets. These ranges describe sample spread, not confidence intervals. Ratios divide medians; `Relar/Rust` above one means Rust is faster.
+Times are median milliseconds with observed Q1–Q3 in brackets. These ranges describe sample spread, not confidence intervals. Ratios divide medians; `Imre/Rust` above one means Rust is faster.
 
 ### Ordinary linking
 
-| Input | CPython [Q1–Q3] | Relar [Q1–Q3] | Rust BigInt [Q1–Q3] | CPython/Relar | Relar/Rust |
+| Input | CPython [Q1–Q3] | Imre [Q1–Q3] | Rust BigInt [Q1–Q3] | CPython/Imre | Imre/Rust |
 |---|---:|---:|---:|---:|---:|
 | empty | 26.99 [26.76–27.41] | 2.19 [2.13–2.26] | 2.26 [2.17–2.34] | 12.33× | 0.97× |
 | boundary-128 | 27.98 [27.76–28.37] | 3.03 [2.95–3.10] | 2.70 [2.62–2.87] | 9.23× | 1.12× |
@@ -62,7 +62,7 @@ Times are median milliseconds with observed Q1–Q3 in brackets. These ranges de
 
 ### ThinLTO
 
-| Input | CPython [Q1–Q3] | Relar [Q1–Q3] | Rust BigInt [Q1–Q3] | CPython/Relar | Relar/Rust |
+| Input | CPython [Q1–Q3] | Imre [Q1–Q3] | Rust BigInt [Q1–Q3] | CPython/Imre | Imre/Rust |
 |---|---:|---:|---:|---:|---:|
 | empty | 26.71 [26.48–27.27] | 2.12 [2.09–2.23] | 2.14 [2.10–2.20] | 12.60× | 0.99× |
 | boundary-128 | 29.37 [28.70–30.00] | 3.09 [2.88–3.36] | 2.74 [2.63–3.06] | 9.50× | 1.13× |
@@ -71,13 +71,13 @@ Times are median milliseconds with observed Q1–Q3 in brackets. These ranges de
 | dense-16384 | 74.34 [73.76–75.77] | 33.17 [32.89–33.87] | 21.27 [20.97–21.73] | 2.24× | 1.56× |
 | sparse-16384 | 106.26 [104.18–107.48] | 59.28 [58.77–59.94] | 37.83 [37.38–38.66] | 1.79× | 1.57× |
 
-Empty and boundary cases include a substantial startup and small-file floor, but these measurements do not isolate those costs; their large CPython ratios do not establish a similar computational speedup. The empty Relar/Rust ranges overlap. ThinLTO helps the large native application, but the two modes were separate sessions, so the report uses within-session engine comparisons as its main result. No C benchmark was performed.
+Empty and boundary cases include a substantial startup and small-file floor, but these measurements do not isolate those costs; their large CPython ratios do not establish a similar computational speedup. The empty Imre/Rust ranges overlap. ThinLTO helps the large native application, but the two modes were separate sessions, so the report uses within-session engine comparisons as its main result. No C benchmark was performed.
 
 ## Unchanged-program controls
 
 These are the exact incremental-planner sources and captured inputs from the concrete-layout report. `Change` is `new / preserved − 1`; negative is faster. The generated IR identity and overlapping ranges support the conclusion that comprehensions introduce no observed material regression in these existing programs.
 
-| Mode / input | CPython | Preserved Relar [Q1–Q3] | New Relar [Q1–Q3] | Change |
+| Mode / input | CPython | Preserved Imre [Q1–Q3] | New Imre [Q1–Q3] | Change |
 |---|---:|---:|---:|---:|
 | Ordinary / layered-16384-sparse | 113.57 | 50.32 [49.92–50.60] | 50.24 [50.05–50.81] | -0.16% |
 | Ordinary / layered-16384-all | 194.79 | 74.86 [74.01–75.63] | 75.07 [74.11–76.39] | +0.27% |
@@ -100,7 +100,7 @@ The eight suites cover integers, imports, classes, containers, exceptions, inter
 
 Both timing modes pass the full inventory oracle for all three engines and all 172 existing incremental graph/parser cases for their three control engines before measurement. Each inventory workload also gets a full untimed gate. A separately built, fully instrumented inventory application passes the 176-case oracle and device failure with leak detection, using the same final compiler/runtime sources.
 
-The host is Linux x86-64 on AMD EPYC-Milan. CPython 3.14.5 has the GIL enabled, JIT disabled, and recorded PGO/LTO configuration. Relar uses Clang 18.1.3 and Rust 1.98.1-dev (`f62703110`, Ohm `ohm-1.98.1-1`, LLVM 22.1.8). ThinLTO uses LLD 22.1.8 and import/inline budgets of 1000 for both native implementations. Backend versions and language/runtime implementations still differ. Inventory AOT compilation takes 0.621 seconds ordinary and 6.745 seconds with ThinLTO, excluding compiler/runtime builds and all execution timings.
+The host is Linux x86-64 on AMD EPYC-Milan. CPython 3.14.5 has the GIL enabled, JIT disabled, and recorded PGO/LTO configuration. Imre uses Clang 18.1.3 and Rust 1.98.1-dev (`f62703110`, Ohm `ohm-1.98.1-1`, LLVM 22.1.8). ThinLTO uses LLD 22.1.8 and import/inline budgets of 1000 for both native implementations. Backend versions and language/runtime implementations still differ. Inventory AOT compilation takes 0.621 seconds ordinary and 6.745 seconds with ThinLTO, excluding compiler/runtime builds and all execution timings.
 
 ## Evidence and reproduction
 

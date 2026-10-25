@@ -161,7 +161,7 @@ def corpus(codec, tests) -> list[tuple[str, str, bytes]]:
             cases.append((f"malformed-{operation}-{index}", operation, value))
     for index, value in enumerate(("\u0301", "\U000e0100")):
         for operation in ("decode-bytes", "decode-text"):
-            # Relar must preserve CPython's printable combining characters. The
+            # Imre must preserve CPython's printable combining characters. The
             # Rust diagnostic adapter deliberately uses Rust's Unicode quoting.
             cases.append(
                 (
@@ -237,7 +237,7 @@ def validate(binary: Path, compiler: Path, directory: Path) -> dict:
             )
             expected_type = "bytes" if operation == "encode" else "str | bytes"
             diagnostic = (
-                f"Relar: expected {expected_type}, got int; "
+                f"Imre: expected {expected_type}, got int; "
                 "annotations are enforced contracts"
             )
             assert checked.returncode == 1 and not checked.stdout, checked
@@ -375,7 +375,7 @@ def main() -> None:
         parser.error("--binary and --compiler must be supplied together")
     if not args.binary and not args.rust:
         parser.error("provide --binary with --compiler, or --rust")
-    with tempfile.TemporaryDirectory(prefix="relar-base45-validation-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="imre-base45-validation-") as temporary:
         if args.binary:
             record = validate(
                 args.binary.resolve(), args.compiler.resolve(), Path(temporary)

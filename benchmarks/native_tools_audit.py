@@ -23,10 +23,10 @@ if sys.flags.optimize or sys.version_info < (3, 14):
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-ENGINES = ("relar", "port", "original", "codon", "rust")
+ENGINES = ("imre", "port", "original", "codon", "rust")
 PACKAGES = {"catalog": "python_catalog", "conformance": "conformance_report"}
-PAIRS = (("relar", "rust"), ("codon", "rust"), ("original", "relar"),
-         ("port", "relar"), ("codon", "relar"), ("original", "rust"))
+PAIRS = (("imre", "rust"), ("codon", "rust"), ("original", "imre"),
+         ("port", "imre"), ("codon", "imre"), ("original", "rust"))
 SENTINEL = b"replace this previous complete output\n"
 GUARDS = {}
 TREES = {}
@@ -150,15 +150,15 @@ def provenance(prepared):
         upstream = ROOT / "examples" / package / "upstream"
         for name, expected in read_json(upstream / "UPSTREAM.json")["files"].items():
             bind(upstream / name, expected)
-    build = prepared["build_records"]["relar"]
-    assert read_json(paths["relar_build_record"]) == build
+    build = prepared["build_records"]["imre"]
+    assert read_json(paths["imre_build_record"]) == build
     assert build["status"] == "passed" and build["input_guards_passed"]
     assert build["source_matches_revision"] or prepared["dirty"]
     assert build["target"] == prepared["effective_target"]
     bind(paths["compiler"], build["sha256"]["compiler"])
     bind(paths["runtime"], build["sha256"]["thinlto_runtime" if prepared["thinlto"] else "normal_runtime"])
-    bind(paths["relar_builder"], build["driver_sha256"])
-    bind(paths["relar_retained_builder"], build["driver_sha256"])
+    bind(paths["imre_builder"], build["driver_sha256"])
+    bind(paths["imre_retained_builder"], build["driver_sha256"])
     for name, expected in build["source_sha256"].items():
         bind(ROOT / name, expected)
     for item in (build, *prepared["build_records"]["rust"].values()):
@@ -193,7 +193,7 @@ def provenance(prepared):
         assert read_json(paths[tool + "_codon_record"]) == codon
         assert codon["status"] == "passed" and codon["release"] == "v0.20.4"
         assert codon["domain"]["python_interop"] is False
-        assert codon["environment_overrides"]["CODON_PYTHON"] == "/nonexistent/relar-native-codon-libpython.so"
+        assert codon["environment_overrides"]["CODON_PYTHON"] == "/nonexistent/imre-native-codon-libpython.so"
         bind(codon["compiler"], codon["compiler_sha256"])
         for name, expected in codon["source_inputs"].items():
             bind(name, expected)
@@ -295,7 +295,7 @@ def commands(prepared, row, catalog, conformance):
     else:
         port = (conformance.python_compute_command if compute else conformance.python_command)(paths["python"])
         original = (conformance.original_compute_command if compute else conformance.original_command)(paths["python"])
-    result = {"relar": [app["compute_binary" if compute else "binary"]], "port": port, "original": original,
+    result = {"imre": [app["compute_binary" if compute else "binary"]], "port": port, "original": original,
               "codon": [paths[row["tool"] + "_codon" + ("-compute" if compute else "")]],
               "rust": [paths[row["tool"] + "_rust"], *(["--compute"] if compute else [])]}
     assert all(result[name][1:4] == ["-P", "-s", "-B"] for name in ("port", "original"))
@@ -364,7 +364,7 @@ def audit_mode(record, catalog, conformance):
     assert record["python"]["jit_enabled"] is False
     assert record["environment"] == {"PATH": "/usr/bin:/bin", "HOME": "<engine-working-directory>/home",
         "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC", "PYTHONHASHSEED": "0", "PYTHON_JIT": "0",
-        "CODON_PYTHON": "/nonexistent/relar-native-codon-libpython.so", "PYTHONPATH": ""}
+        "CODON_PYTHON": "/nonexistent/imre-native-codon-libpython.so", "PYTHONPATH": ""}
     assert len(record["cpu"]["affinity"]) == 1
     assert record["cpu"]["affinity"][0] in record["cpu"]["allowed_cpus_before_pinning"]
     provenance(prepared)
@@ -452,7 +452,7 @@ def main():
         prepared = record["preparation"]
         roots = [ROOT, *(Path(item["directory"]) for item in prepared["inputs"].values()),
                  *(Path(app["binary"]).parent for app in prepared["applications"].values()),
-                 *(Path(row["gates"]["relar"]["cwd"]).parents[1] for row in record["workloads"])]
+                 *(Path(row["gates"]["imre"]["cwd"]).parents[1] for row in record["workloads"])]
         assert all(not output.is_relative_to(path.resolve()) for path in roots)
     result = {"schema": 1, "kind": "native-tools-audit", "status": "failed",
               "audit_script_sha256": bind(__file__), "records": {str(path.resolve()): bind(path) for path in args.records},

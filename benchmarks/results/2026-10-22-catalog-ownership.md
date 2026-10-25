@@ -1,19 +1,21 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Reducing record and string allocations in uv’s catalog
 
-Relar compiled the same streaming Python program against the same release index. At 10× its ordinary build made **73.5% fewer heap allocations** and executed **20.6% fewer instructions** than the previous build. Across all four inputs and both native build modes, complete runs took **1.11–1.22× Rust’s time**.
+Imre compiled the same streaming Python program against the same release index. At 10× its ordinary build made **73.5% fewer heap allocations** and executed **20.6% fewer instructions** than the previous build. Across all four inputs and both native build modes, complete runs took **1.11–1.22× Rust’s time**.
 
 ## Complete process time
 
-Median wall time in seconds, including startup, input, selection and writing the catalog. Each input ran in 14 position-balanced rounds on one AMD EPYC Milan CPU. The first CPython column runs uv’s upstream program. The second runs the typed streaming Python that Relar compiled. Codon and Rust use the existing ports. Parentheses give Relar’s elapsed time divided by Rust’s in the same build mode.
+Median wall time in seconds, including startup, input, selection and writing the catalog. Each input ran in 14 position-balanced rounds on one AMD EPYC Milan CPU. The first CPython column runs uv’s upstream program. The second runs the typed streaming Python that Imre compiled. Codon and Rust use the existing ports. Parentheses give Imre’s elapsed time divided by Rust’s in the same build mode.
 
-| Input | Upstream CPython | Typed CPython | Codon | Relar | Rust | Relar ThinLTO | Rust ThinLTO |
+| Input | Upstream CPython | Typed CPython | Codon | Imre | Rust | Imre ThinLTO | Rust ThinLTO |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1× plain | 0.993 | 2.622 | 0.550 | 0.128 (1.22×) | 0.105 | 0.095 (1.20×) | 0.079 |
 | 1× gzip | 1.060 | 2.660 | 0.591 | 0.149 (1.17×) | 0.128 | 0.115 (1.16×) | 0.099 |
 | 10× plain | 10.489 | 23.897 | 4.809 | 0.891 (1.21×) | 0.736 | 0.620 (1.20×) | 0.517 |
 | 10× gzip | 11.196 | 24.298 | 4.954 | 1.071 (1.12×) | 0.957 | 0.787 (1.11×) | 0.709 |
 
-The ordinary Relar build ran 7.10–11.77× faster than upstream CPython and 3.96–5.40× faster than Codon. 1 of 112 individual same-round ratios exceeded 2×. The largest was 2.15×.
+The ordinary Imre build ran 7.10–11.77× faster than upstream CPython and 3.96–5.40× faster than Codon. 1 of 112 individual same-round ratios exceeded 2×. The largest was 2.15×.
 
 ## What changed
 
@@ -29,7 +31,7 @@ A focused control cycled over 256 escaped URLs from the actual index. Across 24 
 
 These are whole-process ordinary builds on plain input. The 1× profiles were collected on a second host. The 10× profiles use the timing host. Callgrind counts simulated instructions. DHAT counts allocation requests and bytes over the process lifetime, and live heap at its high-water mark. MB uses decimal bytes in this table.
 
-| Input | Metric | Relar before | Relar after | Rust | Change |
+| Input | Metric | Imre before | Imre after | Rust | Change |
 | --- | --- | ---: | ---: | ---: | ---: |
 | 1× plain | Heap allocations | 579,045 | 232,597 | 341,071 | -59.8% |
 | 1× plain | Cumulative allocated MB | 95.27 | 75.22 | 64.81 | -21.1% |
@@ -40,11 +42,11 @@ These are whole-process ordinary builds on plain input. The 1× profiles were co
 | 10× plain | Peak live heap MB | 12.14 | 12.30 | 9.20 | +1.3% |
 | 10× plain | Instructions, millions | 8,181.5 | 6,496.7 | 5,141.9 | -20.6% |
 
-On 10× plain input the site counts reconcile exactly. Relar eliminated 1,156,812 filename owner and buffer allocations, 504,930 record allocations and 2,132,342 copied JSON string allocations. The cache added 19 bookkeeping allocations. Reading physical rows and materializing the strings from `splitlines()` together account for 398,481,334 bytes, or 72.7% of the remaining allocation traffic. The optimized trace attributes 38.5% of process instructions, including callees, to typed JSON decoding and 17.7% to dictionary lookups. Relar and Rust each executed 760.7 million exclusive instructions in the underlying JSON scanner, `skip_to_escape`.
+On 10× plain input the site counts reconcile exactly. Imre eliminated 1,156,812 filename owner and buffer allocations, 504,930 record allocations and 2,132,342 copied JSON string allocations. The cache added 19 bookkeeping allocations. Reading physical rows and materializing the strings from `splitlines()` together account for 398,481,334 bytes, or 72.7% of the remaining allocation traffic. The optimized trace attributes 38.5% of process instructions, including callees, to typed JSON decoding and 17.7% to dictionary lookups. Imre and Rust each executed 760.7 million exclusive instructions in the underlying JSON scanner, `skip_to_escape`.
 
 Median peak resident memory in MiB, measured by `wait4` for the actual process in each timing round.
 
-| Input | Upstream CPython | Typed CPython | Codon | Relar | Rust | Relar ThinLTO | Rust ThinLTO |
+| Input | Upstream CPython | Typed CPython | Codon | Imre | Rust | Imre ThinLTO | Rust ThinLTO |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1× plain | 119.0 | 30.8 | 42.8 | 15.2 | 11.2 | 15.4 | 11.4 |
 | 1× gzip | 119.3 | 31.6 | 42.8 | 15.6 | 11.3 | 15.6 | 11.3 |
@@ -55,7 +57,7 @@ In a separate 38 MiB workload with 1,024 arrays of 64 records, keeping one recor
 
 ## Comparison with the previous build
 
-A separate run interleaved the previous Relar executable, the optimized executable and Rust, in ordinary and ThinLTO modes. Each input ran in six position- and neighbor-balanced rounds. The reductions below compare medians from this run.
+A separate run interleaved the previous Imre executable, the optimized executable and Rust, in ordinary and ThinLTO modes. Each input ran in six position- and neighbor-balanced rounds. The reductions below compare medians from this run.
 
 | Input | Ordinary before → after (ms) | Time reduction | ThinLTO before → after (ms) | Time reduction |
 | --- | ---: | ---: | ---: | ---: |
@@ -66,7 +68,7 @@ A separate run interleaved the previous Relar executable, the optimized executab
 
 ## Correctness and reproduction
 
-All four inputs produced the same 6,098 entries and 3,440,812 bytes, matching upstream CPython byte for byte. The 10× gzip input contains ten concatenated members. A separate 26-winner corpus changes winners throughout the stream and crosses the record and string size boundaries. It passed in plain and gzip form across eight configurations, including an ASan/LSan Relar build. Both ordinary and instrumented builds also reproduced the previous runtime’s complete output and diagnostics on 836 JSON cases and 170 nested-array cases at O0 and O3.
+All four inputs produced the same 6,098 entries and 3,440,812 bytes, matching upstream CPython byte for byte. The 10× gzip input contains ten concatenated members. A separate 26-winner corpus changes winners throughout the stream and crosses the record and string size boundaries. It passed in plain and gzip form across eight configurations, including an ASan/LSan Imre build. Both ordinary and instrumented builds also reproduced the previous runtime’s complete output and diagnostics on 836 JSON cases and 170 nested-array cases at O0 and O3.
 
 The measured compiler and runtime are at `db44bcc2e9d0f3dca291ed141d7b742227ab44b4`. The final compiler at `db2a6f876e94fa136450ad3efe56c110e376b17d` adds the stable-local correction. Its catalog LLVM is identical. Linking the corrected LLVM with the measured runtime archives, original temporary input names and original flags reproduced all six ordinary, ThinLTO and ASan catalog CLI and compute executables byte for byte. Independent fresh builds had the same executable code, with differences in build metadata and an ASan filename. The freshly compiled catalog produced the same output on each of the four inputs. The old binaries are from the previous study at `34abb56ab902ff8f1ea014024dfa18a814679d3c`, whose implementation was merged in `231f19a21cdb52a93cc5ecbab86644d233ba4ff9`. All Python, Codon and Rust application sources have the same digests across both studies. [Previous catalog measurements](2026-10-22-catalog-hot-paths.md).
 

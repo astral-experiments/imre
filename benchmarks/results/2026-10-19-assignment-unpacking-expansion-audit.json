@@ -9,37 +9,37 @@
   "scope": "saved evidence only; no benchmarks, compilers, or native workloads rerun",
   "statistical_method": "Exact Fraction interpolation of sorted integer ns at p*(n-1), inclusive Q1/median/Q3; ratios of engine medians. IQR overlap is descriptive, not a significance test.",
   "comparison_families": {
-    "application": "Rewritten application on current Relar and CPython; preserved old application on baseline Relar. Changes combine source and compiler/runtime effects.",
-    "common-source": "Exact old application on current Relar, preserved Relar, and CPython. Current-versus-preserved Relar holds application source fixed."
+    "application": "Rewritten application on current Imre and CPython; preserved old application on baseline Imre. Changes combine source and compiler/runtime effects.",
+    "common-source": "Exact old application on current Imre, preserved Imre, and CPython. Current-versus-preserved Imre holds application source fixed."
   },
   "cross_family_caveat": "Families are sequential measurement batches; direct cross-family source-effect ratios are not paired or causal estimates.",
   "reused_helper_sha256": "ff001415dca986218ccf6f26cb3fb7a4ba027e7e32bc551a4602b4795df02d72",
   "audit_script_sha256": "fc2c6fa4509456df4538210a22286c7b00366e8ec894ec106cc102d309a0e76d",
   "preserved_baseline_audit": {
-    "audit_path": "/home/dev-user/code/oss/relar/benchmarks/results/2026-10-19-truthiness-loop-else-audit.json",
+    "audit_path": "/home/dev-user/code/oss/imre/benchmarks/results/2026-10-19-truthiness-loop-else-audit.json",
     "audit_sha256": "bfc16b79ed744a47552ce75ce74c1137957e737a2cba30bc7a5183b8cb98889d",
     "original_checks": 358308,
     "scope": {
       "source_files": 35,
       "artifacts": {
-        "relar": {
-          "path": "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/relar",
-          "source_path": "/home/dev-user/.cache/relar/target/relar-integrated/relar",
+        "imre": {
+          "path": "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/imre",
+          "source_path": "/home/dev-user/.cache/imre/target/imre-integrated/imre",
           "sha256": "0cfce8614ed1a0a72bec4b3fc3b460548a34857da0e3a9225514c7df63b97db1"
         },
-        "librelar_runtime.a": {
-          "path": "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/librelar_runtime.a",
-          "source_path": "/home/dev-user/.cache/relar/target/relar-integrated/librelar_runtime.a",
+        "libimre_runtime.a": {
+          "path": "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/libimre_runtime.a",
+          "source_path": "/home/dev-user/.cache/imre/target/imre-integrated/libimre_runtime.a",
           "sha256": "0079d909653763d6062823a8eb249bbc39ad5aa330251424bc096f4043310f82"
         },
-        "librelar_runtime_lto.a": {
-          "path": "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/librelar_runtime_lto.a",
-          "source_path": "/home/dev-user/.cache/relar/target/relar-truthiness-lto/librelar_runtime.a",
+        "libimre_runtime_lto.a": {
+          "path": "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/libimre_runtime_lto.a",
+          "source_path": "/home/dev-user/.cache/imre/target/imre-truthiness-lto/libimre_runtime.a",
           "sha256": "7259cdb2422ad9c311ca29bae468ff8380073c6886c966628e9d0fc088e17a61"
         },
-        "librelar_runtime_asan.a": {
-          "path": "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/librelar_runtime_asan.a",
-          "source_path": "/home/dev-user/.cache/relar/target/x86_64-unknown-linux-gnu/relar-truthiness-asan/librelar_runtime.a",
+        "libimre_runtime_asan.a": {
+          "path": "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/libimre_runtime_asan.a",
+          "source_path": "/home/dev-user/.cache/imre/target/x86_64-unknown-linux-gnu/imre-truthiness-asan/libimre_runtime.a",
           "sha256": "0239335867da86e5e1bafe9b114045653f31038b7a7ef1a0543db33c0ee5be3f"
         }
       },
@@ -62,24 +62,24 @@
   "frozen_build": {
     "source_files": 37,
     "artifacts": {
-      "relar": {
-        "path": "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/relar",
-        "source_path": "/home/dev-user/.cache/relar/target/relar-integrated/relar",
+      "imre": {
+        "path": "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-tools-final/imre",
+        "source_path": "/home/dev-user/.cache/imre/target/imre-integrated/imre",
         "sha256": "497bf8e34ee7ff5ebfbdd65e6e9d7c86b0045b81b3d07ec3674f0ba330c1a537"
       },
-      "librelar_runtime.a": {
-        "path": "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/librelar_runtime.a",
-        "source_path": "/home/dev-user/.cache/relar/target/relar-integrated/librelar_runtime.a",
+      "libimre_runtime.a": {
+        "path": "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-tools-final/libimre_runtime.a",
+        "source_path": "/home/dev-user/.cache/imre/target/imre-integrated/libimre_runtime.a",
         "sha256": "0079d909653763d6062823a8eb249bbc39ad5aa330251424bc096f4043310f82"
       },
-      "librelar_runtime_lto.a": {
-        "path": "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/librelar_runtime_lto.a",
-        "source_path": "/home/dev-user/.cache/relar/target/relar-truthiness-lto/librelar_runtime.a",
+      "libimre_runtime_lto.a": {
+        "path": "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-tools-final/libimre_runtime_lto.a",
+        "source_path": "/home/dev-user/.cache/imre/target/imre-truthiness-lto/libimre_runtime.a",
         "sha256": "7259cdb2422ad9c311ca29bae468ff8380073c6886c966628e9d0fc088e17a61"
       },
-      "librelar_runtime_asan.a": {
-        "path": "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/librelar_runtime_asan.a",
-        "source_path": "/home/dev-user/.cache/relar/target/x86_64-unknown-linux-gnu/relar-truthiness-asan/librelar_runtime.a",
+      "libimre_runtime_asan.a": {
+        "path": "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-tools-final/libimre_runtime_asan.a",
+        "source_path": "/home/dev-user/.cache/imre/target/x86_64-unknown-linux-gnu/imre-truthiness-asan/libimre_runtime.a",
         "sha256": "0239335867da86e5e1bafe9b114045653f31038b7a7ef1a0543db33c0ee5be3f"
       }
     },
@@ -108,10 +108,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -119,17 +119,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -143,10 +143,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -154,17 +154,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -178,10 +178,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -189,17 +189,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -213,10 +213,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -224,17 +224,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -248,10 +248,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -259,17 +259,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -283,10 +283,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -294,17 +294,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         }
@@ -321,7 +321,7 @@
               "p25_ns": 26749697.75,
               "p75_ns": 27262939.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 2129107.5,
               "min_ns": 2060420,
               "max_ns": 4439683,
@@ -345,22 +345,22 @@
           },
           "median_ms": {
             "cpython": 27.006953,
-            "relar": 2.1291075,
+            "imre": 2.1291075,
             "rust_bigint": 2.1425025,
             "baseline": 2.123873
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 12.68463569829142,
+            "cpython_over_imre": 12.68463569829142,
             "cpython_over_rust_bigint": 12.605330915599865,
             "cpython_over_baseline": 12.715898266986773,
-            "relar_over_cpython": 0.07883553172399715,
-            "relar_over_rust_bigint": 0.9937479652882552,
-            "relar_over_baseline": 1.0024646012261562,
+            "imre_over_cpython": 0.07883553172399715,
+            "imre_over_rust_bigint": 0.9937479652882552,
+            "imre_over_baseline": 1.0024646012261562,
             "rust_bigint_over_cpython": 0.07933151511020144,
-            "rust_bigint_over_relar": 1.0062913685664063,
+            "rust_bigint_over_imre": 1.0062913685664063,
             "rust_bigint_over_baseline": 1.0087714755072454,
             "baseline_over_cpython": 0.07864171126598399,
-            "baseline_over_relar": 0.997541458099227,
+            "baseline_over_imre": 0.997541458099227,
             "baseline_over_rust_bigint": 0.9913047942767862
           },
           "new_vs_baseline_time_change_percent": 0.24646012261562156,
@@ -379,7 +379,7 @@
                 "denominator": 1
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 2086741,
                 "denominator": 1
@@ -438,7 +438,7 @@
               "p25_ns": 27313099.75,
               "p75_ns": 28037552.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 2739364.0,
               "min_ns": 2616696,
               "max_ns": 3941222,
@@ -462,22 +462,22 @@
           },
           "median_ms": {
             "cpython": 27.6184735,
-            "relar": 2.739364,
+            "imre": 2.739364,
             "rust_bigint": 2.541736,
             "baseline": 2.730924
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 10.082075072900134,
+            "cpython_over_imre": 10.082075072900134,
             "cpython_over_rust_bigint": 10.865988245828834,
             "cpython_over_baseline": 10.11323401896208,
-            "relar_over_cpython": 0.09918593075030016,
-            "relar_over_rust_bigint": 1.0777531576843544,
-            "relar_over_baseline": 1.0030905290663525,
+            "imre_over_cpython": 0.09918593075030016,
+            "imre_over_rust_bigint": 1.0777531576843544,
+            "imre_over_baseline": 1.0030905290663525,
             "rust_bigint_over_cpython": 0.09203028545368375,
-            "rust_bigint_over_relar": 0.9278562469244686,
+            "rust_bigint_over_imre": 0.9278562469244686,
             "rust_bigint_over_baseline": 0.9307238136249856,
             "baseline_over_cpython": 0.09888033819103,
-            "baseline_over_relar": 0.9969189928757186,
+            "baseline_over_imre": 0.9969189928757186,
             "baseline_over_rust_bigint": 1.074432592527312
           },
           "new_vs_baseline_time_change_percent": 0.3090529066352543,
@@ -496,7 +496,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 10812795,
                 "denominator": 4
@@ -555,7 +555,7 @@
               "p25_ns": 32746384.75,
               "p75_ns": 33506207.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 6313394.5,
               "min_ns": 6183553,
               "max_ns": 7414026,
@@ -579,22 +579,22 @@
           },
           "median_ms": {
             "cpython": 33.0816435,
-            "relar": 6.3133945,
+            "imre": 6.3133945,
             "rust_bigint": 5.8502805,
             "baseline": 6.218022
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 5.239913884678044,
+            "cpython_over_imre": 5.239913884678044,
             "cpython_over_rust_bigint": 5.654710658745337,
             "cpython_over_baseline": 5.320284087126099,
-            "relar_over_cpython": 0.19084283100989224,
-            "relar_over_rust_bigint": 1.0791609906567727,
-            "relar_over_baseline": 1.015338076964025,
+            "imre_over_cpython": 0.19084283100989224,
+            "imre_over_rust_bigint": 1.0791609906567727,
+            "imre_over_baseline": 1.015338076964025,
             "rust_bigint_over_cpython": 0.17684370790102977,
-            "rust_bigint_over_relar": 0.9266458004485543,
+            "rust_bigint_over_imre": 0.9266458004485543,
             "rust_bigint_over_baseline": 0.9408587650542246,
             "baseline_over_cpython": 0.187959887784898,
-            "baseline_over_relar": 0.9848936257666141,
+            "baseline_over_imre": 0.9848936257666141,
             "baseline_over_rust_bigint": 1.0628587808738401
           },
           "new_vs_baseline_time_change_percent": 1.5338076964025005,
@@ -613,7 +613,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 25027015,
                 "denominator": 4
@@ -672,7 +672,7 @@
               "p25_ns": 37431609.75,
               "p75_ns": 38993894.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 9440972.5,
               "min_ns": 9160028,
               "max_ns": 10525732,
@@ -696,22 +696,22 @@
           },
           "median_ms": {
             "cpython": 38.245385,
-            "relar": 9.4409725,
+            "imre": 9.4409725,
             "rust_bigint": 8.475318,
             "baseline": 9.0782665
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 4.0510005722397775,
+            "cpython_over_imre": 4.0510005722397775,
             "cpython_over_rust_bigint": 4.512560472657191,
             "cpython_over_baseline": 4.212851098830377,
-            "relar_over_cpython": 0.24685259411037436,
-            "relar_over_rust_bigint": 1.1139372587553646,
-            "relar_over_baseline": 1.0399532223470196,
+            "imre_over_cpython": 0.24685259411037436,
+            "imre_over_rust_bigint": 1.1139372587553646,
+            "imre_over_baseline": 1.0399532223470196,
             "rust_bigint_over_cpython": 0.22160367845689094,
-            "rust_bigint_over_relar": 0.8977166282393048,
+            "rust_bigint_over_imre": 0.8977166282393048,
             "rust_bigint_over_baseline": 0.9335833002919666,
             "baseline_over_cpython": 0.23736894006950118,
-            "baseline_over_relar": 0.9615817120534987,
+            "baseline_over_imre": 0.9615817120534987,
             "baseline_over_rust_bigint": 1.071141696394165
           },
           "new_vs_baseline_time_change_percent": 3.995322234701959,
@@ -730,7 +730,7 @@
                 "denominator": 1
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 37179525,
                 "denominator": 4
@@ -789,7 +789,7 @@
               "p25_ns": 76846573.25,
               "p75_ns": 79069521.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 26693965.5,
               "min_ns": 25933123,
               "max_ns": 64807279,
@@ -813,22 +813,22 @@
           },
           "median_ms": {
             "cpython": 77.6608405,
-            "relar": 26.6939655,
+            "imre": 26.6939655,
             "rust_bigint": 23.3371305,
             "baseline": 26.4342565
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.9093032468330717,
+            "cpython_over_imre": 2.9093032468330717,
             "cpython_over_rust_bigint": 3.327780187028564,
             "cpython_over_baseline": 2.9378863180812367,
-            "relar_over_cpython": 0.3437249111410274,
-            "relar_over_rust_bigint": 1.1438409490832646,
-            "relar_over_baseline": 1.0098247136249132,
+            "imre_over_cpython": 0.3437249111410274,
+            "imre_over_rust_bigint": 1.1438409490832646,
+            "imre_over_baseline": 1.0098247136249132,
             "rust_bigint_over_cpython": 0.30050061716754145,
-            "rust_bigint_over_relar": 0.8742474212008703,
+            "rust_bigint_over_imre": 0.8742474212008703,
             "rust_bigint_over_baseline": 0.8828366517514877,
             "baseline_over_cpython": 0.3403807675761634,
-            "baseline_over_relar": 0.9902708722688655,
+            "baseline_over_imre": 0.9902708722688655,
             "baseline_over_rust_bigint": 1.1327123743855312
           },
           "new_vs_baseline_time_change_percent": 0.9824713624913217,
@@ -847,7 +847,7 @@
                 "denominator": 1
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 105382243,
                 "denominator": 4
@@ -906,7 +906,7 @@
               "p25_ns": 111745037.0,
               "p75_ns": 113411305.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 52240948.0,
               "min_ns": 51315978,
               "max_ns": 54833223,
@@ -930,22 +930,22 @@
           },
           "median_ms": {
             "cpython": 112.345613,
-            "relar": 52.240948,
+            "imre": 52.240948,
             "rust_bigint": 43.051363,
             "baseline": 50.2470775
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.1505278388133386,
+            "cpython_over_imre": 2.1505278388133386,
             "cpython_over_rust_bigint": 2.609571571520279,
             "cpython_over_baseline": 2.2358636280886186,
-            "relar_over_cpython": 0.46500211806223357,
-            "relar_over_rust_bigint": 1.2134563079919212,
-            "relar_over_baseline": 1.0396813227595176,
+            "imre_over_cpython": 0.46500211806223357,
+            "imre_over_rust_bigint": 1.2134563079919212,
+            "imre_over_baseline": 1.0396813227595176,
             "rust_bigint_over_cpython": 0.3832046650544334,
-            "rust_bigint_over_relar": 0.8240923001627,
+            "rust_bigint_over_imre": 0.8240923001627,
             "rust_bigint_over_baseline": 0.8567933727090894,
             "baseline_over_cpython": 0.4472544691175436,
-            "baseline_over_relar": 0.961833186870958,
+            "baseline_over_imre": 0.961833186870958,
             "baseline_over_rust_bigint": 1.1671425478445363
           },
           "new_vs_baseline_time_change_percent": 3.9681322759517634,
@@ -964,7 +964,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 51766883,
                 "denominator": 1
@@ -1044,10 +1044,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -1055,17 +1055,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -1079,10 +1079,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -1090,17 +1090,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -1114,10 +1114,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -1125,17 +1125,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -1149,10 +1149,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -1160,17 +1160,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -1184,10 +1184,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -1195,17 +1195,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -1219,10 +1219,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -1230,17 +1230,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         }
@@ -1257,7 +1257,7 @@
               "p25_ns": 26688925.25,
               "p75_ns": 26959070.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 2125080.0,
               "min_ns": 2025003,
               "max_ns": 3285953,
@@ -1281,22 +1281,22 @@
           },
           "median_ms": {
             "cpython": 26.78256,
-            "relar": 2.12508,
+            "imre": 2.12508,
             "rust_bigint": 2.1343765,
             "baseline": 2.116423
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 12.603083178045061,
+            "cpython_over_imre": 12.603083178045061,
             "cpython_over_rust_bigint": 12.548189131580113,
             "cpython_over_baseline": 12.654634730391798,
-            "relar_over_cpython": 0.07934566374536266,
-            "relar_over_rust_bigint": 0.9956443954475698,
-            "relar_over_baseline": 1.0040903921380555,
+            "imre_over_cpython": 0.07934566374536266,
+            "imre_over_rust_bigint": 0.9956443954475698,
+            "imre_over_baseline": 1.0040903921380555,
             "rust_bigint_over_cpython": 0.0796927739543942,
-            "rust_bigint_over_relar": 1.0043746588363731,
+            "rust_bigint_over_imre": 1.0043746588363731,
             "rust_bigint_over_baseline": 1.0084829450445398,
             "baseline_over_cpython": 0.07902243101480964,
-            "baseline_over_relar": 0.9959262710109738,
+            "baseline_over_imre": 0.9959262710109738,
             "baseline_over_rust_bigint": 0.9915884100110735
           },
           "new_vs_baseline_time_change_percent": 0.40903921380555097,
@@ -1315,7 +1315,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 2085375,
                 "denominator": 1
@@ -1374,7 +1374,7 @@
               "p25_ns": 27603748.25,
               "p75_ns": 27903955.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 2780560.5,
               "min_ns": 2673211,
               "max_ns": 3886453,
@@ -1398,22 +1398,22 @@
           },
           "median_ms": {
             "cpython": 27.761557,
-            "relar": 2.7805605,
+            "imre": 2.7805605,
             "rust_bigint": 2.5597195,
             "baseline": 2.7485265
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 9.984158589608102,
+            "cpython_over_imre": 9.984158589608102,
             "cpython_over_rust_bigint": 10.84554655305005,
             "cpython_over_baseline": 10.100523680597586,
-            "relar_over_cpython": 0.10015866545237358,
-            "relar_over_rust_bigint": 1.0862754688550835,
-            "relar_over_baseline": 1.0116549722187507,
+            "imre_over_cpython": 0.10015866545237358,
+            "imre_over_rust_bigint": 1.0862754688550835,
+            "imre_over_baseline": 1.0116549722187507,
             "rust_bigint_over_cpython": 0.09220374419201344,
-            "rust_bigint_over_relar": 0.9205768045687192,
+            "rust_bigint_over_imre": 0.9205768045687192,
             "rust_bigint_over_baseline": 0.9313061016511939,
             "baseline_over_cpython": 0.09900476763605154,
-            "baseline_over_relar": 0.9884793012056382,
+            "baseline_over_imre": 0.9884793012056382,
             "baseline_over_rust_bigint": 1.0737608163707
           },
           "new_vs_baseline_time_change_percent": 1.165497221875067,
@@ -1432,7 +1432,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 5501621,
                 "denominator": 2
@@ -1491,7 +1491,7 @@
               "p25_ns": 33002387.5,
               "p75_ns": 33563279.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 6349646.0,
               "min_ns": 6222674,
               "max_ns": 6656653,
@@ -1515,22 +1515,22 @@
           },
           "median_ms": {
             "cpython": 33.2929295,
-            "relar": 6.349646,
+            "imre": 6.349646,
             "rust_bigint": 5.8786635,
             "baseline": 6.2225855
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 5.2432733257885555,
+            "cpython_over_imre": 5.2432733257885555,
             "cpython_over_rust_bigint": 5.663350096497274,
             "cpython_over_baseline": 5.350337010234733,
-            "relar_over_cpython": 0.1907205552458218,
-            "relar_over_rust_bigint": 1.0801172749554384,
-            "relar_over_baseline": 1.0204192453442384,
+            "imre_over_cpython": 0.1907205552458218,
+            "imre_over_rust_bigint": 1.0801172749554384,
+            "imre_over_baseline": 1.0204192453442384,
             "rust_bigint_over_cpython": 0.17657393291269247,
-            "rust_bigint_over_relar": 0.9258253924706984,
+            "rust_bigint_over_imre": 0.9258253924706984,
             "rust_bigint_over_baseline": 0.9447300483054833,
             "baseline_over_cpython": 0.1869041142804811,
-            "baseline_over_relar": 0.9799893568869824,
+            "baseline_over_imre": 0.9799893568869824,
             "baseline_over_rust_bigint": 1.0585034336461001
           },
           "new_vs_baseline_time_change_percent": 2.0419245344238446,
@@ -1549,7 +1549,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 6294784,
                 "denominator": 1
@@ -1608,7 +1608,7 @@
               "p25_ns": 37347571.0,
               "p75_ns": 38704827.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 9249024.0,
               "min_ns": 9000720,
               "max_ns": 11723615,
@@ -1632,22 +1632,22 @@
           },
           "median_ms": {
             "cpython": 37.985668,
-            "relar": 9.249024,
+            "imre": 9.249024,
             "rust_bigint": 8.343437,
             "baseline": 9.031108
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 4.106992045863434,
+            "cpython_over_imre": 4.106992045863434,
             "cpython_over_rust_bigint": 4.552760211409279,
             "cpython_over_baseline": 4.206091655641811,
-            "relar_over_cpython": 0.24348720154138134,
-            "relar_over_rust_bigint": 1.108538843164993,
-            "relar_over_baseline": 1.0241294866587798,
+            "imre_over_cpython": 0.24348720154138134,
+            "imre_over_rust_bigint": 1.108538843164993,
+            "imre_over_baseline": 1.0241294866587798,
             "rust_bigint_over_cpython": 0.21964697316893309,
-            "rust_bigint_over_relar": 0.9020883717027872,
+            "rust_bigint_over_imre": 0.9020883717027872,
             "rust_bigint_over_baseline": 0.9238553010328301,
             "baseline_over_cpython": 0.23775040628481248,
-            "baseline_over_relar": 0.9764390275125245,
+            "baseline_over_imre": 0.9764390275125245,
             "baseline_over_rust_bigint": 1.0824205899798849
           },
           "new_vs_baseline_time_change_percent": 2.4129486658779786,
@@ -1666,7 +1666,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 9162405,
                 "denominator": 1
@@ -1725,7 +1725,7 @@
               "p25_ns": 76639182.25,
               "p75_ns": 78197972.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 26857347.5,
               "min_ns": 26239852,
               "max_ns": 30346775,
@@ -1749,22 +1749,22 @@
           },
           "median_ms": {
             "cpython": 77.1901815,
-            "relar": 26.8573475,
+            "imre": 26.8573475,
             "rust_bigint": 23.216734,
             "baseline": 26.3925515
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.8740806030826387,
+            "cpython_over_imre": 2.8740806030826387,
             "cpython_over_rust_bigint": 3.324764865721423,
             "cpython_over_baseline": 2.9246956854474644,
-            "relar_over_cpython": 0.3479373539236982,
-            "relar_over_rust_bigint": 1.1568098897975916,
-            "relar_over_baseline": 1.0176108778266475,
+            "imre_over_cpython": 0.3479373539236982,
+            "imre_over_rust_bigint": 1.1568098897975916,
+            "imre_over_baseline": 1.0176108778266475,
             "rust_bigint_over_cpython": 0.3007731494969992,
-            "rust_bigint_over_relar": 0.8644462748974,
+            "rust_bigint_over_imre": 0.8644462748974,
             "rust_bigint_over_baseline": 0.8796699326323186,
             "baseline_over_cpython": 0.34191591452599446,
-            "baseline_over_relar": 0.9826938978244222,
+            "baseline_over_imre": 0.9826938978244222,
             "baseline_over_rust_bigint": 1.1367900196470355
           },
           "new_vs_baseline_time_change_percent": 1.7610877826647497,
@@ -1783,7 +1783,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 106540863,
                 "denominator": 4
@@ -1842,7 +1842,7 @@
               "p25_ns": 110870639.25,
               "p75_ns": 113480344.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 50852260.5,
               "min_ns": 48923656,
               "max_ns": 52810349,
@@ -1866,22 +1866,22 @@
           },
           "median_ms": {
             "cpython": 111.789985,
-            "relar": 50.8522605,
+            "imre": 50.8522605,
             "rust_bigint": 42.5191535,
             "baseline": 49.7274445
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.198328725229432,
+            "cpython_over_imre": 2.198328725229432,
             "cpython_over_rust_bigint": 2.6291676996815094,
             "cpython_over_baseline": 2.2480540901312556,
-            "relar_over_cpython": 0.4548910217672898,
-            "relar_over_rust_bigint": 1.1959847813056768,
-            "relar_over_baseline": 1.0226196220479418,
+            "imre_over_cpython": 0.4548910217672898,
+            "imre_over_rust_bigint": 1.1959847813056768,
+            "imre_over_baseline": 1.0226196220479418,
             "rust_bigint_over_cpython": 0.3803485034907197,
-            "rust_bigint_over_relar": 0.836131040821676,
+            "rust_bigint_over_imre": 0.836131040821676,
             "rust_bigint_over_baseline": 0.8550440089476145,
             "baseline_over_cpython": 0.4448291544184392,
-            "baseline_over_relar": 0.9778807079775735,
+            "baseline_over_imre": 0.9778807079775735,
             "baseline_over_rust_bigint": 1.1695304446735988
           },
           "new_vs_baseline_time_change_percent": 2.2619622047941768,
@@ -1900,7 +1900,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 201807921,
                 "denominator": 4
@@ -1975,10 +1975,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -1986,17 +1986,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -2010,10 +2010,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -2021,17 +2021,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -2045,10 +2045,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -2056,17 +2056,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -2080,10 +2080,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -2091,17 +2091,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -2115,10 +2115,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -2126,17 +2126,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -2150,10 +2150,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -2161,17 +2161,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         }
@@ -2188,7 +2188,7 @@
               "p25_ns": 26937239.75,
               "p75_ns": 27324825.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 2158367.0,
               "min_ns": 2059897,
               "max_ns": 3503808,
@@ -2212,22 +2212,22 @@
           },
           "median_ms": {
             "cpython": 27.139878,
-            "relar": 2.158367,
+            "imre": 2.158367,
             "rust_bigint": 2.24332,
             "baseline": 2.207343
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 12.574264710311082,
+            "cpython_over_imre": 12.574264710311082,
             "cpython_over_rust_bigint": 12.098085872724354,
             "cpython_over_baseline": 12.29526992406708,
-            "relar_over_cpython": 0.07952751298292497,
-            "relar_over_rust_bigint": 0.9621306813116274,
-            "relar_over_baseline": 0.9778122385148117,
+            "imre_over_cpython": 0.07952751298292497,
+            "imre_over_rust_bigint": 0.9621306813116274,
+            "imre_over_baseline": 0.9778122385148117,
             "rust_bigint_over_cpython": 0.08265770391451281,
-            "rust_bigint_over_relar": 1.0393598493676006,
+            "rust_bigint_over_imre": 1.0393598493676006,
             "rust_bigint_over_baseline": 1.016298780932551,
             "baseline_over_cpython": 0.08133208999686733,
-            "baseline_over_relar": 1.022691229063454,
+            "baseline_over_imre": 1.022691229063454,
             "baseline_over_rust_bigint": 0.9839626089902466
           },
           "new_vs_baseline_time_change_percent": -2.2187761485188306,
@@ -2246,7 +2246,7 @@
                 "denominator": 1
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 2124403,
                 "denominator": 1
@@ -2305,7 +2305,7 @@
               "p25_ns": 27729792.75,
               "p75_ns": 28260867.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 2711703.0,
               "min_ns": 2566743,
               "max_ns": 5617507,
@@ -2329,22 +2329,22 @@
           },
           "median_ms": {
             "cpython": 27.9377195,
-            "relar": 2.711703,
+            "imre": 2.711703,
             "rust_bigint": 2.591329,
             "baseline": 2.7695505
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 10.302647266311983,
+            "cpython_over_imre": 10.302647266311983,
             "cpython_over_rust_bigint": 10.781232139955984,
             "cpython_over_baseline": 10.087456249669396,
-            "relar_over_cpython": 0.09706243202849825,
-            "relar_over_rust_bigint": 1.0464526117679385,
-            "relar_over_baseline": 0.9791130365739855,
+            "imre_over_cpython": 0.09706243202849825,
+            "imre_over_rust_bigint": 1.0464526117679385,
+            "imre_over_baseline": 0.9791130365739855,
             "rust_bigint_over_cpython": 0.09275377684280924,
-            "rust_bigint_over_relar": 0.9556094454296802,
+            "rust_bigint_over_imre": 0.9556094454296802,
             "rust_bigint_over_baseline": 0.9356496658934365,
             "baseline_over_cpython": 0.0991330197871018,
-            "baseline_over_relar": 1.021332535310836,
+            "baseline_over_imre": 1.021332535310836,
             "baseline_over_rust_bigint": 1.0687760990595945
           },
           "new_vs_baseline_time_change_percent": -2.088696342601448,
@@ -2363,7 +2363,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 10656315,
                 "denominator": 4
@@ -2422,7 +2422,7 @@
               "p25_ns": 33236565.25,
               "p75_ns": 33686081.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 5626052.5,
               "min_ns": 5477045,
               "max_ns": 6083895,
@@ -2446,22 +2446,22 @@
           },
           "median_ms": {
             "cpython": 33.5341005,
-            "relar": 5.6260525,
+            "imre": 5.6260525,
             "rust_bigint": 5.5722615,
             "baseline": 5.7024905
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 5.960502590404196,
+            "cpython_over_imre": 5.960502590404196,
             "cpython_over_rust_bigint": 6.018041418192595,
             "cpython_over_baseline": 5.8806061141180335,
-            "relar_over_cpython": 0.16777108722507705,
-            "relar_over_rust_bigint": 1.0096533516957165,
-            "relar_over_baseline": 0.986595681308018,
+            "imre_over_cpython": 0.16777108722507705,
+            "imre_over_rust_bigint": 1.0096533516957165,
+            "imre_over_baseline": 0.986595681308018,
             "rust_bigint_over_cpython": 0.16616701855473953,
-            "rust_bigint_over_relar": 0.9904389445352669,
+            "rust_bigint_over_imre": 0.9904389445352669,
             "rust_bigint_over_baseline": 0.9771627852777659,
             "baseline_over_cpython": 0.1700504982979937,
-            "baseline_over_relar": 1.0135864356047157,
+            "baseline_over_imre": 1.0135864356047157,
             "baseline_over_rust_bigint": 1.0233709419416157
           },
           "new_vs_baseline_time_change_percent": -1.3404318691981998,
@@ -2480,7 +2480,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 11147435,
                 "denominator": 2
@@ -2539,7 +2539,7 @@
               "p25_ns": 37188434.0,
               "p75_ns": 38534388.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 8025548.0,
               "min_ns": 7816434,
               "max_ns": 9383374,
@@ -2563,22 +2563,22 @@
           },
           "median_ms": {
             "cpython": 37.773515,
-            "relar": 8.025548,
+            "imre": 8.025548,
             "rust_bigint": 7.8433135,
             "baseline": 8.0182395
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 4.706658660567478,
+            "cpython_over_imre": 4.706658660567478,
             "cpython_over_rust_bigint": 4.816014940624266,
             "cpython_over_baseline": 4.710948706383739,
-            "relar_over_cpython": 0.21246495064068038,
-            "relar_over_rust_bigint": 1.0232343766445138,
-            "relar_over_baseline": 1.0009114843725984,
+            "imre_over_cpython": 0.21246495064068038,
+            "imre_over_rust_bigint": 1.0232343766445138,
+            "imre_over_baseline": 1.0009114843725984,
             "rust_bigint_over_cpython": 0.20764055185227004,
-            "rust_bigint_over_relar": 0.9772932016604972,
+            "rust_bigint_over_imre": 0.9772932016604972,
             "rust_bigint_over_baseline": 0.9781839891412573,
             "baseline_over_cpython": 0.21227146851438103,
-            "baseline_over_relar": 0.9990893456745882,
+            "baseline_over_imre": 0.9990893456745882,
             "baseline_over_rust_bigint": 1.0223025638335124
           },
           "new_vs_baseline_time_change_percent": 0.0911484372598359,
@@ -2597,7 +2597,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 15866389,
                 "denominator": 2
@@ -2656,7 +2656,7 @@
               "p25_ns": 76010302.75,
               "p75_ns": 77481593.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 21089609.5,
               "min_ns": 20424675,
               "max_ns": 23627552,
@@ -2680,22 +2680,22 @@
           },
           "median_ms": {
             "cpython": 76.6392675,
-            "relar": 21.0896095,
+            "imre": 21.0896095,
             "rust_bigint": 20.6986605,
             "baseline": 21.371704
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 3.63398229350809,
+            "cpython_over_imre": 3.63398229350809,
             "cpython_over_rust_bigint": 3.702619669519194,
             "cpython_over_baseline": 3.586015766454561,
-            "relar_over_cpython": 0.27518020706552293,
-            "relar_over_rust_bigint": 1.0188876473431698,
-            "relar_over_baseline": 0.9868005611531958,
+            "imre_over_cpython": 0.27518020706552293,
+            "imre_over_rust_bigint": 1.0188876473431698,
+            "imre_over_baseline": 0.9868005611531958,
             "rust_bigint_over_cpython": 0.2700790492289087,
-            "rust_bigint_over_relar": 0.9814624827453539,
+            "rust_bigint_over_imre": 0.9814624827453539,
             "rust_bigint_over_baseline": 0.9685077287239239,
             "baseline_over_cpython": 0.2788610159928786,
-            "baseline_over_relar": 1.0133759944677971,
+            "baseline_over_imre": 1.0133759944677971,
             "baseline_over_rust_bigint": 1.0325162828773389
           },
           "new_vs_baseline_time_change_percent": -1.319943884680419,
@@ -2714,7 +2714,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 83257797,
                 "denominator": 4
@@ -2773,7 +2773,7 @@
               "p25_ns": 111893954.5,
               "p75_ns": 114572315.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 41584429.0,
               "min_ns": 40442942,
               "max_ns": 48783242,
@@ -2797,22 +2797,22 @@
           },
           "median_ms": {
             "cpython": 112.604831,
-            "relar": 41.584429,
+            "imre": 41.584429,
             "rust_bigint": 37.91684,
             "baseline": 40.840682
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.7078604590194084,
+            "cpython_over_imre": 2.7078604590194084,
             "cpython_over_rust_bigint": 2.96978416450316,
             "cpython_over_baseline": 2.7571731294790816,
-            "relar_over_cpython": 0.36929524808753544,
-            "relar_over_rust_bigint": 1.0967271797966287,
-            "relar_over_baseline": 1.0182109348712638,
+            "imre_over_cpython": 0.36929524808753544,
+            "imre_over_rust_bigint": 1.0967271797966287,
+            "imre_over_baseline": 1.0182109348712638,
             "rust_bigint_over_cpython": 0.3367248071266143,
-            "rust_bigint_over_relar": 0.9118037907890956,
+            "rust_bigint_over_imre": 0.9118037907890956,
             "rust_bigint_over_baseline": 0.9284085902385274,
             "baseline_over_cpython": 0.3626903183221331,
-            "baseline_over_relar": 0.9821147718536667,
+            "baseline_over_imre": 0.9821147718536667,
             "baseline_over_rust_bigint": 1.077111963971681
           },
           "new_vs_baseline_time_change_percent": 1.8210934871263795,
@@ -2831,7 +2831,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 164463587,
                 "denominator": 4
@@ -2911,10 +2911,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -2922,17 +2922,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -2946,10 +2946,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -2957,17 +2957,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -2981,10 +2981,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -2992,17 +2992,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -3016,10 +3016,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -3027,17 +3027,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -3051,10 +3051,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -3062,17 +3062,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -3086,10 +3086,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -3097,17 +3097,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         }
@@ -3124,7 +3124,7 @@
               "p25_ns": 27117218.0,
               "p75_ns": 27500059.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 2337215.5,
               "min_ns": 2064746,
               "max_ns": 3515289,
@@ -3148,22 +3148,22 @@
           },
           "median_ms": {
             "cpython": 27.351855,
-            "relar": 2.3372155,
+            "imre": 2.3372155,
             "rust_bigint": 2.459262,
             "baseline": 2.409107
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 11.702752698670704,
+            "cpython_over_imre": 11.702752698670704,
             "cpython_over_rust_bigint": 11.121976836953525,
             "cpython_over_baseline": 11.353524355705247,
-            "relar_over_cpython": 0.08544998136323843,
-            "relar_over_rust_bigint": 0.9503727134400483,
-            "relar_over_baseline": 0.970158444602087,
+            "imre_over_cpython": 0.08544998136323843,
+            "imre_over_rust_bigint": 0.9503727134400483,
+            "imre_over_baseline": 0.970158444602087,
             "rust_bigint_over_cpython": 0.08991207360524542,
-            "rust_bigint_over_relar": 1.0522187620268648,
+            "rust_bigint_over_imre": 1.0522187620268648,
             "rust_bigint_over_baseline": 1.0208189175491167,
             "baseline_over_cpython": 0.08807837713383608,
-            "baseline_over_relar": 1.0307594656975363,
+            "baseline_over_imre": 1.0307594656975363,
             "baseline_over_rust_bigint": 0.9796056703189818
           },
           "new_vs_baseline_time_change_percent": -2.9841555397913,
@@ -3182,7 +3182,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 2262861,
                 "denominator": 1
@@ -3241,7 +3241,7 @@
               "p25_ns": 28401598.25,
               "p75_ns": 29072806.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 2988674.0,
               "min_ns": 2635660,
               "max_ns": 4695018,
@@ -3265,22 +3265,22 @@
           },
           "median_ms": {
             "cpython": 28.578916,
-            "relar": 2.988674,
+            "imre": 2.988674,
             "rust_bigint": 2.851617,
             "baseline": 2.975048
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 9.562406605738866,
+            "cpython_over_imre": 9.562406605738866,
             "cpython_over_rust_bigint": 10.022003656171218,
             "cpython_over_baseline": 9.606203328484112,
-            "relar_over_cpython": 0.10457618476502048,
-            "relar_over_rust_bigint": 1.048062906063472,
-            "relar_over_baseline": 1.0045800941699092,
+            "imre_over_cpython": 0.10457618476502048,
+            "imre_over_rust_bigint": 1.048062906063472,
+            "imre_over_baseline": 1.0045800941699092,
             "rust_bigint_over_cpython": 0.09978044653618073,
-            "rust_bigint_over_relar": 0.9541412010811484,
+            "rust_bigint_over_imre": 0.9541412010811484,
             "rust_bigint_over_baseline": 0.9585112576334903,
             "baseline_over_cpython": 0.10409939971131166,
-            "baseline_over_relar": 0.9954407874528972,
+            "baseline_over_imre": 0.9954407874528972,
             "baseline_over_rust_bigint": 1.0432845645119944
           },
           "new_vs_baseline_time_change_percent": 0.45800941699092323,
@@ -3299,7 +3299,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 2863971,
                 "denominator": 1
@@ -3358,7 +3358,7 @@
               "p25_ns": 33532276.25,
               "p75_ns": 34268794.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 5786381.0,
               "min_ns": 5576981,
               "max_ns": 8212832,
@@ -3382,22 +3382,22 @@
           },
           "median_ms": {
             "cpython": 33.81455,
-            "relar": 5.786381,
+            "imre": 5.786381,
             "rust_bigint": 5.6874615,
             "baseline": 5.814283
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 5.843816713762886,
+            "cpython_over_imre": 5.843816713762886,
             "cpython_over_rust_bigint": 5.945455630776578,
             "cpython_over_baseline": 5.8157729852502875,
-            "relar_over_cpython": 0.17112104109029988,
-            "relar_over_rust_bigint": 1.0173925572946736,
-            "relar_over_baseline": 0.9952011279808706,
+            "imre_over_cpython": 0.17112104109029988,
+            "imre_over_rust_bigint": 1.0173925572946736,
+            "imre_over_baseline": 0.9952011279808706,
             "rust_bigint_over_cpython": 0.16819568795089687,
-            "rust_bigint_over_relar": 0.982904772430298,
+            "rust_bigint_over_imre": 0.982904772430298,
             "rust_bigint_over_baseline": 0.9781879382204134,
             "baseline_over_cpython": 0.17194618884474286,
-            "baseline_over_relar": 1.004822012238738,
+            "baseline_over_imre": 1.004822012238738,
             "baseline_over_rust_bigint": 1.0222984366575492
           },
           "new_vs_baseline_time_change_percent": -0.479887201912943,
@@ -3416,7 +3416,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 22703083,
                 "denominator": 4
@@ -3475,7 +3475,7 @@
               "p25_ns": 37256364.25,
               "p75_ns": 37912813.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 7955927.5,
               "min_ns": 7703491,
               "max_ns": 8848455,
@@ -3499,22 +3499,22 @@
           },
           "median_ms": {
             "cpython": 37.5758475,
-            "relar": 7.9559275,
+            "imre": 7.9559275,
             "rust_bigint": 7.7172475,
             "baseline": 7.9154875
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 4.723000241015268,
+            "cpython_over_imre": 4.723000241015268,
             "cpython_over_rust_bigint": 4.869073785698852,
             "cpython_over_baseline": 4.7471299146135975,
-            "relar_over_cpython": 0.2117298219288334,
-            "relar_over_rust_bigint": 1.0309281256043688,
-            "relar_over_baseline": 1.0051089714941752,
+            "imre_over_cpython": 0.2117298219288334,
+            "imre_over_rust_bigint": 1.0309281256043688,
+            "imre_over_baseline": 1.0051089714941752,
             "rust_bigint_over_cpython": 0.20537786938804242,
-            "rust_bigint_over_relar": 0.9699997266189265,
+            "rust_bigint_over_imre": 0.9699997266189265,
             "rust_bigint_over_baseline": 0.9749554275715804,
             "baseline_over_cpython": 0.2106535986979402,
-            "baseline_over_relar": 0.9949169974211052,
+            "baseline_over_imre": 0.9949169974211052,
             "baseline_over_rust_bigint": 1.0256879152832665
           },
           "new_vs_baseline_time_change_percent": 0.5108971494175218,
@@ -3533,7 +3533,7 @@
                 "denominator": 1
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 31486089,
                 "denominator": 4
@@ -3592,7 +3592,7 @@
               "p25_ns": 76759103.75,
               "p75_ns": 78565131.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 21857112.0,
               "min_ns": 20964468,
               "max_ns": 23746862,
@@ -3616,22 +3616,22 @@
           },
           "median_ms": {
             "cpython": 77.6817135,
-            "relar": 21.857112,
+            "imre": 21.857112,
             "rust_bigint": 20.8632955,
             "baseline": 21.606775
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 3.5540703410404815,
+            "cpython_over_imre": 3.5540703410404815,
             "cpython_over_rust_bigint": 3.7233673606358115,
             "cpython_over_baseline": 3.595247948849377,
-            "relar_over_cpython": 0.28136753188380687,
-            "relar_over_rust_bigint": 1.0476346845588225,
-            "relar_over_baseline": 1.0115860418780684,
+            "imre_over_cpython": 0.28136753188380687,
+            "imre_over_rust_bigint": 1.0476346845588225,
+            "imre_over_baseline": 1.0115860418780684,
             "rust_bigint_over_cpython": 0.26857408983389636,
-            "rust_bigint_over_relar": 0.9545312070505929,
+            "rust_bigint_over_imre": 0.9545312070505929,
             "rust_bigint_over_baseline": 0.9655904455894042,
             "baseline_over_cpython": 0.2781449330414165,
-            "baseline_over_relar": 0.988546657033189,
+            "baseline_over_imre": 0.988546657033189,
             "baseline_over_rust_bigint": 1.0356357652126433
           },
           "new_vs_baseline_time_change_percent": 1.1586041878068443,
@@ -3650,7 +3650,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 42830823,
                 "denominator": 2
@@ -3709,7 +3709,7 @@
               "p25_ns": 112752150.5,
               "p75_ns": 116040161.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 41807551.5,
               "min_ns": 39140923,
               "max_ns": 50359413,
@@ -3733,22 +3733,22 @@
           },
           "median_ms": {
             "cpython": 113.559766,
-            "relar": 41.8075515,
+            "imre": 41.8075515,
             "rust_bigint": 38.0077365,
             "baseline": 41.519039
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.7162501013722364,
+            "cpython_over_imre": 2.7162501013722364,
             "cpython_over_rust_bigint": 2.9878066009008455,
             "cpython_over_baseline": 2.735125107303182,
-            "relar_over_cpython": 0.3681546112027036,
-            "relar_over_rust_bigint": 1.0999747775035222,
-            "relar_over_baseline": 1.006948920469956,
+            "imre_over_cpython": 0.3681546112027036,
+            "imre_over_rust_bigint": 1.0999747775035222,
+            "imre_over_baseline": 1.006948920469956,
             "rust_bigint_over_cpython": 0.33469368455725773,
-            "rust_bigint_over_relar": 0.9091117546072986,
+            "rust_bigint_over_imre": 0.9091117546072986,
             "rust_bigint_over_baseline": 0.9154290998883668,
             "baseline_over_cpython": 0.36561398867271355,
-            "baseline_over_relar": 0.9930990337953659,
+            "baseline_over_imre": 0.9930990337953659,
             "baseline_over_rust_bigint": 1.0923838887380204
           },
           "new_vs_baseline_time_change_percent": 0.6948920469955988,
@@ -3767,7 +3767,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 41338957,
                 "denominator": 1
@@ -3834,491 +3834,491 @@
       "sha256": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
       "bytes": 11593976
     },
-    "/home/dev-user/code/oss/relar/Cargo.lock": {
+    "/home/dev-user/code/oss/imre/Cargo.lock": {
       "sha256": "1e4053a4eb89af2554a43b30dac6e6f81d56097907d65bf48953a69e318e55ae",
       "bytes": 53753
     },
-    "/home/dev-user/code/oss/relar/Cargo.toml": {
+    "/home/dev-user/code/oss/imre/Cargo.toml": {
       "sha256": "7a9d1c188ccc5a930c600ad503438d9ef4f590cdaf5f2a6488cb65e741f79c29",
       "bytes": 848
     },
-    "/home/dev-user/code/oss/relar/benchmarks/batch_benchmark.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/batch_benchmark.py": {
       "sha256": "8d7b1d17a73baae1a691cc9efad15f29063b4f2a9d090354d5f81a173b67ba19",
       "bytes": 23596
     },
-    "/home/dev-user/code/oss/relar/benchmarks/batch_validate.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/batch_validate.py": {
       "sha256": "d9ceda6746224421ac5c6c8ca555b8d5beed4d8aec93487674269bb5b765f941",
       "bytes": 10937
     },
-    "/home/dev-user/code/oss/relar/benchmarks/benchmark.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/benchmark.py": {
       "sha256": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
       "bytes": 12777
     },
-    "/home/dev-user/code/oss/relar/benchmarks/compare.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/compare.py": {
       "sha256": "d878c49d30863b2b47bc3e453003611752b7fda34b9250754a4b580887599724",
       "bytes": 10330
     },
-    "/home/dev-user/code/oss/relar/benchmarks/dependency_benchmark.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/dependency_benchmark.py": {
       "sha256": "ddf4c986e24d5ea66dad3d492121ebe464a11e5bb7e0b5f075e3f3bc7989930d",
       "bytes": 15928
     },
-    "/home/dev-user/code/oss/relar/benchmarks/dependency_compare.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/dependency_compare.py": {
       "sha256": "f496e1e7659e15a2446427794f6184e173691b2e22c83439966c47b1cc7c0fc5",
       "bytes": 19925
     },
-    "/home/dev-user/code/oss/relar/benchmarks/dependency_profile.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/dependency_profile.py": {
       "sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30",
       "bytes": 19807
     },
-    "/home/dev-user/code/oss/relar/benchmarks/dependency_validate.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/dependency_validate.py": {
       "sha256": "493bd16ecfc938c902b98f78adecc5f8dce2204c163fd05c64a1701e4996be2e",
       "bytes": 13429
     },
-    "/home/dev-user/code/oss/relar/benchmarks/exception_benchmark.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/exception_benchmark.py": {
       "sha256": "7eb93f08f84fa1ca98d94bb2c6c2fde341726fa69e185cf6d45434602d7aeb85",
       "bytes": 22792
     },
-    "/home/dev-user/code/oss/relar/benchmarks/incremental_benchmark.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/incremental_benchmark.py": {
       "sha256": "362a99c6a015840d2f36428a61d31e2ba81ebb221b761ca54669b584ad577d9a",
       "bytes": 19310
     },
-    "/home/dev-user/code/oss/relar/benchmarks/incremental_validate.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/incremental_validate.py": {
       "sha256": "f384d2807c07006572a5dec0146abd026511ed59f2ae1d0a674dd9c60e95782b",
       "bytes": 21198
     },
-    "/home/dev-user/code/oss/relar/benchmarks/inventory_benchmark.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/inventory_benchmark.py": {
       "sha256": "2aeb2c8440f3c8ca4a560c4dee2ff840dd186e13e2bf96a1aecd2d5e8799290c",
       "bytes": 30611
     },
-    "/home/dev-user/code/oss/relar/benchmarks/inventory_profile.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/inventory_profile.py": {
       "sha256": "f07dc7a9d6a4033828d6b59a96273a1affe87a45b0b23911c1c0bcffed3e9a39",
       "bytes": 20529
     },
-    "/home/dev-user/code/oss/relar/benchmarks/inventory_validate.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/inventory_validate.py": {
       "sha256": "b4e824402bb37e70a68c7c72561336dfbc4b01f914ec0afb756b77d52f7d30d0",
       "bytes": 20905
     },
-    "/home/dev-user/code/oss/relar/benchmarks/layout_benchmark.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/layout_benchmark.py": {
       "sha256": "c01bf35a42b805ba8627e01585ccab432cd00bbd1122060d87bf7257bc3abc25",
       "bytes": 29984
     },
-    "/home/dev-user/code/oss/relar/benchmarks/layout_profile.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/layout_profile.py": {
       "sha256": "a46a2483b4375e87a7a058b237ba3a2ee186ac711208b04a6207af5c86912ea1",
       "bytes": 15769
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-lto/inventory_reconciliation": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-comparison-final/application-lto/inventory_reconciliation": {
       "sha256": "b7d73ae015201da8fae1357c76dda98947d1d59a548601da84c0f3eb35b35ab3",
       "bytes": 3542496
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-lto/inventory_reconciliation.ll": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-comparison-final/application-lto/inventory_reconciliation.ll": {
       "sha256": "635b4c5dc30d1afc1ba33a28ec118ecebf2d13a06e27122bb2a0474ee6e88290",
       "bytes": 206019
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-lto.json": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-comparison-final/application-lto.json": {
       "sha256": "198d26f10fee0774325df233defcee37d7b9df5349d8254f8550a6c50b1df06e",
       "bytes": 6785685
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-normal/inventory_reconciliation": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-comparison-final/application-normal/inventory_reconciliation": {
       "sha256": "dbabfcafe5c8ce40fa11caf5fe3f986b06e81ac7eb383ada4f3dfbd8e9b61d38",
       "bytes": 3887104
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-normal/inventory_reconciliation.ll": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-comparison-final/application-normal/inventory_reconciliation.ll": {
       "sha256": "635b4c5dc30d1afc1ba33a28ec118ecebf2d13a06e27122bb2a0474ee6e88290",
       "bytes": 206019
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-normal.json": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-comparison-final/application-normal.json": {
       "sha256": "afd20b245d41cb5d04a6c9019a908045c458a27393756d1015f4dba1b27dd0c7",
       "bytes": 6785145
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/asan.log": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/asan.log": {
       "sha256": "c8fb3f28bf9c67ae685e39f3215c80d5b6bf927bdb93d00d21cfb8d2badfe0b0",
       "bytes": 87
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/build-record.json": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/build-record.json": {
       "sha256": "ed3e4ad2cb880532f2451c42fcfa525f18a342f1b78682a19ac6ba2576465516",
       "bytes": 887974
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/freeze.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/freeze.py": {
       "sha256": "6931d9c03bc6bcd299baf8ff6173ef6e962433284f5c6283f6c3c9f247d4d0c2",
       "bytes": 5613
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/librelar_runtime.a": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/libimre_runtime.a": {
       "sha256": "0079d909653763d6062823a8eb249bbc39ad5aa330251424bc096f4043310f82",
       "bytes": 38472348
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/librelar_runtime_asan.a": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/libimre_runtime_asan.a": {
       "sha256": "0239335867da86e5e1bafe9b114045653f31038b7a7ef1a0543db33c0ee5be3f",
       "bytes": 39471426
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/librelar_runtime_lto.a": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/libimre_runtime_lto.a": {
       "sha256": "7259cdb2422ad9c311ca29bae468ff8380073c6886c966628e9d0fc088e17a61",
       "bytes": 25470354
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/relar": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/imre": {
       "sha256": "0cfce8614ed1a0a72bec4b3fc3b460548a34857da0e3a9225514c7df63b97db1",
       "bytes": 139840368
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/ordinary.log": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/ordinary.log": {
       "sha256": "98f837b162414ce697c0385f744cc1d5f8ff426bf7daa4dde5f0de408c519451",
       "bytes": 168
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/thinlto.log": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/thinlto.log": {
       "sha256": "4e98f21b0a5ce81f557a23de49fa5d70351768af3882a165e0fd5dfdb3e3632f",
       "bytes": 86
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json": {
       "sha256": "001a121e8c549548ded1b976e9b2c099cbc07226b0678714fe39cb1707f97fce",
       "bytes": 26484
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint": {
       "sha256": "00d4086b398ffe41a3346a9e24d14659002d763b1d25a058a353a3e5fd108270",
       "bytes": 1772384
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json": {
       "sha256": "b43013232af09bdc8c1ce5d0c3d095cc48941fe9301b2f7e5fef0019ce65e8fb",
       "bytes": 26370
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint": {
       "sha256": "dae07835587c65d3b1d82558e5eebb9f2cc11fc549f7ab5876570132c932f2f5",
       "bytes": 1562488
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-final-launch.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/sequence-access-final-launch.py": {
       "sha256": "8aaacc03b3c40fb5b505518827d5d8afdf577745bda9a09326e0190a327ca508",
       "bytes": 15943
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/application-lto/inventory_reconciliation": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/application-lto/inventory_reconciliation": {
       "sha256": "3565bd71863a28f37651f882ab295dd9a5c65fdc434f3570b348e7ef5c5ea934",
       "bytes": 3556864
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/application-lto/inventory_reconciliation.ll": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/application-lto/inventory_reconciliation.ll": {
       "sha256": "666098f927087246fc0ce30483524d0f3508ac9cd0c87b078b22f94314d232fa",
       "bytes": 245044
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/application-lto.json": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/application-lto.json": {
       "sha256": "89f7a263c2c6415a26dfdb4b59f3ab7d5bc88dc2ad5d56dd1da45e7f8cf33e2a",
       "bytes": 6790142
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/application-lto.log": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/application-lto.log": {
       "sha256": "5ab0b3300d13db520ddc421beca5b9c1a7483653d04bf2de67fcd74a57d1501b",
       "bytes": 600
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/application-normal/inventory_reconciliation": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/application-normal/inventory_reconciliation": {
       "sha256": "d1796c97bb85f30b3e35c0435085c3fec02ad92ac6bd2ff4a37916305ca95b74",
       "bytes": 3891200
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/application-normal/inventory_reconciliation.ll": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/application-normal/inventory_reconciliation.ll": {
       "sha256": "666098f927087246fc0ce30483524d0f3508ac9cd0c87b078b22f94314d232fa",
       "bytes": 245044
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/application-normal.json": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/application-normal.json": {
       "sha256": "11099f6893af042c64905e716124be2126d623640708999c68497aa1b214e838",
       "bytes": 6789495
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/application-normal.log": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/application-normal.log": {
       "sha256": "f33883fc2394d7cc0a8dbf0a423786382ca05e012371baee35b8e1ea42f7b4b8",
       "bytes": 603
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/common-source-lto/inventory_reconciliation": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/common-source-lto/inventory_reconciliation": {
       "sha256": "2459449aa8cda3afba68c0a8723df6c219882d6b8bb331dfd4cffa43140dc8bc",
       "bytes": 3544288
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/common-source-lto/inventory_reconciliation.ll": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/common-source-lto/inventory_reconciliation.ll": {
       "sha256": "cfe4d0410a496c637895fbbd1c231c040b670a9f2d7868dc572d2d008c4e202f",
       "bytes": 215252
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/common-source-lto.json": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/common-source-lto.json": {
       "sha256": "59fbf31289589e6ab8295c5114744ddfbb91afeed684405f5c77049f0ec55f04",
       "bytes": 6789353
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/common-source-lto.log": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/common-source-lto.log": {
       "sha256": "7cedadb584e4806a3fda8a3630f3a44cf3d34dc717dde28248462eccabc999b2",
       "bytes": 602
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/common-source-normal/inventory_reconciliation": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/common-source-normal/inventory_reconciliation": {
       "sha256": "afc17e3a11215dea8a8cabd33d5fe2202d611db9a43d019d57349101f53a9425",
       "bytes": 3887104
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/common-source-normal/inventory_reconciliation.ll": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/common-source-normal/inventory_reconciliation.ll": {
       "sha256": "cfe4d0410a496c637895fbbd1c231c040b670a9f2d7868dc572d2d008c4e202f",
       "bytes": 215252
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/common-source-normal.json": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/common-source-normal.json": {
       "sha256": "3a58cbc48b5dd03e00f91f2db9bab8623dbaccdba10107475e76f5189c6b9169",
       "bytes": 6788812
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/common-source-normal.log": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/common-source-normal.log": {
       "sha256": "3e8c44eba0c52d6081184eccfb78186ec9961969969e839bee640abe69aab804",
       "bytes": 605
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/session.json": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-comparison-final/session.json": {
       "sha256": "35a82dbc41c7822fa0fa00b62b887b474b0e691172dfd24c320bdd8435eb4cc5",
       "bytes": 40346
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/asan.log": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-tools-final/asan.log": {
       "sha256": "5e3853511fb14c3412a54f17aff94e7ddf508313374e0ce907e24f90bf927e72",
       "bytes": 87
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/build-record.json": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-tools-final/build-record.json": {
       "sha256": "badc428f68f28540fe3cc2b77e833eec01a7d538ff3aace3803b0f7482ac782c",
       "bytes": 947967
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/freeze.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-tools-final/freeze.py": {
       "sha256": "9300f827b5875041f40140625fc75acf03268c2e598e4d58e3512a88029acef3",
       "bytes": 5607
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/librelar_runtime.a": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-tools-final/libimre_runtime.a": {
       "sha256": "0079d909653763d6062823a8eb249bbc39ad5aa330251424bc096f4043310f82",
       "bytes": 38472348
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/librelar_runtime_asan.a": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-tools-final/libimre_runtime_asan.a": {
       "sha256": "0239335867da86e5e1bafe9b114045653f31038b7a7ef1a0543db33c0ee5be3f",
       "bytes": 39471426
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/librelar_runtime_lto.a": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-tools-final/libimre_runtime_lto.a": {
       "sha256": "7259cdb2422ad9c311ca29bae468ff8380073c6886c966628e9d0fc088e17a61",
       "bytes": 25470354
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/relar": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-tools-final/imre": {
       "sha256": "497bf8e34ee7ff5ebfbdd65e6e9d7c86b0045b81b3d07ec3674f0ba330c1a537",
       "bytes": 140200152
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/ordinary.log": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-tools-final/ordinary.log": {
       "sha256": "23b6eb0e6fa25d538ad43320e37bc6146a215d2118f038b8f4375c970ee77e83",
       "bytes": 82
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/thinlto.log": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/unpacking-tools-final/thinlto.log": {
       "sha256": "6d358385a76ff903745ff4b782017dc487af3de0e17b92d2a92953100f5418cb",
       "bytes": 86
     },
-    "/home/dev-user/code/oss/relar/benchmarks/manifest_benchmark.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/manifest_benchmark.py": {
       "sha256": "4833c5d3ad0f0ed542cb8e12e0f5b787b143e300979747f3e278d5fad08eb773",
       "bytes": 24725
     },
-    "/home/dev-user/code/oss/relar/benchmarks/manifest_validate.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/manifest_validate.py": {
       "sha256": "2ba1a0e0062583add10cc7e5fd347b67ad82769a74dfc761266cc604685d738d",
       "bytes": 19931
     },
-    "/home/dev-user/code/oss/relar/benchmarks/reference/dependency_planner/check_boundaries.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/reference/dependency_planner/check_boundaries.py": {
       "sha256": "e0e83d31483c2983b1228c6403cb6ca43fc305b1300c78294e33d0f74edc1ac4",
       "bytes": 9712
     },
-    "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/Cargo.lock": {
+    "/home/dev-user/code/oss/imre/benchmarks/reference/inventory_reconciliation/Cargo.lock": {
       "sha256": "5fc2164c7d5d646f2dffefb4ae6bfe004cb211c240cbd1f591971e2e75ead1e0",
       "bytes": 1108
     },
-    "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/Cargo.toml": {
+    "/home/dev-user/code/oss/imre/benchmarks/reference/inventory_reconciliation/Cargo.toml": {
       "sha256": "1bca622581e0122a40193f41c63ffef865c2e02b3e34853aaa2ab04fc096c839",
       "bytes": 326
     },
-    "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/build.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/reference/inventory_reconciliation/build.py": {
       "sha256": "6ad52ac86852824666a0386323b33fa1ff5b86797de69fbbacf72d5c329850e2",
       "bytes": 8195
     },
-    "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/src/main.rs": {
+    "/home/dev-user/code/oss/imre/benchmarks/reference/inventory_reconciliation/src/main.rs": {
       "sha256": "e21c4a4aa25aa1509398afa76feb64d644535ff4b1707317037630e811db6617",
       "bytes": 12795
     },
-    "/home/dev-user/code/oss/relar/benchmarks/results/2026-10-19-truthiness-loop-else-application-lto.json.gz": {
+    "/home/dev-user/code/oss/imre/benchmarks/results/2026-10-19-truthiness-loop-else-application-lto.json.gz": {
       "sha256": "5a434a2c409b4851ee92e7c63e163f3cef2ebe5fd440cf6d0cbefd48c6fa2200",
       "bytes": 926763
     },
-    "/home/dev-user/code/oss/relar/benchmarks/results/2026-10-19-truthiness-loop-else-application-normal.json.gz": {
+    "/home/dev-user/code/oss/imre/benchmarks/results/2026-10-19-truthiness-loop-else-application-normal.json.gz": {
       "sha256": "075698aad0a29cbf10384659c48506bdf824612d7dbfedae007fe7403a813bb6",
       "bytes": 926661
     },
-    "/home/dev-user/code/oss/relar/benchmarks/results/2026-10-19-truthiness-loop-else-audit.json": {
+    "/home/dev-user/code/oss/imre/benchmarks/results/2026-10-19-truthiness-loop-else-audit.json": {
       "sha256": "bfc16b79ed744a47552ce75ce74c1137957e737a2cba30bc7a5183b8cb98889d",
       "bytes": 157044
     },
-    "/home/dev-user/code/oss/relar/benchmarks/validate.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/validate.py": {
       "sha256": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
       "bytes": 3251
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/Cargo.toml": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/Cargo.toml": {
       "sha256": "e6936e9d0c4e64f21889cfe158385a0c49067bb19672bc3d2df8dc1c7c1f173e",
       "bytes": 617
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/analysis.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/analysis.rs": {
       "sha256": "9d7e36d7f1f1ca55a0815128316b979f647aa1fef4c58ee10baa474ceaa0885c",
       "bytes": 8191
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/classes.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/classes.rs": {
       "sha256": "61a7b33711262a841e59a47f417227e77b4ffef7e6369f6beec72bb2666a92ea",
       "bytes": 10589
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/effects.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/effects.rs": {
       "sha256": "d6b90ecac77c8c872b46c18fcba3af8cf2917aeddfe42e53cba04cf680925f41",
       "bytes": 15405
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/assignments.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/assignments.rs": {
       "sha256": "d58b85fa7216835edb95174bcdc6d95431c496131b600f1ec25ba22bbdb0d238",
       "bytes": 4735
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/calls.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/calls.rs": {
       "sha256": "7daa10bbc1fbfd47747370231ae50b71c371d7bb0f27dcf917ce752ca0ede7fd",
       "bytes": 6951
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/comprehensions.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/comprehensions.rs": {
       "sha256": "bc93fe4c4aec8e9aa07469f4689aa1dd176fd0e228e66c53e8fe07cf2c1b5130",
       "bytes": 22597
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/expansions.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/expansions.rs": {
       "sha256": "a158922ecea2c5e8a7b0dacd6b1dea9da9218c6b7100082285023734e79ec18e",
       "bytes": 19329
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/matching.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/matching.rs": {
       "sha256": "33afe21b4a9f995aea1f06b698460a340466b6bc776e92c33c9dd91bdb04f06b",
       "bytes": 38530
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/truthiness.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/truthiness.rs": {
       "sha256": "62faeca4d3f3497265711fb5cd8eacc6eb551a70845a17ff5735d25738a0ae11",
       "bytes": 6026
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/unpacking.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend/unpacking.rs": {
       "sha256": "d3a3e73ea6812f62300be034808aecc96610b24cce5cf8e4a2ade884d21840b8",
       "bytes": 22694
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/frontend.rs": {
       "sha256": "df659a7ed717d4c1f376c4409c84a44f0b9f27244b495d9d61a03f904b8cc4a1",
       "bytes": 123166
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/ir.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/ir.rs": {
       "sha256": "22a135b55c087cd1adf030f52f34bca55114eb1e613d43e6a4e3c850fc9eaa9d",
       "bytes": 14208
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/lib.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/lib.rs": {
       "sha256": "69e431a89155096d2b142bd5b6402b8d2c2730e685ac60879ce7fdbb689cc84a",
       "bytes": 6770
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/llvm/truthiness.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/llvm/truthiness.rs": {
       "sha256": "150b4b292e52ee167c6ee090456786599552f7886c0adcff0c6590e8290ef4f3",
       "bytes": 7442
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/llvm.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/llvm.rs": {
       "sha256": "0340f394443a3f724028d1e4479faf5bf4c100c0f876de8ed8892967be066797",
       "bytes": 125491
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/main.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/main.rs": {
       "sha256": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
       "bytes": 7777
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/modules.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/modules.rs": {
       "sha256": "bab4f6960e73bbbe8702c839994d635f151cc45614ef32eea744fadc4dd0a723",
       "bytes": 22121
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/narrowing.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/narrowing.rs": {
       "sha256": "4e62079facab3e53ab356299d1d20325ca62ec9509eac5e193a2d70f22a4d2a7",
       "bytes": 9860
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/ranges.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/ranges.rs": {
       "sha256": "669d48b94f9a6240ec331f05d4769114015006bef5a037e58f57a98aa6055578",
       "bytes": 81480
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/tuples.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/tuples.rs": {
       "sha256": "550a43362e23d9c1b00c240502195f89fb235ec403d83d23ad16fb090e252058",
       "bytes": 27895
     },
-    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/types.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-compiler/src/types.rs": {
       "sha256": "413e496f6c0c27d54ba3fc12f5f3939ddcacf5bfa59a1eec4810da8a053891bc",
       "bytes": 7587
     },
-    "/home/dev-user/code/oss/relar/crates/relar-runtime/Cargo.toml": {
+    "/home/dev-user/code/oss/imre/crates/imre-runtime/Cargo.toml": {
       "sha256": "147e0977af4370fc833c67726f1be51f72fe0b413efcaa7f8f35fdb6c82ac919",
       "bytes": 441
     },
-    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/floats.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-runtime/src/floats.rs": {
       "sha256": "99882a45e8d7d3e4f3d88221303d09f32c3c811f25f1b3e709646b0a59ace76e",
       "bytes": 18780
     },
-    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/lib.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-runtime/src/lib.rs": {
       "sha256": "51c1a7a8a82858b085f8a079f23dc59d600373451c5e6c1b8e700e28d7726d36",
       "bytes": 42445
     },
-    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/args.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/args.rs": {
       "sha256": "0f7c2543368bc69da08613471c17dc7ac0981967e7840e3c30ef85dc6a044099",
       "bytes": 6684
     },
-    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/bytes.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/bytes.rs": {
       "sha256": "20693862a727e214a66983bc1a023d5368e53d74963c917c1b1add0d519aa4bc",
       "bytes": 12277
     },
-    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/exceptions.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/exceptions.rs": {
       "sha256": "bfb4a6e2c65a7454b47965945a0a286cfae9ffecee9315e66a770ac365690512",
       "bytes": 27529
     },
-    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/files.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/files.rs": {
       "sha256": "aeef4b559a3b712569e2de219832228c20e416814bc7e502604e22253170341d",
       "bytes": 26635
     },
-    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/mappings.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/mappings.rs": {
       "sha256": "abb515dc980648a857f2acf3505198b8b195d4ef7ab55024d9b4764960bf1c00",
       "bytes": 43827
     },
-    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/records.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/records.rs": {
       "sha256": "9e8061a02eca605d6587da87dedb0ca7b2b868d98bef9abb5159bd4b7ceff75d",
       "bytes": 10110
     },
-    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/sequences.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/sequences.rs": {
       "sha256": "35db7ebce64ae2fc9cc0a2efb40e5cb9ceb43adc9ff5327df000b3b5d90ba079",
       "bytes": 22931
     },
-    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/words.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects/words.rs": {
       "sha256": "47f3fc0bbc6b6976420ba6754eef826a3aebc70da6055cf76179ae489443f390",
       "bytes": 7905
     },
-    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects.rs": {
+    "/home/dev-user/code/oss/imre/crates/imre-runtime/src/objects.rs": {
       "sha256": "5312213a08d83a6e97d3d32e6a4f4418e7b3f303ce4cd29059f87a02c75211ea",
       "bytes": 35010
     },
-    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__init__.py": {
+    "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__init__.py": {
       "sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
       "bytes": 75
     },
-    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py": {
+    "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__main__.py": {
       "sha256": "83dddda51b6a25f0ed27c17635d06392e9a786231afac3401d634ae60dfffabf",
       "bytes": 855
     },
-    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc": {
+    "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc": {
       "sha256": "363df6ba1b6d8875d50e03f1f83983871c49843a872dfa796596b9b6a532d9b5",
       "bytes": 256
     },
-    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc": {
+    "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc": {
       "sha256": "18e2c27f2a8267028d405194e754daaadb9edf6c7d02f5efdaf77866aa3abad0",
       "bytes": 1643
     },
-    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc": {
+    "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc": {
       "sha256": "8c4ec72ea53953acbe65ed1dc1ecf849a3e18b06aefc0f1a376d89fc94bee3e4",
       "bytes": 8393
     },
-    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc": {
+    "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc": {
       "sha256": "736e3da875859f41e443ec769f7029112e284fb5cf275fbc87c9348fd4e3cb39",
       "bytes": 4993
     },
-    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc": {
+    "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc": {
       "sha256": "cb4aeecd9019c82b65281bde438d9f2d403335ea5424235b2f070fc84d174a1b",
       "bytes": 2609
     },
-    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc": {
+    "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc": {
       "sha256": "42cc16eaed07fb752aaea346da7b24a4c97576a7d9a26440ddad1cb024bc24d0",
       "bytes": 4257
     },
-    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/load.py": {
+    "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/load.py": {
       "sha256": "a487031da43dae551dc884721fa603062cfe89858e7642342b74e20c7366b2b0",
       "bytes": 3596
     },
-    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/model.py": {
+    "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/model.py": {
       "sha256": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
       "bytes": 1544
     },
-    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/reconcile.py": {
+    "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/reconcile.py": {
       "sha256": "6cd8d119a7dfc86a110d17d7fc10c1d0cbc713b6c3b2da5356c63927fe9dc67f",
       "bytes": 1700
     },
-    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/render.py": {
+    "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/render.py": {
       "sha256": "b9127fc3254bff9d16d2bfa3099852238d235ec0b07463fab15520d78f2036af",
       "bytes": 2230
     },
-    "/home/dev-user/code/oss/relar/rust-toolchain.toml": {
+    "/home/dev-user/code/oss/imre/rust-toolchain.toml": {
       "sha256": "7553618f800829444096beea3dce84c3d07585efda504c19adb6787369bbd9e8",
       "bytes": 86
     },
@@ -4326,99 +4326,99 @@
       "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
       "bytes": 32359056
     },
-    "/tmp/relar-unpacking-independent-audit/audit.py": {
+    "/tmp/imre-unpacking-independent-audit/audit.py": {
       "sha256": "fc2c6fa4509456df4538210a22286c7b00366e8ec894ec106cc102d309a0e76d",
       "bytes": 38948
     },
-    "/tmp/relar-unpacking-independent-audit/helper-origin.json": {
+    "/tmp/imre-unpacking-independent-audit/helper-origin.json": {
       "sha256": "a2ac8e8496a174273313cfbc36b84438dfdcc8cd70d561d709e807ca442cd404",
       "bytes": 273
     },
-    "/tmp/relar-unpacking-independent-audit/reused_helpers.py": {
+    "/tmp/imre-unpacking-independent-audit/reused_helpers.py": {
       "sha256": "ff001415dca986218ccf6f26cb3fb7a4ba027e7e32bc551a4602b4795df02d72",
       "bytes": 53125
     },
-    "/tmp/relar-unpacking-inventory/application-source-3cc767b401f9/inventory_reconciliation/__init__.py": {
+    "/tmp/imre-unpacking-inventory/application-source-3cc767b401f9/inventory_reconciliation/__init__.py": {
       "sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
       "bytes": 75
     },
-    "/tmp/relar-unpacking-inventory/application-source-3cc767b401f9/inventory_reconciliation/__main__.py": {
+    "/tmp/imre-unpacking-inventory/application-source-3cc767b401f9/inventory_reconciliation/__main__.py": {
       "sha256": "83dddda51b6a25f0ed27c17635d06392e9a786231afac3401d634ae60dfffabf",
       "bytes": 855
     },
-    "/tmp/relar-unpacking-inventory/application-source-3cc767b401f9/inventory_reconciliation/load.py": {
+    "/tmp/imre-unpacking-inventory/application-source-3cc767b401f9/inventory_reconciliation/load.py": {
       "sha256": "a487031da43dae551dc884721fa603062cfe89858e7642342b74e20c7366b2b0",
       "bytes": 3596
     },
-    "/tmp/relar-unpacking-inventory/application-source-3cc767b401f9/inventory_reconciliation/model.py": {
+    "/tmp/imre-unpacking-inventory/application-source-3cc767b401f9/inventory_reconciliation/model.py": {
       "sha256": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
       "bytes": 1544
     },
-    "/tmp/relar-unpacking-inventory/application-source-3cc767b401f9/inventory_reconciliation/reconcile.py": {
+    "/tmp/imre-unpacking-inventory/application-source-3cc767b401f9/inventory_reconciliation/reconcile.py": {
       "sha256": "6cd8d119a7dfc86a110d17d7fc10c1d0cbc713b6c3b2da5356c63927fe9dc67f",
       "bytes": 1700
     },
-    "/tmp/relar-unpacking-inventory/application-source-3cc767b401f9/inventory_reconciliation/render.py": {
+    "/tmp/imre-unpacking-inventory/application-source-3cc767b401f9/inventory_reconciliation/render.py": {
       "sha256": "b9127fc3254bff9d16d2bfa3099852238d235ec0b07463fab15520d78f2036af",
       "bytes": 2230
     },
-    "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__init__.py": {
+    "/tmp/imre-unpacking-inventory/baseline-source/inventory_reconciliation/__init__.py": {
       "sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
       "bytes": 75
     },
-    "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__main__.py": {
+    "/tmp/imre-unpacking-inventory/baseline-source/inventory_reconciliation/__main__.py": {
       "sha256": "48c3015dcbac52a08f48b800197398076ac26f37ca480a4ee1ebab2b72c9349c",
       "bytes": 798
     },
-    "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc": {
+    "/tmp/imre-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc": {
       "sha256": "c0e5ea3d19e91fe3108d68de9c0b42e4a8ee81cb49911d81b9cf046527edca52",
       "bytes": 264
     },
-    "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc": {
+    "/tmp/imre-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc": {
       "sha256": "3d2a47989ffcae12dd4a0c4f10ce0677442458dad5f33f3e69c7edd95664ea89",
       "bytes": 1636
     },
-    "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/load.cpython-314.pyc": {
+    "/tmp/imre-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/load.cpython-314.pyc": {
       "sha256": "a711e4fcdd769b3cb77b00c4afa0681ea712d81ed1f0e6652a377a2317bc5d33",
       "bytes": 8375
     },
-    "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/model.cpython-314.pyc": {
+    "/tmp/imre-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/model.cpython-314.pyc": {
       "sha256": "7bd566f323202e5bd0004ec34bea3b8d7da096e8a28f2a42ae46b2dfb76d84f3",
       "bytes": 5001
     },
-    "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc": {
+    "/tmp/imre-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc": {
       "sha256": "14f13b8716d25f8d6b1c11a8757247738874c360d130917fac42091988d8f55c",
       "bytes": 2692
     },
-    "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/render.cpython-314.pyc": {
+    "/tmp/imre-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/render.cpython-314.pyc": {
       "sha256": "51eabc4c37845ee8617068cc6226ab6a428e70d80697ac9633ce24e444520ba0",
       "bytes": 4269
     },
-    "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/load.py": {
+    "/tmp/imre-unpacking-inventory/baseline-source/inventory_reconciliation/load.py": {
       "sha256": "63b6a27309c84a8e201703f23f1e825ffdc76b5f367b1f336001aa84dcee8429",
       "bytes": 3520
     },
-    "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/model.py": {
+    "/tmp/imre-unpacking-inventory/baseline-source/inventory_reconciliation/model.py": {
       "sha256": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
       "bytes": 1544
     },
-    "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/reconcile.py": {
+    "/tmp/imre-unpacking-inventory/baseline-source/inventory_reconciliation/reconcile.py": {
       "sha256": "eca175bf2a76c26b7429e0f7ad574be004a63e0f3424a9a3f3ac7aea4bd8d0ea",
       "bytes": 1725
     },
-    "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/render.py": {
+    "/tmp/imre-unpacking-inventory/baseline-source/inventory_reconciliation/render.py": {
       "sha256": "df456686711363c55c13f652df5a32df6b47ce666a71b8a2c8806b542e31357f",
       "bytes": 2242
     },
-    "/tmp/relar-unpacking-inventory/launch.py": {
+    "/tmp/imre-unpacking-inventory/launch.py": {
       "sha256": "ceaa9a0a1fb7cd72536c47099c9a0017d77bfffc4c29833c525d20e133d2250d",
       "bytes": 9574
     },
-    "/tmp/relar-unpacking-inventory/prepared-manifest.json": {
+    "/tmp/imre-unpacking-inventory/prepared-manifest.json": {
       "sha256": "9ecabcedfd20cc5e1c8677fbbedded88b0501b9a041396646e3f3ce4fb02c570",
       "bytes": 11399
     },
-    "/tmp/relar-unpacking-inventory/run_comparison.py": {
+    "/tmp/imre-unpacking-inventory/run_comparison.py": {
       "sha256": "2eecc09b5afd39d928556f9040e6d076d2bb80377d2dcde0d251872630164262",
       "bytes": 1359
     },
