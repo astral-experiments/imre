@@ -30,6 +30,8 @@ pub(crate) enum Type {
     Optional(usize),
     /// A closed str/bytes union with one owned tagged-pointer word.
     Union(usize),
+    /// An owned tagged reference to a string list or a fixed tuple of strings.
+    StringIterable,
     /// An internal container or string cursor, never available in user annotations.
     Iterator,
     /// A first-class cursor whose next operation transfers one exact element type.
@@ -51,6 +53,8 @@ pub(crate) enum Type {
     PurePath(PathFlavor),
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture),
+    /// A synchronous child with statically known captured stream types.
+    Popen(ProcessCapture),
     /// Async process handle, with bits for the captured stdout and stderr slots.
     AsyncProcess(u8),
     Coroutine(usize),
@@ -64,6 +68,8 @@ pub(crate) enum Type {
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
     Logger,
+    TimedFileHandler,
+    ClockTime,
     Sha256,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
@@ -153,6 +159,7 @@ impl std::fmt::Display for Type {
             Self::Exception | Self::NamedException(_) => "Exception",
             Self::ExitCode => "SystemExit.code",
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
+            Self::StringIterable => "Iterable[str]",
             Self::TextIO => "typing.TextIO",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
@@ -160,6 +167,7 @@ impl std::fmt::Display for Type {
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
             Self::CompletedProcess(capture) if capture.text => "subprocess.CompletedProcess[str]",
             Self::CompletedProcess(_) => "subprocess.CompletedProcess[bytes]",
+            Self::Popen(_) => "subprocess.Popen",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
             Self::Coroutine(_) => "Coroutine",
             Self::EventLoop => "asyncio.AbstractEventLoop",
@@ -170,6 +178,8 @@ impl std::fmt::Display for Type {
             Self::Semaphore => "asyncio.Semaphore",
             Self::RegexPattern => "re.Pattern[str]",
             Self::Logger => "logging.Logger",
+            Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
+            Self::ClockTime => "datetime.time",
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
@@ -494,7 +504,9 @@ pub(crate) enum Builtin {
     RaiseException,
     WallTime,
     Logging(LogOperation),
+    Timed(TimedOperation),
     Input,
+    Chr,
     Int,
     Float,
     /// Represents an exact integer by its sign for a proved zero-comparison parameter.
@@ -527,6 +539,11 @@ pub(crate) enum Builtin {
     StringFormat,
     StringReplace,
     Text(TextOperation),
+    HexFormat {
+        width: u32,
+        zero: bool,
+        upper: bool,
+    },
     FloatFormat {
         precision: u32,
         percent: bool,
@@ -624,6 +641,8 @@ pub(crate) enum Builtin {
     IsNone,
     /// Promotes an exact str/bytes owner without allocating or changing identity.
     UnionInject,
+    /// An owned list for a readonly iteration: borrows existing list storage or copies tuple words.
+    StringIterationList,
     /// Projects a member proved by local control flow, acquiring its own owner.
     UnionProject,
     IsInstance(Vec<InstanceType>),
@@ -752,6 +771,7 @@ pub(crate) enum Builtin {
     /// Attaches an explicit cause to a fresh, unescaped builtin exception.
     ExceptionWithCause,
     ExceptionCause,
+    ActiveException,
     ExceptionSuppressContext,
 }
 
@@ -898,6 +918,31 @@ pub(crate) enum PosixPathOperation {
     Abspath,
 }
 
+/// Operations on a timed file handler and its immutable wall-clock time.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TimedOperation {
+    New,
+    Clock,
+    ClockPart,
+    Close,
+    Flush,
+    Stream,
+    Filename,
+    Interval,
+    RolloverAt,
+    When,
+    Suffix,
+    BackupCount,
+    Utc,
+    Delay,
+    AtTime,
+    ComputeInt,
+    ComputeFloat,
+    FilesToDelete,
+    ShouldRollover,
+    DoRollover,
+}
+
 /// Operations on the native logging registry and its named loggers.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LogOperation {
@@ -930,6 +975,17 @@ pub(crate) enum ProcessOperation {
     Run {
         streams: u32,
     },
+    Popen {
+        streams: u32,
+    },
+    PopenPid,
+    PopenArgs,
+    PopenStatus {
+        poll: bool,
+    },
+    PopenWait,
+    PopenExit,
+    PopenSignal,
     AsyncSpawn {
         stdout: u8,
         stderr: u8,

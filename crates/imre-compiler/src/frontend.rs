@@ -50,7 +50,9 @@ mod stdlib;
 mod string_lists;
 mod sys;
 mod text;
+mod timed_handlers;
 mod truthiness;
+mod unbound_locals;
 mod unions;
 mod unpacking;
 mod zip_sums;
@@ -303,6 +305,7 @@ const RESERVED: &[&str] = &[
     "set",
     "len",
     "abs",
+    "chr",
     "sorted",
     "divmod",
     "isinstance",
@@ -330,8 +333,11 @@ const RESERVED: &[&str] = &[
 
 /// These numbers are the sealed exception categories in the runtime ABI.
 pub(crate) fn exception_kind(name: &str) -> Option<u32> {
-    if name == "NotImplementedError" {
-        return Some(37);
+    match name {
+        "NotImplementedError" => return Some(37),
+        "NameError" => return Some(39),
+        "UnboundLocalError" => return Some(40),
+        _ => {}
     }
     if name == "StopIteration" {
         return Some(35);
@@ -1264,6 +1270,8 @@ fn annotation_at(
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
+        Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
+        Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return Ok(Type::ClockTime),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
@@ -1399,7 +1407,15 @@ fn annotation_at(
                 ))
             ) =>
             {
-                Ok(types.list(nested(&value.slice)?))
+                let element = nested(&value.slice)?;
+                if owner.is_some_and(|id| classes.definitions[id].dataclass.is_some())
+                    && element == Type::Str
+                    && graph.resolve(module, item) == Some(Binding::Intrinsic(Intrinsic::Iterable))
+                {
+                    Ok(Type::StringIterable)
+                } else {
+                    Ok(types.list(element))
+                }
             }
             item if graph.resolve_type(module, item)
                 == Some(Binding::Intrinsic(Intrinsic::Counter)) =>
@@ -1618,6 +1634,7 @@ struct Checker<'a> {
     captured_process_errors: Vec<processes::CapturedFields>,
     returns: Type,
     nullable_assignments: HashMap<String, Type>,
+    bound_flags: HashMap<String, usize>,
     names: HashMap<String, usize>,
     local_functions: HashMap<String, local_functions::Binding>,
     locals: Vec<Type>,
@@ -1632,7 +1649,7 @@ struct Checker<'a> {
     class: Option<usize>,
     class_receiver: Option<String>,
     iterator_source: Option<TextRange>,
-    super_initializer: Option<usize>,
+    super_initializer: Option<records::BaseInitializer>,
     initializing: bool,
 }
 
@@ -1673,6 +1690,7 @@ impl<'a> Checker<'a> {
             captured_process_errors: Vec::new(),
             returns: Type::None,
             nullable_assignments: HashMap::new(),
+            bound_flags: HashMap::new(),
             names: HashMap::new(),
             local_functions: HashMap::new(),
             locals: Vec::new(),
@@ -1849,6 +1867,18 @@ impl<'a> Checker<'a> {
         if value.ty == expected {
             return Ok(value);
         }
+        if expected == Type::StringIterable
+            && (self.types.element(value.ty) == Some(Type::Str)
+                || self
+                    .types
+                    .fields(value.ty)
+                    .is_some_and(|fields| fields.iter().all(|t| *t == Type::Str)))
+        {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
+            });
+        }
         if let (Some(source), Some(destination)) = (
             self.types.directory_value(value.ty),
             self.types.directory_value(expected),
@@ -1978,6 +2008,9 @@ impl<'a> Checker<'a> {
         }
         self.reject_class_receiver_value(expression)?;
         let mut concrete = self.types.payload(expected).unwrap_or(expected);
+        if concrete == Type::StringIterable && matches!(expression, ast::Expr::List(_)) {
+            concrete = self.types.list(Type::Str);
+        }
         if matches!(expression, ast::Expr::List(_))
             && let Some(members) = self.types.members(concrete)
         {
@@ -3128,6 +3161,20 @@ impl<'a> Checker<'a> {
         if self.block_depth == 0 && !self.module_scope {
             self.local_iter = narrowing::assigned_names(statements).contains("iter");
             self.nullable_assignments = assignments::nullable_assignments(self, statements);
+            let mut names: Vec<_> = unbound_locals::candidates(statements).into_iter().collect();
+            names.sort_unstable();
+            for name in names {
+                // Arguments enter already bound; deletion and nonordinary stores were excluded.
+                if self
+                    .names
+                    .get(&name)
+                    .is_some_and(|slot| self.assigned.contains(slot))
+                {
+                    continue;
+                }
+                let flag = self.hidden(Type::Bool);
+                self.bound_flags.insert(name, flag);
+            }
         }
         self.block_depth += 1;
         let mut body = Vec::new();
@@ -3186,6 +3233,17 @@ impl<'a> Checker<'a> {
             previous_sum = sum.is_some();
             let (mut lowered, continues) = self.statement(statement)?;
             self.remember_regex_assignment(statement, &mut lowered, &statements[index + 1..]);
+            if let Some(flag) =
+                unbound_locals::assigned(statement).and_then(|n| self.bound_flags.get(n))
+            {
+                lowered.push(Statement::Assign(
+                    *flag,
+                    Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Bool(true),
+                    },
+                ));
+            }
             body.extend(lowered);
             falls_through &= continues;
         }
@@ -3579,9 +3637,11 @@ impl<'a> Checker<'a> {
         }
         let stored = self.types.directory_value(manager.ty);
         let archive = manager.ty == Type::ZipFile;
+        let popen = matches!(manager.ty, Type::Popen(_));
         if temporary.is_none()
             && stored.is_none()
             && !archive
+            && !popen
             && !matches!(manager.ty, Type::TextIO | Type::BinaryIO)
         {
             return Err(error(
@@ -3614,7 +3674,7 @@ impl<'a> Checker<'a> {
         let (nested, falls) = self.with_items(remaining, body)?;
         protected.extend(nested);
         let mut statements = vec![Statement::Assign(captured, manager)];
-        if temporary.is_none() && stored.is_none() && !archive {
+        if temporary.is_none() && stored.is_none() && !archive && !popen {
             statements.push(Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::TextEnter, vec![self.local(captured)]),
@@ -3624,6 +3684,8 @@ impl<'a> Checker<'a> {
             Builtin::Path(ir::PathOperation::ContextExit)
         } else if temporary.is_some() {
             Builtin::Path(ir::PathOperation::CleanupTemporaryDirectory)
+        } else if popen {
+            Builtin::Process(ir::ProcessOperation::PopenExit)
         } else if archive {
             Builtin::ZipClose
         } else {
@@ -4335,6 +4397,9 @@ impl<'a> Checker<'a> {
                 }
                 let slot = self.names.get(name.id.as_str()).copied().ok_or_else(|| error(self.source, expression, "name is not a local value; globals and first-class functions are unsupported"))?;
                 if !self.assigned.contains(&slot) {
+                    if let Some(&flag) = self.bound_flags.get(name.id.as_str()) {
+                        return Ok(self.checked_bound_read(slot, flag, name.id.as_str()));
+                    }
                     return Err(error(
                         self.source,
                         expression,
@@ -4714,7 +4779,7 @@ impl<'a> Checker<'a> {
                         self.expect(ty, right, expression)?;
                     }
                     let ordered = numeric
-                        || ty == Type::Bytes
+                        || matches!(ty, Type::Bytes | Type::ClockTime)
                         || matches!(ty, Type::Tuple(_)) && self.types.ordered_key(ty);
                     let op = match op {
                         ast::CmpOp::Eq => Compare::Equal,
@@ -4980,6 +5045,9 @@ impl<'a> Checker<'a> {
                 if receiver.ty == Type::Sha256 {
                     return self.sha256_attribute(receiver, attribute);
                 }
+                if matches!(receiver.ty, Type::TimedFileHandler | Type::ClockTime) {
+                    return self.timed_attribute(receiver, attribute);
+                }
                 if receiver.ty == Type::Logger {
                     return self.logger_attribute(receiver, attribute);
                 }
@@ -4988,6 +5056,9 @@ impl<'a> Checker<'a> {
                 }
                 if matches!(receiver.ty, Type::AsyncProcess(_)) {
                     return self.async_returncode(receiver, attribute);
+                }
+                if matches!(receiver.ty, Type::Popen(_)) {
+                    return self.popen_attribute(receiver, attribute);
                 }
                 if matches!(receiver.ty, Type::CompletedProcess(_)) {
                     return self.process_attribute(receiver, attribute);
@@ -5390,6 +5461,7 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetCwd), vec![]),
                 });
             }
+            Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call),
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
                 self.reject_builtin_keywords(call)?;
@@ -5404,6 +5476,10 @@ impl<'a> Checker<'a> {
                 | Intrinsic::GetLevelName
                 | Intrinsic::LevelNamesMapping),
             )) => return self.logging_levels(symbol, call),
+            Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => {
+                return self.timed_handler(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return self.clock_time(call),
             Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
                 return self.configure_logging(call);
             }
@@ -5594,6 +5670,9 @@ impl<'a> Checker<'a> {
             if receiver.ty.is_path() {
                 return self.path_method(receiver, attribute, call);
             }
+            if matches!(receiver.ty, Type::Popen(_)) {
+                return self.popen_method(receiver, attribute, call);
+            }
             if matches!(receiver.ty, Type::CompletedProcess(_)) {
                 return self.process_method(receiver, attribute, call);
             }
@@ -5620,6 +5699,9 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::ZipFile {
                 return self.zipfile_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::TimedFileHandler {
+                return self.timed_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
@@ -6148,7 +6230,7 @@ impl<'a> Checker<'a> {
             });
         }
         if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
-            if name.id == "repr" {
+            if name.id == "repr" || (name.id == "str" && self.types.element(args[0].ty).is_some()) {
                 if !dataclass_values::can_format(args[0].ty, self.types, self.classes) {
                     return Err(error(
                         self.source,
@@ -6162,8 +6244,10 @@ impl<'a> Checker<'a> {
                 });
             }
             if matches!(name.id.as_str(), "str" | "print")
-                && (matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess(_))
-                    || self.types.is_counter(args[0].ty))
+                && (matches!(
+                    args[0].ty,
+                    Type::Class(_) | Type::CompletedProcess(_) | Type::StringIterable
+                ) || self.types.is_counter(args[0].ty))
             {
                 let text = self.record_text(args.into_iter().next().unwrap(), call)?;
                 return Ok(if name.id == "str" {
@@ -6184,6 +6268,21 @@ impl<'a> Checker<'a> {
         }
         let (builtin, ty) = match name.id.as_str() {
             "input" if args.is_empty() => (Builtin::Input, Type::Str),
+            "chr" if args.len() == 1 && matches!(args[0].ty, Type::Int | Type::Bool) => {
+                let value = args.into_iter().next().unwrap();
+                let integer = if value.ty == Type::Int {
+                    value
+                } else {
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                    }
+                };
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::Chr, vec![integer]),
+                });
+            }
             "str" if args.is_empty() => {
                 return Ok(Expr {
                     ty: Type::Str,
@@ -6243,6 +6342,7 @@ impl<'a> Checker<'a> {
                         args[0].ty,
                         Type::Str
                             | Type::Bytes
+                            | Type::StringIterable
                             | Type::ListInt
                             | Type::List(_)
                             | Type::Dict(_)

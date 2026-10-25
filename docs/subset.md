@@ -274,6 +274,8 @@ The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as 
 
 ## Fixed regular expressions
 
+Word escapes (`\w`, `\W`) use Python's Unicode alphanumeric characters plus underscore, including inside character classes.
+
 `re.compile` accepts a literal string and an optional literal `0`, `re.VERBOSE`, `re.UNICODE`, or their bitwise union. Unicode matching is already the default for text.
 `re.search(pattern, text)` accepts a literal or a compiled `re.Pattern[str]`.
 A compiled pattern has `search(text)` and `match(text)` methods. The latter
@@ -506,6 +508,12 @@ Numeric fields additionally accept literal `f`, `%`, `.Nf`, and `.N%` specificat
 
 Integer and boolean fields support decimal `d` and the `+`, `-`, and space sign options with or without `d`. For example, `f"{change:+}"` produces `+0`, `+3`, or `-3`. Decimal formatting preserves arbitrary integer precision and formats booleans as zero or one.
 
+Integer and boolean fields also accept `x` or `X` with a literal width up to
+1000, including zero padding (for example, `f"{code:04x}"`). `chr(int)` returns
+a one-character native string for Unicode scalar values. Out-of-range integers
+raise `ValueError`; isolated surrogate code points cannot be represented by a
+native string.
+
 Dynamic specifications, width, alignment, other numeric presentation types, `!a`, and debug `=` fields are rejected, including `f"{quantity=!s}"`. Records support a statically resolved `__str__` method. Custom `__format__` and `__repr__` methods are unsupported.
 
 Raw prefixes apply only to their own literal text. Expressions inside a raw f-string still follow their ordinary string rules, and adjacent parts keep their individual prefixes. Surrogate escapes in non-raw literal text or field expressions are rejected consistently with ordinary strings; tabs and form feeds inside literal text remain data.
@@ -709,6 +717,8 @@ remain available when the program accesses them.
 
 `sys.platform` gives the target platform name; `os.name` gives its OS interface (`posix` or `nt`). `sys.stdout.write(text)` and `sys.stderr.write(text)` return the number of Unicode characters written. Each stream’s `flush()` flushes that stream.
 
+`sys.exception()` returns the actual exception being handled, or `None` outside a handler. Nested handlers restore their caller’s active exception. Exception identity can be compared with `is` and `is not`.
+
 `sys.exit()` raises `SystemExit` through the ordinary exception and `finally` paths. It accepts an optional `None`, boolean, integer or string. An uncaught string prints to stderr and exits with status 1. An omitted or `None` code exits with status 0. A caught `SystemExit.code` preserves the scalar for printing, truth tests, equality, and type tests.
 
 `os.environ.copy()` returns an independent `dict[str, str]` snapshot. Passing a dictionary as `env` replaces the child's environment; use a snapshot to preserve inherited variables before making overrides. `env=None` inherits the existing environment. Snapshotting undecodable Unix names or values raises `UnicodeDecodeError`; surrogateescaped strings remain outside Imre's string domain. NUL-containing arguments, directories, or environment entries, and environment keys containing `=`, raise `ValueError`. Imre accepts an empty environment name through `execve`, as does CPython's fork/exec path. CPython's `posix_spawn` path raises `ValueError` for that name.
@@ -794,7 +804,7 @@ class Counter:
 
 Ordinary class bodies contain field annotations without defaults, typed methods, and optional docstrings. An instance method's first positional parameter is named `self`; its exact class type is inferred, or an explicit annotation must name that class. Other parameter and return types follow the same inference rules as direct functions; an initializer must return `None`. Method calls use the receiver's exact class and a fixed implementation. Passing or returning an instance preserves its identity, and aliases observe field replacement. Ordinary classes use identity for `==` and `!=`; distinct nominal classes compare unequal.
 
-An ordinary class requires `__init__(...) -> None`, including a class with no fields. Its body contains only straight-line `self.field = expression` assignments, docstrings, and `pass`. Every declared field must be assigned exactly once. Assignment values may use constructor arguments and checked expressions, but cannot read or pass the receiver; a partially initialized object never escapes construction. Local assignments, conditionals, loops, explicit returns, and direct later calls to `__init__` are rejected.
+An ordinary class requires `__init__(...) -> None`, including a class with no fields. Its body may make straight-line local and field assignments, check assertions, and initialize inherited fields with `super().__init__`. Every declared field must be assigned exactly once. Expressions may use constructor arguments, locals and already initialized fields; the receiver itself cannot escape or be rebound. Conditionals, loops, explicit returns, and direct later calls to `__init__` are rejected.
 
 When a checked guard narrows an optional record stored in a mutable field, each subsequent attribute read checks the current field; clearing it through an alias produces the usual `AttributeError`.
 
@@ -826,7 +836,7 @@ print(snapshot.count)
 
 Dataclass fields may use exact scalar literal defaults or `field(default_factory=list)`, `dict`, or `set`. Each omitted factory field gets a fresh container; explicit arguments retain their identity. Optional container factories preserve the distinction between an omitted value and explicit `None`. `kw_only` works at class and field level, including a field override. Fields also accept `compare` and `repr` flags. Flags require literal booleans; custom factories and mutable literal defaults are rejected.
 
-Class options `init`, `eq`, `repr`, `frozen`, `kw_only`, and `slots` are supported. A mutable dataclass may retain an explicit initializer under the ordinary constructor rules; `init=False` requires one. Both values of `slots` keep the language's fixed-layout contract. Frozen records reject field assignments at compile time; their referenced containers remain mutable. The generated initializer calls an instance method `__post_init__(self) -> None` after assigning every field and default factory. An explicit initializer controls its own calls. Explicit frozen initializers, `InitVar`, `ClassVar`, `field(init=False)`, custom metadata, generated ordering, custom hashes, and weak-reference slots are unsupported. `match_args` is accepted without adding positional class patterns or runtime `__match_args__` access. Frozen records do not add class-valued dictionary keys or set members.
+Class options `init`, `eq`, `repr`, `frozen`, `kw_only`, and `slots` are supported. A mutable dataclass may retain an explicit initializer under the ordinary constructor rules; `init=False` requires one. Both values of `slots` keep the language's fixed-layout contract. Frozen records reject field assignments at compile time; their referenced containers remain mutable. Dataclasses accept exact string lists and fixed tuples of strings for `Iterable[str]` fields. They preserve the original container for representation, identity, truth, iteration, and length. The generated initializer calls an instance method `__post_init__(self) -> None` after assigning every field and default factory. An explicit initializer controls its own calls. Explicit frozen initializers, `InitVar`, `ClassVar`, `field(init=False)`, custom metadata, generated ordering, custom hashes, and weak-reference slots are unsupported. `match_args` is accepted without adding positional class patterns or runtime `__match_args__` access. Frozen records do not add class-valued dictionary keys or set members.
 
 Generated equality follows modern CPython: an object equals itself; otherwise instances of the same dataclass compare selected fields in declaration order. `eq=False` preserves identity equality. Distinct records containing the same scalar NaN compare unequal. Compared container fields containing floats are rejected because native unboxed floats cannot preserve Python container NaN identity; use `field(compare=False)` or `@dataclass(eq=False)` for such storage. Nested record fields preserve their own identity and equality behavior.
 
@@ -936,6 +946,8 @@ Language errors propagate through explicit checked call results and can be caugh
 Exceptions contain an immutable category, message, optional explicit cause, and context-suppression flag. Process status errors additionally retain the original argument list, return code, and captured strings, and format their message from the current argument list. A cause can be attached only while raising a freshly constructed exception, and cause attributes cannot be written, so cause chains remain acyclic. Deep uniquely owned cause chains are released iteratively. There are no traceback, frame, or implicit context references. Exited function frames release their owners during propagation; implicit file closure can therefore happen before CPython releases locals retained by a traceback. A source-defined exception can inherit from one known exception class. A subclass with a docstring or `pass` uses the inherited constructor and matches its ancestor handlers. A failing `asyncio.TaskGroup` can raise an exception group. Full traceback objects, implicit exception context, attaching causes to existing instances and `except*` remain unsupported.
 
 ## Exceptions and cleanup
+
+An explicitly typed local assigned in a `try` body may be read after a handled exception. When a simple assignment did not complete on that path and no earlier value exists, the read raises `UnboundLocalError` (a `NameError`). A successfully assigned `None` remains an ordinary value.
 
 User exception classes keep their nominal identity in both builtin and user
 handlers. A marker class may inherit several exception bases with a consistent

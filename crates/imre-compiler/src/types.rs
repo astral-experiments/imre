@@ -86,6 +86,7 @@ impl Types {
             | Type::Str
             | Type::Bytes
             | Type::ListInt
+            | Type::StringIterable
             | Type::StringKeys
             | Type::Iterator
             | Type::ByteOutput
@@ -96,6 +97,7 @@ impl Types {
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
+            | Type::Popen(_)
             | Type::CompletedProcess(_)
             | Type::EventLoop
             | Type::TaskGroup
@@ -103,6 +105,8 @@ impl Types {
             | Type::Semaphore
             | Type::Document(_)
             | Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -420,8 +424,11 @@ impl Types {
             | Type::GeneratorContext
             | Type::DirectoryContext(_)
             | Type::Semaphore
+            | Type::Popen(_)
             | Type::AsyncProcess(_)
             | Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -648,6 +655,7 @@ impl Types {
                 | Type::TextIO
                 | Type::BinaryIO
                 | Type::ZipFile
+                | Type::Popen(_)
                 | Type::AsyncProcess(_)
                 | Type::DirectoryContext(_)
                 | Type::GeneratorContext

@@ -63,6 +63,7 @@ enum Storage {
     File(Box<files::FileState>),
     ZipFile(Box<zipfile::Archive>),
     ZipInfo(Rc<zipfile::Info>),
+    Popen(Box<processes::Popen>),
     AsyncProcess(Box<processes::AsyncProcess>),
     AsyncTask(Rc<asyncio::Task>),
     GeneratorContext(Rc<contexts::Manager>),
@@ -79,6 +80,8 @@ enum Storage {
     PathIterator(Box<paths::PathIterator>),
     RegexPattern(Box<regexes::Pattern>),
     Logger(Rc<Str>),
+    TimedFileHandler(Box<logging::timed::Handler>),
+    ClockTime(logging::timed::Clock),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
 }

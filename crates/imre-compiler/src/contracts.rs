@@ -140,6 +140,21 @@ impl Builtin {
                 },
                 PreservesLists,
             ),
+            Self::Timed(operation) => Contract::new(
+                matches!(
+                    operation,
+                    crate::ir::TimedOperation::New
+                        | crate::ir::TimedOperation::Clock
+                        | crate::ir::TimedOperation::Close
+                        | crate::ir::TimedOperation::Flush
+                        | crate::ir::TimedOperation::ComputeInt
+                        | crate::ir::TimedOperation::ComputeFloat
+                        | crate::ir::TimedOperation::FilesToDelete
+                        | crate::ir::TimedOperation::ShouldRollover
+                        | crate::ir::TimedOperation::DoRollover
+                ),
+                PreservesLists,
+            ),
             Self::Logging(operation) => Contract::new(
                 matches!(
                     operation,
@@ -163,6 +178,13 @@ impl Builtin {
                 | ProcessOperation::CheckOutput
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
+                | ProcessOperation::Popen { .. }
+                | ProcessOperation::PopenPid
+                | ProcessOperation::PopenArgs
+                | ProcessOperation::PopenStatus { .. }
+                | ProcessOperation::PopenExit
+                | ProcessOperation::PopenWait
+                | ProcessOperation::PopenSignal
                 | ProcessOperation::AsyncSpawn { .. }
                 | ProcessOperation::AsyncStatus { wait: false }
                 | ProcessOperation::Coroutine { .. }
@@ -212,6 +234,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::BytesGet
+            | Self::Chr
             | Self::Decode
             | Self::HashNew
             | Self::DecodeSplitLines
@@ -245,6 +268,7 @@ impl Builtin {
             | Self::Slice
             | Self::StringFormat
             | Self::RegexSub(_)
+            | Self::StringIterationList
             | Self::StringJoin
             | Self::StringReplace
             | Self::StringGet
@@ -264,10 +288,12 @@ impl Builtin {
             | Self::Sha256Update
             | Self::Sha256Digest { .. }
             | Self::Sha256Copy
+            | Self::ActiveException
             | Self::ExceptionRecord
             | Self::ExceptionCause
             | Self::ExceptionSuppressContext
             | Self::FloatFormat { .. }
+            | Self::HexFormat { .. }
             | Self::GlobalGet(_)
             | Self::IntBounded { .. }
             | Self::IntSignAsFloat
@@ -581,6 +607,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || matches!(
             name,
             "int_floordiv"
+                | "imre_chr"
                 | "imre_json_index"
                 | "imre_exception_message"
                 | "imre_exception_repr"
@@ -604,12 +631,22 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_subprocess_error_field"
                 | "imre_print_int"
                 | "imre_print_float"
+                | "imre_log_file_new"
+                | "imre_log_clock_new"
+                | "imre_log_file_close"
+                | "imre_log_file_flush"
+                | "imre_log_file_compute_int"
+                | "imre_log_file_compute_float"
+                | "imre_log_file_deletions"
+                | "imre_log_file_should_roll"
+                | "imre_log_file_roll"
                 | "imre_log_config"
                 | "imre_log_config_named"
                 | "imre_log_check_level"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
                 | "imre_str_unquote"
+                | "imre_string_iterable_list"
                 | "imre_str_join"
                 | "imre_str_replace"
                 | "imre_print_str"
