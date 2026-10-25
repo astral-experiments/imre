@@ -580,6 +580,17 @@ impl Checker<'_> {
                 ),
             });
         }
+        if matches!(value.ty, Type::Exception | Type::NamedException(_)) {
+            let op = if field.conversion == ast::ConversionFlag::Repr {
+                Builtin::ExceptionRepr
+            } else {
+                Builtin::ExceptionMessage
+            };
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(op, vec![value]),
+            });
+        }
         if field.conversion != ast::ConversionFlag::Repr
             && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(_))
         {
