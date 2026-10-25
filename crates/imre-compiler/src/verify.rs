@@ -529,6 +529,23 @@ impl Verifier<'_> {
             ExprKind::Field(receiver, field) => self.field(receiver.ty, *field, value.ty),
             ExprKind::Builtin(operation, args) => {
                 match operation {
+                    Builtin::ExceptionRecordFields => {
+                        let Type::Class(id) = value.ty else {
+                            return Err("exception payload construction needs a record".to_owned());
+                        };
+                        let layout = self
+                            .module
+                            .class_fields
+                            .get(id)
+                            .ok_or("unknown exception payload")?;
+                        require(
+                            layout.len() == args.len(),
+                            "exception payload field count differs from its layout",
+                        )?;
+                        for (field, expected) in args.iter().zip(layout) {
+                            same(field.ty, *expected)?;
+                        }
+                    }
                     Builtin::GlobalGet(slot) => {
                         let ty = *self
                             .module
