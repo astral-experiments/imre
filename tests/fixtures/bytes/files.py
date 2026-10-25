@@ -129,3 +129,16 @@ try:
         print("unreachable")
 except NotADirectoryError as error:
     print(error)
+
+
+with open("seek.bin", "wb") as writer:
+    writer.write(b"abcdef")
+with open("seek.bin", "rb") as reader:
+    print(reader.tell())
+    print(reader.read(2))
+    print(reader.seek(1, 1))
+    print(reader.read(1))
+    print(reader.seek(-1, 2))
+    print(reader.read())
+    print(reader.seek(0))
+    print(reader.tell())
