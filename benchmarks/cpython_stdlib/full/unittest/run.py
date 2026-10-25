@@ -107,7 +107,7 @@ def run(args, level, root):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level, args.reachable_only)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
-    for name in ["truth_protocol", "equality_protocol", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
+    for name in ["truth_protocol", "equality_protocol", "boolean_equality", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
                  "callable_binding", "context_regex", *("context_" + family for family in families)]:
         control = root / name
         control.mkdir()
@@ -152,7 +152,7 @@ def run(args, level, root):
             blob = manifest["files"][path.relative_to(HERE / "upstream").as_posix()]
             native_defaults[case_id, 1] = NativeDefaultMethod(lang, directory, path, blob, ("imre", operation))
             continue
-        fixture = testcase_fixture("bool" if method == "test_stop" else None)
+        fixture = testcase_fixture()
         if module == "testmock.testmock":
             fixture = "from unittest.mock import Mock\n" + fixture
         try:
