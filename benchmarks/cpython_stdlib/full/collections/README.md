@@ -7,6 +7,13 @@ free-threading test. The loader includes inherited test methods and both
 `load_tests` hooks. The 15 docstrings in `Lib/collections/__init__.py` are
 upstream test inputs.
 
+The [versioned native evidence](evidence-linux.json) covers all eight suites
+at both optimization levels. See [execution and reproduction](routines.md)
+and the [dependency inventory](startup.md) for array registration, argparse's
+Mapping class base, and the copy protocols exercised by 16 original cases.
+The [branch verification runs](runs/README.md) retain full historical reports
+for individual compiler trees. Each report has its own O0 and O3 denominator.
+
 | Suite | IDs |
 | --- | ---: |
 | test_collections (containers, ABCs and doctests) | 116 |
@@ -29,5 +36,8 @@ The free-threaded deque ID is retained even though its parent package raises
 
 Reference outcomes describe CPython only. The existing
 [`native_counter.py`](../../native_counter.py) compiles complete upstream
-methods with native assertion adapters. Other IDs require independent Imre
-execution evidence before they can count as native.
+methods with native assertion adapters. [The Counter method gate](methods.py)
+also runs seven of those complete bodies under their original unittest fixtures:
+total, membership, equality and all four ordering operations. The per-method
+[O0](methods-O0.json) and [O3](methods-O3.json) results retain the method hash
+and the host fixture role. The same cases are attributed by the full runner.

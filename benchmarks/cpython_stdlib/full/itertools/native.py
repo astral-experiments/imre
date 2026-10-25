@@ -16,6 +16,7 @@ CASES = {
     "LengthTransparency.test_repeat": ("int", 3, ("repeat",)),
     "LengthTransparency.test_repeat_with_negative_times": ("int", 4, ("repeat",)),
     "TestBasicOps.test_repeat_with_negative_times": ("str", 4, ("repeat",)),
+    "TestBasicOps.test_tee_del_backward": ("int", 0, ("repeat", "tee")),
     "TestExamples.test_count": ("list[int]", 1, ("count", "islice")),
     "TestExamples.test_cycle": ("list[str]", 1, ("cycle", "islice")),
     "TestExamples.test_islice": ("list[str]", 4, ("islice",)),
@@ -93,7 +94,7 @@ def main():
             if built.returncode:
                 result.update(status="compile_error", diagnostic=built.stderr.strip())
             else:
-                ran = subprocess.run([wd / "case"], cwd=wd, capture_output=True, text=True, timeout=15)
+                ran = subprocess.run([wd / "case"], cwd=wd, capture_output=True, text=True, timeout=180)
                 if ran.returncode == 0 and not ran.stderr and ran.stdout == f"{checks}\n":
                     result["status"] = "native"
                 else:

@@ -279,9 +279,11 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         let (kind, ty) = match attribute.attr.as_str() {
+            "info" if receiver.ty == Type::Path => (PathOperation::Info, Type::PathInfo),
             "name" => (PathOperation::Name, Type::Str),
             "stem" => (PathOperation::Stem, Type::Str),
             "suffix" => (PathOperation::Suffix, Type::Str),
+            "suffixes" => (PathOperation::Suffixes, self.types.list(Type::Str)),
             "parent" => (PathOperation::Parent, receiver.ty),
             "drive" => (PathOperation::Drive, Type::Str),
             "root" => (PathOperation::Root, Type::Str),
@@ -304,6 +306,122 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if matches!(receiver.ty, Type::Path | Type::PathInfo) {
+            let info = receiver.ty == Type::PathInfo;
+            use ir::PathQuery;
+            let query = match name {
+                "exists" => Some(PathQuery::Exists),
+                "is_dir" => Some(PathQuery::Directory),
+                "is_file" => Some(PathQuery::File),
+                "is_symlink" => Some(PathQuery::Symlink),
+                "is_fifo" if !info => Some(PathQuery::Fifo),
+                "is_socket" if !info => Some(PathQuery::Socket),
+                "is_block_device" if !info => Some(PathQuery::BlockDevice),
+                "is_char_device" if !info => Some(PathQuery::CharDevice),
+                _ => None,
+            };
+            if let Some(query) = query {
+                let kind = PathOperation::Query(query);
+                if matches!(
+                    query,
+                    PathQuery::Exists | PathQuery::Directory | PathQuery::File
+                ) {
+                    let param = Parameter {
+                        kind: ParameterKind::KeywordOnly,
+                        ..parameter("follow_symlinks", Type::Bool, Some(boolean(true)))
+                    };
+                    let args = self.arguments_with(
+                        call,
+                        &[param],
+                        Some(receiver),
+                        |checker, _, value| {
+                            let value = checker.expr(value)?;
+                            Ok(checker.truth_value(value))
+                        },
+                    )?;
+                    return Ok(self.ordered_path_operation(kind, Type::Bool, args));
+                }
+                if !call.arguments.args.is_empty() {
+                    return Err(error(
+                        self.source,
+                        call,
+                        &format!("{name} requires no positional arguments"),
+                    ));
+                }
+                self.reject_builtin_keywords(call)?;
+                let follow = !matches!(query, PathQuery::Symlink);
+                return Ok(operation(kind, Type::Bool, vec![receiver, boolean(follow)]));
+            }
+            if info {
+                return Err(error(self.source, call, "unsupported Path.info method"));
+            }
+        }
+        if matches!(name, "relative_to" | "is_relative_to") {
+            let ty = receiver.ty;
+            let (op, result) = if name == "relative_to" {
+                (PathOperation::RelativeTo, ty)
+            } else {
+                (PathOperation::IsRelativeTo, Type::Bool)
+            };
+            if call.arguments.args.is_empty()
+                && call.arguments.keywords.iter().all(|kw| {
+                    name == "relative_to"
+                        && kw.arg.as_ref().is_some_and(|a| a.as_str() == "walk_up")
+                })
+            {
+                let mut values = vec![receiver];
+                for kw in &call.arguments.keywords {
+                    values.push(self.expr(&kw.value)?);
+                }
+                self.graph
+                    .checked_missing_argument(self.module, call.range());
+                return Ok(self.bad_relative_argument(
+                    values,
+                    result,
+                    format!("PurePath.{name}() missing 1 required positional argument: 'other'"),
+                ));
+            }
+            let mut params = vec![parameter("other", Type::Str, None)];
+            if name == "relative_to" {
+                params.push(Parameter {
+                    kind: ParameterKind::KeywordOnly,
+                    ..parameter("walk_up", Type::Bool, Some(boolean(false)))
+                });
+            }
+            let arguments =
+                self.arguments_with(call, &params, Some(receiver), |checker, i, arg| {
+                    if i != 0 {
+                        return checker.expr_expected(arg, Type::Bool);
+                    }
+                    let value = checker.expr(arg)?;
+                    if value.ty.is_path()
+                        || matches!(
+                            value.ty,
+                            Type::Bytes | Type::None | Type::Int | Type::Float | Type::Bool
+                        )
+                    {
+                        return Ok(value);
+                    }
+                    let text = checker.path_text(value, arg)?;
+                    Ok(if let Type::PurePath(flavor) = ty {
+                        let base = operation(PathOperation::PureNew(flavor), ty, vec![]);
+                        operation(PathOperation::Join, ty, vec![base, text])
+                    } else {
+                        operation(PathOperation::New, Type::Path, vec![text])
+                    })
+                })?;
+            let other = arguments.values[arguments.order[1]].ty;
+            if !other.is_path() {
+                let kind = if other == Type::None {
+                    "NoneType".to_owned()
+                } else {
+                    self.type_name(other)
+                };
+                return Ok(self.bad_relative_argument(arguments.values, result, format!(
+                    "argument should be a str or an os.PathLike object where __fspath__ returns a str, not '{kind}'")));
+            }
+            return Ok(self.ordered_path_operation(op, result, arguments));
+        }
         if matches!(name, "match" | "full_match") {
             let full = name == "full_match";
             let optional_bool = self.types.optional(Type::Bool);
@@ -360,7 +478,10 @@ impl Checker<'_> {
             return Ok(path);
         }
         if matches!(receiver.ty, Type::PurePath(_))
-            && !matches!(name, "as_posix" | "is_absolute" | "with_name")
+            && !matches!(
+                name,
+                "as_posix" | "is_absolute" | "with_name" | "with_stem" | "with_suffix"
+            )
         {
             return Err(error(
                 self.source,
@@ -376,25 +497,27 @@ impl Checker<'_> {
         }
         if matches!(
             name,
-            "mkdir" | "unlink" | "replace" | "resolve" | "with_name"
+            "mkdir"
+                | "unlink"
+                | "replace"
+                | "resolve"
+                | "with_name"
+                | "with_stem"
+                | "with_suffix"
+                | "symlink_to"
+                | "hardlink_to"
         ) {
             return self.path_call(receiver, name, call);
         }
-        if matches!(name, "iterdir" | "glob") {
-            return Err(error(
-                self.source,
-                call,
-                "Path iterators require an immediate loop, comprehension, or iterable consumer",
-            ));
+        if matches!(name, "iterdir" | "glob" | "rglob" | "walk") {
+            return self.path_iterator(receiver, call, name);
         }
         let (kind, ty, arity) = match name {
             "absolute" => (PathOperation::Absolute, Type::Path, 0),
             "as_posix" => (PathOperation::AsPosix, Type::Str, 0),
-            "exists" => (PathOperation::Exists, Type::Bool, 0),
-            "is_file" => (PathOperation::IsFile, Type::Bool, 0),
-            "is_dir" => (PathOperation::IsDir, Type::Bool, 0),
             "is_absolute" => (PathOperation::IsAbsolute, Type::Bool, 0),
             "read_bytes" => (PathOperation::ReadBytes, Type::Bytes, 0),
+            "readlink" => (PathOperation::Readlink, Type::Path, 0),
             "rmdir" => (PathOperation::Rmdir, Type::None, 0),
             _ => return Err(error(self.source, call, "unsupported native Path method")),
         };
@@ -549,6 +672,19 @@ impl Checker<'_> {
                 Type::Path,
                 vec![parameter("target", Type::Str, None)],
             ),
+            "symlink_to" => (
+                PathOperation::Link(ir::PathLink::Symlink),
+                Type::None,
+                vec![
+                    parameter("target", Type::Str, None),
+                    parameter("target_is_directory", Type::Bool, Some(boolean(false))),
+                ],
+            ),
+            "hardlink_to" => (
+                PathOperation::Link(ir::PathLink::Hardlink),
+                Type::None,
+                vec![parameter("target", Type::Str, None)],
+            ),
             "resolve" => (
                 PathOperation::Resolve,
                 Type::Path,
@@ -557,18 +693,61 @@ impl Checker<'_> {
             "with_name" => (
                 PathOperation::WithName,
                 receiver.ty,
-                vec![parameter("name", Type::Str, None)],
+                vec![parameter("name", self.types.optional(Type::Str), None)],
+            ),
+            "with_stem" => (
+                PathOperation::WithStem,
+                receiver.ty,
+                vec![parameter("stem", self.types.optional(Type::Str), None)],
+            ),
+            "with_suffix" => (
+                PathOperation::WithSuffix,
+                receiver.ty,
+                vec![parameter("suffix", self.types.optional(Type::Str), None)],
             ),
             _ => unreachable!("only path methods with parameters have this signature"),
         };
         let arguments =
             self.arguments_with(call, &params, Some(receiver), |checker, index, value| {
-                if name == "replace" {
+                if matches!(name, "symlink_to" | "hardlink_to") {
+                    checker.expr(value)
+                } else if name == "replace" {
                     checker.path_argument(value)
                 } else {
                     checker.expr_expected(value, params[index].ty)
                 }
             })?;
+        if let PathOperation::Link(link) = kind {
+            let mut scope = calls::ArgumentScope::default();
+            // The Python method receives every expression before os.link/os.symlink
+            // asks for a filename or the truth of target_is_directory.
+            let values: Vec<_> = arguments
+                .values
+                .into_iter()
+                .map(|v| scope.hold(self, v))
+                .collect();
+            let mut args: Vec<_> = arguments.order.iter().map(|&i| values[i].clone()).collect();
+            let symlink = matches!(link, ir::PathLink::Symlink);
+            let operation_name = if symlink { "symlink" } else { "link" };
+            let source = self.syscall_fspath(args[1].clone(), &call.func, operation_name, "src")?;
+            args[1] = scope.hold(self, source);
+            if symlink {
+                let flag = args.pop().unwrap();
+                if flag.ty != Type::Bool {
+                    scope.hold(
+                        self,
+                        operation(
+                            PathOperation::Link(ir::PathLink::CheckSymlink),
+                            Type::None,
+                            args.clone(),
+                        ),
+                    );
+                    let flag = self.truth_value(flag);
+                    scope.hold(self, flag);
+                }
+            }
+            return Ok(scope.finish(operation(kind, returns, args)));
+        }
         Ok(self.ordered_path_operation(kind, returns, arguments))
     }
 
@@ -585,10 +764,12 @@ impl Checker<'_> {
         }
         let mut mode = call.arguments.args.first();
         let mut encoding = None;
+        let mut newline = None;
         for keyword in &call.arguments.keywords {
             match keyword.arg.as_ref().map(|arg| arg.as_str()) {
                 Some("mode") if mode.is_none() => mode = Some(&keyword.value),
                 Some("encoding") if encoding.is_none() => encoding = Some(keyword),
+                Some("newline") if newline.is_none() => newline = Some(&keyword.value),
                 _ => {
                     return Err(error(
                         self.source,
@@ -612,7 +793,7 @@ impl Checker<'_> {
                 ));
             }
         };
-        let (ty, builtin) = match mode {
+        let (ty, mut builtin) = match mode {
             "rt" | "tr" => file_open_mode("r"),
             "wt" | "tw" => file_open_mode("w"),
             "br" => file_open_mode("rb"),
@@ -635,6 +816,9 @@ impl Checker<'_> {
             self.utf8_encoding_keyword(encoding)?;
         }
         let path = operation(PathOperation::Text, Type::Str, vec![receiver]);
+        if let Some(newline) = newline {
+            builtin = self.text_newline(newline, builtin)?;
+        }
         Ok(Expr {
             ty,
             kind: ExprKind::Builtin(builtin, vec![path]),
@@ -688,6 +872,38 @@ impl Checker<'_> {
         Ok(self.ordered_path_operation(PathOperation::TemporaryDirectory, Type::Str, arguments))
     }
 
+    fn bad_relative_argument(&mut self, values: Vec<Expr>, ty: Type, message: String) -> Expr {
+        // Python evaluates the receiver and all arguments before it checks the
+        // signature or attempts to construct a path from the 'other' value.
+        let mut body = Vec::new();
+        let mut clear = Vec::new();
+        for value in values {
+            let slot = self.hidden(value.ty);
+            body.push(Statement::Assign(slot, value));
+            clear.push(slot);
+        }
+        body.push(Statement::Raise(Some(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("TypeError").unwrap(),
+                message: Some(Box::new(unpacking::string(&message))),
+            },
+        })));
+        let unreachable = if ty == Type::Bool {
+            boolean(false)
+        } else {
+            self.local(clear[0])
+        };
+        Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(unreachable),
+                clear,
+            },
+        }
+    }
+
     fn ordered_path_operation(
         &mut self,
         kind: PathOperation,
@@ -701,7 +917,7 @@ impl Checker<'_> {
             body.push(Statement::Assign(slot, value));
             clear.push(slot);
         }
-        let args = arguments
+        let args: Vec<_> = arguments
             .order
             .iter()
             .map(|&index| self.local(clear[index]))
@@ -716,48 +932,77 @@ impl Checker<'_> {
         }
     }
 
-    /// Bounded glob syntax has no recursive traversal or dynamic matching protocol.
-    /// Matching itself stays native and preserves pathlib's treatment of dotfiles.
+    /// Construct the iterator at the call site. Globs bind and validate their pattern
+    /// now, but defer every directory scan until the consumer first requests a path.
     pub(super) fn path_iterator(
-        &self,
+        &mut self,
         receiver: Expr,
         call: &ast::ExprCall,
-        glob: bool,
+        name: &str,
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
-        self.reject_builtin_keywords(call)?;
-        let mut args = vec![receiver];
-        if glob {
-            let [ast::Expr::StringLiteral(pattern)] = call.arguments.args.as_ref() else {
-                return Err(error(
-                    self.source,
-                    call,
-                    "Path.glob requires one literal single-component pattern",
-                ));
-            };
-            check_string(pattern, self.source)?;
-            let value = pattern.value.to_str();
-            if value.is_empty() || value == "." || value.contains('/') || value.contains("**") {
-                return Err(error(
-                    self.source,
-                    pattern,
-                    "Path.glob supports nonempty single-component patterns without recursive '**'",
-                ));
+        if name == "iterdir" {
+            self.reject_builtin_keywords(call)?;
+            if !call.arguments.args.is_empty() {
+                return Err(error(self.source, call, "Path.iterdir takes no arguments"));
             }
-            args.push(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Str(value.into()),
-            });
-        } else if !call.arguments.args.is_empty() {
-            return Err(error(self.source, call, "Path.iterdir takes no arguments"));
+            return Ok(operation(
+                PathOperation::Iterdir,
+                self.types.cursor(Type::Path),
+                vec![receiver],
+            ));
         }
-        Ok(operation(
-            if glob {
-                PathOperation::Glob
-            } else {
-                PathOperation::Iterdir
+        if name == "walk" {
+            let none = Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            };
+            let params = [
+                parameter("top_down", Type::Bool, Some(boolean(true))),
+                parameter("on_error", Type::None, Some(none)),
+                parameter("follow_symlinks", Type::Bool, Some(boolean(false))),
+            ];
+            let args = self.arguments(call, &params, Some(receiver))?;
+            let names = self.types.list(Type::Str);
+            let row = self.types.tuple(vec![Type::Path, names, names]);
+            return Ok(self.ordered_path_operation(
+                PathOperation::Walk,
+                self.types.cursor(row),
+                args,
+            ));
+        }
+        let optional = self.types.optional(Type::Bool);
+        let default = self.coerce(
+            Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
             },
-            Type::Iterator,
+            optional,
+            call,
+        )?;
+        let params = [
+            parameter("pattern", Type::Str, None),
+            Parameter {
+                kind: ParameterKind::KeywordOnly,
+                ..parameter("case_sensitive", optional, Some(default))
+            },
+            Parameter {
+                kind: ParameterKind::KeywordOnly,
+                ..parameter("recurse_symlinks", Type::Bool, Some(boolean(false)))
+            },
+        ];
+        let args = self.arguments_with(call, &params, Some(receiver), |checker, i, value| {
+            if i == 0 {
+                checker.path_argument(value)
+            } else {
+                checker.expr_expected(value, params[i].ty)
+            }
+        })?;
+        Ok(self.ordered_path_operation(
+            PathOperation::Glob {
+                recursive: name == "rglob",
+            },
+            self.types.cursor(Type::Path),
             args,
         ))
     }

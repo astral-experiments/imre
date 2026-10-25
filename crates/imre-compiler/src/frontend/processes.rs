@@ -28,6 +28,14 @@ fn absent(ty: Type) -> Expr {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LaunchApi {
+    Popen,
+    Call(bool),
+    CheckOutput,
+    Run,
+}
+
 fn integer_deadline(value: &ast::Expr) -> bool {
     let value = match value {
         ast::Expr::UnaryOp(unary)
@@ -62,10 +70,20 @@ fn timeout_field_type(graph: &SourceGraph) -> Option<Type> {
         fn visit_expr(&mut self, expr: &'ast ast::Expr) {
             if let ast::Expr::Call(call) = expr
                 && let Some(deadline) = match self.graph.resolve(self.module, &call.func) {
-                    Some(Binding::Intrinsic(Intrinsic::SubprocessRun)) => timeout_argument(call),
+                    Some(Binding::Intrinsic(
+                        Intrinsic::SubprocessRun
+                        | Intrinsic::SubprocessCall
+                        | Intrinsic::SubprocessCheckCall
+                        | Intrinsic::CheckOutput,
+                    )) => timeout_argument(call),
                     _ if matches!(&*call.func, ast::Expr::Attribute(a) if a.attr.as_str() == "wait") => {
                         timeout_argument(call)
                             .or_else(|| call.arguments.args.first())
+                            .filter(|d| !matches!(d, ast::Expr::NoneLiteral(_)))
+                    }
+                    _ if matches!(&*call.func, ast::Expr::Attribute(a) if a.attr.as_str() == "communicate") => {
+                        timeout_argument(call)
+                            .or_else(|| call.arguments.args.get(1))
                             .filter(|d| !matches!(d, ast::Expr::NoneLiteral(_)))
                     }
                     _ => None,
@@ -99,7 +117,8 @@ fn timeout_field_type(graph: &SourceGraph) -> Option<Type> {
 
 /// The handler slot and any argument or capture layout shared by its producers.
 pub(super) struct CapturedFields {
-    slot: usize,
+    pub(super) slot: usize,
+    pub(super) tree_issue: Option<Type>,
     argv: Option<Type>,
     capture: Option<ProcessCapture>,
     timeout: bool,
@@ -141,8 +160,18 @@ pub(super) fn process_error_view(
     let mut argv = HashSet::new();
     let mut precise = !raises.0;
     let mut timed = false;
+    let mut tree_issue = None;
+    let mut other_shutil = false;
     ir::walk_expressions(body, &mut |value| {
         let (origin, command) = match &value.kind {
+            ExprKind::Builtin(Builtin::Process(ProcessOperation::CopyTree(issue)), _) => {
+                tree_issue = Some(*issue);
+                return;
+            }
+            ExprKind::Builtin(Builtin::Process(ProcessOperation::Copy(_)), _) => {
+                other_shutil = true;
+                return;
+            }
             ExprKind::Call(..)
             | ExprKind::Invoke { .. }
             | ExprKind::Construct { .. }
@@ -170,37 +199,58 @@ pub(super) fn process_error_view(
                 },
                 types.list(Type::Str),
             ),
-            ExprKind::Builtin(Builtin::Process(ProcessOperation::CheckOutput), args) => (
-                ProcessCapture {
-                    stdout: true,
-                    stderr: false,
-                    text: true,
-                },
-                args[0].ty,
-            ),
-            ExprKind::Builtin(Builtin::Process(ProcessOperation::Run { .. }), args) => {
-                timed |= args.len() == 5;
-                let Type::CompletedProcess(capture) = value.ty else {
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::CheckOutput { capture, .. }),
+                args,
+            ) => {
+                timed = true;
+                (*capture, args[0].ty)
+            }
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::Run {
+                    timed: deadline, ..
+                }),
+                _,
+            ) => {
+                timed |= *deadline;
+                let Type::CompletedProcess(capture, cmd) = value.ty else {
                     unreachable!()
                 };
-                (capture, types.list(Type::Str))
+                (capture, types.completed_command(cmd))
             }
-            ExprKind::Builtin(Builtin::Process(ProcessOperation::PopenWait), _) => {
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::PopenCommunicate { .. }),
+                args,
+            ) => {
                 timed = true;
+                let Type::Popen(capture, _, cmd) = args[0].ty else {
+                    unreachable!()
+                };
+                (capture, types.command_type(cmd))
+            }
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::PopenWait | ProcessOperation::Call { .. }),
+                args,
+            ) => {
+                timed = true;
+                let command = match args[0].ty {
+                    Type::Popen(_, _, id) => types.command_type(id),
+                    ty => ty,
+                };
                 (
                     ProcessCapture {
                         stdout: false,
                         stderr: false,
                         text: false,
                     },
-                    types.list(Type::Str),
+                    command,
                 )
             }
             ExprKind::Builtin(Builtin::Process(ProcessOperation::CheckReturnCode), args) => {
-                let Type::CompletedProcess(capture) = args[0].ty else {
+                let Type::CompletedProcess(capture, cmd) = args[0].ty else {
                     unreachable!()
                 };
-                (capture, types.list(Type::Str))
+                (capture, types.completed_command(cmd))
             }
             _ => return,
         };
@@ -209,6 +259,11 @@ pub(super) fn process_error_view(
     });
     CapturedFields {
         slot,
+        tree_issue: if precise && !other_shutil && kinds == [64] {
+            tree_issue
+        } else {
+            None
+        },
         argv: (precise && argv.len() == 1).then(|| *argv.iter().next().unwrap()),
         capture: (precise && captures.len() == 1).then(|| *captures.iter().next().unwrap()),
         // These exception categories include TimeoutExpired.
@@ -216,40 +271,61 @@ pub(super) fn process_error_view(
     }
 }
 
-/// The fixed streams are the only accepted non-value arguments. Their descriptor
-/// choices have no Python evaluation effects. All ordinary expressions still run
-/// in source order, even when conflicting capture arguments will raise.
+/// Modes 6 and 7 borrow an integer descriptor or file object. The final choice
+/// between them is made after checking the argument's type.
+fn stream_mode(graph: &SourceGraph, module: ModuleId, value: &ast::Expr) -> u32 {
+    if matches!(value, ast::Expr::NoneLiteral(_)) {
+        return 0;
+    }
+    if let ast::Expr::UnaryOp(unary) = value
+        && unary.op == ast::UnaryOp::USub
+        && let ast::Expr::NumberLiteral(number) = &*unary.operand
+        && let ast::Number::Int(number) = &number.value
+    {
+        return match number.to_string().as_str() {
+            "1" => 1, // PIPE
+            "2" => 5, // STDOUT
+            "3" => 2, // DEVNULL
+            _ => 6,
+        };
+    }
+    match graph.resolve(module, value) {
+        Some(Binding::Intrinsic(Intrinsic::Pipe)) => 1,
+        Some(Binding::Intrinsic(Intrinsic::Devnull)) => 2,
+        Some(Binding::Intrinsic(Intrinsic::Stdout)) => 3,
+        Some(Binding::Intrinsic(Intrinsic::Stderr)) => 4,
+        Some(Binding::Intrinsic(Intrinsic::SubprocessStdout)) => 5,
+        Some(Binding::Intrinsic(Intrinsic::Stdin)) => 8,
+        _ => 6,
+    }
+}
+
+/// Capture determines the returned layout. Ordinary stream expressions are
+/// evaluated in source order, including ones rejected by run/check_output.
 fn stream_plan(
     graph: &SourceGraph,
     module: ModuleId,
     call: &ast::ExprCall,
 ) -> Result<(u32, ProcessCapture), &'static str> {
-    let mut streams = [0, 0];
+    let checked_output =
+        graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::CheckOutput));
+    let run =
+        graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::SubprocessRun));
+    let mut streams = [u32::from(checked_output), 0];
     let mut capture = false;
     let mut text = false;
     for keyword in &call.arguments.keywords {
         let value = &keyword.value;
         match keyword.arg.as_ref().map(|name| name.as_str()) {
             Some(name @ ("stdout" | "stderr")) => {
+                if checked_output && name == "stdout" {
+                    // This keyword always raises, whatever value it evaluates to.
+                    continue;
+                }
                 let index = usize::from(name == "stderr");
-                streams[index] = if matches!(value, ast::Expr::NoneLiteral(_)) {
-                    0
-                } else {
-                    match graph.resolve(module, value) {
-                        Some(Binding::Intrinsic(Intrinsic::Pipe)) => 1,
-                        Some(Binding::Intrinsic(Intrinsic::Devnull)) => 2,
-                        Some(Binding::Intrinsic(Intrinsic::Stdout)) => 3,
-                        Some(Binding::Intrinsic(Intrinsic::Stderr)) => 4,
-                        Some(Binding::Intrinsic(Intrinsic::SubprocessStdout)) => 5,
-                        _ => {
-                            return Err(
-                                "process streams require None, PIPE, DEVNULL, a standard output stream, or stderr=STDOUT",
-                            );
-                        }
-                    }
-                };
+                streams[index] = stream_mode(graph, module, value);
             }
-            Some(name @ ("capture_output" | "text")) => {
+            Some(name @ ("capture_output" | "text" | "universal_newlines")) => {
                 let flag = match value {
                     ast::Expr::BooleanLiteral(flag) => flag.value,
                     ast::Expr::NoneLiteral(_) => false,
@@ -257,11 +333,20 @@ fn stream_plan(
                         return Err("process capture_output and text require literal bool or None");
                     }
                 };
-                if name == "text" {
+                if name != "capture_output" {
                     text |= flag;
                 } else {
                     capture = flag;
                 }
+            }
+            Some("errors")
+                if (checked_output || run) && !matches!(value, ast::Expr::NoneLiteral(_)) =>
+            {
+                if !matches!(value, ast::Expr::StringLiteral(v) if matches!(v.value.to_str(), "strict" | "ignore" | "replace"))
+                {
+                    return Err("check_output errors requires strict, ignore, replace, or None");
+                }
+                text = true;
             }
             Some("encoding") if !matches!(value, ast::Expr::NoneLiteral(_)) => {
                 if !matches!(value, ast::Expr::StringLiteral(v) if matches!(v.value.to_string().to_ascii_lowercase().replace('_', "-").as_str(), "utf8" | "utf-8"))
@@ -277,6 +362,9 @@ fn stream_plan(
     if capture {
         streams = [1, 1];
     }
+    if checked_output {
+        streams[0] = 1;
+    }
     let stdout = streams[0] == 1;
     let stderr = streams[1] == 1;
     Ok((
@@ -284,7 +372,12 @@ fn stream_plan(
         ProcessCapture {
             stdout,
             stderr,
-            text: text && (stdout || stderr),
+            text: text
+                && (stdout
+                    || stderr
+                    || run
+                    || graph.resolve(module, &call.func)
+                        == Some(Binding::Intrinsic(Intrinsic::Popen))),
         },
     ))
 }
@@ -296,7 +389,8 @@ fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: boo
         graph: &'a SourceGraph,
         module: ModuleId,
         stdout: bool,
-        check_output: bool,
+        variable_command: bool,
+        check_command: bool,
         types: &'a Types,
         timeout: bool,
         found: Vec<Type>,
@@ -305,11 +399,43 @@ fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: boo
         fn visit_expr(&mut self, expression: &'ast ast::Expr) {
             if let ast::Expr::Call(call) = expression {
                 let ty = match self.graph.resolve(self.module, &call.func) {
+                    Some(Binding::Intrinsic(
+                        Intrinsic::SubprocessCall | Intrinsic::SubprocessCheckCall,
+                    )) => {
+                        self.variable_command = true; // the command may have a non-list layout
+                        Some(Type::None)
+                    }
+                    Some(Binding::Intrinsic(Intrinsic::Popen)) => {
+                        self.variable_command = true;
+                        None
+                    }
                     Some(Binding::Intrinsic(Intrinsic::CheckOutput)) => {
-                        self.check_output = true;
-                        Some(if self.stdout { Type::Str } else { Type::None })
+                        self.variable_command = true;
+                        stream_plan(self.graph, self.module, call)
+                            .ok()
+                            .map(|(_, capture)| {
+                                error_stream(
+                                    self.types,
+                                    capture,
+                                    self.stdout,
+                                    self.timeout && timeout_argument(call).is_some(),
+                                )
+                            })
                     }
                     Some(Binding::Intrinsic(Intrinsic::SubprocessRun)) => {
+                        if self.check_command && !self.variable_command {
+                            let arg = call.arguments.args.first().or_else(|| {
+                                call.arguments
+                                    .keywords
+                                    .iter()
+                                    .find(|k| k.arg.as_deref() == Some("args"))
+                                    .map(|k| &k.value)
+                            });
+                            self.variable_command = !arg.is_some_and(|arg|
+                                matches!(arg, ast::Expr::List(list) if list.elts.iter().all(|e| matches!(e, ast::Expr::StringLiteral(_))))
+                                || self.graph.session.is_string_list(self.module, arg)
+                            );
+                        }
                         stream_plan(self.graph, self.module, call)
                             .ok()
                             .filter(|(mode, _)| mode & 256 == 0)
@@ -337,7 +463,8 @@ fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: boo
         graph,
         module: graph.entry,
         stdout: field != 3,
-        check_output: false,
+        variable_command: false,
+        check_command: field == 0,
         types,
         timeout,
         found: Vec::new(),
@@ -347,8 +474,8 @@ fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: boo
         visitor.visit_body(&module.parsed.syntax().body);
     }
     if field == 0 {
-        // A check_output invocation may retain an argv with Path or union elements.
-        (!visitor.check_output).then(|| types.list(Type::Str))
+        // Popen and checked launches may retain a tuple, path or other command object.
+        (!visitor.variable_command).then(|| types.list(Type::Str))
     } else {
         Some(types.union(&visitor.found).unwrap_or(Type::Str))
     }
@@ -529,7 +656,10 @@ impl Checker<'_> {
                 _ => return self.process_run(call),
             }
         }
-        let argv = self.expr_expected(argv, self.types.list(Type::Str))?;
+        let argv = self.command_argument(argv)?;
+        if argv.ty != self.types.list(Type::Str) {
+            return self.process_run(call);
+        }
         let check = match check {
             Some(value) => self.expr_expected(value, Type::Bool)?,
             None => boolean(false),
@@ -538,70 +668,6 @@ impl Checker<'_> {
             ProcessOperation::RunToStderr,
             Type::None,
             vec![argv, check],
-        ))
-    }
-
-    /// An exact UTF-8 capture inherits stderr. Keep the original argv owner in
-    /// CalledProcessError so a path stays a Path and later list edits are visible.
-    pub(super) fn process_check_output(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let ([argv], [encoding]) = (
-            call.arguments.args.as_ref(),
-            call.arguments.keywords.as_ref(),
-        ) else {
-            return Err(error(
-                self.source,
-                call,
-                "check_output requires an argv list and encoding='utf-8'",
-            ));
-        };
-        if encoding.arg.as_deref() != Some("encoding")
-            || !matches!(&encoding.value, ast::Expr::StringLiteral(text) if matches!(text.value.to_str(), "utf8" | "utf-8"))
-        {
-            return Err(error(
-                self.source,
-                encoding,
-                "check_output requires a literal UTF-8 encoding",
-            ));
-        }
-        let string_or_path = self.types.union(&[Type::Str, Type::Path]).unwrap();
-        let argv = if let ast::Expr::List(display) = argv {
-            let items = display
-                .elts
-                .iter()
-                .map(|item| self.expr(item))
-                .collect::<Result<Vec<_>, _>>()?;
-            let element = if items.iter().all(|item| item.ty == Type::Str) {
-                Type::Str
-            } else if items.iter().all(|item| item.ty == Type::Path) {
-                Type::Path
-            } else {
-                string_or_path
-            };
-            let items = items
-                .into_iter()
-                .zip(&display.elts)
-                .map(|(item, at)| self.coerce(item, element, at))
-                .collect::<Result<Vec<_>, _>>()?;
-            Expr {
-                ty: self.types.list(element),
-                kind: ExprKind::List(items),
-            }
-        } else {
-            self.expr(argv)?
-        };
-        if !self.types.element(argv.ty).is_some_and(|element| {
-            element == Type::Str || element == Type::Path || element == string_or_path
-        }) {
-            return Err(error(
-                self.source,
-                call,
-                "check_output argv must be a list of str or Path",
-            ));
-        }
-        Ok(operation(
-            ProcessOperation::CheckOutput,
-            Type::Str,
-            vec![argv],
         ))
     }
 
@@ -652,19 +718,176 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Which), returns, args))
     }
 
-    pub(super) fn popen(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+    /// Keep the caller's argument object; only the OS launch converts each entry to bytes.
+    fn command_argument(&mut self, arg: &ast::Expr) -> Result<Expr, String> {
+        let scalar = |ty| {
+            matches!(
+                ty,
+                Type::Str | Type::StrLiteral(_) | Type::Bytes | Type::Path | Type::PurePath(_)
+            )
+        };
+        let value = if let ast::Expr::List(display) = arg
+            && !display
+                .elts
+                .iter()
+                .any(|item| matches!(item, ast::Expr::Starred(_)))
+        {
+            let items = display
+                .elts
+                .iter()
+                .map(|item| self.expr(item))
+                .collect::<Result<Vec<_>, _>>()?;
+            let kinds = items
+                .iter()
+                .map(|e| {
+                    if matches!(e.ty, Type::StrLiteral(_)) {
+                        Type::Str
+                    } else {
+                        e.ty
+                    }
+                })
+                .collect::<Vec<_>>();
+            let ty = if kinds.is_empty() {
+                Some(Type::Str)
+            } else {
+                self.types.union(&kinds)
+            }
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    arg,
+                    "command list elements need a representable str, bytes or Path union",
+                )
+            })?;
+            let items = items
+                .into_iter()
+                .zip(&display.elts)
+                .map(|(value, source)| self.coerce(value, ty, source))
+                .collect::<Result<_, _>>()?;
+            Expr {
+                ty: self.types.list(ty),
+                kind: ExprKind::List(items),
+            }
+        } else {
+            self.expr(arg)?
+        };
+        let element = |ty| {
+            scalar(ty)
+                || self
+                    .types
+                    .members(ty)
+                    .is_some_and(|members| members.into_iter().all(scalar))
+        };
+        if scalar(value.ty)
+            || self.types.element(value.ty).is_some_and(element)
+            || self
+                .types
+                .fields(value.ty)
+                .is_some_and(|fields| fields.into_iter().all(element))
+        {
+            Ok(value)
+        } else {
+            Err(error(
+                self.source,
+                arg,
+                "command requires str, bytes, Path, or a list or tuple of these",
+            ))
+        }
+    }
+
+    /// Keep the original bytes or path owner until the native launch. An absent
+    /// path has a null word; every present value has its own exact storage kind.
+    fn optional_exec_path(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        let value = self.expr(expression)?;
+        let ty = self.types.payload(value.ty).unwrap_or(value.ty);
+        let ty = match ty {
+            Type::None | Type::StrLiteral(_) => Type::Str,
+            Type::Str | Type::Bytes | Type::Path | Type::PurePath(_) => ty,
+            _ => {
+                return Err(error(
+                    self.source,
+                    expression,
+                    "an executable or cwd requires str, bytes, Path or None",
+                ));
+            }
+        };
+        self.coerce(value, self.types.optional(ty), expression)
+    }
+
+    /// call and check_call accept the same Popen arguments with an extra wait deadline.
+    pub(super) fn popen(
+        &mut self,
+        call: &ast::ExprCall,
+        check_call: Option<bool>,
+    ) -> Result<Expr, String> {
+        self.launch_process(call, check_call.map_or(LaunchApi::Popen, LaunchApi::Call))
+    }
+
+    pub(super) fn process_check_output(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.launch_process(call, LaunchApi::CheckOutput)
+    }
+
+    fn launch_process(&mut self, call: &ast::ExprCall, api: LaunchApi) -> Result<Expr, String> {
         let directory = self.types.optional(Type::Str);
         let environment = self.types.optional(self.types.dict(Type::Str, Type::Str));
         let (streams, capture) = stream_plan(self.graph, self.module, call)
             .map_err(|message| error(self.source, call, message))?;
-        let params = [
+        let stdin = call
+            .arguments
+            .keywords
+            .iter()
+            .find(|kw| kw.arg.as_deref() == Some("stdin"))
+            .map_or(0, |kw| stream_mode(self.graph, self.module, &kw.value));
+        let keyword = |name: &str| {
+            call.arguments
+                .keywords
+                .iter()
+                .find(|kw| kw.arg.as_deref() == Some(name))
+                .map(|kw| &kw.value)
+        };
+        let text_flag = |name| match keyword(name) {
+            Some(ast::Expr::BooleanLiteral(flag)) => Some(flag.value),
+            _ => None,
+        };
+        let errors = match keyword("errors") {
+            Some(ast::Expr::StringLiteral(v)) if v.value.to_str() == "ignore" => 1,
+            Some(ast::Expr::StringLiteral(v)) if v.value.to_str() == "replace" => 2,
+            _ => 0,
+        };
+        let input_given = api == LaunchApi::CheckOutput && keyword("input").is_some();
+        let validation = if api == LaunchApi::CheckOutput && keyword("stdout").is_some() {
+            1
+        } else if api == LaunchApi::CheckOutput && keyword("check").is_some() {
+            2
+        } else if input_given && stdin != 0 {
+            3
+        } else if streams & 256 != 0 {
+            4
+        } else if matches!((text_flag("text"), text_flag("universal_newlines")), (Some(a), Some(b)) if a != b)
+        {
+            5
+        } else {
+            0
+        };
+        let stdin = if input_given { 1 } else { stdin };
+        let mut streams = streams | (stdin << 12) | (u32::from(capture.text) << 16);
+        let default_bufsize = || Expr {
+            ty: Type::Int,
+            kind: ExprKind::Int("-1".into()),
+        };
+        let mut params = [
             ("args", self.types.list(Type::Str), None),
+            ("bufsize", Type::Int, Some(default_bufsize())),
             ("cwd", directory, Some(absent(directory))),
             ("env", environment, Some(absent(environment))),
+            ("stdin", Type::Bool, Some(boolean(false))),
             ("stdout", Type::Bool, Some(boolean(false))),
             ("stderr", Type::Bool, Some(boolean(false))),
             ("text", Type::Bool, Some(boolean(false))),
             ("encoding", Type::Bool, Some(boolean(false))),
+            ("close_fds", Type::Bool, Some(boolean(true))),
+            ("executable", directory, Some(absent(directory))),
+            ("shell", Type::Bool, Some(boolean(false))),
         ]
         .into_iter()
         .enumerate()
@@ -673,25 +896,116 @@ impl Checker<'_> {
             ty,
             default,
             sign_only: false,
-            kind: if index == 0 {
+            kind: if index <= 1 {
                 ParameterKind::PositionalOrKeyword
             } else {
                 ParameterKind::KeywordOnly
             },
         })
         .collect::<Vec<_>>();
+        if api != LaunchApi::Popen {
+            let deadline = self.types.optional(Type::Float);
+            params.push(Parameter {
+                name: "timeout".into(),
+                ty: deadline,
+                default: Some(absent(deadline)),
+                sign_only: false,
+                kind: ParameterKind::KeywordOnly,
+            });
+        }
+        if matches!(api, LaunchApi::CheckOutput | LaunchApi::Run) {
+            let input = self
+                .types
+                .optional(if capture.text { Type::Str } else { Type::Bytes });
+            for (name, ty, default) in [
+                ("input", input, absent(input)),
+                ("check", Type::Bool, boolean(false)),
+                ("capture_output", Type::Bool, boolean(false)),
+                ("universal_newlines", Type::Bool, boolean(false)),
+                ("errors", Type::Bool, boolean(false)),
+            ] {
+                params.push(Parameter {
+                    name: name.into(),
+                    ty,
+                    default: Some(default),
+                    sign_only: false,
+                    kind: ParameterKind::KeywordOnly,
+                });
+            }
+        }
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
             match index {
-                1 => checker.optional_path_argument(arg),
-                3.. => Ok(boolean(false)), // effect-free literals checked by stream_plan
+                0 => checker.command_argument(arg),
+                1 if matches!(arg, ast::Expr::NoneLiteral(_)) => Ok(default_bufsize()),
+                2 | 10 => checker.optional_exec_path(arg),
+                4..=6 if stream_mode(checker.graph, checker.module, arg) == 6 => {
+                    if let ast::Expr::BooleanLiteral(flag) = arg {
+                        return Ok(Expr { ty: Type::Int, kind: ExprKind::Int(u8::from(flag.value).to_string()) });
+                    }
+                    let value = checker.expr(arg)?;
+                    // Keep arbitrary integers out of the fixed stream layout: a
+                    // dynamic -1 would create a pipe and change the returned type.
+                    if (index == 5 && api == LaunchApi::CheckOutput)
+                        || validation != 0
+                        || matches!(value.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
+                        || integer_deadline(arg)
+                        || matches!(&value.kind, ExprKind::Builtin(Builtin::FileFileno, _))
+                    {
+                        Ok(value)
+                    } else {
+                        Err(error(checker.source, arg,
+                            "process redirection requires a file, a literal descriptor, or file.fileno()"))
+                    }
+                }
+                4..=8 => Ok(boolean(false)), // effect-free literals checked by stream_plan
+                11 => checker.condition(arg),
+                14 if api == LaunchApi::Run => checker.expr_expected(arg, Type::Bool),
+                14 => checker.expr(arg), // evaluated before reporting a forbidden check keyword
+                15..=17 => Ok(boolean(false)), // literals validated by stream_plan
+                12 => checker.deadline_value(arg),
                 _ => checker.expr_expected(arg, params[index].ty),
             }
         })?;
-        Ok(self.ordered_builtin(
-            Builtin::Process(ProcessOperation::Popen { streams }),
-            Type::Popen(capture),
-            args,
-        ))
+        for (param, shift) in [(4, 12), (5, 0), (6, 4)] {
+            if (streams >> shift) & 15 == 6
+                && matches!(
+                    args.values[args.order[param]].ty,
+                    Type::BinaryIO | Type::TextIO | Type::StringIO
+                )
+            {
+                streams |= 1 << shift;
+            }
+        }
+        let (op, ty) = match api {
+            LaunchApi::CheckOutput => (
+                ProcessOperation::CheckOutput {
+                    streams,
+                    validation,
+                    errors,
+                    capture,
+                },
+                capture.stream(true),
+            ),
+            LaunchApi::Run => (
+                ProcessOperation::Run {
+                    streams,
+                    validation,
+                    errors,
+                    timed: timeout_argument(call).is_some(),
+                },
+                self.types.completed(capture, args.values[args.order[0]].ty),
+            ),
+            LaunchApi::Call(check) => (ProcessOperation::Call { streams, check }, Type::Int),
+            LaunchApi::Popen => (
+                ProcessOperation::Popen { streams },
+                Type::Popen(
+                    capture,
+                    stdin == 1,
+                    self.types.process_args(args.values[args.order[0]].ty),
+                ),
+            ),
+        };
+        Ok(self.ordered_builtin(Builtin::Process(op), ty, args))
     }
 
     pub(super) fn popen_attribute(
@@ -699,8 +1013,28 @@ impl Checker<'_> {
         receiver: Expr,
         attr: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
+        let Type::Popen(capture, stdin, cmd) = receiver.ty else {
+            unreachable!()
+        };
         let (op, ty) = match attr.attr.as_str() {
-            "args" => (ProcessOperation::PopenArgs, self.types.list(Type::Str)),
+            name @ ("stdin" | "stdout" | "stderr") => {
+                let (index, piped) = match name {
+                    "stdin" => (0, stdin),
+                    "stdout" => (1, capture.stdout),
+                    _ => (2, capture.stderr),
+                };
+                (
+                    ProcessOperation::PopenPipe(index),
+                    if !piped {
+                        Type::None
+                    } else if capture.text {
+                        Type::TextIO
+                    } else {
+                        Type::BinaryIO
+                    },
+                )
+            }
+            "args" => (ProcessOperation::PopenArgs, self.types.command_type(cmd)),
             "pid" => (ProcessOperation::PopenPid, Type::Int),
             "returncode" => (
                 ProcessOperation::PopenStatus { poll: false },
@@ -723,6 +1057,38 @@ impl Checker<'_> {
                 ProcessOperation::PopenStatus { poll: true },
                 self.types.optional(Type::Int),
             ),
+            "communicate" => {
+                let Type::Popen(capture, ..) = args[0].ty else {
+                    unreachable!()
+                };
+                let input = self
+                    .types
+                    .optional(if capture.text { Type::Str } else { Type::Bytes });
+                let timeout = self.types.optional(Type::Float);
+                let params = [("input", input), ("timeout", timeout)].map(|(name, ty)| Parameter {
+                    name: name.into(),
+                    ty,
+                    kind: ParameterKind::PositionalOrKeyword,
+                    default: Some(absent(ty)),
+                    sign_only: false,
+                });
+                let values =
+                    self.arguments_with(call, &params, args.pop(), |checker, index, arg| {
+                        if index == 1 {
+                            checker.deadline_value(arg)
+                        } else {
+                            checker.expr_expected(arg, input)
+                        }
+                    })?;
+                let pair = self
+                    .types
+                    .tuple(vec![capture.stream(true), capture.stream(false)]);
+                return Ok(self.ordered_builtin(
+                    Builtin::Process(ProcessOperation::PopenCommunicate { text: capture.text }),
+                    pair,
+                    values,
+                ));
+            }
             "wait" => {
                 let timeout = self.types.optional(Type::Float);
                 let param = Parameter {
@@ -791,85 +1157,8 @@ impl Checker<'_> {
         self.coerce(value, timeout, argument)
     }
 
-    /// Literal mode arguments establish each output’s exact representation. Dynamic values are
-    /// rooted in source order before their permutation into the runtime ABI.
     pub(super) fn process_run(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let strings = self.types.list(Type::Str);
-        let directory = self.types.optional(Type::Str);
-        let environment = self.types.optional(self.types.dict(Type::Str, Type::Str));
-        let timeout = self.types.optional(Type::Float);
-        let (streams, capture) = stream_plan(self.graph, self.module, call)
-            .map_err(|message| error(self.source, call, message))?;
-        let params = [
-            ("args", strings, None),
-            ("cwd", directory, Some(absent(directory))),
-            ("env", environment, Some(absent(environment))),
-            ("check", Type::Bool, Some(boolean(false))),
-            ("capture_output", Type::Bool, Some(boolean(false))),
-            ("encoding", Type::Bool, Some(boolean(false))),
-            ("text", Type::Bool, Some(boolean(false))),
-            ("timeout", timeout, Some(absent(timeout))),
-            ("stdout", Type::Bool, Some(boolean(false))),
-            ("stderr", Type::Bool, Some(boolean(false))),
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(index, (name, ty, default))| Parameter {
-            name: name.to_owned(),
-            ty,
-            kind: if index == 0 {
-                ParameterKind::PositionalOrKeyword
-            } else {
-                ParameterKind::KeywordOnly
-            },
-            default,
-            sign_only: false,
-        })
-        .collect::<Vec<_>>();
-        let supplied = self.arguments_with(call, &params, None, |checker, index, argument| {
-            match index {
-                1 => checker.optional_path_argument(argument),
-                // stream_plan has already checked these effect-free static options.
-                4..=6 | 8 | 9 => Ok(boolean(false)),
-                7 => checker.deadline_value(argument),
-                _ => checker.expr_expected(argument, params[index].ty),
-            }
-        })?;
-        let mut body = Vec::new();
-        let mut clear = Vec::new();
-        let mut order = supplied.order[..4].to_vec();
-        if timeout_argument(call).is_some() {
-            order.push(supplied.order[7]);
-        }
-        let mut values = vec![None; supplied.values.len()];
-        for (index, value) in supplied.values.into_iter().enumerate() {
-            // The validated mode literals have no effects and need no runtime storage.
-            if order.contains(&index) {
-                let slot = self.hidden(value.ty);
-                values[index] = Some(Expr {
-                    ty: value.ty,
-                    kind: ExprKind::Local(slot),
-                });
-                body.push(Statement::Assign(slot, value));
-                clear.push(slot);
-            }
-        }
-        let args = order
-            .iter()
-            .map(|&index| values[index].take().unwrap())
-            .collect();
-        Ok(Expr {
-            ty: Type::CompletedProcess(capture),
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(operation(
-                    ProcessOperation::Run { streams },
-                    Type::CompletedProcess(capture),
-                    args,
-                )),
-                clear,
-            },
-        })
+        self.launch_process(call, LaunchApi::Run)
     }
 
     /// Path conversion is sealed and pure; optional paths retain their absence.
@@ -995,11 +1284,11 @@ impl Checker<'_> {
         receiver: Expr,
         attribute: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
-        let Type::CompletedProcess(capture) = receiver.ty else {
+        let Type::CompletedProcess(capture, cmd) = receiver.ty else {
             unreachable!()
         };
         let (field, ty) = match attribute.attr.as_str() {
-            "args" => (0, self.types.list(Type::Str)),
+            "args" => (0, self.types.completed_command(cmd)),
             "returncode" => (1, Type::Int),
             "stdout" => (2, capture.stream(true)),
             "stderr" => (3, capture.stream(false)),
@@ -1093,7 +1382,30 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
     ) -> Result<Option<Expr>, String> {
         let (field, ty) = match attribute.attr.as_str() {
-            "cmd" => (0, self.types.list(Type::Str)),
+            "cmd" => {
+                // The narrowed exception local may be wrapped in a view.
+                let local = attribute
+                    .value
+                    .as_name_expr()
+                    .and_then(|name| self.names.get(name.id.as_str()))
+                    .and_then(|slot| {
+                        self.captured_process_errors
+                            .iter()
+                            .rev()
+                            .find(|capture| capture.slot == *slot)
+                    })
+                    .and_then(|capture| capture.argv);
+                let ty = local
+                    .or_else(|| error_field_type(self.graph, self.types, 0, true))
+                    .ok_or_else(|| {
+                        error(
+                            self.source,
+                            attribute,
+                            "the original timeout command has no single known type",
+                        )
+                    })?;
+                (0, ty)
+            }
             "timeout" => (
                 1,
                 timeout_field_type(self.graph).ok_or_else(|| {

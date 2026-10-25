@@ -1,0 +1,267 @@
+{
+  "module": "test.test_pathlib",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "discovered_occurrences": 1369,
+  "native_methods_executed_by_these_checks": 0,
+  "observations": [
+    {
+      "imre_commit": "76d74f9fb0ac09808b43be6ad7aee5c45083f81f",
+      "operation": "unchanged package import and runner startup",
+      "checks": {
+        "imports-all": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:6:1: Imre: imports must precede executable module statements"
+          ]
+        },
+        "imports-reachable": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:6:1: Imre: imports must precede executable module statements"
+          ]
+        },
+        "run-all": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:6:1: Imre: imports must precede executable module statements"
+          ]
+        },
+        "run-reachable": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:6:1: Imre: imports must precede executable module statements"
+          ]
+        }
+      }
+    },
+    {
+      "imre_commit": "03977539a984a794bf05b5bb4d8d236883bfd3b4",
+      "operation": "unchanged package import",
+      "checks": {
+        "all": {
+          "phase": "check",
+          "diagnostic_source": "Lib/test/support/__init__.py:6",
+          "next_unsupported_import": "annotationlib"
+        },
+        "reachable": {
+          "phase": "check",
+          "diagnostic_source": "Lib/test/support/__init__.py:6",
+          "next_unsupported_import": "annotationlib"
+        }
+      },
+      "wrong_name_guard": {
+        "configurations": [
+          "CPython 3.14.5",
+          "Imre O0 with ASan",
+          "Imre O3"
+        ],
+        "exception": "ImportError",
+        "message": "support must be imported from the test package",
+        "child_initializer_executed": false
+      }
+    },
+    {
+      "operation": "unchanged package import and runner startup on the prospective glob merge",
+      "imre_base_commit": "939877dc6130088149f4e0b95cb091026e878944",
+      "imre_pr_head": "a2f3ac2f5e0caf6741055dbd666c8f91d068883d",
+      "imre_tree": "d7bd71d8e2ca456b71bcc1afeb536b3738a51aa9",
+      "entry_points": [
+        "imre_pathlib_imports.py",
+        "imre_pathlib_run.py"
+      ],
+      "check_modes": [
+        "all",
+        "reachable-only"
+      ],
+      "checks_attempted": 4,
+      "check_exit_for_each": 1,
+      "diagnostic_source": "Lib/test/test_pathlib/__init__.py:2 -> Lib/test/support/__init__.py:6",
+      "diagnostic": "standard-library imports and shadowing are unsupported: \"annotationlib\"",
+      "test_bodies_executed": 0
+    },
+    {
+      "imre_commit": "c306c73a8495f808bb84974c9a8d69c6d5648723",
+      "operation": "unchanged package import and runner startup",
+      "checks": {
+        "imports-all": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"annotationlib\""
+          ]
+        },
+        "imports-reachable": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"annotationlib\""
+          ]
+        },
+        "run-all": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"annotationlib\""
+          ]
+        },
+        "run-reachable": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"annotationlib\""
+          ]
+        }
+      }
+    },
+    {
+      "imre_commit": "ea9845ac2f3af0ed4766031d716e3182f865e83d",
+      "base_commit": "49be0187f29a8dfeffeb42c035d4069343cf865e",
+      "operation": "unchanged package import and runner startup",
+      "checks": {
+        "imports-all": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+          ]
+        },
+        "imports-reachable": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+          ]
+        },
+        "run-all": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+          ]
+        },
+        "run-reachable": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+          ]
+        }
+      }
+    },
+    {
+      "operation": "unchanged package import and runner startup on the prospective walk merge",
+      "imre_base_commit": "13759fbb3a8069ef1154430b4efe5907792a9af7",
+      "imre_pr_head": "906b10a80a61bbf4efc5cd05cc5c2ae82689e32a",
+      "imre_tree": "a86efec74b8ff8e64f1dce00faff6bb5685da113",
+      "checks": {
+        "imports-all": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+          ]
+        },
+        "imports-reachable": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+          ]
+        },
+        "run-all": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+          ]
+        },
+        "run-reachable": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+          ]
+        }
+      },
+      "test_bodies_executed": 0
+    },
+    {
+      "operation": "unchanged package import and runner startup after inspect.getattr_static (#784)",
+      "imre_base_commit": "8eb6721dc593d81699ae4f507508ad7ec768e498",
+      "imre_pr_head": "906b10a80a61bbf4efc5cd05cc5c2ae82689e32a",
+      "imre_tree": "a0deb496be5a7d12c36d6f9901065475f7ab4a45",
+      "checks": {
+        "imports-all": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under Lib; external and namespace-package imports are unsupported"
+          ]
+        },
+        "imports-reachable": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under Lib; external and namespace-package imports are unsupported"
+          ]
+        },
+        "run-all": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under Lib; external and namespace-package imports are unsupported"
+          ]
+        },
+        "run-reachable": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under Lib; external and namespace-package imports are unsupported"
+          ]
+        }
+      },
+      "test_bodies_executed": 0
+    },
+    {
+      "operation": "unchanged package import and runner startup on the published walk merge",
+      "imre_commit": "4fe38f6389d3720525d6233e5f3d9ec6e898fdce",
+      "imre_tree": "3567308d0f734430ee2c8301923cc2192ac5a0da",
+      "checks": {
+        "imports-all": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under Lib; external and namespace-package imports are unsupported"
+          ]
+        },
+        "imports-reachable": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under Lib; external and namespace-package imports are unsupported"
+          ]
+        },
+        "run-all": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under Lib; external and namespace-package imports are unsupported"
+          ]
+        },
+        "run-reachable": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under Lib; external and namespace-package imports are unsupported"
+          ]
+        }
+      },
+      "test_bodies_executed": 0
+    }
+  ],
+  "next_shared_blocker": "native import of _opcode at Lib/test/support/__init__.py:11; all four unchanged entry-point/mode checks, zero upstream methods reached"
+}

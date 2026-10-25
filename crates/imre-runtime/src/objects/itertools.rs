@@ -83,6 +83,7 @@ pub unsafe extern "C" fn imre_repeat(kind: u32, value: usize, times: usize) -> *
 }
 
 mod sources;
+mod tee;
 use std::cell::{Cell, RefCell};
 
 pub(super) enum Adapter {
@@ -90,10 +91,12 @@ pub(super) enum Adapter {
     Progression(sources::Progression),
     FloatCount { current: Cell<f64>, step: OwnedWord },
     Slice(Slice),
+    Tee(tee::Fork),
     Cycle(Cycle),
+    PathWalk(paths::Walker),
 }
 
-fn adapter(state: Adapter) -> Rc<Object> {
+pub(super) fn adapter(state: Adapter) -> Rc<Object> {
     Rc::new(Object(StorageCell::new(Storage::IteratorAdapter(Rc::new(
         state,
     )))))
@@ -108,7 +111,42 @@ fn next_item(source: &Object) -> Result<Option<OwnedWord>, Error> {
     })
 }
 
+type ItemResult = Result<Option<OwnedWord>, Error>;
+
+enum Advance {
+    Pull(Rc<Object>),
+    Return(ItemResult),
+}
+
+impl Drop for Adapter {
+    fn drop(&mut self) {
+        let mut source = self.take_source();
+        while let Some(cursor) = source {
+            let Ok(cursor) = Rc::try_unwrap(cursor) else {
+                break;
+            };
+            let Storage::IteratorAdapter(state) = cursor.0.into_inner() else {
+                break;
+            };
+            let Ok(mut state) = Rc::try_unwrap(state) else {
+                break;
+            };
+            // Detach the next owner before this adapter's fields are destroyed.
+            source = state.take_source();
+        }
+    }
+}
+
 impl Adapter {
+    fn take_source(&mut self) -> Option<Rc<Object>> {
+        match self {
+            Self::Tee(fork) => fork.take_source(),
+            Self::Slice(slice) => slice.source.get_mut().take(),
+            Self::Cycle(cycle) => cycle.source.get_mut().take(),
+            _ => None,
+        }
+    }
+
     pub(super) fn write_repr(&self, output: &mut String, owner: *const Object) {
         use std::fmt::Write;
         let name = match self {
@@ -133,10 +171,66 @@ impl Adapter {
             }
             Self::Progression(_) => "range_iterator",
             Self::Sequence(_) => "iterator",
+            Self::Tee(_) => "itertools._tee",
             Self::Slice(_) => "itertools.islice",
             Self::Cycle(_) => "itertools.cycle",
+            Self::PathWalk(_) => {
+                write!(output, "<generator object Path.walk at {owner:p}>").unwrap();
+                return;
+            }
         };
         write!(output, "<{name} object at {owner:p}>").unwrap();
+    }
+
+    fn advance(&self, item: Option<ItemResult>) -> Advance {
+        match self {
+            Self::Tee(fork) => fork.advance(item),
+            Self::Slice(slice) => slice.advance(item),
+            Self::Cycle(cycle) => cycle.advance(item),
+            _ => unreachable!("only composed cursors request source items"),
+        }
+    }
+
+    fn next_composed(&self) -> Result<Option<OwnedWord>, Error> {
+        let mut nested = smallvec::SmallVec::<[Rc<Self>; 8]>::new();
+        let mut step = self.advance(None);
+        loop {
+            let item = match step {
+                Advance::Return(result) => {
+                    if nested.pop().is_none() {
+                        return result;
+                    }
+                    result
+                }
+                Advance::Pull(source) => {
+                    // SAFETY: only the adapter owner escapes the storage borrow.
+                    let composed = unsafe {
+                        source.0.with(|storage| match storage {
+                            Storage::IteratorAdapter(state)
+                                if matches!(
+                                    **state,
+                                    Self::Tee(_) | Self::Slice(_) | Self::Cycle(_)
+                                ) =>
+                            {
+                                Some(Rc::clone(state))
+                            }
+                            _ => None,
+                        })
+                    };
+                    if let Some(state) = composed {
+                        if nested.try_reserve(1).is_ok() {
+                            step = state.advance(None);
+                            nested.push(state);
+                            continue;
+                        }
+                        Err(Error::allocation())
+                    } else {
+                        next_item(&source)
+                    }
+                }
+            };
+            step = nested.last().map_or(self, Rc::as_ref).advance(Some(item));
+        }
     }
 
     pub(super) fn next(&self) -> Result<Option<OwnedWord>, Error> {
@@ -158,8 +252,8 @@ impl Adapter {
                     )))
                 }
             }
-            Self::Slice(slice) => slice.next(),
-            Self::Cycle(cycle) => cycle.next(),
+            Self::Tee(_) | Self::Slice(_) | Self::Cycle(_) => self.next_composed(),
+            Self::PathWalk(walk) => walk.next(),
         }
     }
 }
@@ -173,33 +267,29 @@ pub(super) struct Slice {
 }
 
 impl Slice {
-    fn next(&self) -> Result<Option<OwnedWord>, Error> {
-        let Some(source) = self.source.borrow().clone() else {
-            return Ok(None);
-        };
-        let next = (|| {
-            while self.position.get() < self.next_index.get() {
-                if next_item(&source)?.is_none() {
-                    return Ok(None);
-                }
-                self.position.set(self.position.get() + 1);
-            }
-            if self.stop.is_some_and(|stop| self.position.get() >= stop) {
-                return Ok(None);
-            }
-            let Some(item) = next_item(&source)? else {
-                return Ok(None);
+    fn advance(&self, item: Option<ItemResult>) -> Advance {
+        if let Some(item) = item {
+            let Ok(Some(item)) = item else {
+                self.source.take();
+                return Advance::Return(item);
             };
-            self.position.set(self.position.get() + 1);
-            let next = self.next_index.get().saturating_add(self.step);
-            self.next_index
-                .set(self.stop.map_or(next, |stop| next.min(stop)));
-            Ok(Some(item))
-        })();
-        if !matches!(next, Ok(Some(_))) {
+            let position = self.position.get();
+            self.position.set(position + 1);
+            if position >= self.next_index.get() {
+                let next = self.next_index.get().saturating_add(self.step);
+                self.next_index
+                    .set(self.stop.map_or(next, |stop| next.min(stop)));
+                return Advance::Return(Ok(Some(item)));
+            }
+        }
+        let position = self.position.get();
+        if position >= self.next_index.get() && self.stop.is_some_and(|stop| position >= stop) {
             self.source.take();
         }
-        next
+        match self.source.borrow().as_ref() {
+            Some(source) => Advance::Pull(Rc::clone(source)),
+            None => Advance::Return(Ok(None)),
+        }
     }
 }
 
@@ -254,16 +344,24 @@ pub(super) struct Cycle {
 }
 
 impl Cycle {
-    fn next(&self) -> Result<Option<OwnedWord>, Error> {
-        let source = self.source.borrow().clone();
-        if let Some(source) = source {
-            if let Some(item) = next_item(&source)? {
+    fn advance(&self, item: Option<ItemResult>) -> Advance {
+        match item {
+            Some(Ok(Some(item))) => {
                 let mut saved = self.saved.borrow_mut();
-                saved.try_reserve(1).map_err(|_| Error::allocation())?;
+                if saved.try_reserve(1).is_err() {
+                    return Advance::Return(Err(Error::allocation()));
+                }
                 saved.push(item.clone());
-                return Ok(Some(item));
+                return Advance::Return(Ok(Some(item)));
             }
-            self.source.take();
+            Some(Ok(None)) => {
+                self.source.take();
+            }
+            Some(Err(error)) => return Advance::Return(Err(error)),
+            None => {}
+        }
+        if let Some(source) = self.source.borrow().as_ref() {
+            return Advance::Pull(Rc::clone(source));
         }
         let saved = self.saved.borrow();
         let index = self.index.get();
@@ -275,7 +373,7 @@ impl Cycle {
                 index + 1
             });
         }
-        Ok(item)
+        Advance::Return(Ok(item))
     }
 }
 
@@ -302,4 +400,45 @@ pub unsafe extern "C" fn imre_float_count(start: f64, kind: u32, step: usize) ->
         current: Cell::new(start),
         step,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn advancing_deep_adapters_returns_the_leaf_item() {
+        // SAFETY: both immediate integers are rooted canonical integer words.
+        let leaf = unsafe { imre_repeat(2, Int::small(11).unwrap().0, Int::small(1).unwrap().0) };
+        // SAFETY: the constructor transferred its owner.
+        let mut cursor = unsafe { Rc::from_raw(leaf) };
+        for _ in 0..32_768 {
+            // SAFETY: mode zero acquires the live iterator cursor.
+            let next = unsafe { imre_cycle(0, Rc::as_ptr(&cursor) as usize) };
+            // SAFETY: the constructor transferred a new owner.
+            cursor = unsafe { Rc::from_raw(next) };
+        }
+        let Ok(Some((item, None))) = mappings::pull(&cursor) else {
+            panic!("expected the repeated integer");
+        };
+        assert_eq!(item.word, Int::small(11).unwrap().0);
+    }
+
+    #[test]
+    fn releasing_deep_adapters_stops_at_a_shared_cursor() {
+        let cycle = |source| {
+            adapter(Adapter::Cycle(Cycle {
+                source: RefCell::new(source),
+                saved: RefCell::default(),
+                index: Cell::new(0),
+            }))
+        };
+        let shared = cycle(None);
+        let mut cursor = Rc::clone(&shared);
+        for _ in 0..65_536 {
+            cursor = cycle(Some(cursor));
+        }
+        drop(cursor);
+        assert_eq!(Rc::strong_count(&shared), 1);
+    }
 }

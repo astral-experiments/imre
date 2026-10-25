@@ -9,6 +9,22 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "argparse"
 CASES = {
+    "class_constants": [[], ["--as-class"], ["--optional"], ["--as-class", "--optional"],
+                        ["--help"], ["--as-class=value"], ["--text", "<class 'tuple'>"]],
+    "numbers": [
+        [], ["--help"], ["-i", "１２_３"], ["-i", "123456789012345678901234567890"],
+        ["-i", "0" * 4301], ["-i", "\x1c34\x1f"],
+        ["-i", "bad", "-i", "1"], ["-i", "bad", "--help"], ["--help", "-i", "bad"],
+        ["--scale=-0.0"], ["--scale", "1e-1000"], ["--scale=inf"], ["--scale=nan"],
+        ["--scale=\U00011de0"],
+        ["--scale", "1", "--scale", "bad"],
+        ["--ids", "-02", "0_4"], ["--ids", "3", "bad"], ["--ids", "3", "2"],
+        ["--choice=0.0"], ["--choice=2"], ["--maybe"], ["--maybe=01"], ["--maybe=42"],
+        ["--unit", "ab"], ["--unit=c", "-.１２"], ["--label"], ["--label=-42"],
+        ["--note", "red"], ["--note=42"],
+    ],
+    "format": [[], ["--help"], ["--mode", "text"], ["--unknown"]],
+    "blank_help": [[], ["format"], ["print"], ["parse"]],
     "counts": [
         [], ["a"], ["a", "b"], ["a", "b", "c", "d", "e"],
         ["--", "a", "b"], ["a", "--", "--", "b"], ["a", "b", "-v", "c"],
@@ -29,6 +45,7 @@ CASES = {
         ["--items", "red", "green"],
         ["--items=red", "green"],
         ["--items", "-0.125", "-.９", "--verbose"],
+        ["--items", "-\U00011de0"],
         ["--item-kind=blue", "--items", "red"],
         ["--items", "red", "--", "tail"],
         ["--help=none"],
@@ -93,7 +110,42 @@ CASES = {
         ["one", "-v", "two"], ["one", "--", "-v", "--"], ["--", "--", "tail"],
         ["one", "--unknown", "two"], ["--unknown", "one"], ["one", "--help"],
     ],
+    "flag_actions": [[], ["--help"], ["-v"], ["-vvv"], ["-vqvfq"], ["-s", "-n", "--pi", "--toggle"],
+                     ["-q", "-q", "-q"], ["--off"], ["--off=x"], ["-s=x"], ["-v=3"], ["-vh"],
+                     ["-v=f", "--help"], ["--help", "--off=x"], ["-f", "extra"]],
+    "method_args": [[]],
+    "known_args": [
+        [], ["--help"], ["--foo", "F", "--bar", "--baz"], ["--foo"],
+        ["one", "two", "--unknown", "-v", "three"], ["-vvv", "π", "one", "两"],
+        ["-vx", "--foo", "F"], ["a", "--", "b", "--", "c"], ["--", "--", "tail"],
+        ["commands", "run"], ["commands", "--unknown", "run", "--flag", "--child", "tail"],
+        ["commands", "--parent=x", "run", "a", "--flag", "b"], ["commands", "bad"],
+        ["commands", "--unknown"], ["commands", "run", "--help"],
+        ["commands", "--parent=x", "--before", "r", "--flag", "--after"], ["repeat"],
+    ],
+    "numeric_defaults": [[], ["--help"], ["word"], ["--amount", "2"], ["--amount=2", "word"],
+                         ["--amount", "bad", "--help"], ["--help", "--amount", "bad"],
+                         ["range", "--big", "4999", "100000000000000000001"],
+                         ["radix", str(2**80)], ["radix", str(2**80 + 3)], ["radix", "--help"]],
     "two": [[], ["--help"], ["--mo=lar"], ["--flag"], ["--paths", "one", "two"]],
+    "optional_commands": [
+        [], ["-v"], ["run"], ["r", "--value", "x"], ["-v", "start", "--value=-v"],
+        ["list", "a"], ["ls"], ["invalid"], ["--help"], ["r", "--help"], ["start", "--bogus"],
+        ["--", "run"], ["absent"], ["absent", "run"], ["absent", "run", "--mark"],
+        ["absent", "t"], ["absent", "--help"], ["required"], ["required", "r", "--value=1"],
+        ["required", "list"], ["required", "--help"], ["required", "r", "--help"],
+        ["required", "bad"], ["required", "--", "list"],
+        ["named"], ["named", "bad"], ["named", "g"], ["named", "go-now", "--help"],
+        ["named", "--help"], ["empty"], ["empty", "bad"], ["empty", "--help"],
+        ["empty-required"], ["empty-required", "--key=ok"], ["empty-required", "bad"],
+        ["named", "two words"], ["named", ""], ["named", "Δ"], ["dispatch"],
+        ["dispatch", "r", "--value=selected"], ["dispatch", "ls", "name"],
+    ],
+    "spellings": [[], ["+h"], ["++help"], ["++hel"], ["--help"], ["++value=x"], ["/v", "v"],
+                  ["+xz"], ["+x+z"], ["+xZ"], ["+"], ["++v", "x"], ["--", "++value"],
+                  ["abbrev"], ["abbrev", "-h"], ["abbrev", "-foo"], ["abbrev", "-foob=x"],
+                  ["abbrev", "-fabc"], ["abbrev", "-foor", "y"], ["abbrev", "-foobar=a"],
+                  ["abbrev", "-3-2"], ["abbrev", "-f", "-2"], ["abbrev", "--help"]],
 }
 REJECTED = {
     "computed_flag": 'parser.add_argument("--" + "item")',
@@ -101,7 +153,7 @@ REJECTED = {
     "invalid_arity": 'parser.add_argument("input", nargs="bad")',
     "zero_arity": 'parser.add_argument("input", nargs=0)',
     "mixed_positionals": 'parser.add_argument("input", "--other")',
-    "foreign_converter": 'parser.add_argument("--number", type=int)',
+    "foreign_converter": 'parser.add_argument("--number", type=complex)',
     "choice_expression": 'parser.add_argument("--key", choices=list("ab"))',
     "duplicate_destination": 'parser.add_argument("--a-b")\n    parser.add_argument("--a_b")',
     "escaped_builder": "copy = parser",
@@ -149,10 +201,16 @@ def main():
             for width in (16, 34, 55, 111):
                 for arguments in (["--help"], ["--not-an-option"]):
                     samples.extend((arguments, width, color) for color in (False, True))
+                if name == "spellings":
+                    samples.extend(([mode, "--unknown"], width, color) for mode in ("bare", "pos") for color in (False, True))
                 if name == "groups":
                     samples.extend((["foo", "check", "--help"], width, color) for color in (False, True))
+                if name == "blank_help":
+                    samples.extend(([], width, color) for color in (False, True))
             for width in (" 34\t", "+3_4", "٣٤", "3__4", "9" * 20, "0" * 4300 + "34"):
                 samples.append((["--help"], width, False))
+            for separator in ("\x1c", "\x1d", "\x1e", "\x1f"):
+                samples.append((["--help"], separator + "34" + separator, False))
             for level in args.opt_levels:
                 subprocess.run(
                     [
@@ -181,6 +239,25 @@ def main():
                             (name, arguments, width, color, expected, actual)
                         )
                     checks += 1
+        # An integer written in the source is already a value. A large hex
+        # default/const remains usable even when decimal argv conversion is limited.
+        source = Path(directory) / "literal_default.py"
+        literal = "0x" + "f" * 560
+        source.write_text(
+            "import argparse\ndef read():\n    parser = argparse.ArgumentParser()\n"
+            f"    parser.add_argument('-n', nargs='?', type=int, default={literal}, const={literal})\n"
+            f"    return parser.parse_args()\nprint(read().n == {literal})\n"
+        )
+        native = source.with_suffix("")
+        env = {**os.environ, "PYTHONINTMAXSTRDIGITS": "640", "PYTHON_COLORS": "0"}
+        for level in args.opt_levels:
+            subprocess.run([args.compiler, "build", source, "-o", native, "--opt-level", level, *compile_flags], check=True)
+            for arguments in ([], ["-n"], ["-n", "1" + "0" * 650]):
+                expected = result([args.python, source, *arguments], env)
+                actual = result([native, *arguments], env)
+                if actual != expected:
+                    raise AssertionError(("literal_default", arguments, level, expected, actual))
+                checks += 1
         for name, declaration in REJECTED.items():
             source = Path(directory) / (name + ".py")
             source.write_text(
@@ -199,11 +276,15 @@ def main():
         # The successful guard relies on a stable receiver and a read-only field.
         source = Path(directory) / "bad_field.py"
         prelude = "from argparse import ArgumentParser\nfrom pathlib import Path\ndef read():\n    p = ArgumentParser()\n    p.add_argument('--out', type=Path)\n    return p.parse_args()\na = read()\n"
-        for statement in [
+        invalid_field_reads = [
             "a.out = Path('else')",
             "print(a.out.name)",
             "if a.out:\n    a = read()\n    print(a.out.name)",
-        ]:
+            "if a.out is None:\n    print(a.out.name)",
+            "if None is not a.out:\n    a = read()\n    print(a.out.name)",
+            "if a.out is None:\n    pass\nelse:\n    a = read()\n    print(a.out.name)",
+        ]
+        for statement in invalid_field_reads:
             source.write_text(prelude + statement + "\n")
             check = subprocess.run(
                 [args.compiler, "check", source], capture_output=True, check=False
@@ -218,6 +299,11 @@ def main():
             checked = subprocess.run([args.compiler, "check", source], capture_output=True)
             if checked.returncode == 0:
                 raise AssertionError(wrong)
+        alias_source = (FIXTURES / "optional_commands.py").read_text()
+        source.write_text(alias_source.replace("print(repr(namespace.value))", "print(repr(namespace.name))"))
+        checked = subprocess.run([args.compiler, "check", source], capture_output=True)
+        if checked.returncode == 0 or b"unknown field" not in checked.stderr:
+            raise AssertionError(checked.stderr)
         source.write_text(commands.replace("    return args\n", "    print(args.text)\n    return args\n"))
         checked = subprocess.run([args.compiler, "check", source], capture_output=True)
         if checked.returncode == 0 or b"unknown field" not in checked.stderr:
@@ -230,7 +316,7 @@ def main():
         if checked.returncode == 0 or b"argparse.Namespace requires" not in checked.stderr:
             raise AssertionError(checked.stderr)
     print(
-        f"Validated {checks} argparse process comparisons and {len(REJECTED) + 7} compile-time rejections"
+        f"Validated {checks} argparse process comparisons and {len(REJECTED) + len(invalid_field_reads) + 5} compile-time rejections"
     )
 
 

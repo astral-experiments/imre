@@ -335,12 +335,24 @@ impl Checker<'_> {
                 "str.join requires one string iterable",
             ));
         };
-        let input = self.expansion_input(source, Some(Type::Str))?;
+        self.join_parts(receiver, source, call, false)
+    }
+
+    /// For shlex.join, quote each yielded item before requesting the next one.
+    pub(super) fn join_parts(
+        &mut self,
+        receiver: Expr,
+        source: &ast::Expr,
+        call: &ast::ExprCall,
+        shell_quote: bool,
+    ) -> Result<Expr, String> {
+        let input = self.expansion_input(source, (!shell_quote).then_some(Type::Str))?;
         if let Iteration::Container {
             iterable,
             items: false,
             start: None,
         } = &input
+            && !shell_quote
             && matches!(
                 self.types.element(iterable.ty),
                 Some(Type::Str | Type::StrLiteral(_))
@@ -367,7 +379,11 @@ impl Checker<'_> {
             ),
         ];
         body.extend(self.expand_items(input, call, |checker, value| {
-            let value = checker.coerce(value, Type::Str, call)?;
+            let value = if shell_quote {
+                checker.shlex_quote_value(value, call)?
+            } else {
+                checker.coerce(value, Type::Str, call)?
+            };
             Ok(vec![Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::Append, vec![checker.local(parts), value]),
@@ -516,6 +532,11 @@ impl Checker<'_> {
                 specification.push_str(&literal.value);
             }
         }
+        if specification.is_empty()
+            && let Some(text) = self.unittest_failure_repr(&field.expression)?
+        {
+            return Ok(text);
+        }
         let mut value = self.expr(&field.expression)?;
         if field.conversion != ast::ConversionFlag::Repr {
             value = if matches!(value.ty, Type::Enum(_)) {
@@ -616,7 +637,10 @@ impl Checker<'_> {
                 ),
             });
         }
-        if matches!(value.ty, Type::Exception | Type::NamedException(_)) {
+        if matches!(
+            value.ty,
+            Type::Exception | Type::ImportException | Type::NamedException(_)
+        ) {
             let op = if field.conversion == ast::ConversionFlag::Repr {
                 Builtin::ExceptionRepr
             } else {
@@ -628,9 +652,15 @@ impl Checker<'_> {
             });
         }
         if field.conversion != ast::ConversionFlag::Repr
-            && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(_))
+            && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(..))
         {
             return self.record_text(value, field);
+        }
+        if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ExceptionField {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::ExceptionFieldRepr, vec![value]),
+            });
         }
         if field.conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Document(_)) {
             return Ok(documents::op(ir::DocumentOp::Repr, Type::Str, vec![value]));
@@ -698,7 +728,8 @@ impl Checker<'_> {
                 | Type::Bytes
                 | Type::None
                 | Type::Exception
-                | Type::ExitCode
+                | Type::ExceptionField
+                | Type::ImportException
                 | Type::TimeoutExpired
         ) {
             return Err(error(

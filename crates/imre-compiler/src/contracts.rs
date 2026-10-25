@@ -57,12 +57,23 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
+            Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
             Self::Str
                 if args
                     .first()
                     .is_some_and(|e| matches!(e.ty, Type::Exception | Type::NamedException(_))) =>
             {
                 Contract::new(true, Unknown)
+            }
+            Self::Linecache(..) => Contract::new(true, Unknown),
+            Self::ImportErrorReset => Contract::new(false, Unknown),
+            Self::ImportErrorRejectReset => Contract::new(true, Unknown),
+            Self::ImportErrorNew { .. }
+            | Self::ImportErrorField(_)
+            | Self::ExceptionFieldLen
+            | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
+            Self::ExceptionTupleView | Self::ExceptionFieldRepr => {
+                Contract::new(false, PreservesOwners)
             }
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {
@@ -72,11 +83,18 @@ impl Builtin {
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
                 match operation {
-                    TextOperation::Split(_)
+                    TextOperation::SplitLineEnds
+                    | TextOperation::ExpandTabs
+                    | TextOperation::Lower
+                    | TextOperation::Capitalize
+                    | TextOperation::Split(_)
                     | TextOperation::Partition
+                    | TextOperation::Translate
                     | TextOperation::Unquote
-                    | TextOperation::ShlexSplit => true,
-                    TextOperation::Strip(_)
+                    | TextOperation::ShlexSplit
+                    | TextOperation::ShlexQuote => true,
+                    TextOperation::IsSpace
+                    | TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
                     | TextOperation::Find
@@ -95,13 +113,25 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
                     PathOperation::ContextExit
+                    | PathOperation::Join
+                    | PathOperation::JoinObject
+                    | PathOperation::Parent
+                    | PathOperation::IsRelativeTo
+                    | PathOperation::AsPosix
                     | PathOperation::ReadText
                     | PathOperation::ReadBytes
+                    | PathOperation::Readlink
+                    | PathOperation::Link(_)
                     | PathOperation::Absolute
                     | PathOperation::WithName
+                    | PathOperation::WithStem
+                    | PathOperation::WithSuffix
+                    | PathOperation::Suffixes
+                    | PathOperation::RelativeTo
                     | PathOperation::Match { .. }
                     | PathOperation::Resolve
                     | PathOperation::WriteText
@@ -115,7 +145,8 @@ impl Builtin {
                     | PathOperation::TemporaryDirectory
                     | PathOperation::CleanupTemporaryDirectory
                     | PathOperation::Iterdir
-                    | PathOperation::Next => true,
+                    | PathOperation::Walk
+                    | PathOperation::Glob { .. } => true,
                     PathOperation::ContextNew { .. }
                     | PathOperation::ContextEnter
                     | PathOperation::UnionText
@@ -123,22 +154,18 @@ impl Builtin {
                     | PathOperation::OsExists
                     | PathOperation::New
                     | PathOperation::PureNew(_)
-                    | PathOperation::JoinObject
                     | PathOperation::Drive
                     | PathOperation::Root
                     | PathOperation::Anchor
-                    | PathOperation::AsPosix
-                    | PathOperation::Join
+                    | PathOperation::CountPart
                     | PathOperation::Text
                     | PathOperation::Name
                     | PathOperation::Stem
                     | PathOperation::Suffix
-                    | PathOperation::Parent
                     | PathOperation::IsAbsolute
-                    | PathOperation::Exists
-                    | PathOperation::IsFile
-                    | PathOperation::IsDir
-                    | PathOperation::Glob => false,
+                    | PathOperation::Info
+                    | PathOperation::InfoRepr
+                    | PathOperation::Query(_) => false,
                 },
                 PreservesLists,
             ),
@@ -157,16 +184,26 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::TimeSleep
+            | Self::PercentScalar
+            | Self::WarningFilter { .. }
+            | Self::WarningReset => Contract::new(true, PreservesLists),
+            Self::Formatter(_) => Contract::new(true, PreservesLists),
+            Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
                 matches!(
                     operation,
                     crate::ir::LogOperation::Configure
                         | crate::ir::LogOperation::ConfigureName
+                        | crate::ir::LogOperation::DictConfig
+                        | crate::ir::LogOperation::DictConfigTyped
+                        | crate::ir::LogOperation::FileConfig
                         | crate::ir::LogOperation::CheckLevel
                 ),
                 PreservesLists,
             ),
             Self::Process(operation) => match operation {
+                ProcessOperation::DescriptorConstant(_) => Contract::new(false, PreservesLists),
                 ProcessOperation::RunUntilComplete
                 | ProcessOperation::CloseLoop
                 | ProcessOperation::Gather { .. }
@@ -179,14 +216,17 @@ impl Builtin {
                 | ProcessOperation::GeneratorYield
                 | ProcessOperation::Acquire => Contract::new(true, Unknown),
                 ProcessOperation::Executable
-                | ProcessOperation::CheckOutput
+                | ProcessOperation::CheckOutput { .. }
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
                 | ProcessOperation::Popen { .. }
+                | ProcessOperation::Call { .. }
                 | ProcessOperation::PopenPid
+                | ProcessOperation::PopenPipe(_)
                 | ProcessOperation::PopenArgs
                 | ProcessOperation::PopenStatus { .. }
                 | ProcessOperation::PopenExit
+                | ProcessOperation::PopenCommunicate { .. }
                 | ProcessOperation::PopenWait
                 | ProcessOperation::PopenSignal
                 | ProcessOperation::AsyncSpawn { .. }
@@ -216,7 +256,15 @@ impl Builtin {
                 | ProcessOperation::EnvironCopy
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
+                | ProcessOperation::Fd(_)
+                | ProcessOperation::OsErrorField(_)
+                | ProcessOperation::Strerror
                 | ProcessOperation::Which
+                | ProcessOperation::RmTree
+                | ProcessOperation::CopyTree(_)
+                | ProcessOperation::IgnorePatterns
+                | ProcessOperation::TreeErrorArgs
+                | ProcessOperation::Copy(_)
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)
@@ -239,8 +287,14 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::BytesGet
+            | Self::WrapperAttributes(_)
             | Self::Chr
+            | Self::IntegerPower
+            | Self::ModularPower
+            | Self::NegativeIntegerPower
             | Self::Decode
+            | Self::DecodeAscii
+            | Self::UrlsafeB64encode
             | Self::HashNew
             | Self::DecodeSplitLines
             | Self::SplitLines
@@ -252,13 +306,24 @@ impl Builtin {
             | Self::KeyDifference
             | Self::RegexGroupDict
             | Self::DictGet
+            | Self::NamespaceWrap
+            | Self::NamespaceDict
+            | Self::NamespaceGet
+            | Self::DictCopy
+            | Self::DictFromKeysTarget
+            | Self::DeepCopy
+            | Self::RecordCopy
             | Self::JsonDecode(_)
+            | Self::CsvReader { .. }
+            | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads
+            | Self::JsonErrorField(_)
             | Self::HashRecord
             | Self::JsonGet { .. }
             | Self::JsonGetReceiver
             | Self::JsonAdd
+            | Self::JsonEqual
             | Self::JsonAddFields(_, _)
             | Self::JsonDumps(_)
             | Self::JsonDump(_)
@@ -268,6 +333,8 @@ impl Builtin {
             | Self::JsonSelect(_)
             | Self::ListGet
             | Self::ListGetBounded { .. }
+            | Self::CacheProbe(_)
+            | Self::CacheInsert(_)
             | Self::ListGetI32
             | Self::ListSliceSum
             | Self::Slice
@@ -287,8 +354,12 @@ impl Builtin {
             | Self::DictSumValues
             | Self::DictTryGet(_)
             | Self::Encode
+            | Self::CsvLineNumber
             | Self::Sha256Hex
             | Self::Sha256New
+            | Self::StrDescriptor(_)
+            | Self::NewPlainObject
+            | Self::InspectSentinel
             | Self::HashAvailable
             | Self::Sha256Update
             | Self::Sha256Digest { .. }
@@ -303,16 +374,24 @@ impl Builtin {
             | Self::IntBounded { .. }
             | Self::IntSignAsFloat
             | Self::IsInstance(_)
+            | Self::IsBuiltinSubclass
             | Self::IsNone
             | Self::JsonIsInt
             | Self::Len
             | Self::JsonEmptyObject
             | Self::WallTime
-            | Self::FunctionCache(_)
+            | Self::CacheNew
+            | Self::CacheTable
+            | Self::CacheStat(_)
+            | Self::CacheParameter(_)
+            | Self::CacheClear
+            | Self::CallableContext
+            | Self::ModuleCache(_)
             | Self::HashStr
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum
             | Self::DirectoryContextView
+            | Self::TextStreamView
             | Self::LiteralStringView
             | Self::RStrip
             | Self::RegexCompile(_)
@@ -321,19 +400,21 @@ impl Builtin {
             | Self::SequenceGetInBounds
             | Self::SetContains
             | Self::Split
-            | Self::Ndiff
-            | Self::StringListCopy
             | Self::StringListFilter(_)
-            | Self::StringListSortSuffix(_)
             | Self::StringListNonempty
             | Self::Str
             | Self::NominalIdentity
+            | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
+            | Self::ForwardRefField(_)
+            | Self::NewForwardRef
+            | Self::ClassNameView
             | Self::StrEnumName
             | Self::StrEnumValue
             | Self::EnumString
             | Self::StringListContains
             | Self::StringContains
+            | Self::BytesContains
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
             Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
@@ -341,8 +422,13 @@ impl Builtin {
             Self::BinaryOpen(_)
             | Self::BinaryRead
             | Self::BinaryReadSize
+            | Self::Ndiff
+            | Self::StringListCopy
+            | Self::StringListSortSuffix(_)
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
+            | Self::BytesContainsInt
+            | Self::NamespaceDelete
             | Self::DictDelete
             | Self::DictPop
             | Self::DictTryPop(_)
@@ -351,6 +437,7 @@ impl Builtin {
             | Self::FileReadline
             | Self::GzipOpen
             | Self::BytesIo
+            | Self::StringIo(_)
             | Self::BinarySeek
             | Self::BinaryTell
             | Self::ZipOpenFile
@@ -367,6 +454,7 @@ impl Builtin {
             | Self::ZipClose
             | Self::Input
             | Self::ParseArgs { .. }
+            | Self::ArgparseText { .. }
             | Self::Pop
             | Self::Print
             | Self::SortRestore
@@ -379,7 +467,12 @@ impl Builtin {
             | Self::SystemExitCodeEqual { .. }
             | Self::SysPlatform
             | Self::OsName
+            | Self::SysOrigArgv
+            | Self::DocCaptureStart
+            | Self::DocCaptureTake
+            | Self::DocAscii
             | Self::SysArgv
+            | Self::FileFileno
             | Self::TextClose
             | Self::TextEnter
             | Self::TextFlush
@@ -390,6 +483,7 @@ impl Builtin {
             Self::Repeat
             | Self::CursorLengthHint
             | Self::Progression { .. }
+            | Self::Tee
             | Self::Islice
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
@@ -397,6 +491,8 @@ impl Builtin {
             | Self::CounterNew
             | Self::CounterTotal
             | Self::DictAsBase
+            | Self::DictClear
+            | Self::ListClear
             | Self::DictIter(_)
             | Self::ExceptionWithCause
             | Self::GlobalSet(_)
@@ -405,7 +501,6 @@ impl Builtin {
             | Self::ListAllI32
             | Self::ListDistinct
             | Self::ListExtendUnhinted
-            | Self::Repr
             | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
@@ -413,7 +508,9 @@ impl Builtin {
             | Self::StringIter
             | Self::StringReverseIter
             | Self::TextClosed => Contract::new(false, Unknown),
-            Self::SortedRecordRows { .. }
+            Self::CounterMath { .. }
+            | Self::CounterMostCommon
+            | Self::SortedRecordRows { .. }
             | Self::SortedStringKeys
             | Self::TupleCacheNew
             | Self::TupleCacheResult => Contract::new(true, Unknown),
@@ -443,6 +540,7 @@ impl Builtin {
             _ => false,
         };
         let valid = match self {
+            Self::RecordCopy => matches!(result, Type::Class(_)) && signature(&[result], result),
             Self::ListGetI32 => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::ListGetBounded { min, max } | Self::ListGetBoundedInBounds { min, max } => {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
@@ -476,6 +574,38 @@ impl Builtin {
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
+            Self::WrapperAttributes(fields) => {
+                args.is_empty() && result == types.tuple(vec![Type::Str; fields.names().len()])
+            }
+            Self::CallableContext => {
+                matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result))
+            }
+            Self::CacheParameter(_) => {
+                matches!(args, [wrapper] if types.cached_function(wrapper.ty).is_some())
+                    && result == Type::Document(crate::ir::DocumentShape::Any)
+            }
+            Self::CacheNew | Self::ModuleCache(_) => {
+                args.is_empty() && result.cache_table().is_some()
+            }
+            Self::CacheTable => matches!(args, [state] if state.ty.cache_table() == Some(result)),
+            Self::CacheProbe(capacity) => {
+                *capacity >= -1
+                    && matches!(args, [state, key] if state.ty.cache_table().and_then(|t| types.mapping(t)).is_some_and(|(k, _)| k == key.ty))
+                    && result == Type::Bool
+            }
+            Self::CacheInsert(capacity) => {
+                *capacity > 0
+                    && matches!(args, [state, key, value] if state.ty.cache_table().and_then(|t| types.mapping(t)) == Some((key.ty, value.ty)))
+                    && result == Type::None
+            }
+            Self::CacheStat(field) => {
+                matches!(field, 0 | 1 | 3)
+                    && matches!(args, [state] if state.ty.cache_table().is_some())
+                    && result == Type::Int
+            }
+            Self::CacheClear => {
+                matches!(args, [state] if state.ty.cache_table().is_some()) && result == Type::None
+            }
             Self::TupleCacheNew => args.is_empty() && matches!(result, Type::Tuple(_)),
             Self::TupleCacheResult => matches!(args, [value]
                 if matches!(value.kind, ExprKind::Local(_)) && matches!(result, Type::Tuple(_)) && value.ty == result),
@@ -619,8 +749,12 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
             name,
             "int_floordiv"
                 | "imre_chr"
+                | "imre_int_pow"
+                | "imre_int_modpow"
+                | "imre_int_negative_pow"
                 | "imre_json_index"
                 | "imre_exception_message"
+                | "imre_import_error_reject_reset"
                 | "imre_exception_repr"
                 | "imre_json_iter"
                 | "imre_json_len"
@@ -651,7 +785,17 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_deletions"
                 | "imre_log_file_should_roll"
                 | "imre_log_file_roll"
+                | "imre_time_sleep"
+                | "imre_str_percent_int"
+                | "imre_str_percent_text"
+                | "imre_formatter_format"
+                | "imre_formatter_time"
+                | "imre_formatter_message"
+                | "imre_logrecord_message"
                 | "imre_log_config"
+                | "imre_log_dict_config"
+                | "imre_log_typed_dict_config"
+                | "imre_log_file_config"
                 | "imre_log_config_named"
                 | "imre_log_check_level"
                 | "imre_stderr_line"
@@ -664,6 +808,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_bytes"
                 | "imre_bytes_count"
                 | "imre_bytes_list"
+                | "imre_bytes_contains_int"
                 | "imre_byte_output_finish"
                 | "imre_bytes_get"
                 | "imre_bytes_get_index"
@@ -678,7 +823,15 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_regex_groupdict"
                 | "imre_bytes_decode_splitlines"
                 | "imre_str_splitlines"
+                | "imre_str_splitlines_options"
+                | "imre_str_translate"
+                | "imre_exception_field_index"
+                | "imre_exception_field_len"
                 | "imre_bytes_decode"
+                | "imre_bytes_decode_ascii"
+                | "imre_fnmatch_translate"
+                | "imre_fnmatch_translate_bytes"
+                | "imre_urlsafe_b64encode"
                 | "imre_hash_new"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
@@ -692,6 +845,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_none"
                 | "imre_input"
                 | "imre_sys_argv"
+                | "imre_sys_orig_argv"
+                | "imre_path_as_posix"
+                | "imre_path_join"
+                | "imre_path_join_object"
+                | "imre_path_parent"
                 | "imre_path_read_bytes"
                 | "imre_path_read_text"
                 | "imre_path_write_text"
@@ -704,9 +862,14 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_path_mkdir"
                 | "imre_path_unlink"
                 | "imre_path_rmdir"
+                | "imre_path_readlink"
+                | "imre_path_link"
                 | "imre_path_replace"
                 | "imre_path_absolute"
                 | "imre_path_with_name"
+                | "imre_path_change_extension"
+                | "imre_path_relative_to"
+                | "imre_path_suffixes"
                 | "imre_path_resolve"
                 | "imre_tempdir_new"
                 | "imre_tempdir_cleanup"
@@ -719,6 +882,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_text_flush"
                 | "imre_text_close"
                 | "imre_bytes_io"
+                | "imre_string_io"
+                | "imre_string_io_value"
+                | "imre_string_io_read"
+                | "imre_string_io_seek"
+                | "imre_string_io_position"
                 | "imre_binary_seek"
                 | "imre_binary_tell"
                 | "imre_zip_open_file"
@@ -743,6 +911,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_list_slice"
                 | "imre_list_slice_sum"
                 | "imre_str_get"
+                | "imre_str_expandtabs"
+                | "imre_str_lower"
+                | "imre_str_capitalize"
                 | "imre_str_slice"
                 | "imre_str_int_list"
                 | "imre_seq_get"
@@ -753,9 +924,15 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_seq_repeat"
                 | "imre_str_repeat"
                 | "imre_seq_slice"
+                | "imre_str_list_copy"
+                | "imre_record_shallow_copy"
+                | "imre_dict_copy"
+                | "imre_dict_fromkeys_target"
                 | "imre_dict_get"
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
+                | "imre_ndiff_deferred"
+                | "imre_str_list_sorted_suffix"
                 | "imre_dict_delete"
                 | "imre_dict_pop"
                 | "imre_cursor_length_hint"

@@ -54,6 +54,21 @@ impl Levels {
 
 thread_local! { static LEVELS: Levels = Levels::new(); }
 
+/// Looks up a level name in the same process-local registry used for emission and records.
+pub(super) fn number_for(name: &Str) -> Option<Int> {
+    LEVELS.with(|levels| levels.number(name))
+}
+
+/// Resolve a configured name through the same aliased registry as Logger.setLevel.
+pub(super) fn named_level(name: &Str) -> Result<Int, Error> {
+    number_for(name).ok_or_else(|| {
+        Error::new(
+            Kind::ValueError,
+            format!("Unknown level: {}", string_repr(name)),
+        )
+    })
+}
+
 pub(super) fn level_name(level: &Int) -> Rc<Str> {
     LEVELS.with(|levels| {
         // SAFETY: the registry roots the integer-key dictionary; lookup returns a string owner.
@@ -93,7 +108,7 @@ pub unsafe extern "C" fn imre_log_level_name(level: usize) -> *const Str {
 pub unsafe extern "C" fn imre_log_level_for_name(name: *const Str) -> usize {
     // SAFETY: the caller retains the string until lookup completes.
     let name = unsafe { &*name };
-    LEVELS.with(|levels| levels.number(name)).map_or_else(
+    number_for(name).map_or_else(
         || Rc::into_raw(Rc::new(Str::from(format!("Level {name}")))) as usize,
         super::super::unions::integer,
     )
@@ -105,18 +120,7 @@ pub unsafe extern "C" fn imre_log_level_for_name(name: *const Str) -> usize {
 pub unsafe extern "C" fn imre_log_check_level(name: *const Str) -> usize {
     // SAFETY: the caller retains the string until lookup and error formatting finish.
     let name = unsafe { &*name };
-    finish(
-        LEVELS
-            .with(|levels| levels.number(name))
-            .map(Int::into_raw)
-            .ok_or_else(|| {
-                Error::new(
-                    Kind::ValueError,
-                    format!("Unknown level: {}", string_repr(name)),
-                )
-            }),
-        0,
-    )
+    finish(named_level(name).map(Int::into_raw), 0)
 }
 
 /// # Safety

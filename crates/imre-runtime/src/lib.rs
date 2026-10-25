@@ -34,6 +34,7 @@
 
 mod extensions;
 mod floats;
+mod integer_power;
 mod integer_text;
 mod objects;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -374,6 +375,7 @@ struct Output<W = io::Stdout> {
     buffer: Vec<u8>,
     written: usize,
     line_buffered: bool,
+    captures: Vec<Vec<u8>>,
 }
 
 impl<W: Write> Output<W> {
@@ -386,6 +388,7 @@ impl<W: Write> Output<W> {
             buffer,
             written: 0,
             line_buffered,
+            captures: Vec::new(),
         }
     }
 
@@ -417,6 +420,13 @@ impl<W: Write> Output<W> {
 
 impl<W: Write> Write for Output<W> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if let Some(captured) = self.captures.last_mut() {
+            captured
+                .try_reserve(bytes.len())
+                .map_err(|_| io::ErrorKind::OutOfMemory)?;
+            captured.extend_from_slice(bytes);
+            return Ok(bytes.len());
+        }
         if bytes.len() > self.buffer.capacity() - self.buffer.len() {
             self.flush_buffer()?;
         }
@@ -429,6 +439,9 @@ impl<W: Write> Write for Output<W> {
 
     #[inline]
     fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        if !self.captures.is_empty() {
+            return self.write(bytes).map(|_| ());
+        }
         if bytes.len() <= self.buffer.capacity() - self.buffer.len() {
             self.buffer.extend_from_slice(bytes);
             return Ok(());
@@ -437,6 +450,9 @@ impl<W: Write> Write for Output<W> {
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        if !self.captures.is_empty() {
+            return Ok(());
+        }
         self.flush_buffer()?;
         self.stdout.flush()
     }
@@ -449,6 +465,7 @@ static OUTPUT: LazyLock<Mutex<Output>> = LazyLock::new(|| {
     Mutex::new(Output::with_stream(stdout, line_buffered))
 });
 
+mod doctest;
 mod sys;
 
 /// Prints one value and a newline, returning with the writer lock released.
@@ -511,14 +528,11 @@ fn fail(kind: &str, message: &str) -> ! {
     std::process::exit(1)
 }
 
-/// Flushes pending output before generated code returns from the process entry.
+/// Flush both standard streams and return the process's final exit status.
 #[unsafe(no_mangle)]
-pub extern "C" fn imre_flush_stdout() {
-    if flush_stdout().is_err() {
-        Error::new(Kind::OSError, "could not write standard output").raise();
-    } else if sys::flush_stderr().is_err() {
-        Error::new(Kind::OSError, "could not write standard error").raise();
-    }
+pub extern "C" fn imre_finish_stdio() -> i32 {
+    let stderr = sys::flush_stderr();
+    objects::exceptions::status_after_flush(0, flush_stdout(), stderr)
 }
 
 /// Reads a compiler-provided UTF-8 byte span without taking ownership.
@@ -549,7 +563,21 @@ pub unsafe extern "C" fn imre_int_release(value: usize) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_int_literal(data: *const u8, length: usize) -> usize {
     // SAFETY: the caller owns the compiler-generated literal span.
-    let literal = unsafe { text(data, length) }.replace('_', "");
+    let literal = unsafe { text(data, length) };
+    Int::new(
+        parse_integer_literal(literal)
+            .unwrap_or_else(|| fail("ValueError", "invalid integer literal")),
+    )
+    .into_raw()
+}
+
+/// Parse the spelling of a source integer, including signed literals stored in
+/// an argparse schema. Runtime conversion of a string argument stays decimal.
+fn parse_integer_literal(literal: &str) -> Option<BigInt> {
+    let literal = literal.replace('_', "");
+    let (literal, negative) = literal
+        .strip_prefix('-')
+        .map_or((literal.as_str(), false), |s| (s, true));
     let (digits, radix) = if literal.starts_with("0x") || literal.starts_with("0X") {
         (&literal[2..], 16)
     } else if literal.starts_with("0o") || literal.starts_with("0O") {
@@ -557,13 +585,9 @@ pub unsafe extern "C" fn imre_int_literal(data: *const u8, length: usize) -> usi
     } else if literal.starts_with("0b") || literal.starts_with("0B") {
         (&literal[2..], 2)
     } else {
-        (literal.as_str(), 10)
+        (literal, 10)
     };
-    Int::new(
-        BigInt::parse_bytes(digits.as_bytes(), radix)
-            .unwrap_or_else(|| fail("ValueError", "invalid integer literal")),
-    )
-    .into_raw()
+    BigInt::parse_bytes(digits.as_bytes(), radix).map(|value| if negative { -value } else { value })
 }
 
 /// # Safety
@@ -770,7 +794,8 @@ pub extern "C" fn imre_none_str() -> *const Str {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_literal(data: *const u8, length: usize) -> *const Str {
     // SAFETY: the compiler supplies the readable constant span.
-    Rc::into_raw(Rc::new(Str::new(unsafe { text(data, length) })))
+    let literal = unsafe { text(data, length) };
+    Rc::into_raw(objects::literal_string(literal))
 }
 
 /// # Safety
@@ -780,7 +805,11 @@ pub unsafe extern "C" fn imre_str_literal(data: *const u8, length: usize) -> *co
 pub unsafe extern "C" fn imre_str_static_literal(data: *const u8, length: usize) -> *const Str {
     // SAFETY: the compiler's string globals have static storage duration.
     let literal: &'static str = unsafe { text(data, length) };
-    Rc::into_raw(Rc::new(Str::const_new(literal)))
+    Rc::into_raw(if literal.len() <= 2 {
+        objects::literal_string(literal)
+    } else {
+        Rc::new(Str::const_new(literal))
+    })
 }
 
 /// # Safety
@@ -868,15 +897,25 @@ pub unsafe extern "C" fn imre_optional_str_equal(a: usize, b: usize) -> u32 {
 pub unsafe extern "C" fn imre_int_parse(value: *const Str) -> usize {
     // SAFETY: the caller keeps the immutable string alive.
     let original = unsafe { &*value };
+    finish(
+        parse_decimal_int(original)
+            .map(Int::into_raw)
+            .ok_or_else(|| integer_text::invalid_literal(original)),
+        1,
+    )
+}
+
+/// Parses a decimal integer without setting a pending Python exception. Callers
+/// such as argparse can report conversion failures in their own error context.
+fn parse_decimal_int(original: &str) -> Option<Int> {
     let source = original.trim();
-    let invalid = || integer_text::invalid_literal(original);
     // Rust's signed decimal parser accepts a subset of our grammar. Ordinary
     // small inputs need neither normalization nor temporary BigInt allocations;
     // separators and larger values still take the checked path below.
     if let Ok(value) = source.parse::<i64>()
         && let Some(value) = Int::small(value)
     {
-        return value.into_raw();
+        return Some(value);
     }
     let source = if source.is_ascii() {
         Cow::Borrowed(source)
@@ -885,16 +924,14 @@ pub unsafe extern "C" fn imre_int_parse(value: *const Str) -> usize {
         for character in source.chars() {
             if character.is_ascii() {
                 normalized.push(character);
-            } else if let Some(digit) = integer_text::decimal_digit(character) {
-                normalized.push(char::from(b'0' + digit));
             } else {
-                return invalid().returning(1);
+                normalized.push(char::from(b'0' + integer_text::decimal_digit(character)?));
             }
         }
         if let Ok(value) = normalized.parse::<i64>()
             && let Some(value) = Int::small(value)
         {
-            return value.into_raw();
+            return Some(value);
         }
         Cow::Owned(normalized)
     };
@@ -905,14 +942,9 @@ pub unsafe extern "C" fn imre_int_parse(value: *const Str) -> usize {
         || digits.contains("__")
         || !digits.bytes().all(|c| c.is_ascii_digit() || c == b'_')
     {
-        return invalid().returning(1);
+        return None;
     }
-    finish(
-        BigInt::parse_bytes(source.replace('_', "").as_bytes(), 10)
-            .map(|value| Int::new(value).into_raw())
-            .ok_or_else(invalid),
-        1,
-    )
+    BigInt::parse_bytes(source.replace('_', "").as_bytes(), 10).map(Int::new)
 }
 
 #[unsafe(no_mangle)]
@@ -999,6 +1031,27 @@ fn index(raw: isize, length: usize) -> Result<usize> {
 #[inline(never)]
 fn big_index(value: &BigInt) -> Option<isize> {
     value.to_isize()
+}
+
+/// Empty an integer list in place, detaching its allocation before releasing owners.
+///
+/// # Safety
+/// The caller roots a live integer list for the duration of the operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_clear(list: *const List) {
+    // SAFETY: the handle stays rooted; the exclusive borrow only moves its buffer.
+    let list = unsafe { &*list };
+    // SAFETY: no element is destroyed while the storage is borrowed.
+    let previous = unsafe {
+        list.0
+            .with_mut(|values| (!is_sorting_empty_ints(values)).then(|| std::mem::take(values)))
+    };
+    if let Some(mut values) = previous {
+        list.release_range_hint();
+        while let Some(value) = values.pop() {
+            drop(value);
+        }
+    }
 }
 
 /// Returns an owned nonzero integer word, or raw zero with a pending error.
@@ -1508,6 +1561,7 @@ mod tests {
                 buffer: Vec::with_capacity(capacity),
                 written: 0,
                 line_buffered: false,
+                captures: Vec::new(),
             };
             output.write_all(b"abc").unwrap();
             assert_eq!(output.stdout.is_empty(), capacity != 0);
@@ -1546,6 +1600,7 @@ mod tests {
             buffer: Vec::with_capacity(16),
             written: 0,
             line_buffered: false,
+            captures: Vec::new(),
         };
         output.write_all(b"partial").unwrap();
         assert_eq!(

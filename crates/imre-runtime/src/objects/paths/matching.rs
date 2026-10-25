@@ -86,6 +86,16 @@ fn glob_matches(
     if sensitive && !pattern.contains(['*', '?', '[']) {
         return Ok(path == pattern);
     }
+    Ok(glob_regex(pattern, sensitive, recursive, sep)?.is_match(path))
+}
+
+/// Compile once for a filesystem selector that checks many names against the same pattern.
+pub(super) fn glob_regex(
+    pattern: &str,
+    sensitive: bool,
+    recursive: bool,
+    sep: char,
+) -> Result<Regex> {
     let slash = || Hir::literal([sep as u8]);
     let mut parts = pattern.split(sep).peekable();
     let mut expression = vec![Hir::look(Look::Start)];
@@ -113,10 +123,9 @@ fn glob_matches(
         }
     }
     expression.push(Hir::look(Look::End));
-    let regex = Regex::builder()
+    Regex::builder()
         .build_from_hir(&Hir::concat(expression))
-        .map_err(|e| Error::new(Kind::MemoryError, e.to_string()))?;
-    Ok(regex.is_match(path))
+        .map_err(|e| Error::new(Kind::MemoryError, e.to_string()))
 }
 
 /// A normalized anchor is a single part, even for a Windows UNC share. A
@@ -124,6 +133,7 @@ fn glob_matches(
 #[derive(Clone, Copy)]
 struct Spelling<'a> {
     text: &'a str,
+    components: &'a str,
     anchor: usize,
     sep: char,
 }
@@ -133,6 +143,7 @@ impl<'a> Spelling<'a> {
         let (drive, root) = path.drive_root();
         Self {
             text: path.path(),
+            components: path.component_text(),
             anchor: drive.len() + root.len(),
             sep: if path.windows_path() { '\\' } else { '/' },
         }
@@ -140,19 +151,24 @@ impl<'a> Spelling<'a> {
     fn of_pure(path: &'a PurePath) -> Self {
         Self {
             text: &path.text,
+            components: &path.text,
             anchor: path.drive.len() + path.root.len(),
             sep: if path.windows { '\\' } else { '/' },
         }
     }
     fn parts(self) -> impl DoubleEndedIterator<Item = &'a str> {
-        let (anchor, tail) = self.text.split_at(self.anchor);
+        let (anchor, tail) = self.components.split_at(self.anchor);
         (!anchor.is_empty())
             .then_some(anchor)
             .into_iter()
             .chain(tail.split(self.sep).filter(|p| !p.is_empty() && *p != "."))
     }
     fn text(self) -> &'a str {
-        if self.text == "." { "" } else { self.text }
+        if self.components == "." {
+            ""
+        } else {
+            self.text
+        }
     }
     fn matches(self, q: Self, case: u64, full: bool) -> Result<bool> {
         let sensitive = if case == 0 {
@@ -196,7 +212,7 @@ pub unsafe extern "C" fn imre_path_match(
                 let pattern = PurePath::new(
                     true,
                     vec![super::super::acquire_rc::<Str>(pattern as usize)],
-                );
+                )?;
                 receiver.matches(Spelling::of_pure(&pattern), case, full != 0)
             } else {
                 let text = normalize(&*pattern);
@@ -204,6 +220,7 @@ pub unsafe extern "C" fn imre_path_match(
                 receiver.matches(
                     Spelling {
                         text: &text,
+                        components: &text,
                         anchor,
                         sep: '/',
                     },

@@ -24,6 +24,7 @@ REJECTED = {
     "tomllib_key_equality": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys()\nprint(keys == keys)",
     "tomllib_key_argument": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys('x')",
     "integer_segment": "Path(1)",
+    "missing_nested_walk_option": "def option(required: bool) -> bool:\n    return required\nPath('a').relative_to(walk_up=option())",
     "bytes_segment": "Path(b'file')",
     "keyword_segment": "Path(path='file')",
     "expanded_segments": "Path(*['a', 'b'])",
@@ -50,19 +51,10 @@ REJECTED = {
     "which_mode_type": "import shutil\nshutil.which('tool', mode='x')",
     "path_constructor_value": "constructor = Path\nprint(constructor('a'))",
     "subclass": "class Custom(Path):\n    pass",
-    "escaped_iterdir": "values = Path('.').iterdir()",
-    "escaped_glob": "values = Path('.').glob('*.json')",
     "reversed_iterator": "for value in reversed(Path('.').iterdir()):\n    print(value)",
     "iterdir_arguments": "for value in Path('.').iterdir(1):\n    print(value)",
-    "glob_dynamic_pattern": "pattern = '*.json'\nfor value in Path('.').glob(pattern):\n    print(value)",
-    "glob_empty": "for value in Path('.').glob(''):\n    print(value)",
-    "glob_dot": "for value in Path('.').glob('.'):\n    print(value)",
-    "glob_recursive": "for value in Path('.').glob('**'):\n    print(value)",
-    "glob_nested": "for value in Path('.').glob('sub/*.json'):\n    print(value)",
-    "glob_trailing_separator": "for value in Path('.').glob('*/'):\n    print(value)",
-    "glob_absolute": "for value in Path('.').glob('/tmp'):\n    print(value)",
-    "glob_options": "for value in Path('.').glob('*', case_sensitive=False):\n    print(value)",
-    "predicate_options": "print(Path('.').exists(follow_symlinks=False))",
+    "predicate_positional": "print(Path('.').exists(False))",
+    "predicate_unknown_keyword": "print(Path('.').is_dir(follow_links=False))",
     "read_argument": "Path('a').read_text(1, encoding='utf-8')",
     "unsupported_method": "Path('.').expanduser()",
     "resolve_integer_strict": "Path('.').resolve(strict=1)",
@@ -162,6 +154,8 @@ def main() -> None:
     parser.add_argument("--target")
     parser.add_argument("--lto-linker", type=Path)
     parser.add_argument("--opt-levels", nargs="+", choices=["0", "1", "2", "3"], default=["0", "3"])
+    parser.add_argument("--fixture", action="append", choices=sorted(p.stem for p in FIXTURES.glob("*.py")) + ["imported"],
+                        help="limit the positive filesystem comparisons to these fixtures")
     parser.add_argument("--sanitize", action="store_true")
     args = parser.parse_args()
     assert len(set(args.opt_levels)) == len(args.opt_levels)
@@ -196,6 +190,8 @@ def main() -> None:
         sources = [*sorted(FIXTURES.glob("*.py")), FIXTURES / "imported/main.py"]
         for source in sources:
             name = source.stem if source.parent == FIXTURES else "imported"
+            if args.fixture and name not in args.fixture:
+                continue
             runner = files.run_with_failing_output if name == "failures" else subprocess.run
             project = temporary / name
             project.mkdir()
@@ -215,6 +211,7 @@ def main() -> None:
                 files.check_result(actual, None, f"Imre {name} O{level}")
                 assert actual.stdout == stdout, (name, level, actual.stdout, stdout)
                 assert snapshot(native_dir) == expected_files, (name, level, "filesystem effects differ")
+                binary.unlink()
                 checks += 1
         source = temporary / "invalid_names.py"
         source.write_text(INVALID_NAMES)
@@ -229,6 +226,7 @@ def main() -> None:
                 actual = files.run([str(binary)], temporary, limit_descriptors=True)
                 files.check_result(actual, None, "invalid filename boundary")
                 assert actual.stdout == (b"invalid directory entry\ninvalid glob entry\n" * 4 + b"True\n"), actual.stdout
+                binary.unlink()
                 checks += 1
     print(f"Passed {checks} path checks ({len(REJECTED) + 1} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize}; CPython 3.14+ oracle)")
 

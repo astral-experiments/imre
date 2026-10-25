@@ -6,6 +6,8 @@ use std::cmp::Ordering;
 use std::fmt::Write;
 use std::rc::Rc;
 
+use num_traits::ToPrimitive;
+
 use super::records::descriptor;
 use super::words::{NULLABLE, WordKind};
 use super::{Bytes, Int, List, Object, Storage, Str, fail, object};
@@ -104,13 +106,28 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
     }
     // SAFETY: both pointers are rooted record payloads.
     let (left_layout, right_layout) = unsafe { (descriptor(left), descriptor(right)) };
-    if !std::ptr::eq(left_layout, right_layout) {
-        return Comparison::Done(false);
-    }
     // SAFETY: nonnull semantic descriptors are immutable compiler-emitted data.
     let Some(semantics) = (unsafe { left_layout.semantics.as_ref() }) else {
         return Comparison::Done(false);
     };
+    if !std::ptr::eq(left_layout, right_layout) {
+        // Named tuples compare structurally with other tuple layouts. Both
+        // descriptors must agree on how to read every word before traversing.
+        // SAFETY: the immutable descriptors cover each initialized field.
+        let compatible = unsafe {
+            semantics.kind == TUPLE
+                && right_layout
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|other| other.kind == TUPLE)
+                && left_layout.length == right_layout.length
+                && (0..left_layout.length)
+                    .all(|i| *left_layout.kinds.add(i) == *right_layout.kinds.add(i))
+        };
+        if !compatible {
+            return Comparison::Done(false);
+        }
+    }
     if semantics.kind != TUPLE && semantics.flags & GENERATED_EQ == 0 {
         return Comparison::Done(false);
     }
@@ -182,7 +199,14 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
                         let (left, left_kind) = super::unions::member(left);
                         let (right, right_kind) = super::unions::member(right);
                         if left_kind != right_kind {
-                            Comparison::Done(false)
+                            let numbers = match (left_kind.base(), right_kind.base()) {
+                                (1, 2) => Some((left, right)),
+                                (2, 1) => Some((right, left)),
+                                _ => None,
+                            };
+                            Comparison::Done(numbers.is_some_and(|(flag, integer)| {
+                                Int::borrow(integer).big().to_usize() == Some(flag)
+                            }))
                         } else {
                             Comparison::Child {
                                 left,
@@ -227,9 +251,10 @@ unsafe fn scalar_equal(left: usize, right: usize, kind: WordKind) -> bool {
     // SAFETY: the shared kind selects the exact scalar or rooted allocation.
     unsafe {
         match raw & !NULLABLE {
+            12 => super::annotations::equal(left, right),
             0 | 1 | 10 => left == right,
             2 => integer_equal(left, right),
-            3 => *(left as *const Str) == *(right as *const Str),
+            3 | 11 => *(left as *const Str) == *(right as *const Str),
             4 => {
                 if left == right {
                     return true;
@@ -294,13 +319,20 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         resume: (position + 1 < left.values.len()).then_some(position + 1),
                     }
                 }
+                (Storage::SimpleNamespace(left), Storage::SimpleNamespace(right)) => {
+                    object_element(Rc::as_ptr(left), Rc::as_ptr(right), position)
+                }
                 (Storage::Dictionary(left), Storage::Dictionary(right)) => {
                     left.compare_entry(right, position)
                 }
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Json(left), Storage::Json(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Document(left), Storage::Document(right)) => {
-                    Comparison::Done(left.view().equal(&right.view()))
+                    let result = left.view().and_then(|left| Ok(left.equal(&right.view()?)));
+                    Comparison::Done(result.unwrap_or_else(|error| {
+                        error.raise();
+                        false
+                    }))
                 }
                 (
                     left @ (Storage::Path { .. } | Storage::PurePath(_)),
@@ -322,6 +354,9 @@ pub unsafe extern "C" fn imre_value_repr(word: usize, kind: u32) -> *const Str {
     let mut output = String::new();
     // SAFETY: the caller supplies the exact checked representation and root.
     unsafe { write_repr(&mut output, word, WordKind::new(kind)) };
+    if super::exceptions::imre_error_pending() != 0 {
+        return std::ptr::null();
+    }
     Rc::into_raw(Rc::new(Str::from(output)))
 }
 
@@ -351,6 +386,19 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 },
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
+                        Storage::Plain => {
+                            write!(output, "<object object at {owner:p}>").unwrap();
+                            None
+                        }
+                        Storage::StrDescriptor(index) => {
+                            write!(
+                                output,
+                                "<method '{}' of 'str' objects>",
+                                super::inspect::descriptor_name(*index)
+                            )
+                            .unwrap();
+                            None
+                        }
                         Storage::IteratorAdapter(adapter) => {
                             adapter.write_repr(output, owner);
                             None
@@ -390,6 +438,13 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         Storage::Dictionary(mapping) => {
                             format_entry(owner, mapping.repr_entry(output, position), &mut pending)
                         }
+                        Storage::SimpleNamespace(dict) => dict
+                            .0
+                            .with(|state| state.dictionary().namespace_repr_entry(output, position))
+                            .map(|(next, word, kind)| {
+                                pending.push(ReprTask::Object(owner, next));
+                                ReprTask::Word(word, kind)
+                            }),
                         Storage::Set(set) => {
                             format_entry(owner, set.repr_entry(output, position), &mut pending)
                         }
@@ -398,13 +453,16 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                             None
                         }
                         Storage::Document(value) => {
-                            value.view().write_repr(output);
+                            match value.view() {
+                                Ok(view) => view.write_repr(output),
+                                Err(error) => error.raise(),
+                            }
                             None
                         }
                         Storage::PurePath(path) => {
                             output.push_str(path.class());
                             output.push('(');
-                            super::exceptions::push_string_repr(&storage.posix_spelling(), output);
+                            path.push_posix_repr(output);
                             output.push(')');
                             None
                         }
@@ -469,6 +527,8 @@ unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
         match raw & !NULLABLE {
             0 => output.push_str("None"),
             10 => super::string_enums::write_repr(output, word),
+            12 => super::annotations::write_repr(output, word),
+            11 => write!(output, "<class '{}'>", *(word as *const Str)).unwrap(),
             1 => {
                 let value = if raw & NULLABLE != 0 { word - 1 } else { word };
                 output.push_str(if value == 0 { "False" } else { "True" });
@@ -535,14 +595,15 @@ unsafe fn record_field_repr(
             .unwrap();
             return None;
         }
+        let plain_tuple = semantics.kind == TUPLE && semantics.name.is_null();
         if position == 0 {
-            if semantics.kind != TUPLE {
+            if !plain_tuple {
                 output.push_str(text(semantics.name, semantics.name_len));
             }
             output.push('(');
         }
         for index in position..layout.length {
-            let field = if semantics.kind == TUPLE {
+            let field = if plain_tuple {
                 None
             } else {
                 Some(&*semantics.fields.add(index))
@@ -566,7 +627,7 @@ unsafe fn record_field_repr(
             }
             write_scalar(output, word, kind);
         }
-        if semantics.kind == TUPLE && written == 1 {
+        if plain_tuple && written == 1 {
             output.push(',');
         }
         output.push(')');

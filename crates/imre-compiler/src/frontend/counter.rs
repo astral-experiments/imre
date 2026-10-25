@@ -3,7 +3,102 @@
 
 use super::*;
 
+/// Counter ordering compares counts for the union of keys even when the two
+/// key types differ. Other operator families retain their ordinary type checks.
+pub(super) fn comparison(
+    types: &Types,
+    left: Type,
+    right: Type,
+    op: ast::CmpOp,
+) -> Option<Compare> {
+    if !(types.is_counter(left) && types.is_counter(right)) {
+        return None;
+    }
+    Some(match op {
+        ast::CmpOp::Eq => Compare::Equal,
+        ast::CmpOp::NotEq => Compare::NotEqual,
+        ast::CmpOp::Lt => Compare::Less,
+        ast::CmpOp::LtE => Compare::LessEqual,
+        ast::CmpOp::Gt => Compare::Greater,
+        ast::CmpOp::GtE => Compare::GreaterEqual,
+        _ => return None,
+    })
+}
+
 impl Checker<'_> {
+    /// Bind both forms of the Python method in source order, including
+    /// `Counter.most_common(n=..., self=...)`.
+    pub(super) fn counter_most_common(
+        &mut self,
+        call: &ast::ExprCall,
+        receiver: Option<Expr>,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let mut values: Vec<_> = receiver.into_iter().collect();
+        let offset = values.len();
+        let mut slots = [(offset == 1).then_some(0), None];
+        let keywords = call.arguments.keywords.iter().map(|kw| {
+            (
+                match kw.arg.as_ref().map(|name| name.as_str()) {
+                    Some("self") => 0,
+                    Some("n") => 1,
+                    _ => 2,
+                },
+                &kw.value,
+            )
+        });
+        for (index, argument) in (offset..).zip(&call.arguments.args).chain(keywords) {
+            if index >= slots.len() || slots[index].replace(values.len()).is_some() {
+                return Err(error(
+                    self.source,
+                    call,
+                    "most_common accepts one optional count",
+                ));
+            }
+            let value = self.expr(argument)?;
+            values.push(if index == 1 && value.ty == Type::Bool {
+                Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                }
+            } else {
+                value
+            });
+        }
+        let owner = slots[0]
+            .ok_or_else(|| error(self.source, call, "most_common requires a Counter receiver"))?;
+        let ty = values[owner].ty;
+        if !self.types.is_counter(ty) {
+            return Err(error(
+                self.source,
+                call,
+                "most_common requires a Counter receiver",
+            ));
+        }
+        let limit = if let Some(limit) = slots[1] {
+            let ty = values[limit].ty;
+            if !matches!(ty, Type::None | Type::Int) && self.types.payload(ty) != Some(Type::Int) {
+                return Err(error(
+                    self.source,
+                    call,
+                    "most_common requires an integer count or None",
+                ));
+            }
+            limit
+        } else {
+            values.push(Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            });
+            values.len() - 1
+        };
+        let (key, count) = self.types.mapping(ty).unwrap();
+        let result = self.types.list(self.types.tuple(vec![key, count]));
+        let mut args = ir::CallArgs::positional(values);
+        args.order = vec![owner, limit];
+        Ok(self.ordered_builtin(Builtin::CounterMostCommon, result, args))
+    }
+
     /// Root all evaluated call arguments until the catchable argument error.
     fn counter_call_error(
         &mut self,
@@ -301,6 +396,30 @@ impl Checker<'_> {
                 value: Box::new(value),
                 clear,
             },
+        })
+    }
+
+    pub(super) fn counter_math(
+        &self,
+        operator: ast::Operator,
+        left: Expr,
+        right: Expr,
+        inplace: bool,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        if !inplace || self.types.mapping(left.ty) != self.types.mapping(right.ty) {
+            self.expect(left.ty, right.ty, node)?;
+        }
+        let op = match operator {
+            ast::Operator::Add => ir::CounterOp::Add,
+            ast::Operator::Sub => ir::CounterOp::Subtract,
+            ast::Operator::BitOr => ir::CounterOp::Union,
+            ast::Operator::BitAnd => ir::CounterOp::Intersection,
+            _ => return Err(error(self.source, node, "unsupported Counter operator")),
+        };
+        Ok(Expr {
+            ty: left.ty,
+            kind: ExprKind::Builtin(Builtin::CounterMath { op, inplace }, vec![left, right]),
         })
     }
 }
