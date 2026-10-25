@@ -7608,6 +7608,7 @@ impl<'a> Checker<'a> {
                 return self.single_dispatch(call);
             }
             Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
+            Some(Binding::Intrinsic(Intrinsic::UpdateWrapper)) => return self.update_wrapper(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
                 let [ast::Expr::StringLiteral(target), value] = call.arguments.args.as_ref() else {
@@ -8086,6 +8087,9 @@ impl<'a> Checker<'a> {
             };
             if let Some(layout) = self.types.dispatcher(receiver.ty) {
                 return self.single_dispatch_method(call, attribute, receiver, layout);
+            }
+            if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
+                return self.invoke(call, wrapped);
             }
             if receiver.ty == Type::ModuleNamespace
                 && attribute.attr.as_str() == "keys"

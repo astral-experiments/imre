@@ -55,6 +55,8 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
+            Self::FunctionWrappedSet => Contract::new(false, Unknown),
+            Self::FunctionWrappedGet => Contract::new(true, PreservesLists),
             Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
             Self::Str
                 if args.first().is_some_and(|e| {
@@ -695,6 +697,12 @@ impl Builtin {
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
+            Self::FunctionWrappedSet => {
+                matches!(result, Type::Callable(_)) && signature(&[result, result], result)
+            }
+            Self::FunctionWrappedGet => {
+                matches!(result, Type::Callable(_)) && signature(&[result], result)
+            }
             Self::WrapperAttributes(fields) => {
                 args.is_empty() && result == types.tuple(vec![Type::Str; fields.names().len()])
             }
@@ -878,6 +886,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_random_bits"
                 | "imre_random_choice_index"
                 | "imre_random_progression"
+                | "imre_function_get_wrapped"
                 | "imre_int_pow"
                 | "imre_int_modpow"
                 | "imre_int_negative_pow"

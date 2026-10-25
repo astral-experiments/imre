@@ -797,6 +797,8 @@ pub(crate) enum Builtin {
     AnnotationRef,
     AnnotationIs,
     StaticFunction(usize),
+    FunctionWrappedSet,
+    FunctionWrappedGet,
     StrEnumValue,
     EnumLookup(usize),
     EnumString,
