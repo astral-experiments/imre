@@ -72,8 +72,9 @@ native calls and host setup details for auditing. A supplemental configuration
 does not replace a canonical skip.
 
 [Method preflight](method-preflight-linux.json) records a separate native build
-at each level for every other reference-passing public occurrence: 295 OS, 143
-POSIX and 25 genericpath. Each build takes the complete verified definition, its
+at each level for the initial 295 OS, 143 POSIX and 25 genericpath reference-passing
+occurrences outstanding after #506. Later successful executions take precedence over
+the earlier diagnostics in the versioned reports. Each build takes the complete verified definition, its
 actual imported names, and the shared native TestCase fixture. Eight generated
 invalid-descriptor methods receive the operation name from their original closure.
 Two outer methods now compile: the unchanged subprocess requests for
@@ -90,13 +91,13 @@ work](https://github.com/astral-sh/imre/pull/587#issuecomment-6392803799) covers
 that fixture requirement. Other first errors belong to upstream case helpers,
 such as `WalkTests.walk`, or to a product import such as `posix`. A compiler
 diagnostic describes the first failed build step, not the result of running the
-method. The [canonical rollup](../native_report.py) counts 13 native bodies with
-host fixtures, six host-driven native operations, one mixed body, two host operations, 461 blockers,
+method. The [canonical rollup](../native_report.py) counts 15 native bodies with
+host fixtures, 12 host-driven native operations, one mixed body, two host operations, 453 blockers,
 five private reference-only cases, and 91 upstream skips at each level.
 
 To refresh these diagnostics, run `method_preflight.py` twice with the same
 `--imre`, `--runtime`, `--clang` and `--cpython-source`, once with each
 `--opt-level 0|3` and a distinct `--result`. Pass both files to
 `evidence.py --method-results O0.json O3.json --compiler-commit FULL_SHA`.
-CI independently reruns the 22 exercised methods at both levels and
+CI independently reruns the 30 exercised methods at both levels and
 compares their results with the denominator reports.
