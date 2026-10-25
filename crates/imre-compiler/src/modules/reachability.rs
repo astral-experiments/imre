@@ -267,9 +267,24 @@ impl Reachable {
                                     || (source.bundled
                                         && class.name.as_str() == "_MainRunner"
                                         && matches!(name, "_start" | "_run" | "_finish")));
+                            let mock_dispatch = source.bundled
+                                && source.name == "unittest.mock"
+                                && match class.name.as_str() {
+                                    "Mock" => matches!(
+                                        name,
+                                        "_child"
+                                            | "_record"
+                                            | "_assert_any_call"
+                                            | "_assert_called_with"
+                                            | "_assert_called_once_with"
+                                    ),
+                                    "_Call" => matches!(name, "_represent" | "_represent_list"),
+                                    _ => false,
+                                };
                             if (property
                                 || unittest_method
                                 || assertion_exit
+                                || mock_dispatch
                                 || refs.found.attributes.contains(name)
                                 || matches!(
                                     name,

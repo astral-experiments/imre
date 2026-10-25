@@ -238,6 +238,15 @@ impl Checker<'_> {
                 op == ast::CmpOp::IsNot,
             ));
         }
+        if let (Type::Class(a), Type::Class(b)) = (left.ty, right.ty)
+            && self.native_mock(a)
+            && self.native_mock(b)
+        {
+            return Ok(Self::identity_result(
+                vec![self.mock_node(left, a), self.mock_node(right, b)],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         if !(types
             .iter()
             .all(|ty| matches!(ty, Type::StrEnum(_) | Type::Enum(_)))
