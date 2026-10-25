@@ -5509,32 +5509,10 @@ impl<'a> Checker<'a> {
                     });
                 }
                 let mut values = self.numeric_union_comparison(values);
-                if let ([a, b], [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)]) =
-                    (values.as_slice(), compare.ops.as_ref())
-                    && [a.ty, b.ty].into_iter().all(|t| {
-                        matches!(t, Type::None | Type::Calendar(_))
-                            || self
-                                .types
-                                .payload(t)
-                                .is_some_and(|p| matches!(p, Type::Calendar(_)))
-                    })
-                    && [a.ty, b.ty].into_iter().any(|t| {
-                        matches!(t, Type::Calendar(_))
-                            || self
-                                .types
-                                .payload(t)
-                                .is_some_and(|p| matches!(p, Type::Calendar(_)))
-                    })
+                if let Some(result) =
+                    calendar::equality(self.types, &mut values, compare.ops.as_ref())
                 {
-                    let equal = calendar::op(ir::CalendarOp::NullableEqual, Type::Bool, values);
-                    return Ok(if *op == ast::CmpOp::NotEq {
-                        Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Not(Box::new(equal)),
-                        }
-                    } else {
-                        equal
-                    });
+                    return Ok(result);
                 }
                 if let ([left, right], [op]) = (values.as_slice(), compare.ops.as_ref())
                     && let Some(result) = inspect::equality(left, right, *op)
@@ -7751,22 +7729,7 @@ impl<'a> Checker<'a> {
             && matches!(args[0].ty, Type::Calendar(_))
             && matches!(name.id.as_str(), "str" | "print" | "repr")
         {
-            let text = if name.id == "repr" {
-                Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Repr, args),
-                }
-            } else {
-                calendar::op(ir::CalendarOp::Text { iso: false }, Type::Str, args)
-            };
-            return Ok(if name.id == "print" {
-                Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(Builtin::Print, vec![text]),
-                }
-            } else {
-                text
-            });
+            return Ok(calendar::format_builtin(name.id.as_str(), args));
         }
         if name.id == "hash" {
             let [value] = args.as_slice() else {

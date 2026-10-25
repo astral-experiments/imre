@@ -31,6 +31,50 @@ fn boolean(v: bool) -> Expr {
         kind: ExprKind::Bool(v),
     }
 }
+/// Calendar values and optional calendar values use the same handle or zero for None.
+pub(super) fn equality(types: &Types, values: &mut Vec<Expr>, ops: &[ast::CmpOp]) -> Option<Expr> {
+    let ([left, right], [cmp @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)]) = (values.as_slice(), ops)
+    else {
+        return None;
+    };
+    let operands = [left.ty, right.ty].map(|ty| types.payload(ty).unwrap_or(ty));
+    if !operands
+        .iter()
+        .all(|ty| matches!(ty, Type::None | Type::Calendar(_)))
+        || !operands.iter().any(|ty| matches!(ty, Type::Calendar(_)))
+    {
+        return None;
+    }
+    let equal = op(Op::NullableEqual, Type::Bool, std::mem::take(values));
+    Some(if *cmp == ast::CmpOp::NotEq {
+        Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Not(Box::new(equal)),
+        }
+    } else {
+        equal
+    })
+}
+
+pub(super) fn format_builtin(name: &str, args: Vec<Expr>) -> Expr {
+    let text = if name == "repr" {
+        Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::Repr, args),
+        }
+    } else {
+        op(Op::Text { iso: false }, Type::Str, args)
+    };
+    if name == "print" {
+        Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::Print, vec![text]),
+        }
+    } else {
+        text
+    }
+}
+
 pub(super) fn binary(
     a: C,
     b: C,
