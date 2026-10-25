@@ -1,6 +1,7 @@
 """Run pinned cache methods with a persistent native cache for each decorated function."""
 import argparse
 import ast
+import builtins
 from collections import Counter
 import inspect
 import json
@@ -80,6 +81,7 @@ class Wrapper:
         self.proc = self.shape = self.failure = None
         self.objects = []
         self.arity = length(inspect.signature(function).parameters)
+        self.bound_len_calls = 0
 
     def start(self, shape):
         if any(t not in (int, str) for t in shape):
@@ -119,6 +121,9 @@ class Wrapper:
         return line
 
     def __call__(self, *args, **kwargs):
+        if self.function is length and builtins.len is self:
+            self.bound_len_calls += 1
+            self.counts["host_len_binding_calls"] += 1
         if kwargs:
             raise UnsupportedFixture("native cached calls do not yet retain keyword order and names")
         if self.arity != length(args):
@@ -149,15 +154,18 @@ class Wrapper:
             raise RuntimeError(f"unexpected native cache response: {reply}")
         return self.objects[int(reply.split()[1])]
 
-    def cache_info(self):
+    def native_cache_info(self):
         self.start(self.shape if self.shape is not None else (int,) * self.arity)
         self.send(1)
         op, hits, misses, size, current = self.read().split()
         if op != "info":
             raise RuntimeError(op)
+        return (int(hits), int(misses), None if size == "None" else int(size), int(current))
+
+    def cache_info(self):
+        values = self.native_cache_info()
         self.counts["snapshots"] += 1
-        return Snapshot((int(hits), int(misses), None if size == "None" else int(size), int(current)),
-                        self.counts)
+        return Snapshot(values, self.counts)
 
     def cache_clear(self):
         self.start(self.shape if self.shape is not None else (int,) * self.arity)
@@ -215,6 +223,8 @@ BLOCKERS = {
 
 def exercise(build, case, original, counts):
     wrappers = []
+    initial_len = builtins.len
+    bindings = []
     def decorate(function, decorator):
         value = Wrapper(build, function, decorator, counts)
         wrappers.append(value)
@@ -234,13 +244,24 @@ def exercise(build, case, original, counts):
         with patch.object(case.module, "lru_cache", lru_cache), patch.object(
                 case.module, "cache", lambda f: decorate(f, "functools.cache")):
             original()
+        for wrapper in wrappers:
+            if wrapper.bound_len_calls:
+                if builtins.len is not initial_len:
+                    raise AssertionError("the original method did not restore builtins.len by identity")
+                bindings.append({"binding": "builtins.len", "calls_while_replaced": wrapper.bound_len_calls,
+                                 "cache_info_before_teardown": wrapper.native_cache_info(),
+                                 "original_is_callback": wrapper.function is initial_len,
+                                 "original_identity_restored": True})
     finally:
         for wrapper in reversed(wrappers):
             wrapper.close()
     if not any(counts[k] for k in ("lookups", "snapshots", "clears", "parameter_reads")):
         raise UnsupportedFixture("no native cache operation executed")
-    mixed = counts["host_wrapper_metadata"] or counts["host_named_fields"] or counts["host_exception_state"]
-    return {"status": "mixed" if mixed else "host_driven_native_operation", **counts}
+    mixed = any(value for name, value in counts.items() if name.startswith("host_"))
+    result = {"status": "mixed" if mixed else "host_driven_native_operation", **counts}
+    if bindings:
+        result["binding_observations"] = bindings
+    return result
 
 
 def main():

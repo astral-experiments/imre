@@ -6,6 +6,8 @@ use std::cmp::Ordering;
 use std::fmt::Write;
 use std::rc::Rc;
 
+use num_traits::ToPrimitive;
+
 use super::records::descriptor;
 use super::words::{NULLABLE, WordKind};
 use super::{Bytes, Int, List, Object, Storage, Str, fail, object};
@@ -211,7 +213,14 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
                         let (left, left_kind) = super::unions::member(left);
                         let (right, right_kind) = super::unions::member(right);
                         if left_kind != right_kind {
-                            Comparison::Done(false)
+                            let numbers = match (left_kind.base(), right_kind.base()) {
+                                (1, 2) => Some((left, right)),
+                                (2, 1) => Some((right, left)),
+                                _ => None,
+                            };
+                            Comparison::Done(numbers.is_some_and(|(flag, integer)| {
+                                Int::borrow(integer).big().to_usize() == Some(flag)
+                            }))
                         } else {
                             Comparison::Child {
                                 left,
@@ -324,10 +333,16 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         resume: (position + 1 < left.values.len()).then_some(position + 1),
                     }
                 }
+                (Storage::ObjectValue(l), Storage::ObjectValue(r)) => Comparison::Done(
+                    super::boxed_values::equal((l.kind, l.word), (r.kind, r.word)),
+                ),
                 (Storage::SimpleNamespace(left), Storage::SimpleNamespace(right)) => {
                     object_element(Rc::as_ptr(left), Rc::as_ptr(right), position)
                 }
                 (Storage::Dictionary(left), Storage::Dictionary(right)) => {
+                    left.compare_entry(right, position)
+                }
+                (Storage::Deque(left), Storage::Deque(right)) => {
                     left.compare_entry(right, position)
                 }
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
@@ -391,6 +406,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 },
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
+                        Storage::ObjectValue(field) => Some(ReprTask::Word(field.word, field.kind)),
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None
@@ -467,7 +483,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         Storage::PurePath(path) => {
                             output.push_str(path.class());
                             output.push('(');
-                            super::exceptions::push_string_repr(&storage.posix_spelling(), output);
+                            path.push_posix_repr(output);
                             output.push(')');
                             None
                         }

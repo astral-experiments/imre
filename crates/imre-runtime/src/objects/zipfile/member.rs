@@ -47,7 +47,7 @@ impl Member {
         info: Rc<Info>,
         encrypted_name: impl FnOnce() -> Str,
     ) -> Result<Self> {
-        let at = source.header_offset(info.offset)?;
+        let at = source.absolute_offset(info.offset)?;
         let mut header = [0; 30];
         if source.read(at, &mut header)? != 30 {
             return Err(bad("Truncated file header"));
@@ -368,6 +368,9 @@ impl Member {
             let cached = out.is_empty() && self.pos < self.buffer.len();
             if self.pos == self.buffer.len() {
                 if self.eof {
+                    // The buffered readline fallback reads past the cached newline.
+                    self.buffer.clear();
+                    self.pos = 0;
                     break;
                 }
                 self.refill(1)?;
@@ -412,10 +415,13 @@ impl Member {
             return Ok(to);
         }
         if self.info.method == 0 {
+            let at = self
+                .source
+                .absolute_offset(i128::from(self.start) + i128::from(to))?;
+            self.source.position(at)?;
             // Seeking a stored member skips data: its full CRC cannot be checked.
             self.crc = None;
-            self.source.position(self.start + to)?;
-            self.packed_at = self.start + to;
+            self.packed_at = at;
             self.left = self.info.file_size - to;
             self.packed_left = self.info.compress_size.saturating_sub(to);
             self.buffer.clear();
@@ -454,6 +460,20 @@ mod tests {
 
     // CPython-generated ZIP_DEFLATED archive containing exactly 4,097 NULs.
     const FIXTURE: &[u8] = b"PK\x03\x04\x14\x00\x00\x00\x08\x00\x00\x00!\x00\x7f\xd3u\xb8\x14\x00\x00\x00\x01\x10\x00\x00\x01\x00\x00\x00p\xed\xc1\x01\x0d\x00\x00\x00\xc2\xa0\xf7Om\x0f\x07\x14\x00\x00\x00poPK\x01\x02\x14\x03\x14\x00\x00\x00\x08\x00\x00\x00!\x00\x7f\xd3u\xb8\x14\x00\x00\x00\x01\x10\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x80\x01\x00\x00\x00\x00pPK\x05\x06\x00\x00\x00\x00\x01\x00\x01\x00/\x00\x00\x003\x00\x00\x00\x00\x00";
+
+    #[test]
+    fn stored_zip64_seek_checks_the_absolute_offset() {
+        // A one-byte stored member declares u64::MAX uncompressed bytes.
+        let bytes = b"PK\x03\x04\x14\x00\x00\x00\x00\x00\x00\x00!\x00K6\xb2\xb7\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x0c\x00x\x01\x00\x08\x00\xff\xff\xff\xff\xff\xff\xff\xffXPK\x01\x02\x14\x03\x14\x00\x00\x00\x00\x00\x00\x00!\x00K6\xb2\xb7\x01\x00\x00\x00\xff\xff\xff\xff\x01\x00\x0c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x80\x01\x00\x00\x00\x00x\x01\x00\x08\x00\xff\xff\xff\xff\xff\xff\xff\xffPK\x05\x06\x00\x00\x00\x00\x01\x00\x01\x00;\x00\x00\x00,\x00\x00\x00\x00\x00";
+        let input = Source::Borrowed(FileState::memory(Rc::new(bytes.to_vec())));
+        let archive = Archive::open(input, None).ok().unwrap();
+        let mut member = archive.member_by_name(&Str::new("x")).ok().unwrap();
+
+        let error = member.seek(SeekFrom::End(0)).unwrap_err();
+        assert!(error.is_kind(Kind::OverflowError));
+        assert_eq!(member.tell(), 0);
+        assert_eq!(member.read(Some(1)).ok().unwrap(), b"X");
+    }
 
     #[test]
     fn invalid_deflate_block_consumes_input_without_advancing_member_position() {
