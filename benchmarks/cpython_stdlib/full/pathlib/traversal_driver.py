@@ -27,6 +27,8 @@ paths = [Path(".")]
 lookup = {paths[0]: 0}
 # The seed establishes the concrete cursor type without scanning any directory.
 cursors = [paths[0].glob("*")]
+walks = [paths[0].walk()]
+walk_dirs: list[list[str]] = []
 print("READY")
 while True:
     command = input()
@@ -59,6 +61,24 @@ while True:
         elif command == "iterdir":
             cursors.append(paths[int(arg(0))].iterdir())
             print(len(cursors) - 1)
+        elif command == "walk":
+            walks.append(paths[int(arg(0))].walk(top_down=arg(1) == "true", follow_symlinks=arg(2) == "true"))
+            print(len(walks) - 1)
+        elif command == "walk_iter":
+            walk = walks[int(arg(0))]
+            print(iter(walk) is walk)
+        elif command == "walk_next":
+            path, dirs, files = next(walks[int(arg(0))])
+            walk_dirs.append(dirs)
+            print("(" + str(intern(paths, lookup, path)) + ", " + str(len(walk_dirs) - 1)
+                  + ", " + repr(dirs) + ", " + repr(files) + ")")
+        elif command == "walk_update_dirs":
+            dirs = walk_dirs[int(arg(0))]
+            while dirs:
+                dirs.pop()
+            for i in range(int(arg(1))):
+                dirs.append(arg(i + 2))
+            print(None)
         elif command == "glob" or command == "rglob":
             root = paths[int(arg(0))]
             sensitive = case_option(arg(2))
