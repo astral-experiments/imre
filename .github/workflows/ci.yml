@@ -9,7 +9,7 @@ on:
       audit:
         description: Source of the requested per-occurrence results
         type: choice
-        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace, percent-scalar, record-attributes, adapter-events, adapter-tools, codec-writer]
+        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace, percent-scalar, record-attributes, adapter-events, adapter-tools, codec-writer, plain-file]
         required: true
 permissions:
   contents: read
@@ -155,6 +155,11 @@ jobs:
               fi
               PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/null_handler.py "${tools[@]}" --result "$results/null-handler.json"
               ;;
+            plain-file)
+              python3 -I -B benchmarks/cpython_stdlib/full/logging/native_plain_encoding.py "${tools[@]}" --cpython-source "$ref" --result "$results/plain-file-encoding.json"
+              cmp benchmarks/cpython_stdlib/full/logging/plain-file-encoding-linux.json "$results/plain-file-encoding.json"
+              python3 -B tests/files.py "${ordinary[@]}"
+              ;;
             codec-writer)
               python3 -I -B benchmarks/cpython_stdlib/full/logging/codec_writer.py "${tools[@]}" --cpython-source "$ref" --result "$results/codec-writer.json"
               cmp benchmarks/cpython_stdlib/full/logging/codec-writer-linux.json "$results/codec-writer.json"
@@ -168,6 +173,8 @@ jobs:
                   "$RUNNER_TEMP/binding" "$results/binding-file-O$opt" > "$results/binding-stdout-O$opt"
                   cmp "$results/binding-reference-file" "$results/binding-file-O$opt"
                   cmp "$results/binding-reference-stdout" "$results/binding-stdout-O$opt"
+                  mkdir "$RUNNER_TEMP/import-snapshots-O$opt"
+                  PYTHONPATH="$PWD/benchmarks/cpython_stdlib:$PWD/benchmarks/cpython_stdlib/full/sys" python3 -B -c 'from pathlib import Path; from suite_native import Toolchain; from import_snapshots import check_import_snapshots; import sys; check_import_snapshots(Toolchain(Path(sys.argv[1]), Path(sys.argv[2]), Path("/usr/bin/clang-18"), int(sys.argv[3])), Path(sys.argv[4]))' "$imre" "$runtime" "$opt" "$RUNNER_TEMP/import-snapshots-O$opt"
                 done
                 PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/native_encoding.py "${tools[@]}" --cpython-source "$ref" --result "$results/unchanged-stream.json"
               fi
