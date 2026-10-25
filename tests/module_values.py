@@ -15,6 +15,9 @@ from imports import require_success, run, write_files
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "module_values"
 ERRORS = {"initialization_error": "ValueError", "entry_error": "ValueError"}
 REJECTED = {
+    "early_namedtuple_imported": {
+        "library.py": 'from collections import namedtuple\ndef early() -> str:\n    return Late("before").value\nVALUE = early()\nLate = namedtuple("Late", "value")\n',
+    },
     "entry_call_before_definition": {"main.py": "VALUE = make()\ndef make() -> int:\n    return 1\n"},
     "entry_early_read": {"main.py": "def read() -> int:\n    return SECOND\nFIRST = read()\nSECOND = 2\ndef last() -> None:\n    pass\n"},
     "early_class_entry_enum": {

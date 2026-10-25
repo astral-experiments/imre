@@ -13,6 +13,28 @@ impl Emitter<'_, '_> {
         let first = &args[0].value;
         let bytes = u8::from(first.ty == Type::Bytes);
         let operand = match operation {
+            PosixPathOperation::Commonpath => {
+                let kind = match self.module.types.element(first.ty) {
+                    Some(Type::Str) => 0,
+                    Some(Type::Bytes) => 1,
+                    Some(Type::Union(_)) => 2,
+                    Some(Type::Path) => 3,
+                    _ => 4,
+                };
+                let handle = if first.ty == Type::None {
+                    "null"
+                } else {
+                    &first.operand
+                };
+                let raw = self.checked_instruction(format!(
+                    "call i64 @imre_posix_commonpath(ptr {handle}, i32 {kind})"
+                ));
+                if matches!(returns, Type::Union(_)) {
+                    raw
+                } else {
+                    self.instruction(format!("inttoptr i64 {raw} to ptr"))
+                }
+            }
             PosixPathOperation::Join => {
                 let handles = self.entry_alloca(format!("[{} x ptr]", args.len()));
                 for (index, arg) in args.iter().enumerate() {

@@ -1,0 +1,33 @@
+{
+  "module": "test.test_genericpath",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 25,
+  "reference": {
+    "test.test_genericpath.PathLikeTests.test_path_commonprefix": "pass",
+    "test.test_genericpath.PathLikeTests.test_path_exists": "pass",
+    "test.test_genericpath.PathLikeTests.test_path_getctime": "pass",
+    "test.test_genericpath.PathLikeTests.test_path_getmtime": "pass",
+    "test.test_genericpath.PathLikeTests.test_path_getsize": "pass",
+    "test.test_genericpath.PathLikeTests.test_path_isdir": "pass",
+    "test.test_genericpath.PathLikeTests.test_path_isfile": "pass",
+    "test.test_genericpath.PathLikeTests.test_path_samefile": "pass",
+    "test.test_genericpath.TestGenericTest.test_commonprefix": "pass",
+    "test.test_genericpath.TestGenericTest.test_exists": "pass",
+    "test.test_genericpath.TestGenericTest.test_exists_bool": "pass",
+    "test.test_genericpath.TestGenericTest.test_exists_fd": "pass",
+    "test.test_genericpath.TestGenericTest.test_filetime": "pass",
+    "test.test_genericpath.TestGenericTest.test_getsize": "pass",
+    "test.test_genericpath.TestGenericTest.test_invalid_paths": "pass",
+    "test.test_genericpath.TestGenericTest.test_isdir": "pass",
+    "test.test_genericpath.TestGenericTest.test_isfile": "pass",
+    "test.test_genericpath.TestGenericTest.test_no_argument": "pass",
+    "test.test_genericpath.TestGenericTest.test_samefile": "pass",
+    "test.test_genericpath.TestGenericTest.test_samefile_on_link": "pass",
+    "test.test_genericpath.TestGenericTest.test_samefile_on_symlink": "pass",
+    "test.test_genericpath.TestGenericTest.test_sameopenfile": "pass",
+    "test.test_genericpath.TestGenericTest.test_samestat": "pass",
+    "test.test_genericpath.TestGenericTest.test_samestat_on_link": "pass",
+    "test.test_genericpath.TestGenericTest.test_samestat_on_symlink": "pass"
+  }
+}

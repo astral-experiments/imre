@@ -1,0 +1,2 @@
+upstream/** -text linguist-vendored=true whitespace=-blank-at-eol,-blank-at-eof
+reference-linux.json linguist-generated=true

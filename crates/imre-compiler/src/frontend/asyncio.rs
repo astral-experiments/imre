@@ -119,7 +119,8 @@ impl Checker<'_> {
         result: Type,
         args: ir::CallArgs,
     ) -> Expr {
-        let context = self.classes.contexts.contains(&signature.id);
+        let context = self.classes.contexts.contains(&signature.id)
+            || self.classes.producer_items.contains_key(&signature.id);
         if !signature.asynchronous && !context {
             return Expr {
                 ty: result,

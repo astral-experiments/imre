@@ -7,7 +7,7 @@ use std::os::unix::net::UnixStream;
 
 const PREFIX: &[u8] = b".imre-run-fd-";
 
-pub(crate) fn wait_for_cleanup() {
+pub(crate) fn wait_for_cleanup(want_original: bool) -> io::Result<Option<Vec<u8>>> {
     #[cfg(target_os = "linux")]
     // SAFETY: AT_EXECFN points to the kernel-provided executable pathname.
     let path = unsafe { libc::getauxval(libc::AT_EXECFN) } as *const libc::c_char;
@@ -15,25 +15,25 @@ pub(crate) fn wait_for_cleanup() {
     // SAFETY: dyld image zero is the main executable and remains loaded.
     let path = unsafe { libc::_dyld_get_image_name(0) };
     if path.is_null() {
-        return;
+        return Ok(None);
     }
     // SAFETY: the loader owns this NUL-terminated string throughout startup.
     let path = unsafe { CStr::from_ptr(path) }.to_bytes();
     let name = path.rsplit(|&byte| byte == b'/').next().unwrap_or_default();
     let Some(digits) = name.strip_prefix(PREFIX) else {
-        return;
+        return Ok(None);
     };
     if digits.len() > 10 || !digits.iter().all(u8::is_ascii_digit) {
-        return;
+        return Ok(None);
     }
     let Some(fd) = std::str::from_utf8(digits)
         .ok()
         .and_then(|digits| digits.parse::<RawFd>().ok())
     else {
-        return;
+        return Ok(None);
     };
     if fd < 3 {
-        return;
+        return Ok(None);
     }
 
     // A standalone program can have this basename and unrelated inherited
@@ -50,23 +50,47 @@ pub(crate) fn wait_for_cleanup() {
         )
     });
     if received != Some(name.len()) || &challenge[..name.len()] != name || !is_unix_stream(fd) {
-        return;
+        return Ok(None);
     }
 
     // SAFETY: the matching launcher challenge transfers this connected Unix
     // stream to us. Dropping it closes the inherited fd before user code runs.
     let mut stream = unsafe { UnixStream::from_raw_fd(fd) };
     if stream.read_exact(&mut challenge[..name.len()]).is_err() {
-        return;
+        return Ok(None);
     }
     // SAFETY: the ready byte is readable, the stream owns fd, and NOSIGNAL
     // lets an early launcher exit produce EPIPE without killing the program.
-    if retry_interrupted(|| unsafe { libc::send(fd, [1u8].as_ptr().cast(), 1, libc::MSG_NOSIGNAL) })
-        == Some(1)
+    if retry_interrupted(|| unsafe {
+        libc::send(
+            fd,
+            [if want_original { 2u8 } else { 1 }].as_ptr().cast(),
+            1,
+            libc::MSG_NOSIGNAL,
+        )
+    }) == Some(1)
     {
         // The launcher closes its endpoint after removing the temporary tree.
-        let _ = io::copy(&mut stream, &mut io::sink());
+        if want_original {
+            // A real exec cannot contain more argument bytes than ARG_MAX.
+            // Bound allocation even if an unrelated process mimics the handshake.
+            // SAFETY: sysconf reads this process's exec limit without pointers.
+            let max = unsafe { libc::sysconf(libc::_SC_ARG_MAX) };
+            let limit = u64::try_from(max).unwrap_or(64 * 1024 * 1024);
+            let mut bytes = Vec::new();
+            stream.take(limit + 1).read_to_end(&mut bytes)?;
+            if bytes.len() as u64 > limit {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "launcher arguments exceed ARG_MAX",
+                ));
+            }
+            // A launcher predating the argument protocol sends no payload.
+            return Ok((!bytes.is_empty()).then_some(bytes));
+        }
+        io::copy(&mut stream, &mut io::sink())?;
     }
+    Ok(None)
 }
 
 fn is_unix_stream(fd: RawFd) -> bool {

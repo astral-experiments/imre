@@ -1,4 +1,4 @@
-from io import UnsupportedOperation
+from io import BytesIO, UnsupportedOperation
 from typing import BinaryIO
 
 
@@ -43,6 +43,14 @@ def closed(value: BinaryIO) -> None:
             print("unreachable")
     except ValueError as error:
         print(error)
+
+
+def check_whence(value: BinaryIO) -> None:
+    for whence in [-2**31 - 1, 2**31]:
+        try:
+            print(value.seek(0, whence))
+        except OverflowError as error:
+            print(error)
 
 
 payload = bytes([value for value in range(256)]) + b"\r\n\r\0"
@@ -129,3 +137,21 @@ try:
         print("unreachable")
 except NotADirectoryError as error:
     print(error)
+
+
+with open("seek.bin", "wb") as writer:
+    writer.write(b"abcdef")
+with open("seek.bin", "rb") as reader:
+    print(reader.tell())
+    print(reader.read(2))
+    print(reader.seek(1, 1))
+    print(reader.read(1))
+    print(reader.seek(-1, 2))
+    print(reader.read())
+    print(reader.seek(0))
+    print(reader.tell())
+    check_whence(reader)
+check_whence(reader)
+with BytesIO(b"abc") as memory:
+    check_whence(memory)
+check_whence(memory)
