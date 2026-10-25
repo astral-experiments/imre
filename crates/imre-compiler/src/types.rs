@@ -82,6 +82,7 @@ struct Storage {
     exceptions: Vec<NamedException>,
     ids: HashMap<Shape, usize>,
     hashable_records: HashSet<usize>,
+    value_structs: HashSet<usize>,
     custom_truth: HashSet<usize>,
     pathlike_records: HashSet<usize>,
     fallible_keys: HashSet<usize>,
@@ -114,6 +115,7 @@ impl Types {
                 Some(Shape::Dict(..) | Shape::DefaultListDict(..) | Shape::Counter(_))
             ),
             Type::Set(id) => matches!(storage.shapes.get(id), Some(Shape::Set(_))),
+            Type::ChainMap(id) => matches!(storage.shapes.get(id), Some(Shape::Dict(..))),
             Type::Deque(id) => matches!(storage.shapes.get(id), Some(Shape::Deque(_))),
             Type::Tuple(id) => matches!(
                 storage.shapes.get(id),
@@ -231,6 +233,7 @@ impl Types {
                 | Type::List(child_id)
                 | Type::CacheState(child_id)
                 | Type::Dict(child_id)
+                | Type::ChainMap(child_id)
                 | Type::Deque(child_id)
                 | Type::Set(child_id)
                 | Type::Tuple(child_id)
@@ -279,6 +282,14 @@ impl Types {
                 _ => unreachable!("literal type identity has a string domain"),
             }
         }))
+    }
+
+    pub(crate) fn set_value_structs(&self, ids: HashSet<usize>) {
+        self.0.borrow_mut().value_structs = ids;
+    }
+
+    pub(crate) fn is_value_struct(&self, ty: Type) -> bool {
+        matches!(ty, Type::Class(id) if self.0.borrow().value_structs.contains(&id))
     }
 
     pub(crate) fn set_hashable_records(&self, records: HashSet<usize>) {
@@ -644,6 +655,13 @@ impl Types {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
     }
 
+    /// The percent formatter reads positional operands from an exact tuple's descriptor.
+    pub(crate) fn percent_tuple(&self, ty: Type) -> bool {
+        let Type::Tuple(id) = ty else { return false };
+        matches!(&self.0.borrow().shapes[id], Shape::Tuple(fields)
+            if fields.iter().all(|ty| matches!(ty, Type::Int | Type::Str | Type::StrLiteral(_))))
+    }
+
     /// Stat results use ten visible integer slots and a separate tail for named attributes.
     pub(crate) fn stat_result(&self) -> Type {
         self.struct_sequence(
@@ -852,6 +870,11 @@ impl Types {
         }
     }
 
+    /// A ChainMap and its concrete dictionaries share their key/value shape.
+    pub(crate) fn chainmap(&self, key: Type, value: Type) -> Type {
+        Type::ChainMap(self.intern(Shape::Dict(key, value)))
+    }
+
     pub(crate) fn dict(&self, key: Type, value: Type) -> Type {
         Type::Dict(self.intern(Shape::Dict(key, value)))
     }
@@ -943,6 +966,27 @@ impl Types {
         }
     }
 
+    /// A runtime tuple read must agree on ownership and storage for every selectable field.
+    pub(crate) fn homogeneous_tuple_element(&self, ty: Type) -> Option<Type> {
+        let Type::Tuple(id) = ty else {
+            return None;
+        };
+        let shapes = self.0.borrow();
+        let (Shape::Tuple(fields) | Shape::NamedTuple(_, fields)) = &shapes.shapes[id] else {
+            return None;
+        };
+        let widen = |t| match t {
+            Type::StrLiteral(_) => Type::Str,
+            other => other,
+        };
+        // An empty tuple raises before a result can be observed.
+        let element = fields.first().copied().map_or(Type::None, widen);
+        fields
+            .iter()
+            .all(|&field| widen(field) == element)
+            .then_some(element)
+    }
+
     /// Enumerates concrete tuple layouts for native field access and destruction.
     pub(crate) fn tuples(&self) -> Vec<(Type, Vec<Type>)> {
         self.0
@@ -1027,7 +1071,7 @@ impl Types {
         if let Type::ForwardRef(id) = ty {
             return self.fields(Type::Tuple(id)).unwrap();
         }
-        if let Type::SimpleNamespace(id) = ty {
+        if let Type::ChainMap(id) | Type::SimpleNamespace(id) = ty {
             return vec![Type::Dict(id)];
         }
         if let Some(element) = self
@@ -1102,6 +1146,7 @@ impl TypeDescription<'_> {
             | Type::Tuple(id)
             | Type::Callable(id)
             | Type::Dict(id)
+            | Type::ChainMap(id)
             | Type::Deque(id)
             | Type::Set(id)
             | Type::Optional(id)
@@ -1155,7 +1200,9 @@ impl TypeDescription<'_> {
                 self.write_type(*key)?;
             }
             Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => {
-                self.write_str(if matches!(shape, Shape::Dict(..)) {
+                self.write_str(if matches!(ty, Type::ChainMap(_)) {
+                    "ChainMap["
+                } else if matches!(shape, Shape::Dict(..)) {
                     "dict["
                 } else {
                     "defaultdict["
