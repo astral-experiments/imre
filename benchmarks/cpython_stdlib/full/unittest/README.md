@@ -61,8 +61,8 @@ The [context control](context_protocol.py) compares caught errors, stored manage
 `run.py` compares the shipped context protocol against pinned CPython at
 both optimization levels. It exercises nested mismatched handlers and the
 identity of the original caught object for LookupError, NameError,
-UnicodeEncodeError and shutil's OSError subclasses.
-On a build that also includes [native CSV](https://github.com/astral-sh/imre/pull/468)
-or [structured import errors](https://github.com/astral-sh/imre/pull/590), add
-`--exception-family csv` or `--exception-family import`. The selected
-control must compile, run, and match the reference; it contributes no upstream IDs.
+UnicodeEncodeError and shutil's OSError subclasses. The default gate also checks
+the identity, name and path of [structured import errors](https://github.com/astral-sh/imre/pull/590).
+On a build that includes [native CSV](https://github.com/astral-sh/imre/pull/468),
+add `--exception-family csv` to exercise csv.Error against unrelated handlers.
+These controls must compile, run, and match the reference; they contribute no upstream IDs.

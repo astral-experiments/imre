@@ -477,20 +477,22 @@ fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> 
             tail = &spec[end..];
         }
         rest = tail.strip_prefix('}').ok_or_else(unmatched)?;
-        if name
-            .chars()
-            .all(|ch| crate::integer_text::decimal_digit(ch).is_some())
-        {
-            let index = name
-                .chars()
-                .try_fold(0isize, |index, ch| {
-                    index
-                        .checked_mul(10)?
-                        .checked_add(crate::integer_text::decimal_digit(ch)? as isize)
-                })
+        // A decimal prefix can overflow before a nondigit makes this a named field.
+        let mut index = 0isize;
+        let mut positional = true;
+        for ch in name.chars() {
+            let Some(digit) = crate::integer_text::decimal_digit(ch) else {
+                positional = false;
+                break;
+            };
+            index = index
+                .checked_mul(10)
+                .and_then(|value| value.checked_add(isize::from(digit)))
                 .ok_or_else(|| {
                     Error::new(Kind::ValueError, "Too many decimal digits in format string")
                 })?;
+        }
+        if positional {
             return Err(Error::new(
                 Kind::IndexError,
                 compact_str::format_compact!(
@@ -608,6 +610,36 @@ pub extern "C" fn imre_float_format(value: f64, precision: u32, flags: u32) -> *
         result.push('%');
     }
     Rc::into_raw(Rc::new(result))
+}
+
+/// Suspend the current native thread, rounding a positive timeout up to nanoseconds.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_time_sleep(seconds: f64) {
+    let error = if seconds.is_nan() {
+        Some(Error::new(
+            Kind::ValueError,
+            "Invalid value NaN (not a number)",
+        ))
+    } else if !seconds.is_finite() || seconds.abs() >= i64::MAX as f64 / 1e9 {
+        Some(Error::new(
+            Kind::OverflowError,
+            "timestamp out of range for platform time_t",
+        ))
+    } else if seconds < 0.0 {
+        Some(Error::new(
+            Kind::ValueError,
+            "sleep length must be non-negative",
+        ))
+    } else {
+        None
+    };
+    if let Some(e) = error {
+        e.raise();
+        return;
+    }
+    let duration = std::time::Duration::from_secs(seconds.trunc() as u64)
+        + std::time::Duration::from_nanos((seconds.fract() * 1e9).ceil() as u64);
+    std::thread::sleep(duration);
 }
 
 /// Seconds since the Unix epoch, including the subsecond fraction.

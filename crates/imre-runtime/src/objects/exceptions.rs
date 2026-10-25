@@ -5,6 +5,8 @@
 //! freshly constructed, unescaped exceptions. No traceback or mutable exception
 //! attributes can introduce ownership cycles.
 
+mod imports;
+
 use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
 use std::rc::Rc;
@@ -73,6 +75,8 @@ pub(crate) enum Kind {
     UnicodeEncodeError = 38,
     NameError = 39,
     UnboundLocalError = 40,
+    ImportError = 41,
+    ModuleNotFoundError = 42,
 }
 
 impl Kind {
@@ -126,6 +130,8 @@ impl Kind {
             38 => Self::UnicodeEncodeError,
             39 => Self::NameError,
             40 => Self::UnboundLocalError,
+            41 => Self::ImportError,
+            42 => Self::ModuleNotFoundError,
             _ => return None,
         })
     }
@@ -176,6 +182,8 @@ impl Kind {
             Self::NotImplementedError => "NotImplementedError",
             Self::NameError => "NameError",
             Self::UnboundLocalError => "UnboundLocalError",
+            Self::ImportError => "ImportError",
+            Self::ModuleNotFoundError => "ModuleNotFoundError",
         }
     }
 
@@ -208,6 +216,7 @@ impl Kind {
                 self,
                 Self::UnicodeError | Self::UnicodeDecodeError | Self::UnicodeEncodeError
             ),
+            Self::ImportError => matches!(self, Self::ImportError | Self::ModuleNotFoundError),
             Self::SubprocessError => {
                 matches!(
                     self,
@@ -282,6 +291,7 @@ enum Payload {
     Json(Rc<JsonError>),
     Key(OwnedWord),
     Exit(Option<OwnedWord>),
+    Import(Box<imports::Import>),
     Process(Box<super::processes::ProcessError>),
     Timeout(Box<super::processes::TimeoutError>),
     Group(Box<[GroupMember]>),
@@ -507,6 +517,7 @@ impl Error {
                 lineno,
                 colno,
             }))),
+            cause: None,
         }
     }
 
@@ -947,6 +958,7 @@ impl Storage {
 
     fn exception_message(&self) -> Rc<Str> {
         match &self.exception().payload {
+            Payload::Import(err) => err.message(),
             Payload::Exit(code) => exit_text(code.as_ref(), ""),
             Payload::Empty => Rc::new(Str::new("")),
             Payload::Message(message) => Rc::clone(message),
@@ -1057,10 +1069,14 @@ pub unsafe extern "C" fn imre_system_exit_code(value: *const Object) -> *const O
 unsafe fn exit_word(value: *const Object) -> (WordKind, usize) {
     // SAFETY: a code view keeps its immutable typed exit payload alive.
     unsafe {
-        (*value).0.with(|s| match &s.exception().payload {
-            Payload::Exit(Some(code)) => (code.kind, code.word),
-            Payload::Exit(None) => (WordKind::new(0), 0),
-            _ => unreachable!("checked SystemExit code view"),
+        (*value).0.with(|s| match s {
+            Storage::ExceptionField(v) => (v.kind, v.word),
+            Storage::Exception(e) => match &e.payload {
+                Payload::Exit(Some(code)) => (code.kind, code.word),
+                Payload::Exit(None) => (WordKind::new(0), 0),
+                _ => unreachable!("checked SystemExit code view"),
+            },
+            _ => unreachable!("checked exception field"),
         })
     }
 }
@@ -1083,28 +1099,9 @@ pub unsafe extern "C" fn imre_system_exit_code_kind(value: *const Object) -> u32
 pub unsafe extern "C" fn imre_system_exit_code_text(value: *const Object) -> *const Str {
     // SAFETY: the caller roots the immutable exit payload.
     unsafe {
-        (*value).0.with(|s| {
-            let Payload::Exit(code) = &s.exception().payload else {
-                unreachable!()
-            };
-            Rc::into_raw(exit_text(code.as_ref(), "None"))
-        })
-    }
-}
-
-/// Format the original payload, preserving string quotes and tuple shape.
-///
-/// # Safety
-/// The caller roots a code view from `imre_system_exit_code`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_system_exit_code_repr(value: *const Object) -> *const Str {
-    let mut text = String::new();
-    // SAFETY: the exit view keeps its correctly typed payload live throughout formatting.
-    unsafe {
         let (kind, word) = exit_word(value);
-        super::values::write_repr(&mut text, word, kind);
+        Rc::into_raw(imports::word_text(kind, word, false))
     }
-    Rc::into_raw(Rc::new(Str::from(text)))
 }
 
 /// Compare the original exit code against a scalar, tuple or a second code view.
@@ -1118,13 +1115,6 @@ pub unsafe extern "C" fn imre_system_exit_code_equal(
     kind: u32,
     word: usize,
 ) -> u32 {
-    fn numeric(kind: WordKind, word: usize) -> (WordKind, usize) {
-        if kind == WordKind::new(1) {
-            (WordKind::new(2), (word << 1) | 1)
-        } else {
-            (kind, word)
-        }
-    }
     // SAFETY: both code views and all inferred scalar arguments remain rooted.
     let ((left_kind, left), (right_kind, right)) = unsafe {
         let (k, w) = exit_word(value);
@@ -1133,10 +1123,10 @@ pub unsafe extern "C" fn imre_system_exit_code_equal(
         } else {
             (WordKind::new(kind), word)
         };
-        (numeric(k, w), numeric(j, v))
+        ((k, w), (j, v))
     };
     // SAFETY: matching immutable scalar kinds describe both words.
-    u32::from(left_kind == right_kind && unsafe { super::values::equal(left, right, left_kind) })
+    u32::from(unsafe { imports::equal((left_kind, left), (right_kind, right)) })
 }
 
 /// # Safety
@@ -1151,8 +1141,10 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
         2 => word != 1, // tagged zero
         // SAFETY: the immutable exit code owns this string.
         3 => !unsafe { &*(word as *const Str) }.is_empty(),
-        // SAFETY: kind 6 roots the fixed tuple and its static descriptor.
-        6 => unsafe { super::records::descriptor(word as *const usize).length != 0 },
+        // SAFETY: the view owns this exact byte buffer.
+        8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),
+        // SAFETY: the tuple remains rooted while its immutable length is read.
+        6 => unsafe { super::records::descriptor(word as *const usize) }.length != 0,
         _ => unreachable!(),
     })
 }
@@ -1386,6 +1378,7 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
             }
             let e = s.exception();
             let arg = match &e.payload {
+                Payload::Import(err) => err.repr_args(),
                 Payload::Empty => Str::new(""),
                 Payload::Arguments(arguments) => {
                     let mut result = String::new();

@@ -87,7 +87,7 @@ change the results of the default reference command.
 ## Pipes and communication
 
 The same native-body command now executes 11 unchanged methods (the keys
-under `fully_native` in its result) at both levels. It covers stdin writes,
+under `native_body_host_fixtures` in its result) at both levels. It covers stdin writes,
 stdout/stderr reads, merged output, EOF/closed state, and `communicate` with
 zero or one pipe. `ProcessTestCase.test_communicate_stdout` and
 `test_communicate_stderr` now have native-parent evidence as well as the older
@@ -100,3 +100,110 @@ The differential `tests/fixtures/processes/popen_pipes.py` fixture also checks
 a 200,000-byte exchange on all three pipes, recovery after a zero deadline,
 rejection of new input, repeated output, text newline conversion, and shared
 descriptor/close state. It is not another upstream ID.
+
+## Original fixtures and per-ID evidence
+
+Use the shared [suite runner](../../SUITE_RUNNER.md) from
+[#508](https://github.com/astral-sh/imre/pull/508) to run these bodies under
+the pinned release's module, class, and instance hooks. In
+`native_body_host_fixtures`, the body, assertions, and subprocess operation
+execute in Imre; the fixtures execute in CPython. The literal Python helpers
+launched by the methods still execute in the specified CPython interpreter.
+
+[host_popen.py](host_popen.py) runs original host bodies and assertions, with a
+persistent Imre parent performing the requested Popen operations. The transport
+returns the native status, stdout, stderr, and exception message. In particular,
+the post-timeout test performs both communicate calls on the same native child.
+It records which calls actually ran. [audit.py](audit.py) exercises this route
+in isolation for every eligible reference ID, with the CPU resource enabled.
+A successful host assertion with no native operation, a subprocess operation
+executed inside a CPython child, or a check of the wrong process's descriptor
+table is not a native subprocess pass.
+
+Run either script with the same flags as `native_bodies.py`. The latter's
+`blocked` and the audit's failed/blocked rows remain in the denominator.
+
+[native-linux.json](native-linux.json) records the strongest evidence for each
+of the **353** IDs on the pipes implementation. Both levels produced the same
+category totals. Repeated operations, including timeout retries, retain their
+separate counts if the levels differ.
+
+| Execution of the tested operation | -O0 | -O3 |
+| --- | ---: | ---: |
+| Native body, assertions, and subprocess operation; original host fixtures | 11 | 11 |
+| Host body and assertions, verified native subprocess operation | 36 | 36 |
+| Mixed (including a subprocess operation inside a CPython child) | 8 | 8 |
+| Reference-only | 6 | 6 |
+| Blocked | 227 | 227 |
+| Failed | 26 | 26 |
+| Original reference skip, with individual reason | 39 | 39 |
+| **Total** | **353** | **353** |
+
+There are zero end-to-end native unittest fixture executions. Eight of the 36
+host-driven IDs use the older `native_subprocess.py` reconstructed host case;
+the other 28 use the original CPython fixtures. String argument sequences are
+transported by value to the native launcher. This route does not establish
+tuple identity, ownership of inherited host descriptors, or a native
+`SelectSelector` when the NoPoll fixture patches the host module. The Linux
+reference passes the strace case outside the devbox sandbox. An unavailable
+worker fixture is a blocker rather than a new reference skip.
+
+The host can verify a closed pipe after a native context exit raises an
+`OSError`. The control process continues using that same native handle to
+check the reaped status. Arguments containing NUL travel in separate files:
+both invalid commands reach Imre instead of failing at the host's exec call.
+
+To regenerate the report, run `audit.py`, `native_bodies.py`, and
+`../../native_subprocess.py` for each level, capturing the latter's combined
+output. Pass the two files from each command, in level order, to
+`report.py --audit O0 O3 --bodies O0 O3 --run-log O0 O3 --imre-revision REV --result FILE`.
+
+## Per-occurrence evidence on Linux
+
+[evidence-linux.json](evidence-linux.json) follows the [shared evidence contract](../../NATIVE_EVIDENCE.md).
+It covers the 353 original loader occurrences (353 distinct IDs) at each of -O0 and -O3,
+using Imre `f5d008458b8ab221026f9ac92ba28fd028e96ece`. There is no companion Python test
+package: `test.test_subprocess` is one module, and the five `subprocessdata` scripts are
+child programs. The earlier [native-linux.json](native-linux.json) records a different
+pipe implementation revision and remains useful for comparing individual calls.
+
+| Execution | -O0 | -O3 |
+| --- | ---: | ---: |
+| Fully native | 0 | 0 |
+| Native method and subprocess operation, CPython fixture | 28 | 28 |
+| Host method and assertions, native subprocess operation | 44 | 44 |
+| Both host and native subprocess operations | 8 | 8 |
+| Host subprocess operation only | 6 | 6 |
+| Blocked | 201 | 201 |
+| Failed | 27 | 27 |
+| Upstream skip with exact condition and source | 39 | 39 |
+| **Total** | **353** | **353** |
+
+[attempt_bodies.py](attempt_bodies.py) tried every eligible complete body via the shared
+runner, including the methods inherited by the NoPoll class. The native method source
+and its helpers are taken byte for byte from the pinned file. The oracle supplies the
+original fixtures, selected module globals and literal Python child programs. The native
+parent launches the child, owns the file descriptors, communicates, waits, and propagates
+the result. Native status does not imply that the child is native. Twelve inherited
+NoPoll cases never reached a selector in the native parent; [selector_proof.py](selector_proof.py)
+checked each one, with a separate timed communication case as a positive control.
+The control has no separate assertion call: its original loop must catch timeouts and
+eventually return. Of the 44 host-driven cases, eight use the older reconstructed
+`RunFuncTestCase` fixture. Six cases exercising the reference's private process interface
+are explicitly recorded as host operations. See [MOCK.md](MOCK.md) for the shared mock requirements.
+
+To reproduce, run `attempt_bodies.py` and `audit.py` with the pinned Python, Imre
+compiler and runtime, and `--opt-level 0` or `3`. Run the original vfork fixture separately
+with `attempt_bodies.py --only test.test_subprocess.POSIXProcessTestCase.test_vfork_used_when_expected`
+where strace is permitted. Run `selector_proof.py --mode build`, followed by `--mode trace`
+with the same tools and work directory. The trace checks compiler, runtime, binary and method
+hashes; it traces the native parent only. Also run `../../native_subprocess.py` for each
+level and capture its combined output. Combine those files and validate from the repository root:
+
+```sh
+python benchmarks/cpython_stdlib/full/subprocess/evidence.py --audit AUDIT0 AUDIT3 --bodies BODY0 BODY3 --trace TRACE0 TRACE3 \
+    --vfork VFORK0 VFORK3 --run-log LEGACY0 LEGACY3 --imre-revision FULL_SHA --result benchmarks/cpython_stdlib/full/subprocess/evidence-linux.json
+python3 benchmarks/cpython_stdlib/suite_evidence.py \
+    benchmarks/cpython_stdlib/full/subprocess/reference-linux.json \
+    benchmarks/cpython_stdlib/full/subprocess/evidence-linux.json
+```

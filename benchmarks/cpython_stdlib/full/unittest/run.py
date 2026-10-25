@@ -77,7 +77,7 @@ def run(args, level, root):
     if (reference["module"], reference["cpython_commit"]) != (manifest["module"], manifest["commit"]):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level)
-    for family in ["protocol", *args.exception_family]:
+    for family in dict.fromkeys(["protocol", "import", *args.exception_family]):
         control = root / ("context_" + family)
         control.mkdir()
         program = HERE / ("context_" + family + ".py")
