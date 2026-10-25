@@ -88,6 +88,7 @@ impl Type {
             | Self::Logger
             | Self::TimedFileHandler
             | Self::CacheState(_)
+            | Self::ProcessSelectorClass
             | Self::ClockTime
             | Self::PlainObject
             | Self::StrDescriptor(_)
@@ -148,6 +149,7 @@ impl Type {
             | Self::Logger
             | Self::TimedFileHandler
             | Self::CacheState(_)
+            | Self::ProcessSelectorClass
             | Self::ClockTime
             | Self::PlainObject
             | Self::StrDescriptor(_)
@@ -738,6 +740,7 @@ impl Emitter<'_, '_> {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::CacheState(_)
+            | Type::ProcessSelectorClass
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
@@ -3324,6 +3327,7 @@ impl Emitter<'_, '_> {
                 Type::Bool
                 | Type::None
                 | Type::Class(_)
+                | Type::ProcessSelectorClass
                 | Type::TimedFileHandler
                 | Type::StrDescriptor(_)
                 | Type::PlainObject
@@ -5624,6 +5628,7 @@ impl Emitter<'_, '_> {
                     | Type::Logger
                     | Type::TimedFileHandler
                     | Type::CacheState(_)
+                    | Type::ProcessSelectorClass
                     | Type::ClockTime
                     | Type::StrDescriptor(_)
                     | Type::PlainObject
@@ -5872,6 +5877,7 @@ impl Emitter<'_, '_> {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::CacheState(_)
+            | Type::ProcessSelectorClass
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
@@ -5946,6 +5952,7 @@ impl Emitter<'_, '_> {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::CacheState(_)
+            | Type::ProcessSelectorClass
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
@@ -6533,6 +6540,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Logger
         | Type::TimedFileHandler
         | Type::CacheState(_)
+        | Type::ProcessSelectorClass
         | Type::ClockTime
         | Type::StrDescriptor(_)
         | Type::PlainObject
@@ -7118,6 +7126,8 @@ declare ptr @imre_str_dedent(ptr)
 declare ptr @imre_shlex_split_options(ptr, i32, i32)
 declare ptr @imre_shlex_quote(ptr)
 declare ptr @imre_sys_executable()
+declare ptr @imre_popen_selector_class(i32)
+declare void @imre_popen_set_selector(ptr)
 declare void @imre_subprocess_to_stderr(ptr, i32)
 declare ptr @imre_float_format(double, i32, i32)
 declare ptr @imre_int_hex_format(i64, i32, i32)

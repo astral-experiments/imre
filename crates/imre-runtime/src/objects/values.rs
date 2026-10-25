@@ -386,6 +386,14 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                             .unwrap();
                             None
                         }
+                        Storage::ProcessSelectorClass(select) => {
+                            output.push_str(if *select {
+                                "<class 'selectors.SelectSelector'>"
+                            } else {
+                                "<class 'selectors.PollSelector'>"
+                            });
+                            None
+                        }
                         Storage::IteratorAdapter(adapter) => {
                             adapter.write_repr(output, owner);
                             None

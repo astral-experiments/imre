@@ -82,6 +82,7 @@ pub(crate) enum Type {
     PlainObject,
     /// An exact immutable method descriptor on the builtin str class.
     StrDescriptor(StrDescriptor),
+    ProcessSelectorClass,
     Sha256,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
@@ -217,6 +218,7 @@ impl std::fmt::Display for Type {
             Self::ClockTime => "datetime.time",
             Self::PlainObject => "object",
             Self::StrDescriptor(_) => "method_descriptor",
+            Self::ProcessSelectorClass => "subprocess selector class",
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
@@ -1228,6 +1230,8 @@ pub(crate) enum CopyOperation {
 /// Synchronous process operations cannot invoke language callbacks.
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
+    SelectorClass(Option<bool>),
+    SetSelector,
     Executable,
     RunToStderr,
     CheckOutput {
