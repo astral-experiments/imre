@@ -4,6 +4,8 @@ The [reference run](reference-linux.json) records **216 executions, 212 unique t
 
 The package's `load_tests` adds two doctests and two backend identity tests. Package discovery visits each of these IDs twice. Most other methods are inherited by both the Python and C backend fixtures; the command-line tests are inherited by both `TestMain` and `TestTool`. Each entry in the report names the defining source routine, all its concrete IDs, and every occurrence of each ID.
 
+[JSON's doctest fixtures](DOCTEST.md) list the three `DocTestSuite` calls, their 34 distinct examples, and the shared import blocking the intact package runner.
+
 Reproduce with a test-enabled build of the pinned release:
 
 ```sh
