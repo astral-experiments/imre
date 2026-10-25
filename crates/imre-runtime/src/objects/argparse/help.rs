@@ -7,7 +7,8 @@ use std::io::IsTerminal;
 use icu_properties::props::{EnumeratedProperty, GeneralCategory, GeneralCategoryGroup};
 
 use super::super::python_whitespace;
-use super::{Kind, OptionSpec, Parser, Subcommands};
+use super::exceptions::{Error, Kind as ExceptionKind};
+use super::{ArgumentGroup, OptionSpec, Parser, Subcommands};
 
 /// Parse the positive decimal width accepted by shutil.get_terminal_size().
 fn positive_columns(value: &str) -> Option<usize> {
@@ -102,7 +103,7 @@ impl OptionSpec {
             (false, false) => "32",
         };
         if summary {
-            if self.kind == Kind::Bool {
+            if !self.takes_value() {
                 return paint(color, option_color(&self.flag, false), &self.flag);
             }
             return if color {
@@ -120,7 +121,7 @@ impl OptionSpec {
             .map(|flag| paint(color, option_color(flag, true), flag))
             .collect::<Vec<_>>()
             .join(", ");
-        if self.kind != Kind::Bool {
+        if self.takes_value() {
             label.push(' ');
             label.push_str(&paint(color, "1;33", &metavar));
         }
@@ -277,15 +278,63 @@ fn usage_lines(
 }
 
 impl Subcommands {
-    fn metavar(&self) -> String {
-        format!(
-            "{{{}}}",
-            self.choices
-                .iter()
-                .map(|child| child.name.as_str())
-                .collect::<Vec<_>>()
-                .join(",")
-        )
+    pub(super) fn metavar(&self) -> String {
+        self.metavar
+            .clone()
+            .unwrap_or_else(|| format!("{{{}}}", self.spellings().collect::<Vec<_>>().join(",")))
+    }
+    fn write_rows(
+        &self,
+        output: &mut String,
+        prog: &str,
+        width: usize,
+        position: usize,
+        color: bool,
+    ) -> Result<(), Error> {
+        let label = self.metavar();
+        help_row(
+            output,
+            width,
+            position,
+            2,
+            &label,
+            &paint(color, "1;32", &label),
+            &ActionHelp::new(self.help.as_deref().unwrap_or_default(), prog, None),
+        )?;
+        for child in &self.choices {
+            if let Some(help) = &child.help {
+                let label = child.label();
+                help_row(
+                    output,
+                    width,
+                    position,
+                    4,
+                    &label,
+                    &paint(color, "1;32", &label),
+                    &ActionHelp::new(help, prog, None),
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The action header depends on the original help, before substitutions.
+enum ActionHelp {
+    Missing,
+    Whitespace,
+    Expanded(String),
+}
+
+impl ActionHelp {
+    fn new(template: &str, prog: &str, option: Option<&OptionSpec>) -> Self {
+        if template.is_empty() {
+            Self::Missing
+        } else if template.chars().all(python_whitespace) {
+            Self::Whitespace
+        } else {
+            Self::Expanded(expand(template, prog, option))
+        }
     }
 }
 
@@ -297,12 +346,12 @@ fn help_row(
     indent: usize,
     label: &str,
     styled: &str,
-    help: &str,
-) {
+    help: &ActionHelp,
+) -> Result<(), Error> {
     write!(output, "{}{styled}", " ".repeat(indent)).unwrap();
-    if help.is_empty() {
+    if matches!(help, ActionHelp::Missing) {
         output.push('\n');
-        return;
+        return Ok(());
     }
     let fits = indent + len(label) + 2 <= position;
     if !fits {
@@ -313,23 +362,41 @@ fn help_row(
     } else {
         position
     };
-    if help.chars().all(python_whitespace) {
+    if fits {
+        output.push_str(&" ".repeat(padding));
+    }
+    let ActionHelp::Expanded(text) = help else {
         if fits {
-            output.push_str(&" ".repeat(padding));
             output.push('\n');
         }
-        return;
+        return Ok(());
+    };
+    if text.is_empty() {
+        // An empty substitution leaves the next action on this line.
+        return Ok(());
     }
-    output.push_str(&" ".repeat(padding));
-    for (index, line) in wrap(help, width.saturating_sub(position).max(11))
-        .iter()
-        .enumerate()
-    {
-        if index != 0 {
+    let lines = wrap(text, width.saturating_sub(position).max(11));
+    if lines.is_empty() {
+        // HelpFormatter indexes the first line when the expansion is nonempty.
+        return Err(Error::new(
+            ExceptionKind::IndexError,
+            "list index out of range",
+        ));
+    }
+    for (index, line) in lines.iter().enumerate() {
+        if !fits || index != 0 {
             output.push_str(&" ".repeat(position));
         }
         writeln!(output, "{line}").unwrap();
     }
+    Ok(())
+}
+
+fn start_section(output: &mut String) {
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+    output.push('\n');
 }
 
 impl Parser {
@@ -455,7 +522,17 @@ impl Parser {
         text
     }
 
-    pub(super) fn help(&self, description: &str) -> String {
+    fn open_group(&self, output: &mut String, group: &ArgumentGroup, width: usize, color: bool) {
+        start_section(output);
+        if let Some(title) = &group.title {
+            writeln!(output, "{}", paint(color, "1;34", &format!("{title}:"))).unwrap();
+        }
+        if let Some(text) = &group.description {
+            writeln!(output, "{}\n", self.description(text, width, 2)).unwrap();
+        }
+    }
+
+    pub(super) fn help(&self, description: &str) -> Result<String, Error> {
         let width = width();
         let mut output = self.usage(width);
         if !description.is_empty() {
@@ -474,16 +551,16 @@ impl Parser {
                     paint(color, "1;32", short),
                     paint(color, "1;36", long)
                 ),
-                "show this help message and exit".to_owned(),
+                ActionHelp::Expanded("show this help message and exit".to_owned()),
             ));
         }
         let mut positionals = Vec::new();
-        let mut grouped = vec![Vec::new(); self.groups.len()];
+        let mut grouped: Vec<_> = self.groups.iter().map(|_| Vec::new()).collect();
         for option in &self.options {
             let row = (
                 option.label(false, false),
                 option.label(false, color),
-                expand(&option.help, &self.prog, Some(option)),
+                ActionHelp::new(&option.help, &self.prog, Some(option)),
             );
             if let Some(group) = option.group {
                 grouped[group].push(row);
@@ -504,69 +581,48 @@ impl Parser {
             max_header = max_header.max(len(&commands.metavar()));
             for child in &commands.choices {
                 if child.help.is_some() {
-                    max_header = max_header.max(2 + len(&child.name));
+                    max_header = max_header.max(2 + len(&child.label()));
                 }
             }
         }
         let position = (max_header + 4)
             .min(24)
             .min(width.saturating_sub(20).max(4));
-        if !positionals.is_empty() || self.subcommands.is_some() {
-            writeln!(
-                output,
-                "\n{}",
-                paint(color, "1;34", "positional arguments:")
-            )
-            .unwrap();
+        let inline = self
+            .subcommands
+            .as_ref()
+            .filter(|commands| commands.group.is_none());
+        if !positionals.is_empty() || inline.is_some() {
+            start_section(&mut output);
+            writeln!(output, "{}", paint(color, "1;34", "positional arguments:")).unwrap();
             for (label, styled, help) in positionals {
-                help_row(&mut output, width, position, 2, &label, &styled, &help);
+                help_row(&mut output, width, position, 2, &label, &styled, &help)?;
             }
         }
-        if let Some(commands) = &self.subcommands {
-            let label = commands.metavar();
-            help_row(
-                &mut output,
-                width,
-                position,
-                2,
-                &label,
-                &paint(color, "1;32", &label),
-                "",
-            );
-            for child in &commands.choices {
-                if let Some(help) = &child.help {
-                    help_row(
-                        &mut output,
-                        width,
-                        position,
-                        4,
-                        &child.name,
-                        &paint(color, "1;32", &child.name),
-                        &expand(help, &self.prog, None),
-                    );
-                }
-            }
+        if let Some(commands) = inline {
+            commands.write_rows(&mut output, &self.prog, width, position, color)?;
         }
         if !rows.is_empty() {
-            writeln!(output, "\n{}", paint(color, "1;34", "options:")).unwrap();
+            start_section(&mut output);
+            writeln!(output, "{}", paint(color, "1;34", "options:")).unwrap();
         }
         for (label, styled, help) in rows {
-            help_row(&mut output, width, position, 2, &label, &styled, &help);
+            help_row(&mut output, width, position, 2, &label, &styled, &help)?;
         }
         for (group, rows) in self.groups.iter().zip(grouped) {
             if rows.is_empty() && group.description.is_none() {
                 continue;
             }
-            output.push('\n');
-            if let Some(title) = &group.title {
-                writeln!(output, "{}", paint(color, "1;34", &format!("{title}:"))).unwrap();
-            }
-            if let Some(text) = &group.description {
-                writeln!(output, "{}\n", self.description(text, width, 2)).unwrap();
-            }
+            self.open_group(&mut output, group, width, color);
             for (label, styled, help) in rows {
-                help_row(&mut output, width, position, 2, &label, &styled, &help);
+                help_row(&mut output, width, position, 2, &label, &styled, &help)?;
             }
+        }
+        if let Some(commands) = &self.subcommands
+            && let Some(group) = &commands.group
+        {
+            self.open_group(&mut output, group, width, color);
+            commands.write_rows(&mut output, &self.prog, width, position, color)?;
         }
         // HelpFormatter collapses three or more newlines throughout the report,
         // including blank lines at the edges of a raw module docstring.
@@ -575,7 +631,7 @@ impl Parser {
         }
         output.truncate(output.trim_end_matches('\n').len());
         output.push('\n');
-        output
+        Ok(output)
     }
 }
 
@@ -617,7 +673,7 @@ fn expand(template: &str, prog: &str, option: Option<&OptionSpec>) -> String {
                     }
                 }
                 ("nargs", Some(option)) => {
-                    if option.kind == Kind::Bool {
+                    if !option.takes_value() {
                         "0".into()
                     } else {
                         option.nargs.spelling()

@@ -1,0 +1,656 @@
+{
+  "schema": "imre.subprocess.redirect-fixtures/v1",
+  "platform": "linux",
+  "imre_revision": "5109491b09352159df1f3782844234b837e2871a",
+  "tested_tree": "5619286a93eced789acfa99b1930ec12a98c585f",
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "toolchain": {
+        "imre": "938c780726c9ad84d5ca786cfc5a8f0410080c31f6ac0a8383f77ee6a87e3434",
+        "runtime": "8c18474f76acb7b1229e17251a623c0ecb6a37bd04de0c8b44aff084b4aabafb",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "selector_control_count": 2,
+      "rows": {
+        "test.test_subprocess.ProcessTestCase.test_stderr_filedes": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "integer fd",
+            "actor_source_sha256": "2aa214a5885d634e8264d96fe2bf551fe865562931a62b9b70a168ea93ccef00",
+            "actor_binary_sha256": "209779bcc7e507c4f72788333ae9e05c9d7ebdb1626fe021c446879231e3e32f",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 10,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_stderr_fileobj": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "native file object",
+            "actor_source_sha256": "889a8660bc0cb507869dc49fe4f94656b0d3ac68003b412e587fda0df7503852",
+            "actor_binary_sha256": "974a64307f761d000515c8f639c42d9832b2e879fbe8cd4d14bb7e4cbd81b9fe",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 10,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_stdin_filedes": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait",
+              "Popen.returncode"
+            ],
+            "representation": "integer fd",
+            "actor_source_sha256": "0a49bbdc16e75d07be0fece4347d8616292b4e99be2178e9c8aa74fd4d8d3241",
+            "actor_binary_sha256": "c055234ab5eaf566fac06469b86e05394eb4da70f7f54e9a0d516909f47c442a",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 4,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_stdin_fileobj": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait",
+              "Popen.returncode"
+            ],
+            "representation": "native file object",
+            "actor_source_sha256": "1c589201567ae2d85af2d37fa19a5682350078e7daf85876642bca95154edf8a",
+            "actor_binary_sha256": "1a2b40ad14ac671ad581365da5f4beb42641d1dafd03b13111beab72079246a2",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 4,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_stdout_filedes": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "integer fd",
+            "actor_source_sha256": "5ea3389d3462a3f86ef1525a76a1a91b406493296efd05b4740bf5a7faaf7e19",
+            "actor_binary_sha256": "ad0153d2410eccd4866cc7bebf9dfa69d396b8435aba83b0e7d721b05d5715f5",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 6,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_stdout_fileobj": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "native file object",
+            "actor_source_sha256": "14f9f5cac78a8c243466d22995ea30785ac0e8329c5dc039f5d4a7c05131c4ad",
+            "actor_binary_sha256": "480e1dc8ef7d6841200c5a54b57d7633d7bed5dc33510ccbfecf32435c1fd7ac",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 6,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_stdout_stderr_file": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "native file object",
+            "actor_source_sha256": "b383e38d8aefb93ddc59bf77f4dd5a5da68e397b33b8eeb86269f8a6623af1e9",
+            "actor_binary_sha256": "65bb6c9d86d046ca859491dfe263fe6cf5b4fadb2e455c358421fbf551555066",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 11,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_filedes": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "integer fd",
+            "actor_source_sha256": "2aa214a5885d634e8264d96fe2bf551fe865562931a62b9b70a168ea93ccef00",
+            "actor_binary_sha256": "209779bcc7e507c4f72788333ae9e05c9d7ebdb1626fe021c446879231e3e32f",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 10,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_fileobj": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "native file object",
+            "actor_source_sha256": "889a8660bc0cb507869dc49fe4f94656b0d3ac68003b412e587fda0df7503852",
+            "actor_binary_sha256": "974a64307f761d000515c8f639c42d9832b2e879fbe8cd4d14bb7e4cbd81b9fe",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 10,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_filedes": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait",
+              "Popen.returncode"
+            ],
+            "representation": "integer fd",
+            "actor_source_sha256": "0a49bbdc16e75d07be0fece4347d8616292b4e99be2178e9c8aa74fd4d8d3241",
+            "actor_binary_sha256": "c055234ab5eaf566fac06469b86e05394eb4da70f7f54e9a0d516909f47c442a",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 4,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_fileobj": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait",
+              "Popen.returncode"
+            ],
+            "representation": "native file object",
+            "actor_source_sha256": "1c589201567ae2d85af2d37fa19a5682350078e7daf85876642bca95154edf8a",
+            "actor_binary_sha256": "1a2b40ad14ac671ad581365da5f4beb42641d1dafd03b13111beab72079246a2",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 4,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_filedes": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "integer fd",
+            "actor_source_sha256": "5ea3389d3462a3f86ef1525a76a1a91b406493296efd05b4740bf5a7faaf7e19",
+            "actor_binary_sha256": "ad0153d2410eccd4866cc7bebf9dfa69d396b8435aba83b0e7d721b05d5715f5",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 6,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_fileobj": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "native file object",
+            "actor_source_sha256": "14f9f5cac78a8c243466d22995ea30785ac0e8329c5dc039f5d4a7c05131c4ad",
+            "actor_binary_sha256": "480e1dc8ef7d6841200c5a54b57d7633d7bed5dc33510ccbfecf32435c1fd7ac",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 6,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_stderr_file": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "native file object",
+            "actor_source_sha256": "b383e38d8aefb93ddc59bf77f4dd5a5da68e397b33b8eeb86269f8a6623af1e9",
+            "actor_binary_sha256": "65bb6c9d86d046ca859491dfe263fe6cf5b4fadb2e455c358421fbf551555066",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 11,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "toolchain": {
+        "imre": "938c780726c9ad84d5ca786cfc5a8f0410080c31f6ac0a8383f77ee6a87e3434",
+        "runtime": "8c18474f76acb7b1229e17251a623c0ecb6a37bd04de0c8b44aff084b4aabafb",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "selector_control_count": 2,
+      "rows": {
+        "test.test_subprocess.ProcessTestCase.test_stderr_filedes": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "integer fd",
+            "actor_source_sha256": "2aa214a5885d634e8264d96fe2bf551fe865562931a62b9b70a168ea93ccef00",
+            "actor_binary_sha256": "0374d076aaa2ecb415a12bd46abb30688445bb0dda9a2c1c7c3d36c6d87970fb",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 10,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_stderr_fileobj": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "native file object",
+            "actor_source_sha256": "889a8660bc0cb507869dc49fe4f94656b0d3ac68003b412e587fda0df7503852",
+            "actor_binary_sha256": "12d28ad83f35bbb8a163e7847d8497cb157b13e33d0b8caf38e69ccff7e5bc21",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 10,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_stdin_filedes": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait",
+              "Popen.returncode"
+            ],
+            "representation": "integer fd",
+            "actor_source_sha256": "0a49bbdc16e75d07be0fece4347d8616292b4e99be2178e9c8aa74fd4d8d3241",
+            "actor_binary_sha256": "5aa95c0c890658e6787733a895ed36e8524c3fed1bdab9097279ab2f02ef079f",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 4,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_stdin_fileobj": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait",
+              "Popen.returncode"
+            ],
+            "representation": "native file object",
+            "actor_source_sha256": "1c589201567ae2d85af2d37fa19a5682350078e7daf85876642bca95154edf8a",
+            "actor_binary_sha256": "03ff484712a06e7080c60115d4860026b056b4f928c340b2ea61b533ea430d76",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 4,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_stdout_filedes": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "integer fd",
+            "actor_source_sha256": "5ea3389d3462a3f86ef1525a76a1a91b406493296efd05b4740bf5a7faaf7e19",
+            "actor_binary_sha256": "98c219a559a249cb573f9e97fa4be23391acdead5cc14b76c11f87ece86ce74a",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 6,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_stdout_fileobj": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "native file object",
+            "actor_source_sha256": "14f9f5cac78a8c243466d22995ea30785ac0e8329c5dc039f5d4a7c05131c4ad",
+            "actor_binary_sha256": "30a85aa906bb66f103a41e3b49d6e83b1ea67a8abd73c8f7a672bf1360218c42",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 6,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_stdout_stderr_file": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "native file object",
+            "actor_source_sha256": "b383e38d8aefb93ddc59bf77f4dd5a5da68e397b33b8eeb86269f8a6623af1e9",
+            "actor_binary_sha256": "1fd5cf30f0fd782764e0e59b77c7a913915f6fe1316693be165cbc5b5e7af745",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 11,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_filedes": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "integer fd",
+            "actor_source_sha256": "2aa214a5885d634e8264d96fe2bf551fe865562931a62b9b70a168ea93ccef00",
+            "actor_binary_sha256": "0374d076aaa2ecb415a12bd46abb30688445bb0dda9a2c1c7c3d36c6d87970fb",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 10,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_fileobj": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "native file object",
+            "actor_source_sha256": "889a8660bc0cb507869dc49fe4f94656b0d3ac68003b412e587fda0df7503852",
+            "actor_binary_sha256": "12d28ad83f35bbb8a163e7847d8497cb157b13e33d0b8caf38e69ccff7e5bc21",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 10,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_filedes": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait",
+              "Popen.returncode"
+            ],
+            "representation": "integer fd",
+            "actor_source_sha256": "0a49bbdc16e75d07be0fece4347d8616292b4e99be2178e9c8aa74fd4d8d3241",
+            "actor_binary_sha256": "5aa95c0c890658e6787733a895ed36e8524c3fed1bdab9097279ab2f02ef079f",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 4,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_fileobj": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait",
+              "Popen.returncode"
+            ],
+            "representation": "native file object",
+            "actor_source_sha256": "1c589201567ae2d85af2d37fa19a5682350078e7daf85876642bca95154edf8a",
+            "actor_binary_sha256": "03ff484712a06e7080c60115d4860026b056b4f928c340b2ea61b533ea430d76",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 4,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_filedes": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "integer fd",
+            "actor_source_sha256": "5ea3389d3462a3f86ef1525a76a1a91b406493296efd05b4740bf5a7faaf7e19",
+            "actor_binary_sha256": "98c219a559a249cb573f9e97fa4be23391acdead5cc14b76c11f87ece86ce74a",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 6,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_fileobj": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "native file object",
+            "actor_source_sha256": "14f9f5cac78a8c243466d22995ea30785ac0e8329c5dc039f5d4a7c05131c4ad",
+            "actor_binary_sha256": "30a85aa906bb66f103a41e3b49d6e83b1ea67a8abd73c8f7a672bf1360218c42",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 6,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_stderr_file": [
+          {
+            "operations": [
+              "Popen",
+              "Popen.wait"
+            ],
+            "representation": "native file object",
+            "actor_source_sha256": "b383e38d8aefb93ddc59bf77f4dd5a5da68e397b33b8eeb86269f8a6623af1e9",
+            "actor_binary_sha256": "1fd5cf30f0fd782764e0e59b77c7a913915f6fe1316693be165cbc5b5e7af745",
+            "fixture_fd_offset_before": 0,
+            "native_parents": 1,
+            "child": "upstream CPython -c data producer/consumer",
+            "fixture_fd_offset_after_wait": 11,
+            "native_parent_selector_calls": 0,
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

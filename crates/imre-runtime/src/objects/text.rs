@@ -1,7 +1,9 @@
 //! Native text operations preserve Python's Unicode-scalar and error semantics.
 
+mod expandtabs;
 mod lowercase;
-pub(super) use lowercase::lowercase;
+mod translate;
+pub(super) use lowercase::{lowercase, lowercase_chars};
 
 use num_traits::{Signed, ToPrimitive};
 use std::mem::ManuallyDrop;
@@ -33,6 +35,53 @@ pub unsafe extern "C" fn imre_chr(value: usize) -> *const Str {
     finish(result, std::ptr::null())
 }
 
+/// Returns the scalar value of one character or the unsigned value of one byte.
+///
+/// # Safety
+/// The caller roots a concrete string, bytes, or their checked nullable union.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_ord(mut word: usize, mut kind: u32) -> usize {
+    let result = (|| {
+        if word == 0 {
+            return Err(Error::new(
+                Kind::TypeError,
+                "ord() expected string of length 1, but NoneType found",
+            ));
+        }
+        kind &= !super::words::NULLABLE;
+        if kind == 9 {
+            let (payload, member) = super::unions::member(word);
+            word = payload;
+            kind = member.base();
+        }
+        let length = match kind {
+            3 => {
+                // SAFETY: the representation identifies a rooted UTF-8 string.
+                let mut chars = unsafe { &*(word as *const Str) }.chars();
+                match (chars.next(), chars.next()) {
+                    (Some(ch), None) => return Ok(Int::from_usize(ch as usize).into_raw()),
+                    (None, None) => 0,
+                    _ => 2 + chars.count(),
+                }
+            }
+            8 => {
+                // SAFETY: the representation identifies an immutable rooted bytes value.
+                let bytes = unsafe { &*(word as *const crate::Bytes) };
+                if let [byte] = bytes.as_slice() {
+                    return Ok(Int::from_usize(usize::from(*byte)).into_raw());
+                }
+                bytes.len()
+            }
+            _ => unreachable!("ord's checked character layout"),
+        };
+        Err(Error::new(
+            Kind::TypeError,
+            format!("ord() expected a character, but string of length {length} found"),
+        ))
+    })();
+    finish(result, 0)
+}
+
 /// # Safety
 /// The caller roots the integer and supplies a bounded literal width. BigInt's
 /// formatter pads signed magnitudes, including zeroes after a negative sign.
@@ -61,6 +110,49 @@ pub unsafe extern "C" fn imre_int_hex_format(value: usize, width: u32, flags: u3
 pub unsafe extern "C" fn imre_str_contains(needle: *const Str, text: *const Str) -> u32 {
     // SAFETY: the caller roots both immutable strings through the search.
     unsafe { u32::from((&*text).contains((&*needle).as_str())) }
+}
+
+/// Tests a nonempty Python string against the shared Unicode whitespace table.
+///
+/// # Safety
+/// The immutable string is rooted for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isspace(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive and no character reference escapes.
+    let value = unsafe { &*value };
+    u32::from(!value.is_empty() && value.chars().all(python_whitespace))
+}
+
+/// Return true when text contains a cased character and every cased character is uppercase.
+///
+/// # Safety
+/// The caller roots an immutable native string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_is_upper(value: *const Str) -> u32 {
+    use icu_properties::{
+        CodePointSetData,
+        props::{Cased, Uppercase},
+    };
+    // SAFETY: the caller supplies a rooted, exact UTF-8 string.
+    let text = unsafe { &*value };
+    let mut seen = false;
+    for c in text.chars() {
+        if c.is_ascii_uppercase() {
+            seen = true;
+        } else if c.is_ascii_lowercase() || c == '\u{295}' {
+            // U+0295 was lowercase in Unicode 16, uncased in newer ICU data.
+            return 0;
+        } else if !c.is_ascii()
+            && CodePointSetData::new::<Cased>().contains(c)
+            && !crate::integer_text::newer_printable(c)
+        {
+            if !CodePointSetData::new::<Uppercase>().contains(c) {
+                return 0;
+            }
+            seen = true;
+        }
+    }
+    u32::from(seen)
 }
 
 /// Removes the common space/tab prefix after the caller has evaluated its text.
@@ -273,9 +365,8 @@ pub unsafe extern "C" fn imre_str_split(
     )
 }
 
-/// Splits POSIX shell words with Python's default comments=False. Inside double
-/// quotes only another double quote or a backslash loses its preceding escape.
-fn shell_words(source: &str) -> Result<Words> {
+/// Tokenize with the whitespace-splitting lexer used by shlex.split().
+fn shell_words(source: &str, comments: bool, posix: bool) -> Result<Words> {
     let mut parts = Words::new(3);
     let mut word = Str::default();
     let mut quote = None;
@@ -283,12 +374,24 @@ fn shell_words(source: &str) -> Result<Words> {
     let mut chars = source.chars();
     while let Some(c) = chars.next() {
         match c {
-            c if quote == Some(c) => quote = None,
-            '\'' | '"' if quote.is_none() => {
+            c if quote == Some(c) => {
+                quote = None;
+                if !posix {
+                    word.push(c);
+                    parts
+                        .values
+                        .push(Rc::into_raw(Rc::new(std::mem::take(&mut word))) as usize);
+                    started = false;
+                }
+            }
+            '\'' | '"' if quote.is_none() && (posix || !started) => {
                 quote = Some(c);
                 started = true;
+                if !posix {
+                    word.push(c);
+                }
             }
-            '\\' if quote != Some('\'') => {
+            '\\' if posix && quote != Some('\'') => {
                 let escaped = chars
                     .next()
                     .ok_or_else(|| Error::new(Kind::ValueError, "No escaped character"))?;
@@ -297,6 +400,21 @@ fn shell_words(source: &str) -> Result<Words> {
                 }
                 word.push(escaped);
                 started = true;
+            }
+            '#' if comments && quote.is_none() => {
+                // readline() consumes the newline. The legacy lexer stays
+                // inside a current word, so text on the next line can join it.
+                for next in chars.by_ref() {
+                    if next == '\n' {
+                        break;
+                    }
+                }
+                if posix && started {
+                    parts
+                        .values
+                        .push(Rc::into_raw(Rc::new(std::mem::take(&mut word))) as usize);
+                    started = false;
+                }
             }
             ' ' | '\r' | '\n' | '\t' if quote.is_none() => {
                 if started {
@@ -325,12 +443,68 @@ fn shell_words(source: &str) -> Result<Words> {
 /// The caller roots the input string. Success transfers a fresh list of strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_shlex_split(value: *const Str) -> *const Object {
-    // SAFETY: the input is immutable and rooted throughout tokenization.
-    let parts = shell_words(unsafe { &*value });
+    // SAFETY: preserve the original one-argument ABI with Python's defaults.
+    unsafe { imre_shlex_split_options(value, 0, 1) }
+}
+
+/// # Safety
+/// The optional string stays rooted; a null pointer represents Python None.
+/// Success transfers the list and its strings; failure sets a pending error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_shlex_split_options(
+    value: *const Str,
+    comments: u32,
+    posix: u32,
+) -> *const Object {
+    // SAFETY: a nonnull input is a rooted, immutable Str.
+    let parts = unsafe { value.as_ref() }
+        .ok_or_else(|| Error::new(Kind::ValueError, "s argument must not be None"))
+        .and_then(|source| shell_words(source, comments != 0, posix != 0));
     finish(
         parts.map(|parts| Rc::into_raw(parts.into_object())),
         std::ptr::null(),
     )
+}
+
+/// Quotes a POSIX shell word using shlex's ASCII safe set and apostrophe escape.
+///
+/// # Safety
+/// The input string stays rooted for the call. The returned string is owned;
+/// null indicates a pending allocation error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_shlex_quote(value: *const Str) -> *const Str {
+    // SAFETY: the caller roots this immutable string.
+    let source = unsafe { &*value };
+    if source.is_empty() {
+        return Rc::into_raw(owned_string("''"));
+    }
+    if source
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"_@%+=:,./-".contains(&b))
+    {
+        // SAFETY: transfer a new reference to the existing safe string.
+        unsafe { Rc::increment_strong_count(value) };
+        return value;
+    }
+    let capacity = source
+        .matches('\'')
+        .count()
+        .checked_mul(4)
+        .and_then(|extra| source.len().checked_add(extra))
+        .and_then(|n| n.checked_add(2));
+    let result = capacity.and_then(|n| {
+        let mut quoted = Str::try_with_capacity(n).ok()?;
+        quoted.push('\'');
+        for (index, piece) in source.split('\'').enumerate() {
+            if index != 0 {
+                quoted.push_str("'\"'\"'");
+            }
+            quoted.push_str(piece);
+        }
+        quoted.push('\'');
+        Some(quoted)
+    });
+    owned_text(result)
 }
 
 /// Selects the final field of an ephemeral explicit-separator right split.

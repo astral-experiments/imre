@@ -1,0 +1,38 @@
+{
+  "module": "test.test_stat",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 22,
+  "reference": {
+    "test.test_stat.TestFilemodeCStat.test_devices": "pass",
+    "test.test_stat.TestFilemodeCStat.test_directory": "pass",
+    "test.test_stat.TestFilemodeCStat.test_fifo": "pass",
+    "test.test_stat.TestFilemodeCStat.test_file_attribute_constants": {
+      "skipped": "FILE_ATTRIBUTE_* constants are Win32 specific"
+    },
+    "test.test_stat.TestFilemodeCStat.test_filemode_does_not_misclassify_random_bits": "pass",
+    "test.test_stat.TestFilemodeCStat.test_flags_consistent": "pass",
+    "test.test_stat.TestFilemodeCStat.test_link": "pass",
+    "test.test_stat.TestFilemodeCStat.test_macosx_attribute_values": {
+      "skipped": "macOS system check"
+    },
+    "test.test_stat.TestFilemodeCStat.test_mode": "pass",
+    "test.test_stat.TestFilemodeCStat.test_module_attributes": "pass",
+    "test.test_stat.TestFilemodeCStat.test_socket": "pass",
+    "test.test_stat.TestFilemodePyStat.test_devices": "pass",
+    "test.test_stat.TestFilemodePyStat.test_directory": "pass",
+    "test.test_stat.TestFilemodePyStat.test_fifo": "pass",
+    "test.test_stat.TestFilemodePyStat.test_file_attribute_constants": {
+      "skipped": "FILE_ATTRIBUTE_* constants are Win32 specific"
+    },
+    "test.test_stat.TestFilemodePyStat.test_filemode_does_not_misclassify_random_bits": "pass",
+    "test.test_stat.TestFilemodePyStat.test_flags_consistent": "pass",
+    "test.test_stat.TestFilemodePyStat.test_link": "pass",
+    "test.test_stat.TestFilemodePyStat.test_macosx_attribute_values": {
+      "skipped": "macOS system check"
+    },
+    "test.test_stat.TestFilemodePyStat.test_mode": "pass",
+    "test.test_stat.TestFilemodePyStat.test_module_attributes": "pass",
+    "test.test_stat.TestFilemodePyStat.test_socket": "pass"
+  }
+}

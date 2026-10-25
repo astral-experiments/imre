@@ -93,3 +93,36 @@ python3.14 benchmarks/cpython_stdlib/full/functools/run_cache.py \
     --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /usr/bin/clang \
     --result /tmp/functools-caches.json
 ```
+
+### Independently created wrappers
+
+`cache(f)`, `lru_cache(f)` and `lru_cache(maxsize, typed=...)(f)` allocate a
+native wrapper for synchronous functions with exact positional keys. Its frame
+retains the actual callable and its own cache. A second application starts
+empty even at the same source location. Aliases share entries and counters;
+`__wrapped__` calls bypass the cache. Module decorators use the same cache
+state and eviction operations.
+
+`tests/fixtures/callables/owned_caches.py` compares two independent wrappers,
+nested wrappers, disabled and unbounded caches, exception misses and clearing
+against the reference interpreter. These are native product checks; they do
+not add any unittest occurrences to the table above.
+
+### Cache parameters
+
+[`cache-parameters-linux.json`](cache-parameters-linux.json) records a later
+paired run of all 64 cache methods on compiler `ebc346a2`. The original
+`TestLRUC.test_lru_cache_parameters` and `TestLRUPy.test_lru_cache_parameters`
+each read two fresh native dictionaries at O0 and O3. The fixture transports
+their complete representations back to CPython for the original assertions.
+The complete native bodies still stop at the second local definition of `f`.
+The other 62 cache methods returned the same results and operation counts as
+on `133d1e83`. At each level, 11 of 64 used host-driven native operations,
+10 were mixed, and 43 were blocked. The full native-body run on this branch
+completed two of 325 methods under host fixtures; all four free-threaded
+methods remained blocked.
+
+The native callable fixture also checks mutation, key order, nested caches,
+and calls through a `Callable` parameter or return. For example, decorating a
+cache configured with `maxsize=2, typed=True` with `lru_cache(3)` preserves
+the inner public parameters, but the new wrapper's `cache_info()[2]` is 3.

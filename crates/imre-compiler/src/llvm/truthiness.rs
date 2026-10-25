@@ -77,6 +77,13 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
+                Type::ModuleMember => {
+                    let bit = self.instruction(format!(
+                        "call i32 @imre_module_value_truth(ptr {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i32 {bit}, 0"))
+                }
                 Type::ExceptionField => {
                     let bit = self.instruction(format!(
                         "call i32 @imre_system_exit_code_truth(ptr {})",
@@ -193,13 +200,14 @@ impl Emitter<'_, '_> {
         if value.ty == returns {
             return value;
         }
-        if matches!(
-            self.module.types.payload(returns).unwrap_or(returns),
-            Type::Union(_)
-        ) && matches!(
-            self.module.types.payload(value.ty).unwrap_or(value.ty),
-            Type::Str | Type::Bytes
-        ) {
+        let target = self.module.types.payload(returns).unwrap_or(returns);
+        let source = self.module.types.payload(value.ty).unwrap_or(value.ty);
+        if self
+            .module
+            .types
+            .members(target)
+            .is_some_and(|members| members.contains(&source))
+        {
             return self.union_inject(value, returns);
         }
         let selected = self.module.types.truth_branch(value.ty, truth);

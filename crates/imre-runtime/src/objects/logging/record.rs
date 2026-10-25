@@ -2,6 +2,7 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 thread_local! {static FLAGS:Cell<u8> = const {Cell::new(15)};}
+use num_traits::ToPrimitive;
 use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -9,7 +10,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::super::exceptions::Result;
 use super::super::words::{NULLABLE, OwnedWord, WordKind};
 use super::super::{
-    Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object, records, values,
+    Bytes, Error, Int, Kind, List, Object, Storage, StorageCell, Str, finish, object, records,
+    values,
 };
 
 pub(in crate::objects) struct Record {
@@ -87,6 +89,121 @@ pub(super) fn dict_item(v: &OwnedWord, key: &str) -> Result<OwnedWord> {
             .with(|s| s.dictionary().logging_key(&key))
     }
     .ok_or_else(|| Error::key(string(key.as_str())))
+}
+
+/// A bracketed formatter item is a decimal index or the literal spelling of a key.
+pub(super) fn brace_item(value: &OwnedWord, key: &str) -> Result<OwnedWord> {
+    if key.is_empty() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "Empty attribute in format string",
+        ));
+    }
+    let index = super::super::stdlib::format_index(key)?;
+    let concrete;
+    let value = if value.kind.base() == 9 && value.word != 0 {
+        let (word, kind) = super::super::unions::member(value.word);
+        // SAFETY: the union owner roots its concrete member throughout acquisition.
+        concrete = unsafe { kind.acquire(word) };
+        &concrete
+    } else {
+        value
+    };
+    let unsupported = |kind| {
+        Error::new(
+            Kind::TypeError,
+            format!("'{kind}' object is not subscriptable"),
+        )
+    };
+    if value.kind.raw() & NULLABLE != 0 && value.word == 0 {
+        return Err(unsupported("NoneType"));
+    }
+    if is_dict(value) {
+        let key = index.map_or_else(|| string(key), integer);
+        // SAFETY: the checked dictionary and the lookup key remain rooted.
+        return unsafe {
+            object(value.word as *const Object)
+                .0
+                .with_mut(|s| s.dictionary_mut().logging_item(&key))
+        }?
+        .ok_or_else(|| {
+            Error::new(
+                Kind::ValueError,
+                format!(
+                    "Formatting field not found in record: {}",
+                    display(&key, true)
+                ),
+            )
+        });
+    }
+    let index_for = |kind| {
+        index.ok_or_else(|| {
+            Error::new(
+                Kind::TypeError,
+                match kind {
+                    "string" => "string indices must be integers, not 'str'".to_owned(),
+                    _ => format!("{kind} indices must be integers or slices, not str"),
+                },
+            )
+        })
+    };
+    let (kind, item) = if let Some(len) = tuple_len(value) {
+        let at = index_for("tuple")?;
+        ("tuple", (at < len).then(|| tuple_item(value, at)))
+    } else {
+        // SAFETY: each exact descriptor identifies the rooted field's storage.
+        unsafe {
+            match value.kind.base() {
+                3 => {
+                    let text = &*(value.word as *const Str);
+                    (
+                        "string",
+                        text.chars()
+                            .nth(index_for("string")?)
+                            .map(|ch| string(ch.encode_utf8(&mut [0; 4]))),
+                    )
+                }
+                4 => {
+                    let at = index_for("list")?;
+                    (
+                        "list",
+                        (&*(value.word as *const List))
+                            .0
+                            .with(|list| list.get(at).map(|n| owned(n.clone().into_raw(), 2))),
+                    )
+                }
+                5 => object(value.word as *const Object).0.with(|storage| {
+                    let Storage::Sequence(_) = storage else {
+                        return Err(unsupported("object"));
+                    };
+                    let words = storage.sequence();
+                    Ok((
+                        "list",
+                        words
+                            .values
+                            .get(index_for("list")?)
+                            .map(|&word| words.kind.acquire(word)),
+                    ))
+                })?,
+                8 => (
+                    "bytes",
+                    (&*(value.word as *const Bytes))
+                        .get(index_for("byte")?)
+                        .map(|&b| integer(usize::from(b))),
+                ),
+                kind => {
+                    return Err(unsupported(match kind {
+                        0 => "NoneType",
+                        1 => "bool",
+                        2 => "int",
+                        7 => "float",
+                        _ => "object",
+                    }));
+                }
+            }
+        }
+    };
+    item.ok_or_else(|| Error::new(Kind::IndexError, format!("{kind} index out of range")))
 }
 
 pub(super) fn truth(v: &OwnedWord) -> bool {
@@ -252,7 +369,13 @@ impl Record {
 /// decide whether an empty argument tuple bypasses formatting (only LogRecord does that).
 fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
     let tuple = tuple_len(args);
-    let mut pos = 0;
+    let mut positional = (0..tuple.unwrap_or(1)).map(|i| {
+        if tuple.is_some() {
+            tuple_item(args, i)
+        } else {
+            args.clone()
+        }
+    });
     let mut out = String::new();
     let mut input = msg;
     while let Some((literal, rest)) = input.split_once('%') {
@@ -262,31 +385,22 @@ fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
             input = rest;
             continue;
         }
-        let (value, rest) = if let Some(rest) = rest.strip_prefix('(') {
-            let (key, rest) = rest
-                .split_once(')')
-                .ok_or_else(|| Error::new(Kind::ValueError, "incomplete format key"))?;
-            (dict_item(args, key)?, rest)
-        } else {
-            if pos >= tuple.unwrap_or(1) {
-                return Err(Error::new(
-                    Kind::TypeError,
-                    "not enough arguments for format string",
-                ));
+        let (piece, tail) = if let Some(rest) = rest.strip_prefix('(') {
+            if !is_dict(args) {
+                return Err(Error::new(Kind::TypeError, "format requires a mapping"));
             }
-            let val = if tuple.is_some() {
-                tuple_item(args, pos)
-            } else {
-                args.clone()
-            };
-            pos += 1;
-            (val, rest)
+            let (key, rest) = mapping_key(rest)?;
+            // A named conversion replaces the sole positional mapping with
+            // the looked-up value. Later named conversions can still use args.
+            let _ = positional.next();
+            percent_value_in(rest, &mut std::iter::once(dict_item(args, key)?), Some(msg))?
+        } else {
+            percent_value_in(rest, &mut positional, Some(msg))?
         };
-        let (piece, tail) = percent_value(rest, &value)?;
         out.push_str(&piece);
         input = tail;
     }
-    if !is_dict(args) && pos < tuple.unwrap_or(1) {
+    if !is_dict(args) && positional.len() != 0 {
         return Err(Error::new(
             Kind::TypeError,
             "not all arguments converted during string formatting",
@@ -294,6 +408,20 @@ fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
     }
     out.push_str(input);
     Ok(out)
+}
+
+/// Find the closing delimiter after "%(", allowing balanced parentheses in the key.
+pub(super) fn mapping_key(rest: &str) -> Result<(&str, &str)> {
+    let mut nested = 0usize;
+    for (i, b) in rest.bytes().enumerate() {
+        match b {
+            b'(' => nested += 1,
+            b')' if nested == 0 => return Ok((&rest[..i], &rest[i + 1..])),
+            b')' => nested -= 1,
+            _ => {}
+        }
+    }
+    Err(Error::new(Kind::ValueError, "incomplete format key"))
 }
 
 /// Reserve before filling a user-provided field width so it can raise a Python exception.
@@ -307,6 +435,31 @@ fn padding(n: usize, c: char) -> Result<String> {
 
 /// Formats a single percent conversion and returns the remainder of the original format.
 pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(String, &'a str)> {
+    percent_value_in(fmt, &mut std::iter::once(value.clone()), None)
+}
+
+/// Fetch a format operand at the point CPython consumes its width, precision or value.
+fn next_argument(args: &mut impl Iterator<Item = OwnedWord>) -> Result<OwnedWord> {
+    args.next()
+        .ok_or_else(|| Error::new(Kind::TypeError, "not enough arguments for format string"))
+}
+
+/// A '*' consumes one integer before the formatter asks for the next operand.
+fn star_integer(args: &mut impl Iterator<Item = OwnedWord>) -> Result<Int> {
+    let value = next_argument(args)?;
+    match value.kind.raw() {
+        1 => Ok(Int::from_usize(value.word)),
+        2 => Ok(Int(value.into_word())),
+        _ => Err(Error::new(Kind::TypeError, "* wants int")),
+    }
+}
+
+/// The full format supplies the Unicode character offset for invalid conversions.
+fn percent_value_in<'a>(
+    fmt: &'a str,
+    args: &mut impl Iterator<Item = OwnedWord>,
+    full: Option<&str>,
+) -> Result<(String, &'a str)> {
     let mut chars = fmt.char_indices().peekable();
     let mut flags = String::new();
     while chars.peek().is_some_and(|(_, c)| "#0-+ ".contains(*c)) {
@@ -316,29 +469,61 @@ pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(Stri
     while chars.peek().is_some_and(|(_, c)| c.is_ascii_digit()) {
         width.push(chars.next().unwrap().1);
     }
-    let width = width.parse::<usize>().unwrap_or(0);
+    let width = if width.is_empty() && chars.next_if(|(_, c)| *c == '*').is_some() {
+        let n = star_integer(args)?.big().to_isize().ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "Python int too large to convert to C ssize_t",
+            )
+        })?;
+        if n < 0 {
+            flags.push('-');
+        }
+        // CPython leaves PY_SSIZE_T_MIN without a positive padding width.
+        n.checked_abs().unwrap_or(0) as usize
+    } else if width.is_empty() {
+        0
+    } else {
+        width
+            .parse::<isize>()
+            .map_err(|_| Error::new(Kind::ValueError, "width too big"))? as usize
+    };
     let precision = if chars.peek().is_some_and(|(_, c)| *c == '.') {
         chars.next();
         let mut n = String::new();
         while chars.peek().is_some_and(|(_, c)| c.is_ascii_digit()) {
             n.push(chars.next().unwrap().1);
         }
-        Some(n.parse::<usize>().unwrap_or(0))
+        Some(
+            if n.is_empty() && chars.next_if(|(_, c)| *c == '*').is_some() {
+                star_integer(args)?
+                    .big()
+                    .to_i32()
+                    .ok_or_else(|| {
+                        Error::new(
+                            Kind::OverflowError,
+                            "Python int too large to convert to C int",
+                        )
+                    })?
+                    .max(0) as usize
+            } else if n.is_empty() {
+                0
+            } else {
+                n.parse::<i32>()
+                    .map_err(|_| Error::new(Kind::ValueError, "precision too big"))?
+                    as usize
+            },
+        )
     } else {
         None
     };
-    if width > isize::MAX as usize || precision.is_some_and(|p| p > i32::MAX as usize) {
-        return Err(Error::new(
-            Kind::OverflowError,
-            "formatted string is too long",
-        ));
-    }
     if chars.peek().is_some_and(|(_, c)| "hlL".contains(*c)) {
         chars.next();
     }
     let (i, c) = chars
         .next()
         .ok_or_else(|| Error::new(Kind::ValueError, "incomplete format"))?;
+    let value = &next_argument(args)?;
     let mut text = match c {
         's' | 'r' | 'a' => {
             let mut s = display(value, c != 's');
@@ -373,6 +558,17 @@ pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(Stri
                         .ok_or_else(|| {
                         Error::new(Kind::ValueError, "cannot convert float to integer")
                     })?
+                }
+                3 => {
+                    let required = if "diu".contains(c) {
+                        "a real number"
+                    } else {
+                        "an integer"
+                    };
+                    return Err(Error::new(
+                        Kind::TypeError,
+                        format!("%{c} format: {required} is required, not str"),
+                    ));
                 }
                 _ => return Err(Error::new(Kind::TypeError, "format requires a number")),
             };
@@ -421,11 +617,16 @@ pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(Stri
             format!("{sign}{prefix}{digits}")
         }
         'c' => {
-            use num_traits::ToPrimitive;
             if value.kind.raw() == 3 {
                 let s = display(value, false);
-                if s.chars().count() != 1 {
-                    return Err(Error::new(Kind::TypeError, "%c requires int or char"));
+                let count = s.chars().count();
+                if count != 1 {
+                    return Err(Error::new(
+                        Kind::TypeError,
+                        format!(
+                            "%c requires an int or a unicode character, not a string of length {count}"
+                        ),
+                    ));
                 }
                 s
             } else if matches!(value.kind.raw(), 1 | 2) {
@@ -445,17 +646,15 @@ pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(Stri
             }
         }
         'f' | 'F' | 'e' | 'E' | 'g' | 'G' => {
-            use num_traits::ToPrimitive;
             let n = match value.kind.raw() {
                 7 => f64::from_bits(value.word as u64),
-                // SAFETY: this arm has an integer descriptor and a live owner.
-                2 => unsafe { Int::borrow(value.word) }
-                    .big()
-                    .to_f64()
-                    .ok_or_else(|| {
-                        Error::new(Kind::OverflowError, "int too large to convert to float")
-                    })?,
+                2 => {
+                    // SAFETY: this arm has an integer descriptor and a live owner.
+                    let n = unsafe { Int::borrow(value.word) };
+                    crate::floats::int_to_float(&n)?
+                }
                 1 => value.word as f64,
+                3 => return Err(Error::new(Kind::TypeError, "must be real number, not str")),
                 _ => return Err(Error::new(Kind::TypeError, "must be real number")),
             };
             let precision = precision.unwrap_or(6);
@@ -473,10 +672,21 @@ pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(Stri
             String::from_utf8_lossy(&bytes).into_owned()
         }
         _ => {
-            return Err(Error::new(
-                Kind::ValueError,
-                format!("unsupported format character '{c}'"),
-            ));
+            let message = if let Some(full) = full {
+                let index = full[..full.len() - fmt.len() + i].chars().count();
+                let printable = if c.is_ascii_graphic() || c == ' ' {
+                    c
+                } else {
+                    '?'
+                };
+                format!(
+                    "unsupported format character '{printable}' (0x{:x}) at index {index}",
+                    c as u32
+                )
+            } else {
+                format!("unsupported format character '{c}'")
+            };
+            return Err(Error::new(Kind::ValueError, message));
         }
     };
     let padding = width.saturating_sub(text.chars().count());
@@ -681,9 +891,22 @@ pub extern "C" fn imre_logrecord_set_flag(mask: usize, value: bool) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_percent_int(fmt: *const Str, integer: usize) -> *const Str {
     // SAFETY: the caller roots both precise input representations for the whole operation.
-    let result = unsafe { format_arguments((&*fmt).as_str(), &WordKind::new(2).acquire(integer)) };
+    unsafe { percent_scalar(&*fmt, WordKind::new(2).acquire(integer)) }
+}
+
+/// Format an exact text operand using the same conversions as a log message.
+///
+/// # Safety
+/// Both strings are rooted through the call; the returned string is owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_percent_text(fmt: *const Str, text: *const Str) -> *const Str {
+    // SAFETY: the caller roots the format and the exact string allocation.
+    unsafe { percent_scalar(&*fmt, WordKind::new(3).acquire(text as usize)) }
+}
+
+fn percent_scalar(fmt: &Str, value: OwnedWord) -> *const Str {
     finish(
-        result.map(|s| Rc::into_raw(Rc::new(Str::from(s)))),
+        format_arguments(fmt.as_str(), &value).map(|s| Rc::into_raw(Rc::new(Str::from(s)))),
         std::ptr::null(),
     )
 }

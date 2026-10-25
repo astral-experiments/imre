@@ -3,6 +3,7 @@
 import argparse
 import fcntl
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -32,10 +33,7 @@ REJECTED = {
     "missing_args": "run(capture_output=True, encoding='utf-8')",
     "duplicate_args": "run(['command'], args=['other'], capture_output=True, encoding='utf-8')",
     "extra_positional": "run(['command'], True, capture_output=True, encoding='utf-8')",
-    "string_args": "run('command', capture_output=True, encoding='utf-8')",
-    "bytes_args": "run(b'command', capture_output=True, encoding='utf-8')",
     "integer_args": "run([1], capture_output=True, encoding='utf-8')",
-    "path_args": "run([Path('command')], capture_output=True, encoding='utf-8')",
     "optional_args": "args: list[str] | None = None\nrun(args, capture_output=True, encoding='utf-8')",
     "expanded_args": "run(*[['command']], capture_output=True, encoding='utf-8')",
     "expanded_kwargs": "run(['command'], capture_output=True, encoding='utf-8', **{'check': True})",
@@ -44,7 +42,6 @@ REJECTED = {
     "dynamic_encoding": "encoding = 'utf-8'\nrun(['command'], capture_output=True, encoding=encoding)",
     "dynamic_text": "text = True\nrun(['command'], capture_output=True, encoding='utf-8', text=text)",
     "wrong_check": "run(['command'], capture_output=True, encoding='utf-8', check=1)",
-    "wrong_cwd": "run(['command'], capture_output=True, encoding='utf-8', cwd=b'directory')",
     "wrong_env": "run(['command'], capture_output=True, encoding='utf-8', env={'KEY': 1})",
     "wrong_env_key": "run(['command'], capture_output=True, encoding='utf-8', env={1: 'value'})",
     "raw_environ": "run(['command'], capture_output=True, encoding='utf-8', env=os.environ)",
@@ -76,18 +73,6 @@ REJECTED = {
     "optional_result": "result: CompletedProcess[str] | None = None\nprint(result.stdout)",
     "result_subclass": "class Custom(CompletedProcess):\n    pass",
 }
-for name, value in {
-    "shell": "True",
-    "input": "'data'",
-    "stdin": "0",
-    "stdout": "1",
-    "stderr": "2",
-    "errors": "'replace'",
-    "universal_newlines": "True",
-    "executable": "'command'",
-    "close_fds": "False",
-}.items():
-    REJECTED[f"unsupported_{name}"] = f"run(['command'], capture_output=True, encoding='utf-8', {name}={value})"
 for name, value in {"args": "['other']", "returncode": "0", "stdout": "'text'", "stderr": "'text'"}.items():
     REJECTED[f"write_{name}"] = f"result = {CALL}\nresult.{name} = {value}"
 REJECTED["write_error_field"] = "error: Exception = ValueError('message')\nerror.stdout = 'text'"
@@ -195,6 +180,18 @@ def run(
     )
 
 
+def unobserved_children(result):
+    """Match emitted warning PIDs to each operation; PIDs and source filenames vary."""
+    assert result.returncode == 0, result
+    lines = result.stdout.splitlines()
+    assert lines[-1] == b"invalid action: 'invented'", result
+    pids = dict(zip(lines[:-1:2], lines[1:-1:2], strict=True))
+    assert set(pids) == {b"default", b"live", b"exited", b"waited", b"polled", b"other-category", b"ignored"}
+    emitted = re.findall(rb"ResourceWarning: subprocess (\d+) is still running", result.stderr)
+    assert emitted == [pids[key] for key in (b"live", b"exited", b"other-category")], result
+    assert not re.search(rb"(?:Error|Sanitizer|panicked):", result.stderr), result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
@@ -242,7 +239,9 @@ def main() -> None:
                     "empty_name": name == "environment",
                 }
                 reference = run([python, "-E", "-B", str(source), *arguments], reference_dir, **options)
-                if name == "check_output":
+                if name == "unobserved_child":
+                    unobserved_children(reference)
+                elif name == "check_output":
                     assert reference.returncode == 0 and reference.stderr == b"inherited", reference
                 else:
                     files.check_result(reference, None, f"CPython {name}")
@@ -256,11 +255,14 @@ def main() -> None:
                     native_dir = project / f"imre-O{level}" / "work"
                     seed(native_dir, python)
                     actual = run([str(binary), *arguments], native_dir, **options)
-                    if name == "check_output":
+                    if name == "unobserved_child":
+                        unobserved_children(actual)
+                    elif name == "check_output":
                         assert actual.returncode == 0 and actual.stderr == reference.stderr, actual
                     else:
                         files.check_result(actual, None, f"Imre {name} O{level}")
-                    assert actual.stdout == reference.stdout, (name, level, actual.stdout, reference.stdout)
+                    if name != "unobserved_child":
+                        assert actual.stdout == reference.stdout, (name, level, actual.stdout, reference.stdout)
                     assert snapshot(native_dir) == expected_files, (name, level, "filesystem effects differ")
                     checks += 1
         for name, source in REJECTED.items():

@@ -16,9 +16,13 @@ def observe(name, level, body, body_rev, probes):
     proof = {"opt_level": level, "complete_method": {**body, "compiler_commit": body_rev}}
     loc = roles(body="unobserved", assertions="unobserved", operation="unobserved", fixture="unobserved")
     if state == "native_body_host_fixture":
-        operation = ("Native functools.partial constructs and calls both bound and unbound str.join."
-                     if name.endswith(".test_with_bound_and_unbound_methods")
-                     else f"Imre executed the product operations of the complete unchanged {name} method.")
+        if name.endswith(".test_with_bound_and_unbound_methods"):
+            operation = "Native functools.partial constructs and calls both bound and unbound str.join."
+        elif name.endswith(".test_get_annotations"):
+            operation = ("Imre creates an lru_cache wrapper, reads the original and wrapper annotations, "
+                         "and compares both dictionaries with the expected builtin class objects.")
+        else:
+            operation = f"Imre executed the product operations of the complete unchanged {name} method."
         proof.update(operation=operation,
                      fixture=body["fixture_execution"])
         return dict(outcome="pass", roles=roles(body="imre", assertions="imre", operation="imre", fixture="mixed"), evidence=proof)
@@ -38,7 +42,7 @@ def observe(name, level, body, body_rev, probes):
         if state == "blocked":
             proof["product_probe"]["diagnostic"] = row["diagnostic"]
             if counts:
-                observed_native = any(counts.get(field) for field in ("native_calls", "lookups", "snapshots", "clears"))
+                observed_native = any(counts.get(field) for field in ("native_calls", "lookups", "snapshots", "clears", "parameter_reads"))
                 observed_host = any(v for k, v in counts.items() if k.startswith("host_"))
                 loc = roles(body="cpython", fixture="cpython", assertions="unknown",
                             operation="mixed" if observed_native and observed_host else
@@ -51,11 +55,14 @@ def observe(name, level, body, body_rev, probes):
             if warnings := counts.get("host_warnings"):
                 detail += f" The host emitted {warnings} deprecation warnings for the pure variant."
         else:
-            native = counts.get("lookups", 0) + counts.get("clears", 0) + counts.get("snapshots", 0)
+            native = sum(counts.get(field, 0) for field in ("lookups", "clears", "snapshots", "parameter_reads"))
             host = sum(v for k, v in counts.items() if k.startswith("host_"))
             detail = ("Imre retained each cache and decided hits, misses, insertion, eviction, counters, "
                       "and clears. CPython invoked the user callback on a miss. Host observations: "
                       + repr({k: v for k, v in counts.items() if k.startswith("host_")}))
+            if counts.get("parameter_reads"):
+                detail = (f"Imre constructed {counts['parameter_reads']} fresh cache_parameters dictionaries. "
+                          "CPython decoded the returned values and ran the original dictionary assertions.")
         proof.update(operation=detail, fixture="Original CPython module/class/instance hooks, test method and assertion helpers.")
         loc = roles(body="cpython", assertions="cpython", fixture="cpython",
                     operation="mixed" if native and host else "imre" if native else "cpython")

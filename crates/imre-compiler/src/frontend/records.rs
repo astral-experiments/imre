@@ -597,19 +597,29 @@ impl Checker<'_> {
             )
         });
         self.class = context.map(|context| context.class);
+        let lexical_base = context.and_then(|context| {
+            let classes = &self.classes.declarations;
+            let origin = classes.definitions[context.class].method_origins[context.index];
+            classes.definitions[classes.ids[&origin]]
+                .bases
+                .first()
+                .copied()
+        });
+        self.super_method_base = context
+            .filter(|context| {
+                let classes = &self.classes.declarations;
+                matches!(
+                    context.kind(classes),
+                    MethodKind::Instance | MethodKind::Property | MethodKind::PropertySetter
+                ) && classes.definitions[context.class].initializer != Some(context.index)
+            })
+            .and(lexical_base);
         self.super_initializer = context.and_then(|context| {
             let record = &self.classes.declarations.definitions[context.class];
             if record.methods[context.index].name.as_str() != "__init__" {
                 return None;
             }
-            let owner = self.classes.declarations.ids[&record.method_origins[context.index]];
-            Some(
-                self.classes.declarations.definitions[owner]
-                    .bases
-                    .first()
-                    .copied()
-                    .map_or(BaseInitializer::Object, BaseInitializer::Record),
-            )
+            Some(lexical_base.map_or(BaseInitializer::Object, BaseInitializer::Record))
         });
         self.class_receiver = context.and_then(|context| {
             let declaration = &self.classes.declarations.definitions[context.class];
@@ -688,9 +698,13 @@ impl Checker<'_> {
             *self.classes.declarations.ids.get(&id)?
         };
         let owner = &self.classes.declarations.definitions[class];
-        let binding = *owner.static_bindings.get(attr.attr.as_str())?;
+        let crate::classes::ClassValue::Binding(binding) =
+            owner.static_bindings.get(attr.attr.as_str())?
+        else {
+            return None;
+        };
         self.class_reads.borrow_mut().insert(owner.definition);
-        Some(binding)
+        Some(*binding)
     }
 
     /// The class binding is usable in static dispatch, never as a runtime value.
@@ -832,6 +846,27 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
+        let owner = &self.classes.declarations.definitions[class];
+        let literal = match owner.static_bindings.get(attribute.attr.as_str()) {
+            Some(crate::classes::ClassValue::String(value)) => Some(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Str(value.clone()),
+            }),
+            Some(crate::classes::ClassValue::Strings { owner, ordinal, .. }) => {
+                Some(self.globals.class_tuple(*owner, *ordinal).ok_or_else(|| {
+                    error(
+                        self.source,
+                        attribute,
+                        "class tuple is read before its declaration",
+                    )
+                })?)
+            }
+            _ => None,
+        };
+        if let Some(literal) = literal {
+            self.class_reads.borrow_mut().insert(owner.definition);
+            return Ok(self.evaluated_receiver(receiver, literal));
+        }
         if self.classes.has_concrete_subclasses(class)
             && let Some(receiver) = receiver
         {
@@ -849,6 +884,13 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
+        if self.mock_implementation_method(class, attribute.attr.as_str()) {
+            return Err(error(
+                self.source,
+                attribute,
+                "private native mock operations cannot be accessed directly",
+            ));
+        }
         if attribute.attr.starts_with("__")
             && !matches!(
                 attribute.attr.as_str(),
@@ -890,6 +932,7 @@ impl Checker<'_> {
                 })
             }
             MethodKind::Instance => self.callable_value(&signature, receiver, expected, attribute),
+            MethodKind::PropertySetter => unreachable!("setters are resolved only on assignment"),
             MethodKind::Class | MethodKind::Static => {
                 let value = self.callable_value(&signature, None, expected, attribute)?;
                 Ok(self.evaluated_receiver(receiver, value))
@@ -924,6 +967,13 @@ impl Checker<'_> {
         class: usize,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
+        if self.mock_implementation_method(class, attribute.attr.as_str()) {
+            return Err(error(
+                self.source,
+                attribute,
+                "private native mock operations cannot be accessed directly",
+            ));
+        }
         if call
             .arguments
             .keywords
@@ -961,6 +1011,31 @@ impl Checker<'_> {
             && let Some(context) = self.unittest_assert_raises(call, class, receiver)?
         {
             return Ok(context);
+        }
+        if self.native_mock(class)
+            && let Some(object) = &receiver
+        {
+            match attribute.attr.as_str() {
+                "assert_any_call" => {
+                    return self.mock_arguments(call, class, object.clone(), "_assert_any_call");
+                }
+                "assert_called_with" => {
+                    return self.mock_arguments(call, class, object.clone(), "_assert_called_with");
+                }
+                "assert_called_once_with" => {
+                    return self.mock_arguments(
+                        call,
+                        class,
+                        object.clone(),
+                        "_assert_called_once_with",
+                    );
+                }
+                name if !self.classes.methods[class].contains_key(name) => {
+                    let child = self.mock_child(class, object.clone(), attribute)?;
+                    return self.mock_arguments(call, class, child, "_record");
+                }
+                _ => {}
+            }
         }
         let signature = self.classes.methods[class]
             .get(attribute.attr.as_str())
@@ -1127,6 +1202,8 @@ impl Checker<'_> {
                     Builtin::NamedException {
                         kind,
                         message_field: decl.fields.len() - 1,
+                        tuple_args: self.classes.fields[class].last()
+                            == Some(&Type::ExceptionField),
                         text,
                         repr,
                         dataclass_repr: decl.dataclass.is_some_and(|d| d.repr),
@@ -1136,6 +1213,110 @@ impl Checker<'_> {
             });
         }
         Ok(record)
+    }
+
+    /// Install the native message slot used by the exception's args and formatting.
+    fn set_exception_message(&mut self, class: usize, message: &ast::Expr) -> Result<Expr, String> {
+        let ty = self.types.optional(Type::Str);
+        let message_value = self.expr_expected(message, Type::Str)?;
+        let value = self.coerce(message_value, ty, message)?;
+        Ok(self.store_exception_arguments(class, value))
+    }
+
+    /// Materialize all base arguments before exposing the tuple through the exception.
+    fn set_exception_arguments(
+        &mut self,
+        class: usize,
+        nodes: &[ast::Expr],
+    ) -> Result<Expr, String> {
+        let mut values = Vec::with_capacity(nodes.len());
+        for node in nodes {
+            let value = Self::string_value(self.expr(node)?);
+            if !self.import_argument_supported(value.ty) {
+                return Err(error(
+                    self.source,
+                    node,
+                    "unsupported native exception argument type",
+                ));
+            }
+            values.push(value);
+        }
+        let tuple = Expr {
+            ty: self.types.tuple(values.iter().map(|v| v.ty).collect()),
+            kind: ExprKind::Tuple(values),
+        };
+        let args = Expr {
+            ty: Type::ExceptionField,
+            kind: ExprKind::Builtin(Builtin::ExceptionTupleView, vec![tuple]),
+        };
+        Ok(self.store_exception_arguments(class, args))
+    }
+
+    fn store_exception_arguments(&self, class: usize, value: Expr) -> Expr {
+        let field = self.classes.fields[class].len() - 1;
+        Expr {
+            ty: Type::None,
+            kind: ExprKind::Scope {
+                body: vec![Statement::SetField(self.local(0), field, value)],
+                value: Box::new(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                }),
+                clear: Vec::new(),
+            },
+        }
+    }
+
+    pub(super) fn explicit_exception_initializer(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Option<Expr>, String> {
+        if self.super_initializer.is_some()
+            && self.names.get("self") == Some(&0)
+            && let Some(class) = self.class
+            && self
+                .classes
+                .declarations
+                .exceptions
+                .contains_key(&self.classes.declarations.definitions[class].definition)
+            && let Some((base, args)) =
+                crate::classes::explicit_message_initializer(&self.graph.modules[self.module], call)
+            && !self.names.contains_key(base)
+        {
+            return self.set_exception_arguments(class, args).map(Some);
+        }
+        Ok(None)
+    }
+
+    /// Start lookup after the declaring class and bind that implementation to the same object.
+    pub(super) fn call_super_method(
+        &mut self,
+        call: &ast::ExprCall,
+        method: &ast::ExprAttribute,
+        base: usize,
+    ) -> Result<Expr, String> {
+        let signature = self.classes.methods[base]
+            .get(method.attr.as_str())
+            .filter(|sig| {
+                sig.method.unwrap().kind(&self.classes.declarations) == MethodKind::Instance
+            })
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    method,
+                    "super() requires a known base instance method",
+                )
+            })?
+            .clone();
+        if !self.assigned.contains(&0) {
+            return Err(error(
+                self.source,
+                method,
+                "super() requires a bound first argument",
+            ));
+        }
+        let receiver = self.coerce(self.local(0), Type::Class(base), method)?;
+        self.source_call(call, &signature, Some(receiver), 1)
     }
 
     pub(super) fn call_super_initializer(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -1150,6 +1331,11 @@ impl Checker<'_> {
                 .bindings
                 .contains_key("super")
         {
+            if self.classes.fields[class].last() == Some(&Type::ExceptionField)
+                && call.arguments.keywords.is_empty()
+            {
+                return self.set_exception_arguments(class, &call.arguments.args);
+            }
             let [message] = call.arguments.args.as_ref() else {
                 return Err(error(
                     self.source,
@@ -1164,21 +1350,7 @@ impl Checker<'_> {
                     "exception messages do not accept keyword arguments",
                 ));
             }
-            let ty = self.types.optional(Type::Str);
-            let message_value = self.expr_expected(message, Type::Str)?;
-            let value = self.coerce(message_value, ty, message)?;
-            let field = self.classes.fields[class].len() - 1;
-            return Ok(Expr {
-                ty: Type::None,
-                kind: ExprKind::Scope {
-                    body: vec![Statement::SetField(self.local(0), field, value)],
-                    value: Box::new(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    }),
-                    clear: Vec::new(),
-                },
-            });
+            return self.set_exception_message(class, message);
         }
         // An initializer defined at the root of a checked record lineage finds
         // object.__init__, including when that initializer runs on a subclass.

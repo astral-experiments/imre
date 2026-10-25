@@ -23,7 +23,7 @@ impl WordKind {
     const DEFERRED: Self = Self(u16::MAX);
 
     pub(super) fn new(kind: u32) -> Self {
-        if kind & !NULLABLE > 10 {
+        if kind & !NULLABLE > 12 {
             fail("SystemError", "invalid concrete word representation");
         }
         Self(kind as u16)
@@ -33,7 +33,11 @@ impl WordKind {
         u32::from(self.0)
     }
 
-    fn base(self) -> u32 {
+    pub(super) fn can_queue_release(self) -> bool {
+        matches!(self.base(), 5 | 6 | 9)
+    }
+
+    pub(super) fn base(self) -> u32 {
         self.raw() & !NULLABLE
     }
 
@@ -46,7 +50,7 @@ impl WordKind {
     /// `field` is an aligned, readable record slot stored using this descriptor's
     /// LLVM representation, or its initial all-zero state.
     pub(super) unsafe fn read_record_field(self, field: *const usize) -> usize {
-        if matches!(self.0, 3..=6 | 8) {
+        if matches!(self.0, 3..=6 | 8 | 11 | 12) {
             // SAFETY: this exact descriptor denotes a pointer-typed field.
             unsafe { field.cast::<*const ()>().read() as usize }
         } else if self.0 == 7 {
@@ -65,7 +69,7 @@ impl WordKind {
         let valid = match self.base() {
             0 => word == 0,
             1 => word <= if nullable { 2 } else { 1 },
-            2..=6 | 8..=10 => word != 0 || nullable,
+            2..=6 | 8..=12 => word != 0 || nullable,
             7 => true,
             _ => unreachable!(),
         };
@@ -99,10 +103,10 @@ impl WordKind {
                         Rc::increment_strong_count(word as *const num_bigint::BigInt);
                     }
                 }
-                3 => Rc::increment_strong_count(word as *const Str),
+                3 | 11 => Rc::increment_strong_count(word as *const Str),
                 4 => Rc::increment_strong_count(word as *const List),
                 5 => Rc::increment_strong_count(word as *const Object),
-                6 => records::imre_record_retain(word as *const usize),
+                6 | 12 => records::imre_record_retain(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::increment_strong_count(word as *const f64),
                 7 => {}
                 8 => Rc::increment_strong_count(word as *const Bytes),
@@ -124,10 +128,10 @@ impl WordKind {
             match self.base() {
                 0 | 1 | 10 => {}
                 2 => drop(Int(word)),
-                3 => Rc::decrement_strong_count(word as *const Str),
+                3 | 11 => Rc::decrement_strong_count(word as *const Str),
                 4 => crate::imre_list_release(word as *const List),
                 5 => records::release_object_word(Rc::from_raw(word as *const Object)),
-                6 => records::imre_record_release(word as *const usize),
+                6 | 12 => records::imre_record_release(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::decrement_strong_count(word as *const f64),
                 7 => {}
                 8 => Rc::decrement_strong_count(word as *const Bytes),
@@ -145,6 +149,23 @@ pub(super) struct OwnedWord {
 }
 
 impl OwnedWord {
+    /// Transfers this owner into a fresh record field using the LLVM slot type.
+    ///
+    /// # Safety
+    /// The destination is an uninitialized slot of this exact descriptor.
+    pub(super) unsafe fn initialize_record_field(self, field: *mut usize) {
+        let kind = self.kind.raw();
+        let word = self.into_word();
+        // SAFETY: this is the inverse of WordKind::read_record_field.
+        unsafe {
+            match kind {
+                3..=6 | 8 => field.cast::<*const ()>().write(word as *const ()),
+                7 => field.cast::<f64>().write(f64::from_bits(word as u64)),
+                _ => field.write(word),
+            }
+        }
+    }
+
     pub(super) fn into_word(self) -> usize {
         ManuallyDrop::new(self).word
     }
@@ -405,6 +426,10 @@ impl Drop for Words {
         if self.kind == WordKind::DEFERRED {
             // SAFETY: the deferred header owns exactly this one boxed plan.
             drop(unsafe { Box::from_raw(self.values[0] as *mut Deferred) });
+            return;
+        }
+        if self.values.spilled() && self.kind.can_queue_release() {
+            records::release_sequence_words(self.kind, std::mem::take(&mut self.values).into_vec());
             return;
         }
         for word in self.values.drain(..).rev() {

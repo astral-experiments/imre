@@ -21,6 +21,7 @@ SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
 sys.path[:0] = [str(HERE), str(STDLIB)]
 import native_config
 import native_filters
+import native_files
 import native_formatters
 import native_hierarchy
 import native_levels
@@ -152,9 +153,11 @@ def known_cases(toolchain, work, original):
     executions.update(native_config.config_cases(toolchain, directory("config"), original))
     executions.update(native_filters.filter_cases(toolchain, directory("name-filter")))
     executions.update(native_hierarchy.hierarchy_cases(toolchain, directory("children")))
+    executions.update(native_files.file_cases(toolchain, directory("file-handlers")))
     formatter = toolchain.build((HERE / "formatter_driver.py").read_bytes(), directory("formatters"))
     executions.update(native_formatters.host_formatter_cases(toolchain, formatter, original))
     executions[native_formatters.PRECISION] = native_formatters.precision_case(toolchain, directory("precision"))
+    executions.update(native_formatters.buffering_cases(toolchain, directory("buffering")))
     record_binary = toolchain.build((HERE / "record_driver.py").read_bytes(), directory("records"))
     def optional(case, method):
         with native_records.native_flags(record_binary) as (driver, calls), patch.object(original, "logging", driver):

@@ -11,6 +11,8 @@ The [versioned native evidence](evidence-linux.json) covers all eight suites
 at both optimization levels. See [execution and reproduction](routines.md)
 and the [dependency inventory](startup.md) for array registration, argparse's
 Mapping class base, and the copy protocols exercised by 16 original cases.
+The [branch verification runs](runs/README.md) retain full historical reports
+for individual compiler trees. Each report has its own O0 and O3 denominator.
 
 | Suite | IDs |
 | --- | ---: |

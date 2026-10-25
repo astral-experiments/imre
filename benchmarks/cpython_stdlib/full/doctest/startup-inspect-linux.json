@@ -1,0 +1,73 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "f404bb2c45342e3dc9d50e43e323c8bfed46fc02cf64e0afe37ca204b7ce7991",
+  "operation": "check",
+  "tests_executed": 0,
+  "source": "vendored and pinned Git Lib/test",
+  "support_files": [],
+  "checks": [
+    {
+      "suite": "test.test_itertools",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:4:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under <staged>/Lib; external and namespace-package imports are unsupported"
+    },
+    {
+      "suite": "test.test_itertools",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:4:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under <staged>/Lib; external and namespace-package imports are unsupported"
+    },
+    {
+      "suite": "test.test_itertools",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:4:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under <staged>/Lib; external and namespace-package imports are unsupported"
+    },
+    {
+      "suite": "test.test_itertools",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:4:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under <staged>/Lib; external and namespace-package imports are unsupported"
+    },
+    {
+      "suite": "test.test_json",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under <staged>/Lib; external and namespace-package imports are unsupported"
+    },
+    {
+      "suite": "test.test_json",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under <staged>/Lib; external and namespace-package imports are unsupported"
+    },
+    {
+      "suite": "test.test_json",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under <staged>/Lib; external and namespace-package imports are unsupported"
+    },
+    {
+      "suite": "test.test_json",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under <staged>/Lib; external and namespace-package imports are unsupported"
+    }
+  ],
+  "provenance": {
+    "main": "8eb6721dc593d81699ae4f507508ad7ec768e498",
+    "doctest_pr": 646,
+    "doctest_head": "f1cb878a7e6d20a480972c1393ce0f16b7d302b9",
+    "prospective_merge_tree": "fd03875e4eef9605513175e5dac623148b1e5ff1",
+    "normalization": "Only the randomly generated staging directory before /Lib is replaced by <staged>."
+  }
+}

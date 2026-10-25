@@ -1,5 +1,5 @@
 from os import PathLike
-from typing import TypeVar, overload
+from typing import Callable, Protocol, TypeVar, overload
 
 _S = TypeVar("_S", str, bytes)
 _D = TypeVar("_D", bound=str | bytes | PathLike[str] | PathLike[bytes])
@@ -28,3 +28,15 @@ def copy(src: _Path, dst: PathLike[_S], *, follow_symlinks: bool = True) -> Path
 def copy2(src: _Path, dst: _S, *, follow_symlinks: bool = True) -> _S: ...
 @overload
 def copy2(src: _Path, dst: PathLike[_S], *, follow_symlinks: bool = True) -> PathLike[_S] | _S: ...
+
+class _RmTree(Protocol):
+    avoids_symlink_attacks: bool
+    def __call__(self, path: _Path, ignore_errors: bool = False, onerror: Callable | None = None, *, onexc: Callable | None = None, dir_fd: int | None = None) -> None: ...
+
+rmtree: _RmTree
+
+def ignore_patterns(*patterns: _S) -> Callable[[_S, list[_S]], set[_S]]: ...
+
+def copytree(src: _Path, dst: _D, symlinks: bool = False, ignore: Callable | None = None,
+             copy_function: Callable = ..., ignore_dangling_symlinks: bool = False,
+             dirs_exist_ok: bool = False) -> _D: ...
