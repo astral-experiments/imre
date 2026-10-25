@@ -280,7 +280,7 @@ fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
         message.push_str(": ");
         super::exceptions::push_string_repr(path, &mut message);
     }
-    Error::new(os_error_kind(error.kind()), message)
+    Error::from_errno(os_error_kind(error.kind()), errno, &description, message)
 }
 
 /// Opens a UTF-8 text stream in read, write, append, or exclusive-create mode.
@@ -325,7 +325,7 @@ pub unsafe extern "C" fn imre_gzip_open(path: *const Str, binary: u32) -> *const
 }
 
 /// Shares descriptor ownership and buffering while preserving text/binary access errors.
-fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*const Object> {
+pub(super) fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*const Object> {
     let state = open_state(path, mode, binary, gzip)?;
     Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
         Storage::File(Box::new(state)),
@@ -626,14 +626,15 @@ pub unsafe extern "C" fn imre_text_flush(value: *const Object) -> u32 {
 /// (including repeated close), or 0 with a pending error after releasing the fd.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_text_close(value: *const Object) -> u32 {
+    // SAFETY: the caller roots the exact file.
+    finish(close_stream(unsafe { object(value) }).map(|()| 1), 0)
+}
+
+/// Detach the descriptor before closing so all existing stream aliases observe closure.
+pub(super) fn close_stream(file: &Object) -> Result<()> {
     // SAFETY: only an independent stream owner escapes the nonreentrant access.
-    let stream = unsafe {
-        object(value)
-            .0
-            .with_mut(|storage| storage.file_mut().stream.take())
-    };
-    let result = stream.map_or(Ok(()), Stream::close).map_err(os_error);
-    finish(result.map(|()| 1), 0)
+    let stream = unsafe { file.0.with_mut(|storage| storage.file_mut().stream.take()) };
+    stream.map_or(Ok(()), Stream::close).map_err(os_error)
 }
 
 /// # Safety

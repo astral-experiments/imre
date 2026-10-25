@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/pypa/installer",
+  "commit": "9b7fd286b85c5091390d4368709c46b35693b28c",
+  "sources": {
+    "LICENSE": "c8a93046d6bcc8bd74202b2cdce19e0f1263a14f",
+    "src/installer/__init__.py": "a03af123b7ba6a05aa54d9fc58f357e0426d36c1",
+    "src/installer/__main__.py": "b7a7445d4e5033c53ce01643e7f0a94bb8e80b77",
+    "src/installer/_core.py": "3aad93c0fec8d4de52424f7d462787882583f7be",
+    "src/installer/_scripts/__init__.py": "0361a581a64af666a701aa6044f47471c4e5d00e",
+    "src/installer/destinations.py": "1799cf69c43befd48715eb0904cf9837987d040c",
+    "src/installer/exceptions.py": "01f044add93841fdc97ab865e549608e7625beef",
+    "src/installer/py.typed": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+    "src/installer/records.py": "9bb45c756fb9e6203c5b56deb3a0d8f2f6614e3d",
+    "src/installer/scripts.py": "b21a72ea996e8cf31c7271d6a01483f07aaeb79b",
+    "src/installer/sources.py": "836c1f20e7c79230d9433297e21e20241f41d723",
+    "src/installer/utils.py": "d7cc6704883a8fb50efeaa91c8d5db5b349f77a6"
+  },
+  "omitted": "Windows executable launcher payloads; not used by wheel RECORD validation."
+}
