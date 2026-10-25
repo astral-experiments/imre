@@ -32,6 +32,8 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Copy)]
 pub struct CommandFlags {
     pub isolated: bool,
+    /// Python's language optimization level; independent of LLVM optimization.
+    pub optimize: i32,
     pub safe_path: bool,
     pub no_user_site: bool,
     pub dont_write_bytecode: bool,
