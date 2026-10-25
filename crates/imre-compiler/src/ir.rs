@@ -762,6 +762,7 @@ pub(crate) enum Builtin {
     /// Attaches an explicit cause to a fresh, unescaped builtin exception.
     ExceptionWithCause,
     ExceptionCause,
+    ActiveException,
     ExceptionSuppressContext,
 }
 
