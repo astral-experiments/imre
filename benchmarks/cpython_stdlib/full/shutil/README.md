@@ -97,3 +97,9 @@ To reproduce startup, use a test-enabled CPython 3.14.5 and the pinned CPython c
 ```
 
 For complete methods, generate the reference with `suite_inventory.py` on the same host and pass it to `attempt_methods.py --reference`.
+
+### On canonical main
+
+The [four original startup modes](canonical-startup-transitions-linux.json) all stopped at line 4 before the shared mock landed. On [#758](https://github.com/astral-sh/imre/pull/758) (`06c089f`), they reached `import errno` at line 11. On [#652](https://github.com/astral-sh/imre/pull/652) (`5ca29ab`), they reached `import random` at line 14. The import and unittest-runner entries were each checked with and without reachability pruning. None executed a test. The independent errno rerun reproduced the coordinator's four checks byte for byte.
+
+The [merged mock](mock-758-landed-startup-linux.json) and [merged errno](errno-652-landed-startup-linux.json) receipts also ran at O0 and O3 with the compiler and runtime from the indicated Git trees. Both recorded actual native Mock calls and resets. The original `no_chdir` patch still failed to compile at both levels; CPython trapped the attempted directory change inside the patch and successfully changed directories after both a normal and an exceptional exit. These startup and fixture checks add no passes to the 223 occurrences.
