@@ -73,7 +73,9 @@ impl Checker<'_> {
                 }
             };
         }
-        if matches!((value.ty, ty), (Type::Class(parent), Type::Class(child)) if self.classes.parsers.child_of(child, parent))
+        if matches!((value.ty, ty), (Type::Class(parent), Type::Class(child))
+            if self.classes.parsers.child_of(child, parent)
+                || self.classes.declarations.definitions[child].bases.contains(&parent))
         {
             return Expr {
                 ty,
@@ -502,6 +504,23 @@ impl Checker<'_> {
         }
     }
 
+    /// A successful test proves a derived layout only if every matching class
+    /// has that layout. A tuple of siblings cannot expose either's fields.
+    fn tested_subclass(&self, base: usize, classes: &[InstanceType]) -> Option<usize> {
+        let definitions = &self.classes.declarations.definitions;
+        classes.iter().find_map(|class| {
+            let InstanceType::Exact(Type::Class(child)) = *class else {
+                return None;
+            };
+            (definitions[child].bases.contains(&base)
+                && classes.iter().all(|class| {
+                    matches!(*class, InstanceType::Exact(Type::Class(id))
+                    if id == child || definitions[id].bases.contains(&child))
+                }))
+            .then_some(child)
+        })
+    }
+
     pub(super) fn apply_instance_facts(&mut self, test: &ast::Expr, truth: bool) {
         for (name, constraints) in self.instance_facts(test, truth) {
             let Some(&slot) = self.names.get(&name) else {
@@ -512,6 +531,15 @@ impl Checker<'_> {
                 .get(&slot)
                 .copied()
                 .unwrap_or(self.locals[slot]);
+            if let (Type::Class(_), Type::Class(mut base)) = (self.locals[slot], current) {
+                for (classes, positive) in &constraints {
+                    if *positive && let Some(child) = self.tested_subclass(base, classes) {
+                        base = child;
+                    }
+                }
+                self.narrowed.insert_mut(slot, Type::Class(base));
+                continue;
+            }
             if matches!(current, Type::Document(_)) {
                 for (classes, truth) in &constraints {
                     if !*truth {
