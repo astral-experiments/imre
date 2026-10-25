@@ -28,6 +28,9 @@ for parent in ['', '/', '//', '///', 'C:', 'C:/', 'a/b', r'\\host',
         print(str(PurePosixPath(p)))
         print(str(Path(p)))
 
+for share in [r'\\server\share', '//server/share', '//SERVER/SHARE']:
+    print(PureWindowsPath('//server/share/dir', share).as_posix())
+
 print(PurePath('a/b') == Path('a', 'b'))
 print(PureWindowsPath('a/b') == PurePosixPath('a/b'))
 print(repr(PurePath('//')))
