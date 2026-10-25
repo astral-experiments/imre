@@ -4368,75 +4368,6 @@ impl Emitter<'_, '_> {
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
-            Builtin::FreezeStrings => Value {
-                ty: returns,
-                operand: self.checked_instruction(format!(
-                    "call ptr @imre_frozenset_strings(ptr {})",
-                    args[0].value.operand
-                )),
-                small_integer: false,
-            },
-            Builtin::Errno(op) => {
-                use crate::ir::ErrnoOperation as Op;
-                let call = match op {
-                    Op::Module => "call ptr @imre_errno_module()".to_string(),
-                    Op::Namespace | Op::Keys | Op::Errorcode => {
-                        let f = match op {
-                            Op::Namespace => "namespace",
-                            Op::Keys => "keys",
-                            _ => "errorcode",
-                        };
-                        format!("call ptr @imre_errno_{f}(ptr {})", args[0].value.operand)
-                    }
-                    Op::Number | Op::Text | Op::Has => {
-                        let (ty, f) = match op {
-                            Op::Number => ("i64", "number"),
-                            Op::Text => ("ptr", "text"),
-                            _ => ("i32", "has"),
-                        };
-                        format!(
-                            "call {ty} @imre_errno_{f}(ptr {}, ptr {})",
-                            args[0].value.operand, args[1].value.operand
-                        )
-                    }
-                    Op::DefaultLookup => format!(
-                        "call ptr @imre_errno_lookup_default(ptr {}, ptr {}, ptr {})",
-                        args[0].value.operand, args[1].value.operand, args[2].value.operand
-                    ),
-                    Op::Lookup | Op::Items => format!(
-                        "call ptr @imre_errno_lookup(ptr {}, ptr {}, i32 {})",
-                        args[0].value.operand,
-                        args[1].value.operand,
-                        u32::from(matches!(op, Op::Items))
-                    ),
-                    Op::MemberContains => format!(
-                        "call i32 @imre_errno_member_contains(ptr {}, ptr {})",
-                        args[0].value.operand, args[1].value.operand
-                    ),
-                };
-                let raw = if matches!(
-                    op,
-                    Op::Module
-                        | Op::Number
-                        | Op::Lookup
-                        | Op::DefaultLookup
-                        | Op::Items
-                        | Op::MemberContains
-                ) {
-                    self.checked_instruction(call)
-                } else {
-                    self.instruction(call)
-                };
-                Value {
-                    ty: returns,
-                    operand: if returns == Type::Bool {
-                        self.instruction(format!("icmp ne i32 {raw}, 0"))
-                    } else {
-                        raw
-                    },
-                    small_integer: false,
-                }
-            }
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::DocCaptureStart => {
                 self.checked_line("call void @imre_doctest_capture_start()");
@@ -5659,6 +5590,75 @@ impl Emitter<'_, '_> {
                     args.reverse();
                 }
                 value
+            }
+            Builtin::FreezeStrings => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @imre_frozenset_strings(ptr {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::Errno(op) => {
+                use crate::ir::ErrnoOperation as Op;
+                let call = match op {
+                    Op::Module => "call ptr @imre_errno_module()".to_string(),
+                    Op::Namespace | Op::Keys | Op::Errorcode => {
+                        let f = match op {
+                            Op::Namespace => "namespace",
+                            Op::Keys => "keys",
+                            _ => "errorcode",
+                        };
+                        format!("call ptr @imre_errno_{f}(ptr {})", args[0].value.operand)
+                    }
+                    Op::Number | Op::Text | Op::Has => {
+                        let (ty, f) = match op {
+                            Op::Number => ("i64", "number"),
+                            Op::Text => ("ptr", "text"),
+                            _ => ("i32", "has"),
+                        };
+                        format!(
+                            "call {ty} @imre_errno_{f}(ptr {}, ptr {})",
+                            args[0].value.operand, args[1].value.operand
+                        )
+                    }
+                    Op::DefaultLookup => format!(
+                        "call ptr @imre_errno_lookup_default(ptr {}, ptr {}, ptr {})",
+                        args[0].value.operand, args[1].value.operand, args[2].value.operand
+                    ),
+                    Op::Lookup | Op::Items => format!(
+                        "call ptr @imre_errno_lookup(ptr {}, ptr {}, i32 {})",
+                        args[0].value.operand,
+                        args[1].value.operand,
+                        u32::from(matches!(op, Op::Items))
+                    ),
+                    Op::MemberContains => format!(
+                        "call i32 @imre_errno_member_contains(ptr {}, ptr {})",
+                        args[0].value.operand, args[1].value.operand
+                    ),
+                };
+                let raw = if matches!(
+                    op,
+                    Op::Module
+                        | Op::Number
+                        | Op::Lookup
+                        | Op::DefaultLookup
+                        | Op::Items
+                        | Op::MemberContains
+                ) {
+                    self.checked_instruction(call)
+                } else {
+                    self.instruction(call)
+                };
+                Value {
+                    ty: returns,
+                    operand: if returns == Type::Bool {
+                        self.instruction(format!("icmp ne i32 {raw}, 0"))
+                    } else {
+                        raw
+                    },
+                    small_integer: false,
+                }
             }
             Builtin::DictContains | Builtin::SetContains => {
                 let key = self.key_word(&args[0].value);
@@ -7382,6 +7382,7 @@ declare ptr @imre_str_split(ptr, ptr, i64, i32)
 declare ptr @imre_str_rsplit_last(ptr, ptr)
 declare ptr @imre_str_unquote_rsplit_last(ptr, ptr)
 declare ptr @imre_str_strip(ptr, ptr, i32)
+declare ptr @imre_str_expandtabs(ptr, i64)
 declare ptr @imre_str_lower(ptr)
 declare ptr @imre_str_capitalize(ptr)
 declare i32 @imre_str_affix(ptr, ptr, i32)
