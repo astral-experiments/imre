@@ -98,6 +98,12 @@ jobs:
           report["support_paths_sha256"] = hashlib.sha256(("\n".join(support)+"\n").encode()).hexdigest()
           report["staging"] = "Full pinned Lib/test plus every pinned Python source outside it under Lib/"
           (results / "startup-linux.json").write_text(json.dumps(report, indent=2) + "\n")
+          child = subprocess.run([sys.executable, "-B", "benchmarks/cpython_stdlib/full/check_suite_startup.py", "--compiler", compiler, "--cpython-git", ref, "test.test_logging"], stdout=subprocess.PIPE, check=False)
+          tests = json.loads(child.stdout)
+          assert child.returncode == int(any(r["exit"] for r in tests["checks"])) and len(tests["checks"]) == 4
+          assert tests["tests_executed"] == 0 and not tests["support_files"]
+          tests.update(imre_revision=report["imre_revision"], imre_tree=report["imre_tree"], primary_denominator=272, staging="Full pinned Lib/test; Imre resolves standard-library module implementations")
+          (results / "startup-tests-linux.json").write_text(json.dumps(tests, indent=2) + "\n")
           for row in report["checks"]:
               print(row["entry"], row["reachable_only"], row["exit"], row["diagnostic"])
           PYTHON
