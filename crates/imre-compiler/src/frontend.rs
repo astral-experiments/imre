@@ -56,6 +56,7 @@ mod format_cursors;
 mod fromkeys;
 mod fspath;
 mod function_caches;
+mod function_text;
 mod functools;
 mod hashlib;
 mod import_errors;
@@ -6896,10 +6897,11 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
-                if attribute.attr.as_str() == "__wrapped__"
-                    && let Some(layout) = self.types.dispatcher(receiver.ty)
+                if let Some(layout) = self.types.dispatcher(receiver.ty)
+                    && let Some(value) =
+                        self.dispatch_attribute(&receiver, layout, attribute.attr.as_str())
                 {
-                    return Ok(single_dispatch::original(receiver, layout));
+                    return Ok(value);
                 }
                 if self.types.has_reflected_functions()
                     && matches!(receiver.ty, Type::FunctionRef | Type::Callable(_))

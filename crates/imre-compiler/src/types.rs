@@ -74,6 +74,7 @@ pub(crate) struct DispatchFunction {
     pub callable: Type,
     pub frame: Type,
     pub registry: Type,
+    pub metadata: Type,
 }
 
 /// A cache delegates annotation evaluation to the captured declaration.
@@ -1266,11 +1267,13 @@ impl Types {
     /// Only the dispatcher constructs this registry; source dictionaries cannot store callables.
     pub(crate) fn dispatch_callable(&self, callable: Type) -> Type {
         let registry = Type::Dict(self.intern(Shape::DispatchRegistry(callable)));
-        let frame = self.partial_frame(vec![callable, registry]);
+        let metadata = self.optional(self.tuple(vec![Type::Str, self.optional(Type::Str)]));
+        let frame = self.partial_frame(vec![callable, registry, metadata]);
         Type::Callable(self.intern(Shape::DispatchCallable(DispatchFunction {
             callable,
             frame,
             registry,
+            metadata,
         })))
     }
 
