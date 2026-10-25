@@ -105,6 +105,19 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
                 field_metadata(output, name, layout),
             )
         }
+        Type::Tuple(_) if module.types.is_stat_result(ty) => (
+            1,
+            3 | 8, // tuple behavior, with untraced stat attributes after the sequence
+            "os.stat_result",
+            "os.stat_result",
+            field_metadata(
+                output,
+                name,
+                crate::types::STAT_SEQUENCE_FIELDS
+                    .into_iter()
+                    .map(|field| (field, 3)),
+            ),
+        ),
         Type::Tuple(_) if named.is_some() => {
             let declaration = named.as_ref().unwrap();
             (

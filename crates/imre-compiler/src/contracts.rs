@@ -138,6 +138,8 @@ impl Builtin {
                     | PathOperation::WriteUnion { .. }
                     | PathOperation::WriteTypeError
                     | PathOperation::WriteBytes
+                    | PathOperation::Stat { .. }
+                    | PathOperation::CheckStatPath
                     | PathOperation::Mkdir
                     | PathOperation::Unlink
                     | PathOperation::Rmdir
@@ -165,6 +167,8 @@ impl Builtin {
                     | PathOperation::IsAbsolute
                     | PathOperation::Info
                     | PathOperation::InfoRepr
+                    | PathOperation::StatTime(_)
+                    | PathOperation::StatExtraInt(_)
                     | PathOperation::Query(_) => false,
                 },
                 PreservesLists,

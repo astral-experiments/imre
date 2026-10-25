@@ -10,6 +10,11 @@ use std::rc::Rc;
 
 const MAX_DESCRIPTION_BYTES: usize = 1024;
 
+pub(crate) const STAT_SEQUENCE_FIELDS: [&str; 10] = [
+    "st_mode", "st_ino", "st_dev", "st_nlink", "st_uid", "st_gid", "st_size", "st_atime",
+    "st_mtime", "st_ctime",
+];
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum Shape {
     StringLiterals(Vec<String>),
@@ -21,6 +26,7 @@ enum Shape {
     Set(Type),
     Tuple(Vec<Type>),
     NamedTuple(DefinitionId, Vec<Type>),
+    StatResult,
     PartialFrame(Vec<Type>),
     Callable(Vec<Type>, Type),
     DeclaredCache(Type, usize),
@@ -103,7 +109,12 @@ impl Types {
             Type::Set(id) => matches!(storage.shapes.get(id), Some(Shape::Set(_))),
             Type::Tuple(id) => matches!(
                 storage.shapes.get(id),
-                Some(Shape::Tuple(_) | Shape::NamedTuple(..) | Shape::PartialFrame(_))
+                Some(
+                    Shape::Tuple(_)
+                        | Shape::NamedTuple(..)
+                        | Shape::PartialFrame(_)
+                        | Shape::StatResult
+                )
             ),
             Type::ForwardRef(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::Tuple(fields)) if fields.len() == 5)
@@ -185,7 +196,7 @@ impl Types {
         let storage = self.0.borrow();
         for (id, shape) in storage.shapes.iter().enumerate() {
             let children: Vec<Type> = match shape {
-                Shape::StringLiterals(_) => Vec::new(),
+                Shape::StringLiterals(_) | Shape::StatResult => Vec::new(),
                 Shape::Cursor(ty)
                 | Shape::List(ty)
                 | Shape::Set(ty)
@@ -609,6 +620,15 @@ impl Types {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
     }
 
+    /// Stat results expose ten integer tuple fields, independently of their named attributes.
+    pub(crate) fn stat_result(&self) -> Type {
+        Type::Tuple(self.intern(Shape::StatResult))
+    }
+
+    pub(crate) fn is_stat_result(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::StatResult))
+    }
+
     pub(crate) fn declare_namedtuple(&self, definition: DefinitionId, declaration: NamedTuple) {
         self.0
             .borrow_mut()
@@ -830,6 +850,7 @@ impl Types {
             return None;
         };
         match &self.0.borrow().shapes[id] {
+            Shape::StatResult => Some(vec![Type::Int; STAT_SEQUENCE_FIELDS.len()]),
             Shape::Tuple(fields) | Shape::NamedTuple(_, fields) | Shape::PartialFrame(fields) => {
                 Some(fields.clone())
             }
@@ -845,6 +866,9 @@ impl Types {
             .iter()
             .enumerate()
             .filter_map(|(id, shape)| match shape {
+                Shape::StatResult => {
+                    Some((Type::Tuple(id), vec![Type::Int; STAT_SEQUENCE_FIELDS.len()]))
+                }
                 Shape::Tuple(fields)
                 | Shape::NamedTuple(_, fields)
                 | Shape::PartialFrame(fields) => Some((Type::Tuple(id), fields.clone())),
@@ -1004,6 +1028,7 @@ impl TypeDescription<'_> {
         };
         let shape = &self.shapes[id];
         match shape {
+            Shape::StatResult => return self.write_str("os.stat_result"),
             Shape::StringLiterals(values) => {
                 self.write_str("Literal[")?;
                 for (i, value) in values.iter().enumerate() {

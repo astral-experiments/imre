@@ -3,6 +3,8 @@
 use super::*;
 use crate::ir::PathOperation;
 
+mod stat;
+
 pub(super) fn operation(kind: PathOperation, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
@@ -299,6 +301,51 @@ impl Checker<'_> {
         Ok(operation(kind, ty, vec![receiver]))
     }
 
+    /// CPython's tuple contains integral seconds, while its time attributes use the subsecond stat data.
+    pub(super) fn stat_result_attribute(
+        &self,
+        receiver: Expr,
+        attribute: &ast::ExprAttribute,
+    ) -> Result<Expr, String> {
+        let name = attribute.attr.as_str();
+        if let Some(index) = crate::types::STAT_SEQUENCE_FIELDS
+            .iter()
+            .position(|field| *field == name)
+        {
+            if index < 7 {
+                return Ok(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Field(Box::new(receiver), index),
+                });
+            }
+            return Ok(operation(
+                PathOperation::StatTime((index - 7) as u32),
+                Type::Float,
+                vec![receiver],
+            ));
+        }
+        let fields = [
+            "st_atime_ns",
+            "st_mtime_ns",
+            "st_ctime_ns",
+            "st_blksize",
+            "st_blocks",
+            "st_rdev",
+        ];
+        if let Some(index) = fields.iter().position(|field| *field == name) {
+            return Ok(operation(
+                PathOperation::StatExtraInt(index as u32),
+                Type::Int,
+                vec![receiver],
+            ));
+        }
+        Err(error(
+            self.source,
+            attribute,
+            "unknown native stat_result attribute",
+        ))
+    }
+
     pub(super) fn path_method(
         &mut self,
         receiver: Expr,
@@ -306,6 +353,9 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if receiver.ty == Type::Path && matches!(name, "stat" | "lstat") {
+            return self.path_stat(receiver, name, call);
+        }
         if matches!(receiver.ty, Type::Path | Type::PathInfo) {
             let info = receiver.ty == Type::PathInfo;
             use ir::PathQuery;

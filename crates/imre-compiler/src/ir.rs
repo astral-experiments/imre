@@ -1181,6 +1181,12 @@ pub(crate) enum PathOperation {
     Resolve,
     Info,
     InfoRepr,
+    CheckStatPath,
+    Stat {
+        lstat: bool,
+    },
+    StatTime(u32),
+    StatExtraInt(u32),
     Query(PathQuery),
     ReadText,
     ReadBytes,

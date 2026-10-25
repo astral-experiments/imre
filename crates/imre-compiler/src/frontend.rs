@@ -1471,6 +1471,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
         Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return Ok(Type::ClockTime),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
+        Some(Binding::Intrinsic(Intrinsic::StatResult)) => return Ok(types.stat_result()),
         Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
             return Ok(Type::CompletedProcess(
@@ -5680,6 +5681,9 @@ impl<'a> Checker<'a> {
                 }
                 if let Type::StrDescriptor(method) = receiver.ty {
                     return self.descriptor_attribute(receiver, method, attribute);
+                }
+                if self.types.is_stat_result(receiver.ty) {
+                    return self.stat_result_attribute(receiver, attribute);
                 }
                 if let Some(definition) = self.types.namedtuple_definition(receiver.ty) {
                     return self.namedtuple_instance_attribute(attribute, receiver, definition);
