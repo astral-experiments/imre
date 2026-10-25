@@ -73,7 +73,7 @@ impl Checker<'_> {
             Iteration::Prepared(_) => !matches!(source, ast::Expr::Call(call)
                 if matches!(&*call.func, ast::Expr::Name(name) if name.id == "reversed")),
             Iteration::Container { iterable, .. } => {
-                matches!(iterable.ty, Type::TextIO | Type::BinaryIO)
+                matches!(iterable.ty, Type::TextIO | Type::BinaryIO | Type::CsvReader)
             }
             Iteration::Range(_) => false,
         };
