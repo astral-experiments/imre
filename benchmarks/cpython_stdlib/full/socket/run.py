@@ -20,17 +20,24 @@ from suite_native import Toolchain, method_bytes
 UP = HERE / "upstream/Lib/test/test_socket.py"
 TCP = ("testRecv", "testOverFlowRecv", "testSendAll")
 BACKLOG = "test_listen_backlog"
+DESCRIPTORS = ("test_default_inheritable", "test_set_inheritable", "test_dup")
 TIMEOUT = 15
 NATIVE_BYTES_EQUALITY = b'''    def assertEqual(self, actual: bytes, expected: bytes) -> None:
         if actual != expected:
             raise AssertionError("received bytes differ")
+'''
+NATIVE_BOOL_EQUALITY = b'''    def assertEqual(self, actual: bool, expected: bool) -> None:
+        self.assertTrue(actual == expected)
 '''
 
 
 def source():
     bodies = {name: method_bytes(UP, "BasicTCPTest", name) for method in TCP
               for name in (method, "_" + method)}
+    tcp_methods = b"\n".join(bodies.values())
     bodies[BACKLOG] = method_bytes(UP, "GeneralModuleTests", BACKLOG)
+    for name in DESCRIPTORS:
+        bodies[name] = method_bytes(UP, "InheritanceTest", name)
     # Use the original MSG expression and socket_helper's actual HOST constant.
     from test.test_socket import HOST
     data = UP.read_bytes()
@@ -39,7 +46,8 @@ def source():
     globals_ = f"HOST = {HOST!r}\n".encode() + data.splitlines(keepends=True)[msg.lineno - 1]
     template = (HERE / "tcp_fixture.py.in").read_bytes()
     return (template.replace(b"# UPSTREAM_GLOBALS", globals_)
-            .replace(b"# UPSTREAM_TCP_METHODS", b"\n".join(bodies[n] for n in bodies if n != BACKLOG))
+            .replace(b"# UPSTREAM_TCP_METHODS", tcp_methods)
+            .replace(b"# UPSTREAM_INHERITANCE", b"\n".join(bodies[n] for n in DESCRIPTORS))
             .replace(b"# UPSTREAM_BACKLOG", bodies[BACKLOG])), bodies
 
 
@@ -62,6 +70,12 @@ def observe(command):
     backlog = upstream.GeneralModuleTests(BACKLOG)
     setattr(backlog, BACKLOG, lambda: run("backlog"))
     in_fixture(backlog)
+    for name in DESCRIPTORS:
+        case = upstream.InheritanceTest(name)
+        setattr(case, name, lambda name=name: run("descriptors", name))
+        in_fixture(case)
+
+    run("wrong-cloexec", wrong=True)
 
     def run_tcp(owner, method, wrong):
         case = owner(method)
@@ -113,16 +127,17 @@ def main():
     with tempfile.TemporaryDirectory() as temp:
         work = Path(temp)
         script = work / "oracle.py"
-        # Stock CPython uses its own TestCase.assertEqual for these bytes.
-        script.write_bytes(entry.replace(b"# NATIVE_BYTES_EQUALITY", b""))
-        native = entry.replace(b"# NATIVE_BYTES_EQUALITY", NATIVE_BYTES_EQUALITY)
+        # Stock CPython uses its own TestCase.assertEqual for bytes and booleans.
+        script.write_bytes(entry.replace(b"# NATIVE_BYTES_EQUALITY", b"").replace(b"# NATIVE_BOOL_EQUALITY", b""))
+        native = (entry.replace(b"# NATIVE_BYTES_EQUALITY", NATIVE_BYTES_EQUALITY)
+                  .replace(b"# NATIVE_BOOL_EQUALITY", NATIVE_BOOL_EQUALITY))
         observe([sys.executable, "-E", script])
-        print("CPython: seven original bodies, two host-driven options; eight negative controls rejected", flush=True)
+        print("CPython: ten original bodies, two host-driven options; nine negative controls rejected", flush=True)
         for level in (0, 3):
             binary = Toolchain(args.compiler, args.runtime, clang, level).build(native, work)
             observe([binary])
-            reports.append(report(reference, UP, bodies, TCP, BACKLOG, OPTIONS, level))
-            print(f"O{level}: seven original bodies, two host-driven options; eight negative controls rejected", flush=True)
+            reports.append(report(reference, UP, bodies, TCP, BACKLOG, OPTIONS, DESCRIPTORS, level))
+            print(f"O{level}: ten original bodies, two host-driven options; nine negative controls rejected", flush=True)
 
     if args.output:
         write_reports(args.output, reports, reference)
