@@ -10,6 +10,12 @@ use std::rc::Rc;
 
 const MAX_DESCRIPTION_BYTES: usize = 1024;
 
+const STAT_RESULT_NAME: &str = "os.stat_result";
+pub(crate) const STAT_SEQUENCE_FIELDS: [&str; 10] = [
+    "st_mode", "st_ino", "st_dev", "st_nlink", "st_uid", "st_gid", "st_size", "st_atime",
+    "st_mtime", "st_ctime",
+];
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum Shape {
     StringLiterals(Vec<String>),
@@ -703,6 +709,21 @@ impl Types {
         }
         false
     }
+
+    /// Stat results use ten visible integer slots and a separate tail for named attributes.
+    pub(crate) fn stat_result(&self) -> Type {
+        self.struct_sequence(
+            STAT_RESULT_NAME,
+            &STAT_SEQUENCE_FIELDS,
+            vec![Type::Int; STAT_SEQUENCE_FIELDS.len()],
+        )
+    }
+
+    pub(crate) fn is_stat_result(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id],
+            Shape::NamedTuple(TupleOrigin::StructSequence(STAT_RESULT_NAME, _), _)))
+    }
+
     pub(crate) fn declare_namedtuple(&self, definition: DefinitionId, declaration: NamedTuple) {
         self.0
             .borrow_mut()
