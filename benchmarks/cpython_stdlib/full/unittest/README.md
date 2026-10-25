@@ -58,8 +58,8 @@ compares complete failure messages, including first differing and extra list
 elements, Unicode, truncation, custom messages, and a subclass's failure class.
 It adds no upstream IDs.
 
-At each of O0 and O3: 7 fully native passes, 8 native bodies with host
-fixtures, 9 host-driven native operations (36 calls), 10 compile blockers,
+At each of O0 and O3: 8 fully native passes, 8 native bodies with host
+fixtures, 9 host-driven native operations (36 calls), 9 compile blockers,
 1,054 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
 all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
 
@@ -129,8 +129,13 @@ the same [native default fixture entry](../../SUITE_RUNNER.md#running-a-method-w
 as the four above. Each receipt includes its verbose case ID, one-test summary,
 source blob, and complete method hash.
 
-Five additional original Mock methods have measured compile blockers. One
-reaches `TestCase.assertNotIn`. The three reset methods need constructor
+`test_assert_called_once_message_not_called` checks the actual assertion message
+from a mock that was never called. The [membership control](membership.py)
+also exercises substring, list and dictionary membership, failure messages,
+operand evaluation order, and subclass overrides.
+
+Four additional original Mock methods have measured compile blockers.
+The three reset methods need constructor
 arguments (`parent` or `return_value`) or assign a mock as its own return value.
 `test_assert_called_exception_message` also reaches positional `str.format` at
 upstream `testmock.py:533`.

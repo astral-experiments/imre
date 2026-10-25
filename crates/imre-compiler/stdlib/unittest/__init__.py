@@ -265,6 +265,35 @@ class TestCase:
             right = [repr(x) for x in list2]
             self._list_difference(left, right, left, right, msg)
 
+    def _failMembership(self, member: str, container: str, msg: str | None, expected: bool) -> None:
+        detail = " not found in " if expected else " unexpectedly found in "
+        self.fail(self._formatMessage(msg, member + detail + container))
+
+    def _assertTextMembership(self, member: str, container: str, msg: str | None = None, *, expected: bool) -> None:
+        if (member in container) != expected:
+            self._failMembership(repr(member), repr(container), msg, expected)
+
+    def _assertTextListMembership(self, member: str, container: list[str], msg: str | None = None, *, expected: bool) -> None:
+        if (member in container) != expected:
+            self._failMembership(repr(member), repr(container), msg, expected)
+
+    def _assertIntListMembership(self, member: int, container: list[int], msg: str | None = None, *, expected: bool) -> None:
+        found = False
+        for item in container:
+            if member == item:
+                found = True
+                break
+        if found != expected:
+            self._failMembership(repr(member), repr(container), msg, expected)
+
+    def _assertTextDictMembership(self, member: str, container: dict[str, str], msg: str | None = None, *, expected: bool) -> None:
+        if (member in container) != expected:
+            self._failMembership(repr(member), repr(container), msg, expected)
+
+    def _assertIntKeyMembership(self, member: object, container: dict[int, str], msg: str | None = None, *, expected: bool) -> None:
+        if (member in container) != expected:
+            self._failMembership(repr(member), repr(container), msg, expected)
+
     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
         if first == second:
             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
