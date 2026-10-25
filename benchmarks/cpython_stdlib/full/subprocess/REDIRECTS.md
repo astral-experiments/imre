@@ -33,3 +33,14 @@ python benchmarks/cpython_stdlib/full/subprocess/redirect_fixtures.py \
 
 Repeat with `--opt-level 3`. Use `--kind numbers` or `--kind files` to run one
 representation separately.
+
+The [repeat with the merged launch-error and file-descriptor code](redirects-merged-linux.json)
+records the same offsets at both levels. Its tested tree is
+`5619286a93eced789acfa99b1930ec12a98c585f`; the compiler and runtime sources
+are identical to the green #651 head. The complete reports include these
+14 occurrences as host-driven native operations. To reproduce that update:
+
+```sh
+"$CPYTHON" redirect_evidence.py --previous /tmp/previous-evidence.json \
+    --result evidence-linux.json
+```
