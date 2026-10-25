@@ -35,7 +35,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `enum` | Yes | Named `Enum` and `StrEnum` members and aliases. [Evidence](../tests/fixtures/classes/ordinary_enums.py) | — | — | — |
 | `errno` | Yes | Named errno constants, aliases and the `errorcode` registry. [Evidence](../benchmarks/cpython_stdlib/full/errno/README.md) | [3 / 3](../benchmarks/cpython_stdlib/full/errno/) | 0 | 0 |
 | `fnmatch` | Yes | `fnmatch`, `fnmatchcase`, `filter`, `filterfalse` and `translate`. [Evidence](../benchmarks/cpython_stdlib/full/fnmatch/README.md) | [8 / 24](../benchmarks/cpython_stdlib/full/fnmatch/) | 0 | 16 |
-| `functools` | Yes | Selected `partial`, caching decorators and dispatch operations. [Evidence](../benchmarks/cpython_stdlib/full/functools/EVIDENCE.md) | [0 / 329](../benchmarks/cpython_stdlib/full/functools/) | 9 | 17 |
+| `functools` | Yes | Selected `partial`, caching decorators and dispatch operations. [Evidence](../benchmarks/cpython_stdlib/full/functools/EVIDENCE.md) | [0 / 329](../benchmarks/cpython_stdlib/full/functools/) | 12 | 17 |
 | `genericpath` | Rejected | The genericpath companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | — | — | — |
 | `gzip` | Yes | Read text lines and binary chunks from gzip files. [Evidence](../tests/fixtures/files/stream_reads.py) | — | — | — |
 | `hashlib` | Yes | SHA-256 construction, incremental updates, digest and hexdigest. [Evidence](../benchmarks/cpython_stdlib/native_hashlib.py) | — | — | — |
