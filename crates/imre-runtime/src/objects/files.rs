@@ -809,9 +809,9 @@ mod tests {
     }
 
     fn open(path: &str, mode: u32) -> Rc<Object> {
-        let path = Str::new(path);
-        // SAFETY: the local string is rooted; this helper requires a successful open.
-        let result = unsafe { imre_text_open(&path, mode) };
+        let path = Rc::new(Str::new(path));
+        // SAFETY: the path is rooted in an Rc; this helper requires a successful open.
+        let result = unsafe { imre_text_open(Rc::as_ptr(&path), mode) };
         assert!(!result.is_null());
         // SAFETY: open transfers this one owned reference to the Rc.
         unsafe { Rc::from_raw(result) }
@@ -1220,8 +1220,9 @@ mod tests {
             ),
             ("nul\0path".to_owned(), Kind::ValueError),
         ] {
-            // SAFETY: the temporary path remains rooted for this failed call.
-            assert!(unsafe { imre_text_open(&Str::from(path), 0) }.is_null());
+            let path = Rc::new(Str::from(path));
+            // SAFETY: the path remains rooted in an Rc for this failed call.
+            assert!(unsafe { imre_text_open(Rc::as_ptr(&path), 0) }.is_null());
             take_error(kind);
         }
         let denied = os_error(io::Error::from(io::ErrorKind::PermissionDenied));
