@@ -510,7 +510,7 @@ impl<K: ScalarKey> Table<K, usize> {
             return Ok(Some(unsafe { kind.acquire(value) }));
         }
         let element = match missing {
-            Missing::Raise => return Ok(None),
+            Missing::Raise | Missing::NoFactory => return Ok(None),
             Missing::Zero => {
                 // SAFETY: a Counter has exact integer values. Zero is immediate.
                 return Ok(Some(unsafe { kind.acquire(Int::small(0).unwrap().0) }));
@@ -686,6 +686,7 @@ impl AsciiIntCache {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Missing {
     Raise,
+    NoFactory,
     List(WordKind),
     Zero,
 }
@@ -1038,14 +1039,16 @@ impl Mapping {
             return None;
         }
         if position == 0 {
-            if matches!(self.missing, Missing::List(_)) {
-                output.push_str("defaultdict(<class 'list'>, ");
+            match self.missing {
+                Missing::List(_) => output.push_str("defaultdict(<class 'list'>, "),
+                Missing::NoFactory => output.push_str("defaultdict(None, "),
+                _ => {}
             }
             output.push('{');
         }
         let Some((next, key, value)) = self.tables.next(position) else {
             output.push('}');
-            if matches!(self.missing, Missing::List(_)) {
+            if matches!(self.missing, Missing::List(_) | Missing::NoFactory) {
                 output.push(')');
             }
             return None;
@@ -1569,6 +1572,39 @@ pub extern "C" fn imre_dict_new(key_kind: u32, value_kind: u32) -> *const Object
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
         TableOwner::new(Mapping::new(key_kind, value_kind)),
     )))))
+}
+
+/// Select the bound dictionary's class before consuming the first key.
+///
+/// # Safety
+/// The caller roots both mappings. `fresh` is a new, unreachable plain
+/// dictionary with the result's key and value types.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_fromkeys_target(
+    owner: *const Object,
+    fresh: *const Object,
+) -> *const Object {
+    // SAFETY: only the missing-key policy is copied out of the receiver's borrow.
+    let policy = unsafe { object(owner).0.with(|s| s.dictionary().missing) };
+    let missing = match policy {
+        Missing::Zero => {
+            return Error::new(
+                Kind::NotImplementedError,
+                "Counter.fromkeys() is undefined.  Use Counter(iterable) instead.",
+            )
+            .returning(std::ptr::null());
+        }
+        Missing::List(_) | Missing::NoFactory => Missing::NoFactory,
+        Missing::Raise => Missing::Raise,
+    };
+    // SAFETY: the target is still private; the result needs its own strong reference.
+    unsafe {
+        object(fresh)
+            .0
+            .with_mut(|s| s.dictionary_mut().missing = missing);
+        Rc::increment_strong_count(fresh);
+    }
+    fresh
 }
 
 /// Copies the mapping in insertion order, preserving its subscription policy.

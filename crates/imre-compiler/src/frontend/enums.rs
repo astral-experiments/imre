@@ -268,6 +268,9 @@ impl Checker<'_> {
             })
             || types
                 .iter()
+                .all(|ty| matches!(ty, Type::ForwardRef(_) | Type::Callable(_)))
+            || types
+                .iter()
                 .all(|ty| matches!(ty, Type::Str | Type::StrLiteral(_) | Type::Bytes))
             || (types[0] == types[1]
                 && self
@@ -287,6 +290,7 @@ impl Checker<'_> {
             || types == [Type::Logger; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
+            || types == [Type::PathInfo; 2]
             || types == [Type::Sha256; 2])
         {
             return Err(error(
