@@ -1,5 +1,6 @@
 //! Usage and help formatting for long options, using Python code-point widths.
 
+use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::fmt::Write;
 use std::io::IsTerminal;
@@ -259,17 +260,28 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
 }
 
 fn usage_lines(
-    parts: &[(usize, String)],
+    parts: &[(usize, impl AsRef<str>)],
     indent: usize,
-    mut initial: usize,
+    initial: usize,
     width: usize,
 ) -> String {
     let mut output = String::new();
-    let mut first = true;
+    write_usage_lines(&mut output, parts, indent, initial, width, true);
+    output
+}
+
+fn write_usage_lines(
+    output: &mut String,
+    parts: &[(usize, impl AsRef<str>)],
+    indent: usize,
+    mut initial: usize,
+    width: usize,
+    mut first: bool,
+) {
     for &(length, ref part) in parts {
         if !first && initial + 1 + length > width {
             output.push('\n');
-            output.push_str(&" ".repeat(indent));
+            output.extend(std::iter::repeat_n(' ', indent));
             initial = indent;
             first = true;
         }
@@ -277,11 +289,10 @@ fn usage_lines(
             initial += 1;
             output.push(' ');
         }
-        output.push_str(part);
+        output.push_str(part.as_ref());
         initial += length;
         first = false;
     }
-    output
 }
 
 impl Subcommands {
@@ -412,20 +423,24 @@ impl Parser {
         let Some(commands) = &mut self.subcommands else {
             return Ok(());
         };
-        let mut parts = vec![(len(&self.prog), self.prog.clone())];
+        let mut parts = vec![(len(&self.prog), Cow::Borrowed(self.prog.as_str()))];
         parts.extend(self.options.iter().filter(|o| o.positional()).map(|o| {
             let label = o.label(true, false);
-            (len(&label), label)
+            (len(&label), Cow::Owned(label))
         }));
         let width = width();
         let prog = if parts.len() == 1 {
-            self.prog.clone()
+            Cow::Borrowed(self.prog.as_str())
         } else if parts.iter().map(|(length, _)| length + 1).sum::<usize>() - 1 > width
             && len(&self.prog) * 4 > width.saturating_mul(3)
         {
-            format!("{}\n{}", self.prog, usage_lines(&parts[1..], 0, 0, width))
+            Cow::Owned(format!(
+                "{}\n{}",
+                self.prog,
+                usage_lines(&parts[1..], 0, 0, width)
+            ))
         } else {
-            usage_lines(&parts, len(&self.prog) + 1, 0, width)
+            Cow::Owned(usage_lines(&parts, len(&self.prog) + 1, 0, width))
         };
         let prog = prog.trim_matches(python_whitespace);
         for child in &mut commands.choices {
@@ -469,7 +484,7 @@ impl Parser {
 
     pub(super) fn usage(&self, width: usize) -> String {
         let color = color_enabled();
-        let mut parts = vec![(len(&self.prog), paint(color, "1;35", &self.prog))];
+        let mut parts = Vec::new();
         if let Some([short, _]) = &self.help_flags {
             parts.push((len(short) + 2, format!("[{}]", paint(color, "32", short))));
         }
@@ -480,44 +495,41 @@ impl Parser {
             positional.push((len(&word), paint(color, "32", &word)));
         }
         let prefix = "usage: ".len();
+        let prog_end = prefix + len(&self.prog);
         let mut text = paint(color, "1;34", "usage: ");
-        let width_of = |parts: &[(usize, String)]| parts.iter().map(|(n, _)| n + 1).sum::<usize>();
-        if (parts.len() == 1 && positional.is_empty())
-            || prefix + width_of(&parts) + width_of(&positional) - 1 <= width
-        {
-            text.push_str(
-                &parts
-                    .iter()
-                    .chain(&positional)
-                    .map(|(_, part)| part.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            );
+        if color {
+            write!(text, "\x1b[1;35m{}\x1b[0m", self.prog).unwrap();
         } else {
-            if parts.len() == 1 {
+            text.push_str(&self.prog);
+        }
+        let width_of = |parts: &[(usize, String)]| parts.iter().map(|(n, _)| n + 1).sum::<usize>();
+        if (parts.is_empty() && positional.is_empty())
+            || prog_end + width_of(&parts) + width_of(&positional) <= width
+        {
+            for (_, part) in parts.iter().chain(&positional) {
+                text.push(' ');
+                text.push_str(part);
+            }
+        } else {
+            if parts.is_empty() {
                 parts.append(&mut positional);
             }
-            let short_prog = (prefix + len(&self.prog)) * 4 <= 3 * width;
-            let indent = if short_prog {
-                prefix + len(&self.prog) + 1
-            } else {
-                prefix
-            };
+            let short_prog = prog_end * 4 <= 3 * width;
+            let indent = if short_prog { prog_end + 1 } else { prefix };
             if short_prog {
-                text.push_str(&usage_lines(&parts, indent, prefix, width));
+                write_usage_lines(&mut text, &parts, indent, prog_end, width, false);
             } else {
-                text.push_str(&parts[0].1);
                 text.push('\n');
-                text.push_str(&" ".repeat(indent));
-                if prefix + width_of(&parts[1..]) + width_of(&positional) - 1 <= width {
+                text.extend(std::iter::repeat_n(' ', indent));
+                if prefix + width_of(&parts) + width_of(&positional) - 1 <= width {
                     parts.append(&mut positional);
                 }
-                text.push_str(&usage_lines(&parts[1..], indent, indent, width));
+                write_usage_lines(&mut text, &parts, indent, indent, width, true);
             }
             if !positional.is_empty() {
                 text.push('\n');
-                text.push_str(&" ".repeat(indent));
-                text.push_str(&usage_lines(&positional, indent, indent, width));
+                text.extend(std::iter::repeat_n(' ', indent));
+                write_usage_lines(&mut text, &positional, indent, indent, width, true);
             }
         }
         text.push('\n');

@@ -4,7 +4,6 @@
 use crate::StrOwner;
 use std::cell::OnceCell;
 use std::hash::{Hash, Hasher};
-use std::rc::Rc;
 
 use super::{Error, Kind, Object, Result, Storage, StorageCell, Str, object};
 use crate::objects::exceptions::string_repr;
@@ -487,9 +486,9 @@ impl PurePath {
         }
     }
     pub(super) fn into_object(self) -> *const Object {
-        Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::PurePath(
-            Box::new(self),
-        )))))
+        crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+            Storage::PurePath(Box::new(self)),
+        ))))
     }
 }
 

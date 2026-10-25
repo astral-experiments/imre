@@ -34,7 +34,11 @@
 
 mod extensions;
 mod floats;
+mod shared;
 mod string_owner;
+use shared::Shared;
+type ObjectOwner = Shared<objects::Object>;
+type WeakObject = shared::Weak<objects::Object>;
 use string_owner::{StrOwner, WeakStr};
 mod integer_power;
 mod integer_text;

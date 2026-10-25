@@ -109,8 +109,8 @@ pub(super) enum Nodes {
     /// The iterative parser emits every subtree contiguously in postorder.
     Deep(Rc<Vec<Node>>),
     /// Keep aliases of a mutable root array without enlarging every scalar view.
-    Root(Rc<Vec<Node>>, Rc<Object>),
-    DeepRoot(Rc<Vec<Node>>, Rc<Object>),
+    Root(Rc<Vec<Node>>, crate::ObjectOwner),
+    DeepRoot(Rc<Vec<Node>>, crate::ObjectOwner),
     /// Computed scalars and missing defaults do not need a second allocation.
     Single(Node),
 }
@@ -129,7 +129,7 @@ impl std::ops::Deref for Nodes {
 }
 
 impl Nodes {
-    pub(super) fn root_items(&self) -> Option<&Rc<Object>> {
+    pub(super) fn root_items(&self) -> Option<&crate::ObjectOwner> {
         match self {
             Self::Root(_, items) | Self::DeepRoot(_, items) => Some(items),
             _ => None,
@@ -179,7 +179,9 @@ impl View {
     }
 
     fn into_handle(self) -> *const Object {
-        Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Json(self)))))
+        crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+            Storage::Json(self),
+        ))))
     }
 
     fn resolved(&self, index: usize) -> (&Self, usize) {
@@ -336,7 +338,7 @@ impl View {
 
     fn array(&self, children: &[usize]) -> *const Object {
         if let Some(items) = self.nodes.root_items() {
-            return Rc::into_raw(Rc::clone(items));
+            return crate::ObjectOwner::into_raw(crate::ObjectOwner::clone(items));
         }
         Self::children(&self.nodes, children)
     }
@@ -346,7 +348,7 @@ impl View {
         result
             .values
             .extend(children.iter().map(|&i| Self::handle(nodes, i) as usize));
-        Rc::into_raw(result.into_object())
+        crate::ObjectOwner::into_raw(result.into_object())
     }
 
     fn select(&self, mut path: &[u8], mode: u32, literal: Option<&Str>) -> Result<usize, Error> {
@@ -759,7 +761,7 @@ pub unsafe extern "C" fn imre_json_get_receiver(value: *const Object) -> *const 
     let result = unsafe {
         with_view(value, |v| {
             v.get_receiver()?;
-            Rc::increment_strong_count(value);
+            crate::ObjectOwner::increment_strong_count(value);
             Ok(value)
         })
     };
@@ -903,7 +905,7 @@ fn collect_keys<const STRINGS: bool>(fields: &ObjectFields) -> Result<*const Obj
             View::single(Node::String(owner)).into_handle() as usize
         });
     }
-    Ok(Rc::into_raw(items.into_object()))
+    Ok(crate::ObjectOwner::into_raw(items.into_object()))
 }
 
 /// # Safety
@@ -949,7 +951,7 @@ pub unsafe extern "C" fn imre_json_iter(value: *const Object) -> *const Object {
                     ));
                 }
             }
-            Ok(Rc::into_raw(items.into_object()))
+            Ok(crate::ObjectOwner::into_raw(items.into_object()))
         })
     };
     finish(result, std::ptr::null())

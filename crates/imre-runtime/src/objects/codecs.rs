@@ -2,14 +2,14 @@
 
 use super::bytes::{ascii_decode_error, decode_error, owned_input};
 use super::exceptions::Result;
-use super::{Bytes, Error, Kind, Object, Rc, Storage, StorageCell, Str, finish, object};
-use crate::{BytesOwner, StrOwner};
+use super::{Bytes, Error, Kind, Object, Storage, StorageCell, Str, finish, object};
+use crate::{BytesOwner, ObjectOwner, StrOwner};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
 thread_local! {
-    static REGISTRY: RefCell<HashMap<String, Rc<Object>>> = RefCell::default();
+    static REGISTRY: RefCell<HashMap<String, ObjectOwner>> = RefCell::default();
     static NAMES: [StrOwner; 4] = ["ascii", "iso8859-1", "utf-8", "utf-8-sig"].map(|s| StrOwner::new(Str::new(s)));
 }
 
@@ -49,16 +49,20 @@ pub unsafe extern "C" fn imre_codec_lookup(name: *const Str) -> *const Object {
     };
     REGISTRY.with_borrow_mut(|entries| {
         if let Some(entry) = entries.get(&key) {
-            return Rc::into_raw(entry.clone());
+            return ObjectOwner::into_raw(entry.clone());
         }
         match Codec::by_key(&key, name) {
             Ok(codec) => {
                 if entries.try_reserve(1).is_err() {
                     return Error::allocation().returning(std::ptr::null());
                 }
-                let info = Rc::new(Object(StorageCell::new(Storage::CodecInfo(codec))));
+                let Ok(info) =
+                    ObjectOwner::try_new(Object(StorageCell::new(Storage::CodecInfo(codec))))
+                else {
+                    return Error::memory_error().returning(std::ptr::null());
+                };
                 entries.insert(key, info.clone());
-                Rc::into_raw(info)
+                ObjectOwner::into_raw(info)
             }
             Err(e) => e.returning(std::ptr::null()),
         }
@@ -109,7 +113,9 @@ pub unsafe extern "C" fn imre_codec_encode(
         result.and_then(|bytes| {
             let owner = match bytes {
                 Cow::Borrowed(bytes) => owned_input(bytes)?,
-                Cow::Owned(bytes) => BytesOwner::try_new(bytes).map_err(|_| Error::allocation())?,
+                Cow::Owned(bytes) => {
+                    BytesOwner::try_new(bytes).map_err(|_| Error::memory_error())?
+                }
             };
             Ok(BytesOwner::into_raw(owner))
         }),
@@ -415,16 +421,26 @@ mod tests {
         let bytes = BytesOwner::new(vec![b'a', 0xff]);
         // SAFETY: all ABI operands remain live until the returned owners are released.
         unsafe {
-            let codec = Rc::from_raw(imre_codec_lookup(&name));
+            let codec = ObjectOwner::from_raw(imre_codec_lookup(&name));
             assert!(
-                imre_codec_encode(Rc::as_ptr(&codec), StrOwner::as_ptr(&text), &policy).is_null()
+                imre_codec_encode(
+                    ObjectOwner::as_ptr(&codec),
+                    StrOwner::as_ptr(&text),
+                    &policy
+                )
+                .is_null()
             );
             let error = super::super::exceptions::take_pending().unwrap();
             assert_eq!(StrOwner::strong_count(&text), 2);
             drop(error);
             assert_eq!(StrOwner::strong_count(&text), 1);
             assert!(
-                imre_codec_decode(Rc::as_ptr(&codec), BytesOwner::as_ptr(&bytes), &policy).is_null()
+                imre_codec_decode(
+                    ObjectOwner::as_ptr(&codec),
+                    BytesOwner::as_ptr(&bytes),
+                    &policy
+                )
+                .is_null()
             );
             let _error = super::super::exceptions::take_pending().unwrap();
             assert_eq!(BytesOwner::strong_count(&bytes), 1);

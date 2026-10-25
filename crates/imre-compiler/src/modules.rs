@@ -978,6 +978,10 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    pub(crate) fn checked_diagnostic_count(&self, module: ModuleId) -> usize {
+        self.checked_diagnostics.borrow()[module].len()
+    }
+
     pub(crate) fn is_unittest_main(&self, id: DefinitionId) -> bool {
         let owner = &self.modules[id.module];
         owner.bundled

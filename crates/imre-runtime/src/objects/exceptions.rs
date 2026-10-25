@@ -20,7 +20,7 @@ use num_traits::ToPrimitive;
 use ruff_python_literal::escape::{Escape, UnicodeEscape};
 
 use super::words::{OwnedWord, WordKind};
-use super::{Object, Storage, StorageCell, Str, acquire_rc, fail, object};
+use super::{Object, Storage, StorageCell, Str, fail, object};
 
 mod os;
 pub(super) use os::Filename;
@@ -296,12 +296,10 @@ impl Kind {
                 Self::OSError
                     | Self::UnsupportedOperation
                     | Self::FileNotFoundError
-                    | Self::BlockingIOError
                     | Self::PermissionError
                     | Self::IsADirectoryError
                     | Self::NotADirectoryError
                     | Self::FileExistsError
-                    | Self::BlockingIOError
                     | Self::ConnectionError
                     | Self::BrokenPipeError
                     | Self::ConnectionAbortedError
@@ -330,7 +328,7 @@ pub(super) struct Exception {
 
 #[derive(Clone, Default)]
 struct ExceptionDetails {
-    cause: Option<Rc<Object>>,
+    cause: Option<crate::ObjectOwner>,
     named: Option<&'static NamedDescriptor>,
     layout: Option<Rc<NamedPayload>>,
     directories: Option<Rc<DirectoryFrame>>,
@@ -346,7 +344,7 @@ struct NamedPayload {
     takes_record_owner: bool,
 }
 struct DirectoryFrame {
-    managers: Vec<Rc<Object>>,
+    managers: Vec<crate::ObjectOwner>,
     outer: Option<Rc<DirectoryFrame>>,
 }
 
@@ -406,17 +404,17 @@ impl From<StrOwner> for Payload {
 /// materialized again; simultaneous projections preserve object identity.
 #[derive(Clone)]
 enum GroupMember {
-    Strong(Rc<Object>),
+    Strong(crate::ObjectOwner),
     Caused(Rc<CausedMember>),
 }
 
 struct CausedMember {
-    live: RefCell<std::rc::Weak<Object>>,
+    live: RefCell<crate::WeakObject>,
     value: Exception,
 }
 
 impl GroupMember {
-    fn get(&self, owner: &Rc<Object>) -> Rc<Object> {
+    fn get(&self, owner: &crate::ObjectOwner) -> crate::ObjectOwner {
         match self {
             Self::Strong(child) => child.clone(),
             Self::Caused(entry) => {
@@ -425,8 +423,9 @@ impl GroupMember {
                 }
                 let mut value = entry.value.clone();
                 value.details_mut().cause = Some(owner.clone());
-                let child = Rc::new(Object(StorageCell::new(Storage::Exception(value))));
-                *entry.live.borrow_mut() = Rc::downgrade(&child);
+                let child =
+                    crate::ObjectOwner::new(Object(StorageCell::new(Storage::Exception(value))));
+                *entry.live.borrow_mut() = crate::ObjectOwner::downgrade(&child);
                 child
             }
         }
@@ -452,11 +451,11 @@ impl Exception {
         Rc::make_mut(self.details.get_or_insert_with(Default::default))
     }
 
-    fn cause(&self) -> Option<&Rc<Object>> {
+    fn cause(&self) -> Option<&crate::ObjectOwner> {
         self.details.as_deref()?.cause.as_ref()
     }
 
-    fn take_cause(&mut self) -> Option<Rc<Object>> {
+    fn take_cause(&mut self) -> Option<crate::ObjectOwner> {
         // A shared snapshot retains its own metadata and keeps the cause rooted.
         Rc::into_inner(self.details.take()?)?.cause
     }
@@ -486,7 +485,7 @@ impl Drop for Exception {
     fn drop(&mut self) {
         let mut next = self.take_cause();
         while let Some(cause) = next {
-            let Ok(object) = Rc::try_unwrap(cause) else {
+            let Ok(object) = crate::ObjectOwner::try_unwrap(cause) else {
                 break;
             };
             let Storage::Exception(mut exception) = object.0.into_inner() else {
@@ -502,7 +501,7 @@ pub(crate) struct Error {
     kind: Kind,
     // A missing payload uses the preallocated MemoryError when raised.
     payload: Option<Payload>,
-    cause: Option<Rc<Object>>,
+    cause: Option<crate::ObjectOwner>,
 }
 
 impl Error {
@@ -753,17 +752,17 @@ impl Error {
         self
     }
 
-    fn into_object(self) -> Rc<Object> {
+    fn into_object(self) -> crate::ObjectOwner {
         match self.payload {
             Some(Payload::Empty) if self.kind == Kind::MemoryError && self.cause.is_none() => {
-                MEMORY_ERROR.with_borrow(Rc::clone)
+                MEMORY_ERROR.with_borrow(crate::ObjectOwner::clone)
             }
             Some(payload) => exception_with_cause(self.kind, payload, self.cause),
-            None => SEQUENCE_ALLOCATION_ERROR.with_borrow(Rc::clone),
+            None => SEQUENCE_ALLOCATION_ERROR.with_borrow(crate::ObjectOwner::clone),
         }
     }
 
-    pub(super) fn into_exception(self) -> Rc<Object> {
+    pub(super) fn into_exception(self) -> crate::ObjectOwner {
         self.into_object()
     }
 
@@ -792,16 +791,16 @@ pub(crate) fn finish<T>(result: Result<T>, sentinel: T) -> T {
 }
 
 thread_local! {
-    static MEMORY_ERROR: RefCell<Rc<Object>> =
+    static MEMORY_ERROR: RefCell<crate::ObjectOwner> =
         RefCell::new(new_exception(Kind::MemoryError, Payload::Empty));
-    static RECORD_ALLOCATION_ERROR: RefCell<Rc<Object>> = RefCell::new(new_exception(
+    static RECORD_ALLOCATION_ERROR: RefCell<crate::ObjectOwner> = RefCell::new(new_exception(
         Kind::MemoryError, StrOwner::new(Str::new("record allocation failed")),
     ));
-    static SEQUENCE_ALLOCATION_ERROR: RefCell<Rc<Object>> = RefCell::new(new_exception(
+    static SEQUENCE_ALLOCATION_ERROR: RefCell<crate::ObjectOwner> = RefCell::new(new_exception(
         Kind::MemoryError, StrOwner::new(Str::new("sequence allocation failed")),
     ));
-    static PENDING: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
-    static ACTIVE: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
+    static PENDING: RefCell<Option<crate::ObjectOwner>> = const { RefCell::new(None) };
+    static ACTIVE: RefCell<Option<crate::ObjectOwner>> = const { RefCell::new(None) };
     // The non-Drop mirror lets successful calls query one TLS byte without
     // initializing or checking the owning cell's destructor/borrow state.
     // Only replace_pending/take_pending mutate the owner; both synchronize this
@@ -822,12 +821,14 @@ pub extern "C" fn imre_record_error_init() {
 
 #[cold]
 pub(super) fn record_allocation_failed() {
-    RECORD_ALLOCATION_ERROR.with_borrow(|error| replace_pending(Some(Rc::clone(error))));
+    RECORD_ALLOCATION_ERROR
+        .with_borrow(|error| replace_pending(Some(crate::ObjectOwner::clone(error))));
 }
 
 #[cold]
 pub(crate) fn sequence_allocation_failed() {
-    SEQUENCE_ALLOCATION_ERROR.with_borrow(|error| replace_pending(Some(Rc::clone(error))));
+    SEQUENCE_ALLOCATION_ERROR
+        .with_borrow(|error| replace_pending(Some(crate::ObjectOwner::clone(error))));
 }
 
 /// # Safety
@@ -853,7 +854,9 @@ pub unsafe extern "C" fn imre_prepare_directory_frame(
         })),
         ..ExceptionDetails::default()
     }));
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Exception(error)))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::Exception(error),
+    ))))
 }
 
 unsafe fn armed_directory(manager: *const Object) -> bool {
@@ -886,8 +889,11 @@ pub unsafe extern "C" fn imre_error_frame_keep_directory(
                 let roots = &mut Rc::get_mut(error.details_mut().directories.as_mut().unwrap())
                     .unwrap()
                     .managers;
-                if !roots.iter().any(|root| Rc::as_ptr(root) == manager) {
-                    roots.push(acquire_rc::<Object>(manager as usize));
+                if !roots
+                    .iter()
+                    .any(|root| crate::ObjectOwner::as_ptr(root) == manager)
+                {
+                    roots.push(crate::ObjectOwner::acquire_word(manager as usize));
                 }
             })
         }
@@ -899,7 +905,7 @@ pub unsafe extern "C" fn imre_error_frame_keep_directory(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_error_attach_directory_frame(frame: *const Object) {
     // SAFETY: this consumes the compiler's one reserved frame owner.
-    let frame = unsafe { Rc::from_raw(frame) };
+    let frame = unsafe { crate::ObjectOwner::from_raw(frame) };
     // SAFETY: the frame is still private to this unwind.
     let details = unsafe {
         frame.0.with_mut(|storage| {
@@ -920,7 +926,7 @@ pub unsafe extern "C" fn imre_error_attach_directory_frame(frame: *const Object)
             &MEMORY_ERROR,
         ]
         .into_iter()
-        .find(|template| template.with_borrow(|cached| Rc::ptr_eq(cached, pending)))
+        .find(|template| template.with_borrow(|cached| crate::ObjectOwner::ptr_eq(cached, pending)))
         {
             // Move the spare into the cache. Existing aliases keep the exact pending
             // exception and its traceback, including an alias saved before a re-raise.
@@ -948,12 +954,16 @@ pub unsafe extern "C" fn imre_error_attach_directory_frame(frame: *const Object)
     });
 }
 
-fn new_exception(kind: Kind, payload: impl Into<Payload>) -> Rc<Object> {
+fn new_exception(kind: Kind, payload: impl Into<Payload>) -> crate::ObjectOwner {
     exception_with_cause(kind, payload.into(), None)
 }
 
-fn exception_with_cause(kind: Kind, payload: Payload, cause: Option<Rc<Object>>) -> Rc<Object> {
-    Rc::new(Object(StorageCell::new(Storage::Exception(Exception {
+fn exception_with_cause(
+    kind: Kind,
+    payload: Payload,
+    cause: Option<crate::ObjectOwner>,
+) -> crate::ObjectOwner {
+    crate::ObjectOwner::new(Object(StorageCell::new(Storage::Exception(Exception {
         kind,
         payload,
         suppress_context: cause.is_some(),
@@ -972,7 +982,7 @@ pub(super) fn kind_of(error: &Object) -> Kind {
 }
 
 /// Wrap an escaping StopIteration with the RuntimeError message for its frame kind.
-pub(super) fn wrap_stop_iteration(error: Rc<Object>, message: &str) -> Rc<Object> {
+pub(super) fn wrap_stop_iteration(error: crate::ObjectOwner, message: &str) -> crate::ObjectOwner {
     if kind_of(&error) != Kind::StopIteration {
         return error;
     }
@@ -985,8 +995,11 @@ pub(super) fn wrap_stop_iteration(error: Rc<Object>, message: &str) -> Rc<Object
 
 /// A generator context manager lets the with-body propagate its original exception,
 /// including a StopIteration returned as the cause of a RuntimeError.
-pub(super) fn propagates_context_exception(raised: &Rc<Object>, injected: &Rc<Object>) -> bool {
-    if Rc::ptr_eq(raised, injected) {
+pub(super) fn propagates_context_exception(
+    raised: &crate::ObjectOwner,
+    injected: &crate::ObjectOwner,
+) -> bool {
+    if crate::ObjectOwner::ptr_eq(raised, injected) {
         return true;
     }
     if kind_of(injected) != Kind::StopIteration {
@@ -999,12 +1012,12 @@ pub(super) fn propagates_context_exception(raised: &Rc<Object>, injected: &Rc<Ob
             exception.kind.matches(Kind::RuntimeError)
                 && exception
                     .cause()
-                    .is_some_and(|cause| Rc::ptr_eq(cause, injected))
+                    .is_some_and(|cause| crate::ObjectOwner::ptr_eq(cause, injected))
         })
     }
 }
 
-pub(super) fn task_group_errors(errors: Vec<Rc<Object>>) -> Rc<Object> {
+pub(super) fn task_group_errors(errors: Vec<crate::ObjectOwner>) -> crate::ObjectOwner {
     new_exception(
         Kind::ExceptionGroup,
         Payload::Group(errors.into_iter().map(GroupMember::Strong).collect()),
@@ -1019,7 +1032,7 @@ pub unsafe extern "C" fn imre_async_exception_at(
     index: usize,
 ) -> *const Object {
     // SAFETY: only an immutable child owner leaves the group's storage.
-    let owner: Rc<Object> = unsafe { acquire_rc(error as usize) };
+    let owner: crate::ObjectOwner = unsafe { crate::ObjectOwner::acquire_word(error as usize) };
     // SAFETY: the owner roots the exact group while its child is acquired.
     let result = unsafe {
         owner.0.with(|storage| {
@@ -1036,7 +1049,7 @@ pub unsafe extern "C" fn imre_async_exception_at(
             let index = super::decode_index(&crate::Int::borrow(index))
                 .and_then(|index| super::index(index, group.len()))
                 .map_err(|_| Error::new(Kind::IndexError, "tuple index out of range"))?;
-            Ok(Rc::into_raw(group[index].get(&owner)))
+            Ok(crate::ObjectOwner::into_raw(group[index].get(&owner)))
         })
     };
     finish(result, std::ptr::null())
@@ -1053,15 +1066,15 @@ pub unsafe extern "C" fn imre_async_member_cause(
     // SAFETY: two ordinary, rooted exception objects are accessed in separate
     // scopes. No user code can reenter their storage during ownership transfer.
     unsafe {
-        let child: Rc<Object> = acquire_rc(child as usize);
-        let group: Rc<Object> = acquire_rc(group as usize);
+        let child: crate::ObjectOwner = crate::ObjectOwner::acquire_word(child as usize);
+        let group: crate::ObjectOwner = crate::ObjectOwner::acquire_word(group as usize);
         let mut snapshot = child.0.with(|storage| storage.exception().clone());
         if snapshot.cause().is_some() {
             snapshot.details_mut().cause = None;
         }
         snapshot.suppress_context = true;
         let entry = Rc::new(CausedMember {
-            live: RefCell::new(Rc::downgrade(&child)),
+            live: RefCell::new(crate::ObjectOwner::downgrade(&child)),
             value: snapshot,
         });
         group.0.with_mut(|storage| {
@@ -1072,7 +1085,7 @@ pub unsafe extern "C" fn imre_async_member_cause(
                 unreachable!("child belongs to group");
             };
             for member in members.iter_mut() {
-                if matches!(member, GroupMember::Strong(target) if Rc::ptr_eq(target, &child)) {
+                if matches!(member, GroupMember::Strong(target) if crate::ObjectOwner::ptr_eq(target, &child)) {
                     *member = GroupMember::Caused(entry.clone());
                 }
             }
@@ -1085,7 +1098,7 @@ pub unsafe extern "C" fn imre_async_member_cause(
             value.details_mut().cause = Some(group);
             value.suppress_context = true;
         });
-        Rc::into_raw(child)
+        crate::ObjectOwner::into_raw(child)
     }
 }
 
@@ -1108,7 +1121,7 @@ pub(super) fn raise_timeout(error: super::processes::TimeoutError) {
 }
 
 /// Replaces the pending owner without dropping it during a TLS mutable borrow.
-pub(super) fn replace_pending(value: Option<Rc<Object>>) {
+pub(super) fn replace_pending(value: Option<crate::ObjectOwner>) {
     let present = value.is_some();
     let previous = PENDING.with(|pending| pending.replace(value));
     PENDING_PRESENT.set(present);
@@ -1116,18 +1129,18 @@ pub(super) fn replace_pending(value: Option<Rc<Object>>) {
 }
 
 /// Clears presence before transferring the owner, without dropping under a TLS borrow.
-pub(super) fn take_pending() -> Option<Rc<Object>> {
+pub(super) fn take_pending() -> Option<crate::ObjectOwner> {
     let pending = PENDING.with(RefCell::take);
     PENDING_PRESENT.set(false);
     pending
 }
 
 /// A suspended task retains the exception dynamically active in its own handlers.
-pub(super) fn swap_active(saved: &mut Option<Rc<Object>>) {
+pub(super) fn swap_active(saved: &mut Option<crate::ObjectOwner>) {
     ACTIVE.with(|active| std::mem::swap(&mut *active.borrow_mut(), saved));
 }
 
-pub(super) fn active_exception() -> Option<Rc<Object>> {
+pub(super) fn active_exception() -> Option<crate::ObjectOwner> {
     ACTIVE.with(|active| active.borrow().clone())
 }
 
@@ -1246,14 +1259,14 @@ impl<W: std::fmt::Write> std::fmt::Write for Unicode16Repr<'_, W> {
 }
 
 /// Acquires nullable exception input without retaining a storage reference.
-unsafe fn acquire_exception(value: *const Object) -> Option<Rc<Object>> {
+unsafe fn acquire_exception(value: *const Object) -> Option<crate::ObjectOwner> {
     if value.is_null() {
         return None;
     }
     // SAFETY: the caller roots the object; only immutable kind metadata escapes.
     unsafe { object(value).0.with(Storage::exception_kind) };
     // SAFETY: the shape-checked handle remains rooted throughout acquisition.
-    Some(unsafe { acquire_rc(value as usize) })
+    Some(unsafe { crate::ObjectOwner::acquire_word(value as usize) })
 }
 
 impl Storage {
@@ -1358,7 +1371,7 @@ pub unsafe extern "C" fn imre_system_exit_new(kind: u32, word: usize) -> *const 
         // SAFETY: the caller roots the argument through this acquisition.
         unsafe { WordKind::new(kind).acquire(word) }
     });
-    Rc::into_raw(new_exception(Kind::SystemExit, Payload::Exit(code)))
+    crate::ObjectOwner::into_raw(new_exception(Kind::SystemExit, Payload::Exit(code)))
 }
 
 /// Acquire an immutable view of the heterogeneous `SystemExit.code` scalar.
@@ -1377,7 +1390,7 @@ pub unsafe extern "C" fn imre_system_exit_code(value: *const Object) -> *const O
         .returning(std::ptr::null());
     }
     // SAFETY: the returned owner keeps the original exception and code alive.
-    Rc::into_raw(unsafe { acquire_rc(value as usize) })
+    crate::ObjectOwner::into_raw(unsafe { crate::ObjectOwner::acquire_word(value as usize) })
 }
 
 pub(super) unsafe fn exit_word(value: *const Object) -> (WordKind, usize) {
@@ -1636,7 +1649,7 @@ pub extern "C" fn imre_error_pending() -> u32 {
 /// Transfers the pending reference to the caller and clears pending state.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_error_take() -> *const Object {
-    take_pending().map_or(std::ptr::null(), Rc::into_raw)
+    take_pending().map_or(std::ptr::null(), crate::ObjectOwner::into_raw)
 }
 
 /// # Safety
@@ -1698,7 +1711,7 @@ pub unsafe extern "C" fn imre_exception_argument(
                 e.details_mut().named = Some(named);
             });
         }
-        Rc::into_raw(value)
+        crate::ObjectOwner::into_raw(value)
     }
 }
 
@@ -1893,7 +1906,7 @@ pub unsafe extern "C" fn imre_exception_new(kind: u32, message: *const Str) -> *
         // SAFETY: the non-null argument is a rooted StrOwner.
         Payload::Message(unsafe { crate::StrOwner::acquire_word(message as usize) })
     };
-    Rc::into_raw(new_exception(kind, payload))
+    crate::ObjectOwner::into_raw(new_exception(kind, payload))
 }
 
 /// # Safety
@@ -2030,7 +2043,7 @@ pub unsafe extern "C" fn imre_exception_cause(value: *const Object) -> *const Ob
         object(value)
             .0
             .with(|storage| storage.exception().cause().cloned())
-            .map_or(std::ptr::null(), Rc::into_raw)
+            .map_or(std::ptr::null(), crate::ObjectOwner::into_raw)
     }
 }
 
@@ -2053,7 +2066,7 @@ pub extern "C" fn imre_exception_current() -> *const Object {
         active
             .borrow()
             .clone()
-            .map_or(std::ptr::null(), Rc::into_raw)
+            .map_or(std::ptr::null(), crate::ObjectOwner::into_raw)
     })
 }
 
@@ -2066,7 +2079,11 @@ pub extern "C" fn imre_exception_current() -> *const Object {
 pub unsafe extern "C" fn imre_exception_swap_active(value: *const Object) -> *const Object {
     // SAFETY: the caller roots the nullable exception before TLS replacement.
     let new = unsafe { acquire_exception(value) };
-    ACTIVE.with(|active| active.replace(new).map_or(std::ptr::null(), Rc::into_raw))
+    ACTIVE.with(|active| {
+        active
+            .replace(new)
+            .map_or(std::ptr::null(), crate::ObjectOwner::into_raw)
+    })
 }
 
 /// # Safety
@@ -2147,7 +2164,7 @@ pub extern "C" fn imre_log_print_active_exception() {
 }
 
 /// Render the exception and its explicit causes without retaining any native frames.
-fn write_exception_chain(exception: Rc<Object>) {
+fn write_exception_chain(exception: crate::ObjectOwner) {
     let mut chain = Vec::new();
     let mut current = Some(exception.clone());
     while let Some(exception) = current {
@@ -2159,7 +2176,7 @@ fn write_exception_chain(exception: Rc<Object>) {
             })
         };
         // SAFETY: the local owner outlives custom formatting and any resulting error.
-        let message = unsafe { display(Rc::as_ptr(&exception), false) };
+        let message = unsafe { display(crate::ObjectOwner::as_ptr(&exception), false) };
         let message = if message.is_null() {
             drop(take_pending());
             StrOwner::new(Str::new("<exception str() failed>"))
@@ -2253,7 +2270,7 @@ mod tests {
     fn cached_memory_errors_keep_separate_directory_owners() {
         use crate::objects::tempdirs::{imre_directory_context_new, imre_tempdir_new};
 
-        fn retained(raise: fn()) -> (Rc<Object>, StrOwner) {
+        fn retained(raise: fn()) -> (crate::ObjectOwner, StrOwner) {
             let prefix = Str::from("imre-error-");
             let suffix = Str::from("");
             // SAFETY: both names are rooted and a null directory selects the system default.
@@ -2262,27 +2279,35 @@ mod tests {
             // SAFETY: creation transfers one string owner. The manager acquires its own reference.
             let (name, manager) = unsafe {
                 let manager = imre_directory_context_new(name as usize, 1);
-                (StrOwner::from_raw(name), Rc::from_raw(manager))
+                (
+                    StrOwner::from_raw(name),
+                    crate::ObjectOwner::from_raw(manager),
+                )
             };
             // SAFETY: the compiler roots the manager while preparing its one traceback slot.
-            let frame =
-                unsafe { imre_prepare_directory_frame(std::ptr::null(), Rc::as_ptr(&manager), 1) };
+            let frame = unsafe {
+                imre_prepare_directory_frame(
+                    std::ptr::null(),
+                    crate::ObjectOwner::as_ptr(&manager),
+                    1,
+                )
+            };
             raise();
             let alias = PENDING.with_borrow(|pending| pending.as_ref().unwrap().clone());
             // SAFETY: the compiler transfers one private frame after visiting its single local.
             unsafe {
-                imre_error_frame_keep_directory(frame, Rc::as_ptr(&manager));
+                imre_error_frame_keep_directory(frame, crate::ObjectOwner::as_ptr(&manager));
                 imre_error_attach_directory_frame(frame);
             }
             let error = take_pending().unwrap();
-            assert!(Rc::ptr_eq(&alias, &error));
+            assert!(crate::ObjectOwner::ptr_eq(&alias, &error));
             (error, name)
         }
 
         for raise in [record_allocation_failed as fn(), sequence_allocation_failed] {
             let (first, left) = retained(raise);
             let (second, right) = retained(raise);
-            assert!(!Rc::ptr_eq(&first, &second));
+            assert!(!crate::ObjectOwner::ptr_eq(&first, &second));
             let left = std::path::Path::new(left.as_str());
             let right = std::path::Path::new(right.as_str());
             assert!(left.is_dir() && right.is_dir());
@@ -2297,45 +2322,57 @@ mod tests {
     fn reraised_group_members_keep_identity_without_retaining_a_cycle() {
         let child = new_exception(Kind::ValueError, StrOwner::new(Str::from("child")));
         let group = task_group_errors(vec![child.clone(), child.clone()]);
-        let weak_group = Rc::downgrade(&group);
-        let weak_child = Rc::downgrade(&child);
+        let weak_group = crate::ObjectOwner::downgrade(&group);
+        let weak_child = crate::ObjectOwner::downgrade(&child);
         // SAFETY: local owners root this exact group and one of its members.
         unsafe {
-            let raised = Rc::from_raw(imre_async_member_cause(
-                Rc::as_ptr(&child),
-                Rc::as_ptr(&group),
+            let raised = crate::ObjectOwner::from_raw(imre_async_member_cause(
+                crate::ObjectOwner::as_ptr(&child),
+                crate::ObjectOwner::as_ptr(&group),
             ));
-            assert!(Rc::ptr_eq(&child, &raised));
-            let first = Rc::from_raw(imre_async_exception_at(Rc::as_ptr(&group), 1));
-            assert!(Rc::ptr_eq(&first, &raised));
+            assert!(crate::ObjectOwner::ptr_eq(&child, &raised));
+            let first = crate::ObjectOwner::from_raw(imre_async_exception_at(
+                crate::ObjectOwner::as_ptr(&group),
+                1,
+            ));
+            assert!(crate::ObjectOwner::ptr_eq(&first, &raised));
             drop((first, raised, child));
             assert!(weak_child.upgrade().is_none());
-            let first = Rc::from_raw(imre_async_exception_at(Rc::as_ptr(&group), 1));
-            let second = Rc::from_raw(imre_async_exception_at(Rc::as_ptr(&group), 3));
-            assert!(Rc::ptr_eq(&first, &second));
-            let cause = Rc::from_raw(imre_exception_cause(Rc::as_ptr(&second)));
-            assert!(Rc::ptr_eq(&cause, &group));
+            let first = crate::ObjectOwner::from_raw(imre_async_exception_at(
+                crate::ObjectOwner::as_ptr(&group),
+                1,
+            ));
+            let second = crate::ObjectOwner::from_raw(imre_async_exception_at(
+                crate::ObjectOwner::as_ptr(&group),
+                3,
+            ));
+            assert!(crate::ObjectOwner::ptr_eq(&first, &second));
+            let cause = crate::ObjectOwner::from_raw(imre_exception_cause(
+                crate::ObjectOwner::as_ptr(&second),
+            ));
+            assert!(crate::ObjectOwner::ptr_eq(&cause, &group));
             drop((first, second, cause, group));
             assert!(weak_group.upgrade().is_none());
         }
     }
 
-    fn take_error(kind: Kind) -> Rc<Object> {
+    fn take_error(kind: Kind) -> crate::ObjectOwner {
         assert_eq!(imre_error_pending(), 1);
         let value = imre_error_take();
         assert!(!value.is_null());
         assert_eq!(imre_error_pending(), 0);
         // SAFETY: take transfers a non-null owned exception reference.
-        let value = unsafe { Rc::from_raw(value) };
+        let value = unsafe { crate::ObjectOwner::from_raw(value) };
         // SAFETY: the owned exception is rooted and the expected kind is valid.
-        let matches = unsafe { imre_exception_matches(Rc::as_ptr(&value), kind as u32) };
+        let matches =
+            unsafe { imre_exception_matches(crate::ObjectOwner::as_ptr(&value), kind as u32) };
         assert_eq!(matches, 1);
         value
     }
 
-    fn message(value: &Rc<Object>) -> StrOwner {
+    fn message(value: &crate::ObjectOwner) -> StrOwner {
         // SAFETY: the rooted exception accessor transfers one string reference.
-        unsafe { StrOwner::from_raw(imre_exception_message(Rc::as_ptr(value))) }
+        unsafe { StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(value))) }
     }
 
     #[test]
@@ -2345,7 +2382,7 @@ mod tests {
         let weak = StrOwner::downgrade(&key);
         // SAFETY: the key is rooted and the constructor returns one owned exception.
         let error = unsafe {
-            Rc::from_raw(imre_exception_new(
+            crate::ObjectOwner::from_raw(imre_exception_new(
                 Kind::KeyError as u32,
                 StrOwner::as_ptr(&key),
             ))
@@ -2361,32 +2398,43 @@ mod tests {
     fn explicit_causes_preserve_identity_and_independent_ownership() {
         let original = new_exception(Kind::KeyError, StrOwner::new(Str::new("original")));
         let wrapped = new_exception(Kind::ValueError, StrOwner::new(Str::new("wrapped")));
-        let weak = Rc::downgrade(&original);
+        let weak = crate::ObjectOwner::downgrade(&original);
         // SAFETY: wrapped is fresh; every borrowed input remains rooted and each
         // transferred reference is adopted immediately.
         unsafe {
-            assert!(imre_exception_cause(Rc::as_ptr(&wrapped)).is_null());
-            assert_eq!(imre_exception_suppress_context(Rc::as_ptr(&wrapped)), 0);
-            let result = Rc::from_raw(imre_exception_with_cause(
-                Rc::as_ptr(&wrapped),
-                Rc::as_ptr(&original),
+            assert!(imre_exception_cause(crate::ObjectOwner::as_ptr(&wrapped)).is_null());
+            assert_eq!(
+                imre_exception_suppress_context(crate::ObjectOwner::as_ptr(&wrapped)),
+                0
+            );
+            let result = crate::ObjectOwner::from_raw(imre_exception_with_cause(
+                crate::ObjectOwner::as_ptr(&wrapped),
+                crate::ObjectOwner::as_ptr(&original),
             ));
-            assert!(Rc::ptr_eq(&result, &wrapped));
-            assert_eq!(imre_exception_suppress_context(Rc::as_ptr(&wrapped)), 1);
-            let cause = Rc::from_raw(imre_exception_cause(Rc::as_ptr(&wrapped)));
-            assert!(Rc::ptr_eq(&cause, &original));
+            assert!(crate::ObjectOwner::ptr_eq(&result, &wrapped));
+            assert_eq!(
+                imre_exception_suppress_context(crate::ObjectOwner::as_ptr(&wrapped)),
+                1
+            );
+            let cause = crate::ObjectOwner::from_raw(imre_exception_cause(
+                crate::ObjectOwner::as_ptr(&wrapped),
+            ));
+            assert!(crate::ObjectOwner::ptr_eq(&cause, &original));
             drop((original, wrapped, result));
             assert_eq!(message(&cause).as_str(), "original");
             drop(cause);
             assert!(weak.upgrade().is_none());
 
             let suppressed = new_exception(Kind::ValueError, StrOwner::new(Str::new("hidden")));
-            drop(Rc::from_raw(imre_exception_with_cause(
-                Rc::as_ptr(&suppressed),
+            drop(crate::ObjectOwner::from_raw(imre_exception_with_cause(
+                crate::ObjectOwner::as_ptr(&suppressed),
                 std::ptr::null(),
             )));
-            assert!(imre_exception_cause(Rc::as_ptr(&suppressed)).is_null());
-            assert_eq!(imre_exception_suppress_context(Rc::as_ptr(&suppressed)), 1);
+            assert!(imre_exception_cause(crate::ObjectOwner::as_ptr(&suppressed)).is_null());
+            assert_eq!(
+                imre_exception_suppress_context(crate::ObjectOwner::as_ptr(&suppressed)),
+                1
+            );
         }
     }
 
@@ -2394,14 +2442,14 @@ mod tests {
     fn deep_cause_chains_release_without_recursive_drop() {
         let message = StrOwner::new(Str::new("chain"));
         let mut tail = new_exception(Kind::ValueError, message.clone());
-        let weak_first = Rc::downgrade(&tail);
+        let weak_first = crate::ObjectOwner::downgrade(&tail);
         for _ in 0..100_000 {
             let next = new_exception(Kind::ValueError, message.clone());
             // SAFETY: next is fresh and tail remains rooted until attachment.
             unsafe {
-                drop(Rc::from_raw(imre_exception_with_cause(
-                    Rc::as_ptr(&next),
-                    Rc::as_ptr(&tail),
+                drop(crate::ObjectOwner::from_raw(imre_exception_with_cause(
+                    crate::ObjectOwner::as_ptr(&next),
+                    crate::ObjectOwner::as_ptr(&tail),
                 )));
             }
             tail = next;
@@ -2417,36 +2465,40 @@ mod tests {
         let weak_text = StrOwner::downgrade(&text);
         // SAFETY: the argument is a rooted string; construction transfers an owner.
         let outer = unsafe {
-            Rc::from_raw(imre_exception_new(
+            crate::ObjectOwner::from_raw(imre_exception_new(
                 Kind::ValueError as u32,
                 StrOwner::as_ptr(&text),
             ))
         };
-        let weak_outer = Rc::downgrade(&outer);
+        let weak_outer = crate::ObjectOwner::downgrade(&outer);
         drop(text);
         // SAFETY: all exception inputs are rooted and every transferred owner is
         // adopted or released below, including same-value pending replacement.
         unsafe {
-            imre_exception_raise(Rc::as_ptr(&outer));
-            imre_error_set(Rc::as_ptr(&outer));
+            imre_exception_raise(crate::ObjectOwner::as_ptr(&outer));
+            imre_error_set(crate::ObjectOwner::as_ptr(&outer));
             let pending = take_error(Kind::ValueError);
-            assert!(Rc::ptr_eq(&outer, &pending));
-            assert!(imre_exception_swap_active(Rc::as_ptr(&outer)).is_null());
+            assert!(crate::ObjectOwner::ptr_eq(&outer, &pending));
+            assert!(imre_exception_swap_active(crate::ObjectOwner::as_ptr(&outer)).is_null());
             drop(pending);
-            let inner = Rc::from_raw(imre_exception_new(
+            let inner = crate::ObjectOwner::from_raw(imre_exception_new(
                 Kind::IndexError as u32,
                 std::ptr::null(),
             ));
-            let previous = Rc::from_raw(imre_exception_swap_active(Rc::as_ptr(&inner)));
-            assert!(Rc::ptr_eq(&outer, &previous));
+            let previous = crate::ObjectOwner::from_raw(imre_exception_swap_active(
+                crate::ObjectOwner::as_ptr(&inner),
+            ));
+            assert!(crate::ObjectOwner::ptr_eq(&outer, &previous));
             drop(outer);
-            let current = Rc::from_raw(imre_exception_current());
-            assert!(Rc::ptr_eq(&inner, &current));
+            let current = crate::ObjectOwner::from_raw(imre_exception_current());
+            assert!(crate::ObjectOwner::ptr_eq(&inner, &current));
             imre_exception_reraise();
             let raised = take_error(Kind::IndexError);
-            assert!(Rc::ptr_eq(&inner, &raised));
-            let displaced = Rc::from_raw(imre_exception_swap_active(Rc::as_ptr(&previous)));
-            assert!(Rc::ptr_eq(&inner, &displaced));
+            assert!(crate::ObjectOwner::ptr_eq(&inner, &raised));
+            let displaced = crate::ObjectOwner::from_raw(imre_exception_swap_active(
+                crate::ObjectOwner::as_ptr(&previous),
+            ));
+            assert!(crate::ObjectOwner::ptr_eq(&inner, &displaced));
             drop((inner, current, raised, displaced, previous));
             imre_exception_reraise();
             let raised = take_error(Kind::ValueError);
@@ -2468,15 +2520,15 @@ mod tests {
     fn replacing_clearing_and_reporting_pending_errors_allow_later_recovery() {
         let first = new_exception(Kind::ValueError, StrOwner::new(Str::new("first")));
         let second = new_exception(Kind::IndexError, StrOwner::new(Str::new("second")));
-        let weak_first = Rc::downgrade(&first);
-        let weak_second = Rc::downgrade(&second);
+        let weak_first = crate::ObjectOwner::downgrade(&first);
+        let weak_second = crate::ObjectOwner::downgrade(&second);
         // SAFETY: inputs stay rooted through acquisition, then pending state
         // becomes their sole owner. Null explicitly clears that owner.
         unsafe {
-            imre_error_set(Rc::as_ptr(&first));
+            imre_error_set(crate::ObjectOwner::as_ptr(&first));
             drop(first);
             assert_eq!(imre_error_pending(), 1);
-            imre_error_set(Rc::as_ptr(&second));
+            imre_error_set(crate::ObjectOwner::as_ptr(&second));
             drop(second);
             assert!(weak_first.upgrade().is_none());
             assert_eq!(imre_error_pending(), 1);
@@ -2490,11 +2542,11 @@ mod tests {
             Kind::RuntimeError,
             StrOwner::new(Str::new("reported test error")),
         );
-        let weak_reported = Rc::downgrade(&reported);
+        let weak_reported = crate::ObjectOwner::downgrade(&reported);
         // SAFETY: pending and active independently acquire this rooted exception.
         unsafe {
-            imre_error_set(Rc::as_ptr(&reported));
-            assert!(imre_exception_swap_active(Rc::as_ptr(&reported)).is_null());
+            imre_error_set(crate::ObjectOwner::as_ptr(&reported));
+            assert!(imre_exception_swap_active(crate::ObjectOwner::as_ptr(&reported)).is_null());
         }
         drop(reported);
         assert_eq!(imre_error_unhandled(), 1);
@@ -2525,9 +2577,12 @@ mod tests {
         ] {
             // SAFETY: valid kinds and a null zero-argument message satisfy the ABI.
             unsafe {
-                let value = Rc::from_raw(imre_exception_new(actual as u32, std::ptr::null()));
+                let value = crate::ObjectOwner::from_raw(imre_exception_new(
+                    actual as u32,
+                    std::ptr::null(),
+                ));
                 assert_eq!(
-                    imre_exception_matches(Rc::as_ptr(&value), expected as u32),
+                    imre_exception_matches(crate::ObjectOwner::as_ptr(&value), expected as u32),
                     u32::from(matches)
                 );
             }
@@ -2546,7 +2601,9 @@ mod tests {
             let argument = argument.map(|value| StrOwner::new(Str::new(value)));
             let pointer = argument.as_ref().map_or(std::ptr::null(), StrOwner::as_ptr);
             // SAFETY: the nullable argument remains rooted throughout construction.
-            let error = unsafe { Rc::from_raw(imre_exception_new(Kind::KeyError as u32, pointer)) };
+            let error = unsafe {
+                crate::ObjectOwner::from_raw(imre_exception_new(Kind::KeyError as u32, pointer))
+            };
             drop(argument);
             assert_eq!(message(&error).as_str(), expected);
         }
@@ -2597,29 +2654,35 @@ mod tests {
         // SAFETY: constructors transfer owners; all string/exception slots use
         // their declared representation and every getter's owner is adopted.
         unsafe {
-            let sequence = Rc::from_raw(imre_seq_new(3));
+            let sequence = crate::ObjectOwner::from_raw(imre_seq_new(3));
             imre_seq_set_index(
-                Rc::as_ptr(&sequence),
+                crate::ObjectOwner::as_ptr(&sequence),
                 0,
                 StrOwner::as_ptr(&text) as usize,
                 3,
             );
             drop(take_error(Kind::IndexError));
             assert_eq!(StrOwner::strong_count(&text), 1);
-            assert_eq!(imre_seq_pop(Rc::as_ptr(&sequence)), 0);
+            assert_eq!(imre_seq_pop(crate::ObjectOwner::as_ptr(&sequence)), 0);
             drop(take_error(Kind::IndexError));
             drop(sequence);
-            let sequence = Rc::from_raw(imre_seq_new(5));
-            let exception = Rc::from_raw(imre_exception_new(
+            let sequence = crate::ObjectOwner::from_raw(imre_seq_new(5));
+            let exception = crate::ObjectOwner::from_raw(imre_exception_new(
                 Kind::Exception as u32,
                 StrOwner::as_ptr(&text),
             ));
-            let weak_exception = Rc::downgrade(&exception);
-            imre_seq_append(Rc::as_ptr(&sequence), Rc::as_ptr(&exception) as usize, 5);
+            let weak_exception = crate::ObjectOwner::downgrade(&exception);
+            imre_seq_append(
+                crate::ObjectOwner::as_ptr(&sequence),
+                crate::ObjectOwner::as_ptr(&exception) as usize,
+                5,
+            );
             drop(exception);
-            let exception =
-                Rc::from_raw(imre_seq_get_index(Rc::as_ptr(&sequence), 0) as *const Object);
-            imre_exception_raise(Rc::as_ptr(&exception));
+            let exception = crate::ObjectOwner::from_raw(imre_seq_get_index(
+                crate::ObjectOwner::as_ptr(&sequence),
+                0,
+            ) as *const Object);
+            imre_exception_raise(crate::ObjectOwner::as_ptr(&exception));
             drop((sequence, exception, text));
             let pending = take_error(Kind::Exception);
             assert_eq!(message(&pending).as_str(), "staged");
@@ -2636,33 +2699,45 @@ mod tests {
         // SAFETY: dictionary keys/values match their declared representations;
         // iterator output words are independent writable stack slots.
         unsafe {
-            let strings = Rc::from_raw(imre_dict_new(3, 2));
+            let strings = crate::ObjectOwner::from_raw(imre_dict_new(3, 2));
             assert_eq!(
-                imre_dict_get(Rc::as_ptr(&strings), StrOwner::as_ptr(&string_key) as usize),
+                imre_dict_get(
+                    crate::ObjectOwner::as_ptr(&strings),
+                    StrOwner::as_ptr(&string_key) as usize
+                ),
                 0
             );
             assert_eq!(message(&take_error(Kind::KeyError)).as_str(), "\"a'b\\n\"");
-            imre_dict_delete(Rc::as_ptr(&strings), StrOwner::as_ptr(&string_key) as usize);
+            imre_dict_delete(
+                crate::ObjectOwner::as_ptr(&strings),
+                StrOwner::as_ptr(&string_key) as usize,
+            );
             assert_eq!(message(&take_error(Kind::KeyError)).as_str(), "\"a'b\\n\"");
-            let integers = Rc::from_raw(imre_dict_new(2, 2));
-            assert_eq!(imre_dict_get(Rc::as_ptr(&integers), integer_key.0), 0);
+            let integers = crate::ObjectOwner::from_raw(imre_dict_new(2, 2));
+            assert_eq!(
+                imre_dict_get(crate::ObjectOwner::as_ptr(&integers), integer_key.0),
+                0
+            );
             assert_eq!(
                 message(&take_error(Kind::KeyError)).as_str(),
                 "1267650600228229401496703205376"
             );
-            imre_dict_set(Rc::as_ptr(&integers), integer_key.0, 1);
-            let iterator = Rc::from_raw(imre_dict_iter(Rc::as_ptr(&integers), 1));
-            imre_dict_delete(Rc::as_ptr(&integers), integer_key.0);
+            imre_dict_set(crate::ObjectOwner::as_ptr(&integers), integer_key.0, 1);
+            let iterator = crate::ObjectOwner::from_raw(imre_dict_iter(
+                crate::ObjectOwner::as_ptr(&integers),
+                1,
+            ));
+            imre_dict_delete(crate::ObjectOwner::as_ptr(&integers), integer_key.0);
             let (mut key, mut value) = (17, 19);
             assert_eq!(
-                imre_mapping_iter_next(Rc::as_ptr(&iterator), &mut key, &mut value),
+                imre_mapping_iter_next(crate::ObjectOwner::as_ptr(&iterator), &mut key, &mut value),
                 0
             );
             drop(take_error(Kind::RuntimeError));
             assert_eq!((key, value), (17, 19));
-            imre_dict_set(Rc::as_ptr(&integers), integer_key.0, 1);
+            imre_dict_set(crate::ObjectOwner::as_ptr(&integers), integer_key.0, 1);
             assert_eq!(
-                imre_mapping_iter_next(Rc::as_ptr(&iterator), &mut key, &mut value),
+                imre_mapping_iter_next(crate::ObjectOwner::as_ptr(&iterator), &mut key, &mut value),
                 0
             );
             drop(take_error(Kind::RuntimeError));

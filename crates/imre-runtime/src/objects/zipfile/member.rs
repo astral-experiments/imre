@@ -1,12 +1,10 @@
 //! Independent member cursors with incremental CRC. Compressed and inflated
 //! buffers are each bounded even when the caller requests the entire member.
 use crate::StrOwner;
-use std::io::SeekFrom;
-use std::rc::Rc;
-
 use flate2::{Crc, Decompress, FlushDecompress, Status};
 use num_bigint::Sign;
 use num_traits::ToPrimitive;
+use std::io::SeekFrom;
 
 use super::super::{
     Bytes, Str, bytes,
@@ -30,7 +28,7 @@ fn deflate_error(message: &str) -> Error {
 
 pub(in crate::objects) struct Member {
     source: Source,
-    info: Rc<Info>,
+    info: crate::Shared<Info>,
     start: u64,
     packed_at: u64,
     packed_left: u64,
@@ -48,7 +46,7 @@ pub(in crate::objects) struct Member {
 impl Member {
     pub(super) fn open(
         source: Source,
-        info: Rc<Info>,
+        info: crate::Shared<Info>,
         encrypted_name: impl FnOnce() -> Str,
     ) -> Result<Self> {
         let at = source.absolute_offset(info.offset)?;

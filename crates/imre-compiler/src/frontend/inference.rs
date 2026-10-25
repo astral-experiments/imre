@@ -584,6 +584,7 @@ impl Checker<'_> {
             &signature.params[skip..],
             receiver,
             scope,
+            Some((signature.id, skip)),
             |checker, index, argument| {
                 let index = index + skip;
                 let parameter = &signature.params[index];
