@@ -465,19 +465,21 @@ pub(crate) enum CheckedDiagnostic {
     PlatformImport(TextRange),
     Keyword(TextRange),
     TupleListRead(TextRange),
+    MissingArgument(TextRange),
 }
 
 impl CheckedDiagnostic {
     pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
-        let (range, family) = match self {
-            Self::Decorator(r) => (r, 0),
-            Self::Call(r) => (r, 1),
-            Self::Keyword(r) => (r, 2),
-            Self::DictDeletion(r) => (r, 3),
-            Self::PlatformImport(r) => (r, 4),
-            Self::TupleListRead(r) => (r, 5),
+        let (range, kind) = match self {
+            Self::Decorator(range) => (range, 0),
+            Self::Call(range) => (range, 1),
+            Self::Keyword(range) => (range, 2),
+            Self::TupleListRead(range) => (range, 3),
+            Self::MissingArgument(range) => (range, 4),
+            Self::DictDeletion(range) => (range, 5),
+            Self::PlatformImport(range) => (range, 6),
         };
-        (range.start(), range.end(), family)
+        (range.start(), range.end(), kind)
     }
 
     fn covers(self, diagnostic: &str, range: TextRange) -> bool {
@@ -490,6 +492,7 @@ impl CheckedDiagnostic {
             Self::PlatformImport(alias) => diagnostic == "unresolved-import" && alias == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
             Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
+            Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
         }
     }
 }

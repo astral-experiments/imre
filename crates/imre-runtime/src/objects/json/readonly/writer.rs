@@ -200,6 +200,7 @@ mod tests {
                 text: json,
                 original: None,
                 shared: None,
+                keys: &super::super::KeyMemo::default(),
             },
         )
         .unwrap();

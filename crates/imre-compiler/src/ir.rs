@@ -948,6 +948,7 @@ pub(crate) enum RegexCapture {
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
     Lower,
+    Capitalize,
     /// True splits from the right.
     Split(bool),
     /// 0 strips both ends, 1 the leading end, and 2 the trailing end.
@@ -979,6 +980,11 @@ pub(crate) enum PathOperation {
         full: bool,
     },
     WithName,
+    WithStem,
+    WithSuffix,
+    Suffixes,
+    IsRelativeTo,
+    RelativeTo,
     Text,
     Name,
     Stem,

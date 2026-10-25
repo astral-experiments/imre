@@ -5,7 +5,7 @@ use ::toml::de::{DeTable, DeValue};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use super::{Node, Nodes, View};
+use super::{KeyMemo, Node, Nodes, View};
 use crate::objects::mappings::{
     dict_set, imre_dict_contains, imre_dict_delete, imre_dict_get, imre_dict_new,
 };
@@ -141,7 +141,7 @@ impl Value {
                         Ok::<_, Error>(())
                     })
                 }?;
-                Node::Object(fields)
+                Node::Object(KeyMemo::default().fields(fields))
             }
         };
         nodes.try_reserve(1).map_err(|_| Error::allocation())?;
@@ -180,12 +180,11 @@ impl Value {
                 a.iter()
                     .map(|&index| Self::from_json(view, index).map(Self::object)),
             )?,
-            Node::Object(t) => Self::table(t.iter().map(|(key, index)| {
-                Ok((
-                    Rc::new(key.clone()),
-                    Self::from_json(view, *index)?.object(),
-                ))
-            }))?,
+            Node::Object(t) => {
+                Self::table(t.iter().map(|(key, index)| {
+                    Ok((t.owner(key)?, Self::from_json(view, *index)?.object()))
+                }))?
+            }
         })
     }
     fn from_toml(node: &DeValue<'_>) -> Result<Self, Error> {

@@ -773,6 +773,12 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
     }
 
+    /// Mark the precise call where lowering raises Python's missing-argument TypeError.
+    pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::MissingArgument(call));
+    }
+
     /// The native table is an actual dict, including errno.errorcode (a Mapping in typeshed).
     pub(crate) fn checked_dict_deletion(&self, module: ModuleId, target: TextRange) {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::DictDeletion(target));
@@ -836,10 +842,10 @@ impl SourceGraph {
                         .then_some(CheckedDiagnostic::Decorator(decorator.range()))
                     })
                     .chain({
-                        let mut scopes = self.checked_diagnostics.borrow()[id].clone();
-                        scopes.sort_unstable_by_key(|scope| scope.sort_key());
-                        scopes.dedup();
-                        scopes
+                        let mut diagnostics = self.checked_diagnostics.borrow()[id].clone();
+                        diagnostics.sort_unstable_by_key(|note| note.sort_key());
+                        diagnostics.dedup();
+                        diagnostics
                     })
                     .collect()
             })
@@ -1639,18 +1645,16 @@ impl<'a> Loader<'a> {
             }
             return Ok(id);
         }
-        if name == "unittest" {
+        let bundled = match name {
+            "unittest" => Some(include_str!("../stdlib/unittest/__init__.py")),
+            "string" => Some(include_str!("../stdlib/string/__init__.py")),
+            _ => None,
+        };
+        if let Some(source) = bundled {
             self.reject_stdlib_shadow(name)?;
-            // ty resolves this immutable source at its Python import path in the
-            // in-memory project. It is part of the compiler, not a disk input.
-            let path = self.root.join("unittest/__init__.py");
-            let id = self.add(
-                path.clone(),
-                path,
-                name.into(),
-                true,
-                include_str!("../stdlib/unittest/__init__.py"),
-            )?;
+            // ty resolves bundled source at its Python import path in the in-memory project.
+            let path = self.root.join(name).join("__init__.py");
+            let id = self.add(path.clone(), path, name.into(), true, source)?;
             self.modules[id].bundled = true;
             self.scan(id)?;
             return Ok(id);
