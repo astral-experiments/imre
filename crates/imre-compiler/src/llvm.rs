@@ -4265,7 +4265,14 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
-            Builtin::JsonIter => self.call("imre_json_iter", returns, &[&args[0].value]),
+            Builtin::JsonIter => {
+                let function = if args[0].value.ty == Type::JsonObject {
+                    "imre_json_object_keys"
+                } else {
+                    "imre_json_iter"
+                };
+                self.call(function, returns, &[&args[0].value])
+            }
             Builtin::JsonLen => self.call("imre_json_len", returns, &[&args[0].value]),
             Builtin::JsonGet { key, empty_list } => self.json_get(key, *empty_list, returns, &args),
             Builtin::JsonAdd => {
@@ -7269,6 +7276,7 @@ declare ptr @imre_json_loads_bytes(ptr)
 declare i64 @imre_json_error_field(ptr, i32)
 declare ptr @imre_json_index(ptr, i64)
 declare ptr @imre_json_iter(ptr)
+declare ptr @imre_json_object_keys(ptr)
 declare i64 @imre_json_len(ptr)
 declare i64 @imre_json_get(ptr, ptr, i64, i32, i32, i64)
 declare ptr @imre_json_add(ptr, ptr)

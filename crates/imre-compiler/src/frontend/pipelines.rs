@@ -1040,6 +1040,11 @@ impl Checker<'_> {
         node: &impl Ranged,
         reverse: bool,
     ) -> Result<Prepared, String> {
+        let iterable = if items {
+            iterable
+        } else {
+            self.json_iteration(iterable)
+        };
         if !reverse && iterable.ty == Type::CsvReader {
             return Ok(self.prepare_csv_reader(iterable));
         }

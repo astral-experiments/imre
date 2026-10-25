@@ -223,7 +223,10 @@ Its `decode(s)` method accepts Unicode text; `memo` returns the same dictionary
 on each read from that instance. Keys repeated within one document share the
 same string object. Separate decodes have independent key namespaces. Like
 CPython's default decoder, scanning does not consult or clear entries that a
-caller inserts into the public `memo` dictionary.
+caller inserts into the public `memo` dictionary. A saved `json.loads` function or bound
+`decoder.decode` method can be passed as a callable. Iterating a decoded value
+checked as `dict[str, Any]` yields its actual string keys in insertion order;
+sorting those keys preserves their owners.
 
 `json.dumps(value)` returns a string and `json.dump(value, stream)` writes to
 a text stream. Both accept scalar values, typed lists, tuples, dictionaries
