@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
+DOCSTRINGS = HERE.parents[3] / "crates/imre-compiler/stdlib/docstrings"
 sys.path.insert(0, str(HERE.parents[1]))
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
 
@@ -47,6 +48,8 @@ def audit(test_module):
         if not isinstance(case, doctest.DocTestCase):
             continue
         name = case.id()
+        if (DOCSTRINGS / (name + ".txt")).read_bytes() != case._dt_test.docstring.encode():
+            raise AssertionError(f"bundled native docstring differs from CPython: {name}")
         ids.append(name)
         data = examples(case)
         if docs.setdefault(name, data) != data:
@@ -68,6 +71,9 @@ def main():
         parser.error("use the test-enabled CPython 3.14.5 interpreter")
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
     verify_files(args.cpython_source, manifest["files"])
+    verify_files(DOCSTRINGS, {"LICENSE": manifest["files"]["LICENSE"]})
+    if (DOCSTRINGS / "json.decoder.txt").read_bytes() != json.decoder.__doc__.encode():
+        raise AssertionError("bundled native json.decoder docstring differs from CPython")
     verify_interpreter_tests(manifest)
     # Verify the interpreter's own modules as well as the supplied source tree.
     for module in (doctest, json, json.encoder, json.decoder):

@@ -2,7 +2,6 @@
 //! attributes or importing a host Python interpreter.
 
 use super::*;
-use crate::modules::IntrinsicModule;
 
 use crate::modules::doctest::{sealed, source_docstrings};
 
@@ -196,15 +195,9 @@ impl Checker<'_> {
                 source_docstrings(&source.name, &source.parsed.syntax().body, true, &mut docs);
                 source.name.as_str()
             }
-            Binding::IntrinsicModule(module) if let Some((name, text)) = sealed(module) => {
+            Binding::IntrinsicModule(module) if let Some((owner, name, text)) = sealed(module) => {
                 docs.push((name.into(), text.into()));
-                match module {
-                    IntrinsicModule::Itertools => "itertools",
-                    IntrinsicModule::Json => "json",
-                    IntrinsicModule::JsonEncoder => "json.encoder",
-                    IntrinsicModule::JsonDecoder => "json.decoder",
-                    _ => unreachable!(),
-                }
+                owner
             }
             _ => return Ok(None),
         };

@@ -579,6 +579,8 @@ pub(crate) struct SourceModule {
     pub(crate) name: String,
     pub(crate) source: String,
     bundled: bool,
+    /// Only the loader may mark a synthetic interactive example module.
+    pub(crate) doctest_case: bool,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
     type_bindings: HashMap<String, Binding>,
@@ -1052,6 +1054,7 @@ impl<'a> Loader<'a> {
             name,
             source,
             bundled: false,
+            doctest_case: false,
             parsed,
             is_package,
             root_index: 0,

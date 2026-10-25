@@ -4,6 +4,32 @@ from collections.abc import Iterator
 from _imre_doctest import ascii_output, execute
 import unittest
 
+DONT_ACCEPT_TRUE_FOR_1 = 1
+DONT_ACCEPT_BLANKLINE = 2
+NORMALIZE_WHITESPACE = 4
+ELLIPSIS = 8
+SKIP = 16
+IGNORE_EXCEPTION_DETAIL = 32
+COMPARISON_FLAGS = 63
+REPORT_UDIFF = 64
+REPORT_CDIFF = 128
+REPORT_NDIFF = 256
+REPORT_ONLY_FIRST_FAILURE = 512
+FAIL_FAST = 1024
+REPORTING_FLAGS = 1984
+
+
+def _example_exception(msg: str | None) -> str | None:
+    if msg is not None and not msg.endswith("\n"):
+        return msg + "\n"
+    return msg
+
+
+def _example_options(options: dict[int, bool] | None) -> dict[int, bool]:
+    if options is None:
+        return {}
+    return options
+
 
 class Example:
     source: str
@@ -14,13 +40,14 @@ class Example:
     options: dict[int, bool]
 
     def __init__(self, source: str, want: str, exc_msg: str | None = None,
-                 lineno: int = 0, indent: int = 0) -> None:
+                 lineno: int = 0, indent: int = 0,
+                 options: dict[int, bool] | None = None) -> None:
         self.source = source if source.endswith("\n") else source + "\n"
         self.want = want if not want or want.endswith("\n") else want + "\n"
-        self.exc_msg = exc_msg
+        self.exc_msg = _example_exception(exc_msg)
         self.lineno = lineno
         self.indent = indent
-        self.options = {}
+        self.options = _example_options(options)
 
 
 def _spaces(line: str) -> int:
