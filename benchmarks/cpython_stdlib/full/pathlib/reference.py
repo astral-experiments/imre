@@ -6,21 +6,12 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-import unittest
-from xml.etree import ElementTree
 
 HERE = Path(__file__).resolve().parent
 BENCHMARK = HERE.parents[1]
 sys.path.insert(0, str(BENCHMARK))
 from upstream import verify_upstream
-
-
-def cases(suite):
-    for case in suite:
-        if isinstance(case, unittest.TestSuite):
-            yield from cases(case)
-        else:
-            yield case.id()
+from suite_inventory import cases, load_suite, reference_results
 
 
 def main():
@@ -40,10 +31,7 @@ def main():
                 if p.is_file() and "__pycache__" not in p.parts}
     if sources(oracle) != sources(pinned):
         raise ValueError(f"reference package at {oracle} differs from the pinned sources")
-    loader = unittest.TestLoader()
-    ids = Counter(cases(loader.loadTestsFromModule(test_pathlib)))
-    if loader.errors or not ids or any(count != 1 for count in ids.values()):
-        raise ValueError(f"unexpected discovery: {loader.errors}, {ids.total()} cases")
+    ids = Counter(case.id() for case in cases(load_suite("test.test_pathlib")))
 
     # Keep AF_UNIX paths short. Enabling EncodingWarning exercises the gated
     # read/write methods; regrtest supplies the original fixtures and assertions.
@@ -52,20 +40,9 @@ def main():
         subprocess.run([sys.executable, "-B", "-X", "warn_default_encoding",
                         "-m", "test", "-u", "all", "--tempdir", temp,
                         "--junit-xml", str(xml), "test_pathlib"], cwd=temp, check=True)
-        records = {}
-        results = ElementTree.parse(xml)
-        for case in results.iter("testcase"):
-            name = case.attrib["name"]
-            if name in records or case.find("failure") is not None or case.find("error") is not None:
-                raise ValueError(f"unexpected reference outcome: {ElementTree.tostring(case)!r}")
-            skip = case.find("skipped")
-            records[name] = skip.text if skip is not None else None
-    if set(ids) != set(records):
-        raise ValueError(f"discovery and execution disagree: {sorted(set(ids) ^ set(records))}")
-    report = {"cpython_commit": commit, "platform": sys.platform,
-              "discovered": len(records), "passed": sum(v is None for v in records.values()),
-              "skipped": sum(v is not None for v in records.values()),
-              "reference_skip_reason_by_id": dict(sorted(records.items()))}
+        records = reference_results(xml, ids)
+    report = {"module": "test.test_pathlib", "cpython_commit": commit, "platform": sys.platform,
+              "denominator": ids.total(), "reference": records}
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
 

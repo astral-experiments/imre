@@ -99,6 +99,11 @@ pub(super) fn schemas(module: &Module, output: &mut Output) {
     let mut roots = Vec::new();
     for function in module.functions.iter().chain([&module.entry]) {
         ir::walk_expressions(&function.body, &mut |value| {
+            if let ExprKind::Builtin(Builtin::JsonDumps(_) | Builtin::JsonDump(_), args) =
+                &value.kind
+            {
+                roots.push(args[5].ty);
+            }
             if let ExprKind::Builtin(
                 Builtin::JsonDecode(ty)
                 | Builtin::TomlDecode(ty)
@@ -138,6 +143,7 @@ pub(super) fn schema_name(ty: Type) -> String {
         Type::List(id) => format!("json_list_{id}"),
         Type::Dict(id) => format!("json_dict_{id}"),
         Type::Tuple(id) => format!("json_tuple_{id}"),
+        Type::Document(_) => "json_document".to_owned(),
         Type::JsonRoot => "json_root".to_owned(),
         Type::JsonObject => "json_object".to_owned(),
         Type::JsonValue => "json_value".to_owned(),
@@ -171,10 +177,10 @@ impl Schemas<'_> {
     }
 
     fn schema(&mut self, ty: Type) -> String {
-        let ty = if matches!(ty, Type::StrLiteral(_)) {
-            Type::Str
-        } else {
-            ty
+        let ty = match ty {
+            Type::StrLiteral(_) => Type::Str,
+            Type::Document(_) => Type::Document(crate::ir::DocumentShape::Any),
+            _ => ty,
         };
         let name = schema_name(ty);
         if !self.seen.insert(ty) {
@@ -187,6 +193,7 @@ impl Schemas<'_> {
             Type::Float => (4, None, None, 0, None),
             Type::None => (5, None, None, 0, None),
             Type::JsonRoot | Type::JsonValue | Type::JsonObject => (15, None, None, 0, None),
+            Type::Document(_) => (16, None, None, 0, None),
             Type::Bytes => (12, None, None, 0, None),
             Type::Set(_) => (13, None, None, 0, None),
             Type::Path => (14, None, None, 0, None),
