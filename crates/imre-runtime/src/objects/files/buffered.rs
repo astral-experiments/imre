@@ -283,7 +283,8 @@ impl Input {
         if prefix.is_empty() {
             return Ok(remaining);
         }
-        let mut result = Str::with_capacity(prefix.len() + remaining.len());
+        let mut result = Str::try_with_capacity(prefix.len() + remaining.len())
+            .map_err(|_| Error::allocation())?;
         result.push_str(prefix);
         result.push_str(&remaining);
         self.text.pos = self.text.decoded.len();

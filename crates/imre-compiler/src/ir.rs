@@ -7,6 +7,8 @@ pub(crate) enum Type {
     Int,
     Float,
     Bool,
+    /// A builtin class object. Its name is interned; the handle is never a Python string.
+    BuiltinClass,
     Str,
     /// A closed domain of strings with ordinary string storage and ownership.
     StrLiteral(usize),
@@ -154,6 +156,7 @@ impl std::fmt::Display for Type {
             Self::Int => "int",
             Self::Float => "float",
             Self::Bool => "bool",
+            Self::BuiltinClass => "type",
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
@@ -511,6 +514,7 @@ pub(crate) enum Builtin {
         member: usize,
     },
     StrEnumName,
+    ClassNameView,
     StrEnumValue,
     EnumLookup(usize),
     EnumString,
@@ -813,6 +817,8 @@ pub(crate) enum Builtin {
     FileFileno,
     DictGet,
     DictCopy,
+    DeepCopy,
+    RecordCopy,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
     CounterNew,
@@ -938,6 +944,7 @@ pub(crate) enum RegexCapture {
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
     Lower,
+    Capitalize,
     /// True splits from the right.
     Split(bool),
     /// 0 strips both ends, 1 the leading end, and 2 the trailing end.
@@ -969,6 +976,11 @@ pub(crate) enum PathOperation {
         full: bool,
     },
     WithName,
+    WithStem,
+    WithSuffix,
+    Suffixes,
+    IsRelativeTo,
+    RelativeTo,
     Text,
     Name,
     Stem,
@@ -1099,6 +1111,11 @@ pub(crate) enum LogOperation {
     NamesCopy,
     Configure,
     ConfigureName,
+    DictConfig,
+    DictConfigTyped,
+    FileConfig,
+    Disabled,
+    Propagate,
     Name,
     Level,
     Root,
@@ -1142,7 +1159,12 @@ pub(crate) enum CopyOperation {
 pub(crate) enum ProcessOperation {
     Executable,
     RunToStderr,
-    CheckOutput,
+    CheckOutput {
+        streams: u32,
+        validation: u32,
+        errors: u8,
+        capture: ProcessCapture,
+    },
     Run {
         streams: u32,
     },
@@ -1223,6 +1245,7 @@ pub(crate) enum ProcessOperation {
     Strerror,
     OpenFlag(&'static str),
     Which,
+    RmTree,
     Copy(CopyOperation),
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.

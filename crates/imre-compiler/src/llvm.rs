@@ -51,6 +51,7 @@ impl Type {
             Self::Float => "double",
             Self::Bool => "i1",
             Self::Str
+            | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
             | Self::ListInt
@@ -107,6 +108,7 @@ impl Type {
             Self::Int => "1",
             Self::Float => "0.0",
             Self::Str
+            | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
             | Self::ListInt
@@ -694,7 +696,7 @@ impl Emitter<'_, '_> {
         let family = match ty {
             Type::Int => "int",
             Type::Union(_) | Type::StringIterable => "union",
-            Type::Str | Type::StrLiteral(_) => "str",
+            Type::Str | Type::StrLiteral(_) | Type::BuiltinClass => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
             Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(_) => {
@@ -3200,7 +3202,7 @@ impl Emitter<'_, '_> {
                     "icmp {predicate} i64 {}, {}",
                     left.operand, right.operand
                 )),
-                Type::Str | Type::StrLiteral(_) | Type::Optional(_) => {
+                Type::Str | Type::StrLiteral(_) | Type::BuiltinClass | Type::Optional(_) => {
                     let equal = if matches!(left.ty, Type::Optional(_))
                         || matches!(right.ty, Type::Optional(_))
                     {
@@ -3521,6 +3523,7 @@ impl Emitter<'_, '_> {
         if matches!(
             builtin,
             Builtin::LiteralStringView
+                | Builtin::ClassNameView
                 | Builtin::DictAsBase
                 | Builtin::RecordView
                 | Builtin::DirectoryContextView
@@ -3652,6 +3655,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::LiteralStringView
+            | Builtin::ClassNameView
             | Builtin::DictAsBase
             | Builtin::RecordView
             | Builtin::DirectoryContextView => {
@@ -3833,6 +3837,11 @@ impl Emitter<'_, '_> {
                     NamesCopy => "imre_log_names_copy",
                     Configure => "imre_log_config",
                     ConfigureName => "imre_log_config_named",
+                    DictConfig => "imre_log_dict_config",
+                    DictConfigTyped => "imre_log_typed_dict_config",
+                    FileConfig => "imre_log_file_config",
+                    Disabled => "imre_log_disabled",
+                    Propagate => "imre_log_propagate",
                     Name => "imre_log_name",
                     Parent => "imre_log_parent",
                     Children => "imre_log_children",
@@ -3840,8 +3849,8 @@ impl Emitter<'_, '_> {
                     Level => "imre_log_level",
                     EffectiveLevel => "imre_log_effective_level",
                     SetLevel => "imre_log_set_level",
-                    Enabled => "imre_log_enabled",
-                    Emit => "imre_log_emit",
+                    Enabled => "imre_log_is_enabled",
+                    Emit => "imre_log_routed_emit",
                 };
                 let values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
                 if returns == Type::None {
@@ -5154,6 +5163,17 @@ impl Emitter<'_, '_> {
                 returns,
                 &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
             ),
+            Builtin::DeepCopy => {
+                let source = self.word(&args[0].value);
+                let kind = representation_kind(returns, &self.module.types);
+                let result = self.checked_instruction(format!(
+                    "call i64 @imre_deep_copy(i64 {source}, i32 {kind})"
+                ));
+                self.decode_word(result, returns)
+            }
+            Builtin::RecordCopy => {
+                self.call("imre_record_shallow_copy", returns, &[&args[0].value])
+            }
             Builtin::DictCopy => self.call("imre_dict_copy", returns, &[&args[0].value]),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
             Builtin::CounterNew => {
@@ -5488,6 +5508,7 @@ impl Emitter<'_, '_> {
                     }
                     Type::None => self.void_call("imre_print_none", &[]),
                     Type::ListInt
+                    | Type::BuiltinClass
                     | Type::Class(_)
                     | Type::List(_)
                     | Type::Dict(_)
@@ -5727,6 +5748,7 @@ impl Emitter<'_, '_> {
             Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
             | Type::ListInt
@@ -5797,6 +5819,7 @@ impl Emitter<'_, '_> {
             Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
             | Type::ListInt
@@ -6381,6 +6404,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Int => 2,
         Type::Float => 7,
         Type::Str | Type::StrLiteral(_) => 3,
+        Type::BuiltinClass => 11,
         Type::StrEnum(_) | Type::Enum(_) => 10,
         Type::Bytes => 8,
         Type::Union(_) | Type::StringIterable => 9,
@@ -6546,7 +6570,7 @@ fn none() -> Value {
 fn write_declarations(units: &mut Output) {
     units.common().push_str(
         r#"
-declare ptr @imre_subprocess_check_output(ptr)
+declare ptr @imre_check_output_config(ptr, i32, i64, i64, i32, i32)
 declare ptr @imre_subprocess_run_modes(ptr, ptr, ptr, i32, i32, i32, i64, ptr)
 declare ptr @imre_async_coroutine(ptr, ptr, i32)
 declare ptr @imre_context_new(ptr, ptr)
@@ -6632,6 +6656,7 @@ declare void @imre_os_set_inheritable(i64, i64)
 declare ptr @imre_shutil_which(ptr, i64, ptr, i32, i32, ptr, ptr)
 declare ptr @imre_shutil_confstr_cs_path()
 declare ptr @imre_shutil_os_defpath()
+declare void @imre_shutil_rmtree(ptr, i32, i32, i64, i32, ptr, ptr, ptr, ptr)
 declare i64 @imre_shutil_copy(i32, ptr, i32, ptr, i32, i32)
 declare void @imre_subprocess_check(ptr)
 declare i64 @imre_subprocess_error_field(ptr, i32)
@@ -6642,6 +6667,10 @@ declare ptr @imre_path_text(ptr)
 declare ptr @imre_path_name(ptr)
 declare i64 @imre_path_count_part(ptr, ptr)
 declare ptr @imre_path_with_name(ptr, ptr)
+declare ptr @imre_path_change_extension(ptr, ptr, i32)
+declare ptr @imre_path_suffixes(ptr)
+declare i32 @imre_path_is_relative_to(ptr, ptr)
+declare ptr @imre_path_relative_to(ptr, ptr, i32)
 declare ptr @imre_path_stem(ptr)
 declare ptr @imre_path_suffix(ptr)
 declare ptr @imre_path_parent(ptr)
@@ -6903,6 +6932,8 @@ define internal i64 @imre_seq_borrow_index_proven_fast(ptr %sequence, i64 %index
 declare ptr @imre_seq_repeat(ptr, i64)
 declare ptr @imre_dict_new(i32, i32)
 declare ptr @imre_dict_copy(ptr)
+declare i64 @imre_deep_copy(i64, i32)
+declare ptr @imre_record_shallow_copy(ptr)
 declare ptr @imre_default_list_dict_new(i32, i32)
 declare ptr @imre_counter_new(i32)
 declare void @imre_counter_update(ptr, ptr)
@@ -6949,6 +6980,7 @@ declare ptr @imre_str_rsplit_last(ptr, ptr)
 declare ptr @imre_str_unquote_rsplit_last(ptr, ptr)
 declare ptr @imre_str_strip(ptr, ptr, i32)
 declare ptr @imre_str_lower(ptr)
+declare ptr @imre_str_capitalize(ptr)
 declare i32 @imre_str_affix(ptr, ptr, i32)
 declare i64 @imre_str_find(ptr, ptr, i64)
 declare void @imre_str_partition(ptr, ptr, ptr)
@@ -7073,6 +7105,13 @@ declare void @imre_log_config_named(ptr, i64, i64, i1)
 declare i64 @imre_union_from_int(i64)
 declare i64 @imre_union_into_int(i64)
 declare void @imre_log_config(i64, i64, i64, i1)
+declare void @imre_log_dict_config(ptr)
+declare void @imre_log_typed_dict_config(ptr, i64)
+declare void @imre_log_file_config(ptr, i8, i1, i64)
+declare i1 @imre_log_disabled(ptr)
+declare i1 @imre_log_propagate(ptr)
+declare i1 @imre_log_is_enabled(ptr, i64)
+declare void @imre_log_routed_emit(ptr, i64, ptr)
 declare ptr @imre_log_name(ptr)
 declare i64 @imre_log_parent(ptr)
 declare ptr @imre_log_root(ptr)
