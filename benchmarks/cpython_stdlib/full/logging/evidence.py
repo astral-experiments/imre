@@ -21,6 +21,7 @@ SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
 sys.path[:0] = [str(HERE), str(STDLIB)]
 import native_levels
 import native_logging
+import native_records
 import native_timed
 from suite_evidence import roles, write_reports
 from suite_inventory import cases, load_suite, verify_files
@@ -144,6 +145,7 @@ def known_cases(toolchain, work, original):
         return native_method(toolchain, directory("native-daily"), SOURCE, owner, daily, fixture,
             operation=("imre", "Native handler construction, calendar rollover and close"))(case, method)
     executions[daily] = native_daily
+    executions.update(native_records.record_executions(toolchain, work, original))
     return executions
 
 
