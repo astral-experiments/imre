@@ -31,6 +31,16 @@ EQUALITY_BLOCKERS = {
     "testAssertEqual_diffThreshold": (1036, "14:9: Imre: unknown class method"),
     "testAssertEqual_shorten": (1067, "9:9: Imre: unknown class method"),
 }
+# Each entry has a reviewed native product operation and the original default fixture.
+DEFAULT_MOCK_METHODS = {
+    "test_assert_not_called": "unittest.mock.Mock.assert_not_called",
+    "test_assert_called": "unittest.mock.Mock.assert_called",
+    "test_assert_called_once": "unittest.mock.Mock.assert_called_once",
+    "test_ordered_call_signature": "unittest.mock.Mock.call_args and its representation",
+    "test_assert_any_call": "unittest.TestCase.assertRaises and unittest.mock.Mock.assert_any_call",
+    "test_assert_called_with": "unittest.TestCase.assertRaises and unittest.mock.Mock.assert_called_with",
+    "test_assert_called_once_with": "unittest.TestCase.assertRaises and unittest.mock.Mock.assert_called_once_with",
+}
 MOCK_BLOCKERS = {
     "test_assert_called_once_message_not_called": (1858, "10:9: Imre: unknown class method"),
     "test_reset_mock": (337, '9:35: Imre: unexpected keyword argument "parent"'),
@@ -128,16 +138,9 @@ def run(args, level, root):
                          "testAssertEqualMultipleLinesMissingNewlineTerminator",
                          "testAssertEqualMultipleLinesMismatchedNewlinesTerminators",
                          "testAssertMultiLineEqual", *EQUALITY_BLOCKERS)),
-        ("testmock.testmock", "MockTest", "test_assert_not_called", "unittest.mock.Mock.assert_not_called"),
-        ("testmock.testmock", "MockTest", "test_assert_called", "unittest.mock.Mock.assert_called"),
+        *(("testmock.testmock", "MockTest", method, operation) for method, operation in DEFAULT_MOCK_METHODS.items()),
         ("testmock.testmock", "MockTest", "test_assert_called_exception_message",
          "unittest.TestCase.assertRaisesRegex and unittest.mock.Mock.assert_called"),
-        ("testmock.testmock", "MockTest", "test_assert_called_once", "unittest.mock.Mock.assert_called_once"),
-        ("testmock.testmock", "MockTest", "test_ordered_call_signature", "unittest.mock.Mock.call_args and its representation"),
-        *(("testmock.testmock", "MockTest", method, "unittest.TestCase.assertRaises and unittest.mock.Mock." + assertion)
-          for method, assertion in (("test_assert_any_call", "assert_any_call"),
-                                    ("test_assert_called_with", "assert_called_with"),
-                                    ("test_assert_called_once_with", "assert_called_once_with"))),
         *(("testmock.testmock", "MockTest", method, "unittest.mock recording, reset, and call assertions")
           for method in MOCK_BLOCKERS),
     ):
@@ -145,7 +148,7 @@ def run(args, level, root):
         case_id = PREFIX + f"{module}.{owner}.{method}"
         directory = root / method
         directory.mkdir()
-        if module == "testmock.testmock" and method not in MOCK_BLOCKERS:
+        if module == "testmock.testmock" and method in DEFAULT_MOCK_METHODS:
             blob = manifest["files"][path.relative_to(HERE / "upstream").as_posix()]
             native_defaults[case_id, 1] = NativeDefaultMethod(lang, directory, path, blob, ("imre", operation))
             continue
