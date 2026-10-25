@@ -25,7 +25,7 @@ def main():
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--clang", type=Path, default=shutil.which("clang-18") or shutil.which("clang"))
     parser.add_argument("--compiler-revision", required=True)
-    parser.add_argument("--compare", type=Path, help="optional independent four-mode seven-method report")
+    parser.add_argument("--compare", type=Path, help="optional independent four-mode report for previously verified methods")
     args = parser.parse_args()
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5) or args.clang is None:
         parser.error("use test-enabled CPython 3.14.5 and supply clang")
@@ -70,7 +70,8 @@ def main():
         "--result", out / "fixture-roles.json")
     run(HERE / "combine_defaults.py", out, "--result", out / "evidence-linux.json")
     compare = ["--compare", args.compare.resolve()] if args.compare else []
-    run(HERE / "verify_defaults.py", *common, *compare, "--result", out / "verified-defaults.json")
+    run(HERE / "verify_defaults.py", *common, *compare, "--evidence", out / "evidence-linux.json",
+        "--result", out / "verified-defaults.json")
     run(HERE / "fromkeys/run.py", *common, "--result", out / "fromkeys-original.json",
         env={**os.environ, "PYTHONPATH": str(HERE / "fromkeys")})
     for folder, report in ((HERE, "evidence-linux.json"), (HERE / "fromkeys", "evidence-fromkeys-linux.json")):

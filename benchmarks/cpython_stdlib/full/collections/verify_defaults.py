@@ -1,4 +1,4 @@
-"""Verify the seven promoted collections methods on pinned CPython and in four native compiler modes."""
+"""Verify the promoted collections methods on pinned CPython and in four native compiler modes."""
 import argparse
 import hashlib
 import json
@@ -15,6 +15,7 @@ for name in ("imre", "runtime", "result"):
 parser.add_argument("--compiler-revision", required=True)
 parser.add_argument("--clang", type=Path, default=shutil.which("clang-18") or shutil.which("clang"))
 parser.add_argument("--suite", type=Path, default=Path(__file__).resolve().parent)
+parser.add_argument("--evidence", type=Path, help="verify all occurrences fully native at both optimization levels")
 parser.add_argument("--compare", type=Path, help="optional second four-mode receipt to check identical source and fixture hashes")
 args = parser.parse_args()
 if sys.version_info[:3] != (3, 14, 5) or sys.implementation.name != "cpython" or args.clang is None:
@@ -23,7 +24,8 @@ here = args.suite.resolve()
 sys.path[:0] = [str(here), str(here.parents[1])]
 from suite_inventory import cases, load_suite, verify_files
 from suite_native import NativeDefaultMethod, Toolchain
-from routines import COUNTER_OPERATIONS
+from default_methods import audited_operations
+from suite_evidence import validate_pair
 import test
 
 def digest(path):
@@ -31,7 +33,8 @@ def digest(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 manifest = json.loads((here / "UPSTREAM.json").read_bytes())
-reference = json.loads((here / "reference-linux.json").read_bytes())["reference"]
+reference_report = json.loads((here / "reference-linux.json").read_bytes())
+reference = reference_report["reference"]
 verify_files(here / "upstream", manifest["files"])
 verify_files(Path(test.__file__).resolve().parents[2], manifest["files"])
 imre, runtime, clang = (p.resolve() for p in (args.imre, args.runtime, args.clang))
@@ -39,13 +42,22 @@ revision, tree, *parents = subprocess.check_output(
     ["git", "-C", here, "show", "-s", "--format=%H %T %P", args.compiler_revision], text=True).split()
 source = {"compiler_revision": revision, "tree": tree, "parents": parents, "cpython_commit": manifest["commit"],
           "imre_sha256": digest(imre), "runtime_sha256": digest(runtime)}
-selected = {"test.test_collections.TestCounter." + m: COUNTER_OPERATIONS[m]
-            for m in ("test_ge", "test_gt", "test_le", "test_lt", "test_total")}
-selected.update({
-    "test.test_deque.TestBasic.test_clear": "Clear an existing native deque and measure its length",
-    "test.test_deque.TestBasic.test_maxlen_zero": "Zero-length deque construction, extend and extendleft consume the original iterator",
-})
+audited = audited_operations()
+if args.evidence:
+    reports = json.loads(args.evidence.read_bytes())
+    validate_pair(reports, reference_report)
+    groups = [{row["id"] for row in report["records"] if row["classification"] == "fully-native"}
+              for report in reports]
+    names = set.intersection(*groups)
+else:
+    names = {"test.test_collections.TestCounter." + method
+             for method in ("test_ge", "test_gt", "test_le", "test_lt", "test_total")}
+    names.update({"test.test_deque.TestBasic.test_clear", "test.test_deque.TestBasic.test_maxlen_zero"})
+selected = {name: audited[name] for name in names}
 comparison = json.loads(args.compare.read_bytes()) if args.compare else None
+if comparison:
+    assert set(comparison["reference_controls"]) <= names
+    assert all(set(rows) == set(comparison["reference_controls"]) for rows in comparison["modes"].values())
 discovered = {}
 for module in manifest['modules']:
     try: suite = load_suite(module)
@@ -68,12 +80,12 @@ for opt in (0,3):
         rows = {}
         for ident,case in discovered.items():
             src='Lib/'+type(case).__module__.replace('.','/')+'.py'
-            with tempfile.TemporaryDirectory(prefix='current-seven-') as work:
+            with tempfile.TemporaryDirectory(prefix='verified-collections-') as work:
                 row=NativeDefaultMethod(tool,Path(work),here/'upstream'/src,manifest['files'][src],('imre',selected[ident])).run(type(case)(case._testMethodName))
             rows[ident]=row
             if row['outcome']=='pass':
                 assert set(row['roles'].values()) == {'imre'}
-                if comparison:
+                if comparison and ident in comparison["reference_controls"]:
                     other = comparison['modes'][f'O{opt}-'+('reachable' if reach else 'whole')][ident]
                     assert other['outcome'] == 'pass' and other['roles'] == row['roles']
                     for key in ('method_sha256','source_blob','staged_id','entry_sha256'):

@@ -25,6 +25,15 @@ def own_methods(path):
     return {cls.name:{n.name for n in cls.body if isinstance(n,ast.FunctionDef)}
             for cls in ast.parse(path.read_bytes()).body if isinstance(cls,ast.ClassDef)}
 
+def audited_operations():
+    return {**{'test.test_collections.TestCounter.'+m:v for m,v in COUNTER_OPERATIONS.items()},
+             **{'test.test_collections.TestChainMap.'+m:v for m,v in CHAINMAP.items()},
+             **{'test.test_deque.TestBasic.'+m:BIG_OPERATION[1] for m in BIG_METHODS},
+             'test.test_deque.TestBasic.test_clear':'Clear an existing native deque and measure its length',
+             'test.test_deque.TestBasic.test_maxlen_zero':'Zero-length deque construction, extend and extendleft consume the original iterator',
+             'test.test_deque.TestBasic.test_init':'Call deque with three positional arguments and with a non-iterable integer'}
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for flag in ('imre', 'runtime', 'source'):
@@ -45,12 +54,7 @@ def main():
             assert hashlib.file_digest(stream, 'sha256').hexdigest() == metadata[key]
     if args.clang is None:parser.error('supply --clang when clang is not on PATH')
     tool=Toolchain(args.imre.resolve(), args.runtime.resolve(), args.clang.resolve(), args.opt_level)
-    audited={**{'test.test_collections.TestCounter.'+m:v for m,v in COUNTER_OPERATIONS.items()},
-             **{'test.test_collections.TestChainMap.'+m:v for m,v in CHAINMAP.items()},
-             **{'test.test_deque.TestBasic.'+m:BIG_OPERATION[1] for m in BIG_METHODS},
-             'test.test_deque.TestBasic.test_clear':'Clear an existing native deque and measure its length',
-             'test.test_deque.TestBasic.test_maxlen_zero':'Zero-length deque construction, extend and extendleft consume the original iterator',
-             'test.test_deque.TestBasic.test_init':'Call deque with too many positional arguments and an unexpected keyword'}
+    audited=audited_operations()
     output={}
     counts=collections.Counter()
     for module in manifest['modules']:

@@ -14,6 +14,8 @@ Mapping class base, and the copy protocols exercised by 16 original cases.
 The [branch verification runs](runs/README.md) retain full historical reports
 for individual compiler trees. Each report has its own O0 and O3 denominator.
 
+On [repaired main `e328ca3`](runs/e328ca39a14d/README.md), both levels recorded **8 fully native / 659**, eight native bodies using CPython fixtures, 14 CPython-driven operations, four cases without a collections operation, three reference skips and 622 blockers. The eighth is `TestBasic.test_init`; this is the only [classification change](runs/e328ca39a14d/role-changes.json) from the seven-method report below. The supplementary `dict.fromkeys` case remains outside this denominator.
+
 On [canonical main `03c8d84`](runs/03c8d84fa4c1/README.md), both levels recorded
 **7 fully native / 659**, eight native bodies with host fixtures, 14 host-driven
 native operations, four cases without a collections operation, three reference
