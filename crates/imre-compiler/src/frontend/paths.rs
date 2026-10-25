@@ -130,15 +130,61 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
         calls::reject_unpacking(call, self.source)?;
-        let mut args = call.arguments.args.iter();
+        let inputs = call
+            .arguments
+            .args
+            .iter()
+            .map(|arg| self.expr(arg))
+            .collect::<Result<Vec<_>, _>>()?;
+        let checked = inputs
+            .iter()
+            .any(|value| self.types.payload(value.ty).is_some());
+        let mut body = Vec::new();
+        let mut clear = Vec::new();
+        let mut parts = Vec::new();
+        for (value, syntax) in inputs.into_iter().zip(&call.arguments.args) {
+            let mut part = if checked {
+                // Method lookup and each argument expression run before the constructor
+                // inspects any part. In particular a later argument may raise first.
+                let slot = self.hidden(value.ty);
+                body.push(Statement::Assign(slot, value));
+                clear.push(slot);
+                self.local(slot)
+            } else {
+                value
+            };
+            if let Some(payload) = self.types.payload(part.ty) {
+                let missing = Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::IsNone, vec![part.clone()]),
+                };
+                let error = Statement::Raise(Some(Expr { ty: Type::Exception, kind: ExprKind::Exception {
+                    kind: exception_kind("TypeError").unwrap(),
+                    message: Some(Box::new(Expr { ty: Type::Str, kind: ExprKind::Str(
+                        "argument should be a str or an os.PathLike object where __fspath__ returns a str, not 'NoneType'".into()) })),
+                }}));
+                part = Expr {
+                    ty: payload,
+                    kind: ExprKind::Scope {
+                        body: vec![Statement::If(missing, vec![error], vec![])],
+                        value: Box::new(Expr {
+                            ty: payload,
+                            kind: ExprKind::Unwrap(Box::new(part)),
+                        }),
+                        clear: vec![],
+                    },
+                };
+            }
+            parts.push((part, syntax));
+        }
+        let mut parts = parts.into_iter();
         let mut path = match ty {
             Type::Path => {
-                let first = if let Some(arg) = args.next() {
-                    let value = self.expr(arg)?;
-                    if matches!(value.ty, Type::PurePath(ir::PathFlavor::Windows)) {
-                        operation(PathOperation::AsPosix, Type::Str, vec![value])
+                let first = if let Some((part, syntax)) = parts.next() {
+                    if matches!(part.ty, Type::PurePath(ir::PathFlavor::Windows)) {
+                        operation(PathOperation::AsPosix, Type::Str, vec![part])
                     } else {
-                        self.path_text(value, arg)?
+                        self.path_text(part, syntax)?
                     }
                 } else {
                     unpacking::string("")
@@ -148,11 +194,21 @@ impl Checker<'_> {
             Type::PurePath(flavor) => operation(PathOperation::PureNew(flavor), ty, vec![]),
             _ => unreachable!(),
         };
-        for arg in args {
-            let value = self.expr(arg)?;
-            path = self.path_join(path, value, arg)?;
+        for (part, syntax) in parts {
+            path = self.path_join(path, part, syntax)?;
         }
-        Ok(path)
+        if checked {
+            Ok(Expr {
+                ty,
+                kind: ExprKind::Scope {
+                    body,
+                    clear,
+                    value: Box::new(path),
+                },
+            })
+        } else {
+            Ok(path)
+        }
     }
 
     pub(super) fn system_path_call(
