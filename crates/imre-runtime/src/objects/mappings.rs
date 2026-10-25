@@ -723,6 +723,15 @@ impl Mapping {
         keys
     }
 
+    /// Borrowed document values stay rooted by the unmodified mapping.
+    pub(super) fn document_values(&self) -> impl Iterator<Item = usize> + '_ {
+        assert_eq!(self.value_kind.raw(), 5);
+        let Tables::Str(table) = &self.tables else {
+            unreachable!("expected a string-keyed document");
+        };
+        table.entries.iter().flatten().map(|entry| entry.value)
+    }
+
     pub(super) fn document_pairs(&self) -> Vec<(Rc<Str>, Rc<Object>)> {
         assert_eq!((self.tables.key_kind(), self.value_kind.raw()), (3, 5));
         let mut pairs = Vec::with_capacity(self.tables.len());
