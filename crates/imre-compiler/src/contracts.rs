@@ -65,6 +65,8 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::FreezeStrings => Contract::new(true, PreservesLists),
+            Self::Errno(_) => Contract::new(true, PreservesLists),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
@@ -367,6 +369,7 @@ impl Builtin {
             | Self::CacheNew
             | Self::CacheTable
             | Self::CacheStat(_)
+            | Self::CacheParameter(_)
             | Self::CacheClear
             | Self::CallableContext
             | Self::ModuleCache(_)
@@ -445,6 +448,7 @@ impl Builtin {
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
             | Self::SysPlatform
+            | Self::StrIsUpper
             | Self::OsName
             | Self::SysOrigArgv
             | Self::SysArgv
@@ -551,6 +555,10 @@ impl Builtin {
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
             Self::CallableContext => {
                 matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result))
+            }
+            Self::CacheParameter(_) => {
+                matches!(args, [wrapper] if types.cached_function(wrapper.ty).is_some())
+                    && result == Type::Document(crate::ir::DocumentShape::Any)
             }
             Self::CacheNew | Self::ModuleCache(_) => {
                 args.is_empty() && result.cache_table().is_some()
