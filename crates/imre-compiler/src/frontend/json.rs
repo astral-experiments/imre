@@ -80,21 +80,27 @@ pub(super) fn compare(
         error(
             source,
             node,
-            "readonly JSON comparisons require == or != with a literal string",
+            "JSON comparisons require == or != with another parsed value or a literal string",
         )
     };
     let [left, right]: [Expr; 2] = values.try_into().map_err(|_| invalid())?;
     let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = ops else {
         return Err(invalid());
     };
-    let (value, literal) = if matches!(left.kind, ExprKind::Str(_)) {
-        (right, left)
+    let result = if matches!(left.kind, ExprKind::Str(_)) {
+        select(right, Type::Bool, None, Some(left))
     } else if matches!(right.kind, ExprKind::Str(_)) {
-        (left, right)
+        select(left, Type::Bool, None, Some(right))
     } else {
-        return Err(invalid());
+        let parsed = |ty| matches!(ty, Type::JsonRoot | Type::JsonObject | Type::JsonValue);
+        if !parsed(left.ty) || !parsed(right.ty) {
+            return Err(invalid());
+        }
+        Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Builtin(Builtin::JsonEqual, vec![left, right]),
+        }
     };
-    let result = select(value, Type::Bool, None, Some(literal));
     Ok(if *op == ast::CmpOp::Eq {
         result
     } else {
@@ -411,7 +417,7 @@ impl Checker<'_> {
         for keyword in &call.arguments.keywords {
             let name = keyword.arg.as_ref().map(|name| name.as_str());
             if !(matches!(name, Some("indent" | "ensure_ascii"))
-                || standard && name == Some("allow_nan"))
+                || standard && matches!(name, Some("allow_nan" | "sort_keys" | "separators")))
                 || !names.insert(name)
             {
                 return Err(error(
@@ -422,6 +428,9 @@ impl Checker<'_> {
             }
         }
         let source = match source {
+            display if standard && documents::constant(display) && needs_document(display) => {
+                self.expr_expected(display, documents::ANY)?
+            }
             ast::Expr::List(items) if standard && items.elts.is_empty() => {
                 self.expr_expected(source, Type::ListInt)?
             }
@@ -462,9 +471,44 @@ impl Checker<'_> {
             kind: ExprKind::Bool(true),
         };
         let mut allow_nan = ensure_ascii.clone();
+        let mut sort_keys = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Bool(false),
+        };
+        let mut separators = Expr {
+            ty: Type::None,
+            kind: ExprKind::None,
+        };
         for keyword in &call.arguments.keywords {
             let name = keyword.arg.as_ref().unwrap().as_str();
-            let value = if name == "indent" && standard {
+            let value = if name == "separators" {
+                let value = match &keyword.value {
+                    // The encoder only unpacks this fresh display; its members can
+                    // have different types, and each must be evaluated in order.
+                    ast::Expr::List(items)
+                        if !items.elts.iter().any(ast::Expr::is_starred_expr) =>
+                    {
+                        let values = items
+                            .elts
+                            .iter()
+                            .map(|item| self.expr(item))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        Expr {
+                            ty: self.types.tuple(values.iter().map(|v| v.ty).collect()),
+                            kind: ExprKind::Tuple(values),
+                        }
+                    }
+                    ast::Expr::Dict(items) if items.items.is_empty() => {
+                        self.expr_expected(&keyword.value, self.types.dict(Type::Str, Type::Int))?
+                    }
+                    _ => self.expr(&keyword.value)?,
+                };
+                check_standard_encoding(value.ty, self.types)
+                    .map_err(|message| error(self.source, keyword, message))?;
+                value
+            } else if name == "sort_keys" {
+                self.condition(&keyword.value)?
+            } else if name == "indent" && standard {
                 let value = self.expr(&keyword.value)?;
                 match self.types.payload(value.ty).unwrap_or(value.ty) {
                     Type::Str | Type::StrLiteral(_) => Self::string_value(value),
@@ -490,12 +534,14 @@ impl Checker<'_> {
             match name {
                 "indent" => indent = self.local(slot),
                 "ensure_ascii" => ensure_ascii = self.local(slot),
-                _ => allow_nan = self.local(slot),
+                "allow_nan" => allow_nan = self.local(slot),
+                "sort_keys" => sort_keys = self.local(slot),
+                _ => separators = self.local(slot),
             }
         }
         let mut args = vec![self.local(slot), indent, ensure_ascii];
         if standard {
-            args.push(allow_nan);
+            args.extend([allow_nan, sort_keys, separators]);
         }
         let (builtin, ty) = if let Some(stream) = file {
             args.push(stream);
@@ -516,6 +562,34 @@ impl Checker<'_> {
                 clear,
             },
         })
+    }
+}
+
+/// A homogeneous scalar display already has ordinary typed storage. A fresh
+/// mixed or nested JSON display can use the existing native document containers.
+fn needs_document(display: &ast::Expr) -> bool {
+    fn mixed<'a>(mut values: impl Iterator<Item = &'a ast::Expr>) -> bool {
+        let Some(first) = values.next() else {
+            return false;
+        };
+        let kind = |x: &ast::Expr| match x {
+            ast::Expr::StringLiteral(_) => 1,
+            ast::Expr::BooleanLiteral(_) => 2,
+            ast::Expr::NoneLiteral(_) => 3,
+            ast::Expr::NumberLiteral(n) => match n.value {
+                ast::Number::Int(_) => 4,
+                ast::Number::Float(_) => 5,
+                _ => 6,
+            },
+            _ => 0,
+        };
+        let first = kind(first);
+        first == 0 || values.any(|v| kind(v) != first)
+    }
+    match display {
+        ast::Expr::List(l) => mixed(l.elts.iter()),
+        ast::Expr::Dict(d) => mixed(d.items.iter().map(|i| &i.value)),
+        _ => false,
     }
 }
 
@@ -542,6 +616,7 @@ fn check_standard_encoding(ty: Type, types: &Types) -> Result<(), &'static str> 
         | Type::Float
         | Type::Str
         | Type::StrLiteral(_)
+        | Type::Document(_)
         | Type::JsonRoot
         | Type::JsonValue
         | Type::JsonObject

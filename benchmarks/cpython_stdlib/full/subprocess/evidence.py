@@ -9,6 +9,7 @@ import sys
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1])]
 from report import REFERENCE_ONLY, compact
+from leak_cleanup import IDS as CPU_IDS
 from selector_proof import CONTROL
 from suite_evidence import build_report, roles, write_reports
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
@@ -77,10 +78,18 @@ def diagnostic(reason):
 def report(args, level, discovered, reference):
     index = (0, 3).index(level)
     sources = {
-        k: read(getattr(args, k)[index]) for k in ("audit", "bodies", "trace", "vfork")
+        k: read(getattr(args, k)[index])
+        for k in ("audit", "bodies", "trace", "vfork", "cpu")
     }
     if any(int(data["opt_level"]) != level for data in sources.values()):
         raise ValueError("wrong optimization level")
+    cpu = sources["cpu"]
+    if (
+        set(cpu["observations"]) != set(CPU_IDS)
+        or cpu["reference"] != dict.fromkeys(CPU_IDS, ["pass"])
+        or cpu["cpython_commit"] != reference["cpython_commit"]
+    ):
+        raise ValueError("incomplete CPU-resource fixture execution")
     audit, bodies = sources["audit"]["rows"], sources["bodies"]["rows"]
     ids = {name for name, _ in discovered}
     if set(audit) != ids or set(bodies) != ids or len(ids) != len(discovered):
@@ -117,6 +126,57 @@ def report(args, level, discovered, reference):
             ev["native_body_diagnostic"] = diagnostic(body["reason"])
         if "operations" in actor:
             ev["native_actor_calls"] = actor["operations"]
+        if name in CPU_IDS:
+            reason = "resource 'cpu' is not enabled"
+            if reference["reference"][name] != {"skipped": reason}:
+                raise ValueError("the default reference configuration changed")
+            [enabled] = cpu["observations"][name]
+            if not (
+                enabled["native_parent_count"] == 1
+                and enabled["native_Popen_errors"]
+                == enabled["native_child_creations"]
+                == enabled["native_child_reaps"]
+                == 1024
+                and enabled["parent_fd_count_before"]
+                == enabled["parent_fd_count_after"]
+                and enabled["descriptor_targets_unchanged"]
+                and enabled["parent_selector_calls"] == 0
+                and enabled["roles"]
+                == roles(
+                    body="cpython",
+                    assertions="cpython",
+                    operation="imre",
+                    fixture="cpython",
+                )
+            ):
+                raise ValueError(f"unverified CPU descriptor-leak operation: {name}")
+            exceptions[(*key, level)] = dict(
+                kind="upstream-skip",
+                reason=reason,
+                condition="test.support.use_resources does not enable cpu",
+                source="Lib/test/test_subprocess.py:1520",
+                platform=reference["platform"],
+                configuration="default CPython 3.14.5 Linux reference, cpu disabled",
+                fixture_variant=variant,
+            )
+            observations[key] = dict(
+                outcome="skip",
+                reason=reason,
+                roles=roles(
+                    body="unobserved",
+                    assertions="unobserved",
+                    operation="unobserved",
+                    fixture="unobserved",
+                ),
+                evidence=dict(
+                    imre_revision=args.imre_revision,
+                    opt_level=level,
+                    cpu_enabled=dict(
+                        reference="pass", outcome="pass", build=cpu["build"], **enabled
+                    ),
+                ),
+            )
+            continue
         if status == "reference-skip":
             reason = actor["reason"]
             line, condition = SKIPS[reason]
@@ -209,9 +269,11 @@ def report(args, level, discovered, reference):
             )
         elif status in {"failed", "blocked"}:
             obs = dict(
-                outcome="failure"
-                if status == "failed" or body["status"] == "failed"
-                else "blocked",
+                outcome=(
+                    "failure"
+                    if status == "failed" or body["status"] == "failed"
+                    else "blocked"
+                ),
                 roles=roles(
                     body="unknown",
                     assertions="unknown",
@@ -230,7 +292,7 @@ def report(args, level, discovered, reference):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for group in ("audit", "bodies", "trace", "vfork", "run-log"):
+    for group in ("audit", "bodies", "trace", "vfork", "run-log", "cpu"):
         parser.add_argument(
             "--" + group, nargs=2, metavar=("O0", "O3"), type=Path, required=True
         )

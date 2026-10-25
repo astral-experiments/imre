@@ -66,6 +66,7 @@ impl Builtin {
                 Contract::new(true, Unknown)
             }
             Self::ImportErrorReset => Contract::new(false, Unknown),
+            Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
             | Self::ImportErrorField(_)
             | Self::ExceptionFieldLen
@@ -123,7 +124,7 @@ impl Builtin {
                     | PathOperation::TemporaryDirectory
                     | PathOperation::CleanupTemporaryDirectory
                     | PathOperation::Iterdir
-                    | PathOperation::Next => true,
+                    | PathOperation::Glob { .. } => true,
                     PathOperation::ContextNew { .. }
                     | PathOperation::ContextEnter
                     | PathOperation::UnionText
@@ -135,6 +136,7 @@ impl Builtin {
                     | PathOperation::Drive
                     | PathOperation::Root
                     | PathOperation::Anchor
+                    | PathOperation::CountPart
                     | PathOperation::AsPosix
                     | PathOperation::Join
                     | PathOperation::Text
@@ -145,8 +147,7 @@ impl Builtin {
                     | PathOperation::IsAbsolute
                     | PathOperation::Exists
                     | PathOperation::IsFile
-                    | PathOperation::IsDir
-                    | PathOperation::Glob => false,
+                    | PathOperation::IsDir => false,
                 },
                 PreservesLists,
             ),
@@ -232,8 +233,10 @@ impl Builtin {
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Fd(_)
+                | ProcessOperation::OsErrorField(_)
+                | ProcessOperation::Strerror
                 | ProcessOperation::Which
-                | ProcessOperation::CopyFile
+                | ProcessOperation::Copy(_)
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)
@@ -257,6 +260,9 @@ impl Builtin {
             ),
             Self::BytesGet
             | Self::Chr
+            | Self::IntegerPower
+            | Self::ModularPower
+            | Self::NegativeIntegerPower
             | Self::Decode
             | Self::DecodeAscii
             | Self::UrlsafeB64encode
@@ -271,7 +277,10 @@ impl Builtin {
             | Self::KeyDifference
             | Self::RegexGroupDict
             | Self::DictGet
+            | Self::DictCopy
             | Self::JsonDecode(_)
+            | Self::CsvReader { .. }
+            | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads
             | Self::JsonErrorField(_)
@@ -279,6 +288,7 @@ impl Builtin {
             | Self::JsonGet { .. }
             | Self::JsonGetReceiver
             | Self::JsonAdd
+            | Self::JsonEqual
             | Self::JsonAddFields(_, _)
             | Self::JsonDumps(_)
             | Self::JsonDump(_)
@@ -309,6 +319,7 @@ impl Builtin {
             | Self::DictSumValues
             | Self::DictTryGet(_)
             | Self::Encode
+            | Self::CsvLineNumber
             | Self::Sha256Hex
             | Self::Sha256New
             | Self::HashAvailable
@@ -348,13 +359,13 @@ impl Builtin {
             | Self::SequenceGetInBounds
             | Self::SetContains
             | Self::Split
-            | Self::Ndiff
             | Self::StringListCopy
             | Self::StringListFilter(_)
             | Self::StringListSortSuffix(_)
             | Self::StringListNonempty
             | Self::Str
             | Self::NominalIdentity
+            | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
             | Self::StrEnumName
             | Self::StrEnumValue
@@ -368,6 +379,7 @@ impl Builtin {
             Self::BinaryOpen(_)
             | Self::BinaryRead
             | Self::BinaryReadSize
+            | Self::Ndiff
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
             | Self::DictDelete
@@ -442,7 +454,9 @@ impl Builtin {
             | Self::StringIter
             | Self::StringReverseIter
             | Self::TextClosed => Contract::new(false, Unknown),
-            Self::SortedRecordRows { .. }
+            Self::CounterMath { .. }
+            | Self::CounterMostCommon
+            | Self::SortedRecordRows { .. }
             | Self::SortedStringKeys
             | Self::TupleCacheNew
             | Self::TupleCacheResult => Contract::new(true, Unknown),
@@ -673,8 +687,12 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
             name,
             "int_floordiv"
                 | "imre_chr"
+                | "imre_int_pow"
+                | "imre_int_modpow"
+                | "imre_int_negative_pow"
                 | "imre_json_index"
                 | "imre_exception_message"
+                | "imre_import_error_reject_reset"
                 | "imre_exception_repr"
                 | "imre_json_iter"
                 | "imre_json_len"
@@ -819,9 +837,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_seq_repeat"
                 | "imre_str_repeat"
                 | "imre_seq_slice"
+                | "imre_dict_copy"
                 | "imre_dict_get"
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
+                | "imre_ndiff_deferred"
                 | "imre_dict_delete"
                 | "imre_dict_pop"
                 | "imre_cursor_length_hint"
