@@ -4,8 +4,8 @@ CPython commit: `5607950ef232dad16d75c0cf53101d9649d89115`. The 97
 `test.test_sys` instances come from a single test file. The four whole-module
 checks (the import and runner entry points with full and reachable checking)
 stopped at that file's `import builtins` on line 1 at Imre `76d74f9`.
-With native access to `builtins._`, all four progress to the unimplemented
-`import codecs` on line 2; none has reached unittest discovery natively.
+Native access to `builtins._` moved all four to `import codecs` on line 2. With
+native codec lookup all four now reach `import gc` on line 3; none has reached unittest discovery natively.
 
 The only direct builtins operations in this suite are the read, deletion and
 absence check on lines 51, 53 and 59 of `DisplayHookTest.test_original_displayhook`.
@@ -35,5 +35,9 @@ the default native operations would bypass changes to the namespace.
 
 The two later codecs operations in this suite are `codecs.lookup(fs_encoding)`
 at line 975 and `codecs.charmap_build(encodings.iso8859_3.decoding_table)` at
-line 1650. Host codecs in an assertion or fixture do not establish native codec
-support.
+line 1650. The filesystem helper now calls native lookup; `charmap_build` remains unsupported.
+The [native codec fixture](codec_lookup.py) compares aliases and cache identity, canonical
+names, exact encoded/decoded results and consumed lengths, errors, and the five fixed
+UTF byte-order marks with pinned Python. The stateless registry supports ASCII, Latin-1,
+UTF-8 and UTF-8 with signature. Search-function registration, stream codecs, other
+encodings, mutable CodecInfo attributes, and surrogate-preserving text need further work.
