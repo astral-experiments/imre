@@ -180,6 +180,7 @@ enum Stop<'a> {
     Error(&'a Parser, String),
     Exception(Error),
 }
+
 impl From<TryReserveError> for Stop<'_> {
     fn from(_: TryReserveError) -> Self {
         Self::Exception(Error::allocation())
