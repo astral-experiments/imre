@@ -11,18 +11,21 @@ fn tag(ty: Type) -> u8 {
         Type::Class(_) => 4,
         Type::Enum(_) => 5,
         Type::Path => 6,
+        Type::Int => 7,
         _ => unreachable!("closed native union member"),
     }
 }
 
 impl Emitter<'_, '_> {
-    /// The two alignment bits select str, bytes, or a string list. A nullable
+    /// The low bits select the concrete member. A nullable
     /// source preserves its absent zero word when transitioning into a union.
     pub(super) fn union_inject(&mut self, value: Value, returns: Type) -> Value {
         let source = self.module.types.payload(value.ty).unwrap_or(value.ty);
         let tag = tag(source);
         let word = self.word(&value);
-        let operand = if tag != 0 {
+        let operand = if source == Type::Int {
+            self.instruction(format!("call i64 @imre_union_from_int(i64 {word})"))
+        } else if tag != 0 {
             let bits = if matches!(source, Type::Enum(_)) {
                 self.instruction(format!("shl i64 {word}, 3"))
             } else {
@@ -46,10 +49,15 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// Local flow proves the member before projection; clearing the tag restores
-    /// its address and transfers ownership without retaining or allocating.
+    /// Local flow proves the member before projection. An integer may need to
+    /// recover its immediate representation; other owners transfer unchanged.
     pub(super) fn union_project(&mut self, value: Value, returns: Type) -> Value {
-        let word = if matches!(returns, Type::Enum(_)) {
+        let word = if returns == Type::Int {
+            self.instruction(format!(
+                "call i64 @imre_union_into_int(i64 {})",
+                value.operand
+            ))
+        } else if matches!(returns, Type::Enum(_)) {
             self.instruction(format!("lshr i64 {}, 3", value.operand))
         } else {
             self.instruction(format!("and i64 {}, -8", value.operand))
@@ -126,7 +134,10 @@ impl Emitter<'_, '_> {
                     }
                 }
             } else if let InstanceType::Exception(kind) = class
-                && matches!(value.ty, Type::Exception | Type::TimeoutExpired)
+                && matches!(
+                    value.ty,
+                    Type::Exception | Type::TimeoutExpired | Type::NamedException(_)
+                )
             {
                 let matched = self.instruction(format!(
                     "call i32 @imre_exception_matches(ptr {}, i32 {kind})",

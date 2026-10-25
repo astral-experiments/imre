@@ -23,6 +23,7 @@ fn has_container_float(ty: Type, inside: bool, types: &Types) -> bool {
 pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
     match ty {
         Type::Exception
+        | Type::NamedException(_)
         | Type::StringKeys
         | Type::TimeoutExpired
         | Type::EventLoop
@@ -102,7 +103,15 @@ pub(super) fn validate(
                     "generated dataclass equality cannot compare opaque standard-library objects; use field(compare=False) or dataclass(eq=False)",
                 ));
             }
-            if !graph.reachable_only() && options.repr && field.repr && !repr_supported(ty, types) {
+            if (!graph.reachable_only()
+                || classes
+                    .declarations
+                    .exceptions
+                    .contains_key(&declaration.definition))
+                && options.repr
+                && field.repr
+                && !repr_supported(ty, types)
+            {
                 return Err(module.error(
                     &field.annotation,
                     "generated dataclass repr does not support resource or callable fields; use field(repr=False) or dataclass(repr=False)",

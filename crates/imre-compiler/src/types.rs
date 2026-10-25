@@ -68,7 +68,9 @@ impl Types {
             Type::Callable(id) => matches!(storage.shapes.get(id), Some(Shape::Callable(..))),
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
-            Type::Class(id) | Type::StrEnum(id) | Type::Enum(id) => id < classes,
+            Type::Class(id) | Type::NamedException(id) | Type::StrEnum(id) | Type::Enum(id) => {
+                id < classes
+            }
             Type::Coroutine(id) | Type::Task(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::Awaitable(_)))
             }
@@ -368,6 +370,12 @@ impl Types {
             _ => return None,
         };
         Some(if nullable { self.optional(ty) } else { ty })
+    }
+
+    /// A dynamic logging name resolves to an integer or to its fallback string.
+    /// Narrow this result before using it as either concrete type.
+    pub(crate) fn logging_level_result(&self) -> Type {
+        Type::Union(self.intern(Shape::Union(vec![Type::Str, Type::Int])))
     }
 
     pub(crate) fn members(&self, ty: Type) -> Option<Vec<Type>> {
@@ -713,7 +721,7 @@ impl TypeDescription<'_> {
             | Type::Set(id)
             | Type::Optional(id)
             | Type::Union(id) => id,
-            Type::Class(id) | Type::StrEnum(id) | Type::Enum(id) => {
+            Type::Class(id) | Type::NamedException(id) | Type::StrEnum(id) | Type::Enum(id) => {
                 return self.write_str(&(self.class_name)(id));
             }
             _ => return write!(self, "{ty}"),
