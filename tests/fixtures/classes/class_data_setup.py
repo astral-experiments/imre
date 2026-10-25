@@ -33,11 +33,25 @@ class Nullable(unittest.TestCase):
         self.selected = number(7)
 
 
-class Words(unittest.TestCase):
+class WordReader(unittest.TestCase):
+    def read(self) -> list[str]:
+        return self.value
+
+
+class Words(WordReader):
     value = words("class")
 
     def setUp(self):
         self.value = words("instance")
+
+
+class DirectWords(WordReader):
+    def setUp(self):
+        self.value = words("sibling")
+
+
+def clear_words(case: WordReader):
+    case.value = []
 
 
 def remove(reader: Reader):
@@ -87,7 +101,13 @@ kept = w.value
 w.setUp()
 print(w.value)
 print(kept is Words.value)
-w.value = []
-print(w.value)
+spare = DirectWords()
+spare.setUp()
+print(spare.read())
+clear_words(w)
+clear_words(spare)
+print(w.read())
+print(spare.read())
+print(w.value is spare.value)
 del w.value
 print(w.value is kept)
