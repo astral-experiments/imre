@@ -1,6 +1,6 @@
 //! Positioned binary I/O on ordinary files, in-memory files, and ZIP members.
 
-use super::super::{acquire_rc, os::c_int, zipfile::Member};
+use super::super::{acquire_rc, c_int, zipfile::Member};
 use super::*;
 use num_traits::ToPrimitive;
 
