@@ -27,7 +27,20 @@ CELL = """class Cell:
 """
 
 
+HOOK = """class Build:
+    value: int
+    def __init__(self) -> None:
+        self.prepare()
+    def prepare(self) -> None:
+        self.value = 1
+"""
+
+
 REJECTED = {
+    "init_hook_skips_field": HOOK + "class Child(Build):\n    def prepare(self) -> None: pass\n",
+    "init_hook_reads_before_write": HOOK + "class Child(Build):\n    def prepare(self) -> None: self.value = self.value + 1\n",
+    "init_hook_leaks_receiver": HOOK + "def observe(value: Build) -> int: return value.value\nclass Child(Build):\n    def prepare(self) -> None: self.value = observe(self)\n",
+    "init_hook_duplicates_field": HOOK.replace("self.prepare()", "self.value = 2\n        self.prepare()"),
     "copy_hook_wrong_arity": 'import copy\nclass C:\n    def __copy__(self, extra: int) -> int: return extra\ncopy.copy(C())\n',
     "inherited_copy_reduction": 'import copy\nclass Base:\n    def __reduce_ex__(self, protocol: int) -> int: return 0\nclass Child(Base): pass\ncopy.copy(Child())\n',
     "copy_custom_getstate": 'import copy\nclass C:\n    def __getstate__(self) -> int: return 0\ncopy.copy(C())\n',
@@ -220,7 +233,7 @@ def main() -> None:
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "instance_layout.py", "property_setters.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py"]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "instance_layout.py", "property_setters.py", "initializer_hook.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py"]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)
