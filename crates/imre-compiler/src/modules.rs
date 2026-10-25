@@ -62,6 +62,7 @@ pub(crate) enum IntrinsicModule {
     AnnotationFormat,
     Declaration(&'static str),
     Argparse,
+    Builtins,
     Future,
     Sys,
     SysJit,
@@ -105,6 +106,7 @@ pub(crate) enum IntrinsicModule {
     Textwrap,
     Io,
     Gzip,
+    Codecs,
     Hashlib,
     Types,
     Base64,
@@ -129,6 +131,8 @@ pub(crate) enum Intrinsic {
     AnnotationTypeRepr,
     AnnotationFormat(i64),
     Declaration(&'static str),
+    BuiltinsLast,
+    SysDisplayHook,
     ArgumentParser,
     ArgparseNamespace,
     RawDescriptionHelpFormatter,
@@ -239,6 +243,10 @@ pub(crate) enum Intrinsic {
     GzipOpen,
     UrlsafeB64encode,
     Sha256,
+    CodecInfoClass,
+    CodecLookup,
+    CodecGetWriter,
+    CodecBom(&'static [u8]),
     HashNew,
     SimpleNamespace,
     HashAvailable,
@@ -359,6 +367,7 @@ impl IntrinsicModule {
             "_opcode" => Some(Self::Opcode),
             "unidiff" => Some(Self::Unidiff),
             "argparse" => Some(Self::Argparse),
+            "builtins" => Some(Self::Builtins),
             "sys" => Some(Self::Sys),
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
@@ -381,6 +390,7 @@ impl IntrinsicModule {
             "io" => Some(Self::Io),
             "gzip" => Some(Self::Gzip),
             "types" => Some(Self::Types),
+            "codecs" => Some(Self::Codecs),
             "hashlib" => Some(Self::Hashlib),
             "base64" => Some(Self::Base64),
             "zipfile" => Some(Self::Zipfile),
@@ -441,6 +451,8 @@ impl IntrinsicModule {
         }
         let symbol = match (self, name) {
             (Self::AnnotationLib, "ForwardRef") => Intrinsic::ForwardRef,
+            (Self::Builtins, "_") => Intrinsic::BuiltinsLast,
+            (Self::Sys, "__displayhook__") => Intrinsic::SysDisplayHook,
             (Self::AnnotationLib, "get_annotations") => Intrinsic::GetAnnotations,
             (Self::AnnotationLib, "type_repr") => Intrinsic::AnnotationTypeRepr,
             (Self::AnnotationFormat, "VALUE") => Intrinsic::AnnotationFormat(1),
@@ -606,6 +618,14 @@ impl IntrinsicModule {
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
             (Self::Types, "SimpleNamespace") => Intrinsic::SimpleNamespace,
+            (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
+            (Self::Codecs, "lookup") => Intrinsic::CodecLookup,
+            (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
+            (Self::Codecs, "BOM_UTF8") => Intrinsic::CodecBom(b"\xef\xbb\xbf"),
+            (Self::Codecs, "BOM_UTF16_LE") => Intrinsic::CodecBom(b"\xff\xfe"),
+            (Self::Codecs, "BOM_UTF16_BE") => Intrinsic::CodecBom(b"\xfe\xff"),
+            (Self::Codecs, "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
+            (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
             (Self::Base64, "urlsafe_b64encode") => Intrinsic::UrlsafeB64encode,
             (Self::Hashlib, "new") => Intrinsic::HashNew,
@@ -907,7 +927,7 @@ impl SourceGraph {
             .push(CheckedDiagnostic::ExcessArgument(argument));
     }
 
-    /// The native positional-only binder already raises at this exact keyword.
+    /// The concrete native binder handles this keyword, including errors and protocol-stub differences.
     pub(crate) fn checked_positional_keyword(&self, module: ModuleId, keyword: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::PositionalKeyword(keyword));
@@ -1720,6 +1740,9 @@ impl<'a> Loader<'a> {
                                     alias.name
                                 )
                             })?;
+                        if binding == Binding::Intrinsic(Intrinsic::BuiltinsLast) {
+                            return Err("from builtins import _ needs an import-time snapshot; use a qualified lookup".into());
+                        }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), binding, alias)?;
                     }

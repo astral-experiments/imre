@@ -67,7 +67,7 @@ impl Type {
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
-            | Self::ExceptionField
+            | Self::ValueView
             | Self::ImportException
             | Self::TimeoutExpired
             | Self::Path
@@ -95,6 +95,9 @@ impl Type {
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
             | Self::PathInfo
+            | Self::CodecInfo
+            | Self::CodecWriterClass
+            | Self::CodecWriter
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -131,7 +134,7 @@ impl Type {
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
-            | Self::ExceptionField
+            | Self::ValueView
             | Self::ImportException
             | Self::TimeoutExpired
             | Self::Path
@@ -159,6 +162,9 @@ impl Type {
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
             | Self::PathInfo
+            | Self::CodecInfo
+            | Self::CodecWriterClass
+            | Self::CodecWriter
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -335,6 +341,7 @@ fn emit_program(
         uses_sys_argv,
         uses_orig_argv,
         uses_linecache,
+        uses_builtins_last: module.uses_builtins_last(),
         has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
@@ -521,6 +528,7 @@ struct Emitter<'a, 'module> {
     uses_sys_argv: bool,
     uses_orig_argv: bool,
     uses_linecache: bool,
+    uses_builtins_last: bool,
     has_extensions: bool,
 }
 
@@ -729,7 +737,7 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExceptionField
+            | Type::ValueView
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
@@ -756,6 +764,9 @@ impl Emitter<'_, '_> {
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
+            | Type::CodecInfo
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -1754,6 +1765,9 @@ impl Emitter<'_, '_> {
             if self.uses_linecache {
                 self.line("call void @imre_linecache_clear()");
             }
+            if self.uses_builtins_last {
+                self.line("call void @imre_builtins_clear()");
+            }
             self.line("call void @imre_clear_literals()");
             if self.uses_sys_argv {
                 self.line("call void @imre_args_clear()");
@@ -1788,6 +1802,9 @@ impl Emitter<'_, '_> {
             self.cleanup_globals();
             if self.uses_linecache {
                 self.line("call void @imre_linecache_clear()");
+            }
+            if self.uses_builtins_last {
+                self.line("call void @imre_builtins_clear()");
             }
             self.line("call void @imre_clear_literals()");
             if self.uses_sys_argv {
@@ -3369,13 +3386,16 @@ impl Emitter<'_, '_> {
                 | Type::StrDescriptor(_)
                 | Type::PlainObject
                 | Type::PathInfo
+                | Type::CodecInfo
+                | Type::CodecWriterClass
+                | Type::CodecWriter
                 | Type::Sha256
                 | Type::ZipFile
                 | Type::ZipInfo
                 | Type::CsvReader
                 | Type::Exception
                 | Type::NamedException(_)
-                | Type::ExceptionField
+                | Type::ValueView
                 | Type::ImportException
                 | Type::TimeoutExpired
                 | Type::TextIO
@@ -4414,6 +4434,38 @@ impl Emitter<'_, '_> {
             Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
             Builtin::Chr => self.call("imre_chr", Type::Str, &[&args[0].value]),
+            Builtin::BuiltinsLast => self.call("imre_builtins_last", returns, &[]),
+            Builtin::BuiltinsHasLast => {
+                let bit = self.instruction("call i32 @imre_builtins_has_last()");
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::BuiltinsDeleteLast => {
+                self.void_call("imre_builtins_del_last", &[]);
+                none()
+            }
+            Builtin::BuiltinsSetLast | Builtin::SysDisplayHook => {
+                let value = &args[0].value;
+                let kind = if value.ty == Type::ValueView {
+                    u32::MAX
+                } else {
+                    representation_kind(value.ty, &self.module.types)
+                };
+                let word = self.word(value);
+                if matches!(builtin, Builtin::SysDisplayHook) {
+                    self.checked_line(format!(
+                        "call void @imre_sys_displayhook(i32 {kind}, i64 {word})"
+                    ));
+                } else {
+                    self.line(format!(
+                        "call void @imre_builtins_set_last(i32 {kind}, i64 {word})"
+                    ));
+                }
+                none()
+            }
             Builtin::IntegerPower => {
                 self.call("imre_int_pow", Type::Int, &[&args[0].value, &args[1].value])
             }
@@ -4680,6 +4732,56 @@ impl Emitter<'_, '_> {
             Builtin::CsvLineNumber => {
                 self.call("imre_csv_line_number", Type::Int, &[&args[0].value])
             }
+            Builtin::CodecLookup => {
+                self.call("imre_codec_lookup", Type::CodecInfo, &[&args[0].value])
+            }
+            Builtin::CodecName => self.call("imre_codec_name", Type::Str, &[&args[0].value]),
+            Builtin::CodecWriter(op) => {
+                use crate::ir::WriterOperation::*;
+                let values = args.iter().map(|arg| &arg.value).collect::<Vec<_>>();
+                match op {
+                    Flush | Close | Reset => {
+                        let mode = match op {
+                            Flush => 0,
+                            Close => 1,
+                            _ => 2,
+                        };
+                        self.checked_line(format!(
+                            "call void @imre_codec_writer_control(ptr {}, i32 {mode})",
+                            args[0].value.operand
+                        ));
+                        none()
+                    }
+                    _ => {
+                        let name = match op {
+                            Class => "imre_codec_writer_class",
+                            New => "imre_codec_writer_new",
+                            Write => "imre_codec_writer_write",
+                            Encoding => "imre_codec_writer_encoding",
+                            SetEncoding => "imre_codec_writer_set_encoding",
+                            Stream => "imre_codec_writer_stream",
+                            Errors => "imre_codec_writer_errors",
+                            SetErrors => "imre_codec_writer_set_errors",
+                            Flush | Close | Reset => unreachable!(),
+                        };
+                        if returns == Type::None {
+                            self.void_call(name, &values);
+                            none()
+                        } else {
+                            self.call(name, returns, &values)
+                        }
+                    }
+                }
+            }
+            Builtin::CodecEncode | Builtin::CodecDecode => self.call(
+                if matches!(builtin, Builtin::CodecEncode) {
+                    "imre_codec_encode"
+                } else {
+                    "imre_codec_decode"
+                },
+                returns,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
             Builtin::Sha256Hex => self.call("imre_sha256_hex", Type::Str, &[&args[0].value]),
             Builtin::HashNew => self.call(
                 "imre_hash_new",
@@ -4803,6 +4905,9 @@ impl Emitter<'_, '_> {
                 )
             }
             Builtin::BytesIo => self.call("imre_bytes_io", returns, &[&args[0].value]),
+            Builtin::BytesIoValue => {
+                self.call("imre_bytes_io_value", Type::Bytes, &[&args[0].value])
+            }
             Builtin::BinarySeek => self.call(
                 "imre_binary_seek",
                 returns,
@@ -5102,7 +5207,7 @@ impl Emitter<'_, '_> {
                     }
                 }
                 Type::None => self.call("imre_none_str", Type::Str, &[]),
-                Type::ExceptionField => {
+                Type::ValueView => {
                     self.call("imre_system_exit_code_text", Type::Str, &[&args[0].value])
                 }
                 Type::Exception
@@ -5155,6 +5260,7 @@ impl Emitter<'_, '_> {
                 },
                 _ => unreachable!("float conversion was checked"),
             },
+            Builtin::Len if args[0].value.ty == Type::CodecInfo => small(4),
             Builtin::Len if args[0].value.ty == Type::StringIterable => {
                 self.call("imre_string_iterable_len", Type::Int, &[&args[0].value])
             }
@@ -5805,7 +5911,7 @@ impl Emitter<'_, '_> {
                         self.instruction(format!("icmp eq i64 {}, 0", args[0].value.operand))
                     }
                     Type::None => "true".to_owned(),
-                    Type::ExceptionField => {
+                    Type::ValueView => {
                         let bit = self.instruction(format!(
                             "call i32 @imre_system_exit_code_equal(ptr {}, i32 0, i64 0)",
                             args[0].value.operand
@@ -5857,7 +5963,7 @@ impl Emitter<'_, '_> {
                     | Type::ByteOutput
                     | Type::Exception
                     | Type::NamedException(_)
-                    | Type::ExceptionField
+                    | Type::ValueView
                     | Type::ImportException
                     | Type::TimeoutExpired
                     | Type::Path
@@ -5884,6 +5990,9 @@ impl Emitter<'_, '_> {
                     | Type::PlainObject
                     | Type::SimpleNamespace(_)
                     | Type::PathInfo
+                    | Type::CodecInfo
+                    | Type::CodecWriterClass
+                    | Type::CodecWriter
                     | Type::Sha256
                     | Type::ZipFile
                     | Type::ZipInfo
@@ -6108,7 +6217,7 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExceptionField
+            | Type::ValueView
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
@@ -6136,6 +6245,9 @@ impl Emitter<'_, '_> {
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
+            | Type::CodecInfo
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -6186,7 +6298,7 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExceptionField
+            | Type::ValueView
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
@@ -6214,6 +6326,9 @@ impl Emitter<'_, '_> {
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
+            | Type::CodecInfo
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -6778,7 +6893,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ByteOutput
         | Type::Exception
         | Type::NamedException(_)
-        | Type::ExceptionField
+        | Type::ValueView
         | Type::ImportException
         | Type::TimeoutExpired
         | Type::Path
@@ -6805,6 +6920,9 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::PlainObject
         | Type::SimpleNamespace(_)
         | Type::PathInfo
+        | Type::CodecInfo
+        | Type::CodecWriterClass
+        | Type::CodecWriter
         | Type::Sha256
         | Type::ZipFile
         | Type::ZipInfo
@@ -7165,6 +7283,19 @@ declare ptr @imre_linecache_line_float(ptr, double, ptr)
 declare ptr @imre_inspect_sentinel()
 declare ptr @imre_inspect_str_descriptor(i32)
 declare ptr @imre_sha256_new(ptr)
+declare ptr @imre_codec_lookup(ptr)
+declare ptr @imre_codec_name(ptr)
+declare ptr @imre_codec_encode(ptr, ptr, ptr)
+declare ptr @imre_codec_decode(ptr, ptr, ptr)
+declare ptr @imre_codec_writer_class(ptr)
+declare ptr @imre_codec_writer_new(ptr, ptr, ptr)
+declare void @imre_codec_writer_write(ptr, ptr)
+declare void @imre_codec_writer_control(ptr, i32)
+declare ptr @imre_codec_writer_encoding(ptr)
+declare void @imre_codec_writer_set_encoding(ptr, ptr)
+declare ptr @imre_codec_writer_stream(ptr)
+declare ptr @imre_codec_writer_errors(ptr)
+declare void @imre_codec_writer_set_errors(ptr, ptr)
 declare ptr @imre_hash_new(ptr, ptr)
 declare ptr @imre_hash_algorithms_available()
 declare void @imre_sha256_update(ptr, ptr)
@@ -7172,6 +7303,7 @@ declare ptr @imre_sha256_digest(ptr)
 declare ptr @imre_sha256_hexdigest(ptr)
 declare ptr @imre_sha256_copy(ptr)
 declare ptr @imre_bytes_io(ptr)
+declare ptr @imre_bytes_io_value(ptr)
 declare ptr @imre_string_io(i64, i64)
 declare ptr @imre_string_io_value(ptr)
 declare ptr @imre_string_io_read(ptr, i64, i1)
@@ -7442,6 +7574,12 @@ declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
+declare ptr @imre_builtins_last()
+declare i32 @imre_builtins_has_last()
+declare void @imre_builtins_set_last(i32, i64)
+declare void @imre_builtins_del_last()
+declare void @imre_builtins_clear()
+declare void @imre_sys_displayhook(i32, i64)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_orig_argv()
 declare { i64, i64 } @imre_seq_layout_with_orig_argv()

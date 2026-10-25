@@ -19,6 +19,7 @@ mod bytes;
 mod cached_properties;
 mod callables;
 mod calls;
+mod codecs;
 mod comprehensions;
 mod contexts;
 mod copying;
@@ -173,7 +174,7 @@ impl ClassInfo {
                     .iter()
                     .map(|field| {
                         if field.name == crate::classes::EXCEPTION_ARGS_SLOT {
-                            return Ok(Type::ExceptionField);
+                            return Ok(Type::ValueView);
                         }
                         annotation_in_class(
                             &field.annotation,
@@ -3750,6 +3751,15 @@ impl<'a> Checker<'a> {
             ast::Stmt::Delete(delete) => {
                 let mut statements = Vec::new();
                 for target in &delete.targets {
+                    if matches!(target, ast::Expr::Attribute(_))
+                        && self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast))
+                    {
+                        statements.push(Statement::Expr(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Builtin(Builtin::BuiltinsDeleteLast, vec![]),
+                        }));
+                        continue;
+                    }
                     if let ast::Expr::Name(name) = target
                         && let Some(&slot) = self.names.get(name.id.as_str())
                         && matches!(
@@ -4841,6 +4851,18 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::CodecBom(bytes) => {
+                    return Ok(Expr {
+                        ty: Type::Bytes,
+                        kind: ExprKind::Bytes(bytes.to_vec()),
+                    });
+                }
+                Intrinsic::BuiltinsLast => {
+                    return Ok(Expr {
+                        ty: Type::ValueView,
+                        kind: ExprKind::Builtin(Builtin::BuiltinsLast, vec![]),
+                    });
+                }
                 Intrinsic::DescriptorConstant(name) => {
                     return Ok(Expr {
                         ty: Type::Int,
@@ -5305,19 +5327,19 @@ impl<'a> Checker<'a> {
                         compare.ops[0] == ast::CmpOp::NotEq,
                     ));
                 }
-                if values.iter().any(|value| value.ty == Type::ExceptionField) {
+                if values.iter().any(|value| value.ty == Type::ValueView) {
                     if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
-                        || !values.iter().all(|v| {
-                            v.ty == Type::ExceptionField || self.import_argument_supported(v.ty)
-                        })
+                        || !values
+                            .iter()
+                            .all(|v| sys::displayable(v.ty) || self.import_argument_supported(v.ty))
                     {
                         return Err(error(
                             self.source,
                             expression,
-                            "exception fields support equality with None, bool, int, str, bytes, or tuples",
+                            "retained values support equality with native scalar, int list, or tuple values",
                         ));
                     }
-                    let reversed = values[0].ty != Type::ExceptionField;
+                    let reversed = values[0].ty != Type::ValueView;
                     let eq = Expr {
                         ty: Type::Bool,
                         kind: ExprKind::Builtin(Builtin::SystemExitCodeEqual { reversed }, values),
@@ -5429,10 +5451,10 @@ impl<'a> Checker<'a> {
                         "runtime generic aliases of builtin classes are unsupported",
                     ));
                 }
-                if list.ty == Type::ExceptionField {
+                if list.ty == Type::ValueView {
                     let index = self.expr_expected(&subscript.slice, Type::Int)?;
                     return Ok(Expr {
-                        ty: Type::ExceptionField,
+                        ty: Type::ValueView,
                         kind: ExprKind::Builtin(Builtin::ExceptionFieldIndex, vec![list, index]),
                     });
                 }
@@ -5655,9 +5677,9 @@ impl<'a> Checker<'a> {
                     && attribute.attr.as_str() == "args"
                 {
                     let field = self.classes.fields[class].len() - 1;
-                    if self.classes.fields[class][field] == Type::ExceptionField {
+                    if self.classes.fields[class][field] == Type::ValueView {
                         return Ok(Expr {
-                            ty: Type::ExceptionField,
+                            ty: Type::ValueView,
                             kind: ExprKind::Field(
                                 Box::new(Self::exception_record(receiver)),
                                 field,
@@ -5717,6 +5739,36 @@ impl<'a> Checker<'a> {
                         ty: Type::Int,
                         kind: ExprKind::Builtin(Builtin::CsvLineNumber, vec![receiver]),
                     });
+                }
+                if receiver.ty == Type::CodecInfo && attribute.attr.as_str() == "name" {
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(Builtin::CodecName, vec![receiver]),
+                    });
+                }
+                if receiver.ty == Type::CodecInfo && attribute.attr.as_str() == "streamwriter" {
+                    return Ok(codecs::writer(
+                        ir::WriterOperation::Class,
+                        Type::CodecWriterClass,
+                        vec![receiver],
+                    ));
+                }
+                if matches!(receiver.ty, Type::CodecWriterClass | Type::CodecWriter) {
+                    let (op, ty) = match (receiver.ty, attribute.attr.as_str()) {
+                        (_, "encoding") => (ir::WriterOperation::Encoding, Type::Str),
+                        (Type::CodecWriter, "errors") => (ir::WriterOperation::Errors, Type::Str),
+                        (Type::CodecWriter, "stream") => {
+                            (ir::WriterOperation::Stream, Type::BinaryIO)
+                        }
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                attribute,
+                                "unsupported stream writer attribute",
+                            ));
+                        }
+                    };
+                    return Ok(codecs::writer(op, ty, vec![receiver]));
                 }
                 if receiver.ty == Type::Sha256 {
                     return self.sha256_attribute(receiver, attribute);
@@ -5795,7 +5847,7 @@ impl<'a> Checker<'a> {
                             if receiver.ty == Type::ImportException =>
                         {
                             (
-                                Type::ExceptionField,
+                                Type::ValueView,
                                 Builtin::ImportErrorField(match field {
                                     "args" => 0,
                                     "msg" => 1,
@@ -5805,7 +5857,7 @@ impl<'a> Checker<'a> {
                                 }),
                             )
                         }
-                        "code" => (Type::ExceptionField, Builtin::SystemExitCode),
+                        "code" => (Type::ValueView, Builtin::SystemExitCode),
                         "msg" => (Type::Str, Builtin::JsonErrorField(0)),
                         "doc" => (Type::Str, Builtin::JsonErrorField(1)),
                         "pos" => (Type::Int, Builtin::JsonErrorField(2)),
@@ -6306,6 +6358,10 @@ impl<'a> Checker<'a> {
                 check_string(target, self.source)?;
                 return self.typed_expr(value);
             }
+            Some(Binding::Intrinsic(Intrinsic::CodecLookup)) => return self.codec_lookup(call),
+            Some(Binding::Intrinsic(Intrinsic::CodecGetWriter)) => {
+                return self.codec_getwriter(call);
+            }
             Some(Binding::Intrinsic(op @ (Intrinsic::Sha256 | Intrinsic::HashNew))) => {
                 return self.sha256_constructor(call, op == Intrinsic::HashNew);
             }
@@ -6620,6 +6676,9 @@ impl<'a> Checker<'a> {
             || !matches!(&*call.func, ast::Expr::Name(_) | ast::Expr::Attribute(_))
         {
             let callable = self.expr(&call.func)?;
+            if callable.ty == Type::CodecWriterClass {
+                return self.codec_writer_new(callable, call);
+            }
             return self.invoke(call, callable);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func {
@@ -6727,6 +6786,12 @@ impl<'a> Checker<'a> {
             }
             if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch) {
                 return self.regex_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::CodecInfo {
+                return self.codec_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::CodecWriter {
+                return self.codec_writer_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Sha256 {
                 return self.sha256_method(receiver, attribute, call);
@@ -6888,6 +6953,7 @@ impl<'a> Checker<'a> {
                     ),
                     ("read", 1) if binary => (Builtin::BinaryReadSize, Type::Bytes),
                     ("tell", 0) if binary => (Builtin::BinaryTell, Type::Int),
+                    ("getvalue", 0) if binary => (Builtin::BytesIoValue, Type::Bytes),
                     ("readline", 0) => (Builtin::FileReadline, data_type),
                     ("write", 1) => (
                         if binary {
@@ -7317,7 +7383,7 @@ impl<'a> Checker<'a> {
                 },
             });
         }
-        if args.len() == 1 && args[0].ty == Type::ExceptionField {
+        if args.len() == 1 && args[0].ty == Type::ValueView {
             let op = match name.id.as_str() {
                 "repr" => Some((Type::Str, Builtin::ExceptionFieldRepr)),
                 "len" => Some((Type::Int, Builtin::ExceptionFieldLen)),
@@ -7332,7 +7398,7 @@ impl<'a> Checker<'a> {
         }
         if matches!(name.id.as_str(), "str" | "print")
             && args.len() == 1
-            && args[0].ty == Type::ExceptionField
+            && args[0].ty == Type::ValueView
         {
             let text = Expr {
                 ty: Type::Str,
@@ -7542,6 +7608,7 @@ impl<'a> Checker<'a> {
                             | Type::Dict(_)
                             | Type::Set(_)
                             | Type::StringKeys
+                            | Type::CodecInfo
                             | Type::Tuple(_)
                     ) =>
             {

@@ -38,6 +38,16 @@ pub(super) fn flush_stderr() -> io::Result<()> {
     Ok(())
 }
 
+/// Write the default display hook's repr followed by a newline to stdout.
+pub(super) fn write_display_line(text: &str) -> bool {
+    if let Err(error) = write_stream(&OUTPUT, text, true) {
+        errno_error(error).raise();
+        false
+    } else {
+        true
+    }
+}
+
 /// Return the Python platform name of the target that built this runtime.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_platform() -> *const Str {

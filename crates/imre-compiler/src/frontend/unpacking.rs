@@ -243,7 +243,39 @@ impl Checker<'_> {
                         vec![logging::number(mask), value],
                     )));
                 }
+                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
+                    if !sys::displayable(value.ty) {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "builtins._ requires a supported display value",
+                        ));
+                    }
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::BuiltinsSetLast, vec![value]),
+                    }));
+                }
                 let receiver = self.expr(&attribute.value)?;
+                if matches!(receiver.ty, Type::CodecWriterClass | Type::CodecWriter) {
+                    let op = match (receiver.ty, attribute.attr.as_str()) {
+                        (_, "encoding") => ir::WriterOperation::SetEncoding,
+                        (Type::CodecWriter, "errors") => ir::WriterOperation::SetErrors,
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                target,
+                                "unsupported stream writer assignment",
+                            ));
+                        }
+                    };
+                    let value = self.coerce(value, Type::Str, target)?;
+                    return Ok(Statement::Expr(codecs::writer(
+                        op,
+                        Type::None,
+                        vec![value, receiver],
+                    )));
+                }
                 if receiver.ty == Type::Logger && attribute.attr.as_str() == "propagate" {
                     let value = self.coerce(value, Type::Bool, target)?;
                     // The RHS precedes evaluation of the assignment target.
