@@ -183,6 +183,17 @@ impl Checker<'_> {
             ast::Expr::Name(_) => self.assign(target, value),
             ast::Expr::Subscript(subscript) => {
                 let receiver = self.expr(&subscript.value)?;
+                if let Some((key, element)) = self.types.chainmap_entries(receiver.ty) {
+                    let value = self.coerce(value, element, target)?;
+                    let key = self.expr_expected(&subscript.slice, key)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(
+                            Builtin::ChainMapSetItem,
+                            vec![value, receiver, key],
+                        ),
+                    }));
+                }
                 if matches!(receiver.ty, Type::Document(_)) {
                     if let ast::Expr::Slice(slice) = &*subscript.slice {
                         if slice.lower.is_some() || slice.upper.is_some() || slice.step.is_some() {
@@ -256,7 +267,22 @@ impl Checker<'_> {
                         kind: ExprKind::Builtin(Builtin::BuiltinsSetLast, vec![value]),
                     }));
                 }
+                if let Some(class) = self.class_reference(&attribute.value)
+                    && matches!(
+                        self.classes.declarations.definitions[class]
+                            .static_bindings
+                            .get(attribute.attr.as_str()),
+                        Some(crate::classes::ClassValue::Runtime { .. })
+                    )
+                {
+                    return self.store_class_data(class, attribute, value);
+                }
                 let receiver = self.expr(&attribute.value)?;
+                if let Some(class) =
+                    self.mutable_instance_data(receiver.ty, attribute.attr.as_str())
+                {
+                    return self.store_instance_data(class, attribute, receiver, value);
+                }
                 if receiver.ty == Type::Logger && attribute.attr.as_str() == "propagate" {
                     let value = self.coerce(value, Type::Bool, target)?;
                     // The RHS precedes evaluation of the assignment target.
@@ -280,6 +306,11 @@ impl Checker<'_> {
                         name,
                         value,
                     ));
+                }
+                if matches!(receiver.ty, Type::ModuleSpec(_))
+                    && attribute.attr.as_str() == "has_location"
+                {
+                    return self.set_module_spec_location(attribute, receiver, value);
                 }
                 if receiver.ty == Type::LogRecord {
                     let value = self.check_record_value(value, target)?;

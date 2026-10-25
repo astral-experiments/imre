@@ -85,6 +85,8 @@ This infers `checksum(str) -> int`. Every function has one exact signature, and 
 
 `sum(source[, start])`, including `start=`, consumes exact integers and defaults to zero. Its source can be any supported concrete iterable whose yielded values are integers, including fixed tuples such as `divmod(...)`. An immediate generator may also yield exact booleans. For example, `sum(file.passes for file in files)` counts the true values. The generator acquires its outer iterator before `start` runs, then evaluates each projection once. The start and the result are exact, arbitrary-precision integers, including for an empty generator.
 
+`math.prod(source, *, start=1)` consumes an integer iterable in order and multiplies using arbitrary-precision integers. An empty iterable returns the integer start unchanged. A zero factor does not stop iteration or mask an exception from a later element.
+
 `map(str, source)` supports scalar values, paths, and records with a checked string conversion. Conversion happens as each item is pulled.
 
 An immediate `map(int, source)` converts each item using the ordinary checked `int` conversion. Inputs may yield exact integers, floats, booleans, or strings. Conversion proceeds lazily as the enclosing consumer iterates; input expressions, iterator creation, the optional sum start, and conversion failures retain Python evaluation order. Mutable sources remain live and keep the existing dictionary/set mutation checks. User callbacks follow the exact callable contract below. A map cannot escape into storage, and user-defined iteration protocols remain unsupported.
@@ -698,6 +700,12 @@ nanoseconds. Linux and macOS also expose block size, blocks and device type.
 macOS exposes birth time, file flags and generation. OS failures retain the
 original path spelling in `OSError.filename`.
 
+`Path.samefile(other_path)` follows symlinks and compares inode and device
+numbers. It reads the receiver's metadata first. For a typed operand with a
+`stat` method, it calls that method; a missing attribute or an `AttributeError`
+during the call triggers path conversion and a filesystem query. A different
+inode returns false without reading the operand's device number.
+
 `Path.read_text(encoding=None, errors=None, newline=None)` and `write_text(data, encoding=None, errors=None, newline=None)` use the same native file backend as binary reads and writes. UTF-8 is the default; UTF-8 with signature, Latin-1 and ASCII are also supported. Strict, ignore, replace and backslash-replace error modes work for these encodings; single-byte writes also support XML character references. With no newline override, reads translate CRLF and CR to LF. Empty or explicit newline strings keep the input line endings; on POSIX, write-side CR and CRLF overrides replace each LF. Writes return the number of input Unicode scalars, independent of encoded length. Data of the wrong type raises `TypeError` before opening the target. An invalid newline or codec name on an otherwise valid write is diagnosed after opening and truncating the file.
 
 `mkdir(mode=0o777, parents=False, exist_ok=False)` creates a directory. The mode is an exact integer within the signed C-int range; larger values raise `OverflowError`. Boolean options require exact booleans. The process umask applies, and missing parents use mode `0o777` independently of the leaf mode. `exist_ok=True` accepts an existing directory, including a symlink to one, without changing its permissions. `unlink(missing_ok=False)` removes a file or symlink; its flag suppresses only `FileNotFoundError`. `rmdir()` removes an empty directory. These methods return `None` and preserve their normal filesystem error categories.
@@ -808,7 +816,7 @@ Set `prefix_chars` to declare alternate option prefixes. The help flags follow t
 
 Call `format_help()` or `format_usage()` to obtain a string, including its final newline. `print_help()` and `print_usage()` write to stdout by default and also accept stderr or a native text file. A declared parser can be used for more than one of these operations or parse calls.
 
-Use `group = parser.add_argument_group(title, description)` to place arguments in a separate help section. Arguments added to a group bind in the same order and populate the same namespace as arguments added directly to the parser.
+Use `group = parser.add_argument_group(title, description)` to place arguments in a separate help section. Arguments added to a group bind in the same order and populate the same namespace as arguments added directly to the parser. A parser or titled group may create a mutually exclusive group. Repeating one member is allowed; selecting a different member reports both actions in the error. A required group needs an explicitly supplied member, even when another member has a default.
 
 A subcommand is optional by default. With `add_subparsers(dest="command")`, the namespace contains `command=None` when omitted. Without `dest`, no command field is added. Use `required=True` or set the group's `required` attribute to require a selection. Each literal `add_parser("name", aliases=["alias"], help="...")` introduces a child parser with its own options. The destination retains the spelling the caller used; child help uses its canonical name. A `match args.command` case or `if args.command == "alias"` branch selects the child's concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
 
@@ -1048,7 +1056,9 @@ Fixed classes and dataclasses can define `__str__(self) -> str`. `str(record)`, 
 
 Generated dataclass repr includes field names and values in declaration order, omitting `field(repr=False)`. `repr(record)`, `f"{record!r}"`, and representations of records inside containers use this repr even when the record defines `__str__`. With `repr=False`, the class uses the ordinary object repr, which includes its address. Resource fields require `repr=False` on the field or class.
 
-Fixed classes reserve field names beginning with `__`. A fixed class can extend one concrete base and inherit its fields and methods. Its instances keep a statically known field layout. The compiler rejects multiple concrete bases, metaclasses, class variables and dynamically added fields. Class-field ownership types must form an acyclic graph, following list elements, dictionary values, tuple positions, and optional payloads. For example, fields `children: list["Node"]`, `named: dict[str, "Node"]`, and `parent: "Node | None"` inside class `Node` are rejected even when unused or initialized empty. Methods may accept or return their own class because those signatures do not create stored references.
+Fixed classes reserve field names beginning with `__`. A fixed class can extend one concrete base and inherit its fields and methods. Its instances keep a statically known field layout. The compiler rejects multiple concrete bases, metaclasses and dynamically added fields. Class-field ownership types must form an acyclic graph, following list elements, dictionary values, tuple positions, and optional payloads. For example, fields `children: list["Node"]`, `named: dict[str, "Node"]`, and `parent: "Node | None"` inside class `Node` are rejected even when unused or initialized empty. Methods may accept or return their own class because those signatures do not create stored references.
+
+Plain fixed classes may initialize unannotated scalar, list, set or dictionary attributes in their bodies. A class executes these assignments in order, once, at its definition. An initializer can call a typed helper and refer to an earlier assignment in the same class; an unqualified name does not search base classes. Instances inherit the same value, so mutating a shared container affects every unshadowed reader. Assigning to an instance creates an override; deleting it reveals the current class value. Assigning through a subclass name creates a subclass binding. Assignments retain the inferred data type. Literal strings and fixed tuples of strings keep their existing read-only class binding rules. These rules cover ordinary data attributes; arbitrary descriptors, class-body control flow, and deletion of class bindings are unsupported.
 
 ### Immutable value structs
 
@@ -1135,6 +1145,15 @@ the empty dictionary; a `Counter` still returns zero for a missing key, and a
 `defaultdict` keeps its factory. `dict.clear(mapping)` and the inherited class
 methods `Counter.clear(mapping)` and `defaultdict.clear(mapping)` do the same.
 
+`Counter.copy()` preserves its zero for missing keys, and `defaultdict.copy()`
+preserves the original factory. Each copy holds the original keys and values.
+
+`mapping.update(other, key=value)`
+evaluates its arguments first, replaces existing values without moving their
+keys, then appends new keys in order. The positional source can be any supported
+dictionary of the same key and value types; keyword entries require string
+keys. A Counter retains its additive update behavior through a dict annotation.
+
 Unary `+` and `-` select positive counts and negated negative counts. Binary `+`, `-`, `|` and `&` return a fresh Counter with positive counts, preserving the surviving left keys followed by new right keys in insertion order. Augmented assignment to a Counter local mutates the existing object, including when the right operand aliases it.
 
 `mapping.copy()` on a plain typed dictionary returns a fresh dictionary in
@@ -1154,7 +1173,10 @@ types and exposes them in its mutable `maps` list. A no-argument constructor
 starts with a fresh dictionary. Replacing `maps` affects all aliases of the
 ChainMap; callers that saved the previous list still hold that list. Truth
 testing checks whether any underlying dictionary is nonempty. `repr` uses the
-current mappings in order.
+current mappings in order. Subscription searches the layers in order, including
+the missing-key behavior of a Counter or defaultdict. Membership never inserts a
+key. `get(key, default=None)` tests membership before subscribing, and indexed
+assignment writes through to the first dictionary.
 
 Direct `mapping.keys()` operands and sets of the same key type support `|`, including chained unions. Each union reads the two key sources after evaluating both operands, and returns an independent set. Stored key-view objects and arbitrary iterables as union operands are outside the supported subset.
 

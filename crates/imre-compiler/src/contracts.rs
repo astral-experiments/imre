@@ -102,6 +102,7 @@ impl Builtin {
                     TextOperation::SplitLineEnds
                     | TextOperation::ExpandTabs
                     | TextOperation::Lower
+                    | TextOperation::Upper
                     | TextOperation::Capitalize
                     | TextOperation::Split(_)
                     | TextOperation::Partition
@@ -129,9 +130,11 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::DictContains | Self::DictGetDefault | Self::DictTryGet(_) | Self::SetContains => {
-                Contract::new(true, PreservesLists)
-            }
+            Self::DictContains
+            | Self::ChainMapContains
+            | Self::DictGetDefault
+            | Self::DictTryGet(_)
+            | Self::SetContains => Contract::new(true, PreservesLists),
             Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
@@ -210,6 +213,8 @@ impl Builtin {
             Self::TimeSleep
             | Self::PercentFormat
             | Self::WarningFilter { .. }
+            | Self::WarningFormat { .. }
+            | Self::WarningWrite { .. }
             | Self::WarningReset => Contract::new(true, PreservesLists),
             Self::Formatter(_) => Contract::new(true, PreservesLists),
             Self::LogRecord(_) => Contract::new(true, PreservesLists),
@@ -222,6 +227,11 @@ impl Builtin {
                         | crate::ir::LogOperation::DictConfigTyped
                         | crate::ir::LogOperation::FileConfig
                         | crate::ir::LogOperation::CheckLevel
+                        | crate::ir::LogOperation::LockAcquire
+                        | crate::ir::LogOperation::LockAcquireInt
+                        | crate::ir::LogOperation::LockEnter
+                        | crate::ir::LogOperation::LockExit
+                        | crate::ir::LogOperation::LockRelease
                 ),
                 PreservesLists,
             ),
@@ -237,14 +247,18 @@ impl Builtin {
                 | ProcessOperation::JoinGroup
                 | ProcessOperation::GeneratorNext
                 | ProcessOperation::GeneratorYield
-                | ProcessOperation::Acquire => Contract::new(true, Unknown),
-                ProcessOperation::Executable
+                | ProcessOperation::Acquire
                 | ProcessOperation::CheckOutput { .. }
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
                 | ProcessOperation::Popen { .. }
+                | ProcessOperation::PopenCleanup
                 | ProcessOperation::Call { .. }
+                | ProcessOperation::AsyncSpawn { .. } => Contract::new(true, Unknown),
+                ProcessOperation::Executable
                 | ProcessOperation::PopenPid
+                | ProcessOperation::PopenActive
+                | ProcessOperation::PopenIdentity
                 | ProcessOperation::PopenPipe(_)
                 | ProcessOperation::PopenArgs
                 | ProcessOperation::PopenStatus { .. }
@@ -252,7 +266,6 @@ impl Builtin {
                 | ProcessOperation::PopenCommunicate { .. }
                 | ProcessOperation::PopenWait
                 | ProcessOperation::PopenSignal
-                | ProcessOperation::AsyncSpawn { .. }
                 | ProcessOperation::AsyncStatus { wait: false }
                 | ProcessOperation::Coroutine { .. }
                 | ProcessOperation::IndirectCoroutine { .. }
@@ -284,6 +297,7 @@ impl Builtin {
                 | ProcessOperation::CredentialId { .. }
                 | ProcessOperation::OsErrorField(_)
                 | ProcessOperation::Strerror
+                | ProcessOperation::QuoteCommandArgument
                 | ProcessOperation::Which
                 | ProcessOperation::RmTree
                 | ProcessOperation::CopyTree(_)
@@ -330,6 +344,7 @@ impl Builtin {
             | Self::SetAdd
             | Self::SetDiscard
             | Self::CounterUpdate
+            | Self::DictUpdate
             | Self::KeySet
             | Self::KeyUnion
             | Self::KeyIntersection
@@ -338,6 +353,8 @@ impl Builtin {
             | Self::RegexFindIter
             | Self::Errno(_)
             | Self::DictGet
+            | Self::ModuleParentPrefix
+            | Self::ModuleCacheFromOrigin
             | Self::NamespaceWrap
             | Self::NamespaceDict
             | Self::NamespaceGet
@@ -400,6 +417,8 @@ impl Builtin {
             | Self::Sha256Digest { .. }
             | Self::Sha256Copy
             | Self::ActiveException
+            | Self::SysIntern
+            | Self::SysIsInterned
             | Self::ExceptionRecord
             | Self::ExceptionCause
             // A fresh exception retains its cause without replacing any existing owner.
@@ -473,6 +492,9 @@ impl Builtin {
             | Self::DequeExtendSource
             | Self::NamespaceDelete
             | Self::DictDelete
+            | Self::ChainMapGetItem
+            | Self::ChainMapSetItem
+            | Self::ChainMapGet(_)
             | Self::DictPop
             | Self::DictSetDefault
             | Self::DictTryPop(_)
@@ -521,6 +543,7 @@ impl Builtin {
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::OsName
+            | Self::OptionalStrConcat
             | Self::SysOrigArgv
             | Self::DocCaptureStart
             | Self::DocCaptureTake
@@ -862,6 +885,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_config"
                 | "imre_log_config_named"
                 | "imre_log_check_level"
+                | "imre_log_lock_acquire"
+                | "imre_log_lock_acquire_int"
+                | "imre_log_lock_enter"
+                | "imre_log_lock_exit"
+                | "imre_log_lock_release"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
                 | "imre_str_unquote"
@@ -877,10 +905,12 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_get"
                 | "imre_bytes_get_index"
                 | "imre_bytes_slice"
+                | "imre_optional_str_concat"
                 | "imre_str_concat"
                 | "imre_bytes_concat"
                 | "imre_bytes_repeat"
                 | "imre_counter_update"
+                | "imre_dict_update"
                 | "imre_key_union"
                 | "imre_key_intersection"
                 | "imre_key_difference"
@@ -988,7 +1018,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_get"
                 | "imre_str_expandtabs"
                 | "imre_str_lower"
+                | "imre_str_upper"
                 | "imre_str_capitalize"
+                | "imre_module_cache_from_origin"
                 | "imre_str_slice"
                 | "imre_str_int_list"
                 | "imre_seq_get"

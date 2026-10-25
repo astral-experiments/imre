@@ -21,6 +21,7 @@ mod call_binding_errors;
 mod callables;
 mod calls;
 mod chainmap;
+mod class_data;
 mod comprehensions;
 mod contexts;
 mod copying;
@@ -57,9 +58,11 @@ mod literals;
 mod local_functions;
 mod logging;
 mod logging_formatters;
+mod logging_locks;
 mod logging_records;
 mod mapping_abc;
 mod matching;
+mod module_specs;
 mod module_values;
 mod namedtuples;
 mod namespaces;
@@ -94,6 +97,7 @@ mod unions;
 mod unittest;
 mod unittest_bound;
 mod unittest_equality;
+mod unittest_loader;
 mod unittest_main;
 mod unittest_mock;
 mod unittest_setup;
@@ -821,7 +825,7 @@ pub(crate) fn lower_with_owners(
         }
     }
     let initializer_start = definitions.len();
-    let class_globals = classes.declarations.owns_class_tuples(graph.entry);
+    let class_globals = classes.declarations.has_class_values(graph.entry);
     let helpers = Helpers::new(definitions.len() + graph.initializers(class_globals).count());
     let globals = ModuleValues::default();
     let mut initializations = Vec::new();
@@ -1129,6 +1133,10 @@ pub(crate) fn lower_with_owners(
     for (id, sums) in zip_sums {
         zip_sums::fuse(&mut functions, id, &sums);
     }
+    globals
+        .class_data
+        .borrow_mut()
+        .extend_layouts(&mut classes.fields);
     Ok((
         ir::Module {
             types,
@@ -1576,6 +1584,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::StringIo)) => return Ok(Type::StringIO),
         Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return Ok(Type::LogFormatter),
         Some(Binding::Intrinsic(Intrinsic::HandlerLevelType)) => return Ok(types.string_or_int()),
+        Some(Binding::Intrinsic(Intrinsic::HandlerLock)) => return Ok(Type::HandlerLock),
         Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return Ok(Type::LogRecord),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
@@ -1996,6 +2005,8 @@ struct Checker<'a> {
     returns: Type,
     nullable_assignments: HashMap<String, Type>,
     bound_flags: HashMap<String, usize>,
+    omitted_assert_locals: HashMap<String, unbound_locals::Binding>,
+    omitted_assert_free: HashMap<String, unbound_locals::Binding>,
     names: HashMap<String, usize>,
     local_functions: HashMap<String, local_functions::Binding>,
     locals: Vec<Type>,
@@ -2009,6 +2020,8 @@ struct Checker<'a> {
     module_scope: bool,
     class: Option<usize>,
     class_receiver: Option<String>,
+    /// Earlier assignments in the executing class body shadow module definitions.
+    class_lexical: HashSet<String>,
     super_method_base: Option<usize>,
     iterator_source: Option<TextRange>,
     super_initializer: Option<records::BaseInitializer>,
@@ -2058,6 +2071,8 @@ impl<'a> Checker<'a> {
             returns: Type::None,
             nullable_assignments: HashMap::new(),
             bound_flags: HashMap::new(),
+            omitted_assert_locals: HashMap::new(),
+            omitted_assert_free: HashMap::new(),
             names: HashMap::new(),
             local_functions: HashMap::new(),
             locals: Vec::new(),
@@ -2071,6 +2086,7 @@ impl<'a> Checker<'a> {
             module_scope: false,
             class: None,
             class_receiver: None,
+            class_lexical: HashSet::new(),
             super_method_base: None,
             iterator_source: None,
             super_initializer: None,
@@ -2160,6 +2176,10 @@ impl<'a> Checker<'a> {
         receiver: Expr,
     ) -> Result<(Expr, usize, Type), String> {
         let receiver = Self::exception_record(receiver);
+        if let Type::ModuleSpec(id) = receiver.ty {
+            let (field, ty) = self.module_spec_field(id, attribute)?;
+            return Ok((receiver, field, ty));
+        }
         if let Type::Class(class) = receiver.ty {
             let declaration = &self.classes.declarations.definitions[class];
             if self.classes.parsers.namespace(class) {
@@ -2418,6 +2438,9 @@ impl<'a> Checker<'a> {
 
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
+        if let Some(name) = self.unbound_assert_root(expression) {
+            return self.omitted_assert_read(name, Some(expected), expression);
+        }
         if self.present_subscripts.contains(&expression.range()) {
             let value = self.expr(expression)?;
             if self.types.payload(value.ty) == Some(expected) {
@@ -3714,6 +3737,12 @@ impl<'a> Checker<'a> {
         }
 
         if self.block_depth == 0 && !self.module_scope {
+            if self.graph.python_optimization() > 0 && !self.interactive_names {
+                let (omitted, live) = unbound_locals::omitted_assert_bindings(statements);
+                self.omitted_assert_locals = omitted;
+                self.omitted_assert_free
+                    .retain(|name, _| !live.contains(name));
+            }
             self.local_iter = narrowing::assigned_names(statements).contains("iter");
             self.nullable_assignments = assignments::nullable_assignments(self, statements);
             let mut names: Vec<_> = unbound_locals::candidates(statements, self.interactive_names)
@@ -4068,6 +4097,12 @@ impl<'a> Checker<'a> {
                     }
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
+                        if let Some(class) =
+                            self.mutable_instance_data(receiver.ty, attr.attr.as_str())
+                        {
+                            statements.push(self.delete_instance_data(class, attr, receiver)?);
+                            continue;
+                        }
                         if matches!(receiver.ty, Type::SimpleNamespace(_)) {
                             let name = self.namespace_attr_name(attr)?;
                             statements.push(Statement::Expr(Expr {
@@ -4309,6 +4344,9 @@ impl<'a> Checker<'a> {
             && self.unittest_context(class)
         {
             return self.assert_raises_scope(item, remaining, body, class, manager);
+        }
+        if self.types.payload(manager.ty).unwrap_or(manager.ty) == Type::HandlerLock {
+            return self.handler_lock_scope(item, remaining, body, manager);
         }
         if manager.ty == Type::GeneratorContext {
             return self.generator_scope(item, remaining, body, manager);
@@ -4945,6 +4983,18 @@ impl<'a> Checker<'a> {
         right: Expr,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        let optional_str = |ty| self.types.payload(ty) == Some(Type::Str);
+        if op == ast::Operator::Add
+            && (optional_str(left.ty) || optional_str(right.ty))
+            && [left.ty, right.ty]
+                .into_iter()
+                .all(|ty| matches!(ty, Type::Str | Type::None) || optional_str(ty))
+        {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::OptionalStrConcat, vec![left, right]),
+            });
+        }
         if op == ast::Operator::Mod
             && left.ty == Type::Str
             && (matches!(right.ty, Type::Int | Type::Str) || self.types.percent_tuple(right.ty))
@@ -5042,9 +5092,15 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let Some(name) = self.unbound_assert_root(expression) {
+            return self.omitted_assert_read(name, None, expression);
+        }
         // Calls and binary operators recursively check their operands. Keep
         // the large general expression frame off both paths in debug builds.
         match expression {
+            ast::Expr::Name(name) if self.class_lexical.contains(name.id.as_str()) => {
+                Ok(self.local(self.names[name.id.as_str()]))
+            }
             ast::Expr::Call(call) => self.call(call),
             ast::Expr::BinOp(binary) => self.binary_operation(binary),
             _ => self.non_call_expr(expression),
@@ -5053,6 +5109,15 @@ impl<'a> Checker<'a> {
 
     /// Keep the large general frame off recursive left- and right-hand arithmetic.
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::PopenActive)) {
+            return Ok(Expr {
+                ty: self.types.list(Type::ActivePopen),
+                kind: ExprKind::Builtin(
+                    Builtin::Process(ir::ProcessOperation::PopenActive),
+                    Vec::new(),
+                ),
+            });
+        }
         if let ast::Expr::Attribute(attr) = expression
             && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) =
                 self.resolve(&attr.value)
@@ -5516,6 +5581,8 @@ impl<'a> Checker<'a> {
                             }
                         } else if receiver.ty == Type::ReadOnlyObjectMapping {
                             (Type::Str, Builtin::DictContains)
+                        } else if let Some((key, _)) = self.types.chainmap_entries(receiver.ty) {
+                            (key, Builtin::ChainMapContains)
                         } else if receiver.ty == Type::Str {
                             (Type::Str, Builtin::StringContains)
                         } else if let Some(element) = self
@@ -5758,6 +5825,14 @@ impl<'a> Checker<'a> {
                 let mut ops = Vec::new();
                 for (&op, pair) in compare.ops.iter().zip(values.windows(2)) {
                     let (ty, right) = (pair[0].ty, pair[1].ty);
+                    if self.types.contains_module_spec(ty) || self.types.contains_module_spec(right)
+                    {
+                        return Err(error(
+                            self.source,
+                            expression,
+                            "ModuleSpec rich comparison requires dynamic attribute protocol support",
+                        ));
+                    }
                     if let Some(order) = counter::comparison(self.types, ty, right, op) {
                         ops.push(order);
                         continue;
@@ -5923,6 +5998,13 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(builtin, vec![list, index]),
                     });
                 }
+                if let Some((key, value)) = self.types.chainmap_entries(list.ty) {
+                    let key = self.expr_expected(&subscript.slice, key)?;
+                    return Ok(Expr {
+                        ty: value,
+                        kind: ExprKind::Builtin(Builtin::ChainMapGetItem, vec![list, key]),
+                    });
+                }
                 if let Some((key, value)) = self.types.mapping(list.ty) {
                     let key = self.expr_expected(&subscript.slice, key)?;
                     let required = self.required_group_key(&list, &key);
@@ -5985,6 +6067,19 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if attribute.attr.as_str() == "machinery"
+                    && self.resolve(&attribute.value)
+                        == Some(Binding::IntrinsicModule(
+                            crate::modules::IntrinsicModule::Importlib,
+                        ))
+                    && self.resolve(expression).is_none()
+                {
+                    return Err(error(
+                        self.source,
+                        attribute,
+                        "import importlib.machinery before reading the machinery attribute",
+                    ));
+                }
                 if let Some(flag) = self.command_flag(attribute)? {
                     return Ok(flag);
                 }
@@ -6132,6 +6227,9 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::ZipFile | Type::ZipInfo) {
                     return self.zip_attribute(receiver, attribute);
                 }
+                if let Type::ModuleSpec(id) = receiver.ty {
+                    return self.module_spec_attribute(receiver, id, attribute);
+                }
                 if let Type::SimpleNamespace(id) = receiver.ty {
                     return self.namespace_attribute(receiver, id, attribute);
                 }
@@ -6168,7 +6266,7 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::AsyncProcess(_)) {
                     return self.async_returncode(receiver, attribute);
                 }
-                if matches!(receiver.ty, Type::Popen(..)) {
+                if matches!(receiver.ty, Type::Popen(..) | Type::ActivePopen) {
                     return self.popen_attribute(receiver, attribute);
                 }
                 if matches!(receiver.ty, Type::CompletedProcess(..)) {
@@ -6283,7 +6381,8 @@ impl<'a> Checker<'a> {
                                 .static_bindings
                                 .get(attribute.attr.as_str()),
                             Some(
-                                crate::classes::ClassValue::String(_)
+                                crate::classes::ClassValue::Runtime { .. }
+                                    | crate::classes::ClassValue::String(_)
                                     | crate::classes::ClassValue::Strings { .. }
                             )
                         ))
@@ -6676,9 +6775,14 @@ impl<'a> Checker<'a> {
             return Ok(copy);
         }
         if calls::starred(call) {
-            if let Some(Binding::Intrinsic(Intrinsic::Credential(name))) = self.resolve(&call.func)
-            {
-                return self.credential_call(call, name);
+            match self.resolve(&call.func) {
+                Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
+                    return self.credential_call(call, name);
+                }
+                Some(Binding::Intrinsic(Intrinsic::Fd(op @ ir::FdOperation::Pipe2))) => {
+                    return self.fd_call(call, op);
+                }
+                _ => {}
             }
             if let Some(Binding::Definition(definition)) = self.resolve(&call.func)
                 && let Some(signature) = self.functions.get(&definition)
@@ -6706,6 +6810,9 @@ impl<'a> Checker<'a> {
                 call,
                 "argument unpacking requires a source-defined function or method",
             ));
+        }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ModuleSpec)) {
+            return self.module_spec(call);
         }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::SimpleNamespace)) {
             return self.simple_namespace(call);
@@ -6920,6 +7027,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
                 return self.cursor_length_hint(call);
             }
+            Some(Binding::Intrinsic(Intrinsic::MathProd)) => return self.integer_product(call),
             Some(Binding::Intrinsic(Intrinsic::ShallowCopy)) => return self.shallow_copy(call),
             Some(Binding::Intrinsic(Intrinsic::DeepCopy)) => return self.deep_copy(call),
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
@@ -6961,11 +7069,24 @@ impl<'a> Checker<'a> {
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call, None),
+            Some(Binding::Intrinsic(Intrinsic::PopenCleanup)) => {
+                self.arguments(call, &[], None)?;
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(
+                        Builtin::Process(ir::ProcessOperation::PopenCleanup),
+                        vec![],
+                    ),
+                });
+            }
             Some(Binding::Intrinsic(Intrinsic::SubprocessCall)) => {
                 return self.popen(call, Some(false));
             }
             Some(Binding::Intrinsic(Intrinsic::SubprocessCheckCall)) => {
                 return self.popen(call, Some(true));
+            }
+            Some(Binding::Intrinsic(Intrinsic::SubprocessList2Cmdline)) => {
+                return self.subprocess_list2cmdline(call);
             }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
@@ -6980,6 +7101,14 @@ impl<'a> Checker<'a> {
                 return self.public_fspath(call, symbol == Intrinsic::PosixNormcase);
             }
             Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return self.log_formatter(call),
+            Some(Binding::Intrinsic(Intrinsic::HandlerLock)) => {
+                let args = self.arguments(call, &[], None)?;
+                return Ok(self.ordered_builtin(
+                    Builtin::Logging(ir::LogOperation::LockNew),
+                    Type::HandlerLock,
+                    args,
+                ));
+            }
             Some(Binding::Intrinsic(
                 op @ (Intrinsic::HandlerRename
                 | Intrinsic::HandlerLookup
@@ -7034,6 +7163,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
             Some(Binding::Intrinsic(Intrinsic::WarningFilter { simple })) => {
                 return self.warning_filter(call, simple);
+            }
+            Some(Binding::Intrinsic(Intrinsic::WarningDisplay { show })) => {
+                return self.warning_display(call, show);
             }
             Some(Binding::Intrinsic(Intrinsic::WarningReset)) => {
                 self.arguments(call, &[], None)?;
@@ -7325,6 +7457,11 @@ impl<'a> Checker<'a> {
             if matches!(receiver.ty, Type::Document(_)) {
                 return self.document_method(call, attribute, receiver);
             }
+            if let Some((key, value)) = self.types.chainmap_entries(receiver.ty)
+                && attribute.attr.as_str() == "get"
+            {
+                return self.chainmap_get(call, receiver, key, value);
+            }
             if matches!(
                 receiver.ty,
                 Type::JsonRoot | Type::JsonValue | Type::JsonObject
@@ -7343,7 +7480,7 @@ impl<'a> Checker<'a> {
             if receiver.ty.is_path() || receiver.ty == Type::PathInfo {
                 return self.path_method(receiver, attribute, call);
             }
-            if matches!(receiver.ty, Type::Popen(..)) {
+            if matches!(receiver.ty, Type::Popen(..) | Type::ActivePopen) {
                 return self.popen_method(receiver, attribute, call);
             }
             if matches!(receiver.ty, Type::CompletedProcess(..)) {
@@ -7399,6 +7536,9 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::LogRecord {
                 return self.log_record_method(receiver, attribute, call);
             }
+            if receiver.ty == Type::HandlerLock {
+                return self.handler_lock_method(receiver, attribute.attr.as_str(), call);
+            }
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
             }
@@ -7418,7 +7558,7 @@ impl<'a> Checker<'a> {
             {
                 return self.expandtabs(Self::string_value(receiver), call);
             }
-            if matches!(attribute.attr.as_str(), "lower" | "capitalize")
+            if matches!(attribute.attr.as_str(), "lower" | "upper" | "capitalize")
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
                 return self.text_method(
@@ -7465,6 +7605,11 @@ impl<'a> Checker<'a> {
                     }
                     _ => {}
                 }
+            }
+            if attribute.attr.as_str() == "update"
+                && let Some((key, value)) = self.types.mapping(receiver.ty)
+            {
+                return self.dict_update(call, receiver, key, value);
             }
             if attribute.attr.as_str() == "sort" && self.types.element(receiver.ty).is_some() {
                 return self.list_sort(receiver, call);
@@ -7605,9 +7750,7 @@ impl<'a> Checker<'a> {
                 if attribute.attr.as_str() == "fromkeys" {
                     return self.dict_fromkeys(call, None, Some(receiver));
                 }
-                if attribute.attr.as_str() == "copy"
-                    && receiver.ty == self.types.dict(key_type, value_type)
-                {
+                if attribute.attr.as_str() == "copy" {
                     if !call.arguments.is_empty() {
                         return Err(error(self.source, call, "dict.copy() takes no arguments"));
                     }
@@ -7642,7 +7785,7 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         call,
-                        "supported dictionary methods are clear(), copy() on a plain dictionary, get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
+                        "supported dictionary methods are clear(), copy(), update(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
                     ));
                 }
                 let key = self.expr_expected(&call.arguments.args[0], key_type)?;
@@ -8137,6 +8280,7 @@ impl<'a> Checker<'a> {
                     Type::Class(_)
                         | Type::CompletedProcess(..)
                         | Type::ForwardRef(_)
+                        | Type::ModuleSpec(_)
                         | Type::SimpleNamespace(_)
                         | Type::Dict(_)
                         | Type::Tuple(_)
@@ -8196,6 +8340,16 @@ impl<'a> Checker<'a> {
                     ty: Type::Str,
                     kind: ExprKind::Str(String::new()),
                 });
+            }
+            "id" if args.len() == 1
+                && !self.names.contains_key("id")
+                && self.resolve(&call.func).is_none()
+                && matches!(args[0].ty, Type::Popen(..) | Type::ActivePopen) =>
+            {
+                (
+                    Builtin::Process(ir::ProcessOperation::PopenIdentity),
+                    Type::Int,
+                )
             }
             "str"
                 if args.len() == 1
