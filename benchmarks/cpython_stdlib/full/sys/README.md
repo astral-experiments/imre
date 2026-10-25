@@ -30,6 +30,7 @@ done
 python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverage.json
 ```
 
+- `test_original_displayhook`: the original CPython body, assertions, and capture fixture observe ten operations in one native process, including stdout deletion/restoration and `builtins._` mutation.
 - `test_sys_exception_no_exception`: the complete method queries native handler state and compares the result to `None`. A separate program checks object identity across nested handlers, calls and handler exit.
 - `test_43581`: the complete method reads both stream attributes and executes the shared native unittest string equality assertion. CPython runs the original fixture.
 - `test_getdefaultencoding` and `test_getfilesystemencoding`: all `sys` operations execute in the native driver. The original unittest assertions, codec lookup and transport run on CPython.
@@ -52,7 +53,7 @@ reference reasons even where UTF-8 mode also provides native evidence.
 
 [evidence-linux.json](evidence-linux.json) is the versioned [shared evidence
 contract](../../NATIVE_EVIDENCE.md): 97 distinct occurrences at each of O0 and O3.
-The [Linux CI run](https://github.com/astral-sh/imre/actions/runs/40173735073) executed source `35158607886bce3fec10dd8e965d891e803e1088` (tree `f80a4bcd512cdb24ff2f279f59adb6d2075bef8a`). Its `sys-evidence-linux` artifact contains both optimization reports, the legacy outcomes, and the tested commit and tree. The checked-in reports retain those records except for the blocked displayhook method: its native builtin reads and writes were measured at `e1486d3f5ebc54b757c45ea3f4e402e2bdbe4238` ([builtin coverage](BUILTINS.md)). The pinned suite has no companion module; `native-O*.json` describes the same occurrences.
+The [Linux CI run](https://github.com/astral-sh/imre/actions/runs/40173735073) executed source `35158607886bce3fec10dd8e965d891e803e1088` (tree `f80a4bcd512cdb24ff2f279f59adb6d2075bef8a`). Its `sys-evidence-linux` artifact contains both optimization reports, the legacy outcomes, and the tested commit and tree. The original displayhook case is the one updated row per level: its ten native operations were measured at `44d31ff3c39c14cf3e370e31377d4b0253c514f8` ([builtin coverage](BUILTINS.md)). The pinned suite has no companion module; `native-O*.json` describes the same occurrences.
 
 At each level the two JIT capability methods add two mixed results. `test_jit_is_active` made one native availability query in the parent; its first original child stopped at line 2 on `import _testcapi` before any `is_active` call or child assertion. The second child was not reached. Its individual private-API proposal remains unapproved.
 

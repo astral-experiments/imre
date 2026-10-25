@@ -502,7 +502,13 @@ pub unsafe extern "C" fn imre_stderr_line(text: *const Str) {
 
 /// Writes already encoded text without the general formatting machinery.
 fn output_bytes(value: &[u8]) {
-    output(|writer| writer.write_all(value));
+    if let Some(result) = objects::stdio::write_line(value, false) {
+        if let Err(error) = result {
+            error.raise();
+        }
+    } else {
+        output(|writer| writer.write_all(value));
+    }
 }
 
 /// The caller handles errors only after this function releases the writer lock.
@@ -749,6 +755,8 @@ pub unsafe extern "C" fn imre_print_int(value: usize) {
     if let Some(value) = value.as_small() {
         let mut digits = itoa::Buffer::new();
         output_bytes(digits.format(value).as_bytes());
+    } else if objects::stdio::has_target() {
+        output_bytes(value.big().to_string().as_bytes());
     } else {
         output(|writer| write!(writer, "{}", value.big()));
     }

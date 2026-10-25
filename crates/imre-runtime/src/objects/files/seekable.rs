@@ -168,7 +168,9 @@ impl FileState {
             Stream::Read(input) => input.seek(at),
             Stream::Memory(m) => m.seek(at),
             Stream::Member(m) => m.seek(at),
-            Stream::Write(_) => Err(Error::new(Kind::UnsupportedOperation, "seek")),
+            Stream::Standard(_) | Stream::Write(_) => {
+                Err(Error::new(Kind::UnsupportedOperation, "seek"))
+            }
         }
     }
 
@@ -186,7 +188,9 @@ impl FileState {
                 buf[..bytes.len()].copy_from_slice(&bytes);
                 Ok(bytes.len())
             }
-            Stream::Write(_) => Err(Error::new(Kind::UnsupportedOperation, "read")),
+            Stream::Standard(_) | Stream::Write(_) => {
+                Err(Error::new(Kind::UnsupportedOperation, "read"))
+            }
         }
     }
 }

@@ -190,6 +190,7 @@ pub(crate) enum Intrinsic {
     TypeVar,
     Stderr,
     Stdout,
+    OriginalStdout,
     SysExecutable,
     SysFlags,
     SysDontWriteBytecode,
@@ -515,7 +516,8 @@ impl IntrinsicModule {
             (Self::Subprocess, "check_output") => Intrinsic::CheckOutput,
             (Self::Typing, "TYPE_CHECKING") => Intrinsic::TypeChecking,
             (Self::Sys, "stdin" | "__stdin__") => Intrinsic::Stdin,
-            (Self::Sys, "stdout" | "__stdout__") => Intrinsic::Stdout,
+            (Self::Sys, "stdout") => Intrinsic::Stdout,
+            (Self::Sys, "__stdout__") => Intrinsic::OriginalStdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
             (Self::Sys, "exception") => Intrinsic::SysException,
             (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),
@@ -696,6 +698,8 @@ pub(crate) struct SourceModule {
     pub(crate) type_guards: Vec<usize>,
     /// Fixed pattern declarations in the entry module precede ordinary executable statements.
     pub(crate) entry_globals: Vec<usize>,
+    /// Mutable intrinsic exports read at the source from-import, keyed by statement.
+    pub(crate) snapshots: HashMap<usize, Intrinsic>,
     /// Executable entry statements, or inactive main guards that still require checking.
     pub(crate) executable: Vec<usize>,
     is_package: bool,
@@ -863,6 +867,11 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
     }
 
+    /// The native import at this exact alias performs its own missing-name lookup.
+    pub(crate) fn checked_builtin_import(&self, module: ModuleId, alias: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::BuiltinImport(alias));
+    }
+
     /// Mark the precise call where lowering raises Python's missing-argument TypeError.
     pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
@@ -945,7 +954,11 @@ impl SourceGraph {
     pub(crate) fn initializers(&self) -> impl Iterator<Item = (ModuleId, Range<usize>)> + '_ {
         self.initialization
             .iter()
-            .filter(|(id, _)| *id != self.entry || !self.modules[*id].entry_globals.is_empty())
+            .filter(|(id, _)| {
+                *id != self.entry
+                    || !self.modules[*id].entry_globals.is_empty()
+                    || !self.modules[*id].snapshots.is_empty()
+            })
             .cloned()
     }
 
@@ -1281,6 +1294,7 @@ impl<'a> Loader<'a> {
             aliases: Vec::new(),
             type_guards: Vec::new(),
             entry_globals: Vec::new(),
+            snapshots: HashMap::new(),
             executable: Vec::new(),
         });
         Ok(id)
@@ -1487,7 +1501,15 @@ impl<'a> Loader<'a> {
                         segment = index;
                         executable = false;
                     }
-                    self.import(id, statement)
+                    if self.modules[id]
+                        .snapshots
+                        .keys()
+                        .any(|at| (segment..index).contains(at))
+                    {
+                        self.initialization.push((id, segment..index));
+                        segment = index;
+                    }
+                    self.import(id, index, statement)
                         .map_err(|error| self.modules[id].error(statement, &error))?;
                 }
                 ast::Stmt::Expr(value)
@@ -1585,7 +1607,7 @@ impl<'a> Loader<'a> {
         Ok(())
     }
 
-    fn import(&mut self, id: ModuleId, statement: &ast::Stmt) -> Result<(), String> {
+    fn import(&mut self, id: ModuleId, index: usize, statement: &ast::Stmt) -> Result<(), String> {
         match statement {
             ast::Stmt::Import(import) => {
                 if import.is_lazy {
@@ -1647,9 +1669,23 @@ impl<'a> Loader<'a> {
                                     alias.name
                                 )
                             })?;
-                        if binding == Binding::Intrinsic(Intrinsic::BuiltinsLast) {
-                            return Err("from builtins import _ needs an import-time snapshot; use a qualified lookup".into());
-                        }
+                        let binding = if let Binding::Intrinsic(
+                            symbol @ (Intrinsic::BuiltinsLast | Intrinsic::Stdout),
+                        ) = binding
+                        {
+                            // Typeshed omits the interactive name; this import
+                            // performs the real lookup and may raise ImportError.
+                            if symbol == Intrinsic::BuiltinsLast {
+                                self.checked_builtin_imports.push((id, alias.range()));
+                            }
+                            self.modules[id].snapshots.insert(index, symbol);
+                            Binding::Value(DefinitionId {
+                                module: id,
+                                statement: index,
+                            })
+                        } else {
+                            binding
+                        };
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), binding, alias)?;
                     }
