@@ -23,11 +23,15 @@ fn replacement(table: &Mapping, ch: char) -> Result<Piece<'_>> {
         (word, kind) = unions::member(word);
     }
     match kind.base() {
-        1 => Ok(Piece::Character(if word == usize::from(nullable) {
-            '\0'
-        } else {
-            '\x01'
-        })),
+        1 => {
+            // Unwrapping a tagged union returns a bare bool even in a nullable table.
+            let false_word = usize::from(kind.raw() & NULLABLE != 0);
+            Ok(Piece::Character(if word == false_word {
+                '\0'
+            } else {
+                '\x01'
+            }))
+        }
         2 => {
             // SAFETY: the table keeps this integer live for the whole lookup.
             let value = unsafe { Int::borrow(word) };
