@@ -1088,10 +1088,7 @@ pub(crate) fn lower_with_owners(
     }
     Ok((
         ir::Module {
-            isolated: graph
-                .command_startup
-                .as_ref()
-                .is_some_and(|(flags, _)| flags.isolated),
+            stdio_flags: graph.command_startup.as_ref().map(|(flags, _)| *flags),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             class_fields: classes.fields,
@@ -5887,25 +5884,28 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(self.string_join_value(None, attribute));
                 }
-                if matches!(
-                    self.resolve(&attribute.value),
-                    Some(Binding::Intrinsic(Intrinsic::Stderr))
-                ) {
-                    match attribute.attr.as_str() {
-                        "encoding" => {
-                            return Ok(Expr {
-                                ty: Type::Str,
-                                kind: ExprKind::Builtin(Builtin::SysStderrEncoding, vec![]),
-                            });
+                if let Some(Binding::Intrinsic(stream @ (Intrinsic::Stderr | Intrinsic::Stdout))) =
+                    self.resolve(&attribute.value)
+                {
+                    let kind = match (stream, attribute.attr.as_str()) {
+                        (_, "encoding") => Some(Builtin::SysStreamEncoding),
+                        (Intrinsic::Stdout, "errors") => Some(Builtin::SysStdoutErrors),
+                        (Intrinsic::Stderr, "errors") => {
+                            return Ok(unpacking::string("backslashreplace"));
                         }
-                        "errors" => return Ok(unpacking::string("backslashreplace")),
-                        _ => {}
+                        _ => None,
+                    };
+                    if let Some(kind) = kind {
+                        return Ok(Expr {
+                            ty: Type::Str,
+                            kind: ExprKind::Builtin(kind, vec![]),
+                        });
                     }
                 }
                 if attribute.attr.as_str() == "encoding"
                     && matches!(
                         self.resolve(&attribute.value),
-                        Some(Binding::Intrinsic(Intrinsic::Stdin | Intrinsic::Stdout))
+                        Some(Binding::Intrinsic(Intrinsic::Stdin))
                     )
                 {
                     return Ok(unpacking::string("utf-8"));

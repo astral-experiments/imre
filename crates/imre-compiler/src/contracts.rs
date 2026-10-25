@@ -494,7 +494,8 @@ impl Builtin {
             | Self::SystemExitCodeEqual { .. }
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
-            | Self::SysStderrEncoding
+            | Self::SysStreamEncoding
+            | Self::SysStdoutErrors
             | Self::OsName
             | Self::SysOrigArgv
             | Self::DocCaptureStart
