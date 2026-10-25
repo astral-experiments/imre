@@ -112,6 +112,7 @@ impl Types {
             Type::Popen(_, _, id) => matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_))),
             Type::Int
             | Type::Float
+            | Type::BuiltinClass
             | Type::Bool
             | Type::Str
             | Type::Bytes

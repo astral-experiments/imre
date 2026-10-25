@@ -51,7 +51,7 @@ class Bridge:
             raise RuntimeError('native fixture needs to follow the upstream cwd change')
         for i, value in enumerate(args):
             with open(os.path.join(self.directory, str(i)), 'wb') as out:
-                out.write(str(value).encode())
+                out.write(value if isinstance(value, bytes) else str(value).encode())
         self.process.stdin.write(name + '\n')
         self.process.stdin.flush()
         output = self.read_line()
@@ -64,7 +64,7 @@ class Bridge:
             kind, message = output[1:].split(' ', 1)
             raise {'OSError': OSError, 'FileNotFoundError': FileNotFoundError,
                    'NotADirectoryError': NotADirectoryError, 'PermissionError': PermissionError,
-                   'ValueError': ValueError,
+                   'TypeError': TypeError, 'ValueError': ValueError,
                    'NotImplementedError': NotImplementedError}[kind](ast.literal_eval(message))
         return ast.literal_eval(output)
 

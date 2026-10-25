@@ -27,31 +27,32 @@ python3.14 benchmarks/cpython_stdlib/suite_inventory.py \
 
 ## Native reduce
 
-Both optimization levels have the same results. See `reduce-linux.json` for
-every attempted ID, including the failure and native call counts.
+Both optimization levels have the same results. [The reduce report](reduce-linux.json)
+records all seven IDs, their native call counts and separate keyword controls.
 
 All seven complete methods were also submitted to the shared native-method
-runner under their original CPython fixtures. The compiler rejects the native
-fixture's class assignment `reduce = staticmethod(functools.reduce)` before
-checking the body. This setup blocker is recorded independently from the
-outcome of running the original method against the native fold.
+runner under their original CPython fixtures. The test bodies stop at local
+class declarations, unannotated local functions or `assertWarns`. Their first
+diagnostics are recorded separately from the native folds.
 
 | Execution at each of -O0 and -O3 | IDs |
 | --- | ---: |
 | Complete native test body | 0 |
 | Host assertions and callbacks; Imre drives all reduce operations | 4 |
 | Mixed: native folds plus one missing-arguments error from host binding | 2 |
-| Failed: pure Python reduce's deprecated keyword aliases and warning | 1 |
-| Reference only, outside this reduce run | 318 |
+| Mixed: two native folds with host keyword binding and deprecation warnings | 1 |
+| Other primary IDs outside this reduce run | 318 |
 | Total | 325 |
 
 `run_reduce.py` replaces only the two test classes' interface to reduce.
 The compiled driver calls public `functools.reduce` with no seed, a positional
 seed, or `initial=`. The host retains the original objects, supplies their
 iterator protocol, and executes the provided Python callbacks. Each pull and
-callback invocation is requested by Imre. No host call to functools.reduce is
-used. These results do not establish native support for arbitrary fixture
-classes, their sequence protocols, or polymorphic callbacks.
+callback invocation in the seven scored methods is requested by Imre. The
+pure variant accepts `function=` and `sequence=`, warning once per call before
+binding. The accelerator rejects these forms; both accept `initial=` without
+a warning. The driver compares the result or exception class and the warning
+category and text against both original variants in separate, unscored controls.
 
 ```sh
 python3.14 benchmarks/cpython_stdlib/full/functools/run_reduce.py \
