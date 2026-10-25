@@ -1836,19 +1836,32 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
             // SAFETY: display transfers one owned string.
             unsafe { Rc::from_raw(message) }
         };
-        chain.push((name, message));
+        // Traceback suggestions decorate only uncaught output. The owned exception's
+        // message, positional arguments, str() and repr() stay independent.
+        // SAFETY: the owned exception stays live; this read does not invoke callbacks.
+        let suggestion = unsafe {
+            exception
+                .0
+                .with(|storage| match &storage.exception().payload {
+                    Payload::Import(fields) => fields.suggestion(),
+                    _ => None,
+                })
+        };
+        chain.push((name, message, suggestion));
         current = cause;
     }
     drop(pending);
     let mut diagnostic = crate::sys::stderr_writer();
-    for (index, (name, message)) in chain.into_iter().rev().enumerate() {
+    for (index, (name, message, suggestion)) in chain.into_iter().rev().enumerate() {
         if index != 0 {
             let _ = writeln!(
                 diagnostic,
                 "\nThe above exception was the direct cause of the following exception:\n"
             );
         }
-        if message.is_empty() {
+        if let Some(hint) = suggestion {
+            let _ = writeln!(diagnostic, "{name}: {message}. Did you mean: '{hint}'?");
+        } else if message.is_empty() {
             let _ = writeln!(diagnostic, "{name}");
         } else {
             let _ = writeln!(diagnostic, "{name}: {message}");

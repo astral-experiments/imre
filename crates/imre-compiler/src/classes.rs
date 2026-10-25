@@ -19,7 +19,7 @@ pub(crate) use constants::ClassValue;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
 pub(crate) use exception_forwarders::ForwardingInitializer;
 pub(crate) use exceptions::explicit_message_initializer;
-pub(crate) use inheritance::super_init;
+pub(crate) use inheritance::{super_init, super_method};
 
 pub(crate) const EXCEPTION_ARGS_SLOT: &str = "<exception arguments>";
 

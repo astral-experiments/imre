@@ -93,11 +93,16 @@ pub(super) fn resolve(
     Ok(classes.into_iter().map(Option::unwrap).collect())
 }
 
-/// Matches only zero-argument super bound by the surrounding instance initializer.
+/// Return the member and the name whose binding must be the builtin `super`.
+pub(crate) fn super_method(call: &ast::ExprCall) -> Option<(&ast::ExprAttribute, &ast::Expr)> {
+    let method = call.func.as_attribute_expr()?;
+    let proxy = method.value.as_call_expr()?;
+    (proxy.arguments.is_empty() && proxy.func.as_name_expr()?.id == "super")
+        .then_some((method, &proxy.func))
+}
+
 pub(crate) fn super_init(call: &ast::ExprCall) -> bool {
-    matches!(&*call.func, ast::Expr::Attribute(method) if method.attr.as_str() == "__init__"
-        && matches!(&*method.value, ast::Expr::Call(s) if s.arguments.is_empty()
-            && matches!(&*s.func, ast::Expr::Name(name) if name.id == "super")))
+    super_method(call).is_some_and(|(method, _)| method.attr.as_str() == "__init__")
 }
 
 pub(super) fn infer_fields(
