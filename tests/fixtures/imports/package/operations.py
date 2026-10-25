@@ -1,3 +1,6 @@
+from . import __all__
+
+
 def twice(value: int) -> int:
     return add(value, value)
 
@@ -13,3 +16,5 @@ def append_and_read(left: list[int], right: list[int], value: int) -> int:
 
 # Function globals resolve when called, after this module has finished binding imports.
 from arithmetic import add
+
+EXPORTED_NAME = __all__[0]

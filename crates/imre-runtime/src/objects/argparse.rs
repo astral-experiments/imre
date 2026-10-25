@@ -318,7 +318,24 @@ impl Parser {
                         ),
                     ));
                 }
-                vec![value]
+                let mut taken = vec![value];
+                if option.positional() && option.many {
+                    // Once an option ends this positional's run, parse_args
+                    // treats later bare words as extras. The first -- inside
+                    // the run consumes the marker and makes all following words values.
+                    while let Some(&next) = args.get(index) {
+                        if !end_options && next == "--" {
+                            end_options = true;
+                        } else if end_options || matches!(self.token(next), Token::Value) {
+                            taken.push(next);
+                        } else {
+                            break;
+                        }
+                        index += 1;
+                    }
+                    after_positional = Some(index);
+                }
+                taken
             } else if option.kind == Kind::Bool {
                 Vec::new()
             } else {

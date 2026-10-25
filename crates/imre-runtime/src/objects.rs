@@ -33,6 +33,7 @@ mod text;
 mod unions;
 mod values;
 mod words;
+mod zipfile;
 
 use super::{
     Bytes, Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish,
@@ -58,6 +59,7 @@ enum Storage {
     Sha256(Box<sha2::Sha256>),
     Exception(exceptions::Exception),
     File(Box<files::FileState>),
+    ZipFile(Box<zipfile::Archive>),
     AsyncProcess(Box<processes::AsyncProcess>),
     AsyncTask(Rc<asyncio::Task>),
     GeneratorContext(Rc<contexts::Manager>),

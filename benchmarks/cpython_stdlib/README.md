@@ -2,7 +2,16 @@
 
 The `upstream` directory contains the complete, unmodified CPython 3.14.5 test modules and packages used by these benchmarks. The [manifest](UPSTREAM.json) records the release commit and each unmodified Git blob. [Upstream source](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test) · [CPython license](upstream/LICENSE)
 
+## Native regex substitution tests
+
+The text suite also compiles three complete CPython `ReTests` methods:
+`test_bug_449964`, `test_bug_449000`, and `test_bug_114660`. Their six native
+assertions check capture references and replacement escapes in `re.sub`.
+Run `tests/text.py` with the compiler, runtime, Python oracle and clang paths.
+
 ## Native SHA-256 tests
+
+`native_zipfile.py` runs four unchanged constructor error tests from CPython's ZIP suite. CPython owns the file setup and assertions; a native child opens the files and reports the exception. Separate successful opens check directory order, duplicate names and access after close. Pass the same arguments as the JSON runner, optionally with `--opt-level 0` or `3`.
 
 `native_hashlib.py` takes the same arguments as the JSON runner. In each of CPython’s four `test_case_sha256_*` vectors, the original unittest checks the hex digest, raw digest and digest size from a single native hash object. Alternate constructors and `file_digest` run on CPython and are counted separately.
 

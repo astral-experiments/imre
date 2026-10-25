@@ -103,6 +103,9 @@ impl OptionSpec {
             format!("{{{}}}", self.choices.join(","))
         };
         if self.positional() {
+            if self.many && summary {
+                metavar = format!("{metavar} [{metavar} ...]");
+            }
             return paint(color, if summary { "32" } else { "1;32" }, &metavar);
         }
         if self.many {

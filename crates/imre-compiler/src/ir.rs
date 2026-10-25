@@ -60,6 +60,8 @@ pub(crate) enum Type {
     RegexPattern,
     Logger,
     Sha256,
+    /// An open or closed ZIP archive retains its ordered central directory.
+    ZipFile,
     RegexMatch,
     /// Immutable selections from decoded JSON. Only the object form has a source annotation.
     JsonRoot,
@@ -148,6 +150,7 @@ impl std::fmt::Display for Type {
             Self::RegexPattern => "re.Pattern[str]",
             Self::Logger => "logging.Logger",
             Self::Sha256 => "SHA-256 hash",
+            Self::ZipFile => "zipfile.ZipFile",
             Self::RegexMatch => "re.Match[str]",
             Self::JsonRoot => "JSON document",
             Self::JsonValue => "JSON value",
@@ -544,6 +547,9 @@ pub(crate) enum Builtin {
         hex: bool,
     },
     Sha256Copy,
+    ZipOpen,
+    ZipNamelist,
+    ZipClose,
     /// Validates complete UTF-8 at the decode evaluation point and returns a
     /// retained bytes identity for an internal allocation-free character gather.
     BytesValidateUtf8,
@@ -617,6 +623,7 @@ pub(crate) enum Builtin {
     /// The compile-time validated pattern is independent of the source spelling.
     RegexCompile(String),
     RegexSearch,
+    RegexSub(Vec<u8>),
     RegexGroupDict,
     RegexMatchStart,
     /// A proved selector is a valid numeric index for every possible receiver.

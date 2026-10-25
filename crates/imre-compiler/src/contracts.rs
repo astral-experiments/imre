@@ -212,6 +212,7 @@ impl Builtin {
             | Self::ListSliceSum
             | Self::Slice
             | Self::StringFormat
+            | Self::RegexSub(_)
             | Self::StringJoin
             | Self::StringReplace
             | Self::StringGet
@@ -287,6 +288,9 @@ impl Builtin {
             | Self::DictGatherStrInt
             | Self::FileReadline
             | Self::GzipOpen
+            | Self::ZipOpen
+            | Self::ZipNamelist
+            | Self::ZipClose
             | Self::Input
             | Self::ParseArgs(_)
             | Self::Pop
@@ -611,6 +615,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_text_write"
                 | "imre_text_flush"
                 | "imre_text_close"
+                | "imre_zip_open"
+                | "imre_zip_namelist"
+                | "imre_zip_close"
                 | "imre_int_parse"
                 | "imre_int_float"
                 | "imre_float_int"

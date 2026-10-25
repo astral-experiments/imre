@@ -1,6 +1,7 @@
 //! Loads a closed graph of first-party modules and orders their initialization.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use ruff_db::parsed::ParsedModuleRef;
@@ -84,6 +85,7 @@ pub(crate) enum IntrinsicModule {
     Io,
     Gzip,
     Hashlib,
+    Zipfile,
     Re,
     Enum,
     Zlib,
@@ -159,9 +161,12 @@ pub(crate) enum Intrinsic {
     Sha256,
     HashNew,
     HashAvailable,
+    ZipFile,
+    BadZipFile,
     BadGzipFile,
     RegexCompile,
     RegexSearch,
+    RegexSub,
     RegexVerbose,
     RegexPattern,
     RegexMatch,
@@ -190,6 +195,7 @@ pub(crate) enum Intrinsic {
     AsDict,
     SelfType,
     AssertNever,
+    Cast,
     Path,
     Which,
     TemporaryDirectory,
@@ -244,6 +250,7 @@ impl IntrinsicModule {
             "io" => Some(Self::Io),
             "gzip" => Some(Self::Gzip),
             "hashlib" => Some(Self::Hashlib),
+            "zipfile" => Some(Self::Zipfile),
             "re" => Some(Self::Re),
             "enum" => Some(Self::Enum),
             "zlib" => Some(Self::Zlib),
@@ -342,6 +349,7 @@ impl IntrinsicModule {
             (Self::Typing, "Self") => Intrinsic::SelfType,
             (Self::Typing, "Any") => Intrinsic::Any,
             (Self::Typing, "assert_never") => Intrinsic::AssertNever,
+            (Self::Typing, "cast") => Intrinsic::Cast,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
             (Self::Typing | Self::CollectionsAbc, "Sequence") => Intrinsic::Sequence,
             (Self::Typing | Self::CollectionsAbc, "Iterable") => Intrinsic::Iterable,
@@ -351,9 +359,12 @@ impl IntrinsicModule {
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
             (Self::Hashlib, "new") => Intrinsic::HashNew,
             (Self::Hashlib, "algorithms_available") => Intrinsic::HashAvailable,
+            (Self::Zipfile, "ZipFile") => Intrinsic::ZipFile,
+            (Self::Zipfile, "BadZipFile") => Intrinsic::BadZipFile,
             (Self::Gzip, "BadGzipFile") => Intrinsic::BadGzipFile,
             (Self::Re, "compile") => Intrinsic::RegexCompile,
             (Self::Re, "search") => Intrinsic::RegexSearch,
+            (Self::Re, "sub") => Intrinsic::RegexSub,
             (Self::Re, "VERBOSE") => Intrinsic::RegexVerbose,
             (Self::Re, "Pattern") => Intrinsic::RegexPattern,
             (Self::Re, "Match") => Intrinsic::RegexMatch,
@@ -454,9 +465,9 @@ pub(crate) struct SourceGraph {
     pub(crate) entry: ModuleId,
     /// The absolute entry spelling used for Python's `__file__`.
     entry_filename: PathBuf,
-    /// Imports precede executable statements, so dependency completion order
-    /// also gives Python's module initialization order.
-    pub(crate) initialization: Vec<ModuleId>,
+    /// Split literal prefixes at imports so allocations and package exports are
+    /// available to the child at the original point in Python's initialization.
+    initialization: Vec<(ModuleId, Range<usize>)>,
 }
 
 impl SourceGraph {
@@ -582,11 +593,11 @@ impl SourceGraph {
     }
 
     /// The entry needs its own initializer when it declares globals for later definitions.
-    pub(crate) fn initializer_modules(&self) -> impl Iterator<Item = ModuleId> + '_ {
+    pub(crate) fn initializers(&self) -> impl Iterator<Item = (ModuleId, Range<usize>)> + '_ {
         self.initialization
             .iter()
-            .copied()
-            .filter(|&id| id != self.entry || !self.modules[id].entry_globals.is_empty())
+            .filter(|(id, _)| *id != self.entry || !self.modules[*id].entry_globals.is_empty())
+            .cloned()
     }
 
     /// An isolated source API supports sealed imports only; first-party imports
@@ -756,7 +767,7 @@ struct Loader<'a> {
     loading: HashSet<ModuleId>,
     import_depth: usize,
     allow_imports: bool,
-    initialization: Vec<ModuleId>,
+    initialization: Vec<(ModuleId, Range<usize>)>,
 }
 
 impl<'a> Loader<'a> {
@@ -902,6 +913,7 @@ impl<'a> Loader<'a> {
             )
         });
         let mut executable = false;
+        let mut segment = 0;
         for (index, statement) in parsed.syntax().body.iter().enumerate() {
             if self.modules[id].archive.is_some() && !native_declaration(statement) {
                 return Err(self.modules[id].error(statement,
@@ -955,10 +967,25 @@ impl<'a> Loader<'a> {
                 }
                 ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_) => {
                     if executable || !self.modules[id].entry_globals.is_empty() {
-                        return Err(self.modules[id].error(
-                            statement,
-                            "imports must precede executable module statements",
-                        ));
+                        // Fixed literal exports can precede a package re-export.
+                        // Emit the prefix now: even a list literal can fail to
+                        // allocate before the next module's initializer runs.
+                        if id == 0
+                            || !self.modules[id].is_package
+                            || !self.modules[id].executable.iter().all(|&at| {
+                                let stmt = &parsed.syntax().body[at];
+                                value_name(stmt).is_some()
+                                    && module_value(stmt).is_some_and(literal_export)
+                            })
+                        {
+                            return Err(self.modules[id].error(
+                                statement,
+                                "imports must precede executable module statements",
+                            ));
+                        }
+                        self.initialization.push((id, segment..index));
+                        segment = index;
+                        executable = false;
                     }
                     self.import(id, statement)
                         .map_err(|error| self.modules[id].error(statement, &error))?;
@@ -996,7 +1023,8 @@ impl<'a> Loader<'a> {
             }
         }
         self.loading.remove(&id);
-        self.initialization.push(id);
+        self.initialization
+            .push((id, segment..parsed.syntax().body.len()));
         Ok(())
     }
 
@@ -1082,30 +1110,34 @@ impl<'a> Loader<'a> {
                     _ => self.load_module(&name)?,
                 };
                 for alias in &import.names {
-                    let binding =
-                        if let Some(binding) = self.modules[target].export(alias.name.as_str()) {
-                            if self.loading.contains(&target)
-                                && matches!(binding, Binding::Definition(_) | Binding::Value(_))
-                            {
-                                return Err(format!("cyclic import through {name:?}"));
-                            }
-                            if let Binding::Module(child) = binding
-                                && self.loading.contains(&child)
-                            {
-                                return Err(format!(
-                                    "cyclic import through {:?}",
-                                    self.modules[child].name
-                                ));
-                            }
-                            binding
-                        } else if self.modules[target].is_package {
-                            Binding::Module(self.load_module(&format!("{name}.{}", alias.name))?)
-                        } else {
+                    let binding = if let Some(binding) =
+                        self.modules[target].export(alias.name.as_str())
+                    {
+                        if self.loading.contains(&target)
+                            && matches!(binding, Binding::Definition(_) | Binding::Value(_))
+                            && !matches!(binding, Binding::Value(def)
+                                    if self.initialization.iter().any(|(module, statements)|
+                                        *module == def.module && statements.contains(&def.statement)))
+                        {
+                            return Err(format!("cyclic import through {name:?}"));
+                        }
+                        if let Binding::Module(child) = binding
+                            && self.loading.contains(&child)
+                        {
                             return Err(format!(
-                                "module {name:?} has no static binding {:?}",
-                                alias.name.as_str()
+                                "cyclic import through {:?}",
+                                self.modules[child].name
                             ));
-                        };
+                        }
+                        binding
+                    } else if self.modules[target].is_package {
+                        Binding::Module(self.load_module(&format!("{name}.{}", alias.name))?)
+                    } else {
+                        return Err(format!(
+                            "module {name:?} has no static binding {:?}",
+                            alias.name.as_str()
+                        ));
+                    };
                     let local = alias.asname.as_ref().unwrap_or(&alias.name);
                     self.bind(id, local.as_str(), binding, alias)?;
                 }
@@ -1325,6 +1357,20 @@ impl<'a> Loader<'a> {
                 .insert(child.to_owned(), binding);
         }
         Ok(id)
+    }
+}
+
+/// A closed literal tree cannot read a name introduced by a later import.
+fn literal_export(expression: &ast::Expr) -> bool {
+    match expression {
+        ast::Expr::NoneLiteral(_)
+        | ast::Expr::BooleanLiteral(_)
+        | ast::Expr::NumberLiteral(_)
+        | ast::Expr::StringLiteral(_)
+        | ast::Expr::BytesLiteral(_) => true,
+        ast::Expr::List(seq) => seq.elts.iter().all(literal_export),
+        ast::Expr::Tuple(seq) => seq.elts.iter().all(literal_export),
+        _ => false,
     }
 }
 

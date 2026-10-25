@@ -77,12 +77,18 @@ CASES = {
         ["check", "base", "compare", "extra", "--"], ["-vv=1"], ["-vx", "check", "b", "c"],
         ["--mo", "json", "check", "base", "compare"],
     ],
+    "many_positionals": [
+        [], ["--"], ["one"], ["./one", "two/./three"], ["-v", "one", "two"],
+        ["one", "-v", "two"], ["one", "--", "-v", "--"], ["--", "--", "tail"],
+        ["one", "--unknown", "two"], ["--unknown", "one"], ["one", "--help"],
+    ],
     "two": [[], ["--help"], ["--mo=lar"], ["--flag"], ["--paths", "one", "two"]],
 }
 REJECTED = {
     "computed_flag": 'parser.add_argument("--" + "item")',
     "repeated_flag": 'parser.add_argument("-v", "--verbose")\n    parser.add_argument("-v")',
-    "positional_arity": 'parser.add_argument("input", nargs="+")',
+    "positional_arity": 'parser.add_argument("input", nargs="*")',
+    "positional_after_many": 'parser.add_argument("input", nargs="+")\n    parser.add_argument("output")',
     "mixed_positionals": 'parser.add_argument("input", "--other")',
     "foreign_converter": 'parser.add_argument("--number", type=int)',
     "choice_expression": 'parser.add_argument("--key", choices=list("ab"))',
