@@ -833,6 +833,12 @@ impl SourceGraph {
             .push(CheckedDiagnostic::MissingArgument(call));
     }
 
+    /// This exact operand is excessive for a resolved native method that raises TypeError.
+    pub(crate) fn checked_excess_argument(&self, module: ModuleId, argument: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::ExcessArgument(argument));
+    }
+
     pub(crate) fn checked_keywords(
         &self,
         module: ModuleId,
