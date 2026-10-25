@@ -376,10 +376,10 @@ fn collect_class(
                 }
                 let unary_protocol = matches!(
                     name,
-                    "__str__" | "__bool__" | "__index__" | "__iter__" | "__copy__" | "__fspath__"
+                    "__str__" | "__bool__" | "__index__" | "__iter__" | "__copy__"
                 );
                 if name.starts_with("__")
-                    && name != "__init__"
+                    && !matches!(name, "__init__" | "__fspath__")
                     && !unary_protocol
                     && !(name == "__post_init__" && dataclass.is_some())
                     && !(name == "__repr__" && exception_layout)
