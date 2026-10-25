@@ -4765,16 +4765,11 @@ impl<'a> Checker<'a> {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
         if binary.op == ast::Operator::Mod
-            && let ExprKind::Str(pattern) = &left.kind
+            && matches!(left.ty, Type::Str | Type::StrLiteral(_))
             && matches!(right.ty, Type::Str | Type::StrLiteral(_))
         {
-            return self.percent_string(pattern, right).ok_or_else(|| {
-                error(
-                    self.source,
-                    binary,
-                    "literal percent formatting supports one %s field and %% escapes",
-                )
-            });
+            left = Self::string_value(left);
+            right = Self::string_value(right);
         }
         if binary.op == ast::Operator::Add
             && left.ty == Type::JsonValue
