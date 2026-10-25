@@ -272,7 +272,7 @@ impl Builtin {
                 | ProcessOperation::UnpackArchive
                 | ProcessOperation::ArchiveFormats { .. }
                 | ProcessOperation::UnregisterArchive(_)
-                | ProcessOperation::RegisterUnpack(_)
+                | ProcessOperation::RegisterArchive { .. }
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)

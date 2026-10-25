@@ -572,7 +572,7 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
-            ProcessOperation::RegisterUnpack(frame) => {
+            ProcessOperation::RegisterArchive { unpack, frame } => {
                 let [name, exts, function, extras, description, adapter, metadata] = args else {
                     unreachable!()
                 };
@@ -603,7 +603,14 @@ impl Emitter<'_, '_> {
                     } else {
                         0
                     };
-                self.checked_line(format!("call void @imre_shutil_register_unpack(ptr {}, ptr {}, ptr {function}, i64 {word}, i32 {kind}, ptr {}, ptr {target}, ptr {layout}, ptr {metadata})", name.value.operand, exts.value.operand, description.value.operand));
+                if unpack {
+                    self.checked_line(format!("call void @imre_shutil_register_unpack(ptr {}, ptr {}, ptr {function}, i64 {word}, i32 {kind}, ptr {}, ptr {target}, ptr {layout}, ptr {metadata})", name.value.operand, exts.value.operand, description.value.operand));
+                } else {
+                    let func = &args[2].value;
+                    let func_kind = representation_kind(func.ty, &self.module.types);
+                    let func_word = self.word(func);
+                    self.checked_line(format!("call void @imre_shutil_register_pack(ptr {}, i64 {func_word}, i32 {func_kind}, i64 {word}, i32 {kind}, ptr {}, ptr {target}, ptr {layout}, ptr {metadata})",name.value.operand,description.value.operand));
+                }
                 none()
             }
             ProcessOperation::MakeArchive => {
@@ -622,8 +629,10 @@ impl Emitter<'_, '_> {
                 let flags = u8::from(args[0].value.ty != Type::Str) | (root_kind << 1);
                 let root = self.word(&args[2].value);
                 let val = |i: usize| &args[i].value.operand;
-                let dry = self.instruction(format!("zext i1 {} to i32", val(5)));
-                let operand = self.checked_instruction(format!("call ptr @imre_shutil_make_archive(ptr {}, i32 {flags}, ptr {}, i64 {root}, i64 {}, i32 {dry}, i64 {}, i64 {})", val(0), val(1), val(3), val(6), val(7)));
+                let dry_value = &args[5].value;
+                let dry = self.word(dry_value);
+                let dry_kind = representation_kind(dry_value.ty, &self.module.types);
+                let operand = self.checked_instruction(format!("call ptr @imre_shutil_make_archive(ptr {}, i32 {flags}, ptr {}, i64 {root}, i64 {}, i64 {dry}, i32 {dry_kind}, i64 {}, i64 {})", val(0), val(1), val(3), val(6), val(7)));
                 self.owned(Value {
                     ty: returns,
                     operand,

@@ -1513,7 +1513,10 @@ pub(crate) enum ProcessOperation {
         row: Type,
     },
     UnregisterArchive(bool),
-    RegisterUnpack(Option<Type>),
+    RegisterArchive {
+        unpack: bool,
+        frame: Option<Type>,
+    },
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,

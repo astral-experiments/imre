@@ -3,16 +3,17 @@
 use super::*;
 
 impl Checker<'_> {
-    pub(in super::super) fn shutil_register_unpack(
+    pub(in super::super) fn shutil_register_format(
         &mut self,
         call: &ast::ExprCall,
+        unpack: bool,
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let none = Expr {
             ty: Type::None,
             kind: ExprKind::None,
         };
-        let params = [
+        let mut params = [
             ("name", Type::Str, None),
             ("extensions", self.types.list(Type::Str), None),
             ("function", Type::None, None),
@@ -25,12 +26,17 @@ impl Checker<'_> {
             default,
             kind: ParameterKind::PositionalOrKeyword,
             sign_only: false,
-        });
+        })
+        .to_vec();
+        if !unpack {
+            params.remove(1);
+        }
+        let func = if unpack { 2 } else { 1 };
         let mut signature = None;
         let mut name = String::new();
         let mut module = self.module;
         let mut args = self.arguments_with(call, &params, None, |c, i, expr| {
-            if i == 2 {
+            if i == func {
                 if let Some(Binding::Definition(id)) = c.resolve(expr)
                     && let Some(mut definition) = c.functions.get(&id).cloned()
                 {
@@ -55,7 +61,7 @@ impl Checker<'_> {
                 }
                 return c.expr(expr);
             }
-            if i == 3 {
+            if i == func + 1 {
                 if matches!(expr, ast::Expr::List(list) if list.elts.is_empty()) {
                     let pair = c.types.tuple(vec![Type::Str, Type::Str]);
                     return c.expr_expected(expr, c.types.list(pair));
@@ -64,7 +70,13 @@ impl Checker<'_> {
             }
             c.expr_expected(expr, params[i].ty)
         })?;
+        // Packing needs no extensions. Keep common native positions after evaluating the arguments.
+        if !unpack {
+            args.order.insert(1, args.values.len());
+            args.values.push(none.clone());
+        }
         let callback = args.values[args.order[2]].ty;
+        let result_ty = if unpack { Type::None } else { Type::Str };
         let (layout, adapter, metadata) =
             if let Some((fields, returns)) = self.types.signature(callback) {
                 let declared = signature.ok_or_else(|| error(self.source, call,
@@ -85,6 +97,13 @@ impl Checker<'_> {
                 }
                 // Keep the callable as a separate adapter argument; only its scalar
                 // parameters belong in the tuple used for keyword binding.
+                if !unpack && returns != Type::Str {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "registered packing callbacks require a string return type",
+                    ));
+                }
                 let frame = self.types.tuple(fields.clone());
                 let field = |ty, index| Expr {
                     ty,
@@ -126,8 +145,12 @@ impl Checker<'_> {
                         function: ir::Function {
                             params: vec![0, 1],
                             locals: vec![callback, frame],
-                            returns: Type::None,
-                            body: vec![Statement::Expr(invoke), Statement::Return(none.clone())],
+                            returns: result_ty,
+                            body: if unpack {
+                                vec![Statement::Expr(invoke), Statement::Return(none.clone())]
+                            } else {
+                                vec![Statement::Return(invoke)]
+                            },
                         },
                     },
                 );
@@ -165,7 +188,7 @@ impl Checker<'_> {
                 (
                     Some(frame),
                     Expr {
-                        ty: self.types.callable(vec![callback, frame], Type::None),
+                        ty: self.types.callable(vec![callback, frame], result_ty),
                         kind: ExprKind::Callable {
                             function: id,
                             receiver: None,
@@ -181,7 +204,10 @@ impl Checker<'_> {
             args.values.push(value);
         }
         Ok(self.ordered_builtin(
-            Builtin::Process(ir::ProcessOperation::RegisterUnpack(layout)),
+            Builtin::Process(ir::ProcessOperation::RegisterArchive {
+                unpack,
+                frame: layout,
+            }),
             Type::None,
             args,
         ))

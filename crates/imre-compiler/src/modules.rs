@@ -316,7 +316,7 @@ pub(crate) enum Intrinsic {
     MakeArchive,
     UnpackArchive,
     ArchiveFormats(bool),
-    RegisterUnpack,
+    RegisterArchive { unpack: bool },
     UnregisterArchive(bool),
     TemporaryDirectory,
     Popen,
@@ -717,7 +717,10 @@ impl IntrinsicModule {
             (Self::Shutil, "unpack_archive") => Intrinsic::UnpackArchive,
             (Self::Shutil, "get_archive_formats") => Intrinsic::ArchiveFormats(false),
             (Self::Shutil, "get_unpack_formats") => Intrinsic::ArchiveFormats(true),
-            (Self::Shutil, "register_unpack_format") => Intrinsic::RegisterUnpack,
+            (Self::Shutil, "register_unpack_format") => Intrinsic::RegisterArchive { unpack: true },
+            (Self::Shutil, "register_archive_format") => {
+                Intrinsic::RegisterArchive { unpack: false }
+            }
             (Self::Shutil, "unregister_archive_format") => Intrinsic::UnregisterArchive(false),
             (Self::Shutil, "unregister_unpack_format") => Intrinsic::UnregisterArchive(true),
             (Self::Tempfile, "TemporaryDirectory") => Intrinsic::TemporaryDirectory,

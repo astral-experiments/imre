@@ -52,15 +52,8 @@ impl Checker<'_> {
                     ("format", Type::Str, None),
                     ("root_dir", opt, Some(absent.clone())),
                     ("base_dir", opt, Some(absent.clone())),
-                    ("verbose", Type::Int, Some(zero)),
-                    (
-                        "dry_run",
-                        Type::Bool,
-                        Some(Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Bool(false),
-                        }),
-                    ),
+                    ("verbose", Type::Int, Some(zero.clone())),
+                    ("dry_run", Type::Int, Some(zero)),
                     ("owner", opt, Some(absent.clone())),
                     ("group", opt, Some(absent)),
                     ("logger", Type::None, Some(none)),
@@ -126,7 +119,15 @@ impl Checker<'_> {
                 return checker.coerce(v, opt, expr);
             }
             if create && i == 5 {
-                return checker.condition(expr);
+                let value = checker.expr(expr)?;
+                if matches!(value.ty, Type::Int | Type::Bool) {
+                    return Ok(value);
+                }
+                return Err(error(
+                    checker.source,
+                    expr,
+                    "make_archive dry_run requires a native integer or boolean",
+                ));
             }
             checker.expr_expected(expr, params[i].ty)
         })?;

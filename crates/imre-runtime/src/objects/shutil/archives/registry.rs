@@ -36,7 +36,7 @@ const BUILTINS: [Builtin; 6] = [
 ];
 
 #[derive(Clone)]
-pub(super) enum Unpacker {
+pub(super) enum Handler {
     Builtin(Format),
     Custom(Rc<Callback>),
 }
@@ -45,7 +45,7 @@ pub(super) enum Unpacker {
 struct Entry {
     name: Rc<Str>,
     description: Rc<Str>,
-    unpacker: Unpacker,
+    handler: Handler,
     suffix: &'static str,
     extensions: Rc<Object>,
 }
@@ -69,7 +69,7 @@ impl Registry {
                 Entry {
                     name: Rc::new(Str::from(name)),
                     description: Rc::new(Str::from(description)),
-                    unpacker: Unpacker::Builtin(format),
+                    handler: Handler::Builtin(format),
                     suffix: suffixes[0],
                     extensions: extensions.into_object(),
                 }
@@ -84,20 +84,17 @@ impl Registry {
 
 thread_local! { static REGISTRY: RefCell<Registry> = RefCell::new(Registry::new()); }
 
-pub(super) fn archiver(name: &str) -> Option<(Format, &'static str)> {
+pub(super) fn archiver(name: &str) -> Option<(Handler, &'static str)> {
     REGISTRY.with_borrow(|registry| {
         registry
             .pack
             .iter()
             .find(|e| e.name.as_str() == name)
-            .and_then(|e| match e.unpacker {
-                Unpacker::Builtin(f) => Some((f, e.suffix)),
-                Unpacker::Custom(_) => None,
-            })
+            .map(|e| (e.handler.clone(), e.suffix))
     })
 }
 
-pub(super) fn unpacker(name: Option<&str>, filename: &str) -> Option<Unpacker> {
+pub(super) fn unpacker(name: Option<&str>, filename: &str) -> Option<Handler> {
     REGISTRY.with_borrow(|registry| {
         registry
             .unpack
@@ -113,7 +110,7 @@ pub(super) fn unpacker(name: Option<&str>, filename: &str) -> Option<Unpacker> {
                     })
                 },
             })
-            .map(|e| e.unpacker.clone())
+            .map(|e| e.handler.clone())
     })
 }
 
@@ -176,7 +173,7 @@ pub unsafe extern "C" fn imre_shutil_register_unpack(
                 description: acquire_rc(description as usize),
                 extensions: acquire_rc(extensions as usize),
                 suffix: "",
-                unpacker: Unpacker::Custom(Rc::new(Callback::new(
+                handler: Handler::Custom(Rc::new(Callback::new(
                     function,
                     adapter,
                     frame,
@@ -186,20 +183,77 @@ pub unsafe extern "C" fn imre_shutil_register_unpack(
                 ))),
             }
         };
-        if let Some(existing) = registry
-            .unpack
-            .iter_mut()
-            .find(|old| old.name == entry.name)
-        {
-            *existing = entry;
-        } else {
-            registry
-                .unpack
-                .try_reserve(1)
-                .map_err(|_| Error::allocation())?;
-            registry.unpack.push(entry);
+        replace(&mut registry.unpack, entry)
+    });
+    finish(result, ());
+}
+
+fn replace(entries: &mut Vec<Entry>, entry: Entry) -> Result<()> {
+    if let Some(existing) = entries.iter_mut().find(|old| old.name == entry.name) {
+        *existing = entry;
+    } else {
+        entries.try_reserve(1).map_err(|_| Error::allocation())?;
+        entries.push(entry);
+    }
+    Ok(())
+}
+
+/// # Safety
+/// The compiler roots the arguments, and pairs each packing adapter with its callable,
+/// frame layout and metadata. A null adapter denotes an evaluated non-callable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_shutil_register_pack(
+    name: *const Str,
+    function: usize,
+    function_kind: u32,
+    extras: usize,
+    extras_kind: u32,
+    description: *const Str,
+    adapter: *const (),
+    frame: *const RecordDescriptor,
+    metadata: *const usize,
+) {
+    let result = REGISTRY.with_borrow_mut(|registry| -> Result<()> {
+        if adapter.is_null() {
+            let mut display = String::new();
+            // SAFETY: both branches borrow the original operand using its checked representation.
+            unsafe {
+                if function_kind == 3 {
+                    display.push_str(&*(function as *const Str));
+                } else {
+                    crate::objects::values::write_repr(
+                        &mut display,
+                        function,
+                        WordKind::new(function_kind),
+                    );
+                }
+            }
+            return Err(Error::new(
+                Kind::TypeError,
+                format!("The {display} object is not callable"),
+            ));
         }
-        Ok(())
+        // SAFETY: the typed adapter and frame are static; the callback acquires all live records.
+        let callback = unsafe {
+            Callback::new(
+                function as *const usize,
+                adapter,
+                frame,
+                metadata,
+                extras,
+                extras_kind,
+            )
+        };
+        callback.check_pack_extras()?;
+        let entry = Entry {
+            // SAFETY: both strings are rooted by the caller.
+            name: unsafe { acquire_rc(name as usize) },
+            description: unsafe { acquire_rc(description as usize) },
+            handler: Handler::Custom(Rc::new(callback)),
+            suffix: "",
+            extensions: Words::new(3).into_object(),
+        };
+        replace(&mut registry.pack, entry)
     });
     finish(result, ());
 }

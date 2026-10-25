@@ -311,7 +311,7 @@ jobs:
           python3 benchmarks/cpython_stdlib/full/shutil/move_cross_device.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
           archive_tools=(--imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18)
           python3 benchmarks/cpython_stdlib/full/shutil/archive_ops.py "${archive_tools[@]}" --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-archive.json"
-          for control in archive_filters archive_handler_controls archive_root_controls; do
+          for control in archive_filters archive_handler_controls archive_root_controls archive_pack_controls; do
             python3 "benchmarks/cpython_stdlib/full/shutil/$control.py" "${archive_tools[@]}"
           done
           python3 benchmarks/cpython_stdlib/native_json.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json.json"

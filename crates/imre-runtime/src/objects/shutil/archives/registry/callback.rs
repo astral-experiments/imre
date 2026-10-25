@@ -6,7 +6,7 @@ use crate::{Bytes, Int, List};
 
 pub(in super::super) struct Callback {
     function: OwnedWord,
-    adapter: unsafe extern "C" fn(*const (), *const usize, *const usize) -> u8,
+    adapter: *const (),
     frame: *const RecordDescriptor,
     metadata: OwnedWord,
     extras: OwnedWord,
@@ -136,10 +136,7 @@ impl Callback {
         unsafe {
             Self {
                 function: WordKind::new(6).acquire(function as usize),
-                adapter: std::mem::transmute::<
-                    *const (),
-                    unsafe extern "C" fn(*const (), *const usize, *const usize) -> u8,
-                >(adapter),
+                adapter,
                 frame,
                 metadata: WordKind::new(6).acquire(metadata as usize),
                 extras: WordKind::new(extras_kind & 0xffff).acquire(extras),
@@ -224,12 +221,107 @@ impl Callback {
         explicit: bool,
     ) -> Result<()> {
         let mut kwargs = self.keywords()?;
+        if let Some(filter) = filter {
+            let value = string_word(filter);
+            if let Some((_, old)) = kwargs.iter_mut().find(|(k, _)| k == "filter") {
+                if explicit {
+                    return Err(type_error(format!(
+                        "{}() got multiple values for keyword argument 'filter'",
+                        text(&unsafe { field(self.metadata.word, 0) })
+                    )));
+                }
+                *old = value;
+            } else {
+                kwargs.push(("filter".into(), value));
+            }
+        }
+        let frame = self.prepare([string_word(filename), string_word(dest)], kwargs)?;
+        type Unpack = unsafe extern "C" fn(*const (), *const usize, *const usize) -> u8;
+        // SAFETY: the unpack registry installs exactly this adapter ABI and owns the callable.
+        unsafe {
+            std::mem::transmute::<*const (), Unpack>(self.adapter)(
+                std::ptr::null(),
+                self.function.word as *const usize,
+                frame.word as *const usize,
+            );
+        }
+        Ok(())
+    }
+
+    pub(super) fn check_pack_extras(&self) -> Result<()> {
+        if self.extras.kind.raw() == 0 {
+            return Ok(());
+        }
+        fn entries(v: &OwnedWord) -> Option<Vec<OwnedWord>> {
+            matches!(v.kind.raw(), 4..=6).then(|| items(v)).flatten()
+        }
+        let rows =
+            entries(&self.extras).ok_or_else(|| type_error("extra_args needs to be a sequence"))?;
+        for row in rows {
+            if entries(&row).is_none_or(|parts| parts.len() != 2) {
+                return Err(type_error("extra_args elements are : (arg_name, value)"));
+            }
+        }
+        Ok(())
+    }
+
+    pub(in super::super) fn pack(
+        &self,
+        base: Rc<Str>,
+        dir: Rc<Str>,
+        dry: OwnedWord,
+        owner: Option<&str>,
+        group: Option<&str>,
+        root: Option<Rc<Str>>,
+    ) -> Result<Option<Rc<Str>>> {
+        fn nullable(value: Option<&str>) -> OwnedWord {
+            value.map_or_else(
+                || unsafe { OwnedWord::from_owned(0, WordKind::new(0)) },
+                |s| string_word(Rc::new(Str::from(s))),
+            )
+        }
+        let mut kwargs = vec![
+            ("dry_run".to_string(), dry),
+            ("logger".into(), nullable(None)),
+            ("owner".into(), nullable(owner)),
+            ("group".into(), nullable(group)),
+        ];
+        let mut assign = |name: String, value: OwnedWord| {
+            if let Some((_, old)) = kwargs.iter_mut().find(|(key, _)| *key == name) {
+                *old = value;
+            } else {
+                kwargs.push((name, value));
+            }
+        };
+        for (name, value) in self.keywords()? {
+            assign(name, value);
+        }
+        if let Some(root) = root {
+            assign("root_dir".into(), string_word(root));
+        }
+        let frame = self.prepare([string_word(base), string_word(dir)], kwargs)?;
+        type Pack = unsafe extern "C" fn(*const (), *const usize, *const usize) -> *const Str;
+        // SAFETY: packing adapters return an owned string or a null sentinel on a pending exception.
+        unsafe {
+            let result = std::mem::transmute::<*const (), Pack>(self.adapter)(
+                std::ptr::null(),
+                self.function.word as *const usize,
+                frame.word as *const usize,
+            );
+            Ok((!result.is_null()).then(|| Rc::from_raw(result)))
+        }
+    }
+
+    fn prepare(
+        &self,
+        positional_values: [OwnedWord; 2],
+        kwargs: Vec<(String, OwnedWord)>,
+    ) -> Result<OwnedWord> {
         // SAFETY: immutable metadata holds two names and one fixed tuple per
         // native parameter. Its corresponding frame descriptor is static.
-        let (qualified, short, params) = unsafe {
+        let (short, params) = unsafe {
             let len = records::descriptor(self.metadata.word as *const usize).length;
             (
-                field(self.metadata.word, 0),
                 field(self.metadata.word, 1),
                 (2..len)
                     .map(|i| {
@@ -244,27 +336,13 @@ impl Callback {
             )
         };
         let short = text(&short);
-        if let Some(filter) = filter {
-            let value = string_word(filter);
-            if let Some((_, old)) = kwargs.iter_mut().find(|(k, _)| k == "filter") {
-                if explicit {
-                    return Err(type_error(format!(
-                        "{}() got multiple values for keyword argument 'filter'",
-                        text(&qualified)
-                    )));
-                }
-                *old = value;
-            } else {
-                kwargs.push(("filter".into(), value));
-            }
-        }
         let mut bound: Vec<Option<OwnedWord>> = (0..params.len()).map(|_| None).collect();
         let positional = params
             .iter()
             .take_while(|(_, mode, _)| text(mode) != "*")
             .count();
-        for (i, value) in [filename, dest].into_iter().enumerate().take(positional) {
-            bound[i] = Some(string_word(value));
+        for (i, value) in positional_values.into_iter().enumerate().take(positional) {
+            bound[i] = Some(value);
         }
         for (key, value) in kwargs {
             let index = params
@@ -317,14 +395,12 @@ impl Callback {
             if frame.is_null() {
                 return Err(Error::allocation());
             }
-            let _owner = OwnedWord::from_owned(frame as usize, WordKind::new(6));
+            let owner = OwnedWord::from_owned(frame as usize, WordKind::new(6));
             for (i, (v, (_, _, default))) in bound.into_iter().zip(params).enumerate() {
                 let kind = WordKind::new(*(*self.frame).kinds.add(i));
                 stored(v.or(default).unwrap(), kind)?.initialize_record_field(frame.add(i));
             }
-            (self.adapter)(std::ptr::null(), self.function.word as *const usize, frame);
+            Ok(owner)
         }
-        // The checked caller observes a callback's original pending exception.
-        Ok(())
     }
 }

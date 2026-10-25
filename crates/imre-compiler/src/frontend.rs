@@ -6609,8 +6609,8 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ArchiveFormats(unpack))) => {
                 return self.shutil_archive_formats(call, unpack);
             }
-            Some(Binding::Intrinsic(Intrinsic::RegisterUnpack)) => {
-                return self.shutil_register_unpack(call);
+            Some(Binding::Intrinsic(Intrinsic::RegisterArchive { unpack })) => {
+                return self.shutil_register_format(call, unpack);
             }
             Some(Binding::Intrinsic(Intrinsic::UnregisterArchive(unpack))) => {
                 let args = self.arguments(

@@ -1,4 +1,4 @@
-//! Built-in archive dispatch. Resolve members against the supplied root without changing cwd.
+//! Archive dispatch. Built-in formats resolve members beneath their supplied root; legacy custom packers use the original change-and-restore protocol.
 mod registry;
 mod tar_extract;
 mod tarball;
@@ -12,7 +12,9 @@ use std::rc::Rc;
 
 use super::super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::super::files::{errno_error, errno_with_filenames};
+use super::super::words::{OwnedWord, WordKind};
 use super::super::{Object, Storage, Str, acquire_rc, paths, posixpath};
+use crate::Int;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Format {
@@ -68,13 +70,13 @@ struct ArchiveRoot {
 struct MakeOptions<'a> {
     root: Option<ArchiveRoot>,
     dir: Option<&'a str>,
-    dry: bool,
+    dry: OwnedWord,
     owner: Option<&'a str>,
     group: Option<&'a str>,
     base_class: Option<&'static str>,
 }
 
-fn make(base: &str, format: &str, options: MakeOptions<'_>) -> Result<Str> {
+fn make(base: &str, format: &str, options: MakeOptions<'_>) -> Result<Option<Rc<Str>>> {
     let MakeOptions {
         root,
         dir,
@@ -83,7 +85,7 @@ fn make(base: &str, format: &str, options: MakeOptions<'_>) -> Result<Str> {
         group,
         base_class,
     } = options;
-    let (format, suffix) = registry::archiver(format).ok_or_else(|| {
+    let (handler, suffix) = registry::archiver(format).ok_or_else(|| {
         Error::new(
             Kind::ValueError,
             format!("unknown archive format '{format}'"),
@@ -113,7 +115,46 @@ fn make(base: &str, format: &str, options: MakeOptions<'_>) -> Result<Str> {
                 None,
             ));
         }
-    } else if let Some(class) = base_class {
+    }
+    // Both bool and int retain their original representation for a registered packer.
+    let dry_run = match dry.kind.raw() {
+        1 => dry.word != 0,
+        // SAFETY: the owner has the checked integer representation.
+        2 => unsafe { Int::borrow(dry.word) }.as_small() != Some(0),
+        _ => unreachable!(),
+    };
+    if let registry::Handler::Custom(callback) = handler {
+        let mut saved = None;
+        let mut base = Rc::new(Str::from(base));
+        if let Some(root) = &root {
+            let cwd = std::env::current_dir().map_err(errno_error)?;
+            base = Rc::new(normalized(&base, Some(&cwd))?);
+            if !dry_run {
+                std::env::set_current_dir(root.text.as_str())
+                    .map_err(|e| path_error(e, Path::new(root.text.as_str())))?;
+            }
+            saved = Some(cwd);
+        }
+        let result = callback.pack(
+            base,
+            Rc::new(Str::from(dir.unwrap_or("."))),
+            dry,
+            owner,
+            group,
+            None,
+        );
+        // Restore even on the dry path and while a callback exception is pending.
+        if let Some(cwd) = saved {
+            std::env::set_current_dir(&cwd).map_err(|e| path_error(e, &cwd))?;
+        }
+        return result;
+    }
+    let registry::Handler::Builtin(format) = handler else {
+        unreachable!()
+    };
+    if root.is_none()
+        && let Some(class) = base_class
+    {
         return Err(Error::new(
             Kind::TypeError,
             format!("unsupported operand type(s) for +: '{class}' and 'str'"),
@@ -121,7 +162,7 @@ fn make(base: &str, format: &str, options: MakeOptions<'_>) -> Result<Str> {
     }
     let root = root.as_ref().map(|root| root.text.as_str());
     let result = format!("{base}{suffix}");
-    if !dry {
+    if !dry_run {
         let dir = dir.unwrap_or(".");
         let source = root.map_or_else(|| Path::new(dir).to_owned(), |r| Path::new(r).join(dir));
         let target = Path::new(&result);
@@ -133,14 +174,15 @@ fn make(base: &str, format: &str, options: MakeOptions<'_>) -> Result<Str> {
             tarball::create(file, format, &source, dir, owner, group)?;
         }
     }
-    if root.is_some() {
+    let result = if root.is_some() {
         normalized(
             &result,
             Some(&std::env::current_dir().map_err(errno_error)?),
-        )
+        )?
     } else {
-        Ok(result.into())
-    }
+        result.into()
+    };
+    Ok(Some(Rc::new(result)))
 }
 
 fn unpack(
@@ -164,14 +206,14 @@ fn unpack(
         ),
     })?;
     let format = match driver {
-        registry::Unpacker::Custom(callback) => {
+        registry::Handler::Custom(callback) => {
             let dest = match dest {
                 Some(s) => s,
                 None => Rc::new(paths::path_utf8(cwd.unwrap().into_os_string())?),
             };
             return callback.call(filename, dest, filter, format.is_some());
         }
-        registry::Unpacker::Builtin(format) => format,
+        registry::Handler::Builtin(format) => format,
     };
     let path = Path::new(filename.as_str());
     let dest = cwd.as_deref().unwrap_or_else(|| {
@@ -206,7 +248,8 @@ pub unsafe extern "C" fn imre_shutil_make_archive(
     format: *const Str,
     root: usize,
     dir: usize,
-    dry: u32,
+    dry: usize,
+    dry_kind: u32,
     owner: usize,
     group: usize,
 ) -> *const Str {
@@ -247,14 +290,17 @@ pub unsafe extern "C" fn imre_shutil_make_archive(
             MakeOptions {
                 root,
                 dir: text(dir),
-                dry: dry != 0,
+                dry: WordKind::new(dry_kind).acquire(dry),
                 owner: text(owner),
                 group: text(group),
                 base_class,
             },
         )
     };
-    finish(result.map(|s| Rc::into_raw(Rc::new(s))), std::ptr::null())
+    finish(
+        result.map(|s| s.map_or(std::ptr::null(), Rc::into_raw)),
+        std::ptr::null(),
+    )
 }
 
 /// # Safety
