@@ -212,6 +212,24 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            PathOperation::Walk => {
+                let row = self.module.types.cursor_element(returns).unwrap();
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(row)));
+                let top_down =
+                    self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                let follow = self.instruction(format!("zext i1 {} to i32", args[3].value.operand));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_path_walk(ptr {}, i32 {top_down}, i32 {follow}, ptr @{layout})",
+                    args[0].value.operand,
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
             PathOperation::Iterdir | PathOperation::Glob { .. } => {
                 let path = &args[0].value.operand;
                 let call = if let PathOperation::Glob { recursive } = operation {
