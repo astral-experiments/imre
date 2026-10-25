@@ -4,7 +4,10 @@ The CPython 3.14.5 reference runs all three methods in the unchanged
 [test_errno.py](upstream/Lib/test/test_errno.py).
 The compiler reads the target's native errno headers: forward names, aliases
 and the reverse dictionary follow CPython's registration order. Numbers and
-symbol availability can differ between Linux and macOS.
+symbol availability can differ between Linux and macOS, and between SDKs. The official
+CPython 3.14.5 macOS binary uses SDK 26.4. Darwin 25 / macOS SDK 26 adds
+`ENOTCAPABLE` to the SDK 15 table. Native CI and release archives use the
+same SDK generation, while a source build deliberately reflects its own target headers.
 
 The [native runner](../../../../tests/errno.py) verifies the source's pinned
 Git blob, compiles the complete module, and invokes each original method in a
