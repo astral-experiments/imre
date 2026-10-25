@@ -33,7 +33,9 @@ jobs:
           repository: python/cpython
           ref: 5607950ef232dad16d75c0cf53101d9649d89115
           path: .cpython-argparse
-          sparse-checkout: Lib
+          sparse-checkout: |
+            Lib
+            Tools/i18n
           persist-credentials: false
       - name: Verify the complete original CPython suite and reference
         shell: bash
@@ -41,6 +43,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$REVISION"
           test "$(git -C .cpython-argparse rev-parse HEAD)" = 5607950ef232dad16d75c0cf53101d9649d89115
+          test "$(git hash-object --no-filters .cpython-argparse/Tools/i18n/pygettext.py)" = ddf4474d2bce55f7edd0ddd5db132ddea86ba88c
           mkdir -p "$RUNNER_TEMP/argparse-receipts"
           export PYTHONPATH="$GITHUB_WORKSPACE/.cpython-argparse/Lib"
           python3 -B benchmarks/cpython_stdlib/suite_inventory.py benchmarks/cpython_stdlib/full/argparse/UPSTREAM.json --result "$RUNNER_TEMP/argparse-receipts/reference-linux.json"
