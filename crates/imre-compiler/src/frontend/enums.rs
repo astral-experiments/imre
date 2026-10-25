@@ -190,6 +190,13 @@ impl Checker<'_> {
             ));
         }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
+        if types.iter().any(|&ty| self.types.is_value_struct(ty)) {
+            return Err(error(
+                self.source,
+                node,
+                "imre.struct values have no observable identity; compare them with ==",
+            ));
+        }
         let wrapper_attributes = matches!((left.ty, right.ty), (Type::Tuple(_), Type::Tuple(_)))
             && [&left, &right].iter().any(|value| {
                 matches!(
@@ -294,7 +301,12 @@ impl Checker<'_> {
             || types.iter().all(|ty| {
                 matches!(
                     ty,
-                    Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_) | Type::Class(_)
+                    Type::ListInt
+                        | Type::List(_)
+                        | Type::Dict(_)
+                        | Type::ChainMap(_)
+                        | Type::Set(_)
+                        | Type::Class(_)
                 )
             })
             || types == [Type::Str; 2]

@@ -49,8 +49,7 @@ enum Stream {
 }
 
 impl Stream {
-    /// Closes exactly once even when flushing fails. `into_parts` prevents a
-    /// second implicit flush; a close error takes precedence over a flush error.
+    /// Closes exactly once even when flushing fails. A close error takes precedence.
     fn close(self) -> io::Result<()> {
         let (file, flushed) = match self {
             Self::Read(input) => (input.into_file(), Ok(())),
