@@ -20,6 +20,8 @@ a test-enabled build of the pinned release:
 Four complete upstream methods execute at both O0 and O3: `test_copy_basic`,
 `test_copy_list`, `test_copy_dict`, and `test_copy_set`. Their 13 original
 assertions run in native executables with typed equality and identity checks.
-The [native report](native-linux.json) retains all 81 IDs; the other 77 have
-reference evidence only. A separate differential fixture exercises shared
+The [native report](native-linux.json) retains all 81 IDs; two additional methods run their original assertions on CPython after calling
+the original `__copy__` method in a native process, and the other 75 have
+reference evidence only. The two mixed fixtures transfer one typed integer field
+and check the native result class; they do not count as fully native tests. A separate differential fixture exercises shared
 children, independent outer containers, and Counter/defaultdict missing keys.

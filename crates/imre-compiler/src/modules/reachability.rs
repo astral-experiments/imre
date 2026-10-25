@@ -41,6 +41,13 @@ impl<'a> Visitor<'a> for References<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        if let ast::Expr::Call(call) = expr
+            && self.graph.resolve(self.module, &call.func)
+                == Some(Binding::Intrinsic(Intrinsic::ShallowCopy))
+        {
+            self.found.attributes.insert("__copy__".to_owned());
+            self.found.instance_attributes.insert("__copy__".to_owned());
+        }
         if !matches!(expr, ast::Expr::Name(n) if n.ctx == ast::ExprContext::Store)
             && let Some(Binding::Value(id)) = self.graph.resolve(self.module, expr)
         {
