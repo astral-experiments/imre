@@ -28,6 +28,7 @@ mod calls;
 mod chainmap;
 mod class_data;
 mod closed_calls;
+mod cmp_keys;
 mod codecs;
 mod comprehensions;
 mod consuming_lists;
@@ -55,6 +56,7 @@ mod format_cursors;
 mod fromkeys;
 mod fspath;
 mod function_caches;
+mod function_text;
 mod functools;
 mod hashlib;
 mod import_errors;
@@ -2755,6 +2757,9 @@ impl<'a> Checker<'a> {
                 });
             }
             return self.coerce(value, expected, expression);
+        }
+        if self.types.is_len_argument(expected) {
+            return self.pack_len_argument(expression);
         }
         if self.types.is_callback_argument(expected) {
             return self.pack_callback_argument(expression, expected);
@@ -5538,6 +5543,9 @@ impl<'a> Checker<'a> {
 
     /// Keep the large general frame off recursive left- and right-hand arithmetic.
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if self.unshadowed_len(expression) {
+            return Ok(self.builtin_len());
+        }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::PopenActive)) {
             return Ok(Expr {
                 ty: self.types.list(Type::ActivePopen),
@@ -5727,6 +5735,7 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::BuiltinsLen => return Ok(self.builtin_len()),
                 Intrinsic::CodecBom(bytes) => {
                     return Ok(Expr {
                         ty: Type::Bytes,
@@ -6282,6 +6291,12 @@ impl<'a> Checker<'a> {
                     calendar::equality(self.types, &mut values, compare.ops.as_ref())
                 {
                     return Ok(result);
+                }
+                if values
+                    .iter()
+                    .any(|value| matches!(value.ty, Type::CmpKey(..)))
+                {
+                    return self.cmp_key_chain(values, &compare.ops, expression);
                 }
                 if let ([left, right], [op]) = (values.as_slice(), compare.ops.as_ref())
                     && let Some(result) = inspect::equality(left, right, *op)
@@ -6887,10 +6902,11 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
-                if attribute.attr.as_str() == "__wrapped__"
-                    && let Some(layout) = self.types.dispatcher(receiver.ty)
+                if let Some(layout) = self.types.dispatcher(receiver.ty)
+                    && let Some(value) =
+                        self.dispatch_attribute(&receiver, layout, attribute.attr.as_str())
                 {
-                    return Ok(single_dispatch::original(receiver, layout));
+                    return Ok(value);
                 }
                 if self.types.has_reflected_functions()
                     && matches!(receiver.ty, Type::FunctionRef | Type::Callable(_))
@@ -6938,6 +6954,11 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
                     return Ok(wrapped);
+                }
+                if let Type::CmpKey(frame, bound) = receiver.ty
+                    && attribute.attr.as_str() == "obj"
+                {
+                    return Ok(self.cmp_key_obj(receiver, frame, bound));
                 }
                 if receiver.ty == Type::BuiltinClass {
                     match attribute.attr.as_str() {
@@ -7394,6 +7415,12 @@ impl<'a> Checker<'a> {
     }
 
     fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen))
+            || self.graph.mutable_builtin_len && self.unshadowed_len(&call.func)
+        {
+            let callable = self.builtin_len();
+            return self.invoke(call, callable);
+        }
         if receiver.is_none()
             && let ast::Expr::Call(config) = &*call.func
             && self.resolve(&config.func) == Some(Binding::Intrinsic(Intrinsic::Wraps))
@@ -7904,6 +7931,7 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::UpdateWrapper)) => return self.update_wrapper(call),
+            Some(Binding::Intrinsic(Intrinsic::CmpToKey)) => return self.cmp_to_key(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
                 let [ast::Expr::StringLiteral(target), value] = call.arguments.args.as_ref() else {
@@ -9059,6 +9087,9 @@ impl<'a> Checker<'a> {
             let [value] = args.as_slice() else {
                 return Err(error(self.source, call, "hash requires one argument"));
             };
+            if matches!(value.ty, Type::CmpKey(..)) {
+                return Ok(self.cmp_key_hash(value.clone()));
+            }
             let builtin = match value.ty {
                 Type::Str | Type::StrLiteral(_) => Builtin::HashStr,
                 Type::Class(id)

@@ -35,7 +35,10 @@ pub(super) fn adapters(
                     .is_some_and(|r| matches!(r.ty, Type::Deque(_) | Type::List(_)));
                 int_list_receiver |= receiver.as_ref().is_some_and(|r| r.ty == Type::ListInt);
             }
-            invoked |= matches!(value.kind, ExprKind::Invoke { .. });
+            invoked |= matches!(
+                value.kind,
+                ExprKind::Invoke { .. } | ExprKind::Builtin(Builtin::BuiltinsLen, _)
+            );
         });
     }
     if targets.is_empty() && !invoked {

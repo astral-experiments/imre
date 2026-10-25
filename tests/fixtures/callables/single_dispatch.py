@@ -14,6 +14,52 @@ def replacement(value: str | bytes) -> str:
     return "replacement"
 
 
+def documented(value: str | bytes) -> str:
+    "  original\n\t  π\tcontinued\n\t    indented\n\n\t  final\n"
+    return "original"
+
+
+class TextBase:
+    @staticmethod
+    def static(value: str) -> str:
+        "shared static documentation"
+        return value
+
+
+class TextChild(TextBase):
+    pass
+
+
+def wrapper_text(flag: bool) -> None:
+    known = singledispatch(documented)
+    no_doc = singledispatch(base)
+    known.register(str, replacement)
+    chosen = known if flag else no_doc
+    print(chosen.__name__)
+    doc = chosen.__doc__
+    if doc is None:
+        print("no docstring")
+    else:
+        print(repr(doc))
+    print(known.__wrapped__ is documented)
+    print(known("changed handler"))
+
+    @singledispatch
+    def nested(item):
+        "  local\n    two\n\n      four\n"
+        return "fallback"
+
+    print(nested.__name__)
+    local_doc = nested.__doc__
+    if local_doc is not None:
+        print(repr(local_doc))
+    inherited = singledispatch(TextChild.static)
+    print(inherited.__name__)
+    inherited_doc = inherited.__doc__
+    assert inherited_doc is not None
+    print(inherited_doc)
+
+
 def exercise(flag: bool) -> None:
     first = singledispatch(base)
     other = singledispatch(base)
@@ -149,3 +195,5 @@ decorated()
 heterogeneous()
 registered_format("literal", None)
 registered_format(b"bytes", "present")
+wrapper_text(True)
+wrapper_text(False)

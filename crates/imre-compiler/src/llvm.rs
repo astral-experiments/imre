@@ -57,6 +57,7 @@ impl Type {
             Self::Str
             | Self::ForwardRef(_)
             | Self::AnnotationValue(_)
+            | Self::CmpKey(..)
             | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
@@ -148,6 +149,7 @@ impl Type {
             Self::Str
             | Self::ForwardRef(_)
             | Self::AnnotationValue(_)
+            | Self::CmpKey(..)
             | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
@@ -842,6 +844,7 @@ impl Emitter<'_, '_> {
             | Type::AnnotationValue(_)
             | Type::VarTuple(_)
             | Type::ModuleSpec(_)
+            | Type::CmpKey(..)
             | Type::CompletedProcess(..) => "record",
             Type::List(_)
             | Type::Dict(_)
@@ -3464,6 +3467,7 @@ impl Emitter<'_, '_> {
             self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
         } else {
             match left.ty {
+                Type::CmpKey(..) => unreachable!("comparator keys use their callback"),
                 Type::ForwardRef(_) | Type::AnnotationValue(_) => {
                     let symbol = if matches!(left.ty, Type::ForwardRef(_)) {
                         "imre_forward_ref_equal"
@@ -4938,6 +4942,20 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::BuiltinsLast => self.call("imre_builtins_last", returns, &[]),
+            Builtin::BuiltinsLen => {
+                let layout = self.output.global_ref("layout_callable".to_owned());
+                let value = Value {
+                    ty: returns,
+                    operand: self
+                        .checked_pointer(format!("call ptr @imre_builtins_len(ptr @{layout})")),
+                    small_integer: false,
+                };
+                self.owned(value)
+            }
+            Builtin::BuiltinsSetLen => {
+                self.void_call("imre_builtins_set_len", &[&args[0].value]);
+                none()
+            }
             Builtin::BuiltinsHasLast => {
                 let bit = self.instruction("call i32 @imre_builtins_has_last()");
                 Value {
@@ -7110,6 +7128,7 @@ impl Emitter<'_, '_> {
                     | Type::ForwardRef(_)
                     | Type::FunctionRef
                     | Type::AnnotationValue(_)
+                    | Type::CmpKey(..)
                     | Type::BuiltinClass
                     | Type::Class(_)
                     | Type::List(_)
@@ -7396,6 +7415,7 @@ impl Emitter<'_, '_> {
             | Type::ForwardRef(_)
             | Type::FunctionRef
             | Type::AnnotationValue(_)
+            | Type::CmpKey(..)
             | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
@@ -7501,6 +7521,7 @@ impl Emitter<'_, '_> {
             | Type::ForwardRef(_)
             | Type::FunctionRef
             | Type::AnnotationValue(_)
+            | Type::CmpKey(..)
             | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
@@ -8146,6 +8167,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Class(_)
         | Type::VarTuple(_)
         | Type::Tuple(_)
+        | Type::CmpKey(..)
         | Type::Callable(_)
         | Type::ModuleSpec(_)
         | Type::CompletedProcess(..) => 6,
@@ -9075,6 +9097,8 @@ declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_builtins_last()
+declare ptr @imre_builtins_len(ptr)
+declare void @imre_builtins_set_len(ptr)
 declare i32 @imre_builtins_has_last()
 declare void @imre_builtins_set_last(i32, i64)
 declare void @imre_builtins_del_last()

@@ -303,6 +303,13 @@ impl Checker<'_> {
                         vec![logging::number(mask), value],
                     )));
                 }
+                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen)) {
+                    let value = self.coerce(value, self.builtin_len().ty, target)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::BuiltinsSetLen, vec![value]),
+                    }));
+                }
                 if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
                     if !sys::displayable(value.ty) {
                         return Err(error(
@@ -386,6 +393,13 @@ impl Checker<'_> {
                 }
                 if receiver.ty == Type::LogFormatter {
                     return self.formatter_set(receiver, attribute, value);
+                }
+                if let Type::CmpKey(frame, true) = receiver.ty
+                    && attribute.attr.as_str() == "obj"
+                {
+                    let cell = self.cmp_field(receiver, frame, 1);
+                    let value = self.coerce(value, self.types.element(cell.ty).unwrap(), target)?;
+                    return Ok(Statement::SetItem(cell, pipelines::integer(0), value));
                 }
                 if let Type::SimpleNamespace(id) = receiver.ty {
                     let name = self.namespace_attr_name(attribute)?;
