@@ -49,4 +49,3 @@ class Library:
 example(4)
 example(9)
 Library().sample()
-

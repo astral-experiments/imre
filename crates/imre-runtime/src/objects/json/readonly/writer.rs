@@ -54,6 +54,9 @@ impl View {
         name: &str,
         output: &mut String,
     ) -> Result<(), Error> {
+        if self.nodes.deep() {
+            super::deep_values::check_toml_depth(self)?;
+        }
         self.table(self.index, &key(name), false, output)
     }
 
@@ -200,6 +203,7 @@ mod tests {
                 text: json,
                 original: None,
                 shared: None,
+                keys: &super::super::KeyMemo::default(),
             },
         )
         .unwrap();

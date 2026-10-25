@@ -13,14 +13,23 @@ use num_traits::ToPrimitive;
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Bytes, Int, Object, Storage, StorageCell, Str, fail, files, object};
 
+mod components;
 mod matching;
 mod pure;
 mod traversal;
+mod walking;
 pub(super) use pure::PurePath;
+pub(super) use walking::Walker;
 
 #[derive(Clone)]
 pub(super) enum PathText {
     Flat(Rc<Str>),
+    /// Like pathlib's _from_parsed_string: str and filesystem calls keep the
+    /// supplied spelling, while name, parent and joins use parsed components.
+    Parsed {
+        spelling: Rc<Str>,
+        components: Rc<Str>,
+    },
     WithParent {
         text: Rc<Str>,
         parent: Weak<Str>,
@@ -46,7 +55,30 @@ enum Prefix {
 }
 
 impl PathText {
+    fn from_parsed_string(spelling: Str) -> Self {
+        if spelling.is_empty() {
+            Self::Flat(Rc::new(Str::from(".")))
+        } else if is_normalized(&spelling) {
+            Self::Flat(Rc::new(spelling))
+        } else {
+            Self::Parsed {
+                components: Rc::new(normalize(&spelling)),
+                spelling: Rc::new(spelling),
+            }
+        }
+    }
+
+    fn components(&self) -> &Rc<Str> {
+        match self {
+            Self::Parsed { components, .. } => components,
+            _ => self.spelling(),
+        }
+    }
+
     fn parent(&mut self) -> Rc<Str> {
+        if let Self::Parsed { components, .. } = self {
+            return Rc::new(Str::from(parent(components)));
+        }
         if let Self::WithParent { parent, .. } = self
             && let Some(shared) = parent.upgrade()
         {
@@ -68,6 +100,7 @@ impl PathText {
     fn cached(&self) -> Option<&Rc<Str>> {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => Some(text),
+            Self::Parsed { components, .. } => Some(components),
             Self::Joined { spelling, .. } => spelling.get(),
         }
     }
@@ -75,6 +108,7 @@ impl PathText {
     fn prefix(&self) -> Prefix {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => Prefix::Flat(Rc::clone(text)),
+            Self::Parsed { components, .. } => Prefix::Flat(Rc::clone(components)),
             Self::Joined { parts, spelling } => match spelling.get() {
                 Some(text) => Prefix::Flat(Rc::clone(text)),
                 None => Prefix::Joined(Rc::new(parts.clone())),
@@ -85,6 +119,7 @@ impl PathText {
     fn is_absolute(&self) -> bool {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => text.starts_with('/'),
+            Self::Parsed { components, .. } => components.starts_with('/'),
             Self::Joined { parts, .. } => parts.absolute,
         }
     }
@@ -92,6 +127,7 @@ impl PathText {
     fn spelling(&self) -> &Rc<Str> {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => text,
+            Self::Parsed { spelling, .. } => spelling,
             Self::Joined { parts, spelling } => spelling.get_or_init(|| parts.render()),
         }
     }
@@ -155,7 +191,7 @@ impl Storage {
     fn basename(&self) -> &str {
         match self {
             Self::PurePath(p) => p.basename(),
-            _ => name(self.path()),
+            _ => name(self.path_value().components()),
         }
     }
 
@@ -167,7 +203,7 @@ impl Storage {
             fail("SystemError", "expected a path object");
         };
         cached.get_or_init(|| {
-            let text = self.path_text();
+            let text = self.path_value().components();
             let component = name(text);
             if component.len() == text.len() {
                 Rc::clone(text)
@@ -181,6 +217,13 @@ impl Storage {
         match self {
             Self::PurePath(p) => &p.text,
             _ => self.path_value().spelling(),
+        }
+    }
+
+    fn component_text(&self) -> &Rc<Str> {
+        match self {
+            Self::PurePath(p) => &p.text,
+            _ => self.path_value().components(),
         }
     }
 
@@ -459,13 +502,18 @@ pub unsafe extern "C" fn imre_path_join(path: *const Object, child: *const Str) 
     unsafe {
         object(path).0.with(|storage| {
             if let Storage::PurePath(p) = storage {
-                return p
-                    .join([super::acquire_rc::<Str>(child as usize)])
-                    .into_object();
+                return finish(
+                    p.join(std::iter::once(super::acquire_rc::<Str>(child as usize)))
+                        .map(PurePath::into_object),
+                    std::ptr::null(),
+                );
             }
             let parent = storage.path_value();
             let child_text = &*child;
             if matches!(child_text.as_str(), "" | ".") {
+                if let PathText::Parsed { components, .. } = parent {
+                    return new_path(Rc::clone(components));
+                }
                 return path_with_text(parent.clone());
             }
             if let Some(base) = parent.cached()
@@ -492,35 +540,17 @@ pub unsafe extern "C" fn imre_path_join(path: *const Object, child: *const Str) 
 }
 
 /// # Safety
-/// Root the path and replacement component until the owned new path or error is returned.
+/// Root the path and any non-null replacement component. Null represents Python None.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_path_with_name(
     path: *const Object,
     replacement: *const Str,
 ) -> *const Object {
-    use super::exceptions::string_repr;
     // SAFETY: both inputs are rooted and lexical operations cannot invoke callbacks.
     let result = unsafe {
-        object(path).0.with(|storage| {
-            if let Storage::PurePath(p) = storage {
-                return p.with_name(&*replacement);
-            }
-            let path = storage.path();
-            let replacement = &*replacement;
-            if replacement.is_empty() || replacement.as_str() == "." || replacement.contains('/') {
-                return Err(Error::new(
-                    Kind::ValueError,
-                    format!("Invalid name {}", string_repr(replacement)),
-                ));
-            }
-            if name(path).is_empty() {
-                return Err(Error::new(
-                    Kind::ValueError,
-                    format!("PosixPath({}) has an empty name", string_repr(path)),
-                ));
-            }
-            Ok(new_path(join(parent(path), replacement)))
-        })
+        object(path)
+            .0
+            .with(|storage| storage.replace_name(replacement.as_ref()))
     };
     finish(result, std::ptr::null())
 }
@@ -538,7 +568,7 @@ pub unsafe extern "C" fn imre_path_count_part(path: *const Object, part: *const 
             if let Storage::PurePath(p) = storage {
                 return p.count_part(part);
             }
-            let path = storage.path();
+            let path = storage.component_text();
             let tail = path.trim_start_matches('/');
             let anchor = &path[..path.len() - tail.len()];
             usize::from(!anchor.is_empty() && part == anchor)
@@ -642,7 +672,7 @@ pub unsafe extern "C" fn imre_path_parent(path: *const Object) -> *const Object 
                 return path;
             }
             if let Storage::PurePath(p) = storage {
-                return p.parent().into_object();
+                return finish(p.parent().map(PurePath::into_object), std::ptr::null());
             }
             let Storage::Path { text, .. } = storage else {
                 fail("SystemError", "expected a path object");
@@ -932,19 +962,29 @@ enum IterationState {
     Exhausted,
 }
 
-/// Takes the complete name snapshot and closes the directory handle before any
-/// Path can escape, matching CPython's scandir-based iterator acquisition.
-fn snapshot(root: &str, suppress_errors: bool) -> Result<Vec<OsString>> {
+fn check_directory_path(root: &str) -> Result<()> {
     if root.contains('\0') {
-        return Err(Error::new(Kind::ValueError, "embedded null byte"));
+        return Err(Error::new(
+            Kind::ValueError,
+            "scandir: embedded null character in path",
+        ));
     }
-    let entries = fs::read_dir(root)
-        .and_then(|entries| {
-            entries
-                .map(|entry| entry.map(|entry| entry.file_name()))
-                .collect()
-        })
-        .map_err(files::os_error);
+    Ok(())
+}
+
+/// Snapshot directory entries and close their descriptor before yielding to callers.
+fn directory_entries<T>(
+    root: &str,
+    mut visit: impl FnMut(fs::DirEntry) -> T,
+) -> io::Result<Vec<T>> {
+    fs::read_dir(root)?
+        .map(|entry| entry.map(&mut visit))
+        .collect()
+}
+
+fn snapshot(root: &str, suppress_errors: bool) -> Result<Vec<OsString>> {
+    check_directory_path(root)?;
+    let entries = directory_entries(root, |entry| entry.file_name()).map_err(files::os_error);
     if suppress_errors {
         Ok(entries.unwrap_or_default())
     } else {
@@ -987,7 +1027,7 @@ impl PathIterator {
             IterationState::Exhausted => Ok(None),
         };
         match next {
-            Ok(Some(path)) => Ok(new_path(path)),
+            Ok(Some(path)) => Ok(path_with_text(PathText::from_parsed_string(path))),
             result => {
                 self.state = IterationState::Exhausted;
                 result.map(|_| std::ptr::null())
@@ -1065,12 +1105,12 @@ unsafe fn pull_path(iterator: *const Object) -> Result<*const Object> {
     }
 }
 
-enum Pattern {
+pub(super) enum Pattern {
     Literal(Str),
     Wildcard(Vec<Token>),
 }
 
-enum Token {
+pub(super) enum Token {
     Literal(char),
     Any,
     Star,
@@ -1098,7 +1138,7 @@ impl Pattern {
         Ok(Self::component(pattern))
     }
 
-    fn component(pattern: &str) -> Self {
+    pub(super) fn component(pattern: &str) -> Self {
         if !pattern.contains(['*', '?', '[']) {
             return Self::Literal(Str::from(pattern));
         }
@@ -1114,10 +1154,7 @@ impl Pattern {
                 '?' => tokens.push(Token::Any),
                 '[' => {
                     let start = index;
-                    let negated = chars.get(index) == Some(&'!');
-                    let content = index + usize::from(negated);
-                    let search = content + usize::from(chars.get(content) == Some(&']'));
-                    let Some(end) = (search..chars.len()).find(|&at| chars[at] == ']') else {
+                    let Some(end) = class_end(&chars, index) else {
                         tokens.push(Token::Literal('['));
                         continue;
                     };
@@ -1133,7 +1170,7 @@ impl Pattern {
 
     /// Greedy star matching remembers the most recent star and advances its
     /// Unicode-scalar boundary on mismatch, avoiding recursive backtracking.
-    fn matches(&self, name: &str) -> bool {
+    pub(super) fn matches(&self, name: &str) -> bool {
         let tokens = match self {
             Self::Literal(text) => return text == name,
             Self::Wildcard(tokens) => tokens,
@@ -1171,10 +1208,16 @@ impl Pattern {
     }
 }
 
+pub(super) fn class_end(chars: &[char], start: usize) -> Option<usize> {
+    let content = start + usize::from(chars.get(start) == Some(&'!'));
+    let search = content + usize::from(chars.get(content) == Some(&']'));
+    (search..chars.len()).find(|&at| chars[at] == ']')
+}
+
 /// Python's fnmatch removes descending ranges before interpreting negation.
 /// Preserve literal hyphens separately from range separators: `[b-a!]`, for
 /// example, becomes a negated empty class and therefore matches any character.
-fn character_class(chars: &[char]) -> Token {
+pub(super) fn class_characters(chars: &[char]) -> Vec<(char, bool)> {
     let mut chunks = Vec::<Vec<char>>::new();
     let mut start = 0;
     let mut search = 1 + usize::from(chars.first() == Some(&'!'));
@@ -1202,6 +1245,11 @@ fn character_class(chars: &[char]) -> Token {
         }
         characters.extend(chunk.into_iter().map(|character| (character, false)));
     }
+    characters
+}
+
+fn character_class(chars: &[char]) -> Token {
+    let characters = class_characters(chars);
     let negated = characters
         .first()
         .is_some_and(|&(character, _)| character == '!');

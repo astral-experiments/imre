@@ -25,24 +25,26 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-This replay of `f694378` includes the level registry, timed file handler,
-records, formatter styles, and named filters. The counts are identical at both levels:
+This replay of `984eec0` includes logger hierarchy, the level registry, timed
+file handlers, records, single and batch formatters, filters and configuration.
+Both levels have the same counts:
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 6 |
+| Imre | Imre | Imre | CPython hooks and native child | 9 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
-| CPython | CPython | Imre | CPython | 30 |
-| Blocked before execution | | | | 229 |
+| CPython | CPython | Imre | CPython | 34 |
+| Blocked before execution | | | | 222 |
 | Unchanged reference skip | | | | 3 |
 
-No occurrence is fully native. The six native assertion cases cover root
-logger identity, level-name mapping independence, daily rollover with an
-explicit time, record representation, formatter precision and an empty name filter. The four
-output cases verify emitted native stderr with the original CPython helper.
-The 30 host-driven methods exercise the registry, timed files, record flags or [formatters](formatters.md).
-Setup and registered cleanup stay
-with their test. The report keeps original method locations, individual
+No occurrence has a fully native fixture. Native assertions check root logger
+identity, immediate child membership, level-name mapping independence, daily
+rollover with an explicit time, record representation, formatter precision,
+an empty name filter, and the default and custom buffering formatters.
+Four bodies verify native stderr with the original
+CPython output helper. The 34 host-driven methods exercise the registry, timed
+files, record flags, [formatters](formatters.md), or [configuration](config.md).
+Setup and registered cleanup stay with their test. The report keeps original method locations, individual
 compiler or adapter blockers, and the three pinned skip conditions. It
 does not treat a compiled source or a passing CPython reference as a native pass.
 

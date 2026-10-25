@@ -244,7 +244,7 @@ impl Inference {
             for signature in signatures.values_mut() {
                 self.update(signature);
             }
-            for methods in &mut classes.methods {
+            for methods in classes.methods.iter_mut().chain(&mut classes.setters) {
                 for signature in methods.values_mut() {
                     self.update(signature);
                 }
@@ -387,7 +387,7 @@ impl Inference {
         for signature in signatures.values_mut() {
             self.update(signature);
         }
-        for methods in &mut classes.methods {
+        for methods in classes.methods.iter_mut().chain(&mut classes.setters) {
             for signature in methods.values_mut() {
                 self.update(signature);
             }
@@ -442,6 +442,11 @@ impl Checker<'_> {
         skip: usize,
         scope: Option<&mut calls::ArgumentScope>,
     ) -> Result<(Type, ir::CallArgs), String> {
+        // CPython's accelerated stat functions take an unsigned mode_t through
+        // the index protocol. A boolean argument must reach their integer body
+        // as 0 or 1; ordinary annotated Python functions retain their own types.
+        let stat_mode = matches!(self.resolve(&call.func), Some(Binding::Definition(id))
+            if self.graph.modules[id.module].is_bundled("stat"));
         let inference = self.inference;
         let args = self.bind_supplied(
             call,
@@ -451,6 +456,18 @@ impl Checker<'_> {
             |checker, index, argument| {
                 let index = index + skip;
                 let parameter = &signature.params[index];
+                if stat_mode && parameter.ty == Type::Int {
+                    let node = argument.site();
+                    let value = argument.value(checker)?;
+                    return if value.ty == Type::Bool {
+                        Ok(Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                        })
+                    } else {
+                        checker.direct_value(value, node, parameter.ty, parameter.sign_only)
+                    };
+                }
                 let Some(inference) = inference else {
                     return argument.checked(checker, parameter.ty, parameter.sign_only);
                 };

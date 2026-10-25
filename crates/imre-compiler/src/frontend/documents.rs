@@ -138,7 +138,7 @@ impl Checker<'_> {
                     Type::Int => (Op::FromInt, ANY),
                     Type::Float => (Op::FromFloat, ANY),
                     Type::Str | Type::StrLiteral(_) => (Op::FromStr, ANY),
-                    Type::JsonValue | Type::JsonObject => (Op::FromJson, ANY),
+                    Type::JsonRoot | Type::JsonValue | Type::JsonObject => (Op::FromJson, ANY),
                     t if self.types.mapping(t) == Some((Type::Str, Type::None)) => {
                         (Op::BoxNullMap, MAP)
                     }

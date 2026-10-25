@@ -17,11 +17,29 @@ a test-enabled build of the pinned release:
 
 ## Native coverage
 
-Four complete upstream methods execute at both O0 and O3: `test_copy_basic`,
-`test_copy_list`, `test_copy_dict`, and `test_copy_set`. Their 13 original
-assertions run in native executables with typed equality and identity checks.
-The [native report](native-linux.json) retains all 81 IDs; two additional methods run their original assertions on CPython after calling
-the original `__copy__` method in a native process, and the other 75 have
-reference evidence only. The two mixed fixtures transfer one typed integer field
-and check the native result class; they do not count as fully native tests. A separate differential fixture exercises shared
-children, independent outer containers, and Counter/defaultdict missing keys.
+Six complete upstream methods execute at both O0 and O3: shallow copy of an
+integer, list, dict and set; deep copy of an integer and the empty tuple.
+Their 15 original assertions run in native executables. The [native report](native-linux.json)
+retains all 81 IDs. Three additional methods copy an instance natively and run their original
+assertions on CPython. Two supply their byte-identical `__copy__` method;
+`test_copy_inst_vanilla` exercises the native default. These mixed fixtures
+transfer one typed integer field and check the native result class and distinct
+identity.
+
+The fourth mixed case is `test.test_copy.TestCopy.test_deepcopy_memo`. CPython
+creates its two references to one list, and the native process copies the graph.
+It reports both roots, the integer values, and which child objects each root
+references. The four unchanged assertions run on CPython against that result.
+The runner checks those assertions against three incorrect native copies: one
+returns the original root, one shares its leaves, and one loses the shared
+child. They must fail at the expected assertion at each optimization level.
+The remaining 71 occurrences have reference evidence only.
+
+Separate differential fixtures exercise shared children, independent outer
+containers, Counter/defaultdict missing keys, a tuple pointing into the same
+graph as a dictionary, and an optional list. Runtime tests create a list/dict
+cycle and a tuple/list cycle directly, check that their back edges point to
+the copies, and explicitly break the cycles. The compiler still rejects cyclic
+heap types in Python source, so these runtime checks do not count the upstream
+reflexive-container tests as native. Caller-supplied memo dictionaries and
+custom deepcopy or pickle protocols require separate support.
