@@ -1,0 +1,879 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "executions": 216,
+  "unique_ids": 212,
+  "source_routines": 114,
+  "routines": {
+    "json": {
+      "json": [
+        "pass",
+        "pass"
+      ]
+    },
+    "json.encoder.JSONEncoder.encode": {
+      "json.encoder.JSONEncoder.encode": [
+        "pass",
+        "pass"
+      ]
+    },
+    "test.test_json.TestCTest.test_cjson": {
+      "test.test_json.TestCTest.test_cjson": [
+        "pass",
+        "pass"
+      ]
+    },
+    "test.test_json.TestPyTest.test_pyjson": {
+      "test.test_json.TestPyTest.test_pyjson": [
+        "pass",
+        "pass"
+      ]
+    },
+    "test.test_json.test_decode.TestDecode.test_bytes": {
+      "test.test_json.test_decode.TestCDecode.test_bytes": [
+        "pass"
+      ],
+      "test.test_json.test_decode.TestPyDecode.test_bytes": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_decode.TestDecode.test_constant_invalid_case": {
+      "test.test_json.test_decode.TestCDecode.test_constant_invalid_case": [
+        "pass"
+      ],
+      "test.test_json.test_decode.TestPyDecode.test_constant_invalid_case": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_decode.TestDecode.test_decimal": {
+      "test.test_json.test_decode.TestCDecode.test_decimal": [
+        "pass"
+      ],
+      "test.test_json.test_decode.TestPyDecode.test_decimal": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_decode.TestDecode.test_decoder_optimizations": {
+      "test.test_json.test_decode.TestCDecode.test_decoder_optimizations": [
+        "pass"
+      ],
+      "test.test_json.test_decode.TestPyDecode.test_decoder_optimizations": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_decode.TestDecode.test_empty_objects": {
+      "test.test_json.test_decode.TestCDecode.test_empty_objects": [
+        "pass"
+      ],
+      "test.test_json.test_decode.TestPyDecode.test_empty_objects": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_decode.TestDecode.test_extra_data": {
+      "test.test_json.test_decode.TestCDecode.test_extra_data": [
+        "pass"
+      ],
+      "test.test_json.test_decode.TestPyDecode.test_extra_data": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_decode.TestDecode.test_float": {
+      "test.test_json.test_decode.TestCDecode.test_float": [
+        "pass"
+      ],
+      "test.test_json.test_decode.TestPyDecode.test_float": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_decode.TestDecode.test_invalid_escape": {
+      "test.test_json.test_decode.TestCDecode.test_invalid_escape": [
+        "pass"
+      ],
+      "test.test_json.test_decode.TestPyDecode.test_invalid_escape": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_decode.TestDecode.test_invalid_input_type": {
+      "test.test_json.test_decode.TestCDecode.test_invalid_input_type": [
+        "pass"
+      ],
+      "test.test_json.test_decode.TestPyDecode.test_invalid_input_type": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_decode.TestDecode.test_keys_reuse": {
+      "test.test_json.test_decode.TestCDecode.test_keys_reuse": [
+        "pass"
+      ],
+      "test.test_json.test_decode.TestPyDecode.test_keys_reuse": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_decode.TestDecode.test_limit_int": {
+      "test.test_json.test_decode.TestCDecode.test_limit_int": [
+        "pass"
+      ],
+      "test.test_json.test_decode.TestPyDecode.test_limit_int": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_decode.TestDecode.test_negative_index": {
+      "test.test_json.test_decode.TestCDecode.test_negative_index": [
+        "pass"
+      ],
+      "test.test_json.test_decode.TestPyDecode.test_negative_index": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_decode.TestDecode.test_nonascii_digits_rejected": {
+      "test.test_json.test_decode.TestCDecode.test_nonascii_digits_rejected": [
+        "pass"
+      ],
+      "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_decode.TestDecode.test_object_pairs_hook": {
+      "test.test_json.test_decode.TestCDecode.test_object_pairs_hook": [
+        "pass"
+      ],
+      "test.test_json.test_decode.TestPyDecode.test_object_pairs_hook": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_decode.TestDecode.test_parse_constant": {
+      "test.test_json.test_decode.TestCDecode.test_parse_constant": [
+        "pass"
+      ],
+      "test.test_json.test_decode.TestPyDecode.test_parse_constant": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_decode.TestDecode.test_string_with_utf8_bom": {
+      "test.test_json.test_decode.TestCDecode.test_string_with_utf8_bom": [
+        "pass"
+      ],
+      "test.test_json.test_decode.TestPyDecode.test_string_with_utf8_bom": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_default.TestDefault.test_bad_default": {
+      "test.test_json.test_default.TestCDefault.test_bad_default": [
+        "pass"
+      ],
+      "test.test_json.test_default.TestPyDefault.test_bad_default": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_default.TestDefault.test_default": {
+      "test.test_json.test_default.TestCDefault.test_default": [
+        "pass"
+      ],
+      "test.test_json.test_default.TestPyDefault.test_default": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_default.TestDefault.test_ordereddict": {
+      "test.test_json.test_default.TestCDefault.test_ordereddict": [
+        "pass"
+      ],
+      "test.test_json.test_default.TestPyDefault.test_ordereddict": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_dump.TestCDump.test_large_list": {
+      "test.test_json.test_dump.TestCDump.test_large_list": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_dump.TestDump.test_dump": {
+      "test.test_json.test_dump.TestCDump.test_dump": [
+        "pass"
+      ],
+      "test.test_json.test_dump.TestPyDump.test_dump": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_dump.TestDump.test_dump_skipkeys": {
+      "test.test_json.test_dump.TestCDump.test_dump_skipkeys": [
+        "pass"
+      ],
+      "test.test_json.test_dump.TestPyDump.test_dump_skipkeys": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_dump.TestDump.test_dump_skipkeys_indent_empty": {
+      "test.test_json.test_dump.TestCDump.test_dump_skipkeys_indent_empty": [
+        "pass"
+      ],
+      "test.test_json.test_dump.TestPyDump.test_dump_skipkeys_indent_empty": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_dump.TestDump.test_dumps": {
+      "test.test_json.test_dump.TestCDump.test_dumps": [
+        "pass"
+      ],
+      "test.test_json.test_dump.TestPyDump.test_dumps": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_dump.TestDump.test_encode_evil_dict": {
+      "test.test_json.test_dump.TestCDump.test_encode_evil_dict": [
+        "pass"
+      ],
+      "test.test_json.test_dump.TestPyDump.test_encode_evil_dict": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_dump.TestDump.test_encode_mutated": {
+      "test.test_json.test_dump.TestCDump.test_encode_mutated": [
+        "pass"
+      ],
+      "test.test_json.test_dump.TestPyDump.test_encode_mutated": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_dump.TestDump.test_encode_truefalse": {
+      "test.test_json.test_dump.TestCDump.test_encode_truefalse": [
+        "pass"
+      ],
+      "test.test_json.test_dump.TestPyDump.test_encode_truefalse": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_dump.TestDump.test_skipkeys_indent": {
+      "test.test_json.test_dump.TestCDump.test_skipkeys_indent": [
+        "pass"
+      ],
+      "test.test_json.test_dump.TestPyDump.test_skipkeys_indent": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_overflow": {
+      "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_overflow": [
+        {
+          "skipped": "not enough memory: 8589934592.0G minimum needed"
+        }
+      ]
+    },
+    "test.test_json.test_encode_basestring_ascii.TestEncodeBasestringAscii.test_encode_basestring_ascii": {
+      "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_encode_basestring_ascii": [
+        "pass"
+      ],
+      "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_encode_basestring_ascii": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_encode_basestring_ascii.TestEncodeBasestringAscii.test_ordered_dict": {
+      "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_ordered_dict": [
+        "pass"
+      ],
+      "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_ordered_dict": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_encode_basestring_ascii.TestEncodeBasestringAscii.test_sorted_dict": {
+      "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_sorted_dict": [
+        "pass"
+      ],
+      "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_sorted_dict": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_enum.TestEnum.test_dict_keys": {
+      "test.test_json.test_enum.TestCEnum.test_dict_keys": [
+        "pass"
+      ],
+      "test.test_json.test_enum.TestPyEnum.test_dict_keys": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_enum.TestEnum.test_dict_values": {
+      "test.test_json.test_enum.TestCEnum.test_dict_values": [
+        "pass"
+      ],
+      "test.test_json.test_enum.TestPyEnum.test_dict_values": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_enum.TestEnum.test_floats": {
+      "test.test_json.test_enum.TestCEnum.test_floats": [
+        "pass"
+      ],
+      "test.test_json.test_enum.TestPyEnum.test_floats": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_enum.TestEnum.test_ints": {
+      "test.test_json.test_enum.TestCEnum.test_ints": [
+        "pass"
+      ],
+      "test.test_json.test_enum.TestPyEnum.test_ints": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_enum.TestEnum.test_list": {
+      "test.test_json.test_enum.TestCEnum.test_list": [
+        "pass"
+      ],
+      "test.test_json.test_enum.TestPyEnum.test_list": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_enum.TestEnum.test_weird_floats": {
+      "test.test_json.test_enum.TestCEnum.test_weird_floats": [
+        "pass"
+      ],
+      "test.test_json.test_enum.TestPyEnum.test_weird_floats": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_fail.TestFail.test_extra_data": {
+      "test.test_json.test_fail.TestCFail.test_extra_data": [
+        "pass"
+      ],
+      "test.test_json.test_fail.TestPyFail.test_extra_data": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_fail.TestFail.test_failures": {
+      "test.test_json.test_fail.TestCFail.test_failures": [
+        "pass"
+      ],
+      "test.test_json.test_fail.TestPyFail.test_failures": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_fail.TestFail.test_linecol": {
+      "test.test_json.test_fail.TestCFail.test_linecol": [
+        "pass"
+      ],
+      "test.test_json.test_fail.TestPyFail.test_linecol": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_fail.TestFail.test_non_string_keys_dict": {
+      "test.test_json.test_fail.TestCFail.test_non_string_keys_dict": [
+        "pass"
+      ],
+      "test.test_json.test_fail.TestPyFail.test_non_string_keys_dict": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_fail.TestFail.test_not_serializable": {
+      "test.test_json.test_fail.TestCFail.test_not_serializable": [
+        "pass"
+      ],
+      "test.test_json.test_fail.TestPyFail.test_not_serializable": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_fail.TestFail.test_truncated_input": {
+      "test.test_json.test_fail.TestCFail.test_truncated_input": [
+        "pass"
+      ],
+      "test.test_json.test_fail.TestPyFail.test_truncated_input": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_fail.TestFail.test_unexpected_data": {
+      "test.test_json.test_fail.TestCFail.test_unexpected_data": [
+        "pass"
+      ],
+      "test.test_json.test_fail.TestPyFail.test_unexpected_data": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_float.TestFloat.test_allow_nan": {
+      "test.test_json.test_float.TestCFloat.test_allow_nan": [
+        "pass"
+      ],
+      "test.test_json.test_float.TestPyFloat.test_allow_nan": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_float.TestFloat.test_floats": {
+      "test.test_json.test_float.TestCFloat.test_floats": [
+        "pass"
+      ],
+      "test.test_json.test_float.TestPyFloat.test_floats": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_float.TestFloat.test_ints": {
+      "test.test_json.test_float.TestCFloat.test_ints": [
+        "pass"
+      ],
+      "test.test_json.test_float.TestPyFloat.test_ints": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_float.TestFloat.test_out_of_range": {
+      "test.test_json.test_float.TestCFloat.test_out_of_range": [
+        "pass"
+      ],
+      "test.test_json.test_float.TestPyFloat.test_out_of_range": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_indent.TestIndent.test_indent": {
+      "test.test_json.test_indent.TestCIndent.test_indent": [
+        "pass"
+      ],
+      "test.test_json.test_indent.TestPyIndent.test_indent": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_indent.TestIndent.test_indent0": {
+      "test.test_json.test_indent.TestCIndent.test_indent0": [
+        "pass"
+      ],
+      "test.test_json.test_indent.TestPyIndent.test_indent0": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_pass1.TestPass1.test_parse": {
+      "test.test_json.test_pass1.TestCPass1.test_parse": [
+        "pass"
+      ],
+      "test.test_json.test_pass1.TestPyPass1.test_parse": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_pass2.TestPass2.test_parse": {
+      "test.test_json.test_pass2.TestCPass2.test_parse": [
+        "pass"
+      ],
+      "test.test_json.test_pass2.TestPyPass2.test_parse": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_pass3.TestPass3.test_parse": {
+      "test.test_json.test_pass3.TestCPass3.test_parse": [
+        "pass"
+      ],
+      "test.test_json.test_pass3.TestPyPass3.test_parse": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_recursion.TestRecursion.test_defaultrecursion": {
+      "test.test_json.test_recursion.TestCRecursion.test_defaultrecursion": [
+        "pass"
+      ],
+      "test.test_json.test_recursion.TestPyRecursion.test_defaultrecursion": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_recursion.TestRecursion.test_dictrecursion": {
+      "test.test_json.test_recursion.TestCRecursion.test_dictrecursion": [
+        "pass"
+      ],
+      "test.test_json.test_recursion.TestPyRecursion.test_dictrecursion": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_recursion.TestRecursion.test_endless_recursion": {
+      "test.test_json.test_recursion.TestCRecursion.test_endless_recursion": [
+        "pass"
+      ],
+      "test.test_json.test_recursion.TestPyRecursion.test_endless_recursion": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_recursion.TestRecursion.test_highly_nested_objects_decoding": {
+      "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_decoding": [
+        "pass"
+      ],
+      "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_decoding": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_recursion.TestRecursion.test_highly_nested_objects_encoding": {
+      "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_encoding": [
+        "pass"
+      ],
+      "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_encoding": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_recursion.TestRecursion.test_listrecursion": {
+      "test.test_json.test_recursion.TestCRecursion.test_listrecursion": [
+        "pass"
+      ],
+      "test.test_json.test_recursion.TestPyRecursion.test_listrecursion": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_scanstring.TestScanstring.test_bad_escapes": {
+      "test.test_json.test_scanstring.TestCScanstring.test_bad_escapes": [
+        "pass"
+      ],
+      "test.test_json.test_scanstring.TestPyScanstring.test_bad_escapes": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_scanstring.TestScanstring.test_overflow": {
+      "test.test_json.test_scanstring.TestCScanstring.test_overflow": [
+        "pass"
+      ],
+      "test.test_json.test_scanstring.TestPyScanstring.test_overflow": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_scanstring.TestScanstring.test_scanstring": {
+      "test.test_json.test_scanstring.TestCScanstring.test_scanstring": [
+        "pass"
+      ],
+      "test.test_json.test_scanstring.TestPyScanstring.test_scanstring": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_scanstring.TestScanstring.test_surrogates": {
+      "test.test_json.test_scanstring.TestCScanstring.test_surrogates": [
+        "pass"
+      ],
+      "test.test_json.test_scanstring.TestPyScanstring.test_surrogates": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_separators.TestSeparators.test_illegal_separators": {
+      "test.test_json.test_separators.TestCSeparators.test_illegal_separators": [
+        "pass"
+      ],
+      "test.test_json.test_separators.TestPySeparators.test_illegal_separators": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_separators.TestSeparators.test_separators": {
+      "test.test_json.test_separators.TestCSeparators.test_separators": [
+        "pass"
+      ],
+      "test.test_json.test_separators.TestPySeparators.test_separators": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_speedups.TestDecode.test_bad_bool_args": {
+      "test.test_json.test_speedups.TestDecode.test_bad_bool_args": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_speedups.TestDecode.test_make_scanner": {
+      "test.test_json.test_speedups.TestDecode.test_make_scanner": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_speedups.TestEncode.test_bad_bool_args": {
+      "test.test_json.test_speedups.TestEncode.test_bad_bool_args": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder": {
+      "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_speedups.TestEncode.test_bad_str_encoder": {
+      "test.test_json.test_speedups.TestEncode.test_bad_str_encoder": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_speedups.TestEncode.test_current_indent_level": {
+      "test.test_json.test_speedups.TestEncode.test_current_indent_level": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_speedups.TestEncode.test_make_encoder": {
+      "test.test_json.test_speedups.TestEncode.test_make_encoder": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_speedups.TestEncode.test_unsortable_keys": {
+      "test.test_json.test_speedups.TestEncode.test_unsortable_keys": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii": {
+      "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_speedups.TestSpeedups.test_scanstring": {
+      "test.test_json.test_speedups.TestSpeedups.test_scanstring": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_broken_pipe_error": {
+      "test.test_json.test_tool.TestMain.test_broken_pipe_error": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_broken_pipe_error": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_colors": {
+      "test.test_json.test_tool.TestMain.test_colors": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_colors": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_compact": {
+      "test.test_json.test_tool.TestMain.test_compact": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_compact": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_ensure_ascii_default": {
+      "test.test_json.test_tool.TestMain.test_ensure_ascii_default": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_ensure_ascii_default": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_help_flag": {
+      "test.test_json.test_tool.TestMain.test_help_flag": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_help_flag": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_indent": {
+      "test.test_json.test_tool.TestMain.test_indent": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_indent": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_infile_outfile": {
+      "test.test_json.test_tool.TestMain.test_infile_outfile": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_infile_outfile": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_infile_stdout": {
+      "test.test_json.test_tool.TestMain.test_infile_stdout": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_infile_stdout": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_jsonlines": {
+      "test.test_json.test_tool.TestMain.test_jsonlines": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_jsonlines": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_jsonlines_from_file": {
+      "test.test_json.test_tool.TestMain.test_jsonlines_from_file": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_jsonlines_from_file": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_no_ensure_ascii_flag": {
+      "test.test_json.test_tool.TestMain.test_no_ensure_ascii_flag": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_no_ensure_ascii_flag": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_no_indent": {
+      "test.test_json.test_tool.TestMain.test_no_indent": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_no_indent": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_non_ascii_infile": {
+      "test.test_json.test_tool.TestMain.test_non_ascii_infile": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_non_ascii_infile": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_sort_keys_flag": {
+      "test.test_json.test_tool.TestMain.test_sort_keys_flag": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_sort_keys_flag": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_stdin_stdout": {
+      "test.test_json.test_tool.TestMain.test_stdin_stdout": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_stdin_stdout": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_tab": {
+      "test.test_json.test_tool.TestMain.test_tab": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_tab": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_tool.TestMain.test_writing_in_place": {
+      "test.test_json.test_tool.TestMain.test_writing_in_place": [
+        "pass"
+      ],
+      "test.test_json.test_tool.TestTool.test_writing_in_place": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_ascii_non_printable_decode": {
+      "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_decode": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_ascii_non_printable_encode": {
+      "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_big_unicode_decode": {
+      "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_big_unicode_encode": {
+      "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_bytes_decode": {
+      "test.test_json.test_unicode.TestCUnicode.test_bytes_decode": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_bytes_decode": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_bytes_encode": {
+      "test.test_json.test_unicode.TestCUnicode.test_bytes_encode": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_bytes_encode": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_encoding3": {
+      "test.test_json.test_unicode.TestCUnicode.test_encoding3": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_encoding3": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_encoding4": {
+      "test.test_json.test_unicode.TestCUnicode.test_encoding4": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_encoding4": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_encoding5": {
+      "test.test_json.test_unicode.TestCUnicode.test_encoding5": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_encoding5": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_encoding6": {
+      "test.test_json.test_unicode.TestCUnicode.test_encoding6": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_encoding6": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_encoding7": {
+      "test.test_json.test_unicode.TestCUnicode.test_encoding7": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_encoding7": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_escaped_decode": {
+      "test.test_json.test_unicode.TestCUnicode.test_escaped_decode": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_escaped_decode": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_object_pairs_hook_with_unicode": {
+      "test.test_json.test_unicode.TestCUnicode.test_object_pairs_hook_with_unicode": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_object_pairs_hook_with_unicode": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_single_surrogate_decode": {
+      "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_decode": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_decode": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_single_surrogate_encode": {
+      "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_encode": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_encode": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_unicode_decode": {
+      "test.test_json.test_unicode.TestCUnicode.test_unicode_decode": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_unicode_decode": [
+        "pass"
+      ]
+    },
+    "test.test_json.test_unicode.TestUnicode.test_unicode_preservation": {
+      "test.test_json.test_unicode.TestCUnicode.test_unicode_preservation": [
+        "pass"
+      ],
+      "test.test_json.test_unicode.TestPyUnicode.test_unicode_preservation": [
+        "pass"
+      ]
+    }
+  }
+}

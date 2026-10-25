@@ -217,6 +217,42 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if matches!(name, "match" | "full_match") {
+            let full = name == "full_match";
+            let optional_bool = self.types.optional(Type::Bool);
+            let default = self.coerce(
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                },
+                optional_bool,
+                call,
+            )?;
+            let params = [
+                parameter(
+                    if full { "pattern" } else { "path_pattern" },
+                    Type::Str,
+                    None,
+                ),
+                Parameter {
+                    kind: ParameterKind::KeywordOnly,
+                    ..parameter("case_sensitive", optional_bool, Some(default))
+                },
+            ];
+            let arguments =
+                self.arguments_with(call, &params, Some(receiver), |checker, index, value| {
+                    if index == 0 {
+                        checker.path_argument(value)
+                    } else {
+                        checker.expr_expected(value, optional_bool)
+                    }
+                })?;
+            return Ok(self.ordered_path_operation(
+                PathOperation::Match { full },
+                Type::Bool,
+                arguments,
+            ));
+        }
         if name == "joinpath" {
             self.reject_builtin_keywords(call)?;
             calls::reject_unpacking(call, self.source)?;

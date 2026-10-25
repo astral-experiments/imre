@@ -77,6 +77,7 @@ impl Builtin {
                 matches!(
                     operation,
                     PosixPathOperation::MixedJoin { .. }
+                        | PosixPathOperation::Commonpath
                         | PosixPathOperation::Splitext
                         | PosixPathOperation::Normpath
                         | PosixPathOperation::Abspath
@@ -90,6 +91,7 @@ impl Builtin {
                     | PathOperation::ReadBytes
                     | PathOperation::Absolute
                     | PathOperation::WithName
+                    | PathOperation::Match { .. }
                     | PathOperation::Resolve
                     | PathOperation::WriteText
                     | PathOperation::WriteBytes
@@ -290,18 +292,30 @@ impl Builtin {
             | Self::DictGatherStrInt
             | Self::FileReadline
             | Self::GzipOpen
+            | Self::BytesIo
+            | Self::BinarySeek
+            | Self::BinaryTell
+            | Self::ZipOpenFile
+            | Self::ZipGetInfo
+            | Self::ZipInfoList
+            | Self::ZipMember
+            | Self::ZipRead
+            | Self::ZipTest
+            | Self::ZipFilename
+            | Self::ZipMinReadSize
+            | Self::ZipField(_)
             | Self::ZipOpen
             | Self::ZipNamelist
             | Self::ZipClose
             | Self::Input
-            | Self::ParseArgs(_)
+            | Self::ParseArgs { .. }
             | Self::Pop
             | Self::Print
             | Self::SortRestore
             | Self::StderrLine
             | Self::SysStreamWrite { .. }
             | Self::SysStreamFlush { .. }
-            | Self::SysExit
+            | Self::RaiseException
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
@@ -325,6 +339,7 @@ impl Builtin {
             | Self::KeyUnion
             | Self::KeySet
             | Self::KeyIntersection
+            | Self::KeyDifference
             | Self::ExactRecord(_)
             | Self::RecordView
             | Self::ListAllI32
@@ -618,6 +633,16 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_text_write"
                 | "imre_text_flush"
                 | "imre_text_close"
+                | "imre_bytes_io"
+                | "imre_binary_seek"
+                | "imre_binary_tell"
+                | "imre_zip_open_file"
+                | "imre_zip_getinfo"
+                | "imre_zip_infolist"
+                | "imre_zip_member"
+                | "imre_zip_read"
+                | "imre_zip_test"
+                | "imre_zip_min_read_size"
                 | "imre_zip_open"
                 | "imre_zip_namelist"
                 | "imre_zip_close"
