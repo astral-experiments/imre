@@ -40,7 +40,9 @@ print(Path("input.txt").exists())
 try:
     os.remove("tree")
 except IsADirectoryError as error:
-    print(str(error))
+    print("directory " + str(error))
+except PermissionError as error:
+    print("permission " + str(error))
 try:
     os.remove("bad\0path", dir_fd=1267650600228229401496703205376)
 except ValueError as error:
