@@ -1,0 +1,499 @@
+{
+  "module": "test.test_os",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 375,
+  "reference": {
+    "test.test_os.BlockingTests.test_blocking": "pass",
+    "test.test_os.BytesFwalkTests.test_compare_to_walk": "pass",
+    "test.test_os.BytesFwalkTests.test_dir_fd": "pass",
+    "test.test_os.BytesFwalkTests.test_fd_finalization": "pass",
+    "test.test_os.BytesFwalkTests.test_fd_leak": "pass",
+    "test.test_os.BytesFwalkTests.test_file_like_path": "pass",
+    "test.test_os.BytesFwalkTests.test_walk_above_recursion_limit": "pass",
+    "test.test_os.BytesFwalkTests.test_walk_bad_dir": "pass",
+    "test.test_os.BytesFwalkTests.test_walk_bad_dir2": "pass",
+    "test.test_os.BytesFwalkTests.test_walk_bottom_up": "pass",
+    "test.test_os.BytesFwalkTests.test_walk_named_pipe": "pass",
+    "test.test_os.BytesFwalkTests.test_walk_named_pipe2": "pass",
+    "test.test_os.BytesFwalkTests.test_walk_prune": "pass",
+    "test.test_os.BytesFwalkTests.test_walk_symlink": "pass",
+    "test.test_os.BytesFwalkTests.test_walk_topdown": "pass",
+    "test.test_os.BytesFwalkTests.test_yields_correct_dir_fd": "pass",
+    "test.test_os.BytesWalkTests.test_file_like_path": "pass",
+    "test.test_os.BytesWalkTests.test_walk_above_recursion_limit": "pass",
+    "test.test_os.BytesWalkTests.test_walk_bad_dir": "pass",
+    "test.test_os.BytesWalkTests.test_walk_bad_dir2": "pass",
+    "test.test_os.BytesWalkTests.test_walk_bottom_up": "pass",
+    "test.test_os.BytesWalkTests.test_walk_many_open_files": "pass",
+    "test.test_os.BytesWalkTests.test_walk_named_pipe": "pass",
+    "test.test_os.BytesWalkTests.test_walk_named_pipe2": "pass",
+    "test.test_os.BytesWalkTests.test_walk_prune": "pass",
+    "test.test_os.BytesWalkTests.test_walk_symlink": "pass",
+    "test.test_os.BytesWalkTests.test_walk_topdown": "pass",
+    "test.test_os.CPUCountTests.test_cpu_count": "pass",
+    "test.test_os.CPUCountTests.test_process_cpu_count": "pass",
+    "test.test_os.CPUCountTests.test_process_cpu_count_affinity": "pass",
+    "test.test_os.ChownFileTests.test_chown_gid": "pass",
+    "test.test_os.ChownFileTests.test_chown_uid_gid_arguments_must_be_index": "pass",
+    "test.test_os.ChownFileTests.test_chown_with_root": {
+      "skipped": "test needs root privilege and more than one user"
+    },
+    "test.test_os.ChownFileTests.test_chown_without_permission": "pass",
+    "test.test_os.DevNullTests.test_devnull": "pass",
+    "test.test_os.DeviceEncodingTests.test_bad_fd": "pass",
+    "test.test_os.DeviceEncodingTests.test_device_encoding": {
+      "skipped": "test requires a tty and either Windows or nl_langinfo(CODESET)"
+    },
+    "test.test_os.EnvironTests.test___repr__": "pass",
+    "test.test_os.EnvironTests.test_bool": "pass",
+    "test.test_os.EnvironTests.test_constructor": "pass",
+    "test.test_os.EnvironTests.test_environb": "pass",
+    "test.test_os.EnvironTests.test_get": "pass",
+    "test.test_os.EnvironTests.test_get_exec_path": "pass",
+    "test.test_os.EnvironTests.test_getitem": "pass",
+    "test.test_os.EnvironTests.test_ior_operator": "pass",
+    "test.test_os.EnvironTests.test_ior_operator_invalid_dicts": "pass",
+    "test.test_os.EnvironTests.test_ior_operator_key_value_iterable": "pass",
+    "test.test_os.EnvironTests.test_items": "pass",
+    "test.test_os.EnvironTests.test_iter_error_when_changing_os_environ": "pass",
+    "test.test_os.EnvironTests.test_iter_error_when_changing_os_environ_items": "pass",
+    "test.test_os.EnvironTests.test_iter_error_when_changing_os_environ_values": "pass",
+    "test.test_os.EnvironTests.test_key_type": "pass",
+    "test.test_os.EnvironTests.test_keys": "pass",
+    "test.test_os.EnvironTests.test_keyvalue_types": "pass",
+    "test.test_os.EnvironTests.test_len": "pass",
+    "test.test_os.EnvironTests.test_or_operator": "pass",
+    "test.test_os.EnvironTests.test_os_popen_iter": "pass",
+    "test.test_os.EnvironTests.test_pop": "pass",
+    "test.test_os.EnvironTests.test_popitem": "pass",
+    "test.test_os.EnvironTests.test_putenv_unsetenv": "pass",
+    "test.test_os.EnvironTests.test_putenv_unsetenv_error": "pass",
+    "test.test_os.EnvironTests.test_read": "pass",
+    "test.test_os.EnvironTests.test_reload_environ": "pass",
+    "test.test_os.EnvironTests.test_ror_operator": "pass",
+    "test.test_os.EnvironTests.test_setdefault": "pass",
+    "test.test_os.EnvironTests.test_update": "pass",
+    "test.test_os.EnvironTests.test_update2": "pass",
+    "test.test_os.EnvironTests.test_values": "pass",
+    "test.test_os.EnvironTests.test_write": "pass",
+    "test.test_os.EventfdTests.test_eventfd_initval": "pass",
+    "test.test_os.EventfdTests.test_eventfd_select": "pass",
+    "test.test_os.EventfdTests.test_eventfd_semaphore": "pass",
+    "test.test_os.ExecTests.test_execv_with_bad_arglist": "pass",
+    "test.test_os.ExecTests.test_execve_env_concurrent_mutation_with_fspath_posix": "pass",
+    "test.test_os.ExecTests.test_execve_invalid_env": "pass",
+    "test.test_os.ExecTests.test_execve_with_empty_path": {
+      "skipped": "Win32-specific test"
+    },
+    "test.test_os.ExecTests.test_execvpe_with_bad_arglist": "pass",
+    "test.test_os.ExecTests.test_execvpe_with_bad_program": "pass",
+    "test.test_os.ExecTests.test_internal_execvpe_str": "pass",
+    "test.test_os.ExportsTests.test_os_all": "pass",
+    "test.test_os.ExtendedAttributeTests.test_fds": "pass",
+    "test.test_os.ExtendedAttributeTests.test_lpath": "pass",
+    "test.test_os.ExtendedAttributeTests.test_simple": "pass",
+    "test.test_os.FDInheritanceTests.test_dup": "pass",
+    "test.test_os.FDInheritanceTests.test_dup2": "pass",
+    "test.test_os.FDInheritanceTests.test_dup_nul": {
+      "skipped": "win32-specific test"
+    },
+    "test.test_os.FDInheritanceTests.test_dup_standard_stream": "pass",
+    "test.test_os.FDInheritanceTests.test_get_inheritable_cloexec": "pass",
+    "test.test_os.FDInheritanceTests.test_get_set_inheritable": "pass",
+    "test.test_os.FDInheritanceTests.test_get_set_inheritable_badf": "pass",
+    "test.test_os.FDInheritanceTests.test_get_set_inheritable_o_path": "pass",
+    "test.test_os.FDInheritanceTests.test_open": "pass",
+    "test.test_os.FDInheritanceTests.test_pipe": "pass",
+    "test.test_os.FDInheritanceTests.test_set_inheritable_cloexec": "pass",
+    "test.test_os.FSEncodingTests.test_identity": "pass",
+    "test.test_os.FSEncodingTests.test_nop": "pass",
+    "test.test_os.FileTests.test_access": "pass",
+    "test.test_os.FileTests.test_closerange": "pass",
+    "test.test_os.FileTests.test_copy_file_range": "pass",
+    "test.test_os.FileTests.test_copy_file_range_invalid_values": "pass",
+    "test.test_os.FileTests.test_copy_file_range_offset": "pass",
+    "test.test_os.FileTests.test_fdopen": "pass",
+    "test.test_os.FileTests.test_large_read": {
+      "skipped": "not enough memory: 2.0G minimum needed"
+    },
+    "test.test_os.FileTests.test_large_readinto": {
+      "skipped": "not enough memory: 2.0G minimum needed"
+    },
+    "test.test_os.FileTests.test_open_keywords": "pass",
+    "test.test_os.FileTests.test_read": "pass",
+    "test.test_os.FileTests.test_readinto": "pass",
+    "test.test_os.FileTests.test_readinto_badarg": "pass",
+    "test.test_os.FileTests.test_readinto_non_blocking": "pass",
+    "test.test_os.FileTests.test_rename": "pass",
+    "test.test_os.FileTests.test_replace": "pass",
+    "test.test_os.FileTests.test_splice": "pass",
+    "test.test_os.FileTests.test_splice_invalid_values": "pass",
+    "test.test_os.FileTests.test_splice_offset_in": "pass",
+    "test.test_os.FileTests.test_splice_offset_out": "pass",
+    "test.test_os.FileTests.test_symlink_keywords": "pass",
+    "test.test_os.FileTests.test_write": "pass",
+    "test.test_os.FileTests.test_write_windows_console": {
+      "skipped": "test specific to the Windows console"
+    },
+    "test.test_os.ForkTests.test_fork": "pass",
+    "test.test_os.ForkTests.test_fork_at_finalization": "pass",
+    "test.test_os.ForkTests.test_fork_warns_when_non_python_thread_exists": "pass",
+    "test.test_os.FwalkTests.test_compare_to_walk": "pass",
+    "test.test_os.FwalkTests.test_dir_fd": "pass",
+    "test.test_os.FwalkTests.test_fd_finalization": "pass",
+    "test.test_os.FwalkTests.test_fd_leak": "pass",
+    "test.test_os.FwalkTests.test_file_like_path": "pass",
+    "test.test_os.FwalkTests.test_walk_above_recursion_limit": "pass",
+    "test.test_os.FwalkTests.test_walk_bad_dir": "pass",
+    "test.test_os.FwalkTests.test_walk_bad_dir2": "pass",
+    "test.test_os.FwalkTests.test_walk_bottom_up": "pass",
+    "test.test_os.FwalkTests.test_walk_named_pipe": "pass",
+    "test.test_os.FwalkTests.test_walk_named_pipe2": "pass",
+    "test.test_os.FwalkTests.test_walk_prune": "pass",
+    "test.test_os.FwalkTests.test_walk_symlink": "pass",
+    "test.test_os.FwalkTests.test_walk_topdown": "pass",
+    "test.test_os.FwalkTests.test_yields_correct_dir_fd": "pass",
+    "test.test_os.GetRandomTests.test_getrandom0": "pass",
+    "test.test_os.GetRandomTests.test_getrandom_nonblock": "pass",
+    "test.test_os.GetRandomTests.test_getrandom_random": "pass",
+    "test.test_os.GetRandomTests.test_getrandom_type": "pass",
+    "test.test_os.GetRandomTests.test_getrandom_value": "pass",
+    "test.test_os.LinkTests.test_link": "pass",
+    "test.test_os.LinkTests.test_link_bytes": "pass",
+    "test.test_os.LinkTests.test_unicode_name": "pass",
+    "test.test_os.LoginTests.test_getlogin": {
+      "skipped": "Skip due to platform/environment differences on *NIX buildbots"
+    },
+    "test.test_os.MakedirTests.test_exist_ok_existing_directory": "pass",
+    "test.test_os.MakedirTests.test_exist_ok_existing_regular_file": "pass",
+    "test.test_os.MakedirTests.test_exist_ok_s_isgid_directory": "pass",
+    "test.test_os.MakedirTests.test_makedir": "pass",
+    "test.test_os.MakedirTests.test_mode": "pass",
+    "test.test_os.MakedirTests.test_win32_mkdir_700": {
+      "skipped": "requires Windows"
+    },
+    "test.test_os.MemfdCreateTests.test_memfd_create": "pass",
+    "test.test_os.MiscTests.test_getcwd": "pass",
+    "test.test_os.MiscTests.test_getcwd_long_path": "pass",
+    "test.test_os.MiscTests.test_getcwdb": "pass",
+    "test.test_os.NonLocalSymlinkTests.test_directory_link_nonlocal": "pass",
+    "test.test_os.OSErrorTests.test_oserror_filename": "pass",
+    "test.test_os.PathTConverterTests.test_path_t_converter": "pass",
+    "test.test_os.PathTConverterTests.test_path_t_converter_and_custom_class": "pass",
+    "test.test_os.Pep383Tests.test_listdir": "pass",
+    "test.test_os.Pep383Tests.test_open": "pass",
+    "test.test_os.Pep383Tests.test_stat": "pass",
+    "test.test_os.Pep383Tests.test_statvfs": "pass",
+    "test.test_os.PidTests.test_getppid": "pass",
+    "test.test_os.PidTests.test_waitpid": "pass",
+    "test.test_os.PidTests.test_waitpid_windows": {
+      "skipped": "win32-specific test"
+    },
+    "test.test_os.PidTests.test_waitstatus_to_exitcode": "pass",
+    "test.test_os.PidTests.test_waitstatus_to_exitcode_kill": "pass",
+    "test.test_os.PidTests.test_waitstatus_to_exitcode_windows": {
+      "skipped": "win32-specific test"
+    },
+    "test.test_os.PosixUidGidTests.test_setegid": "pass",
+    "test.test_os.PosixUidGidTests.test_seteuid": "pass",
+    "test.test_os.PosixUidGidTests.test_setgid": "pass",
+    "test.test_os.PosixUidGidTests.test_setregid": "pass",
+    "test.test_os.PosixUidGidTests.test_setregid_neg1": "pass",
+    "test.test_os.PosixUidGidTests.test_setreuid": "pass",
+    "test.test_os.PosixUidGidTests.test_setreuid_neg1": "pass",
+    "test.test_os.PosixUidGidTests.test_setuid": "pass",
+    "test.test_os.ProgramPriorityTests.test_set_get_priority": "pass",
+    "test.test_os.PseudoterminalTests.test_open_via_ptsname": "pass",
+    "test.test_os.PseudoterminalTests.test_openpty": "pass",
+    "test.test_os.PseudoterminalTests.test_pipe_spawnl": "pass",
+    "test.test_os.PseudoterminalTests.test_posix_pty_functions": "pass",
+    "test.test_os.ReadlinkTests.test_bytes": "pass",
+    "test.test_os.ReadlinkTests.test_missing_link": "pass",
+    "test.test_os.ReadlinkTests.test_not_symlink": "pass",
+    "test.test_os.ReadlinkTests.test_pathlike": "pass",
+    "test.test_os.ReadlinkTests.test_pathlike_bytes": "pass",
+    "test.test_os.RemoveDirsTests.test_remove_all": "pass",
+    "test.test_os.RemoveDirsTests.test_remove_nothing": "pass",
+    "test.test_os.RemoveDirsTests.test_remove_partial": "pass",
+    "test.test_os.SpawnTests.test_nowait": "pass",
+    "test.test_os.SpawnTests.test_spawnl": "pass",
+    "test.test_os.SpawnTests.test_spawnl_noargs": "pass",
+    "test.test_os.SpawnTests.test_spawnle": "pass",
+    "test.test_os.SpawnTests.test_spawnle_noargs": "pass",
+    "test.test_os.SpawnTests.test_spawnlp": "pass",
+    "test.test_os.SpawnTests.test_spawnlpe": "pass",
+    "test.test_os.SpawnTests.test_spawnv": "pass",
+    "test.test_os.SpawnTests.test_spawnv_noargs": "pass",
+    "test.test_os.SpawnTests.test_spawnve": "pass",
+    "test.test_os.SpawnTests.test_spawnve_bytes": "pass",
+    "test.test_os.SpawnTests.test_spawnve_invalid_env": "pass",
+    "test.test_os.SpawnTests.test_spawnve_noargs": "pass",
+    "test.test_os.SpawnTests.test_spawnvp": "pass",
+    "test.test_os.SpawnTests.test_spawnvpe": "pass",
+    "test.test_os.SpawnTests.test_spawnvpe_invalid_env": "pass",
+    "test.test_os.StatAttributeTests.test_15261": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.StatAttributeTests.test_1686475": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.StatAttributeTests.test_access_denied": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.StatAttributeTests.test_file_attributes": {
+      "skipped": "st_file_attributes is Win32 specific"
+    },
+    "test.test_os.StatAttributeTests.test_stat_attributes": "pass",
+    "test.test_os.StatAttributeTests.test_stat_attributes_bytes": "pass",
+    "test.test_os.StatAttributeTests.test_stat_block_device": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.StatAttributeTests.test_stat_result_pickle": "pass",
+    "test.test_os.StatAttributeTests.test_statvfs_attributes": "pass",
+    "test.test_os.StatAttributeTests.test_statvfs_result_pickle": "pass",
+    "test.test_os.TermsizeTests.test_does_not_crash": {
+      "skipped": "failed to query terminal size"
+    },
+    "test.test_os.TermsizeTests.test_stty_match": {
+      "skipped": "stty invocation failed"
+    },
+    "test.test_os.TermsizeTests.test_windows_fd": {
+      "skipped": "Windows specific test"
+    },
+    "test.test_os.TestDirEntry.test_uninstantiable": "pass",
+    "test.test_os.TestDirEntry.test_unpickable": "pass",
+    "test.test_os.TestInvalidFD.test_blocking": "pass",
+    "test.test_os.TestInvalidFD.test_closerange": "pass",
+    "test.test_os.TestInvalidFD.test_dup": "pass",
+    "test.test_os.TestInvalidFD.test_dup2": "pass",
+    "test.test_os.TestInvalidFD.test_dup2_negative_fd": "pass",
+    "test.test_os.TestInvalidFD.test_fchdir": "pass",
+    "test.test_os.TestInvalidFD.test_fchmod": "pass",
+    "test.test_os.TestInvalidFD.test_fchown": "pass",
+    "test.test_os.TestInvalidFD.test_fdatasync": "pass",
+    "test.test_os.TestInvalidFD.test_fdopen": "pass",
+    "test.test_os.TestInvalidFD.test_fpathconf": "pass",
+    "test.test_os.TestInvalidFD.test_fpathconf_bad_fd": "pass",
+    "test.test_os.TestInvalidFD.test_fstat": "pass",
+    "test.test_os.TestInvalidFD.test_fstatvfs": "pass",
+    "test.test_os.TestInvalidFD.test_fsync": "pass",
+    "test.test_os.TestInvalidFD.test_ftruncate": "pass",
+    "test.test_os.TestInvalidFD.test_inheritable": "pass",
+    "test.test_os.TestInvalidFD.test_isatty": "pass",
+    "test.test_os.TestInvalidFD.test_lseek": "pass",
+    "test.test_os.TestInvalidFD.test_pathconf_negative_fd_uses_fd_semantics": "pass",
+    "test.test_os.TestInvalidFD.test_read": "pass",
+    "test.test_os.TestInvalidFD.test_readinto": "pass",
+    "test.test_os.TestInvalidFD.test_readv": "pass",
+    "test.test_os.TestInvalidFD.test_tcgetpgrp": "pass",
+    "test.test_os.TestInvalidFD.test_tcsetpgrpt": "pass",
+    "test.test_os.TestInvalidFD.test_ttyname": "pass",
+    "test.test_os.TestInvalidFD.test_write": "pass",
+    "test.test_os.TestInvalidFD.test_writev": "pass",
+    "test.test_os.TestPEP519.test_argument_required": "pass",
+    "test.test_os.TestPEP519.test_bad_pathlike": "pass",
+    "test.test_os.TestPEP519.test_fsencode_fsdecode": "pass",
+    "test.test_os.TestPEP519.test_fspath_set_to_None": "pass",
+    "test.test_os.TestPEP519.test_garbage_in_exception_out": "pass",
+    "test.test_os.TestPEP519.test_pathlike": "pass",
+    "test.test_os.TestPEP519.test_pathlike_class_getitem": "pass",
+    "test.test_os.TestPEP519.test_pathlike_subclass_slots": "pass",
+    "test.test_os.TestPEP519.test_pathlike_subclasshook": "pass",
+    "test.test_os.TestPEP519.test_return_bytes": "pass",
+    "test.test_os.TestPEP519.test_return_string": "pass",
+    "test.test_os.TestPEP519PurePython.test_argument_required": "pass",
+    "test.test_os.TestPEP519PurePython.test_bad_pathlike": "pass",
+    "test.test_os.TestPEP519PurePython.test_fsencode_fsdecode": "pass",
+    "test.test_os.TestPEP519PurePython.test_fspath_set_to_None": "pass",
+    "test.test_os.TestPEP519PurePython.test_garbage_in_exception_out": "pass",
+    "test.test_os.TestPEP519PurePython.test_pathlike": "pass",
+    "test.test_os.TestPEP519PurePython.test_pathlike_class_getitem": "pass",
+    "test.test_os.TestPEP519PurePython.test_pathlike_subclass_slots": "pass",
+    "test.test_os.TestPEP519PurePython.test_pathlike_subclasshook": "pass",
+    "test.test_os.TestPEP519PurePython.test_return_bytes": "pass",
+    "test.test_os.TestPEP519PurePython.test_return_string": "pass",
+    "test.test_os.TestScandir.test_attributes": "pass",
+    "test.test_os.TestScandir.test_attributes_junctions": {
+      "skipped": "Can only test junctions with creation on win32."
+    },
+    "test.test_os.TestScandir.test_bad_path_type": "pass",
+    "test.test_os.TestScandir.test_broken_symlink": "pass",
+    "test.test_os.TestScandir.test_bytes": "pass",
+    "test.test_os.TestScandir.test_bytes_like": "pass",
+    "test.test_os.TestScandir.test_close": "pass",
+    "test.test_os.TestScandir.test_consume_iterator_twice": "pass",
+    "test.test_os.TestScandir.test_context_manager": "pass",
+    "test.test_os.TestScandir.test_context_manager_close": "pass",
+    "test.test_os.TestScandir.test_context_manager_exception": "pass",
+    "test.test_os.TestScandir.test_current_directory": "pass",
+    "test.test_os.TestScandir.test_empty_path": "pass",
+    "test.test_os.TestScandir.test_fd": "pass",
+    "test.test_os.TestScandir.test_fspath_protocol": "pass",
+    "test.test_os.TestScandir.test_fspath_protocol_bytes": "pass",
+    "test.test_os.TestScandir.test_removed_dir": "pass",
+    "test.test_os.TestScandir.test_removed_file": "pass",
+    "test.test_os.TestScandir.test_repr": "pass",
+    "test.test_os.TestScandir.test_resource_warning": "pass",
+    "test.test_os.TestScandir.test_uninstantiable": "pass",
+    "test.test_os.TestScandir.test_unpickable": "pass",
+    "test.test_os.TestSendfile.test_flags": {
+      "skipped": "requires headers and trailers support"
+    },
+    "test.test_os.TestSendfile.test_headers": {
+      "skipped": "requires headers and trailers support"
+    },
+    "test.test_os.TestSendfile.test_headers_overflow_32bits": {
+      "skipped": "requires headers and trailers support"
+    },
+    "test.test_os.TestSendfile.test_invalid_offset": "pass",
+    "test.test_os.TestSendfile.test_keywords": "pass",
+    "test.test_os.TestSendfile.test_offset_overflow": "pass",
+    "test.test_os.TestSendfile.test_send_at_certain_offset": "pass",
+    "test.test_os.TestSendfile.test_send_whole_file": "pass",
+    "test.test_os.TestSendfile.test_trailers": {
+      "skipped": "requires headers and trailers support"
+    },
+    "test.test_os.TestSendfile.test_trailers_overflow_32bits": {
+      "skipped": "requires headers and trailers support"
+    },
+    "test.test_os.TimerfdTests.test_timerfd_TFD_TIMER_ABSTIME": "pass",
+    "test.test_os.TimerfdTests.test_timerfd_initval": "pass",
+    "test.test_os.TimerfdTests.test_timerfd_interval": "pass",
+    "test.test_os.TimerfdTests.test_timerfd_negative": "pass",
+    "test.test_os.TimerfdTests.test_timerfd_non_blocking": "pass",
+    "test.test_os.TimerfdTests.test_timerfd_ns_TFD_TIMER_ABSTIME": "pass",
+    "test.test_os.TimerfdTests.test_timerfd_ns_initval": "pass",
+    "test.test_os.TimerfdTests.test_timerfd_ns_interval": "pass",
+    "test.test_os.TimerfdTests.test_timerfd_ns_poll": "pass",
+    "test.test_os.TimerfdTests.test_timerfd_ns_select": "pass",
+    "test.test_os.TimerfdTests.test_timerfd_poll": "pass",
+    "test.test_os.TimerfdTests.test_timerfd_select": "pass",
+    "test.test_os.TimesTests.test_times": "pass",
+    "test.test_os.URandomFDTests.test_urandom_failure": {
+      "skipped": "os.random() does not use a file descriptor"
+    },
+    "test.test_os.URandomFDTests.test_urandom_fd_closed": {
+      "skipped": "os.random() does not use a file descriptor"
+    },
+    "test.test_os.URandomFDTests.test_urandom_fd_reopened": {
+      "skipped": "os.random() does not use a file descriptor"
+    },
+    "test.test_os.URandomTests.test_urandom_length": "pass",
+    "test.test_os.URandomTests.test_urandom_subprocess": "pass",
+    "test.test_os.URandomTests.test_urandom_value": "pass",
+    "test.test_os.UtimeTests.test_issue31577": "pass",
+    "test.test_os.UtimeTests.test_large_time": {
+      "skipped": "requires NTFS"
+    },
+    "test.test_os.UtimeTests.test_utime": "pass",
+    "test.test_os.UtimeTests.test_utime_by_indexed": "pass",
+    "test.test_os.UtimeTests.test_utime_by_times": "pass",
+    "test.test_os.UtimeTests.test_utime_current": "pass",
+    "test.test_os.UtimeTests.test_utime_current_old": "pass",
+    "test.test_os.UtimeTests.test_utime_dir_fd": "pass",
+    "test.test_os.UtimeTests.test_utime_directory": "pass",
+    "test.test_os.UtimeTests.test_utime_fd": "pass",
+    "test.test_os.UtimeTests.test_utime_invalid_arguments": "pass",
+    "test.test_os.UtimeTests.test_utime_nofollow_symlinks": "pass",
+    "test.test_os.UtimeTests.test_utime_nonexistent": "pass",
+    "test.test_os.WalkTests.test_file_like_path": "pass",
+    "test.test_os.WalkTests.test_walk_above_recursion_limit": "pass",
+    "test.test_os.WalkTests.test_walk_bad_dir": "pass",
+    "test.test_os.WalkTests.test_walk_bad_dir2": "pass",
+    "test.test_os.WalkTests.test_walk_bottom_up": "pass",
+    "test.test_os.WalkTests.test_walk_many_open_files": "pass",
+    "test.test_os.WalkTests.test_walk_named_pipe": "pass",
+    "test.test_os.WalkTests.test_walk_named_pipe2": "pass",
+    "test.test_os.WalkTests.test_walk_prune": "pass",
+    "test.test_os.WalkTests.test_walk_symlink": "pass",
+    "test.test_os.WalkTests.test_walk_topdown": "pass",
+    "test.test_os.Win32ErrorTests.test_chdir": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32ErrorTests.test_chmod": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32ErrorTests.test_mkdir": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32ErrorTests.test_remove": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32ErrorTests.test_rename": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32ErrorTests.test_utime": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32JunctionTests.test_create_junction": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32JunctionTests.test_unlink_removes_junction": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32KillTests.test_CTRL_BREAK_EVENT": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32KillTests.test_CTRL_C_EVENT": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32KillTests.test_kill_int": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32KillTests.test_kill_sigterm": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32ListdirTests.test_listdir_extended_path": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32ListdirTests.test_listdir_no_extended_path": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32ListdriveTests.test_listdrives": {
+      "skipped": "NT specific tests"
+    },
+    "test.test_os.Win32ListdriveTests.test_listmounts": {
+      "skipped": "NT specific tests"
+    },
+    "test.test_os.Win32ListdriveTests.test_listvolumes": {
+      "skipped": "NT specific tests"
+    },
+    "test.test_os.Win32NtTests.test_getfinalpathname_handles": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32NtTests.test_stat_inaccessible_file": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32NtTests.test_stat_unlink_race": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32SymlinkTests.test_12084": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32SymlinkTests.test_29248": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32SymlinkTests.test_appexeclink": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32SymlinkTests.test_buffer_overflow": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32SymlinkTests.test_directory_link": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32SymlinkTests.test_file_link": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32SymlinkTests.test_isdir_on_directory_link_to_missing_target": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32SymlinkTests.test_remove_directory_link_to_missing_target": {
+      "skipped": "Win32 specific tests"
+    },
+    "test.test_os.Win32SymlinkTests.test_rmdir_on_directory_link_to_missing_target": {
+      "skipped": "Win32 specific tests"
+    }
+  }
+}

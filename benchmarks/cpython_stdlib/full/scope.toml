@@ -1,0 +1,30 @@
+# Classification of publicly named *top-level* modules in CPython 3.14.5.
+# Unlisted names are queued, not excluded. os.path and other child APIs
+# belong to their parents; assign all relevant upstream companion suites.
+[wave_one]
+unittest = "test_unittest"
+sys = "test_sys"
+json = "test_json"
+os = "test_os"
+pathlib = "test_pathlib"
+subprocess = "test_subprocess"
+shutil = "test_shutil"
+collections = "test_collections"
+logging = "test_logging"
+itertools = "test_itertools"
+functools = "test_functools"
+argparse = "test_argparse"
+
+[next]
+data_and_files = ["abc", "array", "base64", "binascii", "bisect", "builtins", "codecs", "contextlib", "copy", "csv", "dataclasses", "datetime", "decimal", "enum", "errno", "fnmatch", "glob", "gzip", "hashlib", "heapq", "io", "ipaddress", "math", "operator", "pickle", "posixpath", "queue", "random", "re", "secrets", "shlex", "stat", "string", "struct", "tempfile", "time", "types", "typing", "uuid", "weakref", "zipfile", "zlib"]
+application_runtime = ["asyncio", "concurrent", "configparser", "ctypes", "email", "faulthandler", "getpass", "gettext", "http", "importlib", "inspect", "locale", "multiprocessing", "numbers", "platform", "pprint", "select", "selectors", "signal", "socket", "sqlite3", "ssl", "statistics", "sysconfig", "tarfile", "textwrap", "threading", "timeit", "tomllib", "traceback", "urllib", "warnings", "xml", "zoneinfo"]
+
+# Candidates: this is a module-selection decision, not a test exception.
+[proposed_fringe]
+antigravity = "Easter egg that launches a browser"
+this = "Easter egg that prints the Zen of Python"
+idlelib = "IDLE desktop IDE"
+tkinter = "Optional Tcl/Tk desktop UI"
+turtle = "Educational desktop graphics"
+turtledemo = "Interactive turtle demo programs"
+winsound = "Optional Windows sound playback"
