@@ -15,10 +15,11 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bindings import Boundary, Probe
 from reference import BENCH, COMMIT, routine, verify
+from sweep import diagnostic, prepare
 sys.path.insert(0, str(BENCH))
 from native_json_values import Native
 from suite_inventory import cases, load_suite
-from suite_native import Toolchain, method_bytes, run_in_fixtures
+from suite_native import NativeCompileError, Toolchain, method_bytes, native_method, run_in_fixtures
 
 METHOD = "test.test_json.test_decode.TestDecode.test_keys_reuse"
 SOURCE = BENCH / "upstream/Lib/test/test_json/test_decode.py"
@@ -195,6 +196,24 @@ def run(tools, work):
         if failed or skipped or set(complete) != set(ids):
             raise ValueError((failed, skipped, complete))
         results[mode] = {name: records[0] for name, records in complete.items()}
+    # Both complete-body attempts use the original helper and test method.
+    # An unshadowed fixture import isolates passing self.loads as a callable.
+    owner, method = "TestDecode", "test_keys_reuse"
+    general = prepare(SOURCE, owner, method)
+    unshadowed = general.replace("import json\n", "import json as native_json\n")
+    unshadowed = unshadowed.replace("    json = json\n", "    json = native_json\n")
+    unshadowed = unshadowed.replace("staticmethod(json.loads)", "staticmethod(native_json.loads)")
+    attempts = results["native-body-attempts"] = {}
+    for name, fixture in (("general", general), ("unshadowed-module", unshadowed)):
+        directory = work / name
+        directory.mkdir()
+        try:
+            body = native_method(tools, directory, SOURCE, owner, ids[0], fixture)
+        except NativeCompileError as exc:
+            attempts[name] = {"outcome": "blocked", "diagnostic": diagnostic(exc, directory)}
+        else:
+            passed, failed, skipped = run_in_fixtures(load_suite("test.test_json"), dict.fromkeys(ids, body))
+            attempts[name] = {"passed": list(passed), "failed": failed, "skipped": skipped}
     return results
 
 
