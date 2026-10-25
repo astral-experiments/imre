@@ -278,7 +278,7 @@ fn level(value: &Value) -> Result<Int> {
 
 /// Look up the existing logger, preserving aliases. All configured level
 /// writes use the same setter as public Logger.setLevel.
-fn logger_level(name: &str, level: Option<Int>) {
+fn logger_level(name: &str, level: Option<Int>) -> Rc<Object> {
     let key = Str::from(name);
     // SAFETY: the string is live through lookup and each result transfers an owner.
     let logger = unsafe { Rc::from_raw(super::imre_log_get(&key as *const Str as usize)) };
@@ -286,6 +286,7 @@ fn logger_level(name: &str, level: Option<Int>) {
         // SAFETY: both owners remain in this scope until after the level write.
         unsafe { super::imre_log_set_level(Rc::as_ptr(&logger), level.0) };
     }
+    logger
 }
 
 fn configure_logger(name: &str, spec: &Value, incremental: bool, root: bool) -> Result<()> {
@@ -296,8 +297,9 @@ fn configure_logger(name: &str, spec: &Value, incremental: bool, root: bool) -> 
         .filter(|v| !matches!(v, Value::Null))
         .map(level)
         .transpose()?;
-    logger_level(name, threshold);
+    let logger = logger_level(name, threshold);
     if !incremental {
+        super::delivery::remove_configured_handlers(&logger);
         for key in ["handlers", "filters"] {
             if get(&cfg, key).is_some_and(|v| v.truth()) {
                 return Err(unsupported(key));
@@ -332,6 +334,12 @@ fn previous_loggers(configured: &HashSet<String>, old: &[String], disable: bool)
             .any(|(end, _)| configured.contains(&name[..end]))
         {
             logger_level(name, Int::small(0));
+            // CPython replaces this list; held references retain the old handlers.
+            let old = LOGGERS.with_borrow_mut(|logs| {
+                let entry = logs.entries.get_mut(name).expect("existing child logger");
+                std::mem::replace(&mut entry.handlers, super::delivery::empty_handlers())
+            });
+            drop(old);
             CONTROLS.with_borrow_mut(|map| map.entry(name.clone()).or_default().propagate = true);
         } else {
             CONTROLS.with_borrow_mut(|map| map.entry(name.clone()).or_default().disabled = disable);
@@ -594,12 +602,11 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
             "list.remove(x): x not in list",
         ));
     }
-    if let Some(level) = section("logger_root")?.get("level") {
-        logger_level(
-            "root",
-            Some(levels::named_level(&Str::from(level.as_str()))?),
-        );
-    }
+    let threshold = section("logger_root")?
+        .get("level")
+        .map(|level| levels::named_level(&Str::from(level.as_str())))
+        .transpose()?;
+    super::delivery::remove_configured_handlers(&logger_level("root", threshold));
     if !option("logger_root", "handlers")?.is_empty() {
         return Err(unsupported("root handlers"));
     }
@@ -623,7 +630,7 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
             .get("level")
             .map(|s| levels::named_level(&Str::from(s.as_str())))
             .transpose()?;
-        logger_level(name, threshold);
+        super::delivery::remove_configured_handlers(&logger_level(name, threshold));
         if !option(&section_name, "handlers")?.is_empty() {
             return Err(unsupported("named handlers"));
         }

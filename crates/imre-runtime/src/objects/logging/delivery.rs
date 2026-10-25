@@ -66,6 +66,20 @@ unsafe fn handler_list(logger: *const Object) -> Rc<Object> {
     LOGGERS.with_borrow(|logs| logs.entries[key.as_str()].handlers.clone())
 }
 
+/// Create a list whose elements own their handler records.
+pub(super) fn empty_handlers() -> Rc<Object> {
+    super::super::Words::new(6).into_object()
+}
+
+/// Remove configured handlers in place so held list references observe the change.
+pub(super) fn remove_configured_handlers(logger: &Rc<Object>) {
+    // SAFETY: the logger and its typed handler list remain rooted through clear.
+    unsafe {
+        let list = handler_list(Rc::as_ptr(logger));
+        super::super::imre_seq_clear(Rc::as_ptr(&list));
+    }
+}
+
 /// # Safety
 /// The caller roots the logger; it receives an owned reference to the live list.
 #[unsafe(no_mangle)]
