@@ -77,10 +77,11 @@ def run(args, level, root):
     if (reference["module"], reference["cpython_commit"]) != (manifest["module"], manifest["commit"]):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level)
-    for family in dict.fromkeys(["protocol", "import", *args.exception_family]):
-        control = root / ("context_" + family)
+    families = dict.fromkeys(["protocol", "import", *args.exception_family])
+    for name in ["equality_protocol", *("context_" + family for family in families)]:
+        control = root / name
         control.mkdir()
-        program = HERE / ("context_" + family + ".py")
+        program = HERE / (name + ".py")
         native = lang.build(program.read_bytes(), control)
         oracle = subprocess.run([sys.executable, "-B", program], capture_output=True, timeout=30, check=True)
         observed = subprocess.run([native], capture_output=True, timeout=30, check=True)
@@ -100,6 +101,11 @@ def run(args, level, root):
         ("test_result", "Test_TestResult", "test_stop", "unittest.TestResult.stop"),
         ("test_result", "Test_TestResult", "test_startTestRun_stopTestRun", "unittest.TestResult.startTestRun and stopTestRun"),
         ("test_case", "Test_TestCase", "testAssertRaisesNoExceptionType", "unittest.TestCase.assertRaises"),
+        *(("test_case", "Test_TestCase", method, "unittest.TestCase string equality and failure messages")
+          for method in ("testAssertEqualSingleLine", "testAssertEqualwithEmptyString",
+                         "testAssertEqualMultipleLinesMissingNewlineTerminator",
+                         "testAssertEqualMultipleLinesMismatchedNewlinesTerminators",
+                         "testAssertMultiLineEqual")),
     ):
         path = HERE / f"upstream/Lib/test/test_unittest/{module}.py"
         case_id = PREFIX + f"{module}.{owner}.{method}"

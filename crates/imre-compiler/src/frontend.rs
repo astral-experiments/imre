@@ -64,6 +64,7 @@ mod truthiness;
 mod unbound_locals;
 mod unions;
 mod unittest;
+mod unittest_equality;
 mod unpacking;
 mod zip_sums;
 mod zipfile;
@@ -4043,7 +4044,10 @@ impl<'a> Checker<'a> {
                 expressions
                     .iter()
                     .map(|target| {
-                        if let Some(kind) = self.exception_category(target) {
+                        if let Some(kind) = self
+                            .exception_category(target)
+                            .or_else(|| self.fixed_testcase_failure_kind(target))
+                        {
                             return Ok(kind);
                         }
                         Err(error(
