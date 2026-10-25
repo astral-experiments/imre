@@ -5,12 +5,15 @@ use super::*;
 impl Checker<'_> {
     /// An erased record keeps its concrete descriptor and owner. Admit only
     /// closed classes with generated value operations and supported slot types.
+    /// Packed value structs cannot be given observable identity through erasure.
     pub(super) fn boxed_dataclass(&self, class: usize) -> bool {
         let all = &self.classes.declarations.definitions;
         let decl = &all[class];
         let special_name = |name: &str| name.starts_with("__") && name.ends_with("__");
         decl.generated_initializer
-            && decl.dataclass.is_some_and(|d| !d.value_struct && d.slots && d.eq && d.repr)
+            && decl
+                .dataclass
+                .is_some_and(|d| !d.value_struct && d.slots && d.eq && d.repr)
             && !decl.fields.iter().any(|f| special_name(&f.name))
             && !decl.static_bindings.keys().any(|name| special_name(name))
             && decl.bases.is_empty()
