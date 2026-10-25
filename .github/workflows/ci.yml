@@ -9,7 +9,7 @@ on:
       audit:
         description: Source of the requested per-occurrence results
         type: choice
-        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace, percent-scalar, record-attributes, adapter-events, adapter-tools]
+        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace, percent-scalar, record-attributes, adapter-events, adapter-tools, codec-writer]
         required: true
 permissions:
   contents: read
@@ -47,6 +47,7 @@ jobs:
           sparse-checkout: |
             Lib/test
             Lib/logging
+            Lib/encodings
             Modules
           persist-credentials: false
       - name: Install clang if absent
@@ -153,6 +154,16 @@ jobs:
                 cargo test --locked -p imre-runtime --lib -j 2 only_the_outermost_release_unblocks_another_thread
               fi
               PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/null_handler.py "${tools[@]}" --result "$results/null-handler.json"
+              ;;
+            codec-writer)
+              python3 -I -B benchmarks/cpython_stdlib/full/logging/codec_writer.py "${tools[@]}" --cpython-source "$ref" --result "$results/codec-writer.json"
+              cmp benchmarks/cpython_stdlib/full/logging/codec-writer-linux.json "$results/codec-writer.json"
+              python3 -I -B benchmarks/cpython_stdlib/full/sys/codec_device.py "${tools[@]}" --cpython-source "$ref" --result "$results/sys-codec-device.json"
+              cmp benchmarks/cpython_stdlib/full/sys/codec-device-linux.json "$results/sys-codec-device.json"
+              if [[ -f benchmarks/cpython_stdlib/full/logging/native_encoding.py ]]; then
+                python3 -I -B benchmarks/cpython_stdlib/full/logging/native_encoding.py "${tools[@]}" --cpython-source "$ref" --result "$results/unchanged-stream.json"
+              fi
+              python3 -B tests/files.py "${ordinary[@]}"
               ;;
             adapter-tools)
               tar -czf "$results/toolchain.tgz" -C "$PWD/target/debug" imre libimre_runtime.a
