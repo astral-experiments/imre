@@ -1793,16 +1793,20 @@ pub(crate) fn status_after_flush(
     if let Err(error) = stdout {
         let broken_pipe = error.kind() == io::ErrorKind::BrokenPipe;
         let error = super::files::errno_error(error);
-        if let Payload::Message(message) = error.payload {
-            let name = if broken_pipe {
-                "BrokenPipeError"
-            } else {
-                error.kind.name()
-            };
-            let _ = writeln!(
-                io::stderr().lock(),
-                "Exception ignored while flushing sys.stdout:\n{name}: {message}"
-            );
+        let name = if broken_pipe {
+            "BrokenPipeError"
+        } else {
+            error.kind.name()
+        };
+        let exception = error.into_object();
+        // SAFETY: the owned OS exception roots its arguments throughout formatting.
+        let message = unsafe { exception.0.with(Storage::exception_message) };
+        let mut diagnostic = io::stderr().lock();
+        let _ = writeln!(diagnostic, "Exception ignored while flushing sys.stdout:");
+        if message.is_empty() {
+            let _ = writeln!(diagnostic, "{name}");
+        } else {
+            let _ = writeln!(diagnostic, "{name}: {message}");
         }
         120
     } else if stderr.is_err() {
