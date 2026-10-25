@@ -649,6 +649,9 @@ pub(crate) enum Builtin {
     DocCaptureStart,
     DocCaptureTake,
     DocAscii,
+    MockCallList {
+        mark: bool,
+    },
     SystemExitNew {
         omit_none: bool,
     },
@@ -939,7 +942,12 @@ pub(crate) enum Builtin {
     BinaryOpen(u32),
     GzipOpen,
     /// The compile-time validated pattern is independent of the source spelling.
-    RegexCompile(String),
+    RegexCompile {
+        source: String,
+        spelling: String,
+    },
+    RegexSpelling,
+    UnittestCompilePattern,
     RegexSearch,
     RegexSub(Vec<u8>),
     RegexGroupDict,
@@ -1230,6 +1238,12 @@ pub(crate) enum PathOperation {
     Resolve,
     Info,
     InfoRepr,
+    CheckStatPath,
+    Stat {
+        lstat: bool,
+    },
+    StatTime(u32),
+    StatExtraInt(u32),
     Query(PathQuery),
     ReadText,
     ReadBytes,

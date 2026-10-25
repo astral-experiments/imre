@@ -142,6 +142,8 @@ impl Builtin {
                     | PathOperation::WriteUnion { .. }
                     | PathOperation::WriteTypeError
                     | PathOperation::WriteBytes
+                    | PathOperation::Stat { .. }
+                    | PathOperation::CheckStatPath
                     | PathOperation::Mkdir
                     | PathOperation::Unlink
                     | PathOperation::Rmdir
@@ -170,6 +172,8 @@ impl Builtin {
                     | PathOperation::Info
                     | PathOperation::InfoRepr
                     | PathOperation::Query(_) => false,
+                    PathOperation::StatTime(index) => *index == 3,
+                    PathOperation::StatExtraInt(index) => (6..=8).contains(index),
                 },
                 PreservesLists,
             ),
@@ -353,6 +357,7 @@ impl Builtin {
             | Self::Slice
             | Self::StringFormat
             | Self::RegexSub(_)
+            | Self::UnittestCompilePattern
             | Self::StringIterationList
             | Self::StringJoin
             | Self::StringReplace
@@ -391,6 +396,7 @@ impl Builtin {
             | Self::IsInstance(_)
             | Self::IsBuiltinSubclass
             | Self::IsNone
+            | Self::MockCallList { .. }
             | Self::JsonIsInt
             | Self::Len
             | Self::JsonEmptyObject
@@ -409,7 +415,8 @@ impl Builtin {
             | Self::TextStreamView
             | Self::LiteralStringView
             | Self::RStrip
-            | Self::RegexCompile(_)
+            | Self::RegexCompile { .. }
+            | Self::RegexSpelling
             | Self::RegexSearch
             | Self::RegexMatchStart
             | Self::SequenceGetInBounds

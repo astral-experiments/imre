@@ -85,7 +85,7 @@ print(Path('input.txt').is_file())
 """
 
 
-def seed(directory: Path) -> None:
+def seed(directory: Path, *, stat_clock: bool = False) -> None:
     directory.mkdir()
     for name, data in {
         "input.txt": "alpha\r\néλ🙂\rzero\0tail\n".encode(),
@@ -122,6 +122,10 @@ def seed(directory: Path) -> None:
     (directory / "trailing-link").symlink_to("input.txt/")
     (directory / "absolute-link").symlink_to("/tmp", target_is_directory=True)
     (directory / "command").touch(mode=0o755)
+    if stat_clock:
+        timestamp = directory / "stat-clock"
+        timestamp.touch()
+        os.utime(timestamp, ns=(-1, 6_100_000_000_123_456_789))
     (directory / "denied").mkdir()
     (directory / "denied" / "secret.json").write_text("secret")
     (directory / "denied").chmod(0)
@@ -196,7 +200,7 @@ def main() -> None:
             project = temporary / name
             project.mkdir()
             reference_dir = project / "cpython"
-            seed(reference_dir)
+            seed(reference_dir, stat_clock=name == "path_stat")
             reference = files.run([args.python, "-E", "-B", str(source)], reference_dir, limit_descriptors=name == "cleanup", runner=runner)
             files.check_result(reference, None, f"CPython {name}")
             stdout = reference.stdout
@@ -206,7 +210,7 @@ def main() -> None:
                 built = files.run([compiler, "build", str(source), "--module-root", str(source.parent), "-o", str(binary), "--opt-level", level, *flags], temporary)
                 assert built.returncode == 0 and not built.stderr, (name, level, built.stderr.decode())
                 native_dir = project / f"imre-O{level}"
-                seed(native_dir)
+                seed(native_dir, stat_clock=name == "path_stat")
                 actual = files.run([str(binary)], native_dir, limit_descriptors=name == "cleanup", runner=runner)
                 files.check_result(actual, None, f"Imre {name} O{level}")
                 assert actual.stdout == stdout, (name, level, actual.stdout, stdout)
