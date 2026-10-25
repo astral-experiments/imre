@@ -539,7 +539,6 @@ mod tests {
         for source in [
             r"a$b",
             r"\1",
-            r"\w",
             r"\b",
             r"(?=a)",
             r"(?P<a>x)(?P=a)",
@@ -563,6 +562,8 @@ mod tests {
             r"[a-z]{2,4}?",
             r"[\-\]]+",
             r"(?P<empty>x*)?",
+            r"\w",
+            r"[^\W]",
             r"(a)+",
         ] {
             assert!(translate(source, false).is_ok(), "{source}");
