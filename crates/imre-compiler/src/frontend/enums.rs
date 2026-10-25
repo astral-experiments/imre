@@ -148,6 +148,12 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
+        if matches!((left.ty, right.ty), (Type::Module(_), Type::Module(_))) {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         // Python's empty built-in tuple is a singleton. Each operand still
         // executes exactly once, even when it raises before returning the tuple.
         if [left.ty, right.ty] == [self.types.tuple(Vec::new()); 2] {

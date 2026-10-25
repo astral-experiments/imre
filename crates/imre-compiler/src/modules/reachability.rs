@@ -20,12 +20,46 @@ pub(super) struct Reachable {
     properties: HashSet<String>,
     class_attributes: HashSet<(DefinitionId, String)>,
     instance_attributes: HashSet<String>,
+    discovery: HashSet<DefinitionId>,
+    selected_tests: HashSet<(DefinitionId, String)>,
 }
 
 struct References<'a> {
     graph: &'a SourceGraph,
     module: ModuleId,
     found: &'a mut Reachable,
+}
+
+fn test_lineage(
+    graph: &SourceGraph,
+    id: DefinitionId,
+    base: DefinitionId,
+) -> Option<HashSet<DefinitionId>> {
+    let mut lineage = HashSet::new();
+    let mut todo = vec![id];
+    let mut is_case = false;
+    while let Some(id) = todo.pop() {
+        if id == base {
+            is_case = true;
+            continue;
+        }
+        let ast::Stmt::ClassDef(class) =
+            &graph.modules[id.module].parsed.syntax().body[id.statement]
+        else {
+            continue;
+        };
+        if lineage.insert(id)
+            && let Some(args) = &class.arguments
+        {
+            todo.extend(args.args.iter().filter_map(
+                |arg| match graph.resolve_type(id.module, arg) {
+                    Some(Binding::Definition(parent)) => Some(parent),
+                    _ => None,
+                },
+            ));
+        }
+    }
+    is_case.then_some(lineage)
 }
 
 impl<'a> Visitor<'a> for References<'_> {
@@ -41,6 +75,85 @@ impl<'a> Visitor<'a> for References<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        // Case("test_name").run() performs method lookup even when the caller
+        // never reads that method or uses a loader. A computed name can select
+        // any test in this class, including methods inherited from mixins.
+        if let ast::Expr::Call(call) = expr
+            && let Some(Binding::Definition(owner)) = self.graph.resolve(self.module, &call.func)
+            && !self.graph.modules[owner.module].bundled
+            && let Some(Binding::Definition(base)) = self
+                .graph
+                .modules
+                .iter()
+                .find(|m| m.bundled && m.name == "unittest")
+                .and_then(|m| m.bindings.get("TestCase"))
+            && let Some(lineage) = test_lineage(self.graph, owner, *base)
+        {
+            let name = call.arguments.args.first().or_else(|| {
+                call.arguments
+                    .keywords
+                    .iter()
+                    .find(|kw| kw.arg.as_deref() == Some("methodName"))
+                    .map(|kw| &kw.value)
+            });
+            let literal = match name {
+                None => Some("runTest"),
+                Some(ast::Expr::StringLiteral(literal)) => Some(literal.value.to_str()),
+                _ => None,
+            };
+            if let Some(name) = literal {
+                self.found
+                    .selected_tests
+                    .extend(lineage.into_iter().map(|id| (id, name.to_owned())));
+            } else {
+                self.found.discovery.extend(lineage);
+            }
+        }
+        if let ast::Expr::Call(call) = expr
+            && call
+                .func
+                .as_attribute_expr()
+                .is_some_and(|attr| attr.attr.as_str() == "loadTestsFromModule")
+            && let Some(unittest) = self
+                .graph
+                .modules
+                .iter()
+                .find(|m| m.bundled && m.name == "unittest")
+            && let Some(Binding::Definition(case)) = unittest.bindings.get("TestCase")
+        {
+            self.found.attributes.insert("loadTestsFromModule".into());
+            if let Some(Binding::Definition(suite)) = unittest.bindings.get("TestSuite") {
+                self.found.definitions.insert(*suite);
+            }
+            // A stored module can arrive through a function or local alias. If
+            // its identity isn't syntactically available, retain TestCase
+            // subclasses in the closed graph rather than dropping a real test.
+            let module = call
+                .arguments
+                .args
+                .first()
+                .or_else(|| {
+                    call.arguments
+                        .keywords
+                        .iter()
+                        .find(|kw| kw.arg.as_ref().is_some_and(|n| n == "module"))
+                        .map(|kw| &kw.value)
+                })
+                .and_then(|arg| self.graph.resolve(self.module, arg));
+            for (id, source) in self.graph.modules.iter().enumerate() {
+                if source.bundled || matches!(module,Some(Binding::Module(target)) if target!=id) {
+                    continue;
+                }
+                for binding in source.bindings.values() {
+                    if let Binding::Definition(id) = binding
+                        && let Some(lineage) = test_lineage(self.graph, *id, *case)
+                    {
+                        self.found.definitions.insert(*id);
+                        self.found.discovery.extend(lineage);
+                    }
+                }
+            }
+        }
         if let ast::Expr::Call(call) = expr
             && self.graph.resolve(self.module, &call.func)
                 == Some(Binding::Intrinsic(Intrinsic::ShallowCopy))
@@ -61,6 +174,15 @@ impl<'a> Visitor<'a> for References<'_> {
         }
         if let ast::Expr::Attribute(attr) = expr {
             let name = attr.attr.to_string();
+            let current = &self.graph.modules[self.module];
+            if name == "run"
+                && current.bundled
+                && current.name == "unittest"
+                && let Some(Binding::Definition(def)) =
+                    current.bindings.get("_raise_call_type_error")
+            {
+                self.found.definitions.insert(*def);
+            }
             if matches!(
                 name.as_str(),
                 "assertEqual" | "assertListEqual" | "assertRaises"
@@ -190,6 +312,8 @@ impl Reachable {
 
     pub(super) fn inherited_class_method(&self, owner: DefinitionId, name: &str) -> bool {
         self.instance_attributes.contains(name)
+            || self.discovery.contains(&owner) && (name.starts_with("test") || name == "runTest")
+            || self.selected_tests.contains(&(owner, name.to_owned()))
             || self.class_attributes.contains(&(owner, name.to_owned()))
     }
     pub(super) fn collect(graph: &SourceGraph) -> Self {
@@ -225,6 +349,8 @@ impl Reachable {
                 found.methods.len(),
                 found.attributes.len(),
                 found.properties.len(),
+                found.discovery.len(),
+                found.selected_tests.len(),
             );
             for id in found.definitions.iter().copied().collect::<Vec<_>>() {
                 let source = &graph.modules[id.module];
@@ -294,6 +420,17 @@ impl Reachable {
                                     || (source.bundled
                                         && class.name.as_str() == "_MainRunner"
                                         && matches!(name, "_start" | "_run" | "_finish")));
+                            let discovered = refs.found.discovery.contains(&id)
+                                && (name.starts_with("test") || name == "runTest")
+                                || refs.found.selected_tests.contains(&(id, name.to_owned()));
+                            let loader_control = source.bundled
+                                && source.name == "unittest"
+                                && ((class.name.as_str() == "TestLoader"
+                                    && name == "_check_prefix"
+                                    && refs.found.attributes.contains("loadTestsFromModule"))
+                                    || (class.name.as_str() == "TestSuite"
+                                        && name == "_missing_result"
+                                        && refs.found.attributes.contains("run")));
                             let mock_dispatch = source.bundled
                                 && source.name == "unittest.mock"
                                 && match class.name.as_str() {
@@ -311,6 +448,8 @@ impl Reachable {
                             if (property
                                 || unittest_method
                                 || assertion_exit
+                                || discovered
+                                || loader_control
                                 || mock_dispatch
                                 || refs.found.attributes.contains(name)
                                 || matches!(
@@ -341,6 +480,8 @@ impl Reachable {
                     found.methods.len(),
                     found.attributes.len(),
                     found.properties.len(),
+                    found.discovery.len(),
+                    found.selected_tests.len(),
                 )
             {
                 break;

@@ -3,6 +3,86 @@
 Import `suite_inventory` and `suite_native` from this directory. Use the release's
 test-enabled Python for discovery, shared fixtures and host assertions. Build each
 native entry at both `Toolchain(..., level=0)` and `level=3`.
+Use `Toolchain(..., level=level, reachable_only=True)` for a second pair with
+the compiler's reachability filter. The unittest gate accepts `--reachable-only`;
+give its second invocation a separate `--result` path.
+
+## What discovery runs where
+
+`suite_inventory.load_suite()` asks the pinned CPython loader to discover the
+original IDs, including package `load_tests` hooks. `run_evidence()` can
+substitute a compiled body or operation under those host fixtures. Neither
+operation verifies the public native `unittest` loader.
+
+The [startup witness](https://github.com/astral-sh/imre/pull/578) separates an
+upstream module import from invoking a standard driver. Use the
+[object probes](full/unittest/runner_objects.py) to split that driver further.
+Each control builds **and runs** at O0/O3 in ordinary and reachable mode.
+
+| Control | What a successful result establishes |
+| --- | --- |
+| Import `unittest`, `TestCase`, `TestResult`, `TestLoader`, `defaultTestLoader`, `TestSuite`, `TextTestRunner`, or `mock` separately | That exact public name resolves. |
+| Import and invoke `test.dis_module.f` | The verified upstream module can be imported without a loader. |
+| Store the imported module; pass it to a function | Native module values work in that particular operation. |
+| Collect `test.dis_module` | A real module with no cases yields zero. |
+| Collect and run upstream `bar.test_bar` | A real module containing `PassingTest.test_true` yields and runs one case. |
+| Run the observable pass/fail fixture | Both methods run in loader order, their setup and teardown run, and the result reports two tests and a failure. |
+| Run nested suites and an overridden `failureException` | Selecting a case by method name, unwinding a failing child, and assigning failures to the concrete case's exception class work independently of discovery. |
+| Run cases with different `run` signatures | An explicit suite calls a valid override and propagates a real binding error for an invalid one. |
+
+An empty run does not demonstrate nonempty discovery. The controls record the
+stage, compiler digest and diagnostics and confer no additional upstream test
+IDs. Package recursion, `load_tests`, duplicates, fixture outcomes, text output,
+and protocol overrides require their own evidence. Each executable records stdout
+separately from `matches_reference_stderr`. In particular, the observable
+failure currently lacks CPython's traceback. Its unsuccessful status and test
+count are still observable. Normal package import has its own import chain:
+the coordinator's guard/ImportError witness at `03977539` reached
+`test/support/__init__.py:6` (`annotationlib`) before native discovery.
+
+### The public native loader
+
+```python
+import unittest
+import bar.test_bar as subject  # untouched namespace_test_pkg/bar/test_bar.py
+
+suite = unittest.TestSuite([unittest.defaultTestLoader.loadTestsFromModule(subject)])
+result = unittest.TextTestRunner(verbosity=2).run(suite)
+print(suite.countTestCases(), result.testsRun, result.wasSuccessful())  # 1 1 True
+```
+
+The object probe checks the fixture's upstream Git blob before executing it.
+Substitute `test.dis_module` to exercise the zero-test case. The native loader
+accepts a static imported module value and discovers sorted fixed TestCase
+classes and methods. Package `load_tests`, dynamic module namespaces and class
+or module fixture hooks currently report a diagnostic. The executor preserves
+case setup, method invocation, teardown, result state and totals after cleanup.
+
+### A native fixture in evidence v1
+
+For an unchanged, undecorated method with default TestCase lifecycle, pass
+`native_fixture_method` to `run_evidence` by exact ID and occurrence:
+
+```python
+from suite_native import native_fixture_method
+
+test_id = "test.test_unittest.test_suite.Test_TestSuite.test_init__empty_tests"
+program = native_fixture_method(
+    tools, Path(work), root / "upstream/Lib/test/test_unittest/test_suite.py",
+    "Test_TestSuite", test_id, operation="unittest.TestSuite.run and countTestCases",
+)
+report = run_evidence(load_suite("test.test_unittest"), {}, reference, level,
+                      native_fixtures={(test_id, 1): program}, exceptions=reference_skips(level))
+```
+
+The adapter compiles the pinned method bytes inside a selected class under
+its original module name. It verifies the exact ID reported by the native result.
+CPython inventories the full suite and launches the executable. It runs none of the
+four measured roles for that occurrence. A custom upstream lifecycle, decorator
+or registered cleanup requires an explicit fixture. Whole-module import and
+package initializer behavior are measured separately. The result frame records
+each native error, failure or skip with its full reason; output from the test
+is kept separate from that frame.
 
 ## A verified upstream example
 

@@ -10,6 +10,60 @@ struct Expected {
 }
 
 impl Checker<'_> {
+    /// Match a caught exception against the concrete case's failureException.
+    /// A subclass can replace the category, and its subclasses match as usual.
+    pub(super) fn unittest_failure_type(
+        &mut self,
+        call: &ast::ExprCall,
+        value: &Expr,
+        classes: &ast::Expr,
+    ) -> Result<Option<Expr>, String> {
+        let ast::Expr::Attribute(attr) = classes else {
+            return Ok(None);
+        };
+        if attr.attr.as_str() != "failureException" {
+            return Ok(None);
+        }
+        let Some(receiver) = attr
+            .value
+            .as_name_expr()
+            .and_then(|name| self.names.get(name.id.as_str()))
+            .copied()
+        else {
+            return Ok(None);
+        };
+        let Type::Class(class) = self.read_local(receiver).ty else {
+            return Ok(None);
+        };
+        if !self.unittest_case(class) {
+            return Ok(None);
+        }
+        let tested = self.hidden(value.ty);
+        let receiver = self.expr(&attr.value)?;
+        let matches = self.dispatch_record(class, receiver, call, |checker, id, _| {
+            let declarations = &checker.classes.declarations;
+            let kind = match declarations.definitions[id].exception_aliases["failureException"] {
+                crate::classes::ExceptionAlias::Builtin { kind, .. } => kind,
+                crate::classes::ExceptionAlias::Named(def) => declarations.exceptions[&def],
+            };
+            Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(
+                    Builtin::IsInstance(vec![ir::InstanceType::Exception(kind)]),
+                    vec![checker.local(tested)],
+                ),
+            })
+        })?;
+        Ok(Some(Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(tested, value.clone())],
+                value: Box::new(matches),
+                clear: vec![tested],
+            },
+        }))
+    }
+
     pub(super) fn unittest_case(&self, class: usize) -> bool {
         let classes = &self.classes.declarations.definitions;
         std::iter::once(&class)
@@ -441,7 +495,7 @@ impl Checker<'_> {
 
     /// Raise at the Python binding or invocation boundary, after its inputs have
     /// run. A regular call also gives expression scopes a normal cleanup edge.
-    fn unittest_call_type_error(&mut self, message: String) -> Statement {
+    pub(super) fn unittest_call_type_error(&mut self, message: String) -> Statement {
         let module = self
             .graph
             .modules

@@ -626,6 +626,7 @@ pub(crate) fn finish<T>(result: Result<T>, sentinel: T) -> T {
 }
 
 thread_local! {
+    static TEST_DEPTH: Cell<u32> = const { Cell::new(0) };
     static RECORD_ALLOCATION_ERROR: RefCell<Rc<Object>> = RefCell::new(new_exception(
         Kind::MemoryError, Rc::new(Str::new("record allocation failed")),
     ));
@@ -640,6 +641,27 @@ thread_local! {
     // flag before dropping displaced owners. The single-thread, no-callback
     // contract makes the brief interval between owner and flag writes unobservable.
     static PENDING_PRESENT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Test methods may run another suite. Bound that callback edge on each native
+/// thread; all other source calls retain the compiler's normal recursion check.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_unittest_depth(enter: u32) -> u32 {
+    TEST_DEPTH.with(|depth| {
+        let current = depth.get();
+        if enter == 0 {
+            depth.set(
+                current
+                    .checked_sub(1)
+                    .expect("balanced native unittest exit"),
+            );
+        } else if current < 64 {
+            depth.set(current + 1);
+        } else {
+            return 0;
+        }
+        1
+    })
 }
 
 /// Prepare allocation errors and exception state before generated code starts.

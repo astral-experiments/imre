@@ -58,19 +58,25 @@ impl Checker<'_> {
             }
             // These hooks change which callbacks run or how their results are
             // reported. Reject them until the runner implements their contracts.
-            if class.methods.iter().any(|m| {
-                matches!(
-                    m.name.as_str(),
-                    "setUpClass"
-                        | "tearDownClass"
-                        | "run"
-                        | "__call__"
-                        | "doCleanups"
-                        | "doClassCleanups"
-                        | "shortDescription"
-                        | "defaultTestResult"
-                )
-            }) || !class.node.decorator_list.is_empty()
+            if class
+                .methods
+                .iter()
+                .zip(&class.method_origins)
+                .any(|(m, origin)| {
+                    *origin != self.classes.declarations.definitions[case_base].definition
+                        && matches!(
+                            m.name.as_str(),
+                            "setUpClass"
+                                | "tearDownClass"
+                                | "run"
+                                | "__call__"
+                                | "doCleanups"
+                                | "doClassCleanups"
+                                | "shortDescription"
+                                | "defaultTestResult"
+                        )
+                })
+                || !class.node.decorator_list.is_empty()
                 || class
                     .methods
                     .iter()

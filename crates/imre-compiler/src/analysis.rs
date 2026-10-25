@@ -520,6 +520,7 @@ pub(crate) enum CheckedDiagnostic {
     MissingArgument(TextRange),
     BuiltinImport(TextRange),
     ExcessArgument(TextRange),
+    SuiteRunOverride(TextRange),
 }
 
 impl CheckedDiagnostic {
@@ -532,6 +533,7 @@ impl CheckedDiagnostic {
             Self::MissingArgument(range) => (range, 4),
             Self::BuiltinImport(range) => (range, 5),
             Self::ExcessArgument(range) => (range, 6),
+            Self::SuiteRunOverride(range) => (range, 7),
         };
         (range.start(), range.end(), kind)
     }
@@ -548,6 +550,9 @@ impl CheckedDiagnostic {
             Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
             Self::ExcessArgument(arg) => {
                 diagnostic == "too-many-positional-arguments" && arg == range
+            }
+            Self::SuiteRunOverride(header) => {
+                diagnostic == "invalid-method-override" && header.contains_range(range)
             }
         }
     }

@@ -125,6 +125,7 @@ impl Types {
                 matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_)))
             }
             Type::Int
+            | Type::Module(_)
             | Type::Float
             | Type::BuiltinClass
             | Type::Bool
@@ -497,6 +498,7 @@ impl Types {
             Type::Class(id) if self.0.borrow().custom_truth.contains(&id) => None,
             Type::SimpleNamespace(_) => Some(true),
             Type::Class(_)
+            | Type::Module(_)
             | Type::Callable(_)
             | Type::Enum(_)
             | Type::Iterator

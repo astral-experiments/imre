@@ -2,7 +2,9 @@
 
 
 import difflib
-from typing import ClassVar
+import sys
+import time
+from typing import Callable, ClassVar
 
 
 class SkipTest(Exception):
@@ -112,16 +114,105 @@ def _pretty_list(flat: str, items: list[str]) -> list[str]:
     return ("[" + ",\n ".join(items) + "]").splitlines()
 
 
-class TestCase:
+class _SuiteItem:
+    def _as_suite(self) -> TestSuite | None:
+        return None
+
+    def countTestCases(self) -> int:
+        return 1
+
+    def _run_item(self, result: TestResult) -> None:
+        raise TypeError("test item has no run method")
+
+    def _run_leaf(self, result: TestResult) -> None:
+        raise TypeError("expected a test case")
+
+    def _leaf_count(self) -> int:
+        return 1
+
+
+class TestCase(_SuiteItem):
     failureException: ClassVar[type[Exception]] = AssertionError
     longMessage: bool
+    _testMethodName: str
+    _testClassName: str
     maxDiff: int | None
     _diffThreshold: int
 
-    def __init__(self) -> None:
+    def __init__(self, methodName: str = "runTest") -> None:
         self.longMessage = True
         self.maxDiff = 640
         self._diffThreshold = 65536
+        self._testMethodName = methodName
+        self._testClassName = "unittest.case.TestCase"
+
+    def id(self) -> str:
+        return self._testClassName + "." + self._testMethodName
+
+    def _description(self) -> str:
+        return self._testMethodName + " (" + self.id() + ")"
+
+    def _missing_method(self) -> None:
+        raise AttributeError("no such test method: " + self._testMethodName)
+
+    def _invoke_test(self) -> None:
+        self._missing_method()
+
+    def _run_item(self, result: TestResult) -> None:
+        self.run(result)
+
+    def _run_leaf(self, result: TestResult) -> None:
+        self.run(result)
+
+    def _leaf_count(self) -> int:
+        return self.countTestCases()
+
+    def _record_exception(self, result: TestResult, exc: Exception) -> None:
+        if isinstance(exc, self.failureException):
+            result._failure(self, str(exc))
+        else:
+            result._error(self, str(exc))
+
+    def run(self, result: TestResult | None = None) -> TestResult:
+        own = result is None
+        if result is None:
+            result = TestResult()
+            result.startTestRun()
+        result.startTest(self)
+        passed = True
+        try:
+            try:
+                self.setUp()
+            except SkipTest as exc:
+                result.addSkip(self, str(exc))
+                passed = False
+            except Exception as exc:
+                self._record_exception(result, exc)
+                passed = False
+            if passed:
+                try:
+                    self._invoke_test()
+                except SkipTest as exc:
+                    result.addSkip(self, str(exc))
+                    passed = False
+                except Exception as exc:
+                    self._record_exception(result, exc)
+                    passed = False
+                try:
+                    self.tearDown()
+                except SkipTest as exc:
+                    result.addSkip(self, str(exc))
+                    passed = False
+                except Exception as exc:
+                    self._record_exception(result, exc)
+                    passed = False
+            if passed:
+                result.addSuccess(self)
+        finally:
+            result.stopTest(self)
+            if own:
+                result.stopTestRun()
+        return result
 
     def countTestCases(self) -> int:
         return 1
@@ -369,6 +460,9 @@ class TestResult:
     failfast: bool
     skipped: list[tuple[TestCase, str]]
     unexpectedSuccesses: list[TestCase]
+    failures: list[tuple[TestCase, str]]
+    errors: list[tuple[TestCase, str]]
+    _verbosity: int
 
     def __init__(self) -> None:
         self.testsRun = 0
@@ -376,6 +470,12 @@ class TestResult:
         self.failfast = False
         self.skipped = []
         self.unexpectedSuccesses = []
+        self.failures = []
+        self.errors = []
+        self._verbosity = -1
+
+    def wasSuccessful(self) -> bool:
+        return len(self.failures) == 0 and len(self.errors) == 0 and len(self.unexpectedSuccesses) == 0
 
     def startTestRun(self) -> None:
         pass
@@ -385,15 +485,36 @@ class TestResult:
 
     def startTest(self, test: TestCase) -> None:
         self.testsRun += 1
+        if self._verbosity > 1:
+            sys.stderr.write(test._description() + " ... ")
 
     def stopTest(self, test: TestCase) -> None:
         pass
 
     def addSuccess(self, test: TestCase) -> None:
-        pass
+        self._status("ok", ".")
+
+    def _status(self, full: str, short: str) -> None:
+        if self._verbosity > 1:
+            sys.stderr.write(full + "\n")
+        elif self._verbosity == 1:
+            sys.stderr.write(short)
+
+    def _failure(self, test: TestCase, reason: str) -> None:
+        if self.failfast:
+            self.stop()
+        self.failures.append((test, reason))
+        self._status("FAIL", "F")
+
+    def _error(self, test: TestCase, reason: str) -> None:
+        if self.failfast:
+            self.stop()
+        self.errors.append((test, reason))
+        self._status("ERROR", "E")
 
     def addSkip(self, test: TestCase, reason: str) -> None:
         self.skipped.append((test, reason))
+        self._status("skipped " + repr(reason), "s")
 
     def addUnexpectedSuccess(self, test: TestCase) -> None:
         if self.failfast:
@@ -404,9 +525,143 @@ class TestResult:
         self.shouldStop = True
 
 
-from typing import Callable
-import sys
-import time
+def _members(tests: list[_SuiteItem] | None) -> list[_SuiteItem | None]:
+    contents: list[_SuiteItem | None] = []
+    if tests is not None:
+        for test in tests:
+            contents.append(test)
+    return contents
+
+
+class TestSuite(_SuiteItem):
+    _tests: list[_SuiteItem | None]
+    _removed_tests: int
+    _cleanup: bool
+
+    def __init__(self, tests: list[_SuiteItem] | None = None) -> None:
+        self._tests = _members(tests)
+        self._removed_tests = 0
+        self._cleanup = True
+
+    def _as_suite(self) -> TestSuite | None:
+        return self
+
+    def addTest(self, test: _SuiteItem) -> None:
+        self._tests.append(test)
+
+    def addTests(self, tests: list[_SuiteItem]) -> None:
+        for test in tests:
+            self.addTest(test)
+
+    def countTestCases(self) -> int:
+        count = 0
+        groups: list[TestSuite] = [self]
+        while len(groups):
+            group = groups.pop()
+            count += group._removed_tests
+            for test in group._tests:
+                if test is not None:
+                    child = test._as_suite()
+                    if child is not None:
+                        groups.append(child)
+                    else:
+                        count += test._leaf_count()
+        return count
+
+    def _run_item(self, result: TestResult) -> None:
+        self.run(result)
+
+    def _missing_result(self) -> TestResult:
+        raise TypeError("TestSuite.run() missing 1 required positional argument: 'result'")
+
+    def run(self, result: TestResult | None = None) -> TestResult:
+        if result is None:
+            raise AttributeError("'NoneType' object has no attribute '_testRunEntered' and no __dict__ for setting new attributes")
+        groups: list[TestSuite] = [self]
+        positions: list[int] = [0]
+        while len(groups):
+            group = groups[-1]
+            index = positions[-1]
+            if index >= len(group._tests) or result.shouldStop:
+                groups.pop()
+                positions.pop()
+                if len(groups):
+                    parent = groups[-1]
+                    if parent._cleanup:
+                        parent._removed_tests += group.countTestCases()
+                        parent._tests[positions[-1] - 1] = None
+                continue
+            test = group._tests[index]
+            if test is None:
+                raise TypeError("'NoneType' object is not callable")
+            positions[-1] = index + 1
+            child = test._as_suite()
+            if child is not None:
+                groups.append(child)
+                positions.append(0)
+            else:
+                test._run_leaf(result)
+                if group._cleanup:
+                    group._removed_tests += test._leaf_count()
+                    group._tests[index] = None
+        return result
+
+
+class TestLoader:
+    testMethodPrefix: str
+
+    def __init__(self) -> None:
+        self.testMethodPrefix = "test"
+
+    def _check_prefix(self) -> None:
+        if self.testMethodPrefix != "test":
+            raise NotImplementedError("native module discovery currently requires testMethodPrefix='test'")
+
+
+defaultTestLoader = TestLoader()
+
+
+class TextTestRunner:
+    verbosity: int
+    failfast: bool
+
+    def __init__(self, *, verbosity: int = 1, failfast: bool = False) -> None:
+        self.verbosity = verbosity
+        self.failfast = failfast
+
+    def run(self, test: _SuiteItem) -> TestResult:
+        result = TestResult()
+        result._verbosity = self.verbosity
+        result.failfast = self.failfast
+        start = time.time()
+        result.startTestRun()
+        try:
+            test._run_item(result)
+        finally:
+            result.stopTestRun()
+        elapsed = time.time() - start
+        if self.verbosity > 0:
+            sys.stderr.write("\n")
+        for entry in result.errors:
+            sys.stderr.write("=" * 70 + "\nERROR: " + entry[0]._description() + "\n" + "-" * 70 + "\n" + entry[1] + "\n\n")
+        for entry in result.failures:
+            sys.stderr.write("=" * 70 + "\nFAIL: " + entry[0]._description() + "\n" + "-" * 70 + "\n" + entry[1] + "\n\n")
+        suffix = "" if result.testsRun == 1 else "s"
+        sys.stderr.write("-" * 70 + f"\nRan {result.testsRun} test{suffix} in {elapsed:.3f}s\n\n")
+        details: list[str] = []
+        if len(result.failures):
+            details.append("failures=" + str(len(result.failures)))
+        if len(result.errors):
+            details.append("errors=" + str(len(result.errors)))
+        if len(result.skipped):
+            details.append("skipped=" + str(len(result.skipped)))
+        message = "OK" if result.wasSuccessful() else "FAILED"
+        if result.wasSuccessful() and result.testsRun == 0 and not len(result.skipped):
+            message = "NO TESTS RAN"
+        if len(details):
+            message = message + " (" + ", ".join(details) + ")"
+        sys.stderr.write(message + "\n")
+        return result
 
 
 def main() -> None:

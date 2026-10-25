@@ -45,6 +45,7 @@ impl Type {
             Self::Int
             | Self::StrEnum(_)
             | Self::Enum(_)
+            | Self::Module(_)
             | Self::Optional(_)
             | Self::Union(_)
             | Self::StringIterable => "i64",
@@ -168,6 +169,7 @@ impl Type {
             | Self::None
             | Self::StrEnum(_)
             | Self::Enum(_)
+            | Self::Module(_)
             | Self::Optional(_)
             | Self::Union(_)
             | Self::StringIterable => "0",
@@ -754,7 +756,12 @@ impl Emitter<'_, '_> {
             | Type::JsonObject
             | Type::RegexMatch
             | Type::BinaryIO => "object",
-            Type::Float | Type::Bool | Type::StrEnum(_) | Type::Enum(_) | Type::None => return,
+            Type::Float
+            | Type::Bool
+            | Type::StrEnum(_)
+            | Type::Enum(_)
+            | Type::Module(_)
+            | Type::None => return,
             Type::Optional(_) => unreachable!("optional types are flattened"),
         };
         let name = if value.ty == Type::Int {
@@ -782,7 +789,7 @@ impl Emitter<'_, '_> {
         if value.ty != Type::Float
             && !matches!(
                 self.module.types.payload(value.ty).unwrap_or(value.ty),
-                Type::Bool | Type::None | Type::StrEnum(_) | Type::Enum(_)
+                Type::Bool | Type::None | Type::StrEnum(_) | Type::Enum(_) | Type::Module(_)
             )
             && !value.small_integer
             && !self
@@ -3210,7 +3217,7 @@ impl Emitter<'_, '_> {
                         left.operand, right.operand
                     ))
                 }
-                Type::StrEnum(_) | Type::Enum(_) => self.instruction(format!(
+                Type::StrEnum(_) | Type::Enum(_) | Type::Module(_) => self.instruction(format!(
                     "icmp {predicate} i64 {}, {}",
                     left.operand, right.operand
                 )),
@@ -3644,6 +3651,22 @@ impl Emitter<'_, '_> {
                 ));
                 self.unpack_word(word, returns)
             }
+            Builtin::UnittestDepth(enter) => {
+                let word = self.instruction(format!(
+                    "call i32 @imre_unittest_depth(i32 {})",
+                    u32::from(*enter)
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {word}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::ModuleValue(id) => Value {
+                ty: returns,
+                operand: (id + 1).to_string(),
+                small_integer: false,
+            },
             Builtin::StrEnumMember { class, member } => Value {
                 ty: returns,
                 operand: self.enum_tag(*class, *member).to_string(),
@@ -5649,6 +5672,7 @@ impl Emitter<'_, '_> {
                     Type::None => self.void_call("imre_print_none", &[]),
                     Type::ListInt
                     | Type::BuiltinClass
+                    | Type::Module(_)
                     | Type::Class(_)
                     | Type::List(_)
                     | Type::Dict(_)
@@ -5885,6 +5909,7 @@ impl Emitter<'_, '_> {
             Type::Int
             | Type::StrEnum(_)
             | Type::Enum(_)
+            | Type::Module(_)
             | Type::Optional(_)
             | Type::Union(_)
             | Type::StringIterable => value.operand.clone(),
@@ -5960,6 +5985,7 @@ impl Emitter<'_, '_> {
             Type::Int
             | Type::StrEnum(_)
             | Type::Enum(_)
+            | Type::Module(_)
             | Type::Optional(_)
             | Type::Union(_)
             | Type::StringIterable => word,
@@ -6557,7 +6583,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Float => 7,
         Type::Str | Type::StrLiteral(_) => 3,
         Type::BuiltinClass => 11,
-        Type::StrEnum(_) | Type::Enum(_) => 10,
+        Type::StrEnum(_) | Type::Enum(_) | Type::Module(_) => 10,
         Type::Bytes => 8,
         Type::Union(_) | Type::StringIterable => 9,
         Type::ListInt => 4,
@@ -6987,6 +7013,7 @@ declare ptr @imre_named_exception_new(ptr, ptr)
 declare ptr @imre_exception_new(i32, ptr)
 declare i32 @imre_exception_matches(ptr, i32)
 declare i32 @imre_exception_matches_any(ptr, ptr)
+declare i32 @imre_unittest_depth(i32)
 declare i64 @imre_string_iterable_len(i64)
 declare ptr @imre_string_iterable_list(i64)
 declare void @imre_union_retain(i64)
