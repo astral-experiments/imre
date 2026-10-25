@@ -135,6 +135,7 @@ impl Reachable {
                                         | "__iter__"
                                         | "__str__"
                                 )
+                                || (name == "__repr__" && exception_base(graph, id))
                                 || definition_effect(graph, id.module, method))
                                 && refs.found.methods.insert((id.module, method.start()))
                             {
@@ -244,6 +245,38 @@ fn class_effect(graph: &SourceGraph, module: ModuleId, class: &ast::StmtClassDef
             ast::Stmt::FunctionDef(f) => definition_effect(graph, module, f),
             _ => true,
         })
+}
+
+/// Rich exception display overrides are reachable through base-class catches.
+fn exception_base(graph: &SourceGraph, id: DefinitionId) -> bool {
+    let mut pending = vec![id];
+    let mut seen = HashSet::new();
+    while let Some(def) = pending.pop() {
+        if !seen.insert(def) {
+            continue;
+        }
+        let ast::Stmt::ClassDef(c) = &graph.modules[def.module].parsed.syntax().body[def.statement]
+        else {
+            continue;
+        };
+        let Some(args) = &c.arguments else {
+            continue;
+        };
+        for base in &args.args {
+            match graph.resolve(def.module, base) {
+                Some(Binding::Definition(parent)) => pending.push(parent),
+                None if base
+                    .as_name_expr()
+                    .and_then(|n| crate::frontend::exception_kind(n.id.as_str()))
+                    .is_some() =>
+                {
+                    return true;
+                }
+                _ => {}
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]

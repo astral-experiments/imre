@@ -57,6 +57,17 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
+            Self::Str
+                if args
+                    .first()
+                    .is_some_and(|e| matches!(e.ty, Type::Exception | Type::NamedException(_))) =>
+            {
+                Contract::new(true, Unknown)
+            }
+            Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
+            Self::ExceptionArgument(_) | Self::NamedException { .. } => {
+                Contract::new(false, PreservesLists)
+            }
             // Even a zero-argument call may mutate a retained native list or reenter Python.
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
@@ -124,7 +135,12 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::Logging(operation) => Contract::new(
-                matches!(operation, crate::ir::LogOperation::Configure),
+                matches!(
+                    operation,
+                    crate::ir::LogOperation::Configure
+                        | crate::ir::LogOperation::ConfigureName
+                        | crate::ir::LogOperation::CheckLevel
+                ),
                 PreservesLists,
             ),
             Self::Process(operation) => match operation {
@@ -234,8 +250,8 @@ impl Builtin {
             | Self::Sha256Update
             | Self::Sha256Digest { .. }
             | Self::Sha256Copy
+            | Self::ExceptionRecord
             | Self::ExceptionCause
-            | Self::ExceptionMessage
             | Self::ExceptionSuppressContext
             | Self::FloatFormat { .. }
             | Self::GlobalGet(_)
@@ -556,6 +572,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
             name,
             "int_floordiv"
                 | "imre_json_index"
+                | "imre_exception_message"
+                | "imre_exception_repr"
                 | "imre_json_iter"
                 | "imre_json_len"
                 | "imre_json_get_receiver"
@@ -577,6 +595,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_int"
                 | "imre_print_float"
                 | "imre_log_config"
+                | "imre_log_config_named"
+                | "imre_log_check_level"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
                 | "imre_str_unquote"

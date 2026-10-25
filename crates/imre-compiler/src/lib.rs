@@ -159,6 +159,7 @@ pub fn compile_file(
     let (mut module, _) = checked_lower(&mut graph)?;
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
+    let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
     Ok(Compilation {
         llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer)?,
         extension_archives: graph
@@ -166,13 +167,8 @@ pub fn compile_file(
             .iter()
             .filter_map(|m| m.archive.clone())
             .collect(),
-        source_inputs: graph.inputs,
-        input_paths: graph
-            .modules
-            .into_iter()
-            .map(|module| module.path)
-            .chain(options.entry_profile.iter().cloned())
-            .collect(),
+        source_inputs,
+        input_paths,
     })
 }
 
@@ -287,6 +283,7 @@ fn compile_file_units_with(
         .iter()
         .map(|m| m.name.clone())
         .collect::<Vec<_>>();
+    let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
     Ok(UnitCompilation {
         units: llvm::emit_units(
             &module,
@@ -301,13 +298,8 @@ fn compile_file_units_with(
             .iter()
             .filter_map(|m| m.archive.clone())
             .collect(),
-        input_paths: graph
-            .modules
-            .into_iter()
-            .map(|m| m.path)
-            .chain(options.entry_profile.iter().cloned())
-            .collect(),
-        source_inputs: graph.inputs,
+        input_paths,
+        source_inputs,
     })
 }
 
