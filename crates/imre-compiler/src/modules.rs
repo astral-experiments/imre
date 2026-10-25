@@ -132,6 +132,7 @@ pub(crate) enum Intrinsic {
     Declaration(&'static str),
     ArgumentParser,
     ArgparseNamespace,
+    BooleanOptionalAction,
     RawDescriptionHelpFormatter,
     FutureAnnotations,
     ShallowCopy,
@@ -304,6 +305,8 @@ pub(crate) enum Intrinsic {
     Copy(CopyOperation),
     RmTree,
     CopyTree,
+    Move,
+    DestInSrc,
     IgnorePatterns,
     ShutilError,
     SameFileError,
@@ -571,6 +574,7 @@ impl IntrinsicModule {
             (Self::Errno, _) => Intrinsic::ErrnoAttribute,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
             (Self::Argparse, "Namespace") => Intrinsic::ArgparseNamespace,
+            (Self::Argparse, "BooleanOptionalAction") => Intrinsic::BooleanOptionalAction,
             (Self::Argparse, "RawDescriptionHelpFormatter") => {
                 Intrinsic::RawDescriptionHelpFormatter
             }
@@ -683,6 +687,8 @@ impl IntrinsicModule {
             }
             (Self::Shutil, "rmtree") => Intrinsic::RmTree,
             (Self::Shutil, "copytree") => Intrinsic::CopyTree,
+            (Self::Shutil, "move") => Intrinsic::Move,
+            (Self::Shutil, "_destinsrc") => Intrinsic::DestInSrc,
             (Self::Shutil, "ignore_patterns") => Intrinsic::IgnorePatterns,
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Shutil, "copyfile") => Intrinsic::Copy(CopyOperation::File),
