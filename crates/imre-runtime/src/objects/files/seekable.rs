@@ -71,6 +71,7 @@ impl FileState {
     pub(in crate::objects) fn memory(data: Rc<Bytes>) -> Rc<Object> {
         Self {
             fd: None,
+            raw: false,
             name: None,
             kind: FileKind::Memory,
             stream: Some(Stream::Memory(Memory { data, position: 0 })),
@@ -81,6 +82,7 @@ impl FileState {
     pub(in crate::objects) fn member(member: Member) -> Rc<Object> {
         Self {
             fd: None,
+            raw: false,
             name: Some(member.name().clone()),
             kind: FileKind::Member,
             stream: Some(Stream::Member(Box::new(member))),
@@ -168,7 +170,7 @@ impl FileState {
             Stream::Read(input) => input.seek(at),
             Stream::Memory(m) => m.seek(at),
             Stream::Member(m) => m.seek(at),
-            Stream::Write(_) | Stream::TextMemory(_) => {
+            Stream::UnreadGzip { .. } | Stream::Write(_) | Stream::TextMemory(_) => {
                 Err(Error::new(Kind::UnsupportedOperation, "seek"))
             }
         }
@@ -177,6 +179,8 @@ impl FileState {
     pub(in crate::objects) fn read_into(&mut self, buf: &mut [u8]) -> Result<usize> {
         match self.stream()? {
             Stream::Read(input) => input.read_into(buf),
+            Stream::UnreadGzip { .. } if buf.is_empty() => Ok(0),
+            Stream::UnreadGzip { .. } => self.input()?.read_into(buf),
             Stream::Memory(m) => {
                 let n = m.remaining().len().min(buf.len());
                 buf[..n].copy_from_slice(&m.remaining()[..n]);

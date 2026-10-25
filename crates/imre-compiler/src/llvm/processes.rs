@@ -61,6 +61,23 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            ProcessOperation::SelectorClass(mode) => {
+                let which = mode.map_or(2, u32::from);
+                let operand =
+                    self.instruction(format!("call ptr @imre_popen_selector_class(i32 {which})"));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::SetSelector => {
+                self.line(format!(
+                    "call void @imre_popen_set_selector(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
             ProcessOperation::NewLoop | ProcessOperation::EnsureTask => {
                 let call = if matches!(operation, ProcessOperation::NewLoop) {
                     "call ptr @imre_async_loop_new()".to_owned()
@@ -449,6 +466,14 @@ impl Emitter<'_, '_> {
             }
             ProcessOperation::PopenArgs => self.call("imre_popen_args", returns, &[&args[0].value]),
             ProcessOperation::PopenPid => self.call("imre_popen_pid", returns, &[&args[0].value]),
+            ProcessOperation::PopenActive => self.call("imre_popen_active", returns, &[]),
+            ProcessOperation::PopenCleanup => {
+                self.line("call void @imre_popen_cleanup()");
+                none()
+            }
+            ProcessOperation::PopenIdentity => {
+                self.call("imre_popen_identity", returns, &[&args[0].value])
+            }
             ProcessOperation::PopenStatus { poll } => {
                 let control = self.instruction(format!(
                     "call ptr @imre_popen_control(ptr {})",
@@ -762,6 +787,18 @@ impl Emitter<'_, '_> {
                     args[0].value.operand
                 ));
                 self.unpack_word(word, returns)
+            }
+            ProcessOperation::QuoteCommandArgument => {
+                let word = self.word(&args[0].value);
+                let kind = representation_kind(args[0].value.ty, &self.module.types);
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_subprocess_quote_argument(i64 {word}, i32 {kind})"
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
             }
             ProcessOperation::Strerror => {
                 let operand = self.checked_instruction(format!(

@@ -58,10 +58,13 @@ compares complete failure messages, including first differing and extra list
 elements, Unicode, truncation, custom messages, and a subclass's failure class.
 It adds no upstream IDs.
 
-At each of O0 and O3: 7 fully native passes, 8 native bodies with host
+At each of O0 and O3: 8 fully native passes, 8 native bodies with host
 fixtures, 9 host-driven native operations (36 calls), 10 compile blockers,
-1,054 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
+1,053 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
 all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
+
+The [native loader example](NATIVE_LOADER.md) exercises the same original
+constructor with native default fixtures and identifies the seven blocked methods.
 
 Three additional complete equality methods are attempted at each level.
 `testAssertMultiLineEqualTruncates` constructs a TestCase with a method name;
@@ -120,6 +123,11 @@ diagnostic. `assert_any_call` searches the complete argument history for that mo
 checks both decisions after a reset, previously held call lists, child identity,
 and the different reset rules for children and cached return values. The mock
 tree can keep an exception instance as its `side_effect`.
+
+A Mock stored in an imported module records calls during module initialization,
+through an imported alias, and through the module attribute. The [import control](mock_globals/case.py)
+checks that all three calls share one history and compares the failed
+`assert_called_once()` message with CPython.
 
 `test_assert_any_call`, `test_assert_called_with` and
 `test_assert_called_once_with` exercise the callable form of
