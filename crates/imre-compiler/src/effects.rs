@@ -54,8 +54,15 @@ pub(crate) fn analyze(module: &Module, targets: &Targets) -> ExceptionEffects {
 }
 
 /// Check a fragment during lowering, when no callee is yet proven infallible.
-pub(crate) fn may_raise_locally(body: &[Statement]) -> bool {
-    block(body, &[], &Targets::default())
+pub(crate) fn may_raise_locally(body: &[Statement], types: &crate::types::Types) -> bool {
+    block(
+        body,
+        &[],
+        Context {
+            calls: &Targets::default(),
+            types,
+        },
+    )
 }
 
 /// Any potentially failing path is enough; unreachable branches and caught

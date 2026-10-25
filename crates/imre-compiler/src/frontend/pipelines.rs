@@ -207,8 +207,12 @@ fn not(value: Expr) -> Expr {
 }
 
 /// Handle exhaustion only inside the iterator or generator operation being pulled.
-fn catch_stop_iteration(body: Vec<Statement>, on_stop: Vec<Statement>) -> Vec<Statement> {
-    if !crate::effects::may_raise_locally(&body) {
+fn catch_stop_iteration(
+    types: &crate::types::Types,
+    body: Vec<Statement>,
+    on_stop: Vec<Statement>,
+) -> Vec<Statement> {
+    if !crate::effects::may_raise_locally(&body, types) {
         return body;
     }
     vec![Statement::Try {
@@ -1902,7 +1906,7 @@ impl Checker<'_> {
             ty: Type::Exception,
             kind: ExprKind::Builtin(Builtin::ExceptionWithCause, vec![error, cause]),
         }));
-        catch_stop_iteration(body, vec![converted])
+        catch_stop_iteration(self.types, body, vec![converted])
     }
 
     /// Captures the callable before its source, then invokes it only after each
@@ -1995,6 +1999,7 @@ impl Checker<'_> {
             let ready = self.hidden(Type::Bool);
             let mut step = std::mem::take(&mut input.next);
             let predicate = catch_stop_iteration(
+                self.types,
                 vec![Statement::If(
                     self.test_truth(operation, call)?,
                     vec![Statement::Assign(ready, boolean(true))],
@@ -2043,6 +2048,7 @@ impl Checker<'_> {
                 .next
                 .push(Statement::Assign(ready, self.local(input.ready)));
             let mut mapped = catch_stop_iteration(
+                self.types,
                 vec![Statement::Assign(value, operation)],
                 vec![Statement::Assign(ready, boolean(false))],
             );
