@@ -39,7 +39,7 @@ fn returncode(status: ExitStatus) -> i32 {
 }
 
 pub(in crate::objects) struct Popen {
-    args: Rc<Object>,
+    args: OwnedWord,
     child: Option<Child>,
     status: Option<i32>,
     pipes: Pipes,
@@ -166,7 +166,25 @@ pub unsafe extern "C" fn imre_popen_pipes(
     bufsize: usize,
     close_fds: bool,
 ) -> *const Object {
+    // SAFETY: the original entry point accepts only list[str].
+    unsafe { imre_popen_command(args.cast(), 5, cwd, env, streams, bufsize, close_fds) }
+}
+
+/// # Safety
+/// The command pointer is rooted with exactly the supplied representation kind.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_popen_command(
+    args: *const (),
+    arg_kind: u32,
+    cwd: *const Str,
+    env: *const Object,
+    streams: u32,
+    bufsize: usize,
+    close_fds: bool,
+) -> *const Object {
     // SAFETY: generated callers root the launch and buffer arguments until spawn completes.
+    let args = unsafe { WordKind::new(arg_kind).acquire(args as usize) };
+    // SAFETY: the rooted directory, environment and buffer size have their declared types.
     let result = unsafe { spawn(args, cwd, env, streams, bufsize, close_fds) }.map(|child| {
         Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Popen(Box::new(
             child,
@@ -180,7 +198,7 @@ pub unsafe extern "C" fn imre_popen_pipes(
 /// # Safety
 /// The caller roots the argv, optional directory/environment and buffer size.
 unsafe fn spawn(
-    args: *const Object,
+    args: OwnedWord,
     cwd: *const Str,
     env: *const Object,
     streams: u32,
@@ -205,7 +223,7 @@ unsafe fn spawn(
         ));
     }
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
-    unsafe { prepare_process(args, cwd, env) }
+    unsafe { prepare_command(&args, cwd, env) }
         .and_then(|(launch, cwd)| launch.spawn(cwd.as_ref(), streams).map_err(os_error))
         .map(|mut child| {
             let text = streams & (1 << 16) != 0;
@@ -217,8 +235,7 @@ unsafe fn spawn(
             ];
             Popen {
                 pipes,
-                // SAFETY: the original argv stays rooted while we acquire it.
-                args: unsafe { acquire_rc(args as usize) },
+                args,
                 child: Some(child),
                 status: None,
                 communication: Default::default(),
@@ -243,7 +260,41 @@ pub unsafe extern "C" fn imre_subprocess_call(
     word: usize,
     check: bool,
 ) -> usize {
+    // SAFETY: the original call entry point accepts an exact list[str].
+    unsafe {
+        imre_call_command(
+            args.cast(),
+            5,
+            cwd,
+            env,
+            streams,
+            bufsize,
+            close_fds,
+            kind,
+            word,
+            check,
+        )
+    }
+}
+
+/// # Safety
+/// The command pointer has the given representation; all launch and deadline arguments are rooted.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_call_command(
+    args: *const (),
+    arg_kind: u32,
+    cwd: *const Str,
+    env: *const Object,
+    streams: u32,
+    bufsize: usize,
+    close_fds: bool,
+    kind: u32,
+    word: usize,
+    check: bool,
+) -> usize {
     // SAFETY: caller guarantees the exact native representations and owners.
+    let args = unsafe { WordKind::new(arg_kind).acquire(args as usize) };
+    // SAFETY: the rooted directory, environment and buffer size have their declared types.
     let result = unsafe { spawn(args, cwd, env, streams, bufsize, close_fds) }.and_then(|mut p| {
         // SAFETY: the deadline kind was selected for this rooted word by the compiler.
         let timeout = unsafe { Deadline::from_word(kind, word) };
@@ -310,9 +361,9 @@ pub unsafe extern "C" fn imre_popen_pid(handle: *const Object) -> usize {
 /// # Safety
 /// The caller roots this Popen; the returned reference owns its original argv.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_popen_args(handle: *const Object) -> *const Object {
-    // SAFETY: the handle owns the list throughout the reference acquisition.
-    unsafe { with_process(handle, |p| Rc::into_raw(p.args.clone())) }
+pub unsafe extern "C" fn imre_popen_args(handle: *const Object) -> *const () {
+    // SAFETY: the handle owns this exact command throughout the reference acquisition.
+    unsafe { with_process(handle, |p| p.args.clone().into_word() as *const ()) }
 }
 
 /// # Safety
