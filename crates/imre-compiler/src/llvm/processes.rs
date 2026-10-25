@@ -590,8 +590,11 @@ impl Emitter<'_, '_> {
             ProcessOperation::RegisterArchive {
                 unpack,
                 frame,
+                keyword_value,
                 root_flag,
             } => {
+                let rest_kind = keyword_value
+                    .map_or(u32::MAX, |ty| representation_kind(ty, &self.module.types));
                 let [name, exts, function, extras, description, adapter, metadata] = args else {
                     unreachable!()
                 };
@@ -623,7 +626,7 @@ impl Emitter<'_, '_> {
                         0
                     };
                 if unpack {
-                    self.checked_line(format!("call void @imre_shutil_register_unpack(ptr {}, ptr {}, ptr {function}, i64 {word}, i32 {kind}, ptr {}, ptr {target}, ptr {layout}, ptr {metadata})", name.value.operand, exts.value.operand, description.value.operand));
+                    self.checked_line(format!("call void @imre_shutil_register_unpack(ptr {}, ptr {}, ptr {function}, i64 {word}, i32 {kind}, ptr {}, ptr {target}, ptr {layout}, ptr {metadata}, i32 {rest_kind})", name.value.operand, exts.value.operand, description.value.operand));
                 } else {
                     let func = &args[2].value;
                     let func_kind = representation_kind(func.ty, &self.module.types);
@@ -632,7 +635,7 @@ impl Emitter<'_, '_> {
                         || "null".to_owned(),
                         |id| format!("@{}", self.archive_root_ref(id)),
                     );
-                    self.checked_line(format!("call void @imre_shutil_register_pack(ptr {}, i64 {func_word}, i32 {func_kind}, i64 {word}, i32 {kind}, ptr {}, ptr {target}, ptr {layout}, ptr {metadata}, ptr {root})",name.value.operand,description.value.operand));
+                    self.checked_line(format!("call void @imre_shutil_register_pack(ptr {}, i64 {func_word}, i32 {func_kind}, i64 {word}, i32 {kind}, ptr {}, ptr {target}, ptr {layout}, ptr {metadata}, ptr {root}, i32 {rest_kind})",name.value.operand,description.value.operand));
                 }
                 none()
             }

@@ -1535,6 +1535,7 @@ pub(crate) enum ProcessOperation {
     RegisterArchive {
         unpack: bool,
         frame: Option<Type>,
+        keyword_value: Option<Type>,
         root_flag: Option<(usize, usize)>,
     },
     FastCopy(u32),

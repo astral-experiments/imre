@@ -12,6 +12,7 @@ pub(in super::super) struct Callback {
     metadata: OwnedWord,
     extras: OwnedWord,
     nonstring_keys: bool,
+    keyword_value_kind: Option<WordKind>,
     pub(super) root_flag: Option<&'static AtomicU8>,
 }
 
@@ -133,6 +134,7 @@ impl Callback {
         metadata: *const usize,
         extras: usize,
         extras_kind: u32,
+        rest_kind: u32,
     ) -> Self {
         // SAFETY: acquire the original values; the adapter and its layout are static.
         unsafe {
@@ -143,6 +145,7 @@ impl Callback {
                 metadata: WordKind::new(6).acquire(metadata as usize),
                 extras: WordKind::new(extras_kind & 0xffff).acquire(extras),
                 nonstring_keys: extras_kind & 0x10000 != 0,
+                keyword_value_kind: (rest_kind != u32::MAX).then(|| WordKind::new(rest_kind)),
                 root_flag: None,
             }
         }
@@ -347,23 +350,39 @@ impl Callback {
         let mut bound: Vec<Option<OwnedWord>> = (0..params.len()).map(|_| None).collect();
         let positional = params
             .iter()
-            .take_while(|(_, mode, _)| text(mode) != "*")
+            .take_while(|(_, mode, _)| matches!(text(mode), "/" | ""))
             .count();
         for (i, value) in positional_values.into_iter().enumerate().take(positional) {
             bound[i] = Some(value);
         }
-        for (key, value) in kwargs {
+        let rest = self.keyword_value_kind.map(|kind| {
             let index = params
                 .iter()
-                .position(|(n, mode, _)| text(n) == key && text(mode) != "/")
-                .ok_or_else(|| {
-                    type_error(format!(
-                        "{short}() got an unexpected keyword argument '{key}'"
-                    ))
-                })?;
-            if bound[index].replace(value).is_some() {
+                .position(|(_, mode, _)| text(mode) == "**")
+                .expect("keyword rest slot");
+            let dict = mappings::imre_dict_new(3, kind.raw());
+            // SAFETY: this new dictionary is owned by the argument frame for this call.
+            bound[index] = Some(unsafe { OwnedWord::from_owned(dict as usize, WordKind::new(5)) });
+            (dict, kind)
+        });
+        for (key, value) in kwargs {
+            if let Some(index) = params
+                .iter()
+                .position(|(n, mode, _)| text(n) == key && matches!(text(mode), "" | "*"))
+            {
+                if bound[index].replace(value).is_some() {
+                    return Err(type_error(format!(
+                        "{short}() got multiple values for argument '{key}'"
+                    )));
+                }
+            } else if let Some((dict, kind)) = rest {
+                let key = string_word(Rc::new(Str::from(key)));
+                let value = stored(value, kind)?;
+                // SAFETY: the frame roots the fresh dictionary; both operands have its declared kinds.
+                unsafe { mappings::dict_set(dict, key.word, value.word)? };
+            } else {
                 return Err(type_error(format!(
-                    "{short}() got multiple values for argument '{key}'"
+                    "{short}() got an unexpected keyword argument '{key}'"
                 )));
             }
         }
@@ -396,7 +415,7 @@ impl Callback {
                 )));
             }
         }
-        // SAFETY: the frame holds precisely these scalar arguments. The original
+        // SAFETY: the frame holds precisely the declared arguments. The original
         // callable is rooted separately and survives a callback removing itself.
         unsafe {
             let frame = allocate_record(self.frame);

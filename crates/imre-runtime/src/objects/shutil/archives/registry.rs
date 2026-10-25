@@ -128,6 +128,7 @@ pub unsafe extern "C" fn imre_shutil_register_unpack(
     adapter: *const (),
     frame: *const RecordDescriptor,
     metadata: *const usize,
+    rest_kind: u32,
 ) {
     let result = REGISTRY.with_borrow_mut(|registry| -> Result<()> {
         // The last registered owner wins if an existing list was mutated to contain
@@ -180,6 +181,7 @@ pub unsafe extern "C" fn imre_shutil_register_unpack(
                     metadata,
                     extras,
                     extras_kind,
+                    rest_kind,
                 ))),
             }
         };
@@ -214,6 +216,7 @@ pub unsafe extern "C" fn imre_shutil_register_pack(
     frame: *const RecordDescriptor,
     metadata: *const usize,
     root_flag: *const std::sync::atomic::AtomicU8,
+    rest_kind: u32,
 ) {
     let result = REGISTRY.with_borrow_mut(|registry| -> Result<()> {
         if adapter.is_null() {
@@ -244,6 +247,7 @@ pub unsafe extern "C" fn imre_shutil_register_pack(
                 metadata,
                 extras,
                 extras_kind,
+                rest_kind,
             )
         };
         // SAFETY: this flag, when present, lives for the entire native program.

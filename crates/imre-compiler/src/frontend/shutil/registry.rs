@@ -81,26 +81,37 @@ impl Checker<'_> {
         }
         let callback = args.values[args.order[2]].ty;
         let result_ty = if unpack { Type::None } else { Type::Str };
+        let mut keyword_value = None;
         let (layout, adapter, metadata) =
             if let Some((fields, returns)) = self.types.signature(callback) {
                 let declared = signature.ok_or_else(|| error(self.source, call,
                 "registered archive callbacks need a known signature to bind keyword arguments"))?;
                 // Two unrelated container/class types can have the same storage kind. Never
                 // bind an erased object to a differently typed slot in the callback frame.
-                if fields.iter().any(|&ty| {
-                    !matches!(
-                        self.types.payload(ty).unwrap_or(ty),
+                for (p, &ty) in declared.iter().zip(&fields) {
+                    let value = if p.kind == ParameterKind::KeywordRest {
+                        let (Type::Str, element) =
+                            self.types.mapping(ty).expect("typed keyword rest")
+                        else {
+                            unreachable!("keyword names are strings")
+                        };
+                        keyword_value = Some(element);
+                        element
+                    } else {
+                        ty
+                    };
+                    if !matches!(
+                        self.types.payload(value).unwrap_or(value),
                         Type::None | Type::Bool | Type::Int | Type::Float | Type::Str | Type::Bytes
-                    )
-                }) {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "registered archive callback parameters require scalar types",
-                    ));
+                    ) {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "registered archive callback parameters require scalar types",
+                        ));
+                    }
                 }
-                // Keep the callable as a separate adapter argument; only its scalar
-                // parameters belong in the tuple used for keyword binding.
+                // Keep the callable separate from the frame for the bound arguments.
                 if !unpack && returns != Type::Str {
                     return Err(error(
                         self.source,
@@ -176,6 +187,7 @@ impl Checker<'_> {
                                 ParameterKind::PositionalOnly => "/",
                                 ParameterKind::PositionalOrKeyword => "",
                                 ParameterKind::KeywordOnly => "*",
+                                ParameterKind::KeywordRest => "**",
                             };
                             tuple(vec![
                                 unpacking::string(p.name),
@@ -211,6 +223,7 @@ impl Checker<'_> {
             Builtin::Process(ir::ProcessOperation::RegisterArchive {
                 unpack,
                 frame: layout,
+                keyword_value,
                 root_flag,
             }),
             Type::None,

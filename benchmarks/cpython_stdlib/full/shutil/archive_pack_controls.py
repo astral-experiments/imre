@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from copyfile import build
 
 SOURCE = b'''import os
@@ -28,6 +29,21 @@ def rooted(base: str, directory: str, *, dry_run: int, logger: None, owner: str 
     print(os.getcwd())
     print(root_dir if root_dir is not None else "<no root>")
     return base + ".rooted"
+
+def capture(base: str, /, directory: str, *, dry_run: int, logger: None, owner: str | None, group: str | None, **labels: str) -> str:
+    print("pack kwargs")
+    print(labels.get("base", "absent"))
+    print(labels.get("labels", "absent"))
+    print(len(labels))
+    labels["used"] = "once"
+    return base + ".captured"
+
+def extract(source: str, dest: str, /, **weights: int) -> None:
+    print("unpack kwargs")
+    print(weights.get("source", -1))
+    print(weights.get("weights", -1))
+    print(len(weights))
+    weights["edited"] = 9
 
 try:
     shutil.register_archive_format("xxx", 1)
@@ -76,6 +92,23 @@ print(shutil.make_archive("relative", "same_function", root_dir="switched"))
 print(os.getcwd())
 shutil.unregister_archive_format("rooted")
 shutil.unregister_archive_format("same_function")
+
+shutil.register_archive_format("capture", capture, [("base", "shadow"), ("labels", "outer")])
+print(shutil.make_archive("one", "capture"))
+print(shutil.make_archive("two", "capture"))
+shutil.register_archive_format("capture", capture)
+print(shutil.make_archive("three", "capture"))
+shutil.register_archive_format("capture", capture, [("directory", "duplicate")])
+try:
+    shutil.make_archive("four", "capture")
+except TypeError as error:
+    print(str(error))
+shutil.unregister_archive_format("capture")
+
+shutil.register_unpack_format("weights", [".weights"], extract, [("source", 7), ("weights", 2)])
+shutil.unpack_archive("example.weights", "out")
+shutil.unpack_archive("example.weights", "out")
+shutil.unregister_unpack_format("weights")
 '''
 
 def main():
@@ -96,6 +129,10 @@ def main():
         assert expected.count(os.fsencode(root/"content")+b"\n")==2
         assert b"switched\nrelative.rooted\n" in expected
         assert os.fsencode(root/"switched")+b"\n<no root>\n" in expected
+        assert expected.count(b"pack kwargs\nshadow\nouter\n2\n")==2
+        assert b"pack kwargs\nabsent\nabsent\n0\n" in expected
+        assert b"capture() got multiple values for argument 'directory'\n" in expected
+        assert expected.count(b"unpack kwargs\n7\n2\n2\n")==2
         for level in (0,3):
             exe=build(args,root,f"native-{level}",SOURCE,level);actual=run([str(exe)])
             assert actual==expected,(actual,expected)
