@@ -1013,6 +1013,10 @@ pub(crate) enum ProcessOperation {
     Popen {
         streams: u32,
     },
+    Call {
+        streams: u32,
+        check: bool,
+    },
     PopenPid,
     PopenArgs,
     PopenPipe(u8),
