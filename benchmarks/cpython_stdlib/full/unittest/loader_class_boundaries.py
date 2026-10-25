@@ -1,4 +1,5 @@
 """Check that name discovery cannot discard observable local class construction."""
+from pathlib import Path
 import subprocess
 import sys
 from textwrap import dedent
@@ -7,6 +8,16 @@ from suite_native import NativeCompileError
 
 
 def verify(lang, root):
+    folder = root / "loader_local_classes"
+    folder.mkdir()
+    source = Path(__file__).with_name("loader_local_classes.py").read_bytes()
+    binary = lang.build(source, folder)
+    expected = subprocess.run([sys.executable, "-EB", folder / "case.py"], cwd=folder,
+                              capture_output=True, check=True, timeout=30)
+    actual = subprocess.run([binary], cwd=folder, capture_output=True, check=True, timeout=30)
+    if (actual.stdout, actual.stderr) != (expected.stdout, expected.stderr):
+        raise AssertionError(f"local class discovery differs: {actual!r} != {expected!r}")
+
     cases = {
         "forward": ("""
             def inspect() -> None:

@@ -1,5 +1,6 @@
 """Run complete pinned unittest methods against native Imre at both optimization levels."""
 import argparse
+import ast
 import hashlib
 from collections import Counter
 from contextlib import contextmanager
@@ -18,12 +19,19 @@ from suite_native import (NativeCompileError, NativeDefaultMethod, Toolchain, co
                           method_bytes, native_method, run_evidence, testcase_fixture)
 
 PREFIX = "test.test_unittest."
-DEFAULT_LOADER_METHODS = {
-    "test___init__": "unittest.TestLoader construction and its errors list",
-    **dict.fromkeys(("test_getTestCaseNames", "test_getTestCaseNames__no_tests",
-                     "test_getTestCaseNames__inheritance", "test_getTestCaseNames__testNamePatterns",
-                     "test_sortTestMethodsUsing__default_value"), "unittest.TestLoader.getTestCaseNames"),
-}
+def loader_methods():
+    path = HERE / "upstream/Lib/test/test_unittest/test_loader.py"
+    owner, = (c for c in ast.parse(path.read_bytes()).body
+              if isinstance(c, ast.ClassDef) and c.name == "Test_TestLoader")
+    methods = {m.name: "unittest.TestLoader.getTestCaseNames"
+               for m in owner.body if isinstance(m, ast.FunctionDef)
+               and any(isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                       and call.func.attr == "getTestCaseNames" for call in ast.walk(m))}
+    methods["test___init__"] = "unittest.TestLoader construction and its errors list"
+    return methods
+
+
+DEFAULT_LOADER_METHODS = loader_methods()
 ASSERTIONS = {
     "testAssertTrue": "assertTrue", "testAssertFalse": "assertFalse",
     "testAssertLess": "assertLess", "testAssertLessEqual": "assertLessEqual",
@@ -113,11 +121,9 @@ def run(args, level, root):
     if (reference["module"], reference["cpython_commit"]) != (manifest["module"], manifest["commit"]):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level, args.reachable_only)
-    from loader_class_boundaries import verify as verify_local_class_boundaries
-    verify_local_class_boundaries(lang, root)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
     for name in ["equality_protocol", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
-                 "callable_binding", "context_regex", "loader_names", "loader_local_classes", *("context_" + family for family in families)]:
+                 "callable_binding", "context_regex", "loader_names", *("context_" + family for family in families)]:
         control = root / name
         control.mkdir()
         if name == "loader_names":
@@ -198,6 +204,13 @@ def run(args, level, root):
                 or r["classification"] in {"reference-failure", "reference-disagreement"}]
     for row in failures:
         print(row["id"], row.get("reason", row["reference"]), file=sys.stderr)
+    # Retain original-method observations even when a separate control fails.
+    from loader_class_boundaries import verify as verify_local_class_boundaries
+    try:
+        verify_local_class_boundaries(lang, root)
+    except (NativeCompileError, AssertionError, subprocess.SubprocessError) as exc:
+        print(f"local class discovery control failed at O{level}: {exc}", file=sys.stderr)
+        return report, True
     return report, bool(failures)
 
 

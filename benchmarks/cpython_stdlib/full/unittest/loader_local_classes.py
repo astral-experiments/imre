@@ -15,7 +15,7 @@ def inspect_local() -> None:
         def other(self):
             raise RuntimeError("discovery called a prefixed method")
 
-    print(Child.__name__, Child.__qualname__, Child.__module__)
+    print(Child.__name__ + " " + Child.__qualname__ + " " + Child.__module__)
     loader = unittest.TestLoader()
     print(loader.getTestCaseNames(Child))
     loader.testNamePatterns = ["__main__.inspect_local.<locals>.Child.test_parent"]
