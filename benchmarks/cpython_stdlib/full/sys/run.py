@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
@@ -72,8 +73,8 @@ def select(toolchain, work, source, module):
         executions[case_id] = native_method(toolchain, directory(work, method),
                                              source, cls, case_id, fixture, operation=("imre", operation))
 
-    # Process regressions use the real hooks and retained objects; neither is an additional test ID.
-    for filename in ("active_exception.py", "display_values.py"):
+    # Process regressions use the real hooks and retained objects; none adds a test ID.
+    for filename in ("active_exception.py", "display_values.py", "codec_lookup.py"):
         exercise = HERE / filename
         ref = subprocess.run([sys.executable, exercise], capture_output=True, check=True, timeout=15)
         binary = toolchain.build(exercise.read_bytes(), directory(work, exercise.stem))
@@ -107,18 +108,24 @@ def select(toolchain, work, source, module):
             def getfilesystemencoding(self):
                 return invoke("filesystem")
 
-        with patch.object(module, "sys", NativeSys()):
+        def lookup(name):
+            # The upstream helper discards the CodecInfo. Only its name crosses the process boundary.
+            return SimpleNamespace(name=invoke("lookup", name))
+
+        with (patch.object(module, "sys", NativeSys()),
+              patch.object(module, "codecs", SimpleNamespace(lookup=lookup))):
             original()
-        if not calls:
-            raise AssertionError(f"{case.id()} made no native calls")
-        is_default = "default" in calls
+        is_default = case._testMethodName == "test_getdefaultencoding"
+        expected_calls = ["default-argument", "default"] if is_default else ["filesystem", "platform", "lookup"]
+        if calls != expected_calls:
+            raise AssertionError((case.id(), calls))
         return {"execution": "host-driven-native", "body": "CPython", "assertions": "CPython",
                 "fixture_execution": "CPython module/class/instance hooks", "calls": calls,
                 "observation": {"roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
-                                "evidence": {"operation": ", ".join("sys." + name for name in
-                                             (["getdefaultencoding"] if is_default else ["getfilesystemencoding", "platform"])),
+                                "evidence": {"operation": ("sys.getdefaultencoding" if is_default else
+                                             "sys.getfilesystemencoding, sys.platform, codecs.lookup"),
                                              "assertions": ("upstream TypeError and result type assertions" if is_default else
-                                                            "upstream check_fsencoding; codecs.lookup runs on the host"),
+                                                            "upstream check_fsencoding validates the encoding; Imre resolves its codec"),
                                              "method_sha256": pinned_methods[type(case).__name__, case._testMethodName],
                                              "fixture": "original SysModuleTest lifecycle and reap_children teardown",
                                              "native_calls": len(calls), "calls": calls, "opt_level": toolchain.level}}}

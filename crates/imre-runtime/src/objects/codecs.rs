@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 thread_local! {
     static REGISTRY: RefCell<HashMap<String, Rc<Object>>> = RefCell::default();
+    static NAMES: [Rc<Str>; 4] = ["ascii", "iso8859-1", "utf-8", "utf-8-sig"].map(|s| Rc::new(Str::new(s)));
 }
 
 /// Collapse non-ASCII-alphanumeric separators, retaining dots in codec names.
@@ -71,13 +72,13 @@ unsafe fn codec(info: *const Object) -> Codec {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_codec_name(info: *const Object) -> *const Str {
     // SAFETY: the codec info was returned by the registry.
-    let name = match unsafe { codec(info) } {
-        Codec::Ascii => "ascii",
-        Codec::Latin1 => "iso8859-1",
-        Codec::Utf8 { signature: false } => "utf-8",
-        Codec::Utf8 { signature: true } => "utf-8-sig",
+    let index = match unsafe { codec(info) } {
+        Codec::Ascii => 0,
+        Codec::Latin1 => 1,
+        Codec::Utf8 { signature: false } => 2,
+        Codec::Utf8 { signature: true } => 3,
     };
-    Rc::into_raw(Rc::new(Str::new(name)))
+    NAMES.with(|names| Rc::into_raw(names[index].clone()))
 }
 
 /// # Safety
