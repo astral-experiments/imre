@@ -165,9 +165,9 @@ impl Checker<'_> {
         })
     }
 
-    /// Bind splitlines/isspace after evaluating the receiver; an explicit
+    /// Bind splitlines and no-argument text predicates after evaluating the receiver; an explicit
     /// keepends uses Python truth, including its fallible source-class protocol.
-    pub(super) fn line_method(
+    pub(super) fn splitlines_or_predicate(
         &mut self,
         receiver: Expr,
         name: &str,
@@ -193,7 +193,12 @@ impl Checker<'_> {
                     _ => ExprKind::Builtin(Builtin::SplitLines, vec![receiver]),
                 }
             } else {
-                ExprKind::Builtin(Builtin::Text(TextOperation::IsSpace), vec![receiver])
+                let predicate = match name {
+                    "isspace" => TextOperation::IsSpace,
+                    "isupper" => TextOperation::IsUpper,
+                    _ => unreachable!("resolved text predicate"),
+                };
+                ExprKind::Builtin(Builtin::Text(predicate), vec![receiver])
             };
             return Ok(Expr { ty: returns, kind });
         }
@@ -236,9 +241,9 @@ impl Checker<'_> {
             values.push(self.expr(&kw.value)?);
         }
         let message = if !split && !args.keywords.is_empty() {
-            "str.isspace() takes no keyword arguments".to_owned()
+            format!("str.{name}() takes no keyword arguments")
         } else if !split {
-            format!("str.isspace() takes no arguments ({count} given)")
+            format!("str.{name}() takes no arguments ({count} given)")
         } else if count > 1 {
             let qualifier = if args.args.is_empty() { "keyword " } else { "" };
             format!("splitlines() takes at most 1 {qualifier}argument ({count} given)")

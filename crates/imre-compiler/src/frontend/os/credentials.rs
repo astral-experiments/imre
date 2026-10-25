@@ -50,8 +50,22 @@ impl Checker<'_> {
             })
         };
         if let Some(message) = message {
-            self.graph
-                .checked_positional_binding(self.module, call, size);
+            // Mark only the bad binding sites; errors inside evaluated operands remain visible.
+            if call.arguments.args.len() < size {
+                self.graph
+                    .checked_missing_argument(self.module, call.range());
+            }
+            for arg in call.arguments.args.iter().skip(size) {
+                self.graph.checked_excess_argument(self.module, arg.range());
+            }
+            for keyword in &call.arguments.keywords {
+                self.graph
+                    .checked_positional_keyword(self.module, keyword.range());
+            }
+            self.graph.checked_keywords(
+                self.module,
+                call.arguments.keywords.iter().map(Ranged::range),
+            );
             return Ok(scope.finish(id_error(returns, message)));
         }
         let mut args = Vec::new();
