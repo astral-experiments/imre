@@ -70,7 +70,31 @@ impl<'a> Visitor<'a> for References<'_> {
         }
     }
 
+    fn visit_f_string(&mut self, string: &'a ast::FString) {
+        if string
+            .elements
+            .iter()
+            .any(|element| matches!(element, ast::InterpolatedStringElement::Interpolation(field) if !literal(&field.expression)))
+        {
+            self.found.attributes.insert("__repr__".into());
+            self.found.instance_attributes.insert("__repr__".into());
+        }
+        ruff_python_ast::visitor::walk_f_string(self, string);
+    }
+
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        if let ast::Expr::Call(call) = expr
+            && (self.graph.resolve(self.module, &call.func)
+                == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii))
+                || (matches!(call.func.as_ref(), ast::Expr::Name(name) if matches!(name.id.as_str(), "ascii" | "repr" | "str" | "print"))
+                    && self.graph.resolve(self.module, &call.func).is_none()))
+            && let [argument] = call.arguments.args.as_ref()
+            && !literal(argument)
+            && call.arguments.keywords.is_empty()
+        {
+            self.found.attributes.insert("__repr__".into());
+            self.found.instance_attributes.insert("__repr__".into());
+        }
         if let ast::Expr::Call(call) = expr
             && self.graph.resolve(self.module, &call.func)
                 == Some(Binding::Intrinsic(Intrinsic::ShallowCopy))

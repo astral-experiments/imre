@@ -40,7 +40,12 @@ fn has_container_float(ty: Type, inside: bool, types: &Types) -> bool {
     match ty {
         Type::Float => inside,
         Type::Optional(_) => has_container_float(types.payload(ty).unwrap(), inside, types),
-        Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_) | Type::Tuple(_) => types
+        Type::ListInt
+        | Type::List(_)
+        | Type::Dict(_)
+        | Type::Set(_)
+        | Type::Tuple(_)
+        | Type::VarTuple(_) => types
             .children(ty)
             .into_iter()
             .any(|child| has_container_float(child, true, types)),
@@ -98,6 +103,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::LogRecord
         | Type::Logger
         | Type::TimedFileHandler
+        | Type::ProcessSelectorClass
         | Type::ClockTime
         | Type::Poll
         | Type::Socket
@@ -126,33 +132,55 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
 /// An unused generated repr does not constrain a closed entry. Check its full
 /// field tree on each operation that can actually format the value.
 pub(super) fn can_format(ty: Type, types: &Types, classes: &ClassInfo) -> bool {
-    fn check(ty: Type, types: &Types, classes: &ClassInfo, seen: &mut HashSet<usize>) -> bool {
-        if let Type::Class(id) = ty {
-            if !seen.insert(id) {
-                return true;
-            }
-            let class = &classes.declarations.definitions[id];
-            return class.dataclass.is_none_or(|d| !d.repr)
-                || class
-                    .fields
-                    .iter()
-                    .zip(&classes.fields[id])
-                    .all(|(field, &ty)| !field.repr || check(ty, types, classes, seen));
+    check_format(ty, types, classes, &mut HashSet::new(), false)
+}
+
+/// The dispatch branch already proved the exact outer record layout.
+pub(super) fn can_format_concrete(ty: Type, types: &Types, classes: &ClassInfo) -> bool {
+    check_format(ty, types, classes, &mut HashSet::new(), true)
+}
+
+fn check_format(
+    ty: Type,
+    types: &Types,
+    classes: &ClassInfo,
+    seen: &mut HashSet<usize>,
+    exact: bool,
+) -> bool {
+    if let Type::Class(id) = ty {
+        if !exact && classes.has_concrete_subclasses(id) {
+            return classes
+                .concrete_layouts(id)
+                .into_iter()
+                .all(|class| check_format(Type::Class(class), types, classes, seen, true));
         }
-        // The runtime formatter knows this boxed scalar or tuple default.
-        if types.context_value(ty) == Some(Type::ObjectValue) {
+        if classes.has_repr_override(id) {
+            // The descriptor walk borrows contents and cannot run a mutating callback.
+            return false;
+        }
+        if !seen.insert(id) {
             return true;
         }
-        if matches!(ty, Type::ModuleSpec(_)) {
-            return repr_supported(ty, types);
-        }
-        repr_supported(ty, types)
-            && types
-                .children(ty)
-                .into_iter()
-                .all(|ty| check(ty, types, classes, seen))
+        let class = &classes.declarations.definitions[id];
+        return class.dataclass.is_none_or(|d| !d.repr)
+            || class
+                .fields
+                .iter()
+                .zip(&classes.fields[id])
+                .all(|(field, &ty)| !field.repr || check_format(ty, types, classes, seen, false));
     }
-    check(ty, types, classes, &mut HashSet::new())
+    // Context variables can hold the supported boxed scalar or tuple defaults.
+    if types.context_value(ty) == Some(Type::ObjectValue) {
+        return true;
+    }
+    if matches!(ty, Type::ModuleSpec(_)) {
+        return repr_supported(ty, types);
+    }
+    repr_supported(ty, types)
+        && types
+            .children(ty)
+            .into_iter()
+            .all(|ty| check_format(ty, types, classes, seen, false))
 }
 
 /// Rejects only generated operations whose supported field representations cannot
@@ -210,6 +238,7 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
         ty,
         Type::Logger
             | Type::TimedFileHandler
+            | Type::ProcessSelectorClass
             | Type::ClockTime
             | Type::LogFormatter
             | Type::LogRecord

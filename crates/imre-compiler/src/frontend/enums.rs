@@ -467,6 +467,7 @@ impl Checker<'_> {
             || types == [Type::JsonDecoder; 2]
             || types == [Type::Poll; 2]
             || types == [Type::Socket; 2]
+            || types == [Type::ProcessSelectorClass; 2]
             || types == [Type::Sha256; 2])
         {
             return Err(error(

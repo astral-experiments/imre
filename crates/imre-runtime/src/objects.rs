@@ -42,6 +42,7 @@ mod os;
 mod paths;
 pub(crate) mod posixpath;
 mod processes;
+mod random;
 mod readiness;
 pub(crate) mod records;
 mod regexes;
@@ -116,6 +117,7 @@ enum Storage {
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
+    TupleBuffer(Vec<OwnedWord>),
     SimpleNamespace(Rc<Object>),
     SourceModule {
         name: crate::StrOwner,
@@ -133,6 +135,7 @@ enum Storage {
     ZipFile(Box<zipfile::Archive>),
     ZipInfo(Rc<zipfile::Info>),
     Popen(Box<processes::Popen>),
+    ProcessSelectorClass(bool),
     AsyncProcess(Box<processes::AsyncProcess>),
     AsyncCoroutine(Rc<asyncio::Task>),
     AsyncTask(Rc<asyncio::Task>),
@@ -649,7 +652,12 @@ pub unsafe extern "C" fn imre_str_concat(a: *const Str, b: *const Str) -> *const
     };
     result.push_str(left);
     result.push_str(right);
-    StrOwner::into_raw(StrOwner::new(result))
+    finish(
+        StrOwner::try_new(result)
+            .map(StrOwner::into_raw)
+            .map_err(|_| Error::allocation()),
+        std::ptr::null(),
+    )
 }
 
 /// # Safety
@@ -748,7 +756,8 @@ pub unsafe extern "C" fn imre_str_get_part(
 
 /// Formats one integer at its expression position without allocating for small
 /// values. Null means the fragment borrows `buffer`; otherwise the result owns
-/// the fallback string referenced by `part`. Neither outcome consumes `value`.
+/// the fallback string referenced by `part`. A pending digit-limit error means `part`
+/// is uninitialized. No outcome consumes `value`.
 ///
 /// # Safety
 /// `value` is a rooted canonical integer for this call. `buffer` points to 20
@@ -781,6 +790,9 @@ pub unsafe extern "C" fn imre_int_str_part(
         // SAFETY: the input is still rooted; this conversion returns an independent
         // string owner and performs arbitrary-precision formatting exactly once.
         let result = unsafe { super::imre_int_str(value) };
+        if result.is_null() {
+            return result;
+        }
         // SAFETY: the caller provides a writable descriptor, and the returned
         // owner keeps its immutable Str allocation alive for concatenation.
         unsafe {
@@ -904,7 +916,7 @@ pub unsafe extern "C" fn imre_str_concat_parts_owned(
         // SAFETY: all inputs, including self-borrows, remain rooted and unchanged.
         result.push_str(unsafe { part.as_str() });
     }
-    StrOwner::into_raw(StrOwner::new(result))
+    finish_shared_append(owner, StrOwner::try_new(result))
 }
 
 /// Appends a compiler-pooled literal, retaining its root for an empty prefix.
@@ -1025,7 +1037,17 @@ unsafe fn append_utf8_slow(mut owner: StrOwner, data: *const u8, length: usize) 
         };
         result.push_str(&owner);
         result.push_str(suffix);
-        StrOwner::into_raw(StrOwner::new(result))
+        finish_shared_append(owner, StrOwner::try_new(result))
+    }
+}
+
+fn finish_shared_append(
+    owner: StrOwner,
+    result: Result<StrOwner, allocator_api2::alloc::AllocError>,
+) -> *const Str {
+    match result {
+        Ok(result) => StrOwner::into_raw(result),
+        Err(_) => failed_append(owner),
     }
 }
 
@@ -1085,7 +1107,7 @@ unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Result<StrOwne
         return Ok(shared);
     }
     if length == 0 {
-        return Ok(text::owned_string(""));
+        return text::try_owned_string("");
     }
     let mut result = Str::try_with_capacity(length).map_err(|_| Error::allocation())?;
     {
@@ -1111,7 +1133,7 @@ unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Result<StrOwne
     // SAFETY: exactly `length` bytes were initialized within capacity; joining
     // complete UTF-8 fragments preserves UTF-8, including the full-inline case.
     unsafe { result.set_len(length) };
-    Ok(StrOwner::new(result))
+    StrOwner::try_new(result).map_err(|_| Error::allocation())
 }
 
 /// Python also treats the four ASCII information separators as whitespace.
@@ -1264,23 +1286,25 @@ struct LineIterator {
     offsets: LineOffsets,
 }
 
-fn owned_line(source: &StrOwner, range: std::ops::Range<usize>) -> StrOwner {
+fn owned_line(source: &StrOwner, range: std::ops::Range<usize>) -> Result<StrOwner, Error> {
     if range == (0..source.len()) {
-        StrOwner::clone(source)
+        Ok(StrOwner::clone(source))
     } else {
-        text::owned_string(&source[range])
+        text::try_owned_string(&source[range])
     }
 }
 
 impl LineIterator {
-    fn next(&mut self) -> Option<(OwnedWord, Option<OwnedWord>)> {
-        let range = self.offsets.next(&self.owner)?;
-        let line = owned_line(&self.owner, range);
+    fn next(&mut self) -> Result<Option<(OwnedWord, Option<OwnedWord>)>, Error> {
+        let Some(range) = self.offsets.next(&self.owner) else {
+            return Ok(None);
+        };
+        let line = owned_line(&self.owner, range)?;
         // SAFETY: the new string transfers one owner of the exact element kind.
         let line = unsafe {
             OwnedWord::from_owned(StrOwner::into_raw(line) as usize, words::WordKind::new(3))
         };
-        Some((line, None))
+        Ok(Some((line, None)))
     }
 }
 
@@ -1354,7 +1378,7 @@ unsafe fn split_string_lines<const KEEP: bool>(value: *const Str) -> *const Obje
 
 fn split_lines(
     value: &str,
-    own: impl Fn(std::ops::Range<usize>) -> StrOwner,
+    own: impl Fn(std::ops::Range<usize>) -> Result<StrOwner, Error>,
 ) -> Result<*const Object, Error> {
     let mut offsets = LineOffsets::new(value);
     let mut result = Words::new(3);
@@ -1363,7 +1387,7 @@ fn split_lines(
             .values
             .try_reserve(1)
             .map_err(|_| Error::allocation())?;
-        result.values.push(StrOwner::into_raw(own(range)) as usize);
+        result.values.push(StrOwner::into_raw(own(range)?) as usize);
     }
     Ok(Rc::into_raw(result.into_object()))
 }
@@ -1371,6 +1395,20 @@ fn split_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partial_split_releases_earlier_string_owners() {
+        let first = StrOwner::new(Str::new("first"));
+        let result = split_lines("first\nsecond", |range| {
+            if range.start == 0 {
+                Ok(first.clone())
+            } else {
+                Err(Error::allocation())
+            }
+        });
+        assert!(result.is_err());
+        assert_eq!(StrOwner::strong_count(&first), 1);
+    }
 
     #[test]
     fn concatenation_retains_the_only_nonempty_string_handle() {
@@ -1788,6 +1826,26 @@ mod tests {
             "capacity grew {growths} times for 1024 appends"
         );
         assert_eq!(source.as_str(), "é\0".repeat(1024));
+    }
+
+    #[test]
+    fn refused_shared_append_owner_restores_the_original_handle() {
+        let alias = StrOwner::new(Str::new("shared"));
+        let original = StrOwner::into_raw(alias.clone());
+        // SAFETY: the call consumes the slot's owner and restores it on failure.
+        let result = finish_shared_append(
+            unsafe { StrOwner::from_raw(original) },
+            Err(allocator_api2::alloc::AllocError),
+        );
+        assert!(result.is_null());
+        assert_eq!(exceptions::imre_error_pending(), 1);
+        // SAFETY: the slot still owns one reference and take transfers the exception.
+        unsafe {
+            let restored = StrOwner::from_raw(original);
+            assert!(StrOwner::ptr_eq(&restored, &alias));
+            imre_object_release(exceptions::imre_error_take());
+        }
+        assert_eq!(StrOwner::strong_count(&alias), 1);
     }
 
     #[test]
@@ -2273,7 +2331,9 @@ mod tests {
             offsets: LineOffsets::new(&source),
             owner: StrOwner::clone(&source),
         };
-        let (word, _) = cursor.next().unwrap();
+        let Ok(Some((word, _))) = cursor.next() else {
+            panic!("expected an owned line");
+        };
         // SAFETY: the iterator transfers a Str owner, and source roots the eager split.
         unsafe {
             let streamed = StrOwner::from_raw(word.into_word() as *const Str);
