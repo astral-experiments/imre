@@ -24,7 +24,16 @@ retains all 81 IDs. Three additional methods copy an instance natively and run t
 assertions on CPython. Two supply their byte-identical `__copy__` method;
 `test_copy_inst_vanilla` exercises the native default. These mixed fixtures
 transfer one typed integer field and check the native result class and distinct
-identity. The remaining 72 have reference evidence only.
+identity.
+
+The fourth mixed case is `test.test_copy.TestCopy.test_deepcopy_memo`. CPython
+creates its two references to one list, and the native process copies the graph.
+It reports both roots, the integer values, and which child objects each root
+references. The four unchanged assertions run on CPython against that result.
+The runner checks those assertions against three incorrect native copies: one
+returns the original root, one shares its leaves, and one loses the shared
+child. They must fail at the expected assertion at each optimization level.
+The remaining 71 occurrences have reference evidence only.
 
 Separate differential fixtures exercise shared children, independent outer
 containers, Counter/defaultdict missing keys, a tuple pointing into the same

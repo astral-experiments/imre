@@ -1,0 +1,383 @@
+{
+  "schema": "imre.subprocess.launch-errno/v1",
+  "platform": "linux",
+  "imre_revision": "8ca14776d2f156342d1778d044d4053395d6fe20",
+  "tested_tree": "fae9221820bda509d0dc4a6f47efe0992fc6df02",
+  "os_errno_revision": "c2d13d3e9bb4974d9d6e353c638f40ed38f49c9e",
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "actor_sha256": "50f3be7d44ec1a0dcb56deaceeb706319dbed2f126e9b7a549dbbebd223864de",
+      "toolchain": {
+        "imre": "6f28cefd913a235026568f9cbac99e9c615db7715a7f3d9cf8fc2a86ba520fda",
+        "runtime": "10ca187160a3eacb8772f1365c183790ed490a5622fdb26838f5236592983104",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_exception_bad_args_0": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:9:13: Imre: name is not a local value; globals and first-class functions are unsupported"
+            },
+            "fixture_selector": "PollSelector",
+            "observed": {
+              "api": "Popen",
+              "syscall": "execve",
+              "errno": 2,
+              "strerror": "No such file or directory",
+              "filename": "/_this/pa.th/does/not/exist",
+              "filename2": null,
+              "failed_child_reaped": true,
+              "native_parent_selector_calls": 0
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_exception_bad_executable": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:10:13: Imre: name is not a local value; globals and first-class functions are unsupported"
+            },
+            "fixture_selector": "PollSelector",
+            "observed": {
+              "api": "Popen",
+              "syscall": "execve",
+              "errno": 2,
+              "strerror": "No such file or directory",
+              "filename": "/_this/pa.th/does/not/exist",
+              "filename2": null,
+              "failed_child_reaped": true,
+              "native_parent_selector_calls": 0
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_exception_cwd": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:10:13: Imre: name is not a local value; globals and first-class functions are unsupported"
+            },
+            "fixture_selector": "PollSelector",
+            "observed": {
+              "api": "Popen",
+              "syscall": "chdir",
+              "errno": 2,
+              "strerror": "No such file or directory",
+              "filename": "/_this/pa.th/does/not/exist",
+              "filename2": null,
+              "failed_child_reaped": true,
+              "native_parent_selector_calls": 0
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_file_not_found_includes_filename": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "ProcessTestCase.test_file_not_found_includes_filename needs its upstream method decorator"
+            },
+            "fixture_selector": "PollSelector",
+            "observed": {
+              "api": "call",
+              "syscall": "execve",
+              "errno": 2,
+              "strerror": "No such file or directory",
+              "filename": "/opt/nonexistent_binary",
+              "filename2": null,
+              "failed_child_reaped": true,
+              "native_parent_selector_calls": 0
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_file_not_found_with_bad_cwd": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "ProcessTestCase.test_file_not_found_with_bad_cwd needs its upstream method decorator"
+            },
+            "fixture_selector": "PollSelector",
+            "observed": {
+              "api": "Popen",
+              "syscall": "chdir",
+              "errno": 2,
+              "strerror": "No such file or directory",
+              "filename": "/some/nonexistent/directory",
+              "filename2": null,
+              "failed_child_reaped": true,
+              "native_parent_selector_calls": 0
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_file_not_found_includes_filename": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "ProcessTestCase.test_file_not_found_includes_filename needs its upstream method decorator"
+            },
+            "fixture_selector": "SelectSelector",
+            "observed": {
+              "api": "call",
+              "syscall": "execve",
+              "errno": 2,
+              "strerror": "No such file or directory",
+              "filename": "/opt/nonexistent_binary",
+              "filename2": null,
+              "failed_child_reaped": true,
+              "native_parent_selector_calls": 0
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_file_not_found_with_bad_cwd": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "ProcessTestCase.test_file_not_found_with_bad_cwd needs its upstream method decorator"
+            },
+            "fixture_selector": "SelectSelector",
+            "observed": {
+              "api": "Popen",
+              "syscall": "chdir",
+              "errno": 2,
+              "strerror": "No such file or directory",
+              "filename": "/some/nonexistent/directory",
+              "filename2": null,
+              "failed_child_reaped": true,
+              "native_parent_selector_calls": 0
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "actor_sha256": "28b3ddecb35705981f2aff53b91ec086b97461bd307e1af28c35b79293547898",
+      "toolchain": {
+        "imre": "6f28cefd913a235026568f9cbac99e9c615db7715a7f3d9cf8fc2a86ba520fda",
+        "runtime": "10ca187160a3eacb8772f1365c183790ed490a5622fdb26838f5236592983104",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_exception_bad_args_0": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:9:13: Imre: name is not a local value; globals and first-class functions are unsupported"
+            },
+            "fixture_selector": "PollSelector",
+            "observed": {
+              "api": "Popen",
+              "syscall": "execve",
+              "errno": 2,
+              "strerror": "No such file or directory",
+              "filename": "/_this/pa.th/does/not/exist",
+              "filename2": null,
+              "failed_child_reaped": true,
+              "native_parent_selector_calls": 0
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_exception_bad_executable": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:10:13: Imre: name is not a local value; globals and first-class functions are unsupported"
+            },
+            "fixture_selector": "PollSelector",
+            "observed": {
+              "api": "Popen",
+              "syscall": "execve",
+              "errno": 2,
+              "strerror": "No such file or directory",
+              "filename": "/_this/pa.th/does/not/exist",
+              "filename2": null,
+              "failed_child_reaped": true,
+              "native_parent_selector_calls": 0
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_exception_cwd": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:10:13: Imre: name is not a local value; globals and first-class functions are unsupported"
+            },
+            "fixture_selector": "PollSelector",
+            "observed": {
+              "api": "Popen",
+              "syscall": "chdir",
+              "errno": 2,
+              "strerror": "No such file or directory",
+              "filename": "/_this/pa.th/does/not/exist",
+              "filename2": null,
+              "failed_child_reaped": true,
+              "native_parent_selector_calls": 0
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_file_not_found_includes_filename": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "ProcessTestCase.test_file_not_found_includes_filename needs its upstream method decorator"
+            },
+            "fixture_selector": "PollSelector",
+            "observed": {
+              "api": "call",
+              "syscall": "execve",
+              "errno": 2,
+              "strerror": "No such file or directory",
+              "filename": "/opt/nonexistent_binary",
+              "filename2": null,
+              "failed_child_reaped": true,
+              "native_parent_selector_calls": 0
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_file_not_found_with_bad_cwd": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "ProcessTestCase.test_file_not_found_with_bad_cwd needs its upstream method decorator"
+            },
+            "fixture_selector": "PollSelector",
+            "observed": {
+              "api": "Popen",
+              "syscall": "chdir",
+              "errno": 2,
+              "strerror": "No such file or directory",
+              "filename": "/some/nonexistent/directory",
+              "filename2": null,
+              "failed_child_reaped": true,
+              "native_parent_selector_calls": 0
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_file_not_found_includes_filename": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "ProcessTestCase.test_file_not_found_includes_filename needs its upstream method decorator"
+            },
+            "fixture_selector": "SelectSelector",
+            "observed": {
+              "api": "call",
+              "syscall": "execve",
+              "errno": 2,
+              "strerror": "No such file or directory",
+              "filename": "/opt/nonexistent_binary",
+              "filename2": null,
+              "failed_child_reaped": true,
+              "native_parent_selector_calls": 0
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_file_not_found_with_bad_cwd": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "ProcessTestCase.test_file_not_found_with_bad_cwd needs its upstream method decorator"
+            },
+            "fixture_selector": "SelectSelector",
+            "observed": {
+              "api": "Popen",
+              "syscall": "chdir",
+              "errno": 2,
+              "strerror": "No such file or directory",
+              "filename": "/some/nonexistent/directory",
+              "filename2": null,
+              "failed_child_reaped": true,
+              "native_parent_selector_calls": 0
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -265,6 +265,40 @@ pub unsafe extern "C" fn imre_bytes_compare(left: *const Bytes, right: *const By
     unsafe { (&*left).cmp(&*right) as i32 }
 }
 
+/// Tests for an immutable subsequence; the empty needle matches even empty bytes.
+///
+/// # Safety
+/// Both byte handles remain rooted throughout the search.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytes_contains(needle: *const Bytes, haystack: *const Bytes) -> u32 {
+    // SAFETY: both byte buffers are immutable and rooted for the call.
+    u32::from(unsafe { memchr::memmem::find(&*haystack, &*needle) }.is_some())
+}
+
+/// Integer needles are byte values, including on an empty haystack, not indices.
+///
+/// # Safety
+/// Root the canonical integer and immutable bytes; pending error state is clear.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytes_contains_int(needle: usize, haystack: *const Bytes) -> u32 {
+    // Canonical integers outside the tagged small range cannot represent a byte.
+    // SAFETY: the caller roots the exact canonical integer until this call returns.
+    let byte = unsafe { Int::borrow(needle) }
+        .as_small()
+        .and_then(|n| u8::try_from(n).ok());
+    let Some(byte) = byte else {
+        return finish(
+            Err(Error::new(
+                Kind::ValueError,
+                "byte must be in range(0, 256)",
+            )),
+            0,
+        );
+    };
+    // SAFETY: the caller keeps the immutable haystack alive.
+    u32::from(memchr::memchr(byte, unsafe { &*haystack }).is_some())
+}
+
 /// # Safety
 /// Root the bytes value and exact integer index; pending error state is clear.
 #[unsafe(no_mangle)]

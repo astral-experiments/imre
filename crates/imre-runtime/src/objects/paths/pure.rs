@@ -192,24 +192,71 @@ impl PurePath {
         self.with_tail(self.tail[..self.tail.len().saturating_sub(1)].to_vec())
     }
 
-    fn component_eq(&self, left: &str, right: &str) -> bool {
-        left == right || self.windows && left.to_lowercase() == right.to_lowercase()
+    /// Return the same normalized spelling used for Windows path equality.
+    fn windows_key(&self) -> &Str {
+        self.folded.get_or_init(|| windows_lower(&self.text))
+    }
+
+    /// Byte ends of successively shorter nonempty tails in the normalized spelling.
+    fn windows_tail_ends(&self) -> impl Iterator<Item = usize> {
+        let key = self.windows_key().as_str();
+        std::iter::once(key.len())
+            .chain(key.rmatch_indices('\\').map(|(i, _)| i))
+            .take(self.tail.len())
+    }
+
+    /// Return the comparison key of the path left when every tail component is removed.
+    fn windows_anchor_key(&self) -> Str {
+        let mut key = windows_lower(&self.drive);
+        key.push_str(&self.root);
+        if key.is_empty() {
+            key.push('.');
+        }
+        key
+    }
+
+    /// Find the closest parent of `other` that compares equal to this path or a
+    /// parent. A lowercase expansion can make differently parsed drive prefixes equal.
+    fn shared_windows_parent(&self, other: &Self) -> Option<usize> {
+        let left = self.windows_key().as_str();
+        let right = other.windows_key().as_str();
+        if left == right {
+            return Some(other.tail.len());
+        }
+        let common = left
+            .bytes()
+            .zip(right.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let anchor = self.windows_anchor_key();
+        let mut ends = self.windows_tail_ends().peekable();
+        // Both paths' parent boundaries are ordered from longest to shortest.
+        for (step, end) in other.windows_tail_ends().enumerate() {
+            while ends.next_if(|len| *len > end).is_some() {}
+            if (end <= common && ends.peek() == Some(&end)) || &right[..end] == anchor.as_str() {
+                return Some(other.tail.len() - step);
+            }
+        }
+        let base = other.windows_anchor_key();
+        (anchor == base
+            || left.starts_with(base.as_str()) && self.windows_tail_ends().any(|i| i == base.len()))
+        .then_some(0)
     }
 
     fn shared_tail_prefix(&self, other: &Self) -> Option<usize> {
-        if self.windows != other.windows
-            || !self.component_eq(&self.drive, &other.drive)
-            || self.root != other.root
-        {
+        if self.windows != other.windows {
             return None;
         }
-        Some(
+        if self.windows {
+            return self.shared_windows_parent(other);
+        }
+        (self.root == other.root).then(|| {
             self.tail
                 .iter()
                 .zip(&other.tail)
-                .take_while(|(a, b)| self.component_eq(a, b))
-                .count(),
-        )
+                .take_while(|(a, b)| a == b)
+                .count()
+        })
     }
 
     pub(super) fn is_relative_to(&self, other: &Self) -> bool {
@@ -253,7 +300,7 @@ impl PurePath {
             )
         })?;
         let tail = std::iter::repeat_n(Str::from(".."), other.tail.len() - common)
-            .chain(self.tail[common..].iter().cloned())
+            .chain(self.tail.iter().skip(common).cloned())
             .collect();
         let mut path = Self::parsed(self.windows, vec![], Str::default(), Str::default(), tail);
         path.raw.push(Rc::clone(&path.text));
@@ -333,7 +380,7 @@ impl PurePath {
 impl Storage {
     pub(in crate::objects) fn path_key(&self) -> &str {
         match self {
-            Self::PurePath(p) if p.windows => p.folded.get_or_init(|| windows_lower(&p.text)),
+            Self::PurePath(p) if p.windows => p.windows_key(),
             _ => self.path(),
         }
     }
@@ -353,7 +400,7 @@ impl Storage {
         match self {
             Self::PurePath(p) => (&p.drive, &p.root),
             _ => {
-                let p = self.path();
+                let p = self.component_text();
                 ("", &p[..p.len() - p.trim_start_matches('/').len()])
             }
         }
