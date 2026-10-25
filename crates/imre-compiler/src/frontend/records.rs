@@ -877,7 +877,7 @@ impl Checker<'_> {
         self.direct_class_attribute(attribute, class, receiver, expected)
     }
 
-    fn direct_class_attribute(
+    pub(super) fn direct_class_attribute(
         &mut self,
         attribute: &ast::ExprAttribute,
         class: usize,
@@ -894,7 +894,7 @@ impl Checker<'_> {
         if attribute.attr.starts_with("__")
             && !matches!(
                 attribute.attr.as_str(),
-                "__str__" | "__post_init__" | "__copy__"
+                "__str__" | "__post_init__" | "__copy__" | "__fspath__"
             )
         {
             return Err(error(
@@ -996,7 +996,7 @@ impl Checker<'_> {
         if attribute.attr.starts_with("__")
             && !matches!(
                 attribute.attr.as_str(),
-                "__str__" | "__post_init__" | "__copy__"
+                "__str__" | "__post_init__" | "__copy__" | "__fspath__"
             )
             && !(self.classes.declarations.definitions[class].mapping
                 && matches!(
