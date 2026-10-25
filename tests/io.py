@@ -25,7 +25,8 @@ print(0)
 print(-17)
 print(1000000000000000000000000000000000000000000000000000000000001)
 ''',
-    "large": "print(" + repr("prefix\0" + "éλ🙂" * 8192 + "\0suffix") + ")\n"
+    # Exceed the 128 KiB binary buffer CPython 3.14 uses for a pipe.
+    "large": "print(" + repr("prefix\0" + "éλ🙂" * 32768 + "\0suffix") + ")\n"
     'for index in range(160):\n    print(index)\nprint("large output finished")\n',
     "division_error": '''print("before division error")
 print(1000000000000000000000000000000000000000000000000000000000001)

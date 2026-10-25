@@ -11,7 +11,7 @@ pub(super) fn displayable(ty: Type) -> bool {
             | Type::StrLiteral(_)
             | Type::Bytes
             | Type::ListInt
-            | Type::ValueView
+            | Type::ObjectValue
     )
 }
 impl Checker<'_> {

@@ -6,6 +6,7 @@
 //! attributes can introduce ownership cycles.
 
 mod imports;
+pub(super) use imports::imre_exception_field_repr;
 mod tree;
 pub(super) use tree::append_tree_entries;
 
@@ -1224,11 +1225,15 @@ pub unsafe extern "C" fn imre_system_exit_code(value: *const Object) -> *const O
     Rc::into_raw(unsafe { acquire_rc(value as usize) })
 }
 
-pub(super) unsafe fn value_word(value: *const Object) -> (WordKind, usize) {
+pub(super) unsafe fn exit_word(value: *const Object) -> (WordKind, usize) {
     // SAFETY: a code view keeps its immutable typed exit payload alive.
     unsafe {
         (*value).0.with(|s| match s {
-            Storage::ValueView(v) => (v.kind, v.word),
+            Storage::ObjectValue(v) => (v.kind, v.word),
+            Storage::ModuleMember(m) => {
+                let (kind, word) = m.scalar().expect("non-scalar module metadata was handled");
+                (WordKind::new(kind), word)
+            }
             Storage::Exception(e) => match &e.payload {
                 Payload::Exit(Some(code)) => (code.kind, code.word),
                 Payload::Exit(None) => (WordKind::new(0), 0),
@@ -1245,8 +1250,13 @@ pub(super) unsafe fn value_word(value: *const Object) -> (WordKind, usize) {
 /// The caller roots a code view from `imre_system_exit_code`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code_kind(value: *const Object) -> u32 {
+    // SAFETY: the caller roots the boxed value and any typed index throughout this borrow.
+    if let Some(kind) = unsafe { super::errno::with_nonscalar_member(object(value), |m| m.kind()) }
+    {
+        return kind;
+    }
     // SAFETY: the code view roots its typed payload.
-    unsafe { value_word(value).0.raw() }
+    unsafe { exit_word(value).0.raw() }
 }
 
 /// Render an exit code as a Python value, including None for a missing argument.
@@ -1255,10 +1265,15 @@ pub unsafe extern "C" fn imre_system_exit_code_kind(value: *const Object) -> u32
 /// `value` is a rooted code view returned by `imre_system_exit_code`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code_text(value: *const Object) -> *const Str {
+    // SAFETY: the caller roots the boxed value and any typed index throughout this borrow.
+    if let Some(text) = unsafe { super::errno::with_nonscalar_member(object(value), |m| m.text(0)) }
+    {
+        return text;
+    }
     // SAFETY: the caller roots the immutable exit payload.
     unsafe {
-        let (kind, word) = value_word(value);
-        Rc::into_raw(imports::word_text(kind, word, false))
+        let (kind, word) = exit_word(value);
+        super::boxed_values::checked_text(kind, word, false)
     }
 }
 
@@ -1266,33 +1281,72 @@ pub unsafe extern "C" fn imre_system_exit_code_text(value: *const Object) -> *co
 ///
 /// # Safety
 /// `value` is a rooted code view. `word` is rooted with kind 0 (None), 1
-/// (bool), 2 (int), 3 (str), 5 (another code view) or 6 (tuple).
+/// (bool), 2 (int), 3 (str), 5 (another object view), 6 (tuple), 8 (bytes), or
+/// 17 (a concrete integer-to-string dictionary).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code_equal(
     value: *const Object,
     kind: u32,
     word: usize,
 ) -> u32 {
+    // The compiler uses 5 for a second boxed view and 17 for a concrete
+    // dict[int, str]. Other representation tags are scalar/tuple word kinds.
+    // SAFETY: both inputs stay rooted while we compare their borrowed fields.
+    unsafe {
+        if super::errno::with_nonscalar_member(object(value), |_| ()).is_some() {
+            let (other, payload) = if kind == 5 {
+                if super::errno::with_nonscalar_member(object(word as *const Object), |_| ())
+                    .is_some()
+                {
+                    (16, word)
+                } else {
+                    let (other, payload) = exit_word(word as *const Object);
+                    (other.raw(), payload)
+                }
+            } else {
+                (if kind == 17 { 5 } else { kind }, word)
+            };
+            return super::errno::imre_errno_member_equal(value, other, payload);
+        }
+        if kind == 17 {
+            return 0;
+        }
+        if kind == 5
+            && super::errno::with_nonscalar_member(object(word as *const Object), |_| ()).is_some()
+        {
+            let (other, payload) = exit_word(value);
+            return super::errno::imre_errno_member_equal(
+                word as *const Object,
+                other.raw(),
+                payload,
+            );
+        }
+    }
     // SAFETY: both code views and all inferred scalar arguments remain rooted.
     let ((left_kind, left), (right_kind, right)) = unsafe {
-        let (k, w) = value_word(value);
+        let (k, w) = exit_word(value);
         let (j, v) = if kind == 5 {
-            value_word(word as *const Object)
+            exit_word(word as *const Object)
         } else {
             (WordKind::new(kind), word)
         };
         ((k, w), (j, v))
     };
     // SAFETY: matching immutable scalar kinds describe both words.
-    u32::from(unsafe { imports::equal((left_kind, left), (right_kind, right)) })
+    u32::from(unsafe { super::boxed_values::equal((left_kind, left), (right_kind, right)) })
 }
 
 /// # Safety
 /// `value` is a rooted immutable exit code.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u32 {
+    // SAFETY: the caller roots the boxed value and any typed index throughout this borrow.
+    if let Some(bit) = unsafe { super::errno::with_nonscalar_member(object(value), |m| m.truth()) }
+    {
+        return bit;
+    }
     // SAFETY: the code view roots the scalar described by the stored word kind.
-    let (kind, word) = unsafe { value_word(value) };
+    let (kind, word) = unsafe { exit_word(value) };
     u32::from(match kind.raw() {
         0 => false,
         1 => word != 0,
@@ -1472,7 +1526,7 @@ pub unsafe extern "C" fn imre_named_exception_record_new(
             },
         );
         let positional = tuple.then(|| {
-            let (kind, word) = value_word(argument.cast());
+            let (kind, word) = exit_word(argument.cast());
             debug_assert_eq!(kind.raw(), 6);
             imports::Positional(kind.acquire(word))
         });
