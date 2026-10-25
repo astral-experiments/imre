@@ -1861,6 +1861,7 @@ struct Checker<'a> {
     module_scope: bool,
     class: Option<usize>,
     class_receiver: Option<String>,
+    super_method_base: Option<usize>,
     iterator_source: Option<TextRange>,
     super_initializer: Option<records::BaseInitializer>,
     initializing: bool,
@@ -1920,6 +1921,7 @@ impl<'a> Checker<'a> {
             module_scope: false,
             class: None,
             class_receiver: None,
+            super_method_base: None,
             iterator_source: None,
             super_initializer: None,
             initializing: false,
@@ -6076,8 +6078,15 @@ impl<'a> Checker<'a> {
         {
             return self.namedtuple_call(definition, &declaration, call);
         }
-        if crate::classes::super_init(call) {
-            return self.call_super_initializer(call);
+        if let Some((method, name)) = crate::classes::super_method(call)
+            && self.unshadowed_builtin(name, "super")
+        {
+            if method.attr.as_str() == "__init__" {
+                return self.call_super_initializer(call);
+            }
+            if let Some(base) = self.super_method_base {
+                return self.call_super_method(call, method, base);
+            }
         }
         if let Some(expr) = self.explicit_exception_initializer(call)? {
             return Ok(expr);

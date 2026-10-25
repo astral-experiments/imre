@@ -597,19 +597,29 @@ impl Checker<'_> {
             )
         });
         self.class = context.map(|context| context.class);
+        let lexical_base = context.and_then(|context| {
+            let classes = &self.classes.declarations;
+            let origin = classes.definitions[context.class].method_origins[context.index];
+            classes.definitions[classes.ids[&origin]]
+                .bases
+                .first()
+                .copied()
+        });
+        self.super_method_base = context
+            .filter(|context| {
+                let classes = &self.classes.declarations;
+                matches!(
+                    context.kind(classes),
+                    MethodKind::Instance | MethodKind::Property | MethodKind::PropertySetter
+                ) && classes.definitions[context.class].initializer != Some(context.index)
+            })
+            .and(lexical_base);
         self.super_initializer = context.and_then(|context| {
             let record = &self.classes.declarations.definitions[context.class];
             if record.methods[context.index].name.as_str() != "__init__" {
                 return None;
             }
-            let owner = self.classes.declarations.ids[&record.method_origins[context.index]];
-            Some(
-                self.classes.declarations.definitions[owner]
-                    .bases
-                    .first()
-                    .copied()
-                    .map_or(BaseInitializer::Object, BaseInitializer::Record),
-            )
+            Some(lexical_base.map_or(BaseInitializer::Object, BaseInitializer::Record))
         });
         self.class_receiver = context.and_then(|context| {
             let declaration = &self.classes.declarations.definitions[context.class];
@@ -1237,6 +1247,37 @@ impl Checker<'_> {
             return self.set_exception_arguments(class, args).map(Some);
         }
         Ok(None)
+    }
+
+    /// Start lookup after the declaring class and bind that implementation to the same object.
+    pub(super) fn call_super_method(
+        &mut self,
+        call: &ast::ExprCall,
+        method: &ast::ExprAttribute,
+        base: usize,
+    ) -> Result<Expr, String> {
+        let signature = self.classes.methods[base]
+            .get(method.attr.as_str())
+            .filter(|sig| {
+                sig.method.unwrap().kind(&self.classes.declarations) == MethodKind::Instance
+            })
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    method,
+                    "super() requires a known base instance method",
+                )
+            })?
+            .clone();
+        if !self.assigned.contains(&0) {
+            return Err(error(
+                self.source,
+                method,
+                "super() requires a bound first argument",
+            ));
+        }
+        let receiver = self.coerce(self.local(0), Type::Class(base), method)?;
+        self.source_call(call, &signature, Some(receiver), 1)
     }
 
     pub(super) fn call_super_initializer(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
