@@ -1387,6 +1387,8 @@ pub(crate) enum ProcessOperation {
     RmTree,
     Copy(CopyOperation),
     CopyTree(Type),
+    Move(Type),
+    DestInSrc,
     IgnorePatterns,
     TreeErrorArgs,
     CheckReturnCode,

@@ -6285,6 +6285,8 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
             Some(Binding::Intrinsic(Intrinsic::CopyTree)) => return self.shutil_copytree(call),
+            Some(Binding::Intrinsic(Intrinsic::Move)) => return self.shutil_move(call, false),
+            Some(Binding::Intrinsic(Intrinsic::DestInSrc)) => return self.shutil_move(call, true),
             Some(Binding::Intrinsic(Intrinsic::IgnorePatterns)) => {
                 return self.shutil_ignore_patterns(call);
             }

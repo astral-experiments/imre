@@ -53,6 +53,16 @@ The [complete TestCopyTree run](tree-linux.json) retains all 14 original methods
 
 ## Complete-method attempts
 
+The [copytree merge run](https://github.com/astral-sh/imre/actions/runs/40180794658) verified tree `61d5337dec05ab707494ca4150c05159ead3950b`, exactly the tree merged in [#829](https://github.com/astral-sh/imre/pull/829). Both missing-`PATH` methods ran with the environment variable absent in two native processes per optimization level. Their fixture, environment patches and assertions ran on CPython.
+
+## Moving files
+
+[move_ops.py](move_ops.py) selects every original `TestMove` occurrence, including its two Linux reference skips. It attempts unchanged methods and their original helper bodies when the compiler can represent the fixture. For other cases, it calls the native operation from the untouched CPython method. A test-only interposer sends actual rename operands to the original mock; native code receives its errno and performs the fallback. A Python copy callback keeps the result mixed.
+
+[move_cross_device.py](move_cross_device.py) also compares file contents, directory trees, symlink targets, callbacks, and the source left after a failure on two real Linux mounts. It first proves the kernel returned `EXDEV` on each operand pair. These supplemental controls add no upstream IDs.
+
+## Reproducing complete-method attempts
+
 [method-attempts-linux.json](method-attempts-linux.json) records the compiler and runtime hashes, original method and decorator hashes, and the first diagnostic for each blocked build. The [hosted run](https://github.com/astral-sh/imre/actions/runs/40177629056) tested tree `d6aa3eccebad9fc011341575e3745c7d063ca482` (main `71ffc22`, copytree `b88820e`). All 173 reference passes were attempted under their original CPython fixtures at both levels. Eight native bodies completed; 165 could not compile. After [native _opcode (#800)](https://github.com/astral-sh/imre/pull/800), 83 reach `import warnings` in the stock `test/support/__init__.py:21`; 40 reach the unsupported `unittest` import used by the original mocks and 10 stop at `errno`. The first diagnostic for each other method is in its record. The host-driven and mixed results retain their measured execution roles.
 
 Reproduce the method attempts with the pinned interpreter and [vendored shared fixtures](../shared/UPSTREAM.json):
