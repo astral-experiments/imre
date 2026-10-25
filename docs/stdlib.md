@@ -2,7 +2,7 @@
 
 Imre checks 194 publicly named top-level modules from [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) on Linux. Dotted APIs such as `os.path` appear under their parent. Private modules and third-party packages are outside this inventory.
 
-**At a glance:** 49 modules accept an ordinary import; 3 more accept it only with `--reachable-only`. Across 24 public modules with recorded suites, 62 complete test executions pass natively at both optimization levels; 8,324 of 8,324 upstream executions have a classification.
+**At a glance:** 50 modules accept an ordinary import; 3 more accept it only with `--reachable-only`. Across 24 public modules with recorded suites, 65 complete test executions pass natively at both optimization levels; 8,324 of 8,324 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -17,7 +17,7 @@ Imre checks 194 publicly named top-level modules from [CPython 3.14.5](https://g
 | `argparse` | Yes | `ArgumentParser`, typed options, subcommands and generated help. [Evidence](../benchmarks/cpython_stdlib/full/argparse/README.md) | [0 / 1,893](../benchmarks/cpython_stdlib/full/argparse/) | 928 |
 | `asyncio` | Yes | Run subprocess tasks, wait for a task group and handle cancellation. [Evidence](../tests/fixtures/processes/async_groups.py) | — | — |
 | `base64` | Yes | `urlsafe_b64encode` on bytes. [Evidence](../benchmarks/cpython_stdlib/native_base64.py) | — | — |
-| `builtins` | Rejected | Many builtins work by name in Python source; this is distinct from importing the module. [Evidence](../docs/subset.md) | — | — |
+| `builtins` | Yes | Read, assign and delete `builtins._`, including the value saved by the default display hook. [Evidence](../benchmarks/cpython_stdlib/full/sys/BUILTINS.md) | — | — |
 | `collections` | Yes | `Counter`, `deque`, `defaultdict` and selected `collections.abc.Mapping` operations. [Evidence](../benchmarks/cpython_stdlib/full/collections/README.md) | [0 / 659](../benchmarks/cpython_stdlib/full/collections/) | 11 |
 | `configparser` | Reachable only | `ConfigParser` can be bound in unreachable code. Its constructor does not run natively. [Evidence](../crates/imre-compiler/src/modules/declarations.rs) | — | — |
 | `contextlib` | Yes | `nullcontext` and selected single-yield `@contextmanager` functions. [Evidence](../tests/fixtures/processes/async_resource_arguments.py) | — | — |
@@ -30,7 +30,7 @@ Imre checks 194 publicly named top-level modules from [CPython 3.14.5](https://g
 | `email` | Reachable only | Selected `message`, `parser` and `policy` declarations bind in unreachable code. [Evidence](../crates/imre-compiler/src/modules/declarations.rs) | — | — |
 | `enum` | Yes | Named `Enum` and `StrEnum` members and aliases. [Evidence](../tests/fixtures/classes/ordinary_enums.py) | — | — |
 | `errno` | Yes | Named errno constants, aliases and the `errorcode` registry. [Evidence](../benchmarks/cpython_stdlib/full/errno/README.md) | [3 / 3](../benchmarks/cpython_stdlib/full/errno/) | 0 |
-| `fnmatch` | Yes | `fnmatch`, `fnmatchcase`, `filter`, `filterfalse` and `translate`. [Evidence](../benchmarks/cpython_stdlib/full/fnmatch/README.md) | [5 / 24](../benchmarks/cpython_stdlib/full/fnmatch/) | 19 |
+| `fnmatch` | Yes | `fnmatch`, `fnmatchcase`, `filter`, `filterfalse` and `translate`. [Evidence](../benchmarks/cpython_stdlib/full/fnmatch/README.md) | [8 / 24](../benchmarks/cpython_stdlib/full/fnmatch/) | 16 |
 | `functools` | Yes | Selected `partial`, caching decorators and dispatch operations. [Evidence](../benchmarks/cpython_stdlib/full/functools/EVIDENCE.md) | [0 / 329](../benchmarks/cpython_stdlib/full/functools/) | 19 |
 | `genericpath` | Rejected | The genericpath companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | — | — |
 | `gzip` | Yes | Read text lines and binary chunks from gzip files. [Evidence](../tests/fixtures/files/stream_reads.py) | — | — |
