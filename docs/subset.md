@@ -669,7 +669,7 @@ Use `group = parser.add_argument_group(title, description)` to place arguments i
 
 A parser can require a subcommand with `add_subparsers(dest="command", required=True)`. Each literal `add_parser("name", help="...")` introduces a child parser with its own options. The namespace carries the selected command and that child's fields. A `match args.command` case or `if args.command == "name"` branch selects its concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
 
-Keep each builder local. Declare parent options first, followed by each subparser and its options, then assign or return `parse_args()`. Dynamic declarations and nested or optional subcommands are outside this grammar.
+Keep each builder local to a function or method. Declare parent options first, followed by each subparser and its options, then call `parse_args()`. An explicit list or tuple literal supplies the arguments; a standalone call still checks them and can raise `SystemExit`. Dynamic declarations and nested or optional subcommands are outside this grammar.
 
 ## Standard logging
 

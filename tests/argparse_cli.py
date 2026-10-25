@@ -93,6 +93,7 @@ CASES = {
         ["one", "-v", "two"], ["one", "--", "-v", "--"], ["--", "--", "tail"],
         ["one", "--unknown", "two"], ["--unknown", "one"], ["one", "--help"],
     ],
+    "method_args": [[]],
     "two": [[], ["--help"], ["--mo=lar"], ["--flag"], ["--paths", "one", "two"]],
 }
 REJECTED = {
