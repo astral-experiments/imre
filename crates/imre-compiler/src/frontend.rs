@@ -1402,7 +1402,15 @@ fn annotation_at(
                 ))
             ) =>
             {
-                Ok(types.list(nested(&value.slice)?))
+                let element = nested(&value.slice)?;
+                if owner.is_some_and(|id| classes.definitions[id].dataclass.is_some())
+                    && element == Type::Str
+                    && graph.resolve(module, item) == Some(Binding::Intrinsic(Intrinsic::Iterable))
+                {
+                    Ok(Type::StringIterable)
+                } else {
+                    Ok(types.list(element))
+                }
             }
             item if graph.resolve_type(module, item)
                 == Some(Binding::Intrinsic(Intrinsic::Counter)) =>
@@ -1852,6 +1860,18 @@ impl<'a> Checker<'a> {
         if value.ty == expected {
             return Ok(value);
         }
+        if expected == Type::StringIterable
+            && (self.types.element(value.ty) == Some(Type::Str)
+                || self
+                    .types
+                    .fields(value.ty)
+                    .is_some_and(|fields| fields.iter().all(|t| *t == Type::Str)))
+        {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
+            });
+        }
         if let (Some(source), Some(destination)) = (
             self.types.directory_value(value.ty),
             self.types.directory_value(expected),
@@ -1981,6 +2001,9 @@ impl<'a> Checker<'a> {
         }
         self.reject_class_receiver_value(expression)?;
         let mut concrete = self.types.payload(expected).unwrap_or(expected);
+        if concrete == Type::StringIterable && matches!(expression, ast::Expr::List(_)) {
+            concrete = self.types.list(Type::Str);
+        }
         if matches!(expression, ast::Expr::List(_))
             && let Some(members) = self.types.members(concrete)
         {
@@ -6175,8 +6198,10 @@ impl<'a> Checker<'a> {
                 });
             }
             if matches!(name.id.as_str(), "str" | "print")
-                && (matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess(_))
-                    || self.types.is_counter(args[0].ty))
+                && (matches!(
+                    args[0].ty,
+                    Type::Class(_) | Type::CompletedProcess(_) | Type::StringIterable
+                ) || self.types.is_counter(args[0].ty))
             {
                 let text = self.record_text(args.into_iter().next().unwrap(), call)?;
                 return Ok(if name.id == "str" {
@@ -6256,6 +6281,7 @@ impl<'a> Checker<'a> {
                         args[0].ty,
                         Type::Str
                             | Type::Bytes
+                            | Type::StringIterable
                             | Type::ListInt
                             | Type::List(_)
                             | Type::Dict(_)

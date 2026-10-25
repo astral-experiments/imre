@@ -30,6 +30,8 @@ pub(crate) enum Type {
     Optional(usize),
     /// A closed str/bytes union with one owned tagged-pointer word.
     Union(usize),
+    /// An owned tagged reference to a string list or a fixed tuple of strings.
+    StringIterable,
     /// An internal container or string cursor, never available in user annotations.
     Iterator,
     /// A first-class cursor whose next operation transfers one exact element type.
@@ -155,6 +157,7 @@ impl std::fmt::Display for Type {
             Self::Exception | Self::NamedException(_) => "Exception",
             Self::ExitCode => "SystemExit.code",
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
+            Self::StringIterable => "Iterable[str]",
             Self::TextIO => "typing.TextIO",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
@@ -629,6 +632,8 @@ pub(crate) enum Builtin {
     IsNone,
     /// Promotes an exact str/bytes owner without allocating or changing identity.
     UnionInject,
+    /// An owned list for a readonly iteration: borrows existing list storage or copies tuple words.
+    StringIterationList,
     /// Projects a member proved by local control flow, acquiring its own owner.
     UnionProject,
     IsInstance(Vec<InstanceType>),
