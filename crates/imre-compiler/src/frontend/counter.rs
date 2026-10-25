@@ -39,11 +39,7 @@ impl Checker<'_> {
         for (index, arg) in call.arguments.args.iter().enumerate() {
             values.push(self.expr(arg)?);
             if index >= first_extra {
-                self.graph.checked_diagnostic(
-                    self.module,
-                    "too-many-positional-arguments",
-                    arg.range(),
-                );
+                self.graph.checked_excess_argument(self.module, arg.range());
             }
         }
         let positional = values.len();
@@ -53,21 +49,18 @@ impl Checker<'_> {
             let name = keyword.arg.as_ref().unwrap().as_str();
             if name != "self" {
                 self.graph
-                    .checked_diagnostic(self.module, "unknown-argument", keyword.range());
+                    .checked_keywords(self.module, std::iter::once(keyword.range()));
                 failure
                     .get_or_insert_with(|| format!("got an unexpected keyword argument '{name}'"));
             } else if positional != 0 || keyword_self.replace(&keyword.value).is_some() {
-                self.graph.checked_diagnostic(
-                    self.module,
-                    "parameter-already-assigned",
-                    keyword.range(),
-                );
+                self.graph
+                    .checked_repeated_keyword(self.module, keyword.range());
                 failure.get_or_insert_with(|| "got multiple values for argument 'self'".to_owned());
             }
         }
         if positional == 0 && keyword_self.is_none() {
             self.graph
-                .checked_diagnostic(self.module, "missing-argument", call.range());
+                .checked_missing_argument(self.module, call.range());
         }
         let failure = failure.or_else(|| match positional {
             0 if keyword_self.is_none() => {
