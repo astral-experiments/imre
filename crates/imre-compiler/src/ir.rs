@@ -40,8 +40,10 @@ pub(crate) enum Type {
     Exception,
     /// An exception object known to own the given fixed payload layout.
     NamedException(usize),
-    /// An owned view of the immutable None, bool, int or str in SystemExit.code.
-    ExitCode,
+    /// A retained value projected from a structured builtin exception.
+    ExceptionField,
+    /// A builtin ImportError (including its ModuleNotFoundError and marker subclasses).
+    ImportException,
     /// A proved catch-only timeout with readonly float and nullable bytes fields.
     TimeoutExpired,
     /// A sealed UTF-8 text stream; aliases share its open/closed state.
@@ -158,7 +160,8 @@ impl std::fmt::Display for Type {
             Self::None => "None",
             Self::Iterator => "iterator",
             Self::Exception | Self::NamedException(_) => "Exception",
-            Self::ExitCode => "SystemExit.code",
+            Self::ExceptionField => "exception field",
+            Self::ImportException => "ImportError",
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
             Self::StringIterable => "Iterable[str]",
             Self::TextIO => "typing.TextIO",
@@ -269,14 +272,17 @@ pub(crate) enum JsonDefault {
 impl Module {
     /// Process argument state is required only by an actual argv expression.
     /// Merely importing sys emits no startup allocation or runtime query.
-    pub(crate) fn uses_sys_argv(&self) -> bool {
-        let mut used = false;
+    pub(crate) fn sys_argument_usage(&self) -> (bool, bool) {
+        let mut argv = false;
+        let mut original = false;
         for function in self.functions.iter().chain([&self.entry]) {
-            walk_expressions(&function.body, &mut |value| {
-                used |= matches!(value.kind, ExprKind::Builtin(Builtin::SysArgv, _));
+            walk_expressions(&function.body, &mut |value| match value.kind {
+                ExprKind::Builtin(Builtin::SysArgv, _) => argv = true,
+                ExprKind::Builtin(Builtin::SysOrigArgv, _) => original = true,
+                _ => {}
             });
         }
-        used
+        (argv || original, original)
     }
 }
 
@@ -534,6 +540,15 @@ pub(crate) enum Builtin {
     ExceptionRecord,
     /// A single non-string Python argument, retained for str/repr.
     ExceptionArgument(u32),
+    ImportErrorNew {
+        kind: u32,
+        fields: [Option<usize>; 3],
+    },
+    ImportErrorField(u32),
+    ImportErrorReset,
+    ExceptionFieldRepr,
+    ExceptionFieldLen,
+    ExceptionFieldIndex,
     ExceptionRepr,
     /// Python representation of a value with a fully known storage shape.
     Repr,
@@ -671,6 +686,7 @@ pub(crate) enum Builtin {
     StringListNonempty,
     RStrip,
     SysArgv,
+    SysOrigArgv,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
         children: Vec<usize>,
@@ -684,6 +700,10 @@ pub(crate) enum Builtin {
     JsonLoads,
     JsonEmptyObject,
     FunctionCache(usize),
+    FunctionCacheProbe(usize, i64),
+    FunctionCacheInsert(usize, i64),
+    FunctionCacheStat(usize, u32),
+    FunctionCacheClear(usize),
     HashStr,
     HashRecord,
     /// A dictionary with a read-only JSON receiver and a literal string key.
@@ -1001,6 +1021,21 @@ pub(crate) enum LogOperation {
     Emit,
 }
 
+/// POSIX descriptor calls use the target's C int and file descriptor flags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FdOperation {
+    Open,
+    Pipe,
+    Dup2,
+    Close,
+    Dup,
+    Isatty,
+    GetBlocking,
+    SetBlocking,
+    GetInheritable,
+    SetInheritable,
+}
+
 /// Filesystem copy operations using the same ordered pair of path operands.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -1094,6 +1129,8 @@ pub(crate) enum ProcessOperation {
     EnvironCopy,
     EnvironGet,
     GetCwd,
+    Fd(FdOperation),
+    OpenFlag(&'static str),
     Which,
     Copy(CopyOperation),
     CheckReturnCode,
@@ -1134,7 +1171,10 @@ impl InstanceType {
             Self::Tuple => matches!(ty, Type::Tuple(_)),
             Self::Exception(_) => matches!(
                 ty,
-                Type::Exception | Type::TimeoutExpired | Type::NamedException(_)
+                Type::Exception
+                    | Type::ImportException
+                    | Type::TimeoutExpired
+                    | Type::NamedException(_)
             ),
         }
     }

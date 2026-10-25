@@ -3,6 +3,8 @@
 use super::*;
 use crate::ir::ProcessOperation;
 
+mod descriptors;
+
 impl Emitter<'_, '_> {
     pub(super) fn process_builtin(
         &mut self,
@@ -454,6 +456,8 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
+            ProcessOperation::OpenFlag(name) => self.os_open_flag(name),
+            ProcessOperation::Fd(operation) => self.os_descriptor(operation, args, returns),
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
             ProcessOperation::Copy(op) => {
                 let tag = |ty| match ty {

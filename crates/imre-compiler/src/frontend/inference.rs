@@ -416,7 +416,7 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         skip: usize,
     ) -> Result<Expr, String> {
-        if self.classes.cached.contains(&signature.id) && !call.arguments.keywords.is_empty() {
+        if self.classes.cached.contains_key(&signature.id) && !call.arguments.keywords.is_empty() {
             return Err(error(
                 self.source,
                 call,

@@ -200,6 +200,7 @@ fn known_decorator(graph: &SourceGraph, module: ModuleId, expr: &ast::Expr) -> b
                 | Intrinsic::ContextManager
                 | Intrinsic::CachedProperty
                 | Intrinsic::FunctionCache
+                | Intrinsic::LruCache
         ))
     ) || matches!(expr, ast::Expr::Name(name) if matches!(name.id.as_str(), "property" | "classmethod" | "staticmethod") && graph.resolve(module, expr).is_none())
 }

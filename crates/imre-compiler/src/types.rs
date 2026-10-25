@@ -91,7 +91,8 @@ impl Types {
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
-            | Type::ExitCode
+            | Type::ExceptionField
+            | Type::ImportException
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::BinaryIO
@@ -412,6 +413,7 @@ impl Types {
             | Type::Cursor(_)
             | Type::ByteOutput
             | Type::Exception
+            | Type::ImportException
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::Path
