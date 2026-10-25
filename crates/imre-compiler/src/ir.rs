@@ -570,6 +570,8 @@ pub(crate) enum Builtin {
     Decode,
     Sha256Hex,
     Sha256New,
+    HashNew,
+    HashAvailable,
     Sha256Update,
     Sha256Digest {
         hex: bool,
