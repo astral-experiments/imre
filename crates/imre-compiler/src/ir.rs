@@ -207,6 +207,9 @@ pub(crate) enum SocketOp {
     Fileno,
     SetBlocking,
     GetBlocking,
+    Dup,
+    GetInheritable,
+    SetInheritable,
     SetSockOpt,
     GetSockOpt,
 }

@@ -40,7 +40,7 @@ def skip_condition(case, reason, classes):
     raise ValueError(f"{case.id()}: unmatched stock skip {reason!r}")
 
 
-def report(reference, path, bodies, tcp, backlog, options, level):
+def report(reference, path, bodies, tcp, backlog, options, descriptors, level):
     discovered = list(cases(load_suite(reference["module"])))
     variants = [(c.id(), f"{type(c).__module__}.{type(c).__qualname__}") for c in discovered]
     refs = reference_cases(reference)
@@ -59,12 +59,20 @@ def report(reference, path, bodies, tcp, backlog, options, level):
     observations = {}
     selected = [(owner, method) for owner in ("BasicTCPTest", "BasicTCPTest2") for method in tcp]
     selected += [("GeneralModuleTests", method) for method in (backlog, *options)]
+    selected += [("InheritanceTest", method) for method in descriptors]
     for owner, method in selected:
         name = f"{reference['module']}.{owner}.{method}"
         host = method in options
         if host:
             fixture = "Original CPython TestCase, module lifecycle and addCleanup; pipe forwards calls to one native socket."
             operation = "Native AF_INET socket, SO_REUSEADDR and close; incorrect initial/write value rejected by stock assertion."
+        elif method in descriptors:
+            fixture = "Original host module setup/cleanup; native TestCase.assertTrue compares the original bool operands."
+            operation = {
+                "test_default_inheritable": "Native socket's descriptor starts non-inheritable.",
+                "test_set_inheritable": "Original method changes and reads the real descriptor flag in both directions.",
+                "test_dup": "Original method duplicates the native socket, closes the original and checks the independent, non-inheritable descriptor.",
+            }[method]
         elif method in tcp:
             fixture = ("Original CPython module, threaded class setup/teardown, connected endpoints and cleanups. "
                        "Each child duplicates its fixture fd; both original peer methods and bytes equality run natively.")
