@@ -10,18 +10,21 @@ use regex_syntax::hir::HirKind;
 const SPACE: &str =
     r"\x09-\x0d\x1c-\x20\x85\xa0\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}";
 
-pub(crate) struct FixedPattern {
-    pub(crate) source: String,
-    pub(crate) may_match_empty: bool,
-    pub(crate) groups: Vec<Capture>,
+/// The engine expression and capture layout corresponding to a Python pattern.
+pub struct FixedPattern {
+    pub source: String,
+    pub may_match_empty: bool,
+    pub groups: Vec<Capture>,
 }
 
-pub(crate) struct Capture {
-    pub(crate) name: Option<String>,
-    pub(crate) required: bool,
+/// A capture may be unnamed or absent on some successful paths.
+pub struct Capture {
+    pub name: Option<String>,
+    pub required: bool,
 }
 
-pub(crate) fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, String> {
+/// Translate the supported Python pattern grammar without changing search semantics.
+pub fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, String> {
     let mut input = pattern.chars().peekable();
     let mut output = String::new();
     let mut groups = vec![None]; // Group zero is the whole match.
@@ -198,7 +201,7 @@ pub(crate) fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, St
 
 /// Encode a literal replacement as UTF-8 runs and capture indices. The high
 /// bit distinguishes a group from a byte count, so user text needs no sentinel.
-pub(crate) fn replacement(template: &str, groups: &[Capture]) -> Result<Vec<u8>, &'static str> {
+pub fn replacement(template: &str, groups: &[Capture]) -> Result<Vec<u8>, &'static str> {
     fn flush(out: &mut Vec<u8>, literal: &mut String) -> Result<(), &'static str> {
         if !literal.is_empty() {
             let n = u32::try_from(literal.len())
