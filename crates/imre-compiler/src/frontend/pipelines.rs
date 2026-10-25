@@ -57,32 +57,16 @@ impl Checker<'_> {
         }
         let mut evaluate = Vec::new();
         let mut roots = Vec::new();
-        let mut capture = |checker: &mut Self, arg: &mut Expr| {
-            let slot = checker.hidden(arg.ty);
-            evaluate.push(Statement::Assign(
-                slot,
-                std::mem::replace(arg, checker.local(slot)),
-            ));
-            roots.push(slot);
-        };
-        let call = match (&value.kind, value.ty) {
-            (ExprKind::Call(id, args), _) if self.classes.generators.contains(id) => {
-                let mut args = args.clone();
-                for arg in &mut args.values {
-                    capture(self, arg);
-                }
-                self.calls.insert(*id);
-                Expr {
-                    ty: value.ty,
-                    kind: ExprKind::Call(*id, args),
-                }
-            }
-            (_, Type::Class(class)) if self.classes.has_record_iterator(class) => {
-                let mut receiver = value.clone();
-                capture(self, &mut receiver);
-                self.record_primitive(receiver, "__iter__", &[], node)?
-            }
-            _ => return Ok(None),
+        let call = if self.is_delegated_call(value) {
+            self.capture_delegated_call(value.clone(), &mut evaluate, &mut roots)
+        } else if let Type::Class(class) = value.ty
+            && self.classes.has_record_iterator(class)
+        {
+            let mut receiver = value.clone();
+            evaluate.push(self.capture_generator_operand(&mut receiver, &mut roots));
+            self.record_primitive(receiver, "__iter__", &[], node)?
+        } else {
+            return Ok(None);
         };
         let mut prepared = self.prepare_container(call, false, node, false)?;
         let started = self.hidden(Type::Bool);
@@ -99,6 +83,76 @@ impl Checker<'_> {
         prepared.clear.push(started);
         prepared.clear.extend(roots);
         Ok(Some(prepared))
+    }
+
+    /// Every possible selected method must be a generator before its body can be delayed.
+    fn is_delegated_call(&self, value: &Expr) -> bool {
+        match &value.kind {
+            ExprKind::Call(id, _) => self.classes.generators.contains(id),
+            ExprKind::Scope { value, .. } => self.is_delegated_call(value),
+            ExprKind::Conditional(_, yes, no) => {
+                self.is_delegated_call(yes) && self.is_delegated_call(no)
+            }
+            _ => false,
+        }
+    }
+
+    /// Evaluate dispatch and argument binding at construction. The returned expression
+    /// invokes only the selected method, using those captured operands on the first pull.
+    fn capture_delegated_call(
+        &mut self,
+        mut call: Expr,
+        evaluate: &mut Vec<Statement>,
+        roots: &mut Vec<usize>,
+    ) -> Expr {
+        match call.kind {
+            ExprKind::Call(id, ref mut args) => {
+                for arg in &mut args.values {
+                    evaluate.push(self.capture_generator_operand(arg, roots));
+                }
+                self.calls.insert(id);
+                call
+            }
+            ExprKind::Scope {
+                mut body,
+                value,
+                clear,
+            } => {
+                let delayed = self.capture_delegated_call(*value, &mut body, roots);
+                evaluate.push(Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Scope {
+                        body,
+                        value: Box::new(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::None,
+                        }),
+                        clear,
+                    },
+                }));
+                delayed
+            }
+            ExprKind::Conditional(mut test, yes, no) => {
+                evaluate.push(self.capture_generator_operand(&mut test, roots));
+                let mut on_yes = Vec::new();
+                let mut on_no = Vec::new();
+                let yes = self.capture_delegated_call(*yes, &mut on_yes, roots);
+                let no = self.capture_delegated_call(*no, &mut on_no, roots);
+                evaluate.push(Statement::If((*test).clone(), on_yes, on_no));
+                Expr {
+                    ty: call.ty,
+                    kind: ExprKind::Conditional(test, Box::new(yes), Box::new(no)),
+                }
+            }
+            _ => unreachable!("expected a delegated generator call"),
+        }
+    }
+
+    /// Keep one evaluated operand live until the prepared iterator is released.
+    fn capture_generator_operand(&mut self, value: &mut Expr, roots: &mut Vec<usize>) -> Statement {
+        let slot = self.hidden(value.ty);
+        roots.push(slot);
+        Statement::Assign(slot, std::mem::replace(value, self.local(slot)))
     }
 }
 
