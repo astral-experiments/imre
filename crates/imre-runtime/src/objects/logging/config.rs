@@ -2,7 +2,7 @@
 
 use super::super::exceptions::{Result, push_string_repr, string_repr};
 use super::super::json::readonly::document::Value;
-use super::{Error, Int, Kind, LOGGERS, Object, Str, finish, levels, name, object};
+use super::{Error, Int, Kind, LOGGERS, Object, Str, finish, levels, object, state};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -55,7 +55,8 @@ pub unsafe extern "C" fn imre_log_is_enabled(logger: *const Object, level: usize
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_disabled(logger: *const Object) -> bool {
     // SAFETY: the caller roots this logger while its name is borrowed.
-    control(&unsafe { name(logger) }).disabled
+    let logger = unsafe { state(logger) };
+    logger.standalone_propagate.is_none() && control(&logger.name).disabled
 }
 
 /// # Safety
@@ -63,7 +64,11 @@ pub unsafe extern "C" fn imre_log_disabled(logger: *const Object) -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_propagate(logger: *const Object) -> bool {
     // SAFETY: the caller roots this logger while its name is borrowed.
-    control(&unsafe { name(logger) }).propagate
+    let logger = unsafe { state(logger) };
+    logger
+        .standalone_propagate
+        .as_ref()
+        .map_or_else(|| control(&logger.name).propagate, std::cell::Cell::get)
 }
 
 /// Change the same control that fileConfig, dictConfig and emission observe.
@@ -73,9 +78,17 @@ pub unsafe extern "C" fn imre_log_propagate(logger: *const Object) -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_set_propagate(value: bool, logger: *const Object) {
     // SAFETY: the input retains the native logger for this operation.
-    let key = unsafe { name(logger) };
-    CONTROLS
-        .with_borrow_mut(|controls| controls.entry(key.to_string()).or_default().propagate = value);
+    let logger = unsafe { state(logger) };
+    if let Some(propagate) = &logger.standalone_propagate {
+        propagate.set(value);
+    } else {
+        CONTROLS.with_borrow_mut(|controls| {
+            controls
+                .entry(logger.name.to_string())
+                .or_default()
+                .propagate = value
+        });
+    }
 }
 
 /// Check reachable installed handlers. The fallback handler is not attached
@@ -86,8 +99,9 @@ pub unsafe extern "C" fn imre_log_set_propagate(value: bool, logger: *const Obje
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_has_handlers(logger: *const Object) -> bool {
     // SAFETY: the incoming logger stays live for the walk.
-    let key = unsafe { name(logger) };
-    LOGGERS.with_borrow(|logs| logs.format.is_some() && reaches_root(logs, &key))
+    let logger = unsafe { state(logger) };
+    logger.standalone_propagate.is_none()
+        && LOGGERS.with_borrow(|logs| logs.format.is_some() && reaches_root(logs, &logger.name))
 }
 
 /// A logger with propagation stopped before root has only the default last-resort handler.
@@ -101,8 +115,10 @@ pub unsafe extern "C" fn imre_log_routed_emit(
     message: *const Str,
 ) {
     // SAFETY: the caller holds each owner through this synchronous call.
-    let logger_name = unsafe { name(logger) };
-    if LOGGERS.with_borrow(|logs| reaches_root(logs, &logger_name)) {
+    let receiver = unsafe { state(logger) };
+    if receiver.standalone_propagate.is_none()
+        && LOGGERS.with_borrow(|logs| reaches_root(logs, &receiver.name))
+    {
         // SAFETY: all three original owners remain live.
         unsafe { super::imre_log_emit(logger, level, message) };
     } else {
