@@ -70,7 +70,11 @@ pub(crate) enum Kind {
 
 impl Kind {
     fn from_raw(kind: u32) -> Self {
-        match kind {
+        Self::try_from_raw(kind).unwrap_or_else(|| fail("SystemError", "invalid exception kind"))
+    }
+
+    fn try_from_raw(kind: u32) -> Option<Self> {
+        Some(match kind {
             0 => Self::BaseException,
             1 => Self::Exception,
             2 => Self::ArithmeticError,
@@ -109,8 +113,8 @@ impl Kind {
             35 => Self::StopIteration,
             36 => Self::BadZipFile,
             37 => Self::NotImplementedError,
-            _ => fail("SystemError", "invalid exception kind"),
-        }
+            _ => return None,
+        })
     }
 
     fn name(self) -> &'static str {
@@ -1323,6 +1327,32 @@ pub unsafe extern "C" fn imre_exception_matches(value: *const Object, expected_k
             u32::from(expected_kind < 256 && e.kind.matches(Kind::from_raw(expected_kind)))
         })
     }
+}
+
+/// Match the categories retained by a previously constructed assertion context.
+///
+/// # Safety
+/// Both arguments must be live handles of their declared types. A category lookup
+/// only reads the exception and cannot run Python or mutate the list during the borrow.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_matches_any(
+    value: *const Object,
+    kinds: *const crate::List,
+) -> u32 {
+    // SAFETY: the pointers are independently rooted throughout these readonly operations.
+    u32::from(unsafe {
+        (*kinds).0.with(|entries| {
+            entries.iter().any(|entry| {
+                entry
+                    .as_small()
+                    .and_then(|n| u32::try_from(n).ok())
+                    .is_some_and(|kind| {
+                        (kind >= 256 || Kind::try_from_raw(kind).is_some())
+                            && imre_exception_matches(value, kind) != 0
+                    })
+            })
+        })
+    })
 }
 
 /// Returns an owned string containing Python's str(exception) representation.

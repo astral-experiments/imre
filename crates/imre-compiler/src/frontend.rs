@@ -53,6 +53,7 @@ mod text;
 mod timed_handlers;
 mod truthiness;
 mod unions;
+mod unittest;
 mod unpacking;
 mod zip_sums;
 mod zipfile;
@@ -329,51 +330,53 @@ const RESERVED: &[&str] = &[
     "__file__",
 ];
 
-/// These numbers are the sealed exception categories in the runtime ABI.
+/// Indices are runtime ABI categories. Empty entries belong to imported modules.
+const BUILTIN_EXCEPTION_NAMES: &[&str] = &[
+    "BaseException",
+    "Exception",
+    "ArithmeticError",
+    "ZeroDivisionError",
+    "OverflowError",
+    "LookupError",
+    "IndexError",
+    "KeyError",
+    "ValueError",
+    "AssertionError",
+    "RuntimeError",
+    "EOFError",
+    "OSError",
+    "TypeError",
+    "AttributeError",
+    "MemoryError",
+    "SystemError",
+    "UnicodeError",
+    "UnicodeDecodeError",
+    "",
+    "FileNotFoundError",
+    "PermissionError",
+    "IsADirectoryError",
+    "NotADirectoryError",
+    "FileExistsError",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "SystemExit",
+    "",
+    "ExceptionGroup",
+    "StopIteration",
+    "",
+    "NotImplementedError",
+];
+
 pub(crate) fn exception_kind(name: &str) -> Option<u32> {
-    if name == "NotImplementedError" {
-        return Some(37);
-    }
-    if name == "StopIteration" {
-        return Some(35);
-    }
-    if name == "ExceptionGroup" {
-        return Some(34);
-    }
-    if name == "SystemExit" {
-        return Some(32);
-    }
-    [
-        "BaseException",
-        "Exception",
-        "ArithmeticError",
-        "ZeroDivisionError",
-        "OverflowError",
-        "LookupError",
-        "IndexError",
-        "KeyError",
-        "ValueError",
-        "AssertionError",
-        "RuntimeError",
-        "EOFError",
-        "OSError",
-        "TypeError",
-        "AttributeError",
-        "MemoryError",
-        "SystemError",
-        "UnicodeError",
-        "UnicodeDecodeError",
-        // UnsupportedOperation belongs to io, not the builtin namespace.
-        "",
-        "FileNotFoundError",
-        "PermissionError",
-        "IsADirectoryError",
-        "NotADirectoryError",
-        "FileExistsError",
-    ]
-    .iter()
-    .position(|candidate| !candidate.is_empty() && *candidate == name)
-    .map(|kind| kind as u32)
+    BUILTIN_EXCEPTION_NAMES
+        .iter()
+        .position(|candidate| !candidate.is_empty() && *candidate == name)
+        .map(|kind| kind as u32)
 }
 
 fn reserved(name: &str) -> bool {
@@ -3600,6 +3603,11 @@ impl<'a> Checker<'a> {
         } else {
             self.expr(&item.context_expr)?
         };
+        if let Type::Class(class) = manager.ty
+            && self.unittest_context(class)
+        {
+            return self.assert_raises_scope(item, remaining, body, class, manager);
+        }
         if manager.ty == Type::GeneratorContext {
             return self.generator_scope(item, remaining, body, manager);
         }

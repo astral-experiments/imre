@@ -1180,6 +1180,13 @@ string message and honor the instance's `longMessage` setting. A result can
 count started cases, record skips and unexpected successes, stop a run, and
 receive run and test boundary notifications.
 
+`with case.assertRaises(Expected, msg=...) as caught:` catches builtin and
+declared exception categories using Imre's native exception hierarchy. It
+accepts nested tuples and exposes the original exception as `caught.exception`.
+A stored context can be entered later. Normal exit, return, break, and continue
+raise the missing-exception assertion; unrelated exceptions propagate.
+The callable form and runtime-selected exception classes need further support.
+
 The [shared suite runner](../benchmarks/cpython_stdlib/SUITE_RUNNER.md) shows
 which parts of a complete pinned test run natively. The full CPython unittest
 API, dynamic method discovery in a native process, traceback reports, and
