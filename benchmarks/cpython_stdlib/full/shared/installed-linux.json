@@ -1,7 +1,7 @@
 {
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
   "platform": "linux",
-  "verified_fixture_files": 166,
+  "verified_fixture_files": 168,
   "configurations": {
     "gil": {
       "instances": 7294,
@@ -66,16 +66,20 @@
       ]
     },
     "free-threaded": {
-      "instances": 4,
+      "instances": 5,
       "outcomes": {
-        "pass": 4
+        "pass": 5
       },
       "modules": {
         "functools": {
           "pass": 4
+        },
+        "itertools": {
+          "pass": 1
         }
       },
       "installed_only_passes": []
     }
-  }
+  },
+  "imre_revision": "4798a585c0a0fa19daa06311605597f380ddd4c8"
 }

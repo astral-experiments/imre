@@ -38,4 +38,4 @@ free_prefix=$(mktemp -d)
 "$free_prefix/bin/python3.14t" -I -B benchmarks/cpython_stdlib/full/run_staged_reference.py --output "$(mktemp -d)"
 ```
 
-The [Linux installed run](installed-linux.json) records 7,294 ordinary-build occurrences (6,701 passes and 593 original skips) plus four free-threaded passes. Across both configurations there were no failures, extra skips or missing occurrences. These are CPython reference results; native coverage is recorded separately by each module.
+The [Linux installed run](installed-linux.json) records 7,294 ordinary-build occurrences (6,701 passes and 593 original skips) plus five free-threaded passes (four functools and one itertools) on Imre revision `4798a585c0a0`. Across both configurations there were no failures, extra skips or missing occurrences. These are CPython reference results; native coverage is recorded separately by each module.
