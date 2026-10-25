@@ -1,4 +1,4 @@
-name: Argparse 873 prospective runtime
+name: Argparse 895 prospective runtime
 on:
   workflow_dispatch:
 permissions:
@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ca977019d95d473818bc5bab8043d5c02a218dd8
+          ref: b65213dfe9d6fdd4b429bd079ae52cb302530f25
           fetch-depth: 0
           persist-credentials: true
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -27,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           base_checkout="$PWD"
-          pr=ca977019d95d473818bc5bab8043d5c02a218dd8
+          pr=b65213dfe9d6fdd4b429bd079ae52cb302530f25
           cat > "$RUNNER_TEMP/argparse-driver" <<'SH'
           #!/bin/sh
           if test "$1" = build; then
@@ -49,14 +49,19 @@ jobs:
           for name in ("benchmarks/cpython_stdlib/full/types/namespaces.py",
                        "benchmarks/cpython_stdlib/full/inspect/static_attributes.py",
                        "tests/fixtures/paths/walking.py", "tests/fixtures/processes/file_redirects.py",
-                       "tests/fixtures/text/line_methods.py"):
+                       "tests/fixtures/text/line_methods.py",
+                       "tests/fixtures/module_values/wrapper_attributes/main.py",
+                       "benchmarks/cpython_stdlib/full/logging/hierarchy_values.py"):
               source = root / name
               with TemporaryDirectory() as tmp:
                   directory = Path(tmp)
                   ref_dir = directory / "cpython"
                   ref_dir.mkdir()
                   def observed(argv, cwd):
-                      p = subprocess.run(argv, cwd=cwd, capture_output=True, timeout=90)
+                      env = os.environ.copy()
+                      if name.endswith("/wrapper_attributes/main.py"):
+                          env["PYTHONPATH"] = str(source.parent)
+                      p = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, timeout=90)
                       return p.returncode, p.stdout, p.stderr
                   expected = observed([sys.executable, "-B", source], ref_dir)
                   assert expected[0] == 0, (name, expected)
@@ -65,6 +70,7 @@ jobs:
                       native_dir = directory / ("case-" + level)
                       native_dir.mkdir()
                       subprocess.run([driver, "build", source, "--runtime", runtime, "--clang", "/usr/bin/clang-18",
+                                      *(["--module-root", source.parent] if name.endswith("/wrapper_attributes/main.py") else []),
                                       "--quiet", "--opt-level", level, "-o", output], check=True)
                       actual = observed([output], native_dir)
                       assert actual == expected, (name, level, expected, actual)
@@ -74,7 +80,7 @@ jobs:
             git fetch --no-tags origin refs/heads/main
             base=$(git rev-parse FETCH_HEAD)
             tree=$(git merge-tree --write-tree "$base" "$pr")
-            candidate=$(git -c user.name='Argparse preflight' -c user.email='noreply@github.com' commit-tree "$tree" -p "$base" -p "$pr" -m 'Hosted validation of PR #873')
+            candidate=$(git -c user.name='Argparse preflight' -c user.email='noreply@github.com' commit-tree "$tree" -p "$base" -p "$pr" -m 'Hosted validation of PR #895')
             git checkout --detach "$candidate"
             test "$(git rev-parse HEAD^{tree})" = "$tree"
             echo "Attempt $attempt: base=$base pr=$pr tree=$tree"
@@ -85,7 +91,7 @@ jobs:
             echo "Passed: base=$base pr=$pr tree=$tree (-O0 and -O3 stdout, stderr and exit; runtime ownership)." >> "$GITHUB_STEP_SUMMARY"
             git fetch --no-tags origin refs/heads/main
             latest=$(git rev-parse FETCH_HEAD)
-            if git diff --quiet "$base" "$latest" -- crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse tests/fixtures/paths/walking.py tests/fixtures/processes/file_redirects.py tests/fixtures/text/line_methods.py benchmarks/cpython_stdlib/full/types/namespaces.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py; then
+            if git diff --quiet "$base" "$latest" -- crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse tests/fixtures/paths/walking.py tests/fixtures/processes/file_redirects.py tests/fixtures/text/line_methods.py benchmarks/cpython_stdlib/full/types/namespaces.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py tests/fixtures/module_values/wrapper_attributes benchmarks/cpython_stdlib/full/logging/hierarchy_values.py; then
               echo "Verified product source through main=$latest; tree=$tree (base=$base, pr=$pr)."
               exit 0
             fi
