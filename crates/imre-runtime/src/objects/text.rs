@@ -6,11 +6,49 @@ mod translate;
 pub(super) use lowercase::{lowercase, lowercase_chars};
 
 use num_traits::{Signed, ToPrimitive};
+use std::fmt::Write;
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Int, Object, Str, Words, fail, python_whitespace};
+
+/// Escape Unicode scalars in a Python representation using ASCII backslash replacement.
+///
+/// # Safety
+/// The caller roots the Unicode input for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_ascii_escape(value: *const Str) -> *const Str {
+    // SAFETY: the generated caller owns this immutable string.
+    let text = unsafe { &*value };
+    if text.is_ascii() {
+        // SAFETY: transfer another ownership share to the checked caller.
+        unsafe { Rc::increment_strong_count(value) };
+        return value;
+    }
+    let mut ascii = String::new();
+    let size = text.chars().try_fold(0usize, |len, ch| {
+        len.checked_add(match ch as u32 {
+            0..=127 => 1,
+            128..=255 => 4,
+            256..=65535 => 6,
+            _ => 10,
+        })
+    });
+    if size.is_none_or(|size| ascii.try_reserve_exact(size).is_err()) {
+        return Error::allocation().returning(std::ptr::null());
+    }
+    for ch in text.chars() {
+        let n = ch as u32;
+        match n {
+            0..=127 => ascii.push(ch),
+            128..=255 => write!(ascii, "\\x{n:02x}").unwrap(),
+            256..=65535 => write!(ascii, "\\u{n:04x}").unwrap(),
+            _ => write!(ascii, "\\U{n:08x}").unwrap(),
+        }
+    }
+    Rc::into_raw(Rc::new(Str::from(ascii)))
+}
 
 /// # Safety
 /// The integer is rooted. Success transfers an immutable one-character string.

@@ -857,12 +857,10 @@ pub extern "C" fn imre_print_none() {
 pub unsafe extern "C" fn imre_int_str(value: usize) -> *const Str {
     // SAFETY: the caller keeps the integer alive through formatting.
     let value = unsafe { Int::borrow(value) };
-    let text = if let Some(value) = value.as_small() {
-        Str::new(itoa::Buffer::new().format(value))
-    } else {
-        Str::from(value.big().to_string())
-    };
-    Rc::into_raw(Rc::new(text))
+    match integer_text::decimal_string(&value) {
+        Ok(text) => Rc::into_raw(Rc::new(text)),
+        Err(error) => error.returning(std::ptr::null()),
+    }
 }
 
 /// Returns an owned Python spelling for a compiler-validated boolean.

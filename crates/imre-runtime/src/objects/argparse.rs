@@ -20,18 +20,7 @@ mod nargs;
 use binding::{Bound, IntegerRange};
 use nargs::{Nargs, positional_counts};
 
-/// Large decimal conversions obey the interpreter's configured digit limit,
-/// including leading zeroes. Underscores and signs do not count.
-fn decimal_digits_allowed(count: usize) -> bool {
-    if count <= 640 {
-        return true;
-    }
-    let limit = std::env::var("PYTHONINTMAXSTRDIGITS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(4300);
-    limit == 0 || count <= limit
-}
+use crate::integer_text::decimal_digits_allowed;
 
 #[derive(Deserialize, Copy, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]

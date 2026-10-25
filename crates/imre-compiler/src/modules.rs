@@ -141,6 +141,7 @@ pub(crate) enum Intrinsic {
     AnnotationFormat(i64),
     Declaration(&'static str),
     BuiltinsLast,
+    BuiltinsAscii,
     SysDisplayHook,
     ArgumentParser,
     ArgparseNamespace,
@@ -636,6 +637,7 @@ impl IntrinsicModule {
                 Intrinsic::RawDescriptionHelpFormatter
             }
             (Self::Builtins, "_") => Intrinsic::BuiltinsLast,
+            (Self::Builtins, "ascii") => Intrinsic::BuiltinsAscii,
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Sys, "orig_argv") => Intrinsic::OrigArgv,
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
