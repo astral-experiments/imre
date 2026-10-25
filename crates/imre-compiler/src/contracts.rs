@@ -497,6 +497,10 @@ impl Builtin {
             | Self::CursorLengthHint
             | Self::Progression { .. }
             | Self::Tee
+            | Self::TupleBufferNew
+            | Self::TupleBufferPush
+            | Self::TupleBufferFinish
+            | Self::TupleIndex
             | Self::Islice
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter

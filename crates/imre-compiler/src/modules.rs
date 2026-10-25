@@ -929,6 +929,12 @@ impl SourceGraph {
             .push(CheckedDiagnostic::PositionalKeyword(keyword));
     }
 
+    /// This operand is evaluated by a tuple display that raises a native TypeError.
+    pub(crate) fn checked_non_iterable_spread(&self, module: ModuleId, value: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::NonIterableSpread(value));
+    }
+
     pub(crate) fn checked_keywords(
         &self,
         module: ModuleId,

@@ -63,3 +63,22 @@ Python-defined iterator protocols, including sources that raise mid-pull.
 fork, a discarded lagging fork, source mutation, and an empty result that must
 not obtain an iterator. The larger `test_tee` body also requires weak references,
 dynamic types and arbitrary Python source iterators; it is not counted.
+
+## Whole-file startup: starred arguments in an immutable tuple
+
+The pinned [threading helper](../shared/upstream/Lib/test/support/threading_helper.py#L277)
+constructs `(func, *args)` before it calls `threading.Thread`. On Imre
+`c5d2fe7`, both the import and the runner stopped on that display, with or
+without `--reachable-only` ([baseline](tuple-spread-startup-before-linux.json)).
+With runtime tuple spreads, all four advance to the unsupported `import _thread`
+at line 1. These are compilation checks: **zero upstream methods executed**.
+
+[tuple_spread_audit.py](tuple_spread_audit.py) verifies the helper against its
+pinned Git blob and repeats all four checks with the vendored and original
+sources. It separately compares the [native exercise](tuple_spreads.py) with
+CPython at O0 and O3, in ordinary and reachable-only builds. The [Linux
+result](tuple-spread-controls-linux.json) records 38 matching lines per build, including mutation
+between spreads, partial iteration on failure, invalid operands, callable
+retention, a partially consumed iterator, and a 1,025-element input. It also records how the two checking
+modes treat an unused function. These controls add no occurrence to the 137
+primary or one companion test.

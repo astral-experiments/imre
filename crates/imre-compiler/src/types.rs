@@ -23,6 +23,9 @@ enum Shape {
     Tuple(Vec<Type>),
     NamedTuple(TupleOrigin, Vec<Type>),
     PartialFrame(Vec<Type>),
+    VarTuple(Type),
+    /// Display segments are fixed fields or repetitions of an item of known type.
+    DisplayTuple(Vec<(Type, bool)>),
     Callable(Vec<Type>, Type),
     DeclaredCache(Type, usize),
     CachedCallable(CachedFunction),
@@ -116,6 +119,10 @@ impl Types {
             Type::ForwardRef(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::Tuple(fields)) if fields.len() == 5)
             }
+            Type::VarTuple(id) => matches!(
+                storage.shapes.get(id),
+                Some(Shape::VarTuple(_) | Shape::DisplayTuple(_))
+            ),
             Type::Callable(id) => matches!(
                 storage.shapes.get(id),
                 Some(Shape::Callable(..) | Shape::DeclaredCache(..) | Shape::CachedCallable(_))
@@ -146,6 +153,7 @@ impl Types {
             | Type::StringKeys
             | Type::Iterator
             | Type::ByteOutput
+            | Type::TupleBuffer
             | Type::Exception
             | Type::ExceptionField
             | Type::ImportException
@@ -197,7 +205,9 @@ impl Types {
         for (id, shape) in storage.shapes.iter().enumerate() {
             let children: Vec<Type> = match shape {
                 Shape::StringLiterals(_) => Vec::new(),
-                Shape::Cursor(ty)
+                Shape::DisplayTuple(parts) => parts.iter().map(|&(ty, _)| ty).collect(),
+                Shape::VarTuple(ty)
+                | Shape::Cursor(ty)
                 | Shape::List(ty)
                 | Shape::Deque(ty)
                 | Shape::Set(ty)
@@ -221,6 +231,7 @@ impl Types {
                 self.verify_type(child, classes)?;
                 if let Type::StrLiteral(child_id)
                 | Type::Cursor(child_id)
+                | Type::VarTuple(child_id)
                 | Type::List(child_id)
                 | Type::CacheState(child_id)
                 | Type::Dict(child_id)
@@ -542,6 +553,7 @@ impl Types {
             | Type::Cursor(_)
             | Type::CacheState(_)
             | Type::ByteOutput
+            | Type::TupleBuffer
             | Type::Exception
             | Type::ImportException
             | Type::TimeoutExpired
@@ -610,6 +622,64 @@ impl Types {
         storage.shapes.push(shape.clone());
         storage.ids.insert(shape, id);
         id
+    }
+
+    pub(crate) fn var_tuple(&self, element: Type) -> Type {
+        Type::VarTuple(self.intern(Shape::VarTuple(element)))
+    }
+
+    pub(crate) fn var_tuple_element(&self, ty: Type) -> Option<Type> {
+        let Type::VarTuple(id) = ty else { return None };
+        match &self.0.borrow().shapes[id] {
+            Shape::VarTuple(element) => Some(*element),
+            Shape::DisplayTuple(_) => None,
+            _ => unreachable!(),
+        }
+    }
+
+    /// Homogeneous displays share the ordinary `tuple[T, ...]` type. Heterogeneous
+    /// ones retain their guaranteed fixed positions on either side of a spread.
+    pub(crate) fn display_tuple(&self, parts: Vec<(Type, bool)>) -> Type {
+        let first = parts.first().map_or(Type::None, |(ty, _)| *ty);
+        if parts.iter().all(|&(ty, _)| ty == first) {
+            self.var_tuple(first)
+        } else {
+            Type::VarTuple(self.intern(Shape::DisplayTuple(parts)))
+        }
+    }
+
+    /// Return the field type only when every possible length agrees at this index.
+    pub(crate) fn display_tuple_index(&self, ty: Type, index: Option<i64>) -> Option<Type> {
+        if let Some(element) = self.var_tuple_element(ty) {
+            return Some(element);
+        }
+        let Type::VarTuple(id) = ty else { return None };
+        let storage = self.0.borrow();
+        let Shape::DisplayTuple(parts) = &storage.shapes[id] else {
+            return None;
+        };
+        let index = index?;
+        let reverse = index < 0;
+        let at = if reverse {
+            index.unsigned_abs() - 1
+        } else {
+            index as u64
+        };
+        let mut minimum = 0;
+        let mut variable = false;
+        let mut result = None;
+        for i in 0..parts.len() {
+            let (field, repeated) = parts[if reverse { parts.len() - i - 1 } else { i }];
+            if at >= minimum && (variable || repeated || at == minimum) {
+                if result.is_some_and(|ty| ty != field) {
+                    return None;
+                }
+                result = Some(field);
+            }
+            variable |= repeated;
+            minimum += u64::from(!repeated);
+        }
+        result
     }
 
     pub(crate) fn cursor(&self, element: Type) -> Type {
@@ -1004,6 +1074,11 @@ impl Types {
         if let Type::ForwardRef(id) = ty {
             return self.fields(Type::Tuple(id)).unwrap();
         }
+        if let Type::VarTuple(id) = ty
+            && let Shape::DisplayTuple(parts) = &self.0.borrow().shapes[id]
+        {
+            return parts.iter().map(|&(field, _)| field).collect();
+        }
         if let Type::SimpleNamespace(id) = ty {
             return vec![Type::Dict(id)];
         }
@@ -1013,6 +1088,7 @@ impl Types {
             .or_else(|| self.set_element(ty))
             .or_else(|| self.deque_element(ty))
             .or_else(|| self.cursor_element(ty))
+            .or_else(|| self.var_tuple_element(ty))
         {
             vec![element]
         } else if let Some((key, value)) = self.mapping(ty) {
@@ -1076,6 +1152,7 @@ impl TypeDescription<'_> {
             Type::StrLiteral(id)
             | Type::List(id)
             | Type::Cursor(id)
+            | Type::VarTuple(id)
             | Type::Tuple(id)
             | Type::Callable(id)
             | Type::Dict(id)
@@ -1106,6 +1183,26 @@ impl TypeDescription<'_> {
                 self.write_types(params, ", ")?;
                 self.write_str("], ")?;
                 self.write_type(*returns)?;
+            }
+            Shape::VarTuple(element) => {
+                self.write_str("tuple[")?;
+                self.write_type(*element)?;
+                self.write_str(", ...")?;
+            }
+            Shape::DisplayTuple(parts) => {
+                self.write_str("tuple[")?;
+                for (i, (ty, repeated)) in parts.iter().enumerate() {
+                    if i != 0 {
+                        self.write_str(", ")?;
+                    }
+                    if *repeated {
+                        self.write_str("*tuple[")?;
+                    }
+                    self.write_type(*ty)?;
+                    if *repeated {
+                        self.write_str(", ...]")?;
+                    }
+                }
             }
             Shape::Cursor(element) => {
                 self.write_str("Iterator[")?;
