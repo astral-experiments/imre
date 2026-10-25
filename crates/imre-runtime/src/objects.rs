@@ -9,6 +9,7 @@
 mod argparse;
 mod args;
 mod asyncio;
+mod boxed_values;
 mod bytes;
 mod contexts;
 mod deferred_diff;
@@ -55,6 +56,7 @@ enum Storage {
     Set(Box<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
+    RegexIterator(regexes::FindIter),
     Repeat(itertools::Repeat),
     IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
@@ -62,7 +64,7 @@ enum Storage {
     ByteOutput(bytes::ByteOutput),
     Sha256(Box<sha2::Sha256>),
     Exception(exceptions::Exception),
-    ExceptionField(OwnedWord),
+    ObjectValue(OwnedWord),
     File(Box<files::FileState>),
     ZipFile(Box<zipfile::Archive>),
     ZipInfo(Rc<zipfile::Info>),

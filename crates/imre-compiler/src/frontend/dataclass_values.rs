@@ -43,7 +43,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::Sha256
         | Type::RegexPattern
         | Type::RegexMatch
-        | Type::ExceptionField
+        | Type::ObjectValue
         | Type::TextIO
         | Type::BinaryIO
         | Type::Iterator

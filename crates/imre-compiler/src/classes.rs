@@ -592,6 +592,23 @@ fn class_static_binding(
     }
     let binding = graph.resolve(module, value)?;
     match (wrapped, binding) {
+        (false, Binding::Value(id)) => {
+            // A compiled regex is an immutable object in a fixed module binding.
+            let stmt = &graph.modules[id.module].parsed.syntax().body[id.statement];
+            let init = match stmt {
+                ast::Stmt::Assign(a) => Some(a.value.as_ref()),
+                ast::Stmt::AnnAssign(a) => a.value.as_deref(),
+                _ => None,
+            };
+            if let Some(ast::Expr::Call(call)) = init
+                && graph.resolve(id.module, &call.func)
+                    == Some(Binding::Intrinsic(Intrinsic::RegexCompile))
+            {
+                Some(binding)
+            } else {
+                None
+            }
+        }
         (false, Binding::IntrinsicModule(_)) | (true, Binding::Intrinsic(_)) => Some(binding),
         (true, Binding::Definition(id))
             if matches!(

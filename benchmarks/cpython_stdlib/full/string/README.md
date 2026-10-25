@@ -6,11 +6,15 @@ The vendored `Lib/test/test_string` is CPython 3.14.5's entire package. The upst
 |---|---:|---|
 | ASCII constants and `capwords` | 2 | Complete, byte-identical method bodies; native typed assertion adapter |
 | `string.Formatter` | 14 | No native result; field lookup, format specs, subclass overrides and recursion |
-| `string.Template` | 24 | No native result; mapping/keyword substitution, invalid patterns and subclass customization |
+| `string.Template` | 24 | 9 complete original default-pattern methods; 4 callable assertion methods and 11 custom subclass methods remain unexecuted |
 | `string.templatelib` | 13 | No native result; the Python 3.14 t-string syntax and interpolation objects are separate from `string.Template` |
 | `LazyImportTest.test_lazy_import` | 1 | No native result; CPython's import-isolation fixture inspects `base64`'s imports |
 
-At both O0 and O3, `native_core.py` compiles the two named methods without modifying their source or expected operands. Its native case implements `assertEqual(str, str)`, counts the nine comparisons in each, and must raise on deliberately unequal input. `core_differential.py` separately compares 51 output lines with CPython, including full titlecase expansions, contextual final sigma, Unicode whitespace, positional/default/explicit separators, and the exact error for an empty separator. The other 52 reference occurrences remain in each evidence ledger as unexecuted. This is method-level coverage, not native unittest discovery: importing the intact package reaches `test.support` line 6 and stops at `annotationlib`.
+At both O0 and O3, `native_core.py` compiles **11/54** original method bodies, byte-for-byte: two core methods and nine `Template` methods. The native fixture counts the 41 original string comparisons and must raise for a deliberately unequal pair in each case. CPython executes the same counted fixture as a control. The other 43 original rows remain unexecuted. This is method-level evidence: importing the intact package reaches `test.support` and stops at `annotationlib`.
+
+[`template-cases.json`](template-cases.json) accounts for all 24 `TestTemplate` IDs. Four default-pattern methods pass bound or unbound variadic methods to `assertRaises`, sometimes with deliberately invalid call shapes. Eleven more define a custom `Template` class (including the full `is_valid` and `get_identifiers` tests). Focused native checks exercise default-pattern errors and identifiers; they do not count as those original methods. `Formatter` and the 13 t-string/`templatelib` cases are separate.
+
+Supplemental comparisons cover Unicode and nullable mapping values, keyword order/overrides, exact error locations, independent match cursors, oversized decimal integers and a direct read-only mapping. The driver also compiles the **unchanged** `StringTemplateStyle.validate` method body from CPython's `Lib/logging/__init__.py:524` and compares nine formats with CPython's real style class. Its native fixture supplies only `_fmt`; this is not a claim of native logging-module discovery. [The stored method](logging_validate.method) is checked by SHA-256. Giving `--cpython-source` additionally verifies the entire original logging Git blob and its byte-identical method span.
 
 Reproduce the reference and native ledgers from the repository root:
 

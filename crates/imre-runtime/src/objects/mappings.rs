@@ -1270,6 +1270,30 @@ pub extern "C" fn imre_function_cache_clear(id: usize) {
     drop(FUNCTION_CACHES.with_borrow_mut(|caches| caches.remove(&id)));
 }
 
+/// Look up one value lazily through a read-only string-key mapping view.
+///
+/// # Safety
+/// Both handles are rooted; the mapping stores supported concrete or boxed values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_mapping_object_get(
+    value: *const Object,
+    key: *const Str,
+) -> *const Object {
+    // SAFETY: the shared dictionary borrow only retains the found value.
+    let found = unsafe { object(value).0.with(|s| s.dictionary().logging_key(&*key)) };
+    let Some(field) = found else {
+        // SAFETY: the same dictionary and string key remain rooted.
+        return unsafe { missing_key(value, key as usize) }.returning(std::ptr::null());
+    };
+    if field.kind.raw() == 5 {
+        // The only accepted object-handle value layout is the existing box.
+        return field.into_word() as *const Object;
+    }
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ObjectValue(
+        field,
+    )))))
+}
+
 /// Creates a dictionary with concrete scalar keys and one shared value descriptor.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_dict_new(key_kind: u32, value_kind: u32) -> *const Object {
@@ -1993,6 +2017,7 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
             }
             Storage::Repeat(iterator) => Ok(iterator.next().map(|value| (value, None))),
             Storage::StringIterator(iterator) => Ok(iterator.next()),
+            Storage::RegexIterator(iterator) => Ok(iterator.next()),
             Storage::LineIterator(iterator) => Ok(iterator.next()),
             Storage::BytesIterator(iterator) => Ok(iterator.next()),
             _ => storage.mapping_iterator_mut().next(),

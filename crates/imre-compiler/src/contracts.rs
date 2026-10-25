@@ -65,12 +65,17 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::Str if args.first().is_some_and(|e| e.ty == Type::ObjectValue) => {
+                Contract::new(true, PreservesOwners)
+            }
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorNew { .. }
             | Self::ImportErrorField(_)
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
-            Self::ExceptionFieldRepr => Contract::new(false, PreservesOwners),
+            Self::MappingObjectGet => Contract::new(true, PreservesOwners),
+            Self::BoxValue => Contract::new(false, PreservesOwners),
+            Self::ExceptionFieldRepr => Contract::new(true, PreservesOwners),
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {
                 Contract::new(false, PreservesLists)
@@ -269,6 +274,7 @@ impl Builtin {
             | Self::KeyIntersection
             | Self::KeyDifference
             | Self::RegexGroupDict
+            | Self::RegexFindIter
             | Self::DictGet
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
@@ -704,6 +710,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_regex_groupdict"
                 | "imre_bytes_decode_splitlines"
                 | "imre_str_splitlines"
+                | "imre_mapping_object_get"
+                | "imre_exception_field_repr"
+                | "imre_system_exit_code_text"
                 | "imre_exception_field_index"
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"

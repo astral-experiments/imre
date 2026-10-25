@@ -1069,6 +1069,7 @@ impl Checker<'_> {
         let materialized = self.immediate_constructor_input(call, class);
         let call = materialized.as_ref().unwrap_or(call);
         let signature = self.classes.methods[class]["__init__"].clone();
+        let mut scope = calls::ArgumentScope::default();
         let normalization = self.normalized_record_input(class);
         let args = if let Some((field, wrapper, template)) = normalization {
             let params = &signature.params[1..];
@@ -1084,16 +1085,16 @@ impl Checker<'_> {
         } else if self.inference.is_some() {
             self.infer_call(call, &signature, None, 1)?.1
         } else {
-            self.arguments(call, &signature.params[1..], None)?
+            self.held_arguments(call, &signature.params[1..], None, &mut scope)?
         };
         self.calls.insert(signature.id);
-        let record = Expr {
+        let record = scope.finish(Expr {
             ty: Type::Class(class),
             kind: ExprKind::Construct {
                 initializer: signature.id,
                 args,
             },
-        };
+        });
         let decl = &self.classes.declarations.definitions[class];
         if let Some(&kind) = self.classes.declarations.exceptions.get(&decl.definition) {
             let text = self.classes.methods[class].get("__str__").map(|m| m.id);
@@ -1207,16 +1208,17 @@ impl Checker<'_> {
             ty: Type::Class(base),
             kind: ExprKind::Builtin(Builtin::RecordView, vec![self.local(self.names["self"])]),
         };
+        let mut scope = calls::ArgumentScope::default();
         let args = if self.inference.is_some() {
             self.infer_call(call, &signature, Some(receiver), 1)?.1
         } else {
-            self.arguments(call, &signature.params[1..], Some(receiver))?
+            self.held_arguments(call, &signature.params[1..], Some(receiver), &mut scope)?
         };
         self.calls.insert(signature.id);
-        Ok(Expr {
+        Ok(scope.finish(Expr {
             ty: Type::None,
             kind: ExprKind::Call(signature.id, args),
-        })
+        }))
     }
 
     fn immediate_constructor_input(

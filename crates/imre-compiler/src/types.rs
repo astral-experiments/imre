@@ -91,7 +91,8 @@ impl Types {
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
-            | Type::ExceptionField
+            | Type::ObjectValue
+            | Type::ReadOnlyObjectMapping
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::TextIO

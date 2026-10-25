@@ -294,6 +294,9 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         resume: (position + 1 < left.values.len()).then_some(position + 1),
                     }
                 }
+                (Storage::ObjectValue(l), Storage::ObjectValue(r)) => Comparison::Done(
+                    super::boxed_values::equal((l.kind, l.word), (r.kind, r.word)),
+                ),
                 (Storage::Dictionary(left), Storage::Dictionary(right)) => {
                     left.compare_entry(right, position)
                 }
@@ -358,6 +361,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 },
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
+                        Storage::ObjectValue(field) => Some(ReprTask::Word(field.word, field.kind)),
                         Storage::IteratorAdapter(adapter) => {
                             adapter.write_repr(output, owner);
                             None

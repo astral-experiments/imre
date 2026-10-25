@@ -1066,7 +1066,7 @@ unsafe fn exit_word(value: *const Object) -> (WordKind, usize) {
     // SAFETY: a code view keeps its immutable typed exit payload alive.
     unsafe {
         (*value).0.with(|s| match s {
-            Storage::ExceptionField(v) => (v.kind, v.word),
+            Storage::ObjectValue(v) => (v.kind, v.word),
             Storage::Exception(e) => match &e.payload {
                 Payload::Exit(Some(code)) => (code.kind, code.word),
                 Payload::Exit(None) => (WordKind::new(0), 0),
@@ -1096,7 +1096,7 @@ pub unsafe extern "C" fn imre_system_exit_code_text(value: *const Object) -> *co
     // SAFETY: the caller roots the immutable exit payload.
     unsafe {
         let (kind, word) = exit_word(value);
-        Rc::into_raw(imports::word_text(kind, word, false))
+        super::boxed_values::checked_text(kind, word, false)
     }
 }
 
@@ -1122,7 +1122,7 @@ pub unsafe extern "C" fn imre_system_exit_code_equal(
         ((k, w), (j, v))
     };
     // SAFETY: matching immutable scalar kinds describe both words.
-    u32::from(unsafe { imports::equal((left_kind, left), (right_kind, right)) })
+    u32::from(unsafe { super::boxed_values::equal((left_kind, left), (right_kind, right)) })
 }
 
 /// # Safety

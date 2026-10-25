@@ -12,15 +12,14 @@ impl Checker<'_> {
         matches!(base, 41 | 42)
     }
 
-    pub(super) fn import_argument_supported(&self, ty: Type) -> bool {
+    pub(super) fn boxable_value(&self, ty: Type) -> bool {
         matches!(
             ty,
             Type::None | Type::Bool | Type::Int | Type::Str | Type::StrLiteral(_) | Type::Bytes
-        ) || self.types.fields(ty).is_some_and(|items| {
-            items
-                .into_iter()
-                .all(|item| self.import_argument_supported(item))
-        })
+        ) || self
+            .types
+            .fields(ty)
+            .is_some_and(|items| items.into_iter().all(|item| self.boxable_value(item)))
     }
 
     pub(super) fn import_error(&mut self, call: &ast::ExprCall, kind: u32) -> Result<Expr, String> {
@@ -55,7 +54,7 @@ impl Checker<'_> {
         }
         let mut value = |node: &ast::Expr| {
             let arg = self.expr(node)?;
-            if !self.import_argument_supported(arg.ty) {
+            if !self.boxable_value(arg.ty) {
                 return Err(error(
                     self.source,
                     node,

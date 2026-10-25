@@ -65,7 +65,8 @@ impl Type {
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
-            | Self::ExceptionField
+            | Self::ObjectValue
+            | Self::ReadOnlyObjectMapping
             | Self::ImportException
             | Self::TimeoutExpired
             | Self::Path
@@ -119,7 +120,8 @@ impl Type {
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
-            | Self::ExceptionField
+            | Self::ObjectValue
+            | Self::ReadOnlyObjectMapping
             | Self::ImportException
             | Self::TimeoutExpired
             | Self::Path
@@ -705,7 +707,8 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExceptionField
+            | Type::ObjectValue
+            | Type::ReadOnlyObjectMapping
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
@@ -3313,7 +3316,8 @@ impl Emitter<'_, '_> {
                 | Type::ZipInfo
                 | Type::Exception
                 | Type::NamedException(_)
-                | Type::ExceptionField
+                | Type::ObjectValue
+                | Type::ReadOnlyObjectMapping
                 | Type::ImportException
                 | Type::TimeoutExpired
                 | Type::TextIO
@@ -3831,6 +3835,11 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::RegexFindIter => self.call(
+                "imre_regex_finditer",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::RegexGroupDict => {
                 self.call("imre_regex_groupdict", returns, &[&args[0].value])
             }
@@ -4460,6 +4469,22 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::BoxValue => {
+                let value = &args[0].value;
+                let kind = representation_kind(value.ty, &self.module.types);
+                let word = self.word(value);
+                Value {
+                    ty: returns,
+                    operand: self
+                        .instruction(format!("call ptr @imre_box_value(i32 {kind}, i64 {word})")),
+                    small_integer: false,
+                }
+            }
+            Builtin::MappingObjectGet => self.call(
+                "imre_mapping_object_get",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::ExceptionFieldRepr => {
                 self.call("imre_exception_field_repr", returns, &[&args[0].value])
             }
@@ -4585,7 +4610,7 @@ impl Emitter<'_, '_> {
                     }
                 }
                 Type::None => self.call("imre_none_str", Type::Str, &[]),
-                Type::ExceptionField => {
+                Type::ObjectValue => {
                     self.call("imre_system_exit_code_text", Type::Str, &[&args[0].value])
                 }
                 Type::Exception
@@ -4656,7 +4681,7 @@ impl Emitter<'_, '_> {
                             Type::Bytes => "imre_bytes_len",
                             Type::ListInt => "imre_list_len",
                             Type::List(_) => "imre_seq_len_fast",
-                            Type::Dict(_) => "imre_dict_len",
+                            Type::Dict(_) | Type::ReadOnlyObjectMapping => "imre_dict_len",
                             Type::Set(_) | Type::StringKeys => "imre_set_len",
                             _ => unreachable!("len input was checked"),
                         },
@@ -5205,7 +5230,7 @@ impl Emitter<'_, '_> {
                         self.instruction(format!("icmp eq i64 {}, 0", args[0].value.operand))
                     }
                     Type::None => "true".to_owned(),
-                    Type::ExceptionField => {
+                    Type::ObjectValue => {
                         let bit = self.instruction(format!(
                             "call i32 @imre_system_exit_code_equal(ptr {}, i32 0, i64 0)",
                             args[0].value.operand
@@ -5255,7 +5280,8 @@ impl Emitter<'_, '_> {
                     | Type::ByteOutput
                     | Type::Exception
                     | Type::NamedException(_)
-                    | Type::ExceptionField
+                    | Type::ObjectValue
+                    | Type::ReadOnlyObjectMapping
                     | Type::ImportException
                     | Type::TimeoutExpired
                     | Type::Path
@@ -5496,7 +5522,8 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExceptionField
+            | Type::ObjectValue
+            | Type::ReadOnlyObjectMapping
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
@@ -5564,7 +5591,8 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExceptionField
+            | Type::ObjectValue
+            | Type::ReadOnlyObjectMapping
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
@@ -6146,7 +6174,8 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ByteOutput
         | Type::Exception
         | Type::NamedException(_)
-        | Type::ExceptionField
+        | Type::ObjectValue
+        | Type::ReadOnlyObjectMapping
         | Type::ImportException
         | Type::TimeoutExpired
         | Type::Path
@@ -6522,6 +6551,8 @@ declare ptr @imre_exception_message(ptr)
 declare ptr @imre_import_error_new(i32, ptr, ptr, i32, i64, i32, i64, i32, i64)
 declare ptr @imre_import_error_field(ptr, i32)
 declare void @imre_import_error_reset(ptr, ptr)
+declare ptr @imre_box_value(i32, i64)
+declare ptr @imre_mapping_object_get(ptr, ptr)
 declare ptr @imre_exception_field_repr(ptr)
 declare i64 @imre_exception_field_len(ptr)
 declare ptr @imre_exception_field_index(ptr, i64)
@@ -6795,6 +6826,7 @@ declare i1 @imre_log_enabled(ptr, i64)
 declare void @imre_log_emit(ptr, i64, ptr)
 declare ptr @imre_regex_group(ptr, i64, i32)
 declare ptr @imre_regex_groupdict(ptr)
+declare ptr @imre_regex_finditer(ptr, ptr)
 declare i32 @imre_regex_present(ptr, i64, i32)
 declare i64 @imre_regex_bound(ptr, i64, i32, i32)
 declare ptr @imre_str_get(ptr, i64)

@@ -53,11 +53,12 @@ impl Function {
         node: &impl Ranged,
     ) -> Result<Expr, String> {
         if !self.captures.is_empty()
-            || self
-                .signature
-                .params
-                .iter()
-                .any(|p| p.kind == ParameterKind::KeywordOnly)
+            || self.signature.params.iter().any(|p| {
+                matches!(
+                    p.kind,
+                    ParameterKind::KeywordOnly | ParameterKind::KeywordRest
+                )
+            })
         {
             return Err(error(
                 source,
@@ -372,8 +373,9 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         function: &Function,
     ) -> Result<Expr, String> {
-        let args = self.arguments(call, &function.signature.params, None)?;
-        self.call_local_args(call, function, args)
+        let mut scope = calls::ArgumentScope::default();
+        let args = self.held_arguments(call, &function.signature.params, None, &mut scope)?;
+        Ok(scope.finish(self.call_local_args(call, function, args)?))
     }
 
     fn call_local_args(
