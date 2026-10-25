@@ -364,15 +364,6 @@ pub(super) fn errno_with_filenames(
     })
 }
 
-/// A caller which supplies a printable suffix retains the same errno and args.
-pub(super) fn errno_with_paths(error: io::Error, paths: impl FnOnce(&mut String)) -> Error {
-    with_errno_description(error, |kind, errno, description| {
-        let mut message = format!("[Errno {errno}] {description}");
-        paths(&mut message);
-        Error::from_errno_message(kind, errno, description, message)
-    })
-}
-
 fn with_errno_description(error: io::Error, build: impl FnOnce(Kind, i32, &str) -> Error) -> Error {
     let Some(errno) = error.raw_os_error() else {
         return os_error(error);
