@@ -1,4 +1,4 @@
-//! Owning, type-erased views of native Python scalars, tuples and typed lists.
+//! Owning, type-erased views of native Python scalars, sequences, and eligible dataclasses.
 use super::exceptions::{Error, Kind};
 use super::words::WordKind;
 use super::{Bytes, Object, Storage, StorageCell, Str, acquire_rc, object, records, values};
@@ -60,7 +60,7 @@ pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rc<Str> {
 }
 
 /// The default CPython decimal conversion limit is tested only when a selected
-/// scalar or tuple is actually formatted. Compare magnitudes before converting,
+/// value is actually formatted. Compare magnitudes before converting,
 /// so a huge input cannot allocate an unbounded decimal scratch string.
 pub(super) unsafe fn checked_text(kind: WordKind, word: usize, repr: bool) -> *const Str {
     static LIMIT: std::sync::LazyLock<num_bigint::BigUint> =
@@ -70,7 +70,7 @@ pub(super) unsafe fn checked_text(kind: WordKind, word: usize, repr: bool) -> *c
         // A sibling cursor per ancestor keeps scratch space proportional to depth.
         let mut pending = smallvec::SmallVec::<[(WordKind, usize, usize, usize); 4]>::new();
         let mut next = (kind, word);
-        loop {
+        'scan: loop {
             let (k, w) = next;
             if k.raw() == 2 {
                 let n = Int::borrow(w);
@@ -78,23 +78,34 @@ pub(super) unsafe fn checked_text(kind: WordKind, word: usize, repr: bool) -> *c
                     return Error::new(Kind::ValueError, "Exceeds the limit (4300 digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit")
                         .returning(std::ptr::null());
                 }
-            } else if matches!(k.raw(), 4..=6)
-                && let Some(n) = length(k, w)
-                && n != 0
-            {
-                if n > 1 {
-                    pending.push((k, w, 1, n));
+            } else if matches!(k.raw(), 4..=6) {
+                // Dataclasses have no Python length, but their selected repr fields are visited.
+                let n = if k.raw() == 6 {
+                    records::descriptor(w as *const usize).length
+                } else {
+                    length(k, w).unwrap_or(0)
+                };
+                if n != 0 {
+                    pending.push((k, w, 0, n));
                 }
-                next = sequence_item(k, w, 0);
-                continue;
             }
-            let Some((k, w, i, n)) = pending.pop() else {
-                break;
-            };
-            if i + 1 < n {
-                pending.push((k, w, i + 1, n));
+            while let Some((k, w, i, n)) = pending.pop() {
+                let selected = if k.raw() == 6
+                    && let Some(class) = records::descriptor(w as *const usize).class_semantics()
+                {
+                    (i..n).find(|&j| (*class.fields.add(j)).flags & 2 != 0)
+                } else {
+                    Some(i)
+                };
+                if let Some(i) = selected {
+                    if i + 1 < n {
+                        pending.push((k, w, i + 1, n));
+                    }
+                    next = sequence_item(k, w, i);
+                    continue 'scan;
+                }
             }
-            next = sequence_item(k, w, i);
+            break;
         }
         Rc::into_raw(word_text(kind, word, repr))
     }
@@ -115,6 +126,32 @@ pub unsafe extern "C" fn imre_box_value(kind: u32, word: usize) -> *const Object
     )))))
 }
 
+/// Borrow the payload of an erased instance with the requested exact class.
+///
+/// # Safety
+/// The caller roots the erased value for the lifetime of the returned borrow.
+/// The requested descriptor is immutable compiler-emitted class metadata.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_object_record_payload(
+    value: *const Object,
+    expected: *const records::RecordDescriptor,
+) -> *const usize {
+    // SAFETY: the rooted object keeps the candidate payload alive.
+    unsafe {
+        (*value).0.with(|s| {
+            if let Storage::ObjectValue(v) = s
+                && v.kind.raw() == 6
+            {
+                let ptr = v.word as *const usize;
+                if records::descriptor(ptr).same_class(&*expected) {
+                    return ptr;
+                }
+            }
+            std::ptr::null()
+        })
+    }
+}
+
 pub(super) fn length(kind: WordKind, word: usize) -> Option<usize> {
     // SAFETY: each admitted exact type is read through its own representation.
     unsafe {
@@ -125,7 +162,10 @@ pub(super) fn length(kind: WordKind, word: usize) -> Option<usize> {
                 Storage::Sequence(v) => Some(v.resolved().values.len()),
                 _ => None,
             }),
-            6 => Some(records::descriptor(word as *const usize).length),
+            6 => {
+                let layout = records::descriptor(word as *const usize);
+                layout.class_semantics().is_none().then_some(layout.length)
+            }
             8 => Some((&*(word as *const Bytes)).len()),
             _ => None,
         }
@@ -179,7 +219,7 @@ pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) ->
         let sequence = |kind: WordKind, word| match kind.raw() {
             4 => 1,
             5 if length(kind, word).is_some() => 1,
-            6 => 2,
+            6 if length(kind, word).is_some() => 2,
             _ => 0,
         };
         let (a, b) = ((ka, wa), (kb, wb));

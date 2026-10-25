@@ -77,7 +77,10 @@ impl Builtin {
             | Self::ExceptionFieldIndex
             | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
             Self::MappingObjectGet => Contract::new(true, PreservesOwners),
-            Self::BoxValue | Self::ExceptionTupleView => Contract::new(false, PreservesOwners),
+            Self::BoxValue
+            | Self::ExceptionTupleView
+            | Self::ObjectRecordProject(_)
+            | Self::ObjectRecordIdentity { .. } => Contract::new(false, PreservesOwners),
             Self::ExceptionKeywordSuggestion | Self::ExceptionRecordFields => {
                 Contract::new(false, PreservesOwners)
             }

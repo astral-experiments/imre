@@ -148,18 +148,31 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
-        if [left.ty, right.ty].contains(&Type::ObjectValue)
-            && [left.ty, right.ty]
-                .iter()
-                .any(|ty| matches!(ty, Type::ListInt | Type::List(_)))
-        {
-            let reversed = right.ty == Type::ObjectValue;
+        let identity = match (left.ty, right.ty) {
+            (Type::ObjectValue, Type::ListInt | Type::List(_)) => {
+                Some(Builtin::ExceptionFieldIdentity { reversed: false })
+            }
+            (Type::ListInt | Type::List(_), Type::ObjectValue) => {
+                Some(Builtin::ExceptionFieldIdentity { reversed: true })
+            }
+            (Type::ObjectValue, Type::Class(class)) if self.boxed_dataclass(class) => {
+                Some(Builtin::ObjectRecordIdentity {
+                    class,
+                    reversed: false,
+                })
+            }
+            (Type::Class(class), Type::ObjectValue) if self.boxed_dataclass(class) => {
+                Some(Builtin::ObjectRecordIdentity {
+                    class,
+                    reversed: true,
+                })
+            }
+            _ => None,
+        };
+        if let Some(identity) = identity {
             let same = Expr {
                 ty: Type::Bool,
-                kind: ExprKind::Builtin(
-                    Builtin::ExceptionFieldIdentity { reversed },
-                    vec![left, right],
-                ),
+                kind: ExprKind::Builtin(identity, vec![left, right]),
             };
             return Ok(if op == ast::CmpOp::IsNot {
                 Expr {
