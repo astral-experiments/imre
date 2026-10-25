@@ -23,8 +23,15 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     for flag in ("textwrap-suite", "imre", "runtime", "clang", "result"):
         p.add_argument("--" + flag, type=Path, required=True)
+    p.add_argument("--cpython-source", type=Path)
+    p.add_argument("--baseline", type=Path,
+                   help="the ordinary textwrap report just generated with this compiler")
     p.add_argument("--reachable-only", action="store_true")
     a = p.parse_args()
+    if a.baseline and a.reachable_only:
+        p.error("the reachable gate generates its own baseline")
+    if a.cpython_source:
+        sys.path.insert(0, str(a.cpython_source.resolve() / "Lib"))
     root = a.textwrap_suite.resolve()
     manifest = json.loads((root / "UPSTREAM.json").read_bytes())
     ref = json.loads((root / "reference-linux.json").read_bytes())
@@ -42,10 +49,14 @@ def main():
             compiler.write_text("#!/bin/sh\nexec " + shlex.quote(str(a.imre.resolve()))
                                 + ' "$@" --reachable-only\n')
             compiler.chmod(0o755)
-        baseline = work / "baseline.json"
-        subprocess.run([sys.executable, "-B", root / "run.py", "--imre", compiler,
-                        "--runtime", a.runtime.resolve(), "--clang", a.clang.resolve(),
-                        "--result", baseline], check=True)
+        baseline = a.baseline or work / "baseline.json"
+        if not a.baseline:
+            command = [sys.executable, "-B", root / "run.py", "--imre", compiler,
+                       "--runtime", a.runtime.resolve(), "--clang", a.clang.resolve(),
+                       "--result", baseline]
+            if a.cpython_source:
+                command.extend(["--cpython-source", a.cpython_source.resolve()])
+            subprocess.run(command, check=True)
         for prior in json.loads(baseline.read_bytes()):
             validate_report(prior, ref)
             level = prior["opt_level"]

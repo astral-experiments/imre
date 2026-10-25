@@ -225,3 +225,11 @@ bytes patterns and the callable overload remain separate compiler boundaries.
 The [exception regex control](full/unittest/context_regex.py) covers search,
 Unicode whitespace, compiled patterns, missing and wrong exceptions, mismatched
 messages, and exception identity.
+
+The [textwrap acceptance driver](full/unittest/textwrap_exception.py) verifies
+the upstream test blob and runs both original `DedentTestCase.test_type_error`
+contexts in the native loader. Its normal and reachable invocations each
+produce two 68-occurrence reports. The other 67 rows must equal the textwrap
+owner's corresponding baseline, including their fixture and assertion roles.
+CI supplies its freshly generated ordinary baseline; a standalone invocation
+generates one when `--baseline` is omitted.
