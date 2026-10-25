@@ -4,6 +4,62 @@ Import `suite_inventory` and `suite_native` from this directory. Use the release
 test-enabled Python for discovery, shared fixtures and host assertions. Build each
 native entry at both `Toolchain(..., level=0)` and `level=3`.
 
+## Run an existing suite in both compiler modes
+
+[suite_modes.py](suite_modes.py) invokes the selected checkout's own runner
+twice. It passes `--reachable-only` to native builds on the second invocation.
+The owner supplies a runner that accepts `--imre`, `--runtime`, `--clang`,
+`--cpython-source` and `--result` and emits a full O0/O3 evidence pair. The
+launcher uses that checkout's validator and reference; it copies no outcomes
+between modes. For example, from a clean checkout with the pinned Python:
+
+```sh
+python3 benchmarks/cpython_stdlib/suite_modes.py \
+  --source "$(git rev-parse HEAD)" --entry benchmarks/cpython_stdlib/full/unittest/run.py \
+  --reference benchmarks/cpython_stdlib/full/unittest/reference-linux.json \
+  --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 \
+  --cpython-source /path/to/cpython-3.14.5 --output /tmp/unittest-evidence
+```
+
+Choose a fresh output directory. `ordinary.json` and `reachable.json` each
+retain every original occurrence and its body, assertions, operation, fixture,
+and reason. `source.json` identifies the suite revision, inputs and binary
+hashes, and both runner and validator exit codes. A runner failure, missing
+report or invalid pair fails the command, even if the other mode succeeds.
+
+The **CI** workflow's optional `unittest_source` dispatch builds an exact Imre
+commit on Linux and uploads those three files as `unittest-evidence-linux`.
+It uses the suite and validator at the selected commit, including when that
+commit predates this launcher. The build step in the dispatch establishes the
+compiler's provenance; a local invocation records the supplied binary hashes.
+
+### Verified upstream example
+
+The [Linux example](full/unittest/runner-modes-example-linux.tar.gz) contains
+both full reports and the receipt for Imre `ec4622afddbdf0b4b892220eae6580245a2f3291`.
+The unchanged CPython method
+`test.test_unittest.testmock.testmock.MockTest.test_assert_called_once_message_not_called`
+exercises a failing native `Mock.assert_called_once()` and checks its diagnostic
+with native assertions. Its original method and default fixture ran under Imre
+in all four configurations. To see its record and the actual build commands:
+
+```sh
+example=benchmarks/cpython_stdlib/full/unittest/runner-modes-example-linux.tar.gz
+tar -xOzf "$example" reachable.json | jq '.[] | .records[] | select(.id | endswith(".MockTest.test_assert_called_once_message_not_called"))'
+tar -xOzf "$example" source.json | jq '.modes'
+```
+
+Each configuration retained all **1,090** original occurrences: 8 fully native,
+8 native bodies with host fixtures, 9 host-driven native operations, 9 blocked,
+1,054 reference-only, and 2 original skips. Each mode observed 37 native builds
+at O0 and 37 at O3. Both reports matched independent runs byte for byte.
+`compiler_commands` counts actual invocations; `runner_mode_flag` records
+whether the owner's runner received its own `--reachable-only` switch.
+A record whose declared mode disagrees with the compiler, or a missing build
+at either optimization level, appears in `mode_errors` and fails the run.
+
+## Discover methods on a known class
+
 To discover method names in native code, pass a statically known class to
 `unittest.defaultTestLoader.getTestCaseNames`. The [verified loader example](full/unittest/NATIVE_LOADER.md)
 uses CPython's original `bar.test_bar.PassingTest` and documents which module
