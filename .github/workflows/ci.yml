@@ -14,7 +14,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: json-stdlib-audit
+  group: json-stdlib-audit-${{ inputs.audit == 'decoder-current-main' && 'merge' || 'feature' }}
   cancel-in-progress: false
 jobs:
   verify:
