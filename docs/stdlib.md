@@ -1,14 +1,14 @@
 # Standard library support
 
-Imre checks 194 publicly named top-level modules from [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) on Linux. Dotted APIs such as `os.path` appear under their parent. Private modules and third-party packages are outside this inventory.
+Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 51 modules accept an ordinary import; 3 more accept it only with `--reachable-only`. Across 24 public modules with recorded suites, 79 complete test executions pass natively at both optimization levels; 8,324 of 8,324 upstream executions have a classification.
+**At a glance:** 54 of 297 modules accept an ordinary import; 3 more accept it only with `--reachable-only`. Across 24 modules with recorded suites, 72 complete test executions pass natively at both optimization levels; 8,324 of 8,324 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
 **Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.
 
-The last two columns show where CPython still helps at O3. **CPython fixture**: 309 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,369 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
+The last two columns show where CPython still helps at O3. **CPython fixture**: 308 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,359 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
 
 ## Modules with examples, accepted imports or suite results
 
@@ -20,7 +20,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `asyncio` | Yes | Run subprocess tasks, wait for a task group and handle cancellation. [Evidence](../tests/fixtures/processes/async_groups.py) | — | — | — |
 | `base64` | Yes | `urlsafe_b64encode` on bytes. [Evidence](../benchmarks/cpython_stdlib/native_base64.py) | — | — | — |
 | `builtins` | Yes | Read, assign and delete `builtins._`, including the value saved by the default display hook. [Evidence](../benchmarks/cpython_stdlib/full/sys/BUILTINS.md) | — | — | — |
-| `collections` | Yes | `Counter`, `deque`, `defaultdict` and selected `collections.abc.Mapping` operations. [Evidence](../benchmarks/cpython_stdlib/full/collections/README.md) | [7 / 659](../benchmarks/cpython_stdlib/full/collections/) | 8 | 14 |
+| `collections` | Yes | `Counter`, `deque`, `defaultdict` and selected `collections.abc.Mapping` operations. [Evidence](../benchmarks/cpython_stdlib/full/collections/README.md) | [0 / 659](../benchmarks/cpython_stdlib/full/collections/) | 7 | 4 |
 | `configparser` | Reachable only | `ConfigParser` can be bound in unreachable code. Its constructor does not run natively. [Evidence](../crates/imre-compiler/src/modules/declarations.rs) | — | — | — |
 | `contextlib` | Yes | `nullcontext` and selected single-yield `@contextmanager` functions. [Evidence](../tests/fixtures/processes/async_resource_arguments.py) | — | — | — |
 | `copy` | Yes | Shallow and deep copies of supported containers and fixed-layout objects. [Evidence](../benchmarks/cpython_stdlib/full/copy/README.md) | [6 / 81](../benchmarks/cpython_stdlib/full/copy/) | 0 | 4 |
@@ -222,6 +222,128 @@ These names are still probed. The reasons come from the [scope inventory](../ben
 | `turtle` | Rejected | Educational desktop graphics |
 | `turtledemo` | Rejected | Interactive turtle demo programs |
 | `winsound` | Rejected | Optional Windows sound playback |
+
+## Names beginning with an underscore
+
+These include documented interfaces such as `__future__` and `_thread`, as well as implementation details. The same import and suite checks apply.
+
+<details>
+<summary>Show 103 module names</summary>
+
+| Module | Import | Native API example or boundary | Native / upstream | CPython fixture | CPython test |
+| --- | --- | --- | ---: | ---: | ---: |
+| `__future__` | Yes | The `annotations` future statement and postponed annotations on supported classes and functions. [Evidence](../tests/fixtures/callables/annotations_future.py) | — | — | — |
+| `_opcode` | Yes | `ENABLE_SPECIALIZATION` and `ENABLE_SPECIALIZATION_FT` are both zero for Imre’s native executables. [Evidence](../tests/fixtures/imports/opcode_flags.py) | — | — | — |
+| `_string` | Yes | `formatter_parser` and `formatter_field_name_split` iterate format fields and their components. [Evidence](../tests/fixtures/text/formatter_ownership.py) | — | — | — |
+
+Both import modes reject the following names. They have no recorded API example or suite measurement.
+
+| Module |
+| --- |
+| `_abc` |
+| `_aix_support` |
+| `_android_support` |
+| `_apple_support` |
+| `_ast` |
+| `_ast_unparse` |
+| `_asyncio` |
+| `_bisect` |
+| `_blake2` |
+| `_bz2` |
+| `_codecs` |
+| `_codecs_cn` |
+| `_codecs_hk` |
+| `_codecs_iso2022` |
+| `_codecs_jp` |
+| `_codecs_kr` |
+| `_codecs_tw` |
+| `_collections` |
+| `_collections_abc` |
+| `_colorize` |
+| `_compat_pickle` |
+| `_contextvars` |
+| `_csv` |
+| `_ctypes` |
+| `_curses` |
+| `_curses_panel` |
+| `_datetime` |
+| `_dbm` |
+| `_decimal` |
+| `_elementtree` |
+| `_frozen_importlib` |
+| `_frozen_importlib_external` |
+| `_functools` |
+| `_gdbm` |
+| `_hashlib` |
+| `_heapq` |
+| `_hmac` |
+| `_imp` |
+| `_interpchannels` |
+| `_interpqueues` |
+| `_interpreters` |
+| `_io` |
+| `_ios_support` |
+| `_json` |
+| `_locale` |
+| `_lsprof` |
+| `_lzma` |
+| `_markupbase` |
+| `_md5` |
+| `_multibytecodec` |
+| `_multiprocessing` |
+| `_opcode_metadata` |
+| `_operator` |
+| `_osx_support` |
+| `_overlapped` |
+| `_pickle` |
+| `_posixshmem` |
+| `_posixsubprocess` |
+| `_py_abc` |
+| `_py_warnings` |
+| `_pydatetime` |
+| `_pydecimal` |
+| `_pyio` |
+| `_pylong` |
+| `_pyrepl` |
+| `_queue` |
+| `_random` |
+| `_remote_debugging` |
+| `_scproxy` |
+| `_sha1` |
+| `_sha2` |
+| `_sha3` |
+| `_signal` |
+| `_sitebuiltins` |
+| `_socket` |
+| `_sqlite3` |
+| `_sre` |
+| `_ssl` |
+| `_stat` |
+| `_statistics` |
+| `_strptime` |
+| `_struct` |
+| `_suggestions` |
+| `_symtable` |
+| `_sysconfig` |
+| `_thread` |
+| `_threading_local` |
+| `_tkinter` |
+| `_tokenize` |
+| `_tracemalloc` |
+| `_types` |
+| `_typing` |
+| `_uuid` |
+| `_warnings` |
+| `_weakref` |
+| `_weakrefset` |
+| `_winapi` |
+| `_wmi` |
+| `_zoneinfo` |
+| `_zstd` |
+
+</details>
+
+The entry environment, `__main__`, is separate from CPython’s module registry. Imre’s `import __main__` probe: **Rejected**. The [entry-point guard](../tests/fixtures/module_values/entry_globals/main.py) uses `if __name__ == '__main__'`.
 
 ## Additional test subjects
 
