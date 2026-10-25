@@ -10,7 +10,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::super::exceptions::Result;
 use super::super::words::{NULLABLE, OwnedWord, WordKind};
 use super::super::{
-    Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object, records, values,
+    Bytes, Error, Int, Kind, List, Object, Storage, StorageCell, Str, finish, object, records,
+    values,
 };
 
 pub(in crate::objects) struct Record {
@@ -88,6 +89,121 @@ pub(super) fn dict_item(v: &OwnedWord, key: &str) -> Result<OwnedWord> {
             .with(|s| s.dictionary().logging_key(&key))
     }
     .ok_or_else(|| Error::key(string(key.as_str())))
+}
+
+/// A bracketed formatter item is a decimal index or the literal spelling of a key.
+pub(super) fn brace_item(value: &OwnedWord, key: &str) -> Result<OwnedWord> {
+    if key.is_empty() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "Empty attribute in format string",
+        ));
+    }
+    let index = super::super::stdlib::format_index(key)?;
+    let concrete;
+    let value = if value.kind.base() == 9 && value.word != 0 {
+        let (word, kind) = super::super::unions::member(value.word);
+        // SAFETY: the union owner roots its concrete member throughout acquisition.
+        concrete = unsafe { kind.acquire(word) };
+        &concrete
+    } else {
+        value
+    };
+    let unsupported = |kind| {
+        Error::new(
+            Kind::TypeError,
+            format!("'{kind}' object is not subscriptable"),
+        )
+    };
+    if value.kind.raw() & NULLABLE != 0 && value.word == 0 {
+        return Err(unsupported("NoneType"));
+    }
+    if is_dict(value) {
+        let key = index.map_or_else(|| string(key), integer);
+        // SAFETY: the checked dictionary and the lookup key remain rooted.
+        return unsafe {
+            object(value.word as *const Object)
+                .0
+                .with_mut(|s| s.dictionary_mut().logging_item(&key))
+        }?
+        .ok_or_else(|| {
+            Error::new(
+                Kind::ValueError,
+                format!(
+                    "Formatting field not found in record: {}",
+                    display(&key, true)
+                ),
+            )
+        });
+    }
+    let index_for = |kind| {
+        index.ok_or_else(|| {
+            Error::new(
+                Kind::TypeError,
+                match kind {
+                    "string" => "string indices must be integers, not 'str'".to_owned(),
+                    _ => format!("{kind} indices must be integers or slices, not str"),
+                },
+            )
+        })
+    };
+    let (kind, item) = if let Some(len) = tuple_len(value) {
+        let at = index_for("tuple")?;
+        ("tuple", (at < len).then(|| tuple_item(value, at)))
+    } else {
+        // SAFETY: each exact descriptor identifies the rooted field's storage.
+        unsafe {
+            match value.kind.base() {
+                3 => {
+                    let text = &*(value.word as *const Str);
+                    (
+                        "string",
+                        text.chars()
+                            .nth(index_for("string")?)
+                            .map(|ch| string(ch.encode_utf8(&mut [0; 4]))),
+                    )
+                }
+                4 => {
+                    let at = index_for("list")?;
+                    (
+                        "list",
+                        (&*(value.word as *const List))
+                            .0
+                            .with(|list| list.get(at).map(|n| owned(n.clone().into_raw(), 2))),
+                    )
+                }
+                5 => object(value.word as *const Object).0.with(|storage| {
+                    let Storage::Sequence(_) = storage else {
+                        return Err(unsupported("object"));
+                    };
+                    let words = storage.sequence();
+                    Ok((
+                        "list",
+                        words
+                            .values
+                            .get(index_for("list")?)
+                            .map(|&word| words.kind.acquire(word)),
+                    ))
+                })?,
+                8 => (
+                    "bytes",
+                    (&*(value.word as *const Bytes))
+                        .get(index_for("byte")?)
+                        .map(|&b| integer(usize::from(b))),
+                ),
+                kind => {
+                    return Err(unsupported(match kind {
+                        0 => "NoneType",
+                        1 => "bool",
+                        2 => "int",
+                        7 => "float",
+                        _ => "object",
+                    }));
+                }
+            }
+        }
+    };
+    item.ok_or_else(|| Error::new(Kind::IndexError, format!("{kind} index out of range")))
 }
 
 pub(super) fn truth(v: &OwnedWord) -> bool {
