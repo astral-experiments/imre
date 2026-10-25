@@ -5,6 +5,7 @@ use crate::ir::FdOperation;
 pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
     Some(match name {
         "strerror" => Intrinsic::Strerror,
+        "stat_result" => Intrinsic::StatResult,
         "close" => Intrinsic::Fd(FdOperation::Close),
         "open" => Intrinsic::Fd(FdOperation::Open),
         "unlink" => Intrinsic::Fd(FdOperation::Unlink),
