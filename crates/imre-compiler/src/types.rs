@@ -16,6 +16,7 @@ enum Shape {
     Cursor(Type),
     List(Type),
     Dict(Type, Type),
+    OrderedDict(Type, Type),
     DefaultListDict(Type, Type),
     Counter(Type),
     Set(Type),
@@ -90,7 +91,12 @@ impl Types {
             Type::CacheState(id) => matches!(storage.shapes.get(id), Some(Shape::Dict(..))),
             Type::Dict(id) => matches!(
                 storage.shapes.get(id),
-                Some(Shape::Dict(..) | Shape::DefaultListDict(..) | Shape::Counter(_))
+                Some(
+                    Shape::Dict(..)
+                        | Shape::OrderedDict(..)
+                        | Shape::DefaultListDict(..)
+                        | Shape::Counter(_)
+                )
             ),
             Type::Set(id) => matches!(storage.shapes.get(id), Some(Shape::Set(_))),
             Type::Tuple(id) => matches!(
@@ -180,7 +186,9 @@ impl Types {
                 | Shape::DirectoryContext(ty)
                 | Shape::ProcessArgs(ty)
                 | Shape::Optional(ty) => vec![*ty],
-                Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => vec![*key, *value],
+                Shape::Dict(key, value)
+                | Shape::OrderedDict(key, value)
+                | Shape::DefaultListDict(key, value) => vec![*key, *value],
                 Shape::Tuple(fields)
                 | Shape::NamedTuple(_, fields)
                 | Shape::PartialFrame(fields)
@@ -701,6 +709,14 @@ impl Types {
         Type::Dict(self.intern(Shape::Counter(key)))
     }
 
+    pub(crate) fn ordered_dict(&self, key: Type, value: Type) -> Type {
+        Type::Dict(self.intern(Shape::OrderedDict(key, value)))
+    }
+
+    pub(crate) fn is_ordered_dict(&self, ty: Type) -> bool {
+        matches!(ty, Type::Dict(id) if matches!(self.0.borrow().shapes[id], Shape::OrderedDict(..)))
+    }
+
     pub(crate) fn is_counter(&self, ty: Type) -> bool {
         matches!(ty, Type::Dict(id) if matches!(self.0.borrow().shapes[id], Shape::Counter(_)))
     }
@@ -793,7 +809,9 @@ impl Types {
         };
         match self.0.borrow().shapes[id] {
             Shape::Counter(key) => Some((key, Type::Int)),
-            Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => Some((key, value)),
+            Shape::Dict(key, value)
+            | Shape::OrderedDict(key, value)
+            | Shape::DefaultListDict(key, value) => Some((key, value)),
             _ => unreachable!("dictionary type identity has a dictionary shape"),
         }
     }
@@ -960,11 +978,13 @@ impl TypeDescription<'_> {
                 self.write_str("Counter[")?;
                 self.write_type(*key)?;
             }
-            Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => {
-                self.write_str(if matches!(shape, Shape::Dict(..)) {
-                    "dict["
-                } else {
-                    "defaultdict["
+            Shape::Dict(key, value)
+            | Shape::OrderedDict(key, value)
+            | Shape::DefaultListDict(key, value) => {
+                self.write_str(match shape {
+                    Shape::Dict(..) => "dict[",
+                    Shape::OrderedDict(..) => "OrderedDict[",
+                    _ => "defaultdict[",
                 })?;
                 self.write_type(*key)?;
                 self.write_str(", ")?;
