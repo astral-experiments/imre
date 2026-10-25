@@ -20,6 +20,11 @@ performs its string interpolation and membership assertions natively.
 missing-field errors, mutated defaults and historical UTC formatting. It adds
 no upstream ID.
 
+The [shared string.Template implementation](https://github.com/astral-sh/imre/pull/726)
+also compiles CPython's unchanged `logging.StringTemplateStyle.validate`.
+Its nine format comparisons at O0 and O3 exercise `Template.pattern` in that
+method. They are method evidence, separate from the 272 logging test occurrences.
+
 ```sh
 python -B benchmarks/cpython_stdlib/full/logging/native_formatters.py \
   --imre /path/to/imre --runtime /path/to/libimre_runtime.a \
