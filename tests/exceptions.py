@@ -1239,14 +1239,14 @@ try:
     value = None
     raise ValueError()
 except ValueError:
-    print(value * 2)
+    number: int = value
 """,
     "finally_optional_fact": """
 value: int | None = 1
 try:
     value = None
 finally:
-    print(value * 2)
+    number: int = value
 """,
     "multiple_messages": 'raise ValueError("a", "b")',
     "subclass_annotation": 'value: ValueError = ValueError("error")',
