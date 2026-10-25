@@ -856,7 +856,8 @@ impl Types {
     pub(crate) fn percent_tuple(&self, ty: Type) -> bool {
         let Type::Tuple(id) = ty else { return false };
         matches!(&self.0.borrow().shapes[id], Shape::Tuple(fields)
-            if fields.iter().all(|ty| matches!(ty, Type::Int | Type::Str | Type::StrLiteral(_))))
+            if fields.iter().all(|ty| matches!(ty,
+                Type::None | Type::Bool | Type::Int | Type::Float | Type::Str | Type::StrLiteral(_) | Type::Bytes)))
     }
 
     /// Stat results use ten visible integer slots and a separate tail for named attributes.

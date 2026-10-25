@@ -13,6 +13,7 @@ use crate::types::Types;
 
 mod annotations;
 mod argparse;
+mod ascii;
 mod assertion_syntax;
 mod assignments;
 mod asyncio;
@@ -755,7 +756,7 @@ pub(crate) fn lower_with_owners(
             } else if matches!(method.name.as_str(), "__str__" | "__repr__")
                 && signature.returns != Type::Str
             {
-                return Err(module.error(&method, "__str__ must return str"));
+                return Err(module.error(&method, &format!("{} must return str", method.name)));
             }
             if keyword_copy {
                 classes.keyword_copies.insert(signature.id);
@@ -6801,6 +6802,9 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
+            return self.ascii_call(call);
+        }
         if call
             .func
             .as_name_expr()
@@ -8337,6 +8341,12 @@ impl<'a> Checker<'a> {
         {
             return self.ordinal_call(call);
         }
+        if name.id == "ascii"
+            && !self.names.contains_key("ascii")
+            && self.resolve(&call.func).is_none()
+        {
+            return self.ascii_call(call);
+        }
         self.reject_builtin_keywords(call)?;
         if name.id == "bool" {
             return match call.arguments.args.as_ref() {
@@ -8636,6 +8646,9 @@ impl<'a> Checker<'a> {
             && let Type::SimpleNamespace(id) = receiver.ty
         {
             return Ok(namespaces::backing(receiver.clone(), id));
+        }
+        if name.id == "repr" && args.len() == 1 && matches!(args[0].ty, Type::Class(_)) {
+            return self.record_repr(args.into_iter().next().unwrap(), call);
         }
         if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
             if name.id == "repr" || (name.id == "str" && self.types.element(args[0].ty).is_some()) {
