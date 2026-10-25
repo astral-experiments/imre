@@ -243,6 +243,48 @@ pub(super) fn reject_unpacking(call: &ast::ExprCall, source: &str) -> Result<(),
 }
 
 impl Checker<'_> {
+    /// Evaluate the supplied arguments before raising a positional arity or
+    /// keyword error. Only the spans belonging to this exact call are proved.
+    pub(super) fn one_positional_error(
+        &mut self,
+        call: &ast::ExprCall,
+        name: &str,
+        parameter: &str,
+        returns: Type,
+    ) -> Result<Expr, String> {
+        let args = &call.arguments;
+        self.graph
+            .checked_missing_argument(self.module, call.range());
+        for kw in &args.keywords {
+            if kw.arg.as_deref() == Some(parameter) {
+                self.graph
+                    .checked_positional_keyword(self.module, kw.range());
+            }
+        }
+        self.graph
+            .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
+        for argument in args.args.iter().skip(1) {
+            self.graph
+                .checked_excess_argument(self.module, argument.range());
+        }
+        let mut values = Vec::new();
+        for argument in &args.args {
+            values.push(self.expr(argument)?);
+        }
+        for kw in &args.keywords {
+            values.push(self.expr(&kw.value)?);
+        }
+        let message = if args.keywords.is_empty() {
+            format!(
+                "{name}() takes exactly one argument ({} given)",
+                args.args.len()
+            )
+        } else {
+            format!("{name}() takes no keyword arguments")
+        };
+        Ok(type_error(returns, values, message))
+    }
+
     /// Return a Python class name only when the concrete receiver type is known.
     pub(super) fn exact_argument_type_name(&self, ty: Type) -> Option<&str> {
         Some(match ty {
