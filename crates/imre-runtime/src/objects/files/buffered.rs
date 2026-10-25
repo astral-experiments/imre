@@ -1,17 +1,18 @@
 //! Buffered binary and UTF-8 streams with Python's read and write boundaries.
 
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, BufWriter, IsTerminal, Read, Write};
+use std::io::{self, BufRead, BufReader, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::mem::MaybeUninit;
 
 use smallvec::SmallVec;
 
 use super::gzip::{GzipError, GzipReader};
-use super::{Bytes, Error, Kind, Result, Str, decode_utf8_text, os_error};
+use super::{Bytes, Error, Kind, Result, Str, decode_text, os_error};
+use crate::BinaryOutput;
 
 pub(super) struct Output {
-    raw: BufWriter<File>,
-    text: Option<Vec<u8>>,
+    raw: BinaryOutput<File>,
+    text: Option<crate::text_output::PendingText>,
     line_buffering: bool,
 }
 
@@ -19,52 +20,39 @@ impl Output {
     pub(super) fn new(file: File, capacity: usize, binary: bool) -> Self {
         Self {
             line_buffering: !binary && file.is_terminal(),
-            raw: BufWriter::with_capacity(capacity, file),
-            text: (!binary).then(Vec::new),
+            raw: BinaryOutput::with_capacity(capacity, file),
+            text: (!binary).then(crate::text_output::PendingText::default),
+        }
+    }
+
+    pub(super) fn pipe(file: File, capacity: usize, line_buffering: bool) -> Self {
+        // Popen creates TextIOWrapper(write_through=True) around the binary pipe.
+        Self {
+            raw: BinaryOutput::with_capacity(capacity, file),
+            text: None,
+            line_buffering,
         }
     }
 
     pub(super) fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
-        let Some(pending) = &mut self.text else {
-            return self.raw.write_all(bytes);
-        };
         let flush_line = self.line_buffering && memchr::memchr2(b'\r', b'\n', bytes).is_some();
-        // TextIOWrapper groups small encoded writes, but forwards a large write
-        // separately after draining any pending text.
-        const CHUNK_SIZE: usize = 8192;
-        if bytes.len() >= CHUNK_SIZE {
-            Self::drain_text(&mut self.raw, pending)?;
+        let Some(pending) = &mut self.text else {
             self.raw.write_all(bytes)?;
-        } else {
-            pending.extend_from_slice(bytes);
-            if pending.len() >= CHUNK_SIZE || flush_line {
-                Self::drain_text(&mut self.raw, pending)?;
-            }
-        }
-        if flush_line {
-            self.raw.flush()?;
-        }
-        Ok(())
-    }
-
-    fn drain_text(raw: &mut BufWriter<File>, pending: &mut Vec<u8>) -> io::Result<()> {
-        let result = raw.write_all(pending);
-        // TextIOWrapper removes the pending text even when the binary write fails.
-        pending.clear();
-        result
+            return if flush_line { self.raw.flush() } else { Ok(()) };
+        };
+        pending.write(&mut self.raw, bytes, flush_line)
     }
 
     pub(super) fn flush(&mut self) -> io::Result<()> {
         if let Some(pending) = &mut self.text {
-            Self::drain_text(&mut self.raw, pending)?;
+            return pending.flush(&mut self.raw);
         }
         self.raw.flush()
     }
 
     pub(super) fn finish(mut self) -> (File, io::Result<()>) {
         let flushed = self.flush();
-        let (file, _) = self.raw.into_parts();
-        (file, flushed)
+        (self.raw.inner, flushed)
     }
 }
 
@@ -106,6 +94,7 @@ impl Read for Source {
 pub(super) struct Input {
     raw: BufReader<io::Take<Source>>,
     text: TextBuffer,
+    unbuffered: bool,
 }
 
 impl Input {
@@ -123,6 +112,18 @@ impl Input {
                 source.take(u64::MAX),
             ),
             text: TextBuffer::default(),
+            unbuffered: false,
+        }
+    }
+
+    pub(super) fn pipe(file: File, binary: bool, capacity: usize) -> Self {
+        Self {
+            raw: BufReader::with_capacity(
+                if binary { capacity.max(1) } else { 8192 },
+                Source::Plain(file).take(u64::MAX),
+            ),
+            text: TextBuffer::default(),
+            unbuffered: binary && capacity == 0,
         }
     }
 
@@ -131,6 +132,41 @@ impl Input {
             Source::Plain(file) => file,
             Source::Gzip(reader) => reader.into_file(),
         }
+    }
+
+    pub(super) fn preserve_newlines(&mut self) {
+        self.text.preserve_newlines = true;
+    }
+
+    /// Seek a plain BufferedReader at its logical position, discarding read-ahead
+    /// only after a successful move.
+    pub(super) fn seek(&mut self, mut at: SeekFrom) -> Result<u64> {
+        let buffered = self.raw.buffer().len();
+        let Source::Plain(file) = self.raw.get_mut().get_mut() else {
+            return Err(Error::new(Kind::UnsupportedOperation, "seek"));
+        };
+        if let SeekFrom::Current(delta) = at {
+            if delta == 0 {
+                return file
+                    .stream_position()
+                    .map(|pos| pos - buffered as u64)
+                    .map_err(super::errno_error);
+            }
+            let pos = i128::from(file.stream_position().map_err(super::errno_error)?)
+                - buffered as i128
+                + i128::from(delta);
+            at = SeekFrom::Start(
+                u64::try_from(pos)
+                    .map_err(|_| super::errno_error(io::Error::from_raw_os_error(libc::EINVAL)))?,
+            );
+        }
+        let pos = file.seek(at).map_err(super::errno_error)?;
+        self.raw.consume(buffered);
+        Ok(pos)
+    }
+
+    pub(super) fn read_into(&mut self, bytes: &mut [u8]) -> Result<usize> {
+        self.raw.read(bytes).map_err(os_error)
     }
 
     pub(super) fn read_bytes(&mut self, size: Option<usize>) -> Result<Bytes> {
@@ -144,7 +180,18 @@ impl Input {
             bytes
                 .try_reserve_exact(limit)
                 .map_err(|_| Error::new(Kind::MemoryError, "bytes allocation failed"))?;
-            self.read_sized(&mut bytes, limit).map_err(os_error)?;
+            if self.unbuffered {
+                let n = self
+                    .raw
+                    .get_mut()
+                    .get_mut()
+                    .read_uninit(&mut bytes.spare_capacity_mut()[..limit])
+                    .map_err(os_error)?;
+                // SAFETY: read_uninit initialized exactly this many reserved bytes.
+                unsafe { bytes.set_len(n) };
+            } else {
+                self.read_sized(&mut bytes, limit).map_err(os_error)?;
+            }
             // CPython releases the unused part of a short read. Keeping the
             // requested capacity alive with a tiny result exhausts address space.
             if bytes.len() < limit {
@@ -208,13 +255,14 @@ impl Input {
     pub(super) fn read_text(&mut self) -> Result<Str> {
         let mut bytes = self.text.carry.to_vec();
         self.raw.read_to_end(&mut bytes).map_err(os_error)?;
-        let remaining = decode_utf8_text(bytes)?;
+        let remaining = decode_text(bytes, self.text.preserve_newlines)?;
         self.text.carry.clear();
         let prefix = &self.text.decoded[self.text.pos..];
         if prefix.is_empty() {
             return Ok(remaining);
         }
-        let mut result = Str::with_capacity(prefix.len() + remaining.len());
+        let mut result = Str::try_with_capacity(prefix.len() + remaining.len())
+            .map_err(|_| Error::allocation())?;
         result.push_str(prefix);
         result.push_str(&remaining);
         self.text.pos = self.text.decoded.len();
@@ -226,8 +274,17 @@ impl Input {
         line.clear();
         loop {
             let available = &self.text.decoded[self.text.pos..];
-            if let Some(newline) = memchr::memchr(b'\n', available.as_bytes()) {
-                let len = newline + 1;
+            let bytes = available.as_bytes();
+            let line_end = if self.text.preserve_newlines {
+                // The decoder holds a trailing CR until the next chunk or EOF,
+                // so an available CRLF always belongs to this same line.
+                memchr::memchr2(b'\r', b'\n', bytes).map(|i| {
+                    i + 1 + usize::from(bytes[i] == b'\r' && bytes.get(i + 1) == Some(&b'\n'))
+                })
+            } else {
+                memchr::memchr(b'\n', bytes).map(|i| i + 1)
+            };
+            if let Some(len) = line_end {
                 self.text.pos += len;
                 if line.is_empty() {
                     self.text.line_scratch = line;
@@ -261,6 +318,7 @@ impl Input {
 
 #[derive(Default)]
 struct TextBuffer {
+    preserve_newlines: bool,
     decoded: String,
     line_scratch: String,
     pos: usize,
@@ -291,10 +349,15 @@ impl TextBuffer {
                 unsafe { str::from_utf8_unchecked(&bytes[..err.valid_up_to()]) }
             }
             Err(err) => {
-                return Err(Error::new(
-                    Kind::UnicodeDecodeError,
-                    format!("invalid UTF-8 at byte {}", err.valid_up_to()),
-                ));
+                // A decoded CR was retained for newline translation, independently
+                // of the UTF-8 decoder's incomplete bytes from the previous chunk.
+                let (source, error) = if self.carry.starts_with(b"\r") {
+                    let source = &bytes[1..];
+                    (source, str::from_utf8(source).unwrap_err())
+                } else {
+                    (bytes, err)
+                };
+                return Err(super::super::bytes::decode_error(source, error));
             }
         };
         let mut text = if eof {
@@ -306,6 +369,10 @@ impl TextBuffer {
         self.carry.extend_from_slice(&bytes[text.len()..]);
         self.pos = 0;
         self.decoded.clear();
+        if self.preserve_newlines {
+            self.decoded.push_str(text);
+            return Ok(());
+        }
         while let Some(cr) = memchr::memchr(b'\r', text.as_bytes()) {
             self.decoded.push_str(&text[..cr]);
             self.decoded.push('\n');

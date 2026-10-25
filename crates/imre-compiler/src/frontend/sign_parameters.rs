@@ -78,7 +78,17 @@ impl Checker<'_> {
             return self.expr_expected(argument, ty);
         }
         let value = self.expr(argument)?;
-        if value.ty == Type::Int {
+        self.direct_value(value, argument, ty, true)
+    }
+
+    pub(super) fn direct_value(
+        &self,
+        value: Expr,
+        argument: &ast::Expr,
+        ty: Type,
+        sign_only: bool,
+    ) -> Result<Expr, String> {
+        if sign_only && value.ty == Type::Int {
             Ok(Expr {
                 ty: Type::Float,
                 kind: ExprKind::Builtin(Builtin::IntSignAsFloat, vec![value]),

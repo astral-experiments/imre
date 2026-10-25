@@ -1,4 +1,4 @@
-//! C-main argument capture with one lazy, shared Python-visible list.
+//! C-main argument capture and independent Python-visible argument lists.
 
 use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, c_char};
@@ -15,11 +15,13 @@ struct Arguments {
 
 thread_local! {
     static ARGUMENTS: Cell<Option<Arguments>> = const { Cell::new(None) };
+    static ORIGINAL: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
+    static LAUNCHER: RefCell<std::io::Result<Option<Vec<u8>>>> = const { RefCell::new(Ok(None)) };
     static ARGV: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
 }
 
 /// Captures argv without decoding or allocating. Generated main calls this only
-/// when its closed program can access sys.argv.
+/// when its closed program can access either argument list.
 ///
 /// # Safety
 /// Call once before argv access on this execution thread. `argc` is nonnegative;
@@ -38,16 +40,23 @@ pub unsafe extern "C" fn imre_args_init(argc: i32, argv: *const *const c_char) {
 
 /// Decodes all inputs before publishing a list, so a failed access can be retried.
 fn decode(arguments: Arguments) -> Result<Rc<Object>> {
+    decode_bytes(
+        arguments.count,
+        (0..arguments.count).map(|index| {
+            // SAFETY: initialization guarantees each terminated entry outlives this call.
+            unsafe { CStr::from_ptr(*arguments.values.add(index)).to_bytes() }
+        }),
+    )
+}
+
+fn decode_bytes<'a>(count: usize, arguments: impl Iterator<Item = &'a [u8]>) -> Result<Rc<Object>> {
     let mut values = Words::new(3);
     values
         .values
-        .try_reserve_exact(arguments.count)
-        .unwrap_or_else(|_| fail("MemoryError", "argument list allocation failed"));
-    for index in 0..arguments.count {
-        // SAFETY: initialization guarantees this entry remains readable and
-        // NUL-terminated until clear; decoding invokes no callbacks.
-        let value = unsafe { CStr::from_ptr(*arguments.values.add(index)) };
-        let text = value.to_str().map_err(|error| {
+        .try_reserve_exact(count)
+        .map_err(|_| Error::new(Kind::MemoryError, "argument list allocation failed"))?;
+    for (index, bytes) in arguments.enumerate() {
+        let text = std::str::from_utf8(bytes).map_err(|error| {
             Error::new(
                 Kind::UnicodeDecodeError,
                 format!(
@@ -129,26 +138,65 @@ pub extern "C" fn imre_sys_executable() -> *const Str {
 /// state must be clear; init must already have captured this main activation.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_argv() -> *const Object {
-    if let Some(value) = ARGV.with(|argv| argv.borrow().clone()) {
+    argument_list(&ARGV, || decode(c_arguments()))
+}
+
+fn c_arguments() -> Arguments {
+    ARGUMENTS
+        .get()
+        .unwrap_or_else(|| fail("SystemError", "arguments were not initialized"))
+}
+
+pub(super) fn save_launcher_arguments(args: std::io::Result<Option<Vec<u8>>>) {
+    LAUNCHER.with(|raw| *raw.borrow_mut() = args);
+}
+
+/// Like argv, this list has stable identity. It starts with the original
+/// invocation and never observes mutations of the program's sys.argv.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_sys_orig_argv() -> *const Object {
+    argument_list(&ORIGINAL, || {
+        let list = LAUNCHER.with(|raw| match &*raw.borrow() {
+            Ok(Some(bytes)) => {
+                let count = bytes.iter().filter(|&&b| b == 0).count();
+                let bytes = bytes.strip_suffix(&[0]).ok_or_else(|| {
+                    Error::new(Kind::OSError, "incomplete launcher argument vector")
+                })?;
+                decode_bytes(count, bytes.split(|&b| b == 0))
+            }
+            Ok(None) => decode(c_arguments()),
+            Err(error) => Err(Error::new(Kind::OSError, error.to_string())),
+        })?;
+        save_launcher_arguments(Ok(None));
+        Ok(list)
+    })
+}
+
+fn argument_list(
+    root: &'static std::thread::LocalKey<RefCell<Option<Rc<Object>>>>,
+    build: impl FnOnce() -> Result<Rc<Object>>,
+) -> *const Object {
+    if let Some(value) = root.with(|root| root.borrow().clone()) {
         return Rc::into_raw(value);
     }
-    let arguments = ARGUMENTS
-        .get()
-        .unwrap_or_else(|| fail("SystemError", "arguments were not initialized"));
-    let result = decode(arguments).map(|value| {
-        let previous = ARGV.with(|argv| argv.replace(Some(value.clone())));
-        drop(previous);
-        Rc::into_raw(value)
-    });
-    finish(result, std::ptr::null())
+    finish(
+        build().map(|value| {
+            root.with(|root| root.replace(Some(value.clone())));
+            Rc::into_raw(value)
+        }),
+        std::ptr::null(),
+    )
 }
 
 /// Releases the runtime's list root and captured pointers on either main exit.
 /// Existing aliases remain valid. Cleanup is infallible and preserves pending.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_args_clear() {
+    ORIGINAL.with(RefCell::take);
+    save_launcher_arguments(Ok(None));
     let previous = ARGV.with(RefCell::take);
     ARGUMENTS.set(None);
+    super::hashlib::clear_algorithms();
     drop(previous);
 }
 

@@ -1,8 +1,15 @@
 //! Process-local logging state for the native single-threaded runtime.
+mod config;
+mod handler;
+mod hierarchy;
+mod levels;
+pub(super) mod timed;
+
+pub(super) mod formatter;
+pub(super) mod record;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::mem::MaybeUninit;
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -12,15 +19,17 @@ use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object}
 struct Entry {
     handle: Rc<Object>,
     level: Int,
+    creation_order: usize,
 }
 
 impl Entry {
-    fn new(name: &str, level: i64) -> Self {
+    fn new(name: &str, level: i64, creation_order: usize) -> Self {
         Self {
             handle: Rc::new(Object(StorageCell::new(Storage::Logger(Rc::new(
                 Str::from(name),
             ))))),
             level: Int::small(level).unwrap(),
+            creation_order,
         }
     }
 }
@@ -34,7 +43,7 @@ struct Registry {
 impl Registry {
     fn new() -> Self {
         Self {
-            entries: HashMap::from([("root".into(), Entry::new("root", 30))]),
+            entries: HashMap::from([("root".into(), Entry::new("root", 30, 0))]),
             format: None,
             datefmt: None,
         }
@@ -53,7 +62,13 @@ impl Registry {
                 break;
             }
             let parent = &name[..i];
-            if self.entries.contains_key(parent) {
+            // _fixupChildren keeps an existing parent whose name starts with
+            // the new ancestor's name. A child of "root" can predate "r",
+            // "ro", or "roo" without becoming its child when it is created.
+            if let Some(entry) = self.entries.get(parent)
+                && (!"root".starts_with(parent)
+                    || entry.creation_order < self.entries[name].creation_order)
+            {
                 return Some(parent);
             }
             // Manager._fixupParents searches for the preceding dot before i - 1.
@@ -142,12 +157,13 @@ fn timestamp(format: Option<&str>) -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    let seconds = now.as_secs() as libc::time_t;
-    let mut local = MaybeUninit::<libc::tm>::uninit();
-    // SAFETY: the scalar and destination are live for the call.
-    if unsafe { libc::localtime_r(&seconds, local.as_mut_ptr()) }.is_null() {
-        return String::new();
-    }
+    timed::civil(now.as_secs() as libc::time_t, false)
+        .map(|local| format_timestamp(format, &local, now))
+        .unwrap_or_default()
+}
+
+/// Renders either an emitted timestamp or the time captured earlier by a LogRecord.
+fn format_timestamp(format: Option<&str>, local: &libc::tm, now: std::time::Duration) -> String {
     let custom = format.filter(|value| !value.is_empty());
     let mut text = String::new();
     for (index, part) in custom
@@ -166,15 +182,9 @@ fn timestamp(format: Option<&str>) -> String {
         let fmt = CString::new(format!("{part}!")).expect("the segment contains no NUL");
         let mut buf = vec![0u8; fmt.as_bytes().len().max(64)];
         loop {
-            // SAFETY: localtime_r initialized local, and the format and destination are valid.
-            let len = unsafe {
-                libc::strftime(
-                    buf.as_mut_ptr().cast(),
-                    buf.len(),
-                    fmt.as_ptr(),
-                    local.as_ptr(),
-                )
-            };
+            // SAFETY: the calendar time and format are valid and the buffer is writable.
+            let len =
+                unsafe { libc::strftime(buf.as_mut_ptr().cast(), buf.len(), fmt.as_ptr(), local) };
             if len > 0 {
                 text.push_str(&String::from_utf8_lossy(&buf[..len - 1]));
                 break;
@@ -189,19 +199,6 @@ fn timestamp(format: Option<&str>) -> String {
         text.push_str(&format!(",{:03}", now.subsec_millis()));
     }
     text
-}
-
-fn level_name(level: &Int) -> String {
-    match level.as_small() {
-        Some(0) => "NOTSET",
-        Some(10) => "DEBUG",
-        Some(20) => "INFO",
-        Some(30) => "WARNING",
-        Some(40) => "ERROR",
-        Some(50) => "CRITICAL",
-        _ => return format!("Level {}", level.big()),
-    }
-    .into()
 }
 
 unsafe fn name(handle: *const Object) -> Rc<Str> {
@@ -225,7 +222,7 @@ pub unsafe extern "C" fn imre_log_get(word: usize) -> *const Object {
         if let Some(entry) = logs.entries.get(name) {
             return Rc::into_raw(entry.handle.clone());
         }
-        let entry = Entry::new(name, 0);
+        let entry = Entry::new(name, 0, logs.entries.len());
         let result = Rc::into_raw(entry.handle.clone());
         logs.entries.insert(name.into(), entry);
         result
@@ -353,7 +350,7 @@ pub unsafe extern "C" fn imre_log_emit(logger: *const Object, level: usize, mess
                     ),
                     Field::Message => line.push_str(message),
                     Field::LevelNo => line.push_str(&level.big().to_string()),
-                    Field::LevelName => line.push_str(&level_name(&level)),
+                    Field::LevelName => line.push_str(&levels::level_name(&level)),
                     Field::Name => line.push_str(&name),
                 }
             }

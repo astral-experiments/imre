@@ -1,25 +1,26 @@
 //! Format a failed stdlib JSON parse at Python's character offset. Serde owns
-//! the successful path. This cursor only distinguishes the tokens Python expected.
+//! the shallow successful path; the iterative decoder reuses these token rules.
 
+use std::rc::Rc;
 use std::sync::LazyLock;
 
 use regex_automata::meta::Regex;
 
-use crate::{Error, Kind};
+use crate::{Error, Str};
 
-type Failure = (usize, &'static str);
+pub(super) type Failure = (usize, &'static str);
 
-struct Cursor<'a> {
-    source: &'a str,
-    pos: usize,
+pub(super) struct Cursor<'a> {
+    pub(super) source: &'a str,
+    pub(super) pos: usize,
 }
 
-impl Cursor<'_> {
-    fn peek(&self) -> Option<u8> {
+impl<'a> Cursor<'a> {
+    pub(super) fn peek(&self) -> Option<u8> {
         self.source.as_bytes().get(self.pos).copied()
     }
 
-    fn space(&mut self) {
+    pub(super) fn space(&mut self) {
         while matches!(self.peek(), Some(b' ' | b'\t' | b'\r' | b'\n')) {
             self.pos += 1;
         }
@@ -28,19 +29,25 @@ impl Cursor<'_> {
     fn value(&mut self) -> Result<(), Failure> {
         self.space();
         match self.peek() {
-            Some(b'"') => self.string(),
             Some(open @ (b'[' | b'{')) => self.container(open == b'{'),
-            _ => {
-                static ATOM: LazyLock<Regex> = LazyLock::new(|| {
-                    Regex::new(r"^(?:-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null|NaN|-?Infinity)").unwrap()
-                });
-                let token = ATOM
-                    .find(&self.source[self.pos..])
-                    .ok_or((self.pos, "Expecting value"))?;
-                self.pos += token.end();
-                Ok(())
-            }
+            _ => self.scalar().map(|_| ()),
         }
+    }
+
+    pub(super) fn scalar(&mut self) -> Result<&'a str, Failure> {
+        let start = self.pos;
+        if self.peek() == Some(b'"') {
+            self.string()?;
+        } else {
+            static ATOM: LazyLock<Regex> = LazyLock::new(|| {
+                Regex::new(r"^(?:-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null|NaN|-?Infinity)").unwrap()
+            });
+            let token = ATOM
+                .find(&self.source[self.pos..])
+                .ok_or((self.pos, "Expecting value"))?;
+            self.pos += token.end();
+        }
+        Ok(&self.source[start..self.pos])
     }
 
     fn string(&mut self) -> Result<(), Failure> {
@@ -53,14 +60,16 @@ impl Cursor<'_> {
                 0..=31 => return Err((self.pos - 1, "Invalid control character at")),
                 b'\\' => match self.peek() {
                     Some(b'u') => {
-                        let escape = self.pos;
-                        self.pos += 1;
-                        for _ in 0..4 {
-                            if !self.peek().is_some_and(|c| c.is_ascii_hexdigit()) {
-                                return Err((escape, r"Invalid \uXXXX escape"));
-                            }
-                            self.pos += 1;
+                        let end = self.pos + 5;
+                        // CPython requires a character after the four hex digits.
+                        if end >= self.source.len()
+                            || !self.source.as_bytes()[self.pos + 1..end]
+                                .iter()
+                                .all(u8::is_ascii_hexdigit)
+                        {
+                            return Err((self.pos, r"Invalid \uXXXX escape"));
                         }
+                        self.pos = end;
                     }
                     Some(b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't') => self.pos += 1,
                     Some(_) => return Err((self.pos - 1, r"Invalid \escape")),
@@ -125,34 +134,68 @@ impl Cursor<'_> {
 
 #[cold]
 /// The caller has checked the complete document's container depth.
-pub(super) fn decode_error(text: &str, fallback: serde_json::Error) -> Error {
+pub(super) fn decode_error(
+    text: &str,
+    fallback: serde_json::Error,
+    owner: impl FnOnce() -> Option<Rc<Str>>,
+) -> Error {
     let mut cursor = Cursor {
         source: text,
         pos: 0,
     };
-    let issue = if text.starts_with('\u{feff}') {
-        Some((0, "Unexpected UTF-8 BOM (decode using utf-8-sig)"))
-    } else if let Err(failure) = cursor.value() {
+    let issue = if let Err(failure) = cursor.value() {
         Some(failure)
     } else {
         cursor.space();
         (cursor.pos < text.len()).then_some((cursor.pos, "Extra data"))
     };
-    let message = if let Some((at, message)) = issue {
-        let prefix = &text[..at];
-        let line = 1 + memchr::memchr_iter(b'\n', prefix.as_bytes()).count();
-        let column = 1 + prefix
-            .rsplit('\n')
-            .next()
-            .unwrap_or_default()
-            .chars()
-            .count();
-        format!(
-            "{message}: line {line} column {column} (char {})",
-            prefix.chars().count()
-        )
+    let fallback_message;
+    let (at, msg) = if let Some(issue) = issue {
+        issue
     } else {
-        fallback.to_string()
+        // Serde can reject a syntactically valid string outside Imre's Unicode
+        // domain. Its column is byte-based and one-indexed, unlike Python's pos.
+        let line_start = text
+            .split_inclusive('\n')
+            .take(fallback.line().saturating_sub(1))
+            .map(str::len)
+            .sum::<usize>();
+        let at = text.floor_char_boundary(
+            (line_start + fallback.column().saturating_sub(1)).min(text.len()),
+        );
+        fallback_message = fallback.to_string();
+        let msg = fallback_message
+            .rsplit_once(" at line ")
+            .map_or(fallback_message.as_str(), |(msg, _)| msg);
+        (at, msg)
     };
-    Error::new(Kind::JsonDecodeError, message)
+    let Some(doc) = owner() else {
+        return Error::allocation();
+    };
+    at_error(doc, at, msg)
+}
+
+#[cold]
+pub(super) fn at_error(doc: Rc<Str>, at: usize, msg: &str) -> Error {
+    let prefix = &doc[..at];
+    let lineno = 1 + memchr::memchr_iter(b'\n', prefix.as_bytes()).count();
+    let colno = 1 + prefix
+        .rsplit('\n')
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .count();
+    let pos = prefix.chars().count();
+    Error::json_decode(msg, doc, pos, lineno, colno)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refused_diagnostic_owner_raises_memory_error() {
+        let error = serde_json::from_str::<serde_json::Value>("!").unwrap_err();
+        assert!(decode_error("!", error, || None).is_kind(crate::Kind::MemoryError));
+    }
 }
