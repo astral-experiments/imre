@@ -7,6 +7,7 @@ use std::rc::Rc;
 use super::{Object, fail, words::WordKind};
 
 pub(super) mod strings;
+pub(super) mod tuples;
 
 enum Release {
     Fields(*const usize, usize),
@@ -71,7 +72,7 @@ pub struct RecordField {
 #[repr(C)]
 struct Header {
     references: Cell<usize>,
-    /// An aligned descriptor, or a pointer to a shared block with bit zero set.
+    /// An aligned descriptor, a shared block (bit zero), or an owned tuple layout (bit one).
     descriptor: *const RecordDescriptor,
 }
 
@@ -185,6 +186,10 @@ pub unsafe extern "C" fn imre_tuple_probe(
 }
 
 impl Header {
+    fn tuple_layout(&self) -> Option<*const tuples::TupleLayout> {
+        (self.descriptor.addr() & 2 != 0).then(|| self.descriptor.map_addr(|addr| addr & !2).cast())
+    }
+
     fn block(&self) -> Option<*const Block> {
         if self.descriptor.addr() & 1 == 0 {
             return None;
@@ -196,9 +201,10 @@ impl Header {
 
     fn descriptor(&self) -> &RecordDescriptor {
         // SAFETY: a tagged header owns its Rc until its last record owner drops.
-        let descriptor = self
-            .block()
-            .map_or(self.descriptor, |block| unsafe { (*block).descriptor });
+        let descriptor = self.block().map_or_else(
+            || self.descriptor.map_addr(|addr| addr & !2),
+            |block| unsafe { (*block).descriptor },
+        );
         // SAFETY: both forms carry the original immutable compiler metadata.
         unsafe { &*descriptor }
     }
@@ -426,7 +432,16 @@ unsafe fn cached_result(
     } else {
         // SAFETY: a fresh record uses the cache's static descriptor; it does not
         // expose or mutate any existing tuple's observable field values.
-        unsafe { allocate(header.descriptor()) }
+        unsafe {
+            let next = allocate(header.descriptor());
+            if let Some(layout) = header.tuple_layout()
+                && !next.is_null()
+            {
+                Rc::increment_strong_count(layout);
+                (*next.cast::<Header>().sub(1)).descriptor = header.descriptor;
+            }
+            next
+        }
     }
 }
 
@@ -560,7 +575,14 @@ unsafe fn release_standalone_fields(
     unsafe {
         let size = size_of::<Header>() + descriptor.allocated_words() * size_of::<usize>();
         let layout = Layout::from_size_align_unchecked(size, align_of::<Header>());
-        dealloc(payload.cast::<Header>().sub(1).cast_mut().cast(), layout);
+        let header = payload.cast::<Header>().sub(1);
+        // A suspended field-release frame still needs its tuple descriptor.
+        // Transfer its owner only after the last field has been visited.
+        let tuple_layout = (*header).tuple_layout();
+        dealloc(header.cast_mut().cast(), layout);
+        if let Some(tuple_layout) = tuple_layout {
+            Rc::decrement_strong_count(tuple_layout);
+        }
     }
 }
 

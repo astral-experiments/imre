@@ -94,6 +94,7 @@ enum Storage {
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
+    TupleBuffer(Vec<OwnedWord>),
     SimpleNamespace(Rc<Object>),
     Sha256(Box<sha2::Sha256>),
     CsvReader(Box<csv::Reader>),

@@ -8,7 +8,6 @@ use ruff_python_ast::{self as ast, Expr, ExprContext, Stmt};
 use ruff_text_size::{Ranged, TextSize};
 
 const MAX_FIELDS: usize = 256;
-const UNPROVEN: &str = "starred elements in tuple displays require a bounded, unmodified sequence";
 type Widths = HashMap<TextSize, usize>;
 
 /// A fresh list or tuple has as many fields as its literal. An unfiltered
@@ -171,26 +170,97 @@ fn local_widths(function: &ast::StmtFunctionDef, widths: &mut Widths) {
     }
 }
 
+/// Keep recursively doubled, statically known tuple types out of ty's inference.
+/// Widths here are solely a resource bound, never evidence for unrolling a mutable list.
+fn excessive_inferred_width<'a>(
+    body: &'a [Stmt],
+    parameters: Option<&'a ast::Parameters>,
+) -> Option<&'a ast::ExprStarred> {
+    let mut locals: HashMap<&str, usize> = parameters
+        .into_iter()
+        .flat_map(|p| p.iter_non_variadic_params())
+        .filter_map(|p| {
+            let parameter = &p.parameter;
+            Some((
+                parameter.name.as_str(),
+                parameter_width(parameter.annotation.as_deref()?)?,
+            ))
+        })
+        .collect();
+    for stmt in body {
+        let (name, value) = match stmt {
+            Stmt::Assign(a) if let [Expr::Name(n)] = a.targets.as_slice() => {
+                (n.id.as_str(), &*a.value)
+            }
+            Stmt::AnnAssign(a)
+                if let Expr::Name(n) = &*a.target
+                    && let Some(v) = a.value.as_deref() =>
+            {
+                (n.id.as_str(), v)
+            }
+            _ => continue,
+        };
+        let width = if let Expr::Tuple(tuple) = value {
+            let mut width = Some(0usize);
+            for field in &tuple.elts {
+                if let Expr::Starred(star) = field {
+                    let extra = fresh_width(&star.value).or_else(|| match &*star.value {
+                        Expr::Name(n) => locals.get(n.id.as_str()).copied(),
+                        _ => None,
+                    });
+                    width = width
+                        .zip(extra)
+                        .map(|(total, add)| total.saturating_add(add));
+                    if width.is_some_and(|n| n > MAX_FIELDS) {
+                        return Some(star);
+                    }
+                } else {
+                    width = width.map(|n| n.saturating_add(1));
+                }
+            }
+            width
+        } else if let Expr::Name(n) = value {
+            locals.get(n.id.as_str()).copied()
+        } else {
+            fresh_width(value)
+        };
+        if let Some(width) = width {
+            locals.insert(name, width);
+        } else {
+            locals.remove(name);
+        }
+    }
+    None
+}
+
 #[derive(Default)]
 struct Displays<'a> {
     widths: Widths,
-    function: bool,
+    executable: bool,
     function_body: Option<TextSize>,
     error: Option<(&'a ast::ExprStarred, &'static str)>,
 }
 
 impl<'a> Visitor<'a> for Displays<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        let previous = (self.function, self.function_body);
+        let previous = (self.executable, self.function_body);
         if let Stmt::FunctionDef(function) = stmt {
             local_widths(function, &mut self.widths);
-            self.function = false;
+            self.executable = false;
+            if let Some(star) = excessive_inferred_width(&function.body, Some(&function.parameters))
+            {
+                self.error = Some((
+                    star,
+                    "starred elements in tuple displays exceed 256 inferred fields",
+                ));
+                return;
+            }
             self.function_body = function.body.first().map(Ranged::start);
         } else if matches!(stmt, Stmt::ClassDef(_)) {
-            self.function = false;
+            self.executable = false;
         }
         walk_stmt(self, stmt);
-        (self.function, self.function_body) = previous;
+        (self.executable, self.function_body) = previous;
     }
 
     fn visit_body(&mut self, body: &'a [Stmt]) {
@@ -198,7 +268,7 @@ impl<'a> Visitor<'a> for Displays<'a> {
             .first()
             .is_some_and(|stmt| Some(stmt.start()) == self.function_body)
         {
-            self.function = true;
+            self.executable = true;
         }
         ruff_python_ast::visitor::walk_body(self, body);
     }
@@ -217,18 +287,19 @@ impl<'a> Visitor<'a> for Displays<'a> {
                 .count();
             for element in &tuple.elts {
                 if let Expr::Starred(star) = element {
-                    if !self.function {
+                    if !self.executable {
                         self.error = Some((
                             star,
-                            "starred elements in tuple displays require a function body",
+                            "starred elements in tuple displays are unsupported in defaults or class fields",
                         ));
                         return;
                     }
                     let width = fresh_width(&star.value)
                         .or_else(|| self.widths.get(&star.start()).copied());
                     let Some(width) = width else {
-                        self.error = Some((star, UNPROVEN));
-                        return;
+                        // Unknown widths do not become native fields or demand a type
+                        // while importing. A reachable display consumes the actual iterable.
+                        continue;
                     };
                     total = total.saturating_add(width);
                     if total > MAX_FIELDS {
@@ -244,7 +315,7 @@ impl<'a> Visitor<'a> for Displays<'a> {
     }
 }
 
-/// Keep unrelated source on the fast path and record a width for every accepted spread.
+/// Record only proved fixed widths. Other reachable spreads consume their inputs at run time.
 pub(super) fn check(body: &[Stmt]) -> Result<Widths, (&ast::ExprStarred, &'static str)> {
     if !ast::helpers::any_over_body(body, |e| {
         matches!(e, Expr::Tuple(t) if t.ctx == ExprContext::Load
@@ -252,7 +323,16 @@ pub(super) fn check(body: &[Stmt]) -> Result<Widths, (&ast::ExprStarred, &'stati
     }) {
         return Ok(Widths::new());
     }
-    let mut displays = Displays::default();
+    if let Some(star) = excessive_inferred_width(body, None) {
+        return Err((
+            star,
+            "starred elements in tuple displays exceed 256 inferred fields",
+        ));
+    }
+    let mut displays = Displays {
+        executable: true,
+        ..Displays::default()
+    };
     displays.visit_body(body);
     displays.error.map_or(Ok(displays.widths), Err)
 }
@@ -271,10 +351,12 @@ mod tests {
             let source = format!(
                 "def f(cond: bool) -> int:\n    xs = [1, 2]\n    {body}\n    y = (*xs,)\n    return len(y)\n"
             );
-            let error = crate::check(&source).unwrap_err();
+            let parsed = ruff_python_parser::parse_module(&source).unwrap();
+            let widths = super::check(&parsed.syntax().body).unwrap();
+            let star = ruff_text_size::TextSize::try_from(source.rfind("*xs").unwrap()).unwrap();
             assert!(
-                error.contains("starred elements in tuple displays"),
-                "{error}"
+                !widths.contains_key(&star),
+                "mutable source was assigned a fixed layout: {source}"
             );
         }
     }

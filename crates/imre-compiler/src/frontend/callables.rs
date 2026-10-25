@@ -16,6 +16,14 @@ pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
 fn invalid_aggregate(ty: Type, types: &Types) -> bool {
     if matches!(ty, Type::Callable(_) | Type::ForwardRef(_)) || types.is_partial_frame(ty) {
         false
+    } else if matches!(ty, Type::VarTuple(_)) {
+        // A completed display cannot acquire a reference to itself. Its fields
+        // own the same callable records as locals; mutable containers and class
+        // fields still reject storing the tuple through contains_callable().
+        types
+            .children(ty)
+            .into_iter()
+            .any(|field| invalid_aggregate(field, types))
     } else if let Some(payload) = types.payload(ty) {
         invalid_aggregate(payload, types)
     } else {
