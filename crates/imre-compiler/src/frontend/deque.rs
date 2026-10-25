@@ -64,6 +64,7 @@ impl Checker<'_> {
                 },
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
+                source_frame: false,
                 recursion_error: error(self.source, attribute, "recursive deque method adapter"),
             },
         );
