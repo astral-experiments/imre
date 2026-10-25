@@ -112,7 +112,7 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
     let Some(semantics) = (unsafe { left_layout.semantics.as_ref() }) else {
         return Comparison::Done(false);
     };
-    if !std::ptr::eq(left_layout, right_layout) {
+    if !std::ptr::eq(left_layout, right_layout) && !left_layout.same_class(right_layout) {
         // Named tuples compare structurally with other tuple layouts. Both
         // descriptors must agree on how to read every word before traversing.
         // SAFETY: the immutable descriptors cover each initialized field.
@@ -341,6 +341,9 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         resume: (position + 1 < left.values.len()).then_some(position + 1),
                     }
                 }
+                (Storage::ModuleMember(left), Storage::ModuleMember(right)) => {
+                    Comparison::Done(left.equal_member(right))
+                }
                 (Storage::ObjectValue(l), Storage::ObjectValue(r)) => Comparison::Done(
                     super::boxed_values::equal((l.kind, l.word), (r.kind, r.word)),
                 ),
@@ -415,6 +418,14 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
                         Storage::ObjectValue(field) => Some(ReprTask::Word(field.word, field.kind)),
+                        Storage::ModuleMember(member) => {
+                            let text = member.text(1);
+                            if !text.is_null() {
+                                // SAFETY: the metadata formatter returns an independently owned string.
+                                output.push_str(Rc::from_raw(text).as_str());
+                            }
+                            None
+                        }
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None

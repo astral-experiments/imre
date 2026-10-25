@@ -682,6 +682,9 @@ pub(crate) enum Builtin {
     SystemExitCodeEqual {
         reversed: bool,
     },
+    ExceptionFieldIdentity {
+        reversed: bool,
+    },
     /// Evaluates and roots all arguments, then raises the last (an exception).
     RaiseException,
     WallTime,
@@ -729,8 +732,18 @@ pub(crate) enum Builtin {
     ImportErrorReset,
     ImportErrorRejectReset,
     BoxValue,
+    ObjectRecordProject(usize),
+    ObjectRecordIdentity {
+        class: usize,
+        reversed: bool,
+    },
     MappingObjectGet,
     ExceptionTupleView,
+    ExceptionKeywordSuggestion,
+    /// A new, completely initialized record for a proven forwarding constructor.
+    ExceptionRecordFields,
+    /// Check the return type of __str__ or __repr__ before crossing the formatter ABI.
+    ExceptionFormatterResult(bool),
     ExceptionFieldRepr,
     ExceptionFieldLen,
     ExceptionFieldIndex,
