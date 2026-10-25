@@ -164,16 +164,20 @@ impl Row {
         }
         match self.state {
             FieldStart | Field | AfterEscapeNewline | AfterQuote => {
-                if token.is_none() && self.state == AfterEscapeNewline {
+                let Some(ch) = token else {
+                    if self.state != AfterEscapeNewline {
+                        self.save()?;
+                        self.state = Record;
+                    }
                     return Ok(());
-                }
-                if token.is_none() || newline {
+                };
+                if newline {
                     self.save()?;
-                    self.state = if newline { TrailingNewline } else { Record };
+                    self.state = TrailingNewline;
                 } else if self.state == FieldStart && token == dialect.quote {
                     self.state = Quoted;
                 } else if self.state == AfterQuote && token == dialect.quote {
-                    self.add(token.unwrap())?;
+                    self.add(ch)?;
                     self.state = Quoted;
                 } else if self.state != AfterQuote && token == dialect.escape {
                     self.state = EscapeField;
@@ -192,7 +196,7 @@ impl Row {
                         ),
                     ));
                 } else {
-                    self.add(token.unwrap())?;
+                    self.add(ch)?;
                     if self.state != AfterEscapeNewline {
                         self.state = Field;
                     }
