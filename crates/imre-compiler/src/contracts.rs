@@ -310,6 +310,8 @@ impl Builtin {
             | Self::RegexGroupDict
             | Self::Errno(_)
             | Self::DictGet
+            | Self::ModuleParentPrefix
+            | Self::ModuleCacheFromOrigin
             | Self::NamespaceWrap
             | Self::NamespaceDict
             | Self::NamespaceGet
@@ -940,6 +942,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_expandtabs"
                 | "imre_str_lower"
                 | "imre_str_capitalize"
+                | "imre_module_cache_from_origin"
                 | "imre_str_slice"
                 | "imre_str_int_list"
                 | "imre_seq_get"

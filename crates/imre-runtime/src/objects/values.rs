@@ -15,6 +15,7 @@ use super::{Bytes, Int, List, Object, Storage, Str, fail, object};
 const GENERATED_EQ: u32 = 1;
 const GENERATED_REPR: u32 = 2;
 const TUPLE: u32 = 1;
+const MODULE_SPEC: u32 = 2;
 
 /// Compares an exact immutable tuple lexicographically. The checker excludes
 /// nullable and float fields, so comparison is total and cannot invoke Python
@@ -632,6 +633,12 @@ unsafe fn record_field_repr(
             if field.is_some_and(|field| field.flags & GENERATED_REPR == 0) {
                 continue;
             }
+            let kind = WordKind::new(*layout.kinds.add(index));
+            let word = kind.read_record_field(payload.add(index));
+            // ModuleSpec.__repr__ omits optional origins/locations only when None.
+            if semantics.kind == MODULE_SPEC && matches!(index, 2 | 4) && word == 0 {
+                continue;
+            }
             if written != 0 {
                 output.push_str(", ");
             }
@@ -639,8 +646,7 @@ unsafe fn record_field_repr(
                 output.push_str(text(field.name, field.name_len));
                 output.push('=');
             }
-            let kind = WordKind::new(*layout.kinds.add(index));
-            let word = kind.read_record_field(payload.add(index));
+
             written += 1;
             if word != 0 && matches!(kind.raw() & !NULLABLE, 5 | 6 | 9) {
                 pending.push(ReprTask::Record(payload, index + 1, written));

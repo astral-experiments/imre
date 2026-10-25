@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
-use ruff_text_size::{Ranged, TextRange};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use crate::analysis::{CheckedDiagnostic, Session};
 use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation, WrapperAttributes};
@@ -57,6 +57,8 @@ pub(crate) enum Binding {
 /// Sealed namespaces expose only compiler-known symbols, never module values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IntrinsicModule {
+    Importlib,
+    ImportlibMachinery,
     AnnotationLib,
     AnnotationFormat,
     Declaration(&'static str),
@@ -124,6 +126,7 @@ pub(crate) enum IntrinsicModule {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
+    ModuleSpec,
     GetAnnotations,
     ForwardRef,
     AnnotationTypeRepr,
@@ -377,6 +380,8 @@ impl IntrinsicModule {
             "os.path" | "posixpath" => Some(Self::PosixPath),
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
+            "importlib" => Some(Self::Importlib),
+            "importlib.machinery" => Some(Self::ImportlibMachinery),
             "collections" => Some(Self::Collections),
             "collections.abc" => Some(Self::CollectionsAbc),
             "copy" => Some(Self::Copy),
@@ -453,6 +458,7 @@ impl IntrinsicModule {
             (Self::AnnotationFormat, "VALUE_WITH_FAKE_GLOBALS") => Intrinsic::AnnotationFormat(2),
             (Self::AnnotationFormat, "FORWARDREF") => Intrinsic::AnnotationFormat(3),
             (Self::AnnotationFormat, "STRING") => Intrinsic::AnnotationFormat(4),
+            (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
             (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
@@ -737,6 +743,8 @@ pub(crate) struct SourceModule {
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
     type_bindings: HashMap<String, Binding>,
+    /// Only an executed explicit submodule import populates the bare importlib namespace.
+    machinery_import: Option<TextSize>,
     pub(crate) aliases: Vec<TypeAlias>,
     pub(crate) type_guards: Vec<usize>,
     /// Fixed pattern declarations in the entry module precede ordinary executable statements.
@@ -1188,7 +1196,7 @@ impl SourceGraph {
             ast::Expr::Attribute(attribute) => match self.resolve_type(module, &attribute.value)? {
                 Binding::Module(target) => self.modules[target].export(attribute.attr.as_str()),
                 Binding::IntrinsicModule(target) => {
-                    stdlib_symbol(&self.modules, target, attribute.attr.as_str())
+                    stdlib_attribute(&self.modules, module, target, attribute)
                 }
                 _ => None,
             },
@@ -1207,8 +1215,8 @@ fn resolve_binding(
         ast::Expr::Attribute(attribute) => {
             match resolve_binding(modules, module, &attribute.value)? {
                 Binding::Module(module) => modules[module].export(attribute.attr.as_str()),
-                Binding::IntrinsicModule(module) => {
-                    stdlib_symbol(modules, module, attribute.attr.as_str())
+                Binding::IntrinsicModule(target) => {
+                    stdlib_attribute(modules, module, target, attribute)
                 }
                 Binding::Definition(_)
                 | Binding::Value(_)
@@ -1218,6 +1226,25 @@ fn resolve_binding(
         }
         _ => None,
     }
+}
+
+fn stdlib_attribute(
+    modules: &[SourceModule],
+    owner: ModuleId,
+    target: IntrinsicModule,
+    attr: &ast::ExprAttribute,
+) -> Option<Binding> {
+    if target == IntrinsicModule::Importlib
+        && attr.attr.as_str() == "machinery"
+        && modules[owner]
+            .machinery_import
+            .is_some_and(|at| at <= attr.start())
+    {
+        return Some(Binding::IntrinsicModule(
+            IntrinsicModule::ImportlibMachinery,
+        ));
+    }
+    stdlib_symbol(modules, target, attr.attr.as_str())
 }
 
 const LOGGING_CLASSES: &str = "__imre_logging_classes__";
@@ -1365,6 +1392,7 @@ impl<'a> Loader<'a> {
             archive: None,
             bindings: HashMap::new(),
             type_bindings: HashMap::new(),
+            machinery_import: None,
             aliases: Vec::new(),
             type_guards: Vec::new(),
             entry_globals: Vec::new(),
@@ -1704,6 +1732,11 @@ impl<'a> Loader<'a> {
                 for alias in &import.names {
                     let name = alias.name.as_str();
                     if let Some(module) = self.intrinsic_module(name, None)? {
+                        if module == IntrinsicModule::ImportlibMachinery {
+                            self.modules[id]
+                                .machinery_import
+                                .get_or_insert(statement.end());
+                        }
                         if alias.asname.is_none()
                             && let Some((local, _)) = name.split_once('.')
                             && let Some(namespace) = IntrinsicModule::named(local)
@@ -1739,24 +1772,43 @@ impl<'a> Loader<'a> {
                 if import.level == 0
                     && let Some(module) = self.intrinsic_module(&name, Some(&import.names))?
                 {
+                    if module == IntrinsicModule::ImportlibMachinery
+                        || module == IntrinsicModule::Importlib
+                            && import
+                                .names
+                                .iter()
+                                .any(|alias| alias.name.as_str() == "machinery")
+                    {
+                        self.modules[id]
+                            .machinery_import
+                            .get_or_insert(statement.end());
+                    }
                     for alias in &import.names {
-                        let binding = stdlib_symbol(&self.modules, module, alias.name.as_str())
-                            .filter(|binding| {
-                                self.reachable_only
-                                    || !matches!(
-                                        binding,
-                                        Binding::Intrinsic(Intrinsic::Declaration(_))
-                                            | Binding::IntrinsicModule(
-                                                IntrinsicModule::Declaration(_)
-                                            )
-                                    )
-                            })
-                            .ok_or_else(|| {
-                                format!(
-                                    "unsupported sealed standard-library export {name}.{}",
-                                    alias.name
+                        // An explicit from-import loads this child even when the bare
+                        // package has not yet acquired a machinery attribute.
+                        let binding = if module == IntrinsicModule::Importlib
+                            && alias.name.as_str() == "machinery"
+                        {
+                            Some(Binding::IntrinsicModule(
+                                IntrinsicModule::ImportlibMachinery,
+                            ))
+                        } else {
+                            stdlib_symbol(&self.modules, module, alias.name.as_str())
+                        }
+                        .filter(|binding| {
+                            self.reachable_only
+                                || !matches!(
+                                    binding,
+                                    Binding::Intrinsic(Intrinsic::Declaration(_))
+                                        | Binding::IntrinsicModule(IntrinsicModule::Declaration(_))
                                 )
-                            })?;
+                        })
+                        .ok_or_else(|| {
+                            format!(
+                                "unsupported sealed standard-library export {name}.{}",
+                                alias.name
+                            )
+                        })?;
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         let binding = self.named_import(binding, alias.name.as_str());
                         self.bind(id, local.as_str(), binding, alias)?;

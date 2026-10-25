@@ -288,6 +288,23 @@ impl Checker<'_> {
                 if let Some(class) = self.writable_property(receiver.ty, attribute) {
                     return self.set_property(class, attribute, receiver, value);
                 }
+                if matches!(receiver.ty, Type::ModuleSpec(_))
+                    && attribute.attr.as_str() == "has_location"
+                {
+                    // Python evaluates the RHS and target before the descriptor invokes bool().
+                    let (rhs, object) = (self.hidden(value.ty), self.hidden(receiver.ty));
+                    let (owner, field, _) =
+                        self.writable_field_value(attribute, self.local(object))?;
+                    let truth = self.truth_value(self.local(rhs));
+                    return Ok(Statement::Scope {
+                        body: vec![
+                            Statement::Assign(rhs, value),
+                            Statement::Assign(object, receiver),
+                            Statement::SetField(owner, field, truth),
+                        ],
+                        clear: vec![rhs, object],
+                    });
+                }
                 let (receiver, field, ty) = self.writable_field_value(attribute, receiver)?;
                 let value = self.coerce(value, ty, target)?;
                 Ok(Statement::SetField(receiver, field, value))

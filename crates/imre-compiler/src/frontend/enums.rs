@@ -322,7 +322,12 @@ impl Checker<'_> {
             || types.iter().all(|ty| {
                 matches!(
                     ty,
-                    Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_) | Type::Class(_)
+                    Type::ListInt
+                        | Type::List(_)
+                        | Type::Dict(_)
+                        | Type::Set(_)
+                        | Type::Class(_)
+                        | Type::ModuleSpec(_)
                 )
             })
             || types == [Type::Str; 2]

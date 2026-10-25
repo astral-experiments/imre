@@ -85,6 +85,25 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
                 field_metadata(output, name, layout),
             )
         }
+        Type::ModuleSpec(_) => {
+            let layout = [
+                ("name", 2),
+                ("loader", 2),
+                ("origin", 2),
+                ("loader_state", 0),
+                ("submodule_search_locations", 2),
+                ("_uninitialized_submodules", 0),
+                ("_set_fileattr", 0),
+                ("_cached", 0),
+            ];
+            (
+                2,
+                2,
+                "ModuleSpec",
+                "_frozen_importlib.ModuleSpec",
+                field_metadata(output, name, layout.into_iter()),
+            )
+        }
         Type::CompletedProcess(capture, _) => {
             let layout = [
                 ("args", true),
