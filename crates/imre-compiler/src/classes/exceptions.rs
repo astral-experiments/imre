@@ -71,6 +71,29 @@ fn builtin_mro(kind: u32) -> Vec<u32> {
     out
 }
 
+/// Exception inherits BaseException's initializer. A direct call passes the
+/// receiver explicitly, and must resolve to the unshadowed builtin.
+pub(crate) fn explicit_message_initializer<'a>(
+    module: &SourceModule,
+    call: &'a ast::ExprCall,
+) -> Option<(&'a str, &'a ast::Expr)> {
+    let ast::Expr::Attribute(method) = call.func.as_ref() else {
+        return None;
+    };
+    let base = method.value.as_name_expr()?.id.as_str();
+    let [receiver, message] = call.arguments.args.as_ref() else {
+        return None;
+    };
+    (method.attr.as_str() == "__init__"
+        && matches!(base, "Exception" | "BaseException")
+        && !module.bindings.contains_key(base)
+        && receiver
+            .as_name_expr()
+            .is_some_and(|receiver| receiver.id == "self")
+        && call.arguments.keywords.is_empty())
+    .then_some((base, message))
+}
+
 /// Every admitted payload constructor explicitly establishes its string argument.
 /// BaseException.__new__ also accepts arbitrary positional arguments, whose
 /// heterogeneous tuple is outside this fixed-layout subset.
@@ -87,7 +110,10 @@ fn validate_layout(module: &SourceModule, node: &ast::StmtClassDef) -> Result<()
     let Some(init) = initialization else {
         return Err(module.error(node,"an exception payload needs an explicit initializer or dataclass post-init which calls super().__init__(message)"));
     };
-    let calls=init.body.iter().filter(|stmt|matches!(stmt,ast::Stmt::Expr(e) if matches!(&*e.value,ast::Expr::Call(c) if super_init(c)))).count();
+    let calls = init.body.iter().filter(|stmt| {
+        matches!(stmt, ast::Stmt::Expr(e) if matches!(&*e.value, ast::Expr::Call(c)
+            if super_init(c) || init.name.as_str() == "__init__" && explicit_message_initializer(module, c).is_some()))
+    }).count();
     if calls != 1
         || init.body.iter().any(|s| {
             !matches!(

@@ -1138,6 +1138,46 @@ impl Checker<'_> {
         Ok(record)
     }
 
+    /// Install the native message slot used by the exception's args and formatting.
+    fn set_exception_message(&mut self, class: usize, message: &ast::Expr) -> Result<Expr, String> {
+        let ty = self.types.optional(Type::Str);
+        let message_value = self.expr_expected(message, Type::Str)?;
+        let value = self.coerce(message_value, ty, message)?;
+        let field = self.classes.fields[class].len() - 1;
+        Ok(Expr {
+            ty: Type::None,
+            kind: ExprKind::Scope {
+                body: vec![Statement::SetField(self.local(0), field, value)],
+                value: Box::new(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                }),
+                clear: Vec::new(),
+            },
+        })
+    }
+
+    pub(super) fn explicit_exception_initializer(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Option<Expr>, String> {
+        if self.super_initializer.is_some()
+            && self.names.get("self") == Some(&0)
+            && let Some(class) = self.class
+            && self
+                .classes
+                .declarations
+                .exceptions
+                .contains_key(&self.classes.declarations.definitions[class].definition)
+            && let Some((base, message)) =
+                crate::classes::explicit_message_initializer(&self.graph.modules[self.module], call)
+            && !self.names.contains_key(base)
+        {
+            return self.set_exception_message(class, message).map(Some);
+        }
+        Ok(None)
+    }
+
     pub(super) fn call_super_initializer(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         if let Some(class) = self.class
             && self
@@ -1164,21 +1204,7 @@ impl Checker<'_> {
                     "exception messages do not accept keyword arguments",
                 ));
             }
-            let ty = self.types.optional(Type::Str);
-            let message_value = self.expr_expected(message, Type::Str)?;
-            let value = self.coerce(message_value, ty, message)?;
-            let field = self.classes.fields[class].len() - 1;
-            return Ok(Expr {
-                ty: Type::None,
-                kind: ExprKind::Scope {
-                    body: vec![Statement::SetField(self.local(0), field, value)],
-                    value: Box::new(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    }),
-                    clear: Vec::new(),
-                },
-            });
+            return self.set_exception_message(class, message);
         }
         // An initializer defined at the root of a checked record lineage finds
         // object.__init__, including when that initializer runs on a subclass.

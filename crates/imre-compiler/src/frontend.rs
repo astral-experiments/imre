@@ -5713,6 +5713,9 @@ impl<'a> Checker<'a> {
         if crate::classes::super_init(call) {
             return self.call_super_initializer(call);
         }
+        if let Some(expr) = self.explicit_exception_initializer(call)? {
+            return Ok(expr);
+        }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "most_common"
             && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Counter))

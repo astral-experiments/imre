@@ -14,6 +14,7 @@ mod exceptions;
 mod inheritance;
 mod record_hash;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
+pub(crate) use exceptions::explicit_message_initializer;
 pub(crate) use inheritance::super_init;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -523,6 +524,7 @@ fn collect_class(
             } else {
                 inherited_fields
             },
+            exception_layout,
         )?;
     }
     let mut bases = Vec::new();
@@ -659,6 +661,7 @@ fn check_initializer(
     initializer: &ast::StmtFunctionDef,
     fields: &[Field],
     inherited: &[Field],
+    exception_layout: bool,
 ) -> Result<(), String> {
     let receiver = initializer
         .parameters
@@ -673,7 +676,26 @@ fn check_initializer(
         .collect::<HashSet<_>>();
     let mut initialized = HashSet::new();
     let mut called_super = false;
+    let mut called_exception_base = false;
     for statement in &initializer.body {
+        if exception_layout
+            && let ast::Stmt::Expr(stmt) = statement
+            && let ast::Expr::Call(call) = &*stmt.value
+            && let Some((_, message)) = explicit_message_initializer(module, call)
+        {
+            let mut use_self = SelfUse(receiver, None, &initialized);
+            use_self.visit_expr(message);
+            if let Some(expr) = use_self.1 {
+                return Err(module.error(
+                    expr,
+                    "the incomplete instance cannot escape during construction",
+                ));
+            }
+            // Calling BaseException directly bypasses any user base initializer.
+            // Its ordinary fields still have to be initialized by this method.
+            called_exception_base = true;
+            continue;
+        }
         let assignment = match statement {
             ast::Stmt::Assign(assignment) => assignment,
             ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_)) => {
@@ -772,7 +794,7 @@ fn check_initializer(
             }
         }
     }
-    if !inherited.is_empty() && !called_super {
+    if !inherited.is_empty() && !called_super && !called_exception_base {
         return Err(module.error(initializer, "an explicit subclass initializer must call super().__init__ to initialize inherited fields"));
     }
     let missing = fields
