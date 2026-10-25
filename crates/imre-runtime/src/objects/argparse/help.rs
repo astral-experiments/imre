@@ -25,18 +25,7 @@ fn positive_columns(value: &str) -> Option<usize> {
             count += 1;
         }
     }
-    // Beyond the minimum threshold, CPython's decimal conversion guard can
-    // reject a width even when it consists almost entirely of leading zeroes.
-    if count > 640 {
-        let limit = std::env::var("PYTHONINTMAXSTRDIGITS")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(4300);
-        if limit != 0 && count > limit {
-            return None;
-        }
-    }
-    (width > 0).then_some(width)
+    (width > 0 && super::decimal_digits_allowed(count)).then_some(width)
 }
 
 pub(super) fn width() -> usize {
@@ -100,7 +89,7 @@ impl OptionSpec {
                 self.dest().to_uppercase()
             }
         } else {
-            format!("{{{}}}", self.choices.join(","))
+            format!("{{{}}}", self.choices_text(",", false))
         };
         if self.positional() {
             if summary {
@@ -611,7 +600,7 @@ fn expand(template: &str, prog: &str, option: Option<&OptionSpec>) -> String {
                     if !option.has_choices {
                         "None".into()
                     } else {
-                        option.choices.join(", ")
+                        option.choices_text(", ", false)
                     }
                 }
                 ("required", Some(option)) => {

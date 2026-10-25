@@ -17,8 +17,21 @@ mod binding;
 mod help;
 mod nargs;
 
-use binding::Bound;
+use binding::{Bound, IntegerRange};
 use nargs::{Nargs, positional_counts};
+
+/// Large decimal conversions obey the interpreter's configured digit limit,
+/// including leading zeroes. Underscores and signs do not count.
+fn decimal_digits_allowed(count: usize) -> bool {
+    if count <= 640 {
+        return true;
+    }
+    let limit = std::env::var("PYTHONINTMAXSTRDIGITS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(4300);
+    limit == 0 || count <= limit
+}
 
 #[derive(Deserialize, Copy, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -42,7 +55,10 @@ struct OptionSpec {
     list_default: bool,
     required: bool,
     choices: Vec<String>,
+    range: Option<IntegerRange>,
     has_choices: bool,
+    int_default: bool,
+    int_constant: bool,
     float_default: bool,
     float_constant: bool,
     converter: Option<String>,

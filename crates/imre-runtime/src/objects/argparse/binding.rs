@@ -3,8 +3,47 @@
 use std::borrow::Cow;
 use std::rc::Rc;
 
+use num_bigint::BigInt;
+use num_traits::{Signed, Zero};
+use serde::{Deserialize, Deserializer};
+
 use super::{Kind, OptionSpec, Str, Words, imre_path_new, string_repr};
 use crate::{Int, List, floats, parse_decimal_int};
+
+#[derive(Deserialize)]
+pub(super) struct IntegerRange(
+    #[serde(deserialize_with = "decimal")] BigInt,
+    #[serde(deserialize_with = "decimal")] BigInt,
+    #[serde(deserialize_with = "decimal")] BigInt,
+);
+
+fn decimal<'de, D: Deserializer<'de>>(input: D) -> Result<BigInt, D::Error> {
+    String::deserialize(input)?
+        .parse()
+        .map_err(serde::de::Error::custom)
+}
+
+impl IntegerRange {
+    fn contains(&self, n: &Int) -> bool {
+        let n = n.big();
+        let n = n.as_ref();
+        (if self.2.is_positive() {
+            &self.0 <= n && n < &self.1
+        } else {
+            &self.0 >= n && n > &self.1
+        }) && ((n - &self.0) % &self.2).is_zero()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = BigInt> + '_ {
+        std::iter::successors(Some(self.0.clone()), |n| Some(n + &self.2)).take_while(|n| {
+            if self.2.is_positive() {
+                n < &self.1
+            } else {
+                n > &self.1
+            }
+        })
+    }
+}
 
 pub(super) enum Bound<'a> {
     Absent,
@@ -24,7 +63,19 @@ impl<'a> Scalar<'a> {
     fn convert(option: &OptionSpec, text: &'a str) -> Result<Self, String> {
         let value = match option.kind {
             Kind::Str | Kind::Path => Some(Self::Text(text)),
-            Kind::Int => parse_decimal_int(text).map(Self::Int),
+            Kind::Int => {
+                if text.len() > 640
+                    && !super::decimal_digits_allowed(
+                        text.chars()
+                            .filter(|&ch| crate::integer_text::decimal_digit(ch).is_some())
+                            .count(),
+                    )
+                {
+                    None
+                } else {
+                    parse_decimal_int(text).map(Self::Int)
+                }
+            }
             Kind::Float => floats::parse(text).map(Self::Float),
             Kind::Bool => unreachable!(),
         };
@@ -51,18 +102,18 @@ impl<'a> Scalar<'a> {
             return Ok(());
         }
         let text = self.text();
-        if option.choices.iter().any(|choice| match self {
-            Self::Float(n) => floats::parse(choice) == Some(*n),
-            _ => choice == text.as_ref(),
-        }) {
+        let matches = if let (Some(range), Self::Int(n)) = (&option.range, self) {
+            range.contains(n)
+        } else {
+            option.choices.iter().any(|choice| match self {
+                Self::Float(n) => floats::parse(choice) == Some(*n),
+                _ => choice == text.as_ref(),
+            })
+        };
+        if matches {
             return Ok(());
         }
-        let choices = option
-            .choices
-            .iter()
-            .map(|c| string_repr(c))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let choices = option.choices_text(", ", true);
         Err(format!(
             "argument {}: invalid choice: {} (choose from {choices})",
             option.error_name(),
@@ -72,6 +123,7 @@ impl<'a> Scalar<'a> {
 
     fn word(self, kind: Kind, optional: bool) -> usize {
         match self {
+            Self::Int(value) if kind == Kind::Str => super::super::unions::integer(value),
             Self::Int(value) => value.into_raw(),
             Self::Float(value) if optional => floats::imre_float_box(value),
             Self::Float(value) => value.to_bits() as usize,
@@ -89,6 +141,25 @@ impl<'a> Scalar<'a> {
 }
 
 impl OptionSpec {
+    pub(super) fn choices_text(&self, separator: &str, quoted: bool) -> String {
+        let labels: Box<dyn Iterator<Item = Cow<'_, str>> + '_> = match &self.range {
+            Some(range) => Box::new(range.iter().map(|n| Cow::Owned(n.to_string()))),
+            None => Box::new(self.choices.iter().map(|s| Cow::Borrowed(s.as_str()))),
+        };
+        let mut result = String::new();
+        for (i, label) in labels.enumerate() {
+            if i != 0 {
+                result.push_str(separator);
+            }
+            if quoted {
+                result.push_str(&string_repr(&label));
+            } else {
+                result.push_str(&label);
+            }
+        }
+        result
+    }
+
     pub(super) fn bind<'a>(&'a self, args: Option<&[&'a str]>) -> Result<Bound<'a>, String> {
         let missing = args.is_none() || self.positional() && args.is_some_and(<[_]>::is_empty);
         if missing && let Some(member) = self.enum_default {
@@ -119,17 +190,21 @@ impl OptionSpec {
             }
             return Ok(Bound::List(values));
         }
-        let (value, check) = if missing {
-            (self.default.as_deref(), false)
+        let (value, check, literal_integer) = if missing {
+            (self.default.as_deref(), false, self.int_default)
         } else if let Some(value) = args.and_then(|values| values.first()) {
-            (Some(*value), true)
+            (Some(*value), true, false)
         } else {
-            (self.constant.as_deref(), false)
+            (self.constant.as_deref(), false, self.int_constant)
         };
         let Some(text) = value else {
             return Ok(Bound::Absent);
         };
-        let value = Scalar::convert(self, text)?;
+        let value = if literal_integer {
+            Scalar::Int(parse_decimal_int(text).expect("canonical integer literal"))
+        } else {
+            Scalar::convert(self, text)?
+        };
         if check {
             value.check(self)?;
         }

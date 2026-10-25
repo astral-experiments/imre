@@ -11,12 +11,14 @@ FIXTURES = Path(__file__).parent / "fixtures" / "argparse"
 CASES = {
     "numbers": [
         [], ["--help"], ["-i", "１２_３"], ["-i", "123456789012345678901234567890"],
+        ["-i", "0" * 4301], ["-i", "\x1c34\x1f"],
         ["-i", "bad", "-i", "1"], ["-i", "bad", "--help"], ["--help", "-i", "bad"],
         ["--scale=-0.0"], ["--scale", "1e-1000"], ["--scale=inf"], ["--scale=nan"],
         ["--scale", "1", "--scale", "bad"],
         ["--ids", "-02", "0_4"], ["--ids", "3", "bad"], ["--ids", "3", "2"],
         ["--choice=0.0"], ["--choice=2"], ["--maybe"], ["--maybe=01"], ["--maybe=42"],
-        ["--unit", "ab"], ["--unit=c", "-.１２"],
+        ["--unit", "ab"], ["--unit=c", "-.１２"], ["--label"], ["--label=-42"],
+        ["--note", "red"], ["--note=42"],
     ],
     "counts": [
         [], ["a"], ["a", "b"], ["a", "b", "c", "d", "e"],
@@ -103,6 +105,9 @@ CASES = {
         ["one", "--unknown", "two"], ["--unknown", "one"], ["one", "--help"],
     ],
     "method_args": [[]],
+    "numeric_defaults": [[], ["--help"], ["word"], ["--amount", "2"], ["--amount=2", "word"],
+                         ["--amount", "bad", "--help"], ["--help", "--amount", "bad"],
+                         ["range", "--big", "4999", "100000000000000000001"]],
     "two": [[], ["--help"], ["--mo=lar"], ["--flag"], ["--paths", "one", "two"]],
 }
 REJECTED = {
