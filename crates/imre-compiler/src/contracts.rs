@@ -174,7 +174,9 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::TimeSleep | Self::PercentScalar => Contract::new(true, PreservesLists),
+            Self::TimeSleep | Self::PercentScalar | Self::WarningFilter(_) => {
+                Contract::new(true, PreservesLists)
+            }
             Self::Formatter(_) => Contract::new(true, PreservesLists),
             Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
