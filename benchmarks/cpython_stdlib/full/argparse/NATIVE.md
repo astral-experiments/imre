@@ -1,7 +1,8 @@
 # Native argparse results
 
-Use the pinned, test-enabled CPython interpreter to run the original unittest
-methods. The adapter records the declarations and whether the method actually
+The [shared unittest runner](../../SUITE_RUNNER.md) runs the original module,
+class and instance fixtures under the pinned CPython interpreter. For these
+generated methods, the test body and assertions also run in CPython. The adapter records the declarations and whether the method actually
 passes an argument list, builds the same program with Imre, and compares its
 exit status, stdout and stderr against a separate CPython subprocess. Successful
 assertions receive values decoded from the native process. CPython does not
@@ -13,12 +14,14 @@ python3.14 -B benchmarks/cpython_stdlib/full/argparse/native_cases.py \
   --imre-revision "$(git rev-parse HEAD)" --result /tmp/argparse-native.json
 ```
 
-The first measurement uses the explicit argument list implementation in #491.
+The first measurement uses the compiler and runtime from [#491](https://github.com/astral-sh/imre/pull/491),
+with the shared fixture runner from [#508](https://github.com/astral-sh/imre/pull/508).
 Both levels account for the same 1,893 upstream IDs, independently.
 
 | Execution | -O0 | -O3 |
 |---|---:|---:|
-| Fully native test bodies | 0 | 0 |
+| Fully native test bodies and fixtures | 0 | 0 |
+| Native test bodies with host fixtures | 0 | 0 |
 | Complete host-driven routines with native parser operations | 48 | 48 |
 | Mixed host/native parser operations | 0 | 0 |
 | Reference only | 669 | 669 |

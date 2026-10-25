@@ -712,11 +712,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:5:14: Imre: literal add_argument declarations must be followed by an assignment or return of parse_args()"
+        "case.py:5:14: Imre: literal add_argument declarations must be followed by an assignment or return of parse_args()"
       ],
       "-O3": [
         "blocked",
-        "cli.py:5:14: Imre: literal add_argument declarations must be followed by an assignment or return of parse_args()"
+        "case.py:5:14: Imre: literal add_argument declarations must be followed by an assignment or return of parse_args()"
       ],
       "ids": [
         "test.test_argparse.TestActionExtend.test_successes_many_groups_listargs",
@@ -1356,11 +1356,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:41: Imre: argparse store_true takes no type, choices, or nargs"
+        "case.py:6:41: Imre: argparse store_true takes no type, choices, or nargs"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:41: Imre: argparse store_true takes no type, choices, or nargs"
+        "case.py:6:41: Imre: argparse store_true takes no type, choices, or nargs"
       ],
       "ids": [
         "test.test_argparse.TestActionExtend.test_successes_no_groups_listargs",
@@ -1426,11 +1426,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:5:38: Imre: unsupported or repeated argparse keyword"
+        "case.py:5:38: Imre: unsupported or repeated argparse keyword"
       ],
       "-O3": [
         "blocked",
-        "cli.py:5:38: Imre: unsupported or repeated argparse keyword"
+        "case.py:5:38: Imre: unsupported or repeated argparse keyword"
       ],
       "ids": [
         "test.test_argparse.TestArgumentsFromFile.test_failures_many_groups_listargs",
@@ -1606,11 +1606,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:41: Imre: argparse declarations require literal strings"
+        "case.py:6:41: Imre: argparse declarations require literal strings"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:41: Imre: argparse declarations require literal strings"
+        "case.py:6:41: Imre: argparse declarations require literal strings"
       ],
       "ids": [
         "test.test_argparse.TestBooleanOptionalAction.test_failures_no_groups_listargs",
@@ -1622,11 +1622,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:56: Imre: argparse declarations require literal strings"
+        "case.py:6:56: Imre: argparse declarations require literal strings"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:56: Imre: argparse declarations require literal strings"
+        "case.py:6:56: Imre: argparse declarations require literal strings"
       ],
       "ids": [
         "test.test_argparse.TestBooleanOptionalActionRequired.test_failures_no_groups_listargs",
@@ -1638,11 +1638,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:38: Imre: argparse store_true takes no type, choices, or nargs"
+        "case.py:6:38: Imre: argparse store_true takes no type, choices, or nargs"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:38: Imre: argparse store_true takes no type, choices, or nargs"
+        "case.py:6:38: Imre: argparse store_true takes no type, choices, or nargs"
       ],
       "ids": [
         "test.test_argparse.TestConstActionsMissingConstKwarg.test_failures_no_groups_listargs",
@@ -1666,11 +1666,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:5: Imre: argparse positionals do not accept required, action, or default"
+        "case.py:6:5: Imre: argparse positionals do not accept required, action, or default"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:5: Imre: argparse positionals do not accept required, action, or default"
+        "case.py:6:5: Imre: argparse positionals do not accept required, action, or default"
       ],
       "ids": [
         "test.test_argparse.TestDefaultSuppress.test_failures_no_groups_listargs",
@@ -1714,11 +1714,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:36: Imre: argparse supports nargs='+'"
+        "case.py:6:36: Imre: argparse supports nargs='+'"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:36: Imre: argparse supports nargs='+'"
+        "case.py:6:36: Imre: argparse supports nargs='+'"
       ],
       "ids": [
         "test.test_argparse.TestEmptyAndSpaceContainingArguments.test_failures_no_groups_listargs",
@@ -1834,11 +1834,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:7:36: Imre: argparse supports nargs='+'"
+        "case.py:7:36: Imre: argparse supports nargs='+'"
       ],
       "-O3": [
         "blocked",
-        "cli.py:7:36: Imre: argparse supports nargs='+'"
+        "case.py:7:36: Imre: argparse supports nargs='+'"
       ],
       "ids": [
         "test.test_argparse.TestNargsRemainder.test_failures_no_groups_listargs",
@@ -1850,11 +1850,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:37: Imre: argparse supports nargs='+'"
+        "case.py:6:37: Imre: argparse supports nargs='+'"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:37: Imre: argparse supports nargs='+'"
+        "case.py:6:37: Imre: argparse supports nargs='+'"
       ],
       "ids": [
         "test.test_argparse.TestNargsZeroOrMore.test_successes_no_groups_listargs",
@@ -1872,11 +1872,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:39: Imre: argparse type must be str or pathlib.Path"
+        "case.py:6:39: Imre: argparse type must be str or pathlib.Path"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:39: Imre: argparse type must be str or pathlib.Path"
+        "case.py:6:39: Imre: argparse type must be str or pathlib.Path"
       ],
       "ids": [
         "test.test_argparse.TestNegativeNumber.test_failures_no_groups_listargs",
@@ -1888,11 +1888,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:36: Imre: argparse type must be str or pathlib.Path"
+        "case.py:6:36: Imre: argparse type must be str or pathlib.Path"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:36: Imre: argparse type must be str or pathlib.Path"
+        "case.py:6:36: Imre: argparse type must be str or pathlib.Path"
       ],
       "ids": [
         "test.test_argparse.TestOptionLike.test_failures_no_groups_listargs",
@@ -1908,11 +1908,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:54: Imre: unsupported or repeated argparse keyword"
+        "case.py:6:54: Imre: unsupported or repeated argparse keyword"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:54: Imre: unsupported or repeated argparse keyword"
+        "case.py:6:54: Imre: unsupported or repeated argparse keyword"
       ],
       "ids": [
         "test.test_argparse.TestOptionalsActionAppendConst.test_failures_no_groups_listargs",
@@ -1928,11 +1928,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:53: Imre: unsupported or repeated argparse keyword"
+        "case.py:6:53: Imre: unsupported or repeated argparse keyword"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:53: Imre: unsupported or repeated argparse keyword"
+        "case.py:6:53: Imre: unsupported or repeated argparse keyword"
       ],
       "ids": [
         "test.test_argparse.TestOptionalsActionStoreConst.test_failures_no_groups_listargs",
@@ -2004,11 +2004,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:39: Imre: argparse choices require literal strings or the values of a sealed enum"
+        "case.py:6:39: Imre: argparse choices require literal strings or the values of a sealed enum"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:39: Imre: argparse choices require literal strings or the values of a sealed enum"
+        "case.py:6:39: Imre: argparse choices require literal strings or the values of a sealed enum"
       ],
       "ids": [
         "test.test_argparse.TestOptionalsChoices.test_failures_no_groups_listargs",
@@ -2020,11 +2020,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:7:39: Imre: argparse default must be None, a fixed enum member, or a literal of the option type"
+        "case.py:7:39: Imre: argparse default must be None, a fixed enum member, or a literal of the option type"
       ],
       "-O3": [
         "blocked",
-        "cli.py:7:39: Imre: argparse default must be None, a fixed enum member, or a literal of the option type"
+        "case.py:7:39: Imre: argparse default must be None, a fixed enum member, or a literal of the option type"
       ],
       "ids": [
         "test.test_argparse.TestOptionalsDefault.test_failures_no_groups_listargs",
@@ -2036,11 +2036,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:7:34: Imre: unsupported or repeated argparse keyword"
+        "case.py:7:34: Imre: unsupported or repeated argparse keyword"
       ],
       "-O3": [
         "blocked",
-        "cli.py:7:34: Imre: unsupported or repeated argparse keyword"
+        "case.py:7:34: Imre: unsupported or repeated argparse keyword"
       ],
       "ids": [
         "test.test_argparse.TestOptionalsDest.test_failures_no_groups_listargs",
@@ -2088,11 +2088,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:37: Imre: argparse declarations require literal strings"
+        "case.py:6:37: Imre: argparse declarations require literal strings"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:37: Imre: argparse declarations require literal strings"
+        "case.py:6:37: Imre: argparse declarations require literal strings"
       ],
       "ids": [
         "test.test_argparse.TestOptionalsNargs1.test_failures_no_groups_listargs",
@@ -2108,11 +2108,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:7:50: Imre: argparse default must be None, a fixed enum member, or a literal of the option type"
+        "case.py:7:50: Imre: argparse default must be None, a fixed enum member, or a literal of the option type"
       ],
       "-O3": [
         "blocked",
-        "cli.py:7:50: Imre: argparse default must be None, a fixed enum member, or a literal of the option type"
+        "case.py:7:50: Imre: argparse default must be None, a fixed enum member, or a literal of the option type"
       ],
       "ids": [
         "test.test_argparse.TestOptionalsNargsOneOrMore.test_failures_no_groups_listargs",
@@ -2124,11 +2124,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:25: Imre: argparse arguments require distinct ASCII field names and flags"
+        "case.py:6:25: Imre: argparse arguments require distinct ASCII field names and flags"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:25: Imre: argparse arguments require distinct ASCII field names and flags"
+        "case.py:6:25: Imre: argparse arguments require distinct ASCII field names and flags"
       ],
       "ids": [
         "test.test_argparse.TestOptionalsNumeric.test_failures_no_groups_listargs",
@@ -2166,11 +2166,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:7:25: Imre: argparse arguments require distinct ASCII field names and flags"
+        "case.py:7:25: Imre: argparse arguments require distinct ASCII field names and flags"
       ],
       "-O3": [
         "blocked",
-        "cli.py:7:25: Imre: argparse arguments require distinct ASCII field names and flags"
+        "case.py:7:25: Imre: argparse arguments require distinct ASCII field names and flags"
       ],
       "ids": [
         "test.test_argparse.TestOptionalsSingleDashCombined.test_failures_no_groups_listargs",
@@ -2186,11 +2186,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:8:25: Imre: argparse arguments require distinct ASCII field names and flags"
+        "case.py:8:25: Imre: argparse arguments require distinct ASCII field names and flags"
       ],
       "-O3": [
         "blocked",
-        "cli.py:8:25: Imre: argparse arguments require distinct ASCII field names and flags"
+        "case.py:8:25: Imre: argparse arguments require distinct ASCII field names and flags"
       ],
       "ids": [
         "test.test_argparse.TestOptionalsSingleDoubleDash.test_failures_no_groups_listargs",
@@ -2202,11 +2202,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:38: Imre: argparse type must be str or pathlib.Path"
+        "case.py:6:38: Imre: argparse type must be str or pathlib.Path"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:38: Imre: argparse type must be str or pathlib.Path"
+        "case.py:6:38: Imre: argparse type must be str or pathlib.Path"
       ],
       "ids": [
         "test.test_argparse.TestPositionalsChoicesInt.test_failures_no_groups_listargs",
@@ -2218,11 +2218,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:41: Imre: argparse choices require literal strings or the values of a sealed enum"
+        "case.py:6:41: Imre: argparse choices require literal strings or the values of a sealed enum"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:41: Imre: argparse choices require literal strings or the values of a sealed enum"
+        "case.py:6:41: Imre: argparse choices require literal strings or the values of a sealed enum"
       ],
       "ids": [
         "test.test_argparse.TestPositionalsChoicesString.test_failures_no_groups_listargs",
@@ -2234,11 +2234,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:38: Imre: argparse declarations require literal strings"
+        "case.py:6:38: Imre: argparse declarations require literal strings"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:38: Imre: argparse declarations require literal strings"
+        "case.py:6:38: Imre: argparse declarations require literal strings"
       ],
       "ids": [
         "test.test_argparse.TestPositionalsNargs1.test_failures_no_groups_listargs",
@@ -2286,11 +2286,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:7:38: Imre: argparse declarations require literal strings"
+        "case.py:7:38: Imre: argparse declarations require literal strings"
       ],
       "-O3": [
         "blocked",
-        "cli.py:7:38: Imre: argparse declarations require literal strings"
+        "case.py:7:38: Imre: argparse declarations require literal strings"
       ],
       "ids": [
         "test.test_argparse.TestPositionalsNargsNone1.test_failures_no_groups_listargs",
@@ -2320,11 +2320,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:9:38: Imre: argparse declarations require literal strings"
+        "case.py:9:38: Imre: argparse declarations require literal strings"
       ],
       "-O3": [
         "blocked",
-        "cli.py:9:38: Imre: argparse declarations require literal strings"
+        "case.py:9:38: Imre: argparse declarations require literal strings"
       ],
       "ids": [
         "test.test_argparse.TestPositionalsNargsNoneOneOrMore1.test_failures_no_groups_listargs",
@@ -2336,11 +2336,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:8:38: Imre: argparse supports nargs='+'"
+        "case.py:8:38: Imre: argparse supports nargs='+'"
       ],
       "-O3": [
         "blocked",
-        "cli.py:8:38: Imre: argparse supports nargs='+'"
+        "case.py:8:38: Imre: argparse supports nargs='+'"
       ],
       "ids": [
         "test.test_argparse.TestPositionalsNargsNoneOptional.test_failures_no_groups_listargs",
@@ -2360,11 +2360,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:8:5: Imre: argparse positionals do not accept required, action, or default"
+        "case.py:8:5: Imre: argparse positionals do not accept required, action, or default"
       ],
       "-O3": [
         "blocked",
-        "cli.py:8:5: Imre: argparse positionals do not accept required, action, or default"
+        "case.py:8:5: Imre: argparse positionals do not accept required, action, or default"
       ],
       "ids": [
         "test.test_argparse.TestPositionalsNargsNoneOptional1.test_failures_no_groups_listargs",
@@ -2376,11 +2376,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:8:5: Imre: a positional with nargs='+' must be the last positional"
+        "case.py:8:5: Imre: a positional with nargs='+' must be the last positional"
       ],
       "-O3": [
         "blocked",
-        "cli.py:8:5: Imre: a positional with nargs='+' must be the last positional"
+        "case.py:8:5: Imre: a positional with nargs='+' must be the last positional"
       ],
       "ids": [
         "test.test_argparse.TestPositionalsNargsOneOrMoreNone.test_failures_no_groups_listargs",
@@ -2392,11 +2392,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:38: Imre: argparse supports nargs='+'"
+        "case.py:6:38: Imre: argparse supports nargs='+'"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:38: Imre: argparse supports nargs='+'"
+        "case.py:6:38: Imre: argparse supports nargs='+'"
       ],
       "ids": [
         "test.test_argparse.TestPositionalsNargsOptional.test_failures_no_groups_listargs",
@@ -2432,11 +2432,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:7:38: Imre: argparse supports nargs='+'"
+        "case.py:7:38: Imre: argparse supports nargs='+'"
       ],
       "-O3": [
         "blocked",
-        "cli.py:7:38: Imre: argparse supports nargs='+'"
+        "case.py:7:38: Imre: argparse supports nargs='+'"
       ],
       "ids": [
         "test.test_argparse.TestPositionalsNargsZeroOrMoreNone.test_failures_no_groups_listargs",
@@ -2448,11 +2448,11 @@
     {
       "-O0": [
         "blocked",
-        "cli.py:6:40: Imre: argparse type must be str or pathlib.Path"
+        "case.py:6:40: Imre: argparse type must be str or pathlib.Path"
       ],
       "-O3": [
         "blocked",
-        "cli.py:6:40: Imre: argparse type must be str or pathlib.Path"
+        "case.py:6:40: Imre: argparse type must be str or pathlib.Path"
       ],
       "ids": [
         "test.test_argparse.TestTypeCallable.test_failures_no_groups_listargs",
