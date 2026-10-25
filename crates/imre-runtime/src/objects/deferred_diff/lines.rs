@@ -177,7 +177,7 @@ impl Deferred {
             } else {
                 Words::deferred(Self(View::Lines(Rc::new(lines))))
             };
-            Ok(Some(Rc::into_raw(words.into_object())))
+            Ok(Some(crate::ObjectOwner::into_raw(words.into_object())))
         }
     }
 }

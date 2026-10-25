@@ -1,8 +1,8 @@
 //! Coalesces a splitlines tail when its only consumer extends a private joined list.
 
 use super::{Boundaries, LineOffsets, Object, Str, Words, imre_str_splitlines, text};
+use crate::ObjectOwner;
 use crate::StrOwner;
-use std::rc::Rc;
 
 /// Joins the remaining lines. Decline on allocation failure so that only the
 /// original split and final join determine whether Python sees MemoryError.
@@ -58,5 +58,5 @@ pub unsafe extern "C" fn imre_splitlines_joined_tail(
             .push(StrOwner::into_raw(text::owned_string("")) as usize);
         result.values.push(StrOwner::into_raw(chunk) as usize);
     }
-    Rc::into_raw(result.into_object())
+    ObjectOwner::into_raw(result.into_object())
 }

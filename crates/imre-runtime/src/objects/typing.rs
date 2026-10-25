@@ -5,7 +5,6 @@ use super::{Int, Object, Str};
 use crate::StrOwner;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 
 // The first four words own module, qualname, name and an optional deprecation
 // marker. The remaining words are untraced scalars private to this layout.
@@ -27,9 +26,9 @@ thread_local! {
     // These defaults contain strings and scalars only, never function owners.
     static SITES: RefCell<HashMap<u32, OwnedWord>> = RefCell::default();
     static REGISTRY: RefCell<Groups> = RefCell::default();
-    static DUMMY: Rc<Object> = {
+    static DUMMY: crate::ObjectOwner = {
         // SAFETY: this constructor transfers one strong reference.
-        unsafe { Rc::from_raw(super::inspect::imre_plain_object_new()) }
+        unsafe { crate::ObjectOwner::from_raw(super::inspect::imre_plain_object_new()) }
     };
 }
 
@@ -137,7 +136,7 @@ fn snapshot(module: &str, name: &str) -> *const Object {
                 .values
                 .extend(group.iter().map(|(_, owner)| owner.clone().into_word()));
         }
-        Rc::into_raw(words.into_object())
+        crate::ObjectOwner::into_raw(words.into_object())
     })
 }
 
@@ -172,7 +171,7 @@ pub extern "C" fn imre_typing_registry_len() -> usize {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_typing_overload_dummy() -> *const Object {
-    Rc::into_raw(DUMMY.with(Rc::clone))
+    crate::ObjectOwner::into_raw(DUMMY.with(crate::ObjectOwner::clone))
 }
 
 #[unsafe(no_mangle)]

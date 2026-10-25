@@ -1,12 +1,12 @@
 //! A closed import graph has one live module per import name. Holding the registry
 //! reference also keeps a module alive after the last local alias is discarded.
 
-use super::{Object, Rc, Storage, StorageCell, Str, object};
+use super::{Object, Storage, StorageCell, Str, object};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
 thread_local! {
-    static MODULES: RefCell<HashMap<crate::StrOwner, Rc<Object>>> = RefCell::default();
+    static MODULES: RefCell<HashMap<crate::StrOwner, crate::ObjectOwner>> = RefCell::default();
 }
 
 /// Return an owned handle for this already imported module.
@@ -21,7 +21,7 @@ pub unsafe extern "C" fn imre_source_module(
     MODULES.with_borrow_mut(|modules| {
         // SAFETY: the compiler supplies the exact import name and verified source path.
         if let Some(module) = modules.get(unsafe { &*name }) {
-            return Rc::into_raw(Rc::clone(module));
+            return crate::ObjectOwner::into_raw(crate::ObjectOwner::clone(module));
         }
         // SAFETY: retain independent references to the two rooted strings.
         let (name, filename) = unsafe {
@@ -30,12 +30,12 @@ pub unsafe extern "C" fn imre_source_module(
                 crate::StrOwner::acquire_word(filename as usize),
             )
         };
-        let module = Rc::new(Object(StorageCell::new(Storage::SourceModule {
+        let module = crate::ObjectOwner::new(Object(StorageCell::new(Storage::SourceModule {
             name: crate::StrOwner::clone(&name),
             filename,
         })));
-        modules.insert(name, Rc::clone(&module));
-        Rc::into_raw(module)
+        modules.insert(name, crate::ObjectOwner::clone(&module));
+        crate::ObjectOwner::into_raw(module)
     })
 }
 

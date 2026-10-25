@@ -17,6 +17,62 @@ def _key(text: str, kind: str) -> str:
     return kind + ":" + text
 
 
+def _change_mapping(target: dict[str, str], values: dict[str, str], clear: bool) -> None:
+    if clear:
+        target.clear()
+    for key in values:
+        target[key] = values[key]
+
+
+class _DictionaryPatch:
+    in_dict: dict[str, str]
+    values: dict[str, str]
+    clear: bool
+    _original: dict[str, str] | None
+    _starts: int
+
+    def __init__(self, mapping: dict[str, str], values: dict[str, str], clear: bool) -> None:
+        self.in_dict = mapping
+        self.values = values
+        self.clear = clear
+        self._original = None
+        self._starts = 0
+
+    def _enter(self) -> dict[str, str]:
+        self._original = self.in_dict.copy()
+        _change_mapping(self.in_dict, self.values, self.clear)
+        return self.in_dict
+
+    def _exit(self) -> bool:
+        original = self._original
+        if original is not None:
+            _change_mapping(self.in_dict, original, True)
+        return False
+
+    def start(self) -> dict[str, str]:
+        result = self._enter()
+        self._starts += 1
+        return result
+
+    def stop(self) -> bool | None:
+        if self._starts == 0:
+            return None
+        self._starts -= 1
+        return self._exit()
+
+
+class _PatchFactory:
+    def _dictionary(self, in_dict: dict[str, str], values: dict[str, str] | None, clear: bool, kwargs: dict[str, str]) -> _DictionaryPatch:
+        if values is None:
+            raise TypeError("'NoneType' object is not iterable")
+        changes = values.copy()
+        _change_mapping(changes, kwargs, False)
+        return _DictionaryPatch(in_dict, changes, clear)
+
+
+patch = _PatchFactory()
+
+
 @dataclass(repr=False)
 class _Arg:
     text: str = field(compare=False)

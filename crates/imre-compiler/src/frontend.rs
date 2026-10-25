@@ -23,12 +23,14 @@ mod cached_properties;
 mod calendar;
 mod call_binding_errors;
 mod callables;
+mod caller_cache;
 mod calls;
 mod chainmap;
 mod class_data;
 mod closed_calls;
 mod comprehensions;
 mod contexts;
+mod contextvars;
 mod copying;
 mod counter;
 mod csv;
@@ -96,7 +98,6 @@ mod shutil;
 mod sign_parameters;
 mod single_dispatch;
 mod socket;
-mod sorted_rows;
 mod stdlib;
 mod string_io;
 mod string_lists;
@@ -114,12 +115,14 @@ mod unittest_equality;
 mod unittest_loader;
 mod unittest_main;
 mod unittest_mock;
+mod unittest_patch;
 mod unittest_setup;
 mod unpacking;
 mod warnings;
 mod zip_sums;
 mod zipfile;
 use assignments::LocalState;
+pub(crate) use caller_cache::CallerCache;
 pub(crate) use calls::scalar_literal;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
@@ -550,6 +553,13 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
 pub(crate) fn lower_with_owners(
     graph: &SourceGraph,
 ) -> Result<(ir::Module, Vec<ModuleId>), String> {
+    lower_with_caller_cache(graph, None)
+}
+
+pub(crate) fn lower_with_caller_cache(
+    graph: &SourceGraph,
+    mut cache: Option<&mut CallerCache>,
+) -> Result<(ir::Module, Vec<ModuleId>), String> {
     let types = Types::default();
     typing::collect_sites(graph, &types);
     namedtuples::collect(graph, &types)?;
@@ -884,6 +894,9 @@ pub(crate) fn lower_with_owners(
                 .map_err(|error| format!("{}:{error}", graph.modules[module_id].path.display()))?,
         );
     }
+    if let Some(cache) = cache.as_deref_mut() {
+        cache.validate_abi(&definitions, &globals);
+    }
     let mut functions = Vec::new();
     let mut zip_sums = Vec::new();
     let mut owners = Vec::new();
@@ -892,140 +905,26 @@ pub(crate) fn lower_with_owners(
     let mut recursion_errors = Vec::new();
     for (module_id, definition, signature) in &definitions {
         let module = &graph.modules[*module_id];
-        let result = (|| {
-            let mut checker = Checker::new(
-                graph,
-                *module_id,
-                &signatures,
-                &classes,
-                &types,
-                &helpers,
-                &globals,
-            );
-            checker.returns = signature.returns;
-            checker.interactive_names =
-                module.is_doctest_case() && definition.name.as_str() == "_run_case";
-            checker.joined_lines = joined_lines::find(&definition.body);
-            checker.asynchronous = signature.asynchronous;
-            checker.method_context(signature.method);
-            checker.generator_item = classes.producer_items.get(&signature.id).copied();
-            let mut params = Vec::new();
-            for (parameter, signature) in
-                closed_calls::parameters(&definition.parameters).zip(&signature.params)
-            {
-                let slot = checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
-                checker.assigned.insert(slot);
-                params.push(slot);
-            }
-            if let Some(keyword) = &definition.parameters.kwarg {
-                let parameter = signature.params.last().expect("keyword-rest signature");
-                let slot = checker.declare(keyword.name.as_str(), parameter.ty, &**keyword)?;
-                checker.assigned.insert(slot);
-                params.push(slot);
-            }
-            let (mut body, falls_through) = if module.archive.is_some() {
-                let args = params.iter().map(|&slot| checker.local(slot)).collect();
-                let kind = |ty| match ty {
-                    Type::None => Ok(0),
-                    Type::Int => Ok(1),
-                    Type::Bytes => Ok(2),
-                    Type::ListInt => Ok(3),
-                    Type::Callable(_)
-                        if types.signature(ty) == Some((vec![Type::Int], Type::Int)) =>
-                    {
-                        Ok(4)
-                    }
-                    _ => Err(error(
-                        &module.source,
-                        definition,
-                        "native declarations currently support None, int, bytes, list[int], and Callable[[int], int]",
-                    )),
-                };
-                let call = Builtin::ExtensionCall {
-                    module: module.name.rsplit('.').next().unwrap().to_owned(),
-                    method: definition.name.to_string(),
-                    kinds: signature
-                        .params
-                        .iter()
-                        .map(|p| kind(p.ty))
-                        .collect::<Result<_, _>>()?,
-                    result_kind: kind(signature.returns)?,
-                };
-                (
-                    vec![Statement::Return(Expr {
-                        ty: signature.returns,
-                        kind: ExprKind::Builtin(call, args),
-                    })],
-                    false,
-                )
-            } else if classes.keyword_copies.contains(&signature.id) {
-                let class = signature.method.unwrap().class;
-                let value = checker.dispatch_record(
-                    class,
-                    checker.local(params[0]),
-                    definition,
-                    |checker, class, receiver| {
-                        checker.copy_with_keywords(class, receiver, &[], definition)
-                    },
-                )?;
-                (vec![Statement::Return(value)], false)
-            } else if signature.method.is_some_and(|m| {
-                definition.name.as_str() == "__post_init__"
-                    && checker.normalized_record_input(m.class).is_some()
-            }) {
-                // The generated initializer stores the normalized field on all input paths.
-                (vec![], true)
-            } else {
-                checker.function_body(&definition.body)?
-            };
-            if let Some(context) = signature.method
-                && let class = &classes.declarations.definitions[context.class]
-                && class.generated_initializer
-                && class.initializer == Some(context.index)
-                && let Some(post) = classes.methods[context.class].get("__post_init__")
-            {
-                checker.calls.insert(post.id);
-                body.push(Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Call(
-                        post.id,
-                        ir::CallArgs::positional(vec![checker.local(params[0])]),
-                    ),
-                }));
-            }
-            checker.fuse_sorted_rows(&definition.body, &mut body);
-            if falls_through && types.payload(signature.returns).is_some() {
-                body.push(Statement::Return(Expr {
-                    ty: signature.returns,
-                    kind: ExprKind::Absent(Box::new(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    })),
-                }));
-            } else if falls_through && signature.returns != Type::None {
-                return Err(error(
-                    &module.source,
-                    definition,
-                    "not every path returns the declared type",
-                ));
-            }
-            if classes.generators.contains(&signature.id) {
-                body = checker.generator_body(body);
-            }
-            Ok((
-                ir::Function {
-                    params,
-                    returns: signature.returns,
-                    locals: checker.locals,
-                    body,
-                },
-                checker.calls,
-                checker.class_reads.into_inner(),
-                checker.zip_sums,
-            ))
-        })();
-        let (function, calls, reads, sums) =
-            result.map_err(|error| format!("{}:{error}", module.path.display()))?;
+        let checker = Checker::new(
+            graph,
+            *module_id,
+            &signatures,
+            &classes,
+            &types,
+            &helpers,
+            &globals,
+        );
+        let result = match cache.as_deref_mut() {
+            Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
+            _ => lower_body(checker, definition, signature),
+        };
+        let (body, sums) = result.map_err(|error| format!("{}:{error}", module.path.display()))?;
+        let LoweredBody {
+            function,
+            calls,
+            class_reads: reads,
+            ..
+        } = body;
         let (function, calls, reads) = if let Some(&policy) = classes.cached.get(&signature.id) {
             let raw = helpers.reserve();
             helpers.finish(
@@ -1134,6 +1033,7 @@ pub(crate) fn lower_with_owners(
     }
     // Entry code and inactive module guards can create helpers too. Validate the
     // complete graph only after every source expression has been lowered.
+    let list_builds = helpers.list_builds.take();
     for helper in helpers.into_functions() {
         owners.push(helper.module);
         functions.push(helper.function);
@@ -1176,6 +1076,9 @@ pub(crate) fn lower_with_owners(
         .class_data
         .borrow_mut()
         .extend_layouts(&mut classes.fields);
+    if let Some(cache) = cache {
+        cache.finish(&types);
+    }
     Ok((
         ir::Module {
             ignore_python_environment: graph
@@ -1184,6 +1087,7 @@ pub(crate) fn lower_with_owners(
                 .is_some_and(|(flags, _)| flags.isolated),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
+            list_builds,
             class_fields: classes.fields,
             json_records,
             globals: globals.into_types(),
@@ -1191,6 +1095,144 @@ pub(crate) fn lower_with_owners(
             entry,
         },
         owners,
+    ))
+}
+
+#[derive(Clone)]
+struct LoweredBody {
+    function: ir::Function,
+    calls: HashSet<usize>,
+    class_reads: HashSet<DefinitionId>,
+    default_reads: Option<Vec<caller_cache::DefaultId>>,
+}
+
+type BodyResult = Result<(LoweredBody, HashMap<usize, zip_sums::Sum>), String>;
+
+fn lower_body(
+    mut checker: Checker<'_>,
+    definition: &ast::StmtFunctionDef,
+    signature: &Signature,
+) -> BodyResult {
+    #[cfg(test)]
+    caller_cache::record_lowering(definition.name.as_str());
+    let module = &checker.graph.modules[checker.module];
+    let classes = checker.classes;
+    let types = checker.types;
+    checker.joined_lines = joined_lines::find(&definition.body);
+    checker.returns = signature.returns;
+    checker.interactive_names = module.is_doctest_case() && definition.name.as_str() == "_run_case";
+    checker.asynchronous = signature.asynchronous;
+    checker.method_context(signature.method);
+    checker.generator_item = classes.producer_items.get(&signature.id).copied();
+    let mut params = Vec::new();
+    for (parameter, signature) in
+        closed_calls::parameters(&definition.parameters).zip(&signature.params)
+    {
+        let slot = checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
+        checker.assigned.insert(slot);
+        params.push(slot);
+    }
+    if let Some(keyword) = &definition.parameters.kwarg {
+        let parameter = signature.params.last().expect("keyword-rest signature");
+        let slot = checker.declare(keyword.name.as_str(), parameter.ty, &**keyword)?;
+        checker.assigned.insert(slot);
+        params.push(slot);
+    }
+    let (mut body, falls_through) = if module.archive.is_some() {
+        let args = params.iter().map(|&slot| checker.local(slot)).collect();
+        let kind = |ty| match ty {
+            Type::None => Ok(0),
+            Type::Int => Ok(1),
+            Type::Bytes => Ok(2),
+            Type::ListInt => Ok(3),
+            Type::Callable(_) if types.signature(ty) == Some((vec![Type::Int], Type::Int)) => Ok(4),
+            _ => Err(error(
+                &module.source,
+                definition,
+                "native declarations currently support None, int, bytes, list[int], and Callable[[int], int]",
+            )),
+        };
+        let call = Builtin::ExtensionCall {
+            module: module.name.rsplit('.').next().unwrap().to_owned(),
+            method: definition.name.to_string(),
+            kinds: signature
+                .params
+                .iter()
+                .map(|p| kind(p.ty))
+                .collect::<Result<_, _>>()?,
+            result_kind: kind(signature.returns)?,
+        };
+        (
+            vec![Statement::Return(Expr {
+                ty: signature.returns,
+                kind: ExprKind::Builtin(call, args),
+            })],
+            false,
+        )
+    } else if classes.keyword_copies.contains(&signature.id) {
+        let class = signature.method.unwrap().class;
+        let value = checker.dispatch_record(
+            class,
+            checker.local(params[0]),
+            definition,
+            |checker, class, receiver| checker.copy_with_keywords(class, receiver, &[], definition),
+        )?;
+        (vec![Statement::Return(value)], false)
+    } else if signature.method.is_some_and(|m| {
+        definition.name.as_str() == "__post_init__"
+            && checker.normalized_record_input(m.class).is_some()
+    }) {
+        // The generated initializer stores the normalized field on all input paths.
+        (vec![], true)
+    } else {
+        checker.function_body(&definition.body)?
+    };
+    if let Some(context) = signature.method
+        && let class = &classes.declarations.definitions[context.class]
+        && class.generated_initializer
+        && class.initializer == Some(context.index)
+        && let Some(post) = classes.methods[context.class].get("__post_init__")
+    {
+        checker.calls.insert(post.id);
+        body.push(Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Call(
+                post.id,
+                ir::CallArgs::positional(vec![checker.local(params[0])]),
+            ),
+        }));
+    }
+    if falls_through && types.payload(signature.returns).is_some() {
+        body.push(Statement::Return(Expr {
+            ty: signature.returns,
+            kind: ExprKind::Absent(Box::new(Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            })),
+        }));
+    } else if falls_through && signature.returns != Type::None {
+        return Err(error(
+            &module.source,
+            definition,
+            "not every path returns the declared type",
+        ));
+    }
+    if classes.generators.contains(&signature.id) {
+        body = checker.generator_body(body);
+    }
+    Ok((
+        LoweredBody {
+            function: ir::Function {
+                params,
+                returns: signature.returns,
+                locals: checker.locals,
+                body,
+            },
+            calls: checker.calls,
+            class_reads: checker.class_reads.into_inner(),
+            default_reads: checker.default_reads,
+        },
+        checker.zip_sums,
     ))
 }
 
@@ -1670,6 +1712,10 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::StringIo)) => return Ok(Type::StringIO),
+        Some(Binding::Intrinsic(Intrinsic::Context)) => return Ok(Type::Context),
+        Some(Binding::Intrinsic(Intrinsic::ContextVar)) => {
+            return Ok(types.context_var(Type::ObjectValue));
+        }
         Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return Ok(Type::LogFormatter),
         Some(Binding::Intrinsic(Intrinsic::HandlerLevelType)) => return Ok(types.string_or_int()),
         Some(Binding::Intrinsic(Intrinsic::HandlerLock)) => return Ok(Type::HandlerLock),
@@ -1744,6 +1790,20 @@ fn annotation_with_aliases(
                 expression,
                 "read-only mapping annotations currently require Mapping[str, object]",
             ))
+        }
+        ast::Expr::Subscript(subscript)
+            if let Some(Binding::Intrinsic(
+                kind @ (Intrinsic::ContextVar | Intrinsic::ContextToken),
+            )) = graph.resolve_type(module, &subscript.value) =>
+        {
+            let Type::ContextVar(id) = types.context_var(nested(&subscript.slice)?) else {
+                unreachable!()
+            };
+            Ok(if kind == Intrinsic::ContextVar {
+                Type::ContextVar(id)
+            } else {
+                Type::ContextToken(id)
+            })
         }
         ast::Expr::Subscript(subscript)
             if graph.resolve_type(module, &subscript.value)
@@ -2117,6 +2177,7 @@ struct Checker<'a> {
     assigned: assignments::Assigned,
     calls: HashSet<usize>,
     class_reads: std::cell::RefCell<HashSet<DefinitionId>>,
+    default_reads: Option<Vec<caller_cache::DefaultId>>,
     loop_breaks: Vec<Option<LocalState>>,
     block_depth: usize,
     in_finally: bool,
@@ -2185,6 +2246,7 @@ impl<'a> Checker<'a> {
             assigned: assignments::Assigned::default(),
             calls: HashSet::new(),
             class_reads: Default::default(),
+            default_reads: None,
             loop_breaks: Vec::new(),
             block_depth: 0,
             in_finally: false,
@@ -2559,6 +2621,12 @@ impl<'a> Checker<'a> {
 
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
+        if matches!(expected, Type::ContextVar(_))
+            && let ast::Expr::Call(call) = expression
+            && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ContextVar))
+        {
+            return self.context_constructor(call, self.types.context_value(expected));
+        }
         if let Some(name) = self.unbound_assert_root(expression) {
             return self.omitted_assert_read(name, Some(expected), expression);
         }
@@ -4476,11 +4544,17 @@ impl<'a> Checker<'a> {
         if self.types.payload(manager.ty).unwrap_or(manager.ty) == Type::HandlerLock {
             return self.handler_lock_scope(item, remaining, body, manager);
         }
+        if let Type::Class(class) = manager.ty
+            && self.bundled_mock_class(class, "_DictionaryPatch")
+        {
+            return self.mock_dictionary_scope(item, remaining, body, class, manager);
+        }
         if manager.ty == Type::GeneratorContext {
             return self.generator_scope(item, remaining, body, manager);
         }
         let stored = self.types.directory_value(manager.ty);
         let archive = manager.ty == Type::ZipFile;
+        let token = matches!(manager.ty, Type::ContextToken(_));
         let socket = manager.ty == Type::Socket;
         let popen = matches!(manager.ty, Type::Popen(..));
         let selector_close = if let Type::Class(class) = manager.ty {
@@ -4494,6 +4568,7 @@ impl<'a> Checker<'a> {
         if temporary.is_none()
             && stored.is_none()
             && !archive
+            && !token
             && !socket
             && !popen
             && selector_close.is_none()
@@ -4532,6 +4607,7 @@ impl<'a> Checker<'a> {
         if temporary.is_none()
             && stored.is_none()
             && !archive
+            && !token
             && !socket
             && !popen
             && selector_close.is_none()
@@ -4547,6 +4623,8 @@ impl<'a> Checker<'a> {
             Builtin::Path(ir::PathOperation::CleanupTemporaryDirectory)
         } else if popen {
             Builtin::Process(ir::ProcessOperation::PopenExit)
+        } else if token {
+            Builtin::ContextVar(ir::ContextOperation::ExitToken)
         } else if socket {
             Builtin::Socket(ir::SocketOp::Close)
         } else if archive {
@@ -5304,14 +5382,21 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
         }
-        if let Some(Binding::Intrinsic(
-            intrinsic @ (Intrinsic::PopenSelector | Intrinsic::SelectorClass(_)),
-        )) = self.resolve(expression)
-        {
-            let mode = match intrinsic {
-                Intrinsic::SelectorClass(select) => Some(select),
-                _ => None,
-            };
+        let selector = match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::PopenSelector)) => Some(None),
+            Some(Binding::Intrinsic(Intrinsic::SelectorClass(select))) => Some(Some(select)),
+            Some(binding @ Binding::Definition(def))
+                if self.graph.modules[def.module].is_bundled("selectors")
+                    && self.graph.modules[def.module].bindings.get("PollSelector")
+                        == Some(&binding) =>
+            {
+                // As a value this class selects the poll backend for Popen. Calls
+                // still construct the bundled PollSelector with its own fd map.
+                Some(Some(false))
+            }
+            _ => None,
+        };
+        if let Some(mode) = selector {
             return Ok(Expr {
                 ty: Type::ProcessSelectorClass,
                 kind: ExprKind::Builtin(
@@ -5772,6 +5857,31 @@ impl<'a> Checker<'a> {
                 {
                     let key = self.expr(&compare.operands[0])?;
                     let receiver = Self::string_value(self.expr(&compare.operands[1])?);
+                    if receiver.ty == Type::Context && !matches!(key.ty, Type::ContextVar(_)) {
+                        return self.context_key_error(
+                            receiver,
+                            key,
+                            None,
+                            true,
+                            Type::Bool,
+                            expression,
+                        );
+                    }
+                    if receiver.ty == Type::Context && matches!(key.ty, Type::ContextVar(_)) {
+                        let found = contextvars::op(
+                            ir::ContextOperation::ContextContains,
+                            Type::Bool,
+                            vec![key, receiver],
+                        );
+                        return Ok(if compare.ops[0] == ast::CmpOp::NotIn {
+                            Expr {
+                                ty: Type::Bool,
+                                kind: ExprKind::Not(Box::new(found)),
+                            }
+                        } else {
+                            found
+                        });
+                    }
                     let receiver = if matches!(receiver.ty, Type::Document(_)) {
                         self.document_map(receiver)
                     } else {
@@ -6066,6 +6176,13 @@ impl<'a> Checker<'a> {
                 let mut ops = Vec::new();
                 for (&op, pair) in compare.ops.iter().zip(values.windows(2)) {
                     let (ty, right) = (pair[0].ty, pair[1].ty);
+                    if ty == Type::Context || right == Type::Context {
+                        return Err(error(
+                            self.source,
+                            expression,
+                            "Context mapping equality requires comparing arbitrary bound Python values",
+                        ));
+                    }
                     if self.types.contains_module_spec(ty) || self.types.contains_module_spec(right)
                     {
                         return Err(error(
@@ -6202,6 +6319,7 @@ impl<'a> Checker<'a> {
                         | Type::PathInfo
                         | Type::Poll
                         | Type::Socket
+                        | Type::ProcessSelectorClass
                         | Type::Sha256
                         | Type::JsonDecoder
                         | Type::ZipFile
@@ -6267,6 +6385,9 @@ impl<'a> Checker<'a> {
                         subscript,
                         "runtime generic aliases of builtin classes are unsupported",
                     ));
+                }
+                if list.ty == Type::Context {
+                    return self.context_subscript(list, &subscript.slice);
                 }
                 if list.ty == Type::ModuleNamespace {
                     let key = self.expr_expected(&subscript.slice, Type::Str)?;
@@ -6435,6 +6556,16 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if attribute.attr.as_str() == "MISSING"
+                    && self.resolve(&attribute.value)
+                        == Some(Binding::Intrinsic(Intrinsic::ContextToken))
+                {
+                    return Ok(contextvars::op(
+                        ir::ContextOperation::Missing,
+                        Type::ContextMissing,
+                        vec![],
+                    ));
+                }
                 if matches!(attribute.attr.as_str(), "machinery" | "util")
                     && self.resolve(&attribute.value)
                         == Some(Binding::IntrinsicModule(
@@ -6589,6 +6720,16 @@ impl<'a> Checker<'a> {
                 if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
                     return self.json_load_callable(Some(receiver), None, attribute);
                 }
+                if attribute.attr.as_str() == "reverse" && self.types.element(receiver.ty).is_some()
+                {
+                    return Ok(self.bound_builtin(
+                        attribute,
+                        receiver,
+                        Builtin::ListReverse,
+                        Vec::new(),
+                        Type::None,
+                    ));
+                }
                 if let Some(element) = self.types.deque_element(receiver.ty) {
                     return self.deque_attribute(attribute, receiver, element);
                 }
@@ -6735,6 +6876,10 @@ impl<'a> Checker<'a> {
                         return Ok(value);
                     }
                     let (ty, builtin) = match attribute.attr.as_str() {
+                        "characters_written" => (
+                            Type::Int,
+                            Builtin::Process(ir::ProcessOperation::OsErrorField(4)),
+                        ),
                         name @ ("errno" | "strerror" | "filename" | "filename2") => {
                             let (index, ty) = match name {
                                 "errno" => (0, Type::Int),
@@ -6789,6 +6934,9 @@ impl<'a> Checker<'a> {
                         ty,
                         kind: ExprKind::Builtin(builtin, vec![receiver]),
                     });
+                }
+                if let Some(value) = self.context_attribute(&receiver, attribute.attr.as_str()) {
+                    return Ok(value);
                 }
                 if receiver.ty == Type::StringIO
                     && let Some(value) =
@@ -6924,6 +7072,9 @@ impl<'a> Checker<'a> {
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
             return self.ascii_call(call);
+        }
+        if let Some(registration) = self.immediate_registration(call)? {
+            return Ok(registration);
         }
         if call
             .func
@@ -7178,6 +7329,16 @@ impl<'a> Checker<'a> {
             return self.counter_unbound_update(call, op, method.attr.as_str());
         }
         if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "reverse"
+        {
+            if self.unshadowed_builtin(&method.value, "list") {
+                return self.sequence_reverse(stdlib::ReverseSequence::List, None, call);
+            }
+            if self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Deque)) {
+                return self.sequence_reverse(stdlib::ReverseSequence::Deque, None, call);
+            }
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
             && matches!(method.attr.as_str(), "clear" | "setdefault")
             && (self.unshadowed_builtin(&method.value, "dict")
                 || (method.attr.as_str() == "clear"
@@ -7359,6 +7520,11 @@ impl<'a> Checker<'a> {
                 );
                 return self.invoke(call, callable);
             }
+            if let Some(slot) = binding.value_slot
+                && self.types.dispatcher(self.locals[slot]).is_some()
+            {
+                return self.invoke(call, self.local(slot));
+            }
             if let Some(definition) = binding.generic.clone() {
                 return self.call_generic_awaitable(call, &definition);
             }
@@ -7488,6 +7654,27 @@ impl<'a> Checker<'a> {
                 return self.sha256_constructor(call, op == Intrinsic::HashNew);
             }
             Some(Binding::Intrinsic(Intrinsic::StringIo)) => return self.string_io(call),
+            Some(Binding::Intrinsic(Intrinsic::ContextVar)) => {
+                return self.context_constructor(call, None);
+            }
+            Some(Binding::Intrinsic(kind @ (Intrinsic::Context | Intrinsic::CopyContext))) => {
+                if !call.arguments.args.is_empty() || !call.arguments.keywords.is_empty() {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "Context() and copy_context() take no arguments",
+                    ));
+                }
+                return Ok(contextvars::op(
+                    if kind == Intrinsic::Context {
+                        ir::ContextOperation::New
+                    } else {
+                        ir::ContextOperation::CopyCurrent
+                    },
+                    Type::Context,
+                    vec![],
+                ));
+            }
             Some(Binding::Intrinsic(Intrinsic::BytesIo)) => {
                 let args = self.arguments(
                     call,
@@ -7756,6 +7943,11 @@ impl<'a> Checker<'a> {
         ) {
             return self.process_run(call);
         }
+        if let Some(Binding::Intrinsic(Intrinsic::ShellOutput { status })) =
+            self.resolve(&call.func)
+        {
+            return self.shell_output(call, status);
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::CheckOutput)) {
             return self.process_check_output(call);
         }
@@ -7981,7 +8173,7 @@ impl<'a> Checker<'a> {
             }
             let receiver = if matches!(
                 attribute.attr.as_str(),
-                "append" | "pop" | "extend" | "sort" | "clear"
+                "append" | "pop" | "extend" | "sort" | "clear" | "reverse"
             ) {
                 self.json_mutation_receiver(receiver, call)?
             } else {
@@ -8135,6 +8327,9 @@ impl<'a> Checker<'a> {
             {
                 return self.dict_update(call, receiver, key, value);
             }
+            if attribute.attr.as_str() == "reverse" && self.types.element(receiver.ty).is_some() {
+                return self.sequence_reverse(stdlib::ReverseSequence::List, Some(receiver), call);
+            }
             if attribute.attr.as_str() == "sort" && self.types.element(receiver.ty).is_some() {
                 return self.list_sort(receiver, call);
             }
@@ -8161,6 +8356,12 @@ impl<'a> Checker<'a> {
                     ty: receiver.ty,
                     kind: ExprKind::Builtin(Builtin::KeyUnion, vec![receiver, other]),
                 });
+            }
+            if matches!(
+                receiver.ty,
+                Type::Context | Type::ContextVar(_) | Type::ContextToken(_)
+            ) {
+                return self.context_method(receiver, attribute.attr.as_str(), call);
             }
             if receiver.ty == Type::StringIO
                 && matches!(
@@ -8823,6 +9024,10 @@ impl<'a> Checker<'a> {
                     args[0].ty,
                     Type::Class(_)
                         | Type::CompletedProcess(..)
+                        | Type::Context
+                        | Type::ContextMissing
+                        | Type::ContextVar(_)
+                        | Type::ContextToken(_)
                         | Type::ForwardRef(_)
                         | Type::ModuleSpec(_)
                         | Type::SimpleNamespace(_)
@@ -8934,6 +9139,9 @@ impl<'a> Checker<'a> {
                     ) =>
             {
                 (Builtin::Float, Type::Float)
+            }
+            "len" if args.len() == 1 && args[0].ty == Type::Context => {
+                (Builtin::ContextVar(ir::ContextOperation::Len), Type::Int)
             }
             "len"
                 if args.len() == 1

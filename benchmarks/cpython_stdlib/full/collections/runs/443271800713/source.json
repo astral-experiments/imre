@@ -1,0 +1,10 @@
+{
+  "compiler_revision": "4432718007136e13c6608e0532d07c35b330677d",
+  "tree": "2dbe88a9fe8d94a6d6a9947c6665d6340d053ae6",
+  "base": "d452dc645a7b7dea9453a7ef0686b05a84e86e6a",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "verification": "local Linux x86-64",
+  "imre_sha256": "88f476803d2b33fe393a1c5acbf82412d317db18be45d7be974c2a7740d33b17",
+  "runtime_sha256": "f338a43750d2f86e6897afdef92367ade8094956dd415674d8de3e034d17b70f",
+  "fixture_sha256": "7823ca6ec45c2d79c2c1227057b2357705eaeb41866905e48e4aa5d136033c6e"
+}

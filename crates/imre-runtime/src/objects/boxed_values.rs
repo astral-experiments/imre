@@ -4,7 +4,6 @@ use super::words::WordKind;
 use super::{Bytes, Object, Storage, StorageCell, Str, object, records, values};
 use crate::Int;
 use crate::StrOwner;
-use std::rc::Rc;
 
 // A tuple may store an optional scalar in its nullable representation. Views
 // expose the contained Python value, not the slot's storage tag.
@@ -92,9 +91,9 @@ pub unsafe extern "C" fn imre_box_value(kind: u32, word: usize) -> *const Object
     let (kind, word) = unsafe { concrete(WordKind::new(kind), word) };
     // SAFETY: normalization preserves the rooted value supplied by the ABI.
     let boxed = unsafe { kind.acquire(word) };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ObjectValue(
-        boxed,
-    )))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::ObjectValue(boxed),
+    ))))
 }
 
 /// Borrow the payload of an erased instance with the requested exact class.

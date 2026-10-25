@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static USE_SELECT: AtomicBool = AtomicBool::new(false);
 thread_local! {
-    static CLASSES: [Rc<Object>; 2] = [false, true].map(|select|
-        Rc::new(Object(StorageCell::new(Storage::ProcessSelectorClass(select)))));
+    static CLASSES: [crate::ObjectOwner; 2] = [false, true].map(|select|
+        crate::ObjectOwner::new(Object(StorageCell::new(Storage::ProcessSelectorClass(select)))));
 }
 
 /// Return a rooted selector class: poll (0), select (1), or the current binding (2).
@@ -19,7 +19,9 @@ pub extern "C" fn imre_popen_selector_class(which: u32) -> *const Object {
         2 => current(),
         _ => fail("SystemError", "invalid subprocess selector class"),
     };
-    CLASSES.with(|classes| Rc::into_raw(Rc::clone(&classes[usize::from(select)])))
+    CLASSES.with(|classes| {
+        crate::ObjectOwner::into_raw(crate::ObjectOwner::clone(&classes[usize::from(select)]))
+    })
 }
 
 /// # Safety

@@ -18,7 +18,7 @@ pub unsafe extern "C" fn imre_shutil_noncallable(
 pub(super) fn handle(name: &Name) -> *const () {
     match name {
         Name::Text(s) | Name::Path(s) => StrOwner::as_ptr(s).cast(),
-        Name::Bytes(b) => Rc::as_ptr(b).cast(),
+        Name::Bytes(b) => crate::BytesOwner::as_ptr(b).cast(),
     }
 }
 

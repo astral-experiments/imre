@@ -360,7 +360,7 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
                 values.values.push(value.into_word());
             }
         }
-        let pointer = Rc::into_raw(values.into_object()) as usize;
+        let pointer = crate::ObjectOwner::into_raw(values.into_object()) as usize;
         // SAFETY: this new generic sequence owns every decoded child word.
         Ok(unsafe { OwnedWord::from_owned(pointer, self.0.storage()) })
     }
@@ -386,9 +386,10 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
                     return Err(A::Error::custom("duplicate JSON dictionary key"));
                 }
             }
-            let pointer = Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
-                crate::objects::mappings::TableOwner::new(mapping),
-            ))))) as usize;
+            let pointer =
+                crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+                    Storage::Dictionary(crate::objects::mappings::TableOwner::new(mapping)),
+                )))) as usize;
             // SAFETY: the new dictionary owns every successfully decoded entry.
             return Ok(unsafe { OwnedWord::from_owned(pointer, self.0.storage()) });
         }

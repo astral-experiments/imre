@@ -7,14 +7,14 @@ use super::super::bytes::{ascii_decode_error, decode_error, owned_input};
 use super::{Error, Int, Kind, Object, Result, Str, finish, object, with_path_file};
 
 #[derive(Clone, Copy)]
-enum Codec {
+pub(in crate::objects) enum Codec {
     Utf8 { signature: bool },
     Latin1,
     Ascii,
 }
 
 impl Codec {
-    fn lookup(name: Option<&str>) -> Result<Self> {
+    pub(in crate::objects) fn lookup(name: Option<&str>) -> Result<Self> {
         let value = name.unwrap_or("utf-8");
         let mut key = Str::try_with_capacity(value.len()).map_err(|_| Error::allocation())?;
         // ASCII folding and separator replacement preserve each character's UTF-8 width.
@@ -102,6 +102,21 @@ impl Codec {
                 }
             }
         }
+    }
+
+    /// Decode a complete text stream, applying universal newlines when requested.
+    pub(in crate::objects) fn decode_stream(
+        self,
+        data: &[u8],
+        errors: Option<&str>,
+        universal: bool,
+    ) -> Result<String> {
+        let text = self.decode(data, errors)?;
+        Ok(if universal && text.contains('\r') {
+            universal_newlines(text)
+        } else {
+            text
+        })
     }
 
     fn encode<'a>(
@@ -311,13 +326,11 @@ pub(super) fn read(
     with_path_file(path, 0, true, |file| {
         let codec = options(encoding, newline)?;
         let data = file.input()?.read_bytes(None)?;
-        let text = codec.decode(&data, errors)?;
-        let text = if newline.is_none() && text.contains('\r') {
-            universal_newlines(text)
-        } else {
-            text
-        };
-        Ok(Str::from(text))
+        Ok(Str::from(codec.decode_stream(
+            &data,
+            errors,
+            newline.is_none(),
+        )?))
     })
 }
 
