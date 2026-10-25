@@ -2209,7 +2209,7 @@ impl Emitter<'_, '_> {
                 let element = self
                     .module
                     .types
-                    .element(list.value.ty)
+                    .indexed_element(list.value.ty)
                     .or_else(|| {
                         self.module
                             .types
@@ -5986,6 +5986,16 @@ impl Emitter<'_, '_> {
                 ));
                 self.unpack_word(word, returns)
             }
+            Builtin::SequenceTakeInBounds => {
+                let mut index = args[1].value.clone();
+                index.small_integer = true;
+                let at = self.index_word(&index, true);
+                let word = self.instruction(format!(
+                    "call i64 @imre_seq_take_index_proven(ptr {}, i64 {at})",
+                    args[0].value.operand
+                ));
+                self.decode_word(word, returns)
+            }
             Builtin::SequenceGetInBounds => {
                 debug_assert!(matches!(
                     expressions[1].kind,
@@ -6480,6 +6490,30 @@ impl Emitter<'_, '_> {
                 none()
             }
             Builtin::DequeMaxlen => self.call("imre_deque_maxlen", returns, &[&args[0].value]),
+            Builtin::DequeGet => self.get_item(&args[0].value, &args[1].value, returns, false),
+            Builtin::DequeContains => {
+                let word = self.word(&args[0].value);
+                let found = self.instruction(format!(
+                    "call i32 @imre_deque_contains(ptr {}, i64 {word})",
+                    args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {found}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::DequeSet => {
+                self.set_item(&args[0].value, &args[1].value, &args[2].value, false);
+                none()
+            }
+            Builtin::DequeDelete => {
+                self.checked_line(format!(
+                    "call void @imre_deque_delete(ptr {}, i64 {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                none()
+            }
             Builtin::DequeIter { reverse } => Value {
                 ty: Type::Iterator,
                 operand: self.instruction(format!(
@@ -6813,8 +6847,19 @@ impl Emitter<'_, '_> {
                 none()
             }
             Builtin::SetIter => self.call("imre_set_iter", Type::Iterator, &[&args[0].value]),
-            Builtin::Append => {
-                self.append(&args[0].value, &args[1].value);
+            Builtin::JoinBufferNew => self.call("imre_join_buffer_new", returns, &[&args[0].value]),
+            Builtin::JoinBufferFinish => {
+                self.call("imre_join_buffer_finish", Type::Str, &[&args[0].value])
+            }
+            Builtin::Append | Builtin::JoinBufferAppend => {
+                if matches!(builtin, Builtin::JoinBufferAppend) {
+                    self.checked_status(format!(
+                        "call i32 @imre_join_buffer_append(ptr {}, ptr {})",
+                        args[0].value.operand, args[1].value.operand
+                    ));
+                } else {
+                    self.append(&args[0].value, &args[1].value);
+                }
                 // The list now owns the item. Drop the argument first so a
                 // temporary receiver destroys its items in reverse insertion order.
                 self.release_operand(&args[1]);
@@ -7685,6 +7730,13 @@ impl Emitter<'_, '_> {
     }
 
     fn get_item(&mut self, list: &Value, index: &Value, returns: Type, nonnegative: bool) -> Value {
+        if matches!(list.ty, Type::Deque(_)) {
+            let word = self.checked_instruction(format!(
+                "call i64 @imre_deque_get(ptr {}, i64 {})",
+                list.operand, index.operand
+            ));
+            return self.unpack_word(word, returns);
+        }
         if matches!(list.ty, Type::Dict(_)) {
             let key = self.key_word(index);
             let lookup = format!("call i64 @imre_dict_get(ptr {}, i64 {key})", list.operand);
@@ -7716,6 +7768,14 @@ impl Emitter<'_, '_> {
     }
 
     fn set_item(&mut self, list: &Value, index: &Value, value: &Value, nonnegative: bool) {
+        if matches!(list.ty, Type::Deque(_)) {
+            let word = self.word(value);
+            self.checked_line(format!(
+                "call void @imre_deque_set(ptr {}, i64 {}, i64 {word})",
+                list.operand, index.operand
+            ));
+            return;
+        }
         if matches!(list.ty, Type::Dict(_)) {
             let key = self.key_word(index);
             let word = self.word(value);
@@ -8657,6 +8717,7 @@ declare i64 @imre_seq_get(ptr, i64)
 declare void @imre_seq_set(ptr, i64, i64, i32)
 declare i64 @imre_seq_get_index(ptr, i64)
 declare i64 @imre_seq_borrow_index_proven(ptr, i64) nounwind
+declare i64 @imre_seq_take_index_proven(ptr, i64) nounwind
 declare ptr @imre_seq_data_readonly(ptr) nounwind
 declare void @imre_seq_set_index(ptr, i64, i64, i32)
 declare i32 @imre_seq_append(ptr, i64, i32)
@@ -8762,6 +8823,10 @@ declare ptr @imre_deque_copy(ptr)
 declare i64 @imre_deque_pop(ptr, i32)
 declare void @imre_deque_clear(ptr)
 declare void @imre_deque_reverse(ptr)
+declare i64 @imre_deque_get(ptr, i64)
+declare void @imre_deque_set(ptr, i64, i64)
+declare void @imre_deque_delete(ptr, i64)
+declare i32 @imre_deque_contains(ptr, i64)
 declare i64 @imre_deque_len(ptr)
 declare i64 @imre_deque_maxlen(ptr)
 declare ptr @imre_deque_iter(ptr, i32)
@@ -8851,6 +8916,9 @@ declare ptr @imre_sort_detach(ptr, i32)
 declare void @imre_sort_restore(ptr, i32, ptr, i32)
 declare void @imre_sort_by_keys(ptr, i32, ptr, i32, i32)
 declare ptr @imre_str_join(ptr, ptr)
+declare ptr @imre_join_buffer_new(ptr)
+declare i32 @imre_join_buffer_append(ptr, ptr)
+declare ptr @imre_join_buffer_finish(ptr)
 declare ptr @imre_str_format(ptr, ptr, i64)
 declare ptr @imre_str_format_fields(ptr, ptr, i64)
 declare ptr @imre_str_replace(ptr, ptr, ptr)
