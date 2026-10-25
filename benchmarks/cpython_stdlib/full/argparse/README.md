@@ -5,6 +5,10 @@ The denominator is **1,893 distinct unittest IDs** from CPython 3.14.5
 `test_argparse.py` module. Its metaclasses generate test methods, so counting
 source definitions would miss cases. The vendored files include the translation
 snapshot used by `TestTranslations.test_translations` and the upstream license.
+That test runs CPython's own `Tools/i18n/pygettext.py` on `argparse.py`.
+When staging the reference interpreter, include both `Lib` and `Tools/i18n`
+from the pinned CPython checkout. [UPSTREAM.json](UPSTREAM.json) records the
+original blobs for the tool and the two test helpers that invoke it.
 
 The test-enabled release interpreter on Linux passed all 1,893 IDs with no skips.
 `reference-linux.json` records one result per ID; reference success is not native
