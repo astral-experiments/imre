@@ -7,7 +7,7 @@ out="$RUNNER_TEMP/shutil"
 mod=benchmarks/cpython_stdlib/full/shutil
 opts=(--imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18)
 ref=(--cpython-source .cpython-stdlib-reference)
-branch=codex/shutil-copytree-native
+branch=$SHUTIL_BRANCH
 deadline=$((SECONDS + 3600))
 base=$(jq -r .base "$out/source.json")
 head=$(jq -r .head "$out/source.json")
@@ -24,7 +24,7 @@ while (( SECONDS < deadline )); do
     git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main" "+refs/heads/$branch:refs/remotes/origin/$branch"
     new_base=$(git rev-parse refs/remotes/origin/main)
     new_head=$(git rev-parse "refs/remotes/origin/$branch")
-    GH_TOKEN="$checks_token" gh api "repos/$GITHUB_REPOSITORY/pulls/829" --jq '{headRefOid:.head.sha,state:(if .merged then "MERGED" else (.state|ascii_upcase) end)}' > "$out/pr-state.json"
+    GH_TOKEN="$checks_token" gh api "repos/$GITHUB_REPOSITORY/pulls/$SHUTIL_PR" --jq '{headRefOid:.head.sha,state:(if .merged then "MERGED" else (.state|ascii_upcase) end)}' > "$out/pr-state.json"
     GH_TOKEN="$checks_token" gh api "repos/$GITHUB_REPOSITORY/commits/$new_head/check-runs?per_page=100" --jq '[.check_runs[]|{name,status:(.status|ascii_upcase),conclusion:((.conclusion//"")|ascii_upcase)}]' > "$out/head-checks.json"
     jq -s '.[0] + {statusCheckRollup:.[1]}' "$out/pr-state.json" "$out/head-checks.json" > "$out/pr-checks.json"
     if [[ $(jq -r .state "$out/pr-checks.json") != OPEN ]]; then
@@ -57,10 +57,10 @@ while (( SECONDS < deadline )); do
     python3 -B "$mod/evidence.py" "${opts[@]}" "${ref[@]}" --method-attempts "$receipt/method-attempts-linux.json" --result "$receipt/evidence-linux.json"
     python3 -B benchmarks/cpython_stdlib/suite_evidence.py "$mod/reference-linux.json" "$receipt/evidence-linux.json"
     jq -e 'length == 2 and all(.[]; .denominator == 223 and ([.records[] | select(.id|endswith(".test_environ_path_missing"))] | length==2 and all(.[]; .classification=="mixed" and .evidence.native_calls==2 and .evidence.native_environment=={"PATH":"absent","processes":2})))' "$receipt/evidence-linux.json" >/dev/null
-    for helper in check_csv_handlers copy_error_controls; do
+    for helper in check_csv_handlers copy_error_controls move_cross_device; do
         python3 -B "$mod/$helper.py" "${opts[@]}"
     done
-    for helper in copyfile native_copy native_rmtree tree_ops; do
+    for helper in copyfile native_copy native_rmtree tree_ops move_ops; do
         python3 -B "$mod/$helper.py" "${opts[@]}" "${ref[@]}" --result "$receipt/$helper-linux.json"
     done
     python3 -B tests/paths.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-levels 0 3

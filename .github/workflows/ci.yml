@@ -1,6 +1,16 @@
 name: Shutil prospective merge evidence
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      follow:
+        description: Retest new merge sources until all public PR checks pass
+        type: boolean
+        default: false
+
+env:
+  SHUTIL_BRANCH: codex/shutil-move-native
+  SHUTIL_PR: '902'
 
 permissions:
   contents: read
@@ -20,7 +30,7 @@ jobs:
         run: |
           mkdir "$RUNNER_TEMP/shutil"
           base=$(git rev-parse HEAD)
-          git fetch --no-tags origin refs/heads/codex/shutil-copytree-native
+          git fetch --no-tags origin "refs/heads/$SHUTIL_BRANCH"
           head=$(git rev-parse FETCH_HEAD)
           git -c user.name='Imre CI' -c user.email='ci@localhost' merge --no-ff --no-commit "$head"
           tree=$(git write-tree)
@@ -69,14 +79,15 @@ jobs:
         run: |
           mod=benchmarks/cpython_stdlib/full/shutil
           opts=(--imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18)
-          for helper in check_csv_handlers copy_error_controls; do
+          for helper in check_csv_handlers copy_error_controls move_cross_device; do
             python3 -B "$mod/$helper.py" "${opts[@]}"
           done
-          for helper in copyfile native_copy native_rmtree tree_ops; do
+          for helper in copyfile native_copy native_rmtree tree_ops move_ops; do
             python3 -B "$mod/$helper.py" "${opts[@]}" --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/shutil/$helper-linux.json"
           done
           python3 -B tests/paths.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-levels 0 3
       - name: Verify newer prospective sources until the PR checks finish
+        if: inputs.follow
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
