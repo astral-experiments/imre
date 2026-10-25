@@ -309,6 +309,10 @@ The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as 
 
 ## Native text operations
 
+String `%` formatting accepts an exact integer, a string, or a fixed tuple of
+integers and strings as positional operands. The entire tuple is evaluated before
+formatting begins. Width and precision arguments (`*`) consume tuple items in order.
+
 `str.lower()` uses Unicode 16 full lowercase mappings, including expanding characters and contextual Greek final sigma. `str.capitalize()` titlecases the first code point and lowercases the remainder in the original string context.
 
 `str.expandtabs(tabsize=8)` counts Unicode code points, resets the column on CR or LF, and removes tabs for zero or negative widths. Converting the width happens before inspecting the text. Integers, booleans, and fixed classes with an integer-returning `__index__` are supported; values outside the platform C `int` range raise `OverflowError`. A string with no tabs retains its identity. A user `__index__` returning a boolean is rejected because Python's configurable deprecation warning is not supported.
