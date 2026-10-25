@@ -21,6 +21,32 @@ pub(super) fn metadata(
     }
 }
 
+/// Snapshot names and the kernel's directory-entry types without looking up an inode.
+pub(super) fn directory_entry_types(
+    root: &str,
+) -> io::Result<Vec<(std::ffi::OsString, rustix::fs::FileType)>> {
+    use rustix::fs::{Dir, Mode, OFlags, open};
+    use std::os::unix::ffi::OsStringExt;
+
+    let fd = open(
+        root,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?;
+    let mut entries = Vec::new();
+    for item in Dir::new(fd)? {
+        let entry = item?;
+        let name = entry.file_name().to_bytes();
+        if !matches!(name, b"." | b"..") {
+            entries.push((
+                std::ffi::OsString::from_vec(name.to_vec()),
+                entry.file_type(),
+            ));
+        }
+    }
+    Ok(entries)
+}
+
 macro_rules! descriptor_constants {
     ($($name:ident = $flag:ident),* $(,)?) => {$(
         #[unsafe(no_mangle)]

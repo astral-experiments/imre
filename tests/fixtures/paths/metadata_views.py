@@ -1,4 +1,5 @@
 from pathlib import Path
+from shutil import copyfile
 
 
 def main(root: str) -> None:
@@ -53,6 +54,23 @@ def main(root: str) -> None:
             target.unlink()
             print(link.info.is_file())
             print(link.is_file())
+
+    # The scan saw a regular file. DirEntry.stat reuses lstat for that kind
+    # even when the name has since been replaced with a dangling symlink.
+    replaced = base / 'replaced'
+    replaced.write_text('old')
+    for entry in base.iterdir():
+        if entry.name == 'replaced':
+            saved = entry.info
+            entry.unlink()
+            copyfile(str(base / 'dangling.json'), str(entry), follow_symlinks=False)
+            print(saved.exists(), saved.exists(follow_symlinks=False))
+            print(saved.is_file(), saved.is_symlink())
+            print(entry.exists(), entry.is_file(), entry.is_symlink())
+            entry.unlink()
+            entry.mkdir()
+            print(saved.exists(), saved.is_file(), saved.is_dir(), entry.is_dir())
+            entry.rmdir()
 
 
 main('tree')

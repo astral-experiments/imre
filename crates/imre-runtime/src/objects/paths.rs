@@ -19,7 +19,7 @@ mod metadata;
 mod pure;
 mod traversal;
 mod walking;
-pub(super) use metadata::Info;
+pub(super) use metadata::{Info, InfoCache};
 pub(super) use pure::PurePath;
 pub(super) use walking::Walker;
 
@@ -307,10 +307,10 @@ fn new_path(path: impl Into<Rc<Str>>) -> *const Object {
 }
 
 fn path_with_text(text: PathText) -> *const Object {
-    path_with_info(text, std::cell::OnceCell::new())
+    path_with_info(text, InfoCache::Path)
 }
 
-fn path_with_info(text: PathText, info: std::cell::OnceCell<Rc<Object>>) -> *const Object {
+fn path_with_info(text: PathText, info: InfoCache) -> *const Object {
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Path {
         text,
         name: std::cell::OnceCell::new(),
@@ -963,7 +963,7 @@ pub(super) struct PathIterator {
 
 enum IterationState {
     Glob(traversal::Glob),
-    Snapshot(std::vec::IntoIter<(OsString, Option<fs::FileType>)>),
+    Snapshot(std::vec::IntoIter<(OsString, rustix::fs::FileType)>),
     Exhausted,
 }
 
@@ -1009,9 +1009,7 @@ impl PathIterator {
             )?)
         } else {
             check_directory_path(&root)?;
-            let entries = directory_entries(&root, |entry| {
-                (entry.file_name(), entry.file_type().ok())
-            }).map_err(files::os_error)?;
+            let entries = super::os::directory_entry_types(&root).map_err(files::os_error)?;
             IterationState::Snapshot(entries.into_iter())
         };
         Ok(Self { root, state })
@@ -1019,17 +1017,16 @@ impl PathIterator {
 
     pub(super) fn next(&mut self) -> Result<*const Object> {
         let next = match &mut self.state {
-            IterationState::Glob(glob) => glob.next().map(|next| {
-                next.map(|path| path_with_text(PathText::from_parsed_string(path)))
-            }),
+            IterationState::Glob(glob) => glob
+                .next()
+                .map(|next| next.map(|path| path_with_text(PathText::from_parsed_string(path)))),
             IterationState::Snapshot(names) => names
                 .next()
                 .map(|(name, kind)| {
                     name.into_string()
                         .map(|name| {
                             let text = PathText::from_parsed_string(join(&self.root, &name));
-                            let view = Info::object(Rc::clone(text.spelling()), metadata::Origin::Entry(kind));
-                            path_with_info(text, std::cell::OnceCell::from(view))
+                            path_with_info(text, InfoCache::Entry(kind))
                         })
                         .map_err(|_| {
                             Error::new(
@@ -1378,6 +1375,31 @@ mod tests {
         assert!(query(&entry, 2, false));
         assert!(!query(&entry, 1, true));
         assert!(query(&scanned, 1, true));
+
+        // Filesystems that report DT_UNKNOWN defer both type and link detection.
+        // Exercise this independently of whether the machine's temp fs supplies it.
+        let unknown = || {
+            let text = PathText::Flat(Rc::new(Str::from(entry_name)));
+            let cache = InfoCache::Entry(rustix::fs::FileType::Unknown);
+            // SAFETY: recover the sole path owner, then take its independently owned view.
+            view(&unsafe { Rc::from_raw(path_with_info(text, cache)) })
+        };
+        let remembered = unknown();
+        let unqueried = unknown();
+        assert!(query(&remembered, 1, false));
+        fs::remove_dir(&filename).unwrap();
+        symlink("late-target", &filename).unwrap();
+        assert!(query(&remembered, 1, true)); // share successful non-link lstat
+        assert!(!query(&remembered, 3, false));
+        assert!(query(&unqueried, 0, false)); // no stat needed
+        assert!(query(&unqueried, 3, false));
+        assert!(!query(&unqueried, 0, true)); // a failed follow lookup can retry
+        let target = directory.0.join("late-target");
+        fs::write(&target, "target").unwrap();
+        assert!(query(&unqueried, 2, true));
+        fs::remove_file(target).unwrap();
+        assert!(query(&unqueried, 0, true)); // retain successful target stat
+        assert!(!query(&unqueried, 2, false));
     }
 
     #[test]

@@ -1,77 +1,100 @@
 //! File type queries on concrete paths and the cached views exposed by `Path.info`.
 
 use super::super::{Object, Storage, StorageCell, Str, object, os};
+use rustix::fs::FileType;
 use std::cell::OnceCell;
-use std::fs::{FileType, Metadata};
-use std::os::unix::fs::FileTypeExt;
+use std::fs::Metadata;
+use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 
 /// One path's data, independent of the owner so a saved view can outlive the path.
 pub(in crate::objects) struct Info {
     name: Rc<Str>,
-    origin: Origin,
+    entry: Option<FileType>,
     follow: OnceCell<Option<Box<Metadata>>>,
     nofollow: OnceCell<Option<Box<Metadata>>>,
 }
 
-pub(super) enum Origin {
+/// A scan seeds a Path without allocating a view that might never be requested.
+pub(in crate::objects) enum InfoCache {
     Path,
-    // The scan can succeed even if a file type isn't available for this entry.
-    Entry(Option<FileType>),
+    Entry(FileType),
+    Saved(Rc<Object>),
 }
 
-impl Info {
-    pub(super) fn object(name: Rc<Str>, origin: Origin) -> Rc<Object> {
-        Rc::new(Object(StorageCell::new(Storage::PathInfo(Box::new(
-            Self {
-                name,
-                origin,
+impl InfoCache {
+    fn get(&mut self, name: &Rc<Str>) -> Rc<Object> {
+        let entry = match self {
+            Self::Path => None,
+            Self::Entry(kind) => Some(*kind),
+            Self::Saved(info) => return Rc::clone(info),
+        };
+        let view = Rc::new(Object(StorageCell::new(Storage::PathInfo(Box::new(
+            Info {
+                name: Rc::clone(name),
+                entry,
                 follow: OnceCell::new(),
                 nofollow: OnceCell::new(),
             },
-        )))))
+        )))));
+        *self = Self::Saved(Rc::clone(&view));
+        view
     }
+}
 
-    fn stat(&self, follow: bool) -> Option<&Metadata> {
+impl Info {
+    fn lookup(&self, follow: bool) -> Option<&Metadata> {
         let cell = if follow { &self.follow } else { &self.nofollow };
         if let Some(previous) = cell.get() {
             return previous.as_deref();
         }
         let result = os::metadata(self.name.as_str(), follow).ok();
-        if matches!(self.origin, Origin::Entry(_)) && result.is_none() {
+        if self.entry.is_some() && result.is_none() {
             // DirEntry.stat caches a success; a later call can see a newly created target.
             return None;
         }
         cell.get_or_init(|| result.map(Box::new)).as_deref()
     }
 
+    fn stat(&self, follow: bool) -> Option<&Metadata> {
+        if follow && let Some(entry) = self.entry {
+            // DirEntry.stat follows only an entry identified as a symlink. An
+            // unknown d_type first asks lstat; successful lstat is shared with
+            // the no-follow query, even when the pathname has since changed.
+            let follows_link = entry == FileType::Symlink
+                || entry == FileType::Unknown
+                    && self
+                        .lookup(false)
+                        .is_some_and(|st| st.file_type().is_symlink());
+            return self.lookup(follows_link);
+        }
+        self.lookup(follow)
+    }
+
     fn query(&self, kind: u32, follow: bool) -> bool {
-        if let Origin::Entry(entry) = self.origin {
+        if let Some(entry) = self.entry {
             if kind == 0 && !follow {
                 return true;
             }
-            if kind != 0
-                && let Some(ty) = entry
-                && (!follow || !ty.is_symlink())
-            {
-                return has_type(ty, kind);
+            if kind != 0 && entry != FileType::Unknown && (!follow || entry != FileType::Symlink) {
+                return has_type(entry, kind);
             }
         }
         self.stat(follow)
-            .is_some_and(|stat| has_type(stat.file_type(), kind))
+            .is_some_and(|stat| has_type(FileType::from_raw_mode(stat.mode() as _), kind))
     }
 }
 
 fn has_type(ty: FileType, kind: u32) -> bool {
     match kind {
         0 => true,
-        1 => ty.is_dir(),
-        2 => ty.is_file(),
-        3 => ty.is_symlink(),
-        4 => ty.is_fifo(),
-        5 => ty.is_socket(),
-        6 => ty.is_block_device(),
-        7 => ty.is_char_device(),
+        1 => ty == FileType::Directory,
+        2 => ty == FileType::RegularFile,
+        3 => ty == FileType::Symlink,
+        4 => ty == FileType::Fifo,
+        5 => ty == FileType::Socket,
+        6 => ty == FileType::BlockDevice,
+        7 => ty == FileType::CharacterDevice,
         _ => unreachable!("unknown file type query"),
     }
 }
@@ -84,14 +107,11 @@ fn has_type(ty: FileType, kind: u32) -> bool {
 pub unsafe extern "C" fn imre_path_info(path: *const Object) -> *const Object {
     // SAFETY: only the owned cached view is transferred; no storage borrow escapes.
     unsafe {
-        object(path).0.with(|s| {
-            let Storage::Path { info, .. } = s else {
+        object(path).0.with_mut(|s| {
+            let Storage::Path { text, info, .. } = s else {
                 unreachable!()
             };
-            Rc::into_raw(
-                info.get_or_init(|| Info::object(Rc::clone(s.path_text()), Origin::Path))
-                    .clone(),
-            )
+            Rc::into_raw(info.get(text.spelling()))
         })
     }
 }
@@ -108,7 +128,7 @@ pub unsafe extern "C" fn imre_path_query(path: *const Object, kind: u32, follow:
             let follow = follow != 0;
             u32::from(match s {
                 Storage::Path { .. } => os::metadata(s.path(), follow)
-                    .is_ok_and(|stat| has_type(stat.file_type(), kind)),
+                    .is_ok_and(|stat| has_type(FileType::from_raw_mode(stat.mode() as _), kind)),
                 Storage::PathInfo(info) => info.query(kind, follow),
                 _ => unreachable!(),
             })

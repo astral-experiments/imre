@@ -88,7 +88,7 @@ enum Storage {
     Path {
         text: paths::PathText,
         name: std::cell::OnceCell<Rc<Str>>,
-        info: std::cell::OnceCell<Rc<Object>>,
+        info: paths::InfoCache,
     },
     PathInfo(Box<paths::Info>),
     PurePath(Box<paths::PurePath>),
