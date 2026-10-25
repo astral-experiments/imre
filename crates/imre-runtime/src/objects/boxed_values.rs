@@ -187,6 +187,9 @@ pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) ->
                 }
                 if !(ka == kb && wa == wb) && n != 0 {
                     if n > 1 {
+                        if pending.try_reserve(1).is_err() {
+                            return Error::allocation().returning(false);
+                        }
                         pending.push((a, b, 1, n));
                     }
                     next = (sequence_item(ka, wa, 0), sequence_item(kb, wb, 0));
