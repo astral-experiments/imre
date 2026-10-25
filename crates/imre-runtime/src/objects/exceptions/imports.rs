@@ -232,6 +232,7 @@ fn type_name(kind: WordKind) -> &'static str {
         1 => "bool",
         2 => "int",
         3 => "str",
+        4 => "list",
         6 => "tuple",
         8 => "bytes",
         _ => unreachable!("checked exception field"),
@@ -243,6 +244,7 @@ fn length(kind: WordKind, word: usize) -> Option<usize> {
     unsafe {
         match kind.raw() {
             3 => Some((&*(word as *const Str)).chars().count()),
+            4 => Some((&*(word as *const crate::List)).0.with(|v| v.len())),
             6 => Some(records::descriptor(word as *const usize).length),
             8 => Some((&*(word as *const Bytes)).len()),
             _ => None,
@@ -311,6 +313,7 @@ pub unsafe extern "C" fn imre_exception_field_index(
                 Kind::IndexError,
                 match kind.raw() {
                     3 => "string index out of range",
+                    4 => "list index out of range",
                     6 => "tuple index out of range",
                     8 => "index out of range",
                     _ => unreachable!(),
@@ -324,6 +327,9 @@ pub unsafe extern "C" fn imre_exception_field_index(
                 let s = Rc::new(Str::from(ch.to_string()));
                 view(WordKind::new(3), Rc::as_ptr(&s) as usize)
             }
+            4 => (&*(word as *const crate::List))
+                .0
+                .with(|v| view(WordKind::new(2), v[i].0)),
             6 => {
                 let (k, w) = tuple_item(word, i);
                 view(k, w)

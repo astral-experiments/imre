@@ -180,6 +180,26 @@ class FileHandler:
             self._closed = True
 
 
+class NullHandler(Handler):
+    lock: None
+
+    def __init__(self, level: _Level = 0) -> None:
+        super().__init__(level)
+        self.createLock()
+
+    def handle(self, record: LogRecord | None):
+        pass
+
+    def emit(self, record: LogRecord | None) -> None:
+        pass
+
+    def createLock(self) -> None:
+        self.lock = None
+
+    def _at_fork_reinit(self) -> None:
+        pass
+
+
 class BufferingFormatter:
     linefmt: Formatter
 

@@ -59,8 +59,8 @@ elements, Unicode, truncation, custom messages, and a subclass's failure class.
 It adds no upstream IDs.
 
 At each of O0 and O3: 7 fully native passes, 8 native bodies with host
-fixtures, 9 host-driven native operations (36 calls), 9 compile blockers,
-1,055 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
+fixtures, 9 host-driven native operations (36 calls), 10 compile blockers,
+1,054 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
 all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
 
 Three additional complete equality methods are attempted at each level.
@@ -129,9 +129,11 @@ the same [native default fixture entry](../../SUITE_RUNNER.md#running-a-method-w
 as the four above. Each receipt includes its verbose case ID, one-test summary,
 source blob, and complete method hash.
 
-Four additional original Mock methods have measured compile blockers. One
+Five additional original Mock methods have measured compile blockers. One
 reaches `TestCase.assertNotIn`. The three reset methods need constructor
 arguments (`parent` or `return_value`) or assign a mock as its own return value.
+`test_assert_called_exception_message` also reaches positional `str.format` at
+upstream `testmock.py:533`.
 The evidence records retain their original CPython passes, exact source lines,
 method hashes, and each native diagnostic. These are ordinary blockers.
 

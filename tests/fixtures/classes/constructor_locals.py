@@ -31,3 +31,13 @@ except AssertionError as error:
     print(str(error))
 for event in events:
     print(event)
+
+
+class Shadow:
+    value: int
+
+    def __init__(self, super: int) -> None:
+        self.value = super
+
+
+print(Shadow(42).value)

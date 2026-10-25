@@ -63,6 +63,7 @@ pub(crate) enum IntrinsicModule {
     Argparse,
     Errno,
     Future,
+    Builtins,
     Sys,
     SysJit,
     Typing,
@@ -130,6 +131,8 @@ pub(crate) enum Intrinsic {
     AnnotationTypeRepr,
     AnnotationFormat(i64),
     Declaration(&'static str),
+    BuiltinsLast,
+    SysDisplayHook,
     ArgumentParser,
     ArgparseNamespace,
     BooleanOptionalAction,
@@ -242,7 +245,7 @@ pub(crate) enum Intrinsic {
     Literal,
     Callable,
     Sequence,
-    Mapping,
+    Mapping { typing_alias: bool },
     Iterable,
     Iterator,
     UnsupportedOperation,
@@ -330,6 +333,7 @@ pub(crate) enum Intrinsic {
     GetEnv,
     GetCwd,
     Strerror,
+    StatResult,
     Fd(crate::ir::FdOperation),
     DescriptorConstant(&'static str),
     FsPath,
@@ -373,6 +377,7 @@ impl IntrinsicModule {
             "_opcode" => Some(Self::Opcode),
             "unidiff" => Some(Self::Unidiff),
             "argparse" => Some(Self::Argparse),
+            "builtins" => Some(Self::Builtins),
             "sys" => Some(Self::Sys),
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
@@ -582,11 +587,13 @@ impl IntrinsicModule {
             (Self::Argparse, "RawDescriptionHelpFormatter") => {
                 Intrinsic::RawDescriptionHelpFormatter
             }
+            (Self::Builtins, "_") => Intrinsic::BuiltinsLast,
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Sys, "orig_argv") => Intrinsic::OrigArgv,
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
             (Self::Sysconfig, "get_path") => Intrinsic::GetSysconfigPath,
             (Self::Sys, "exit") => Intrinsic::SysExit,
+            (Self::Sys, "__displayhook__") => Intrinsic::SysDisplayHook,
             (Self::LoggingHandlers, "TimedRotatingFileHandler") => Intrinsic::TimedFileHandler,
             (Self::Datetime, "time") => Intrinsic::ClockTime,
             (Self::Logging, "Logger") => Intrinsic::Logger,
@@ -624,7 +631,9 @@ impl IntrinsicModule {
             (Self::Typing, "cast") => Intrinsic::Cast,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
             (Self::Typing | Self::CollectionsAbc, "Sequence") => Intrinsic::Sequence,
-            (Self::Typing | Self::CollectionsAbc, "Mapping") => Intrinsic::Mapping,
+            (Self::Typing | Self::CollectionsAbc, "Mapping") => Intrinsic::Mapping {
+                typing_alias: self == Self::Typing,
+            },
             (Self::Typing | Self::CollectionsAbc, "Iterable") => Intrinsic::Iterable,
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
@@ -883,6 +892,13 @@ impl SourceGraph {
             scan.found
         })
     }
+    /// Ordinary file builds keep assertions at every native optimizer level.
+    pub(crate) fn python_optimization(&self) -> i32 {
+        self.command_startup
+            .as_ref()
+            .map_or(0, |(flags, _)| flags.optimize)
+    }
+
     pub(crate) fn reachable_only(&self) -> bool {
         self.reachable.is_some()
     }
@@ -943,6 +959,12 @@ impl SourceGraph {
             .push(CheckedDiagnostic::PositionalKeyword(keyword));
     }
 
+    /// The native binder raises for this keyword because the receiver was already bound.
+    pub(crate) fn checked_repeated_keyword(&self, module: ModuleId, keyword: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::RepeatedKeyword(keyword));
+    }
+
     pub(crate) fn checked_keywords(
         &self,
         module: ModuleId,
@@ -969,6 +991,12 @@ impl SourceGraph {
     /// The native table is an actual dict, including errno.errorcode (a Mapping in typeshed).
     pub(crate) fn checked_dict_deletion(&self, module: ModuleId, target: TextRange) {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::DictDeletion(target));
+    }
+
+    /// Native construction raises TypeError at this abstract class call.
+    pub(crate) fn checked_abstract_class_call(&self, module: ModuleId, call: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::AbstractClassCall(call));
     }
 
     /// Source ranges where the reachable profile or native lowering handles diagnostics.
@@ -1013,10 +1041,28 @@ impl SourceGraph {
                     .collect()
             })
             .collect();
-        (
-            self.reachable.as_ref().map(|r| r.skipped.clone()),
-            overloads,
-        )
+        let mut skipped = self.reachable.as_ref().map(|r| r.skipped.clone());
+        if self.python_optimization() > 0 {
+            use ast::visitor::{Visitor, walk_stmt};
+
+            struct OmittedAssertions<'a>(&'a mut Vec<TextRange>);
+            impl<'ast> Visitor<'ast> for OmittedAssertions<'_> {
+                fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
+                    if matches!(stmt, ast::Stmt::Assert(_)) {
+                        self.0.push(stmt.range());
+                    } else {
+                        walk_stmt(self, stmt);
+                    }
+                }
+
+                fn visit_expr(&mut self, _: &'ast ast::Expr) {}
+            }
+            let ranges = skipped.get_or_insert_with(|| vec![Vec::new(); self.modules.len()]);
+            for (module, ranges) in self.modules.iter().zip(ranges) {
+                OmittedAssertions(ranges).visit_body(&module.parsed.syntax().body);
+            }
+        }
+        (skipped, overloads)
     }
 
     /// Entry segments initialize class and module globals and validate platform imports in order.
@@ -1790,6 +1836,9 @@ impl<'a> Loader<'a> {
                                     alias.name
                                 )
                             })?;
+                        if binding == Binding::Intrinsic(Intrinsic::BuiltinsLast) {
+                            return Err("from builtins import _ needs an import-time snapshot; use a qualified lookup".into());
+                        }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         let binding = self.named_import(binding, alias.name.as_str());
                         self.bind(id, local.as_str(), binding, alias)?;
