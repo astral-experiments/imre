@@ -122,14 +122,15 @@ class Fixtures:
                 collect(source_node)
                 # Conditional global declarations are dedented to module scope.
                 declarations[source_node.lineno] = dedent(self.source(source_node))
-        simple_equality = method == "test_with_bound_and_unbound_methods"
+        equality = ({"test_with_bound_and_unbound_methods": "str",
+                     "test_get_annotations": "dict[str, type]"}.get(method))
         fixture = "\n".join(sorted(imports)) + "\n\n"
         fixture += "\n".join(declarations[k] for k in sorted(declarations))
-        fixture += "\nclass NativeCase" + (":\n" if simple_equality else "(unittest.TestCase):\n")
+        fixture += "\nclass NativeCase" + (":\n" if equality else "(unittest.TestCase):\n")
         fixture += "".join(member_texts.values())
         fixture += "".join(helper_nodes[k] for k in sorted(helper_nodes))
-        if simple_equality:
-            fixture += STRING_EQUALITY
+        if equality:
+            fixture += STRING_EQUALITY.replace("first: str, second: str", f"first: {equality}, second: {equality}")
         return owner.__name__, node, fixture
 
 
