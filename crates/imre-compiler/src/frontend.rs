@@ -5469,7 +5469,9 @@ impl<'a> Checker<'a> {
                                 "strerror" => (1, Type::Str),
                                 _ => (
                                     if name == "filename" { 2 } else { 3 },
-                                    self.types.union(&[Type::Str, Type::Bytes]).unwrap(),
+                                    self.types
+                                        .union(&[Type::Str, Type::Bytes, Type::Path])
+                                        .unwrap(),
                                 ),
                             };
                             (
@@ -5931,6 +5933,7 @@ impl<'a> Checker<'a> {
                 return self.cursor_length_hint(call);
             }
             Some(Binding::Intrinsic(Intrinsic::ShallowCopy)) => return self.shallow_copy(call),
+            Some(Binding::Intrinsic(Intrinsic::DeepCopy)) => return self.deep_copy(call),
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Tee)) => return self.tee_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Count)) => return self.count_cursor(call),
