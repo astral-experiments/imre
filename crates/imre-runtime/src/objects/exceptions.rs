@@ -34,6 +34,13 @@ pub struct NamedDescriptor {
     base: u32,
 }
 
+impl NamedDescriptor {
+    fn mro(&self) -> &[u32] {
+        // SAFETY: the compiler emits count entries in C3 order in static storage.
+        unsafe { std::slice::from_raw_parts(self.kinds, self.count) }
+    }
+}
+
 /// Stable ABI identifiers for the supported builtin exception hierarchy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -462,6 +469,28 @@ impl Exception {
     fn take_cause(&mut self) -> Option<crate::ObjectOwner> {
         // A shared snapshot retains its own metadata and keeps the cause rooted.
         Rc::into_inner(self.details.take()?)?.cause
+    }
+
+    /// KeyError uses repr for one key unless an earlier builtin in the MRO overrides str.
+    fn quotes_single_key(&self) -> bool {
+        let Some(descriptor) = self.named() else {
+            return self.kind == Kind::KeyError;
+        };
+        for &kind in descriptor.mro() {
+            if kind == Kind::KeyError as u32 {
+                return true;
+            }
+            if [
+                Kind::OSError as u32,
+                Kind::ImportError as u32,
+                Kind::UnicodeEncodeError as u32,
+            ]
+            .contains(&kind)
+            {
+                return false;
+            }
+        }
+        false
     }
 
     fn named(&self) -> Option<&'static NamedDescriptor> {
@@ -1308,7 +1337,8 @@ impl Storage {
     fn exception_message(&self) -> StrOwner {
         match &self.exception().payload {
             Payload::Import(err) => err.message(),
-            Payload::Positional(args) | Payload::ExitArguments(args) => args.message(),
+            Payload::Positional(args) => args.message(self.exception().quotes_single_key()),
+            Payload::ExitArguments(args) => args.message(false),
             Payload::Exit(code) => exit_text(code.as_ref(), ""),
             Payload::Empty => StrOwner::new(Str::new("")),
             Payload::Message(message) => StrOwner::clone(message),
@@ -1958,7 +1988,7 @@ pub unsafe extern "C" fn imre_exception_matches(value: *const Object, expected_k
         object(value).0.with(|storage| {
             let e = storage.exception();
             if let Some(d) = e.named()
-                && std::slice::from_raw_parts(d.kinds, d.count).contains(&expected_kind)
+                && d.mro().contains(&expected_kind)
             {
                 return 1;
             }
