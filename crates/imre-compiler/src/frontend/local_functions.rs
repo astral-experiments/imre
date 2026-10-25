@@ -53,11 +53,12 @@ impl Function {
         node: &impl Ranged,
     ) -> Result<Expr, String> {
         if !self.captures.is_empty()
-            || self
-                .signature
-                .params
-                .iter()
-                .any(|p| p.kind == ParameterKind::KeywordOnly)
+            || self.signature.params.iter().any(|p| {
+                matches!(
+                    p.kind,
+                    ParameterKind::KeywordOnly | ParameterKind::KeywordRest
+                )
+            })
         {
             return Err(error(
                 source,
@@ -160,7 +161,7 @@ impl Checker<'_> {
         let signature = signature(
             definition,
             self.graph,
-            self.module,
+            keyword_forwarding::Defaults::local(self.module),
             &self.classes.declarations,
             self.types,
             None,
@@ -254,6 +255,7 @@ impl Checker<'_> {
         mut signature: Signature,
     ) -> Result<Function, String> {
         signature.id = self.helpers.reserve();
+        let omitted_free = self.unbound_assert_captures();
         let mut helper = Checker::new(
             self.graph,
             self.module,
@@ -263,6 +265,7 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.returns = signature.returns;
         helper.asynchronous = signature.asynchronous;
@@ -372,8 +375,9 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         function: &Function,
     ) -> Result<Expr, String> {
-        let args = self.arguments(call, &function.signature.params, None)?;
-        self.call_local_args(call, function, args)
+        let mut scope = calls::ArgumentScope::default();
+        let args = self.held_arguments(call, &function.signature.params, None, &mut scope)?;
+        Ok(scope.finish(self.call_local_args(call, function, args)?))
     }
 
     fn call_local_args(

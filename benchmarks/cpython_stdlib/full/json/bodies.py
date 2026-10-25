@@ -14,6 +14,7 @@ from reference import BENCH, COMMIT, routine, verify
 sys.path.insert(0, str(BENCH))
 from suite_inventory import cases, load_suite
 from suite_native import Toolchain, method_bytes, native_method, run_in_fixtures
+from roundtrips import ASSERT_EQUAL, definitions as roundtrip_definitions
 from sweep import prepare
 
 # Signatures specialize only the fixture boundary, never the upstream method.
@@ -70,17 +71,30 @@ def compiled(tools, directory, fixture_ids, *, provenance=False):
                                      fixture(encode, input_type, result_type), **options)
             yield source, ids, assertions, callback
 
-    # Both original fixture variants call loads on all 34 JSON checker inputs.
-    # The method requires two inputs to succeed and catches JSONDecodeError on 32.
-    owner, method = "TestFail", "test_failures"
-    source = f"test.test_json.test_fail.{owner}.{method}"
-    ids = fixture_ids[source]
-    path = BENCH / "upstream/Lib/test/test_json/test_fail.py"
-    work = directory / source
-    work.mkdir()
-    options = {"operation": ("imre", "json.loads: 34 checker inputs")} if provenance else {}
-    callback = native_method(tools, work, path, owner, ids[0], prepare(path, owner, method), **options)
-    yield source, ids, 34, callback
+    # These complete definitions use the bundled unittest.TestCase unchanged.
+    for module, owner, method, count, operations in (
+        ("test_fail", "TestFail", "test_failures", 34, "json.loads: 34 checker inputs"),
+        ("test_decode", "TestDecode", "test_constant_invalid_case", 6, "json.loads: 6 invalid constants"),
+        ("test_decode", "TestDecode", "test_nonascii_digits_rejected", 3, "json.loads: 3 non-ASCII numerals"),
+        ("test_float", "TestFloat", "test_ints", 6, "json.dumps: twice per integer, including 2**64"),
+    ):
+        source = f"test.test_json.{module}.{owner}.{method}"
+        ids = fixture_ids[source]
+        path = BENCH / f"upstream/Lib/test/test_json/{module}.py"
+        work = directory / source
+        work.mkdir()
+        options = {"operation": ("imre", operations)} if provenance else {}
+        callback = native_method(tools, work, path, owner, ids[0], prepare(path, owner, method), **options)
+        yield source, ids, count, callback
+
+    for _, owner, path, source in roundtrip_definitions():
+        ids = fixture_ids[source]
+        work = directory / source
+        work.mkdir()
+        options = {"operation": ("imre", "json.loads, json.dumps, json.loads; parsed-value equality")} if provenance else {}
+        callback = native_method(tools, work, path, owner, ids[0],
+                                 prepare(path, owner, "test_parse") + ASSERT_EQUAL, **options)
+        yield source, ids, 1, callback
 
 
 def main():

@@ -1,9 +1,35 @@
 """Logging classes compiled into the native program."""
 
+import logging
+import os.path
+import sys
 from logging import Formatter, LogRecord, getLevelNamesMapping
-from imre._logging import _Level, _Lock, _lookup_handler, _rename_handler
+from imre._logging import _Level, _Lock, _lookup_handler, _print_active_exception, _rename_handler
+from pathlib import Path
+from typing import TextIO
+from logging import Logger as _AdapterLogger
 
 _default_formatter = Formatter()
+
+
+def _handle_error(record: LogRecord) -> None:
+    if not logging.raiseExceptions:
+        return
+    try:
+        sys.stderr.write("--- Logging error ---\n")
+        _print_active_exception()
+        sys.stderr.write("Call stack:\n")
+        sys.stderr.write(f"Logged from file {record.filename}, line {record.lineno}\n")
+        details = Formatter("Message: %(msg)r\nArguments: %(args)s")
+        try:
+            sys.stderr.write(details.formatMessage(record) + "\n")
+        except RecursionError:
+            raise
+        except Exception:
+            sys.stderr.write("Unable to print the message and arguments - possible formatting error.\n"
+                             "Use the traceback above to help find the error.\n")
+    except OSError:
+        pass
 
 
 class Filter:
@@ -34,6 +60,48 @@ def _handler_level(level: _Level) -> int:
             raise ValueError(f"Unknown level: {level!r}")
         return levels[level]
     return level
+
+
+class LoggerAdapter:
+    logger: _AdapterLogger
+    extra: dict[str, str] | None
+    merge_extra: bool
+
+    def __init__(self, logger: _AdapterLogger, extra: dict[str, str] | None = None, merge_extra: bool = False) -> None:
+        self.logger = logger
+        self.extra = extra
+        self.merge_extra = merge_extra
+
+    def process(self, msg: str, kwargs: dict[str, dict[str, str] | None]) -> tuple[str, dict[str, dict[str, str] | None]]:
+        incoming = kwargs.get("extra")
+        if self.merge_extra and incoming is not None:
+            defaults = self.extra
+            if defaults is not None:
+                merged: dict[str, str] = {}
+                for key in defaults:
+                    merged[key] = defaults[key]
+                for key in incoming:
+                    merged[key] = incoming[key]
+                kwargs["extra"] = merged
+        else:
+            kwargs["extra"] = self.extra
+        return msg, kwargs
+
+    def isEnabledFor(self, level: int) -> bool:
+        return self.logger.isEnabledFor(level)
+
+    def setLevel(self, level: _Level) -> None:
+        self.logger.setLevel(_handler_level(level))
+
+    def getEffectiveLevel(self) -> int:
+        return self.logger.getEffectiveLevel()
+
+    def hasHandlers(self) -> bool:
+        return self.logger.hasHandlers()
+
+    @property
+    def name(self) -> str:
+        return self.logger.name
 
 
 class Handler:
@@ -95,6 +163,9 @@ class Handler:
     def emit(self, record: LogRecord | None) -> None:
         raise NotImplementedError("emit must be implemented by Handler subclasses")
 
+    def handleError(self, record: LogRecord) -> None:
+        _handle_error(record)
+
     def flush(self) -> None:
         pass
 
@@ -105,6 +176,109 @@ class Handler:
 
 def getHandlerByName(name: str) -> Handler | None:
     return _lookup_handler(name)
+
+
+def _logfile_name(filename: str | Path) -> str:
+    if isinstance(filename, Path):
+        return os.path.abspath(str(filename))
+    return os.path.abspath(filename)
+
+
+def _open_logfile(filename: str, mode: str, encoding: str) -> TextIO:
+    codec = encoding.lower().replace("_", "-")
+    if codec != "utf-8" and codec != "utf8" and codec != "locale":
+        raise NotImplementedError("FileHandler stream encoding: " + encoding)
+    path = Path(filename)
+    if mode == "a" or mode == "at" or mode == "ta":
+        return path.open("a", encoding="utf-8")
+    if mode == "w" or mode == "wt" or mode == "tw":
+        return path.open("w", encoding="utf-8")
+    if mode == "x" or mode == "xt" or mode == "tx":
+        return path.open("x", encoding="utf-8")
+    if mode == "r" or mode == "rt" or mode == "tr":
+        return path.open("r", encoding="utf-8")
+    raise NotImplementedError("FileHandler stream mode: " + mode)
+
+
+class FileHandler:
+    baseFilename: str
+    mode: str
+    encoding: str
+    errors: str | None
+    delay: bool
+    stream: TextIO | None
+    terminator: str
+    formatter: Formatter | None
+    _closed: bool
+
+    def __init__(self, filename: str | Path, mode: str = "a", encoding: str | None = None,
+                 delay: bool = False, errors: str | None = None) -> None:
+        path = _logfile_name(filename)
+        codec = "locale" if encoding is None else encoding
+        self.baseFilename = path
+        self.mode = mode
+        self.encoding = codec
+        self.errors = errors
+        self.delay = delay
+        self.terminator = "\n"
+        self.formatter = None
+        self._closed = False
+        self.stream = None if delay else _open_logfile(path, mode, codec)
+
+    def _open(self) -> TextIO:
+        return _open_logfile(self.baseFilename, self.mode, self.encoding)
+
+    def format(self, record: LogRecord) -> str:
+        formatter = self.formatter
+        if formatter is None:
+            return _default_formatter.format(record)
+        return formatter.format(record)
+
+    def setFormatter(self, fmt: Formatter | None) -> None:
+        self.formatter = fmt
+
+    def flush(self) -> None:
+        stream = self.stream
+        if stream is not None:
+            stream.flush()
+
+    def emit(self, record: LogRecord) -> None:
+        stream = self.stream
+        if stream is None:
+            if self.mode == "w" and self._closed:
+                return
+            stream = self._open()
+            self.stream = stream
+        try:
+            message = self.format(record)
+            stream = self.stream
+            if stream is None:
+                raise AttributeError("'NoneType' object has no attribute 'write'")
+            stream.write(message + self.terminator)
+            self.flush()
+        except RecursionError:
+            raise
+        except Exception:
+            self.handleError(record)
+
+    def handleError(self, record: LogRecord) -> None:
+        _handle_error(record)
+
+    def handle(self, record: LogRecord) -> LogRecord:
+        self.emit(record)
+        return record
+
+    def close(self) -> None:
+        try:
+            stream = self.stream
+            if stream is not None:
+                try:
+                    stream.flush()
+                finally:
+                    self.stream = None
+                    stream.close()
+        finally:
+            self._closed = True
 
 
 class NullHandler(Handler):

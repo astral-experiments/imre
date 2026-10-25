@@ -56,8 +56,8 @@ fn required(name: &str, ty: Type) -> Parameter {
 }
 
 impl Checker<'_> {
-    /// Bind the private weak registry to the public fixed Handler record type.
-    pub(super) fn named_handler(
+    /// Bind the private operations used by the public handler implementation.
+    pub(super) fn handler_operation(
         &mut self,
         symbol: Intrinsic,
         call: &ast::ExprCall,
@@ -87,6 +87,7 @@ impl Checker<'_> {
                 self.types.optional(handler),
                 vec![required("name", Type::Str)],
             ),
+            Intrinsic::PrintActiveException => (Log::PrintActiveException, Type::None, vec![]),
             _ => unreachable!(),
         };
         let args = self.arguments(call, &params, None)?;
@@ -313,6 +314,10 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        if attribute.attr.as_str() == "hasHandlers" {
+            let args = self.arguments(call, &[], Some(logger))?;
+            return Ok(self.ordered_builtin(Builtin::Logging(Log::HasHandlers), Type::Bool, args));
+        }
         if attribute.attr.as_str() == "getChildren" {
             let args = self.arguments(call, &[], Some(logger))?;
             return Ok(self.ordered_builtin(

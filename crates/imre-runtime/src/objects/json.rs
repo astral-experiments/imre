@@ -19,7 +19,10 @@ use super::words::{OwnedWord, WordKind, Words};
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish};
 
 mod binary;
+mod decoder;
 mod encode;
+#[cfg(test)]
+pub(super) use encode::imre_json_dumps;
 pub(super) mod readonly;
 mod syntax;
 mod toml;
@@ -153,6 +156,11 @@ struct DecodeState<'a> {
 }
 
 impl DecodeState<'_> {
+    fn array_allocation<E: serde::de::Error>(&mut self) -> E {
+        *self.allocation = Some(Error::allocation());
+        E::custom("array allocation failed")
+    }
+
     fn check<E: serde::de::Error>(&mut self) -> Result<(), E> {
         if !self.checked {
             check_depth(self.text).map_err(E::custom)?;
@@ -314,6 +322,9 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
         if self.0.word_kind == 4 {
             let mut values = Vec::new();
             while let Some(value) = sequence.next_element_seed(Seed(child, self.1))? {
+                values
+                    .try_reserve(1)
+                    .map_err(|_| self.1.array_allocation::<A::Error>())?;
                 values.push(Int(value.into_word()));
             }
             // SAFETY: the schema is list[int], and every element owns an exact Int.
@@ -327,6 +338,10 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
             // and drops both the suspended cursor and this array's partial owners.
             let outer = self.1.records.take();
             while let Some(value) = sequence.next_element_seed(Seed(child, self.1))? {
+                values
+                    .values
+                    .try_reserve(1)
+                    .map_err(|_| self.1.array_allocation::<A::Error>())?;
                 values.values.push(value.into_word());
                 if values.values.len() == values.values.inline_size() + 1 {
                     // Once the array spills its inline slots, pack subsequent records.
@@ -337,6 +352,10 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
             self.1.records = outer;
         } else {
             while let Some(value) = sequence.next_element_seed(Seed(child, self.1))? {
+                values
+                    .values
+                    .try_reserve(1)
+                    .map_err(|_| self.1.array_allocation::<A::Error>())?;
                 values.values.push(value.into_word());
             }
         }
@@ -367,7 +386,7 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
                 }
             }
             let pointer = Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
-                Box::new(mapping),
+                crate::objects::mappings::TableOwner::new(mapping),
             ))))) as usize;
             // SAFETY: the new dictionary owns every successfully decoded entry.
             return Ok(unsafe { OwnedWord::from_owned(pointer, self.0.storage()) });

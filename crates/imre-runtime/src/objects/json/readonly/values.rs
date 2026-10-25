@@ -17,6 +17,16 @@ impl View {
     }
 
     pub(in crate::objects) fn equal(&self, right: &Self) -> bool {
+        if let (Some(left), Some(right)) = (self.nodes.root_items(), right.nodes.root_items()) {
+            // Preserve Python list identity shortcuts for the root and shared elements.
+            // SAFETY: both objects are rooted lists with JsonValue element storage.
+            return unsafe {
+                crate::objects::values::imre_sequence_equal(
+                    std::rc::Rc::as_ptr(left),
+                    std::rc::Rc::as_ptr(right),
+                ) != 0
+            };
+        }
         let left_root = self.snapshot_root();
         let right_root = right.snapshot_root();
         let left = left_root.as_ref().unwrap_or(self);
@@ -62,11 +72,11 @@ impl View {
                 a.len() == b.len() && a.iter().zip(b).all(|(&a, &b)| self.equal_at(a, other, b))
             }
             (Node::Object(a), Node::Object(b)) => {
-                // Only the last value for a repeated JSON key participates in comparison.
-                a.iter().all(|(key, _)| {
-                    right
-                        .lookup(key)
-                        .is_some_and(|b| self.equal_at(left.lookup(key).unwrap(), other, b))
+                a.iter().enumerate().all(|(i, (key, value))| {
+                    a.is_shadowed(i)
+                        || right
+                            .lookup(key)
+                            .is_some_and(|b| self.equal_at(*value, other, b))
                 }) && b.iter().all(|(key, _)| left.lookup(key).is_some())
             }
             _ => false,

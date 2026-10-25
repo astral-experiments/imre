@@ -96,6 +96,13 @@ impl Owned {
         Self(Py::integer(value.into_raw()))
     }
 
+    pub(super) fn bytes(value: Bytes) -> Self {
+        let ptr = Rc::into_raw(Rc::new(value))
+            .cast_mut()
+            .cast::<std::ffi::c_void>();
+        Self(Py(ptr.map_addr(|address| address | BYTES)))
+    }
+
     pub(super) fn as_py(&self) -> Py {
         self.0
     }
