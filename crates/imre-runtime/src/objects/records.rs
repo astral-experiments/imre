@@ -13,6 +13,7 @@ enum Release {
     Record(*const usize),
     Object(Rc<Object>),
     Sequence(WordKind, Vec<usize>),
+    Table(Box<dyn super::mappings::ReleaseEntries>, usize),
 }
 
 thread_local! {
@@ -398,6 +399,10 @@ pub(super) fn release_sequence_words(kind: WordKind, values: Vec<usize>) {
     release(Release::Sequence(kind, values));
 }
 
+pub(super) fn release_table(table: Box<dyn super::mappings::ReleaseEntries>) {
+    release(Release::Table(table, 0));
+}
+
 fn release(owner: Release) {
     PENDING_RELEASES.with(|slot| {
         // SAFETY: a non-null pointer belongs to the enclosing release on this
@@ -425,6 +430,11 @@ fn release(owner: Release) {
                     release_standalone_fields(record, descriptor(record), next, &pending);
                 },
                 Release::Object(object) => drop(object),
+                Release::Table(mut table, mut next) => {
+                    if table.release_next(&mut next) {
+                        pending.borrow_mut().push(Release::Table(table, next));
+                    }
+                }
                 Release::Sequence(kind, mut values) => {
                     if let Some(word) = values.pop() {
                         // SAFETY: the sequence transferred this independently owned word.
