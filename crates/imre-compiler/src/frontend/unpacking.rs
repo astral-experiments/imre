@@ -298,6 +298,15 @@ impl Checker<'_> {
                         kind: ExprKind::Builtin(Builtin::ZipMinReadSize, vec![value, receiver]),
                     }));
                 }
+                if let Type::ChainMap(id) = receiver.ty
+                    && attribute.attr.as_str() == "maps"
+                {
+                    let maps = self.coerce(value, self.types.list(Type::Dict(id)), target)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::ChainMapSetMaps, vec![maps, receiver]),
+                    }));
+                }
                 if let Some(class) = self.writable_property(receiver.ty, attribute) {
                     return self.set_property(class, attribute, receiver, value);
                 }

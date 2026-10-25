@@ -513,6 +513,27 @@ pub(super) unsafe fn try_write_repr(
                         Storage::Dictionary(mapping) => {
                             format_entry(owner, mapping.repr_entry(output, position)?, &mut pending)
                         }
+                        Storage::ChainMap(maps) => {
+                            if position == 0 {
+                                if pending.iter().any(|task| matches!(task, ReprTask::Object(active, _) if *active == owner)) {
+                                    output.write_str("...")?;
+                                    return Ok(None);
+                                }
+                                output.write_str("ChainMap(")?;
+                            }
+                            let mapping = maps.0.with(|s| s.sequence().values.get(position).copied());
+                            if let Some(mapping) = mapping {
+                                if position != 0 {
+                                    output.write_str(", ")?;
+                                }
+                                pending.try_reserve(1).map_err(|_| std::fmt::Error)?;
+                                pending.push(ReprTask::Object(owner, position + 1));
+                                Ok(Some(ReprTask::Object(mapping as *const Object, 0)))
+                            } else {
+                                output.write_char(')')?;
+                                Ok(None)
+                            }
+                        }
                         Storage::SimpleNamespace(dict) => {
                             let entry = dict.0.with(|state| {
                                 state.dictionary().namespace_repr_entry(output, position)

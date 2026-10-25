@@ -85,7 +85,11 @@ impl Builtin {
             Self::MappingObjectGet => Contract::new(true, PreservesOwners),
             Self::BoxValue | Self::ExceptionTupleView => Contract::new(false, PreservesOwners),
             Self::ExceptionFieldRepr => Contract::new(true, PreservesOwners),
-            Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
+            Self::ExceptionRepr
+            | Self::ExceptionMessage
+            | Self::Logging(crate::ir::LogOperation::PrintActiveException) => {
+                Contract::new(true, Unknown)
+            }
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {
                 Contract::new(false, PreservesLists)
             }
@@ -203,7 +207,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::TimeSleep
-            | Self::PercentScalar
+            | Self::PercentFormat
             | Self::WarningFilter { .. }
             | Self::WarningReset => Contract::new(true, PreservesLists),
             Self::Formatter(_) => Contract::new(true, PreservesLists),
@@ -275,6 +279,8 @@ impl Builtin {
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Fd(_)
+                | ProcessOperation::Credential(_)
+                | ProcessOperation::CredentialId { .. }
                 | ProcessOperation::OsErrorField(_)
                 | ProcessOperation::Strerror
                 | ProcessOperation::Which
@@ -340,6 +346,7 @@ impl Builtin {
             | Self::RecordCopy
             | Self::JsonDecode(_)
             | Self::CsvReader { .. }
+            | Self::FormatCursor { .. }
             | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads
@@ -393,6 +400,8 @@ impl Builtin {
             | Self::ActiveException
             | Self::ExceptionRecord
             | Self::ExceptionCause
+            // A fresh exception retains its cause without replacing any existing owner.
+            | Self::ExceptionWithCause
             | Self::ExceptionSuppressContext
             | Self::FloatFormat { .. }
             | Self::HexFormat { .. }
@@ -530,12 +539,14 @@ impl Builtin {
             | Self::DequeMaxlen
             | Self::DequeIter { .. }
             | Self::CounterNew
+            | Self::ChainMapNew
+            | Self::ChainMapMaps
+            | Self::ChainMapSetMaps
             | Self::CounterTotal
             | Self::DictAsBase
             | Self::DictClear
             | Self::ListClear
             | Self::DictIter(_)
-            | Self::ExceptionWithCause
             | Self::GlobalSet(_)
             | Self::ExactRecord(_)
             | Self::RecordView
@@ -830,6 +841,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_time_sleep"
                 | "imre_str_percent_int"
                 | "imre_str_percent_text"
+                | "imre_str_percent_tuple"
                 | "imre_formatter_format"
                 | "imre_formatter_time"
                 | "imre_formatter_message"

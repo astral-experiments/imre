@@ -26,6 +26,7 @@ use super::{Bytes, Int, Object, Storage, Str, fail, object};
 mod argv;
 mod asynchronous;
 mod launch_error;
+mod pass_fds;
 mod popen;
 pub(super) use asynchronous::AsyncProcess;
 pub(super) use popen::Popen;
@@ -434,6 +435,32 @@ impl PathSearch {
     }
 }
 
+struct ChildAttributes {
+    new_session: bool,
+    group: libc::pid_t,
+    mask: Option<libc::mode_t>,
+    keep: Vec<RawFd>,
+}
+
+impl Default for ChildAttributes {
+    fn default() -> Self {
+        Self {
+            new_session: false,
+            group: -1,
+            mask: None,
+            keep: Vec::new(),
+        }
+    }
+}
+
+impl ChildAttributes {
+    /// A negative group other than -1 skips setpgid, but still selects CPython's
+    /// fork/exec path and preserves the caller's executable object on failure.
+    fn requires_fork(&self) -> bool {
+        self.new_session || self.group != -1 || self.mask.is_some() || !self.keep.is_empty()
+    }
+}
+
 struct Launch {
     argv: CStrings,
     executable: Option<CString>,
@@ -487,7 +514,15 @@ impl Launch {
     /// Call only from Command::pre_exec after stdio and cwd setup. Every referenced
     /// buffer was allocated in the parent; only async-signal-safe libc operations
     /// and allocation-free OS-error construction are allowed until exec or _exit.
-    unsafe fn exec_child(&mut self, close_fds: bool) -> io::Result<()> {
+    unsafe fn exec_child(
+        &mut self,
+        close_fds: bool,
+        attributes: &ChildAttributes,
+    ) -> io::Result<()> {
+        if let Some(mask) = attributes.mask {
+            // SAFETY: this is the forked child; umask never fails.
+            unsafe { libc::umask(mask) };
+        }
         for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
             // SAFETY: restore_signals resets dispositions Python ignores; signal
             // is async-signal-safe and both arguments are valid signal constants.
@@ -495,10 +530,22 @@ impl Launch {
                 return Err(io::Error::last_os_error());
             }
         }
-        // SAFETY: this is the forked child after Command's stdio setup.
+        // SAFETY: setsid and setpgid are async-signal-safe. Apply them in
+        // CPython's order; a new session leader cannot also change its group.
+        if attributes.new_session && unsafe { libc::setsid() } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if attributes.group >= 0
+            // SAFETY: this is the forked child and group is a validated pid_t.
+            && unsafe { libc::setpgid(0, attributes.group) } < 0
+        {
+            return Err(io::Error::last_os_error());
+        }
         if close_fds {
             // SAFETY: the forked child owns its descriptor table.
             unsafe { self.descriptors.apply()? };
+            // SAFETY: this runs only after fork. No allocator or callback is used.
+            unsafe { pass_fds::inherit(&attributes.keep)? };
         }
         let mut saved_error = None;
         let mut last_error = libc::ENOENT;
@@ -539,7 +586,7 @@ impl Launch {
     }
 
     fn spawn(self, cwd: Option<&CString>, streams: u32) -> io::Result<Child> {
-        self.spawn_tagged(cwd, streams, [-1; 3])
+        self.spawn_tagged(cwd, streams, [-1; 3], ChildAttributes::default())
             .map_err(|err| launch_error::decode(err).1)
     }
 
@@ -548,10 +595,19 @@ impl Launch {
         cwd: Option<&CString>,
         streams: u32,
         descriptors: [RawFd; 3],
+        attributes: ChildAttributes,
     ) -> io::Result<Child> {
         // STDOUT in the stdin slot reaches child descriptor setup as fd -2.
         if (streams >> 12) & 15 == 5 {
             return Err(io::Error::from_raw_os_error(libc::EBADF));
+        }
+        // Check before opening any stdio or launch-error pipes: an invalid caller
+        // fd must not accidentally become valid when Command allocates a pipe.
+        for &fd in &attributes.keep {
+            // SAFETY: F_GETFD validates the supplied fd without changing it.
+            if unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0 {
+                return Err(io::Error::last_os_error());
+            }
         }
         // Check the original descriptor table before duplicating anything. A
         // duplicate for stdout must not make a closed stderr descriptor valid.
@@ -614,7 +670,7 @@ impl Launch {
                 if stderr == 5 && libc::dup2(libc::STDOUT_FILENO, libc::STDERR_FILENO) < 0 {
                     return Err(io::Error::last_os_error());
                 }
-                self.exec_child(streams & (1 << 17) == 0)
+                self.exec_child(streams & (1 << 17) == 0, &attributes)
             })
         };
         command.spawn()
@@ -1171,7 +1227,11 @@ unsafe fn spawn_list(
     let cmd = unsafe { WordKind::new(5).acquire(args as usize) };
     let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, streams, 0, true);
     // SAFETY: the original configuration remains rooted while spawn reports any error.
-    unsafe { launch_error::spawn(&cmd, &config, streams, [-1; 3], false) }
+    unsafe {
+        launch_error::spawn(&cmd, &config, streams, [-1; 3], false, |_| {
+            Ok(ChildAttributes::default())
+        })
+    }
 }
 
 /// # Safety
@@ -1248,10 +1308,15 @@ unsafe fn prepare_process(
     // SAFETY: existing run and asynchronous ABIs accept an exact list.
     let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, 0, 0, true);
     // SAFETY: the legacy arguments have their original word representations.
-    unsafe { prepare_command(&WordKind::new(5).acquire(args as usize), &config, false) }
+    let (launch, cwd, _) = unsafe {
+        prepare_command(&WordKind::new(5).acquire(args as usize), &config, || {
+            Ok(ChildAttributes::default())
+        })?
+    };
+    Ok((launch, cwd))
 }
 
-/// Conversion error shared by Popen's file descriptors and pipe buffer sizes.
+/// Conversion error shared by POSIX launch arguments that take a C int.
 fn c_int_overflow() -> Error {
     Error::new(
         Kind::OverflowError,
@@ -1264,8 +1329,8 @@ fn c_int_overflow() -> Error {
 unsafe fn prepare_command(
     cmd: &OwnedWord,
     config: &popen::LaunchConfig,
-    oversized_fork_fd: bool,
-) -> Result<(Launch, Option<CString>)> {
+    child_attributes: impl FnOnce() -> Result<ChildAttributes>,
+) -> Result<(Launch, Option<CString>, ChildAttributes)> {
     // SAFETY: the caller roots the exact argv, optional directory and environment.
     unsafe {
         // Python selects args[0], validates every environment name, then
@@ -1303,10 +1368,9 @@ unsafe fn prepare_command(
                 "illegal environment variable name",
             ));
         }
-        // The fork/exec C argument parser converts descriptors before processing argv.
-        if oversized_fork_fd {
-            return Err(c_int_overflow());
-        }
+        // _execute_child validates environment names before _fork_exec converts
+        // its integer arguments. Conversion of argv and cwd to C strings follows.
+        let attributes = child_attributes()?;
         let executable = argv::optional_path(config.executable, config.executable_kind)?;
         let mut argv = argv::copy(cmd)?;
         if config.shell {
@@ -1323,7 +1387,11 @@ unsafe fn prepare_command(
             argv.splice(..0, [shell.to_owned(), c"-c".to_owned()]);
         }
         let cwd = argv::optional_path(config.cwd, config.cwd_kind)?;
-        Ok((Launch::with_executable(argv, env, executable)?, cwd))
+        Ok((
+            Launch::with_executable(argv, env, executable)?,
+            cwd,
+            attributes,
+        ))
     }
 }
 

@@ -1,0 +1,24 @@
+{
+  "compiler_revision": "04337d36ce1b61b94a757b6458c25f953ef3085b",
+  "fixture_sha256": "156b37eda249178d39cdb9a8394265b377001f163a3b09586f3419746432229b",
+  "outputs_per_mode": 532,
+  "reference_sha256": "92c6791ec605fc0ef0d3d25f05d2296cfa15583f8bf311cdadad5797d0dd0ddd",
+  "modes": {
+    "O0-reachable-0": {
+      "outcome": "matched",
+      "stdout_sha256": "92c6791ec605fc0ef0d3d25f05d2296cfa15583f8bf311cdadad5797d0dd0ddd"
+    },
+    "O0-reachable-1": {
+      "outcome": "matched",
+      "stdout_sha256": "92c6791ec605fc0ef0d3d25f05d2296cfa15583f8bf311cdadad5797d0dd0ddd"
+    },
+    "O3-reachable-0": {
+      "outcome": "matched",
+      "stdout_sha256": "92c6791ec605fc0ef0d3d25f05d2296cfa15583f8bf311cdadad5797d0dd0ddd"
+    },
+    "O3-reachable-1": {
+      "outcome": "matched",
+      "stdout_sha256": "92c6791ec605fc0ef0d3d25f05d2296cfa15583f8bf311cdadad5797d0dd0ddd"
+    }
+  }
+}
