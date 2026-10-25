@@ -11,11 +11,11 @@ Imre's matcher uses the same component-pattern parser as `pathlib`. `fnmatch` an
 | Unchanged CPython methods with all fnmatch calls supplied by Imre | 24/24 | 24/24 |
 | Calls from those methods | 2,432 | 2,432 |
 | Distinct native calls compared with CPython | 2,429 | 2,429 |
-| Entire methods compiled and run with native assertions | 0/24 | 0/24 |
+| Entire methods run with their original class, native assertions and unittest runner | 8/24 | 8/24 |
 
-The [operation runner](run_operations.py) traces the unchanged suite, compiles its requests, checks return values and TypeError messages, and replays the native answers through the original fixtures and assertions. The [body runner](run_bodies.py) also attempts every complete original method. The [occurrence ledger](evidence-linux.json) records the result and compiler diagnostic for each attempt. These are host-driven native operations. They do not count as fully native tests.
+The [operation runner](run_operations.py) traces the unchanged suite, compiles its requests, checks return values and TypeError messages, and replays the native answers through the original fixtures and assertions. The [body runner](run_bodies.py) separately compiles each complete original method with its class, required imports and platform flags, and the original `unittest.main()` entry. Five filter cases and the three `test_mix_bytes_str` methods pass this way. The latter exercise mixed string/bytes arguments in `fnmatch`, `fnmatchcase`, `filter` and `filterfalse` using the original callable `assertRaises`. Swapping the public filters makes each of the five filter cases fail. Giving the first mixed-type call a matching string pattern makes each of the other three fail. The remaining 16 methods are [recorded](evidence-linux.json) as host-driven native operations.
 
-An [unmodified suite startup probe](whole-suite-startup.json) stops at `import string` before unittest discovers any cases. Individual method probes also encounter callable defaults, bound methods, global platform flags, unittest context managers and list assertions. None is recorded as an upstream skip.
+The [unmodified whole-file probe](whole-suite-startup.json) now reaches the callable default `fn=fnmatch` in `check_match` at line 16. Neither compilation mode starts the whole suite. The per-method ledger includes the first diagnostic for each method that still needs the host; these are not upstream skips.
 
 ## Reproduce
 

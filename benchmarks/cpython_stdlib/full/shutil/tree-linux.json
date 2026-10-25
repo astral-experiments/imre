@@ -1,0 +1,337 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "optimization_levels": {
+    "0": {
+      "test.test_shutil.TestCopyTree.test_copytree_arg_types_of_ignore": {
+        "status": "mixed",
+        "operations": {
+          "copytree": 3,
+          "rmtree": 0
+        },
+        "callback_argument_types": [
+          [
+            "str",
+            "list[str]"
+          ],
+          [
+            "str",
+            "list[str]"
+          ],
+          [
+            "str",
+            "list[str]"
+          ],
+          [
+            "str",
+            "list[str]"
+          ],
+          [
+            "str",
+            "list[str]"
+          ],
+          [
+            "str",
+            "list[str]"
+          ],
+          [
+            "str",
+            "list[str]"
+          ],
+          [
+            "str",
+            "list[str]"
+          ],
+          [
+            "str",
+            "list[str]"
+          ]
+        ],
+        "host_source_types": [
+          "str",
+          "FakePath",
+          "DirEntry"
+        ]
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_custom_copy_function": {
+        "status": "mixed",
+        "operations": {
+          "copytree": 1,
+          "rmtree": 0
+        },
+        "callback_argument_types": [
+          [
+            "str",
+            "str"
+          ]
+        ]
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_dangling_symlinks": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 3,
+          "rmtree": 0
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_dirs_exist_ok": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 2,
+          "rmtree": 2
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_named_pipe": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 1,
+          "rmtree": 2
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_retains_permissions": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 1,
+          "rmtree": 1
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_return_value": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 1,
+          "rmtree": 1
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_simple": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 1,
+          "rmtree": 2
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_special_func": {
+        "status": "mixed",
+        "operations": {
+          "copytree": 1,
+          "rmtree": 0
+        },
+        "callback_argument_types": [
+          [
+            "str",
+            "str"
+          ],
+          [
+            "str",
+            "str"
+          ]
+        ]
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_subdirectory": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 1,
+          "rmtree": 1
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_symlink_dir": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 2,
+          "rmtree": 0
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_symlinks": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 1,
+          "rmtree": 0
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_winerror": {
+        "status": "blocked",
+        "reason": "the test replaces os.chmod with a PermissionError-raising mock"
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_with_exclude": {
+        "status": "mixed",
+        "operations": {
+          "copytree": 3,
+          "rmtree": 5,
+          "ignore_patterns": 2
+        },
+        "callback_argument_types": [
+          [
+            "str",
+            "list[str]"
+          ]
+        ],
+        "host_source_types": [
+          "str"
+        ]
+      }
+    },
+    "3": {
+      "test.test_shutil.TestCopyTree.test_copytree_arg_types_of_ignore": {
+        "status": "mixed",
+        "operations": {
+          "copytree": 3,
+          "rmtree": 0
+        },
+        "callback_argument_types": [
+          [
+            "str",
+            "list[str]"
+          ],
+          [
+            "str",
+            "list[str]"
+          ],
+          [
+            "str",
+            "list[str]"
+          ],
+          [
+            "str",
+            "list[str]"
+          ],
+          [
+            "str",
+            "list[str]"
+          ],
+          [
+            "str",
+            "list[str]"
+          ],
+          [
+            "str",
+            "list[str]"
+          ],
+          [
+            "str",
+            "list[str]"
+          ],
+          [
+            "str",
+            "list[str]"
+          ]
+        ],
+        "host_source_types": [
+          "str",
+          "FakePath",
+          "DirEntry"
+        ]
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_custom_copy_function": {
+        "status": "mixed",
+        "operations": {
+          "copytree": 1,
+          "rmtree": 0
+        },
+        "callback_argument_types": [
+          [
+            "str",
+            "str"
+          ]
+        ]
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_dangling_symlinks": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 3,
+          "rmtree": 0
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_dirs_exist_ok": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 2,
+          "rmtree": 2
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_named_pipe": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 1,
+          "rmtree": 2
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_retains_permissions": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 1,
+          "rmtree": 1
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_return_value": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 1,
+          "rmtree": 1
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_simple": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 1,
+          "rmtree": 2
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_special_func": {
+        "status": "mixed",
+        "operations": {
+          "copytree": 1,
+          "rmtree": 0
+        },
+        "callback_argument_types": [
+          [
+            "str",
+            "str"
+          ],
+          [
+            "str",
+            "str"
+          ]
+        ]
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_subdirectory": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 1,
+          "rmtree": 1
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_symlink_dir": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 2,
+          "rmtree": 0
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_symlinks": {
+        "status": "host_driven_native",
+        "operations": {
+          "copytree": 1,
+          "rmtree": 0
+        }
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_winerror": {
+        "status": "blocked",
+        "reason": "the test replaces os.chmod with a PermissionError-raising mock"
+      },
+      "test.test_shutil.TestCopyTree.test_copytree_with_exclude": {
+        "status": "mixed",
+        "operations": {
+          "copytree": 3,
+          "rmtree": 5,
+          "ignore_patterns": 2
+        },
+        "callback_argument_types": [
+          [
+            "str",
+            "list[str]"
+          ]
+        ],
+        "host_source_types": [
+          "str"
+        ]
+      }
+    }
+  }
+}

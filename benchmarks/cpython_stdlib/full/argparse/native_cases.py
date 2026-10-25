@@ -2,15 +2,18 @@
 
 import argparse
 import ast
+import builtins
 from collections import Counter
 from functools import cache, partial
 import hashlib
+import io
 import json
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+import tokenize
 import traceback
 import types
 import unittest
@@ -51,6 +54,42 @@ def completed(command):
     return result.returncode, result.stdout, result.stderr
 
 
+def namespace_value(text):
+    """Decode native repr; quoted text that resembles a class stays a string."""
+    classes = {}
+    if "<class " in text:
+        parts = []
+        tokens = iter(tokenize.generate_tokens(io.StringIO(text).readline))
+        for token in tokens:
+            if (token.type, token.string) != (tokenize.OP, "<"):
+                parts.append((token.type, token.string))
+                continue
+            tag, literal, end = next(tokens), next(tokens), next(tokens)
+            if tag.string != "class" or literal.type != tokenize.STRING or end.string != ">":
+                raise AssertionError(f"unexpected native value in {text!r}")
+            name = ast.literal_eval(literal.string)
+            cls = getattr(builtins, name, None)
+            if not isinstance(cls, type) or cls.__module__ != "builtins" or cls.__name__ != name:
+                raise Blocked(f"cannot transfer native class {name!r}")
+            key = f"_native_class_{len(classes)}"
+            classes[key] = cls
+            parts.append((tokenize.NAME, key))
+        text = tokenize.untokenize(parts)
+    expr = ast.parse(text, mode="eval").body
+    if not isinstance(expr, ast.Call) or not isinstance(expr.func, ast.Name) or expr.func.id != "Namespace" or expr.args:
+        raise AssertionError(f"unexpected native namespace: {text!r}")
+
+    def value(node):
+        if isinstance(node, ast.Name) and node.id in classes:
+            return classes[node.id]
+        if isinstance(node, (ast.List, ast.Tuple)):
+            items = [value(item) for item in node.elts]
+            return items if isinstance(node, ast.List) else tuple(items)
+        return ast.literal_eval(node)
+
+    return types.SimpleNamespace(**{kw.arg: value(kw.value) for kw in expr.keywords})
+
+
 class Group:
     def __init__(self, declarations, name):
         self.declarations = declarations
@@ -58,6 +97,11 @@ class Group:
 
     def add_argument(self, *args, **kwargs):
         self.declarations.append(f"{self.name}.add_argument({arguments(args, kwargs)})")
+
+    def add_mutually_exclusive_group(self, *args, **kwargs):
+        name = f"mutex{len(self.declarations)}"
+        self.declarations.append(f"{name} = {self.name}.add_mutually_exclusive_group({arguments(args, kwargs)})")
+        return Group(self.declarations, name)
 
 
 class Parser(Group):
@@ -108,10 +152,7 @@ class Parser(Group):
         lines = stdout.removeprefix(marker).decode().splitlines()
         if len(lines) != (1 if method == "parse_args" else 2):
             raise AssertionError(f"unexpected native result: {stdout!r}")
-        expr = ast.parse(lines[0], mode="eval").body
-        if not isinstance(expr, ast.Call) or not isinstance(expr.func, ast.Name) or expr.func.id != "Namespace":
-            raise AssertionError(f"unexpected native namespace: {stdout!r}")
-        namespace = types.SimpleNamespace(**{kw.arg: ast.literal_eval(kw.value) for kw in expr.keywords})
+        namespace = namespace_value(lines[0])
         if method == "parse_args":
             return namespace
         extras = ast.literal_eval(lines[1])
