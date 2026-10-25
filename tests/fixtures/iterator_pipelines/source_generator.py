@@ -28,6 +28,9 @@ def opened() -> Iterator[int]:
 def main() -> None:
     seen: list[str] = []
     empty: list[int] = []
+    arguments = (["spread"], seen)
+    for row in rows(*arguments):
+        print(row[1])
     for index, item in zip(empty, rows(["unobserved"], seen)):
         print(index)
     for repetition in range(128):

@@ -201,22 +201,7 @@ impl Checker<'_> {
             return Ok(None);
         };
         if let Some((signature, element)) = self.generator_signature(call) {
-            if call.arguments.args.iter().any(ast::Expr::is_starred_expr)
-                || call.arguments.keywords.iter().any(|kw| kw.arg.is_none())
-            {
-                return Err(error(
-                    self.source,
-                    call,
-                    "generator calls do not support argument unpacking",
-                ));
-            }
-            let args = if self.inference.is_some() {
-                self.infer_call(call, &signature, None, 0)?.1
-            } else {
-                self.arguments(call, &signature.params, None)?
-            };
-            self.calls.insert(signature.id);
-            let frame = self.call_value(&signature, Type::None, args);
+            let frame = self.source_call(call, &signature, None, 0)?;
             let handle = self.hidden(Type::GeneratorContext);
             let value = self.hidden(element);
             let ready = self.hidden(Type::Bool);
