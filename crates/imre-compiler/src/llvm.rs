@@ -91,6 +91,7 @@ impl Type {
             | Self::ClockTime
             | Self::PlainObject
             | Self::StrDescriptor(_)
+            | Self::SimpleNamespace(_)
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -151,6 +152,7 @@ impl Type {
             | Self::ClockTime
             | Self::PlainObject
             | Self::StrDescriptor(_)
+            | Self::SimpleNamespace(_)
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -741,6 +743,7 @@ impl Emitter<'_, '_> {
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
+            | Type::SimpleNamespace(_)
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -3249,7 +3252,12 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {result}, 0"))
                 }
-                Type::Path | Type::PurePath(_) | Type::List(_) | Type::Dict(_) | Type::Set(_) => {
+                Type::Path
+                | Type::PurePath(_)
+                | Type::List(_)
+                | Type::Dict(_)
+                | Type::Set(_)
+                | Type::SimpleNamespace(_) => {
                     let operation = if left.ty.is_path() {
                         "path"
                     } else {
@@ -5262,6 +5270,29 @@ impl Emitter<'_, '_> {
             Builtin::RecordCopy => {
                 self.call("imre_record_shallow_copy", returns, &[&args[0].value])
             }
+            Builtin::NamespaceWrap | Builtin::NamespaceDict => self.call(
+                if matches!(builtin, Builtin::NamespaceWrap) {
+                    "imre_namespace_wrap"
+                } else {
+                    "imre_namespace_dict"
+                },
+                returns,
+                &[&args[0].value],
+            ),
+            Builtin::NamespaceGet => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_namespace_get(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                self.decode_word(word, returns)
+            }
+            Builtin::NamespaceDelete => {
+                self.checked_line(format!(
+                    "call void @imre_namespace_delete(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                none()
+            }
             Builtin::DictCopy => self.call("imre_dict_copy", returns, &[&args[0].value]),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
             Builtin::CounterNew => {
@@ -5638,6 +5669,7 @@ impl Emitter<'_, '_> {
                     | Type::ClockTime
                     | Type::StrDescriptor(_)
                     | Type::PlainObject
+                    | Type::SimpleNamespace(_)
                     | Type::Sha256
                     | Type::ZipFile
                     | Type::ZipInfo
@@ -5886,6 +5918,7 @@ impl Emitter<'_, '_> {
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
+            | Type::SimpleNamespace(_)
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -5960,6 +5993,7 @@ impl Emitter<'_, '_> {
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
+            | Type::SimpleNamespace(_)
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -6547,6 +6581,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ClockTime
         | Type::StrDescriptor(_)
         | Type::PlainObject
+        | Type::SimpleNamespace(_)
         | Type::Sha256
         | Type::ZipFile
         | Type::ZipInfo
@@ -6842,6 +6877,7 @@ declare ptr @imre_tempdir_new(ptr, ptr, ptr)
 declare void @imre_tempdir_cleanup(ptr)
 declare ptr @imre_path_iter(ptr, ptr)
 declare ptr @imre_path_glob(ptr, ptr, i64, i32, i32)
+declare ptr @imre_path_walk(ptr, i32, i32, ptr)
 declare ptr @imre_path_next(ptr)
 declare i64 @imre_float_box(double)
 declare double @imre_float_unbox(i64)
@@ -7055,6 +7091,10 @@ define internal i64 @imre_seq_borrow_index_proven_fast(ptr %sequence, i64 %index
 }
 declare ptr @imre_seq_repeat(ptr, i64)
 declare ptr @imre_dict_new(i32, i32)
+declare ptr @imre_namespace_wrap(ptr)
+declare ptr @imre_namespace_dict(ptr)
+declare i64 @imre_namespace_get(ptr, ptr)
+declare void @imre_namespace_delete(ptr, ptr)
 declare ptr @imre_dict_copy(ptr)
 declare i64 @imre_deep_copy(i64, i32)
 declare ptr @imre_record_shallow_copy(ptr)

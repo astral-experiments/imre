@@ -164,14 +164,22 @@ impl Checker<'_> {
             });
         }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
-        if matches!((left.ty, right.ty), (Type::Tuple(_), Type::Tuple(_)))
+        let wrapper_attributes = matches!((left.ty, right.ty), (Type::Tuple(_), Type::Tuple(_)))
             && [&left, &right].iter().any(|value| {
                 matches!(
                     value.kind,
                     ExprKind::Builtin(Builtin::WrapperAttributes(_), _)
                 )
-            })
-        {
+            });
+        // Namespace owners and their backing dictionaries are distinct rooted
+        // objects. Optional storage preserves their pointer words and None tag.
+        let namespace = types
+            .iter()
+            .any(|ty| matches!(ty, Type::SimpleNamespace(_)))
+            && types
+                .iter()
+                .all(|ty| matches!(ty, Type::SimpleNamespace(_) | Type::Dict(_) | Type::None));
+        if wrapper_attributes || namespace {
             return Ok(Self::identity_result(
                 vec![left, right],
                 op == ast::CmpOp::IsNot,
