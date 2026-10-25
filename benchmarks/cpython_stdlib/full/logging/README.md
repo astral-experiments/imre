@@ -62,3 +62,6 @@ CPython's full TestCase lifecycle natively.
 
 [Log record execution](records.md) lists the separate native-body and host-driven
 coverage for record representation, metadata and flag changes.
+
+[Formatter execution](formatters.md) covers all three styles and records where
+the original precision regression executes.
