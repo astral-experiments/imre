@@ -2323,8 +2323,12 @@ impl<'a> Checker<'a> {
             }
         }
         if matches!(concrete, Type::Callable(_)) {
-            if let Some(Binding::Intrinsic(op @ (Intrinsic::Copy(_) | Intrinsic::RmTree))) =
-                self.resolve(expression)
+            if let Some(Binding::Intrinsic(
+                op @ (Intrinsic::Copy(_)
+                | Intrinsic::RmTree
+                | Intrinsic::Move
+                | Intrinsic::DestInSrc),
+            )) = self.resolve(expression)
             {
                 let value = self.shutil_function_value(op, Some(concrete), expression)?;
                 return self.coerce(value, expected, expression);
@@ -4863,8 +4867,9 @@ impl<'a> Checker<'a> {
         {
             return self.callable_value(&signature, None, None, expression);
         }
-        if let Some(Binding::Intrinsic(op @ (Intrinsic::Copy(_) | Intrinsic::RmTree))) =
-            self.resolve(expression)
+        if let Some(Binding::Intrinsic(
+            op @ (Intrinsic::Copy(_) | Intrinsic::RmTree | Intrinsic::Move | Intrinsic::DestInSrc),
+        )) = self.resolve(expression)
         {
             return self.shutil_function_value(op, None, expression);
         }
@@ -6588,6 +6593,8 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
             Some(Binding::Intrinsic(Intrinsic::CopyTree)) => return self.shutil_copytree(call),
+            Some(Binding::Intrinsic(Intrinsic::Move)) => return self.shutil_move(call, false),
+            Some(Binding::Intrinsic(Intrinsic::DestInSrc)) => return self.shutil_move(call, true),
             Some(Binding::Intrinsic(Intrinsic::IgnorePatterns)) => {
                 return self.shutil_ignore_patterns(call);
             }
