@@ -1034,6 +1034,9 @@ pub(crate) const TUPLE_PROBE_ARITY: std::ops::RangeInclusive<usize> = 1..=16;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StringIoOperation {
     New,
+    Newlines,
+    Capability,
+    Readlines,
     Value,
     Read,
     Seek,

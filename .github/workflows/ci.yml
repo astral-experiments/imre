@@ -343,6 +343,11 @@ jobs:
           python3 benchmarks/cpython_stdlib/full/copy/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/copy-native.json"
           cmp benchmarks/cpython_stdlib/full/copy/native-linux.json "$RUNNER_TEMP/copy-native.json"
           python3 benchmarks/cpython_stdlib/full/copy/allocation_failure.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+      - name: Check native StringIO against CPython streams and original methods
+        run: |
+          python3 benchmarks/cpython_stdlib/full/doctest/stringio/native.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source "$RUNNER_TEMP/imre-cpython-fixtures" --result "$RUNNER_TEMP/stringio-native.json"
+          cmp benchmarks/cpython_stdlib/full/doctest/stringio/observations-linux.json "$RUNNER_TEMP/stringio-native.json"
+          python3 benchmarks/cpython_stdlib/full/doctest/stringio/consumer_startup.py --imre target/release/imre --cpython-git .cpython-stdlib-reference --result "$RUNNER_TEMP/stringio-startup.json"
       - name: Run complete itertools methods in native Imre
         run: |
           for opt in 0 3; do
