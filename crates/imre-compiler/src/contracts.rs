@@ -264,6 +264,7 @@ impl Builtin {
                 | ProcessOperation::GeneratorNext
                 | ProcessOperation::GeneratorYield
                 | ProcessOperation::Acquire
+                | ProcessOperation::ShellOutput { .. }
                 | ProcessOperation::CheckOutput { .. }
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
@@ -531,6 +532,7 @@ impl Builtin {
             | Self::GzipOpen
             | Self::BytesIo
             | Self::StringIo(_)
+            | Self::ContextVar(_)
             | Self::BinarySeek
             | Self::BinaryTell
             | Self::ZipOpenFile
@@ -609,6 +611,7 @@ impl Builtin {
             | Self::DictAsBase
             | Self::DictClear
             | Self::ListClear
+            | Self::ListReverse
             | Self::DictIter(_)
             | Self::GlobalSet(_)
             | Self::ExactRecord(_)
@@ -617,6 +620,7 @@ impl Builtin {
             | Self::ListDistinct
             | Self::ListExtendUnhinted
             | Self::DequeClear
+            | Self::DequeReverse
             | Self::SetIter
             | Self::SortDetach
             | Self::SplitLinesIter

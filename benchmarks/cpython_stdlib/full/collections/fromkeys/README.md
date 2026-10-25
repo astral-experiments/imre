@@ -5,6 +5,14 @@ It is one of 120 occurrences discovered in `test.test_dict` on pinned Linux
 CPython 3.14.5, separate from the [659 collections occurrences](../README.md).
 The complete file and [license](upstream/LICENSE) match [the upstream Git blobs](UPSTREAM.json).
 
+On [canonical main `0a46708`](runs/0a46708e7a95/source.json), the [original
+body](runs/0a46708e7a95/fromkeys-original.json) stops at its first dictionary
+assertion at O0 and O3: the available assertion expects an integer. The
+[native default fixture](runs/0a46708e7a95/fromkeys-native-default.json)
+also blocks. Its receiver check sees `self` inside locally defined methods,
+including `BadSeq.__iter__`, as outer test instance state. Neither attempt
+ran the complete method, including its subclasses and failing iterator.
+
 The original method tests class and instance calls, strings, tuples, an empty
 list, a generator, dict/set/list inputs, and a non-iterable. Its dict subclasses
 inherit the constructor, return a UserDict or existing dictionary from

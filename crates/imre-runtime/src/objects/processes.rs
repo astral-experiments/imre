@@ -27,6 +27,7 @@ mod asynchronous;
 mod launch_error;
 mod pass_fds;
 mod popen;
+mod shell_output;
 pub(super) use asynchronous::AsyncProcess;
 pub(super) use popen::{Popen, retain_live_owner};
 

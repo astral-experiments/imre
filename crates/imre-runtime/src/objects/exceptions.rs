@@ -524,6 +524,19 @@ impl Error {
         }
     }
 
+    /// Preserve a single object argument while displaying its Python representation.
+    pub(super) fn object_argument(kind: Kind, message: String, argument: OwnedWord) -> Self {
+        Self {
+            kind,
+            payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
+                message: StrOwner::new(message.into()),
+                args: smallvec::smallvec![argument],
+                os_paths: None,
+            }))),
+            cause: None,
+        }
+    }
+
     fn string_arg(text: impl Into<Str>) -> OwnedWord {
         let word = StrOwner::into_raw(StrOwner::new(text.into())) as usize;
         // SAFETY: kind 3 owns the transferred string allocation.

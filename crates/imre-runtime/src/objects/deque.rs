@@ -252,6 +252,20 @@ pub unsafe extern "C" fn imre_deque_reset(value: *const Object, limit: usize) {
     drop(removed);
 }
 
+/// Reverse the owned words in place. Existing iterators keep their positions.
+///
+/// # Safety
+/// The caller roots this deque until the exclusive storage borrow ends.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_deque_reverse(value: *const Object) {
+    // SAFETY: no element is copied or released while rearranging the ring.
+    unsafe {
+        object(value).0.with_mut(|storage| {
+            storage.deque_mut().items.make_contiguous().reverse();
+        });
+    }
+}
+
 /// # Safety
 /// The caller roots this deque while its length is read.
 #[unsafe(no_mangle)]

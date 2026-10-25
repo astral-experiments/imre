@@ -22,6 +22,7 @@ mod byte_outputs;
 mod calendar;
 mod callables;
 mod conditionals;
+mod contextvars;
 mod integer_regions;
 mod json;
 mod literals;
@@ -118,6 +119,10 @@ impl Type {
             | Self::JsonDecoder
             | Self::ZipFile
             | Self::ZipInfo
+            | Self::Context
+            | Self::ContextMissing
+            | Self::ContextVar(_)
+            | Self::ContextToken(_)
             | Self::CsvReader
             | Self::RegexPattern
             | Self::JsonRoot
@@ -201,6 +206,10 @@ impl Type {
             | Self::JsonDecoder
             | Self::ZipFile
             | Self::ZipInfo
+            | Self::Context
+            | Self::ContextMissing
+            | Self::ContextVar(_)
+            | Self::ContextToken(_)
             | Self::CsvReader
             | Self::RegexPattern
             | Self::JsonRoot
@@ -878,6 +887,10 @@ impl Emitter<'_, '_> {
             | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
+            | Type::Context
+            | Type::ContextMissing
+            | Type::ContextVar(_)
+            | Type::ContextToken(_)
             | Type::CsvReader
             | Type::RegexPattern
             | Type::JsonRoot
@@ -3603,6 +3616,10 @@ impl Emitter<'_, '_> {
                 | Type::JsonDecoder
                 | Type::ZipFile
                 | Type::ZipInfo
+                | Type::Context
+                | Type::ContextMissing
+                | Type::ContextVar(_)
+                | Type::ContextToken(_)
                 | Type::CsvReader
                 | Type::Exception
                 | Type::NamedException(_)
@@ -5400,6 +5417,7 @@ impl Emitter<'_, '_> {
                 self.call(symbol, returns, &[&args[0].value])
             }
             Builtin::Sha256Copy => self.call("imre_sha256_copy", Type::Sha256, &[&args[0].value]),
+            Builtin::ContextVar(operation) => self.context_operation(*operation, &args, returns),
             Builtin::StringIo(operation) => {
                 use crate::ir::StringIoOperation as Op;
                 let call = |this: &mut Self, symbol| {
@@ -6425,6 +6443,10 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_deque_clear", &[&args[0].value]);
                 none()
             }
+            Builtin::DequeReverse => {
+                self.void_call("imre_deque_reverse", &[&args[0].value]);
+                none()
+            }
             Builtin::DequeMaxlen => self.call("imre_deque_maxlen", returns, &[&args[0].value]),
             Builtin::DequeIter { reverse } => Value {
                 ty: Type::Iterator,
@@ -6764,11 +6786,12 @@ impl Emitter<'_, '_> {
                 self.release_operand(&args[0]);
                 return none();
             }
-            Builtin::ListClear => {
-                let symbol = if args[0].value.ty == Type::ListInt {
-                    "imre_list_clear"
-                } else {
-                    "imre_seq_clear"
+            Builtin::ListClear | Builtin::ListReverse => {
+                let symbol = match (builtin, args[0].value.ty) {
+                    (Builtin::ListClear, Type::ListInt) => "imre_list_clear",
+                    (Builtin::ListClear, _) => "imre_seq_clear",
+                    (_, Type::ListInt) => "imre_list_reverse",
+                    _ => "imre_seq_reverse",
                 };
                 self.void_call(symbol, &[&args[0].value]);
                 none()
@@ -6957,6 +6980,10 @@ impl Emitter<'_, '_> {
                     | Type::JsonDecoder
                     | Type::ZipFile
                     | Type::ZipInfo
+                    | Type::Context
+                    | Type::ContextMissing
+                    | Type::ContextVar(_)
+                    | Type::ContextToken(_)
                     | Type::CsvReader
                     | Type::RegexPattern
                     | Type::JsonRoot
@@ -7241,6 +7268,10 @@ impl Emitter<'_, '_> {
             | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
+            | Type::Context
+            | Type::ContextMissing
+            | Type::ContextVar(_)
+            | Type::ContextToken(_)
             | Type::CsvReader
             | Type::RegexPattern
             | Type::JsonRoot
@@ -7338,6 +7369,10 @@ impl Emitter<'_, '_> {
             | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
+            | Type::Context
+            | Type::ContextMissing
+            | Type::ContextVar(_)
+            | Type::ContextToken(_)
             | Type::CsvReader
             | Type::RegexPattern
             | Type::JsonRoot
@@ -7955,6 +7990,10 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::JsonDecoder
         | Type::ZipFile
         | Type::ZipInfo
+        | Type::Context
+        | Type::ContextMissing
+        | Type::ContextVar(_)
+        | Type::ContextToken(_)
         | Type::CsvReader
         | Type::RegexPattern
         | Type::JsonRoot
@@ -8142,6 +8181,7 @@ declare i64 @imre_document(i32, i64, i64, i64)
 declare i64 @imre_string_hash(ptr)
 declare void @imre_prepare_record_key(ptr)
 declare i64 @imre_projected_hash(ptr)
+declare ptr @imre_subprocess_shell_output(ptr, i32, i64, i64, ptr)
 declare ptr @imre_popen_config(ptr)
 declare i64 @imre_call_config(ptr, i32, i64, i1 zeroext)
 declare ptr @imre_popen_pipe(ptr, i32)
@@ -8468,6 +8508,20 @@ declare ptr @imre_import_error_field(ptr, i32)
 declare void @imre_import_error_reset(ptr, ptr)
 declare void @imre_import_error_reject_reset(ptr, ptr, ptr)
 declare ptr @imre_box_value(i32, i64)
+declare ptr @imre_contextvars_new(i1 zeroext)
+declare ptr @imre_contextvars_copy(ptr)
+declare ptr @imre_contextvars_var(ptr, i32, i64)
+declare zeroext i1 @imre_contextvars_contains(ptr, ptr)
+declare i64 @imre_contextvars_read(ptr, ptr)
+declare ptr @imre_contextvars_set(ptr, i32, i64)
+declare void @imre_contextvars_reset(ptr, ptr)
+declare ptr @imre_contextvars_name(ptr)
+declare ptr @imre_contextvars_token_var(ptr)
+declare ptr @imre_contextvars_old(ptr)
+declare zeroext i1 @imre_contextvars_was_missing(ptr)
+declare ptr @imre_contextvars_enter(ptr)
+declare void @imre_contextvars_leave(ptr, ptr)
+declare i64 @imre_contextvars_len(ptr)
 declare ptr @imre_object_record_payload(ptr, ptr)
 declare ptr @imre_mapping_object_get(ptr, ptr)
 declare ptr @imre_exception_tuple_view(ptr)
@@ -8559,6 +8613,8 @@ declare i32 @imre_seq_append(ptr, i64, i32)
 declare i64 @imre_seq_pop(ptr)
 declare void @imre_list_clear(ptr)
 declare void @imre_seq_clear(ptr)
+declare void @imre_list_reverse(ptr)
+declare void @imre_seq_reverse(ptr)
 declare i64 @imre_seq_len(ptr) nounwind
 declare i32 @imre_seq_resolve_header(ptr) nounwind
 ; The entry bootstrap can wait for imre run before it returns the layout.
@@ -8654,6 +8710,7 @@ declare ptr @imre_deque_extend_source(ptr, ptr)
 declare ptr @imre_deque_copy(ptr)
 declare i64 @imre_deque_pop(ptr, i32)
 declare void @imre_deque_clear(ptr)
+declare void @imre_deque_reverse(ptr)
 declare i64 @imre_deque_len(ptr)
 declare i64 @imre_deque_maxlen(ptr)
 declare ptr @imre_deque_iter(ptr, i32)

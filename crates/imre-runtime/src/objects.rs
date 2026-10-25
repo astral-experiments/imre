@@ -18,6 +18,7 @@ mod cache_paths;
 mod calendar;
 mod chainmap;
 mod contexts;
+mod contextvars;
 mod copying;
 mod csv;
 mod deferred_diff;
@@ -96,6 +97,10 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Plain,
+    Context(Rc<contextvars::State>),
+    ContextVar(Rc<contextvars::Variable>),
+    ContextToken(Rc<contextvars::Token>),
+    TokenMissing,
     Socket(socket::Socket),
     StrDescriptor(u32),
     Sequence(Words),
@@ -514,6 +519,20 @@ pub unsafe extern "C" fn imre_seq_clear(value: *const Object) {
         })
     };
     drop(previous);
+}
+
+/// Reverse the owned slots in place without acquiring or releasing them.
+///
+/// # Safety
+/// The caller roots the mutable list for the duration of the operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_seq_reverse(value: *const Object) {
+    // SAFETY: resolving the native sequence and swapping slots cannot invoke Python.
+    unsafe {
+        object(value)
+            .0
+            .with_mut(|storage| storage.sequence_mut().values.reverse())
+    };
 }
 
 /// # Safety
