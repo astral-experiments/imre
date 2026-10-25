@@ -28,3 +28,5 @@ python -I -B benchmarks/cpython_stdlib/full/logging/codec_writer.py \
   --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
   --result /tmp/codec-writer-linux.json
 ```
+
+The [sys registry integration run](https://github.com/astral-sh/imre/actions/runs/40220374525) used sys revision `c53dc9f`, which includes native ChainMap. The writer and sys device receipts both reproduced byte for byte at O0 and O3. The [unchanged StreamHandler test](https://github.com/astral-sh/imre/actions/runs/40217698211) separately verifies that the handler supplies the newline.
