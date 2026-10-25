@@ -13,6 +13,7 @@ mod dataclasses;
 mod enums;
 mod exceptions;
 mod inheritance;
+mod init_hooks;
 mod record_hash;
 pub(crate) use constants::ClassValue;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
@@ -51,6 +52,8 @@ pub(crate) struct Class {
     pub(crate) node: ast::StmtClassDef,
     pub(crate) fields: Vec<Field>,
     pub(crate) methods: Vec<ast::StmtFunctionDef>,
+    /// Field writes required of every override called during construction.
+    pub(crate) init_hooks: HashMap<String, Vec<String>>,
     pub(crate) method_kinds: Vec<MethodKind>,
     /// Declaring class for the corresponding method's imports and lexical super.
     pub(crate) method_origins: Vec<DefinitionId>,
@@ -657,22 +660,6 @@ fn collect_class(
             ));
         }
     };
-    if let Some(initializer) = initializer
-        && method_origins[initializer] == definition
-    {
-        check_initializer(
-            module,
-            &methods[initializer],
-            &fields,
-            &static_bindings,
-            if generated_initializer {
-                &[]
-            } else {
-                inherited_fields
-            },
-            exception_layout,
-        )?;
-    }
     let mut bases = Vec::new();
     if let Some((id, base)) = base {
         bases.push(id);
@@ -690,9 +677,45 @@ fn collect_class(
             }
         }
     }
+    let mut init_hooks = base
+        .map(|(_, parent)| parent.init_hooks.clone())
+        .unwrap_or_default();
+    for (name, expected) in &init_hooks {
+        if names.contains(name) {
+            let actual =
+                init_hooks::method_writes(graph, &methods, &method_kinds, &method_origins, name);
+            if actual.transpose()?.as_ref() != Some(expected) {
+                return Err(module.error(
+                    node,
+                    "an initializer hook override must initialize the same fields",
+                ));
+            }
+        }
+    }
+    if let Some(initializer) = initializer
+        && method_origins[initializer] == definition
+    {
+        check_initializer(
+            module,
+            &methods[initializer],
+            InitializerFields {
+                declared: &fields,
+                bindings: &static_bindings,
+                inherited: if generated_initializer {
+                    &[]
+                } else {
+                    inherited_fields
+                },
+            },
+            exception_layout,
+            &mut init_hooks,
+            |name| init_hooks::method_writes(graph, &methods, &method_kinds, &method_origins, name),
+        )?;
+    }
     Ok(Class {
         definition,
         name: node.name.as_str().to_owned(),
+        init_hooks,
         node: node.clone(),
         fields,
         toml_hash: hash.is_some(),
@@ -832,16 +855,27 @@ fn method_kind(
     ))
 }
 
+struct InitializerFields<'a> {
+    declared: &'a [Field],
+    inherited: &'a [Field],
+    bindings: &'a HashMap<String, ClassValue>,
+}
+
 /// Initializes each field once before `self` can be read or passed to another operation.
 /// This permits allocation before argument assignment without exposing a partial object.
 fn check_initializer(
     module: &SourceModule,
     initializer: &ast::StmtFunctionDef,
-    fields: &[Field],
-    bindings: &HashMap<String, ClassValue>,
-    inherited: &[Field],
+    layout: InitializerFields<'_>,
     exception_layout: bool,
+    hooks: &mut init_hooks::Hooks,
+    lookup: impl Fn(&str) -> Option<Result<Vec<String>, String>>,
 ) -> Result<(), String> {
+    let InitializerFields {
+        declared: fields,
+        inherited,
+        bindings,
+    } = layout;
     let receiver = initializer
         .parameters
         .iter_non_variadic_params()
@@ -880,6 +914,32 @@ fn check_initializer(
             // Calling BaseException directly bypasses any user base initializer.
             // Its ordinary fields still have to be initialized by this method.
             called_exception_base = true;
+            continue;
+        }
+        if let Some(name) = init_hooks::called_method(statement, receiver)
+            && name != "__init__"
+            && let Some(writes) = lookup(name)
+        {
+            let writes = writes?;
+            for field in &writes {
+                // The checked hook may also create an ordinary instance shadow.
+                // That write does not satisfy any of the required physical fields.
+                if matches!(bindings.get(field), Some(ClassValue::Runtime { .. })) {
+                    continue;
+                }
+                let Some(&declared_field) = declared.get(field.as_str()) else {
+                    return Err(
+                        module.error(statement, "initializer hook writes an undeclared field")
+                    );
+                };
+                if !initialized.insert(declared_field) {
+                    return Err(module.error(
+                        statement,
+                        "initializer hook writes an already initialized field",
+                    ));
+                }
+            }
+            hooks.insert(name.to_owned(), writes);
             continue;
         }
         let assignment = match statement {

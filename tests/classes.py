@@ -30,12 +30,25 @@ CELL = """class Cell:
 """
 
 
+HOOK = """class Build:
+    value: int
+    def __init__(self) -> None:
+        self.prepare()
+    def prepare(self) -> None:
+        self.value = 1
+"""
+
+
 REJECTED = {
     "partially_initialized_self_in_class_data_store": 'class C:\n    shared = [1]\n    n: int\n    def __init__(self):\n        self.shared = expose(self)\n        self.n = 0\ndef expose(v: C) -> list[int]: return [v.n]\nC()\n',
     "class_local_shadows_module_callable": 'def make() -> int: return 1\nclass C:\n    make = [1]\n    wrong = make()\n',
     "read_computed_class_data_before_definition": 'def get() -> list[int]: return Later.items\nvalue = get()\nclass Later:\n    items = [1]\n',
     "class_data_rebinding_changes_type": 'class C:\n    items = [1]\nC.items = "wrong"\n',
     "frozen_inherited_class_data": 'from dataclasses import dataclass\nclass Base:\n    items = [1]\n@dataclass(frozen=True)\nclass Child(Base):\n    n: int\nChild(1).items = [2]\n',
+    "init_hook_skips_field": HOOK + "class Child(Build):\n    def prepare(self) -> None: pass\n",
+    "init_hook_reads_before_write": HOOK + "class Child(Build):\n    def prepare(self) -> None: self.value = self.value + 1\n",
+    "init_hook_leaks_receiver": HOOK + "def observe(value: Build) -> int: return value.value\nclass Child(Build):\n    def prepare(self) -> None: self.value = observe(self)\n",
+    "init_hook_duplicates_field": HOOK.replace("self.prepare()", "self.value = 2\n        self.prepare()"),
     "read_class_tuple_before_definition": 'def get() -> tuple[str]:\n    return Later.words\nvalue = get()\nclass Later:\n    words = ("late",)\n',
     "assign_to_class_string": 'class C:\n    label = "fixed"\nC.label = "new"\n',
     "instance_shadows_class_string": 'class C:\n    label = "fixed"\n    def __init__(self, value: str) -> None:\n        self.label = value\nC("instance")\n',
@@ -235,7 +248,7 @@ def main() -> None:
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
         class_sources = write_class_data_sources(project, PROJECT / "benchmarks/cpython_stdlib/full")
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "instance_layout.py", "property_setters.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", *class_sources]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "instance_layout.py", "property_setters.py", "initializer_hook.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", *class_sources]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)

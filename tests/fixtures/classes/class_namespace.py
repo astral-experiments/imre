@@ -50,6 +50,23 @@ class Cached:
     def computed(self) -> list[int]:
         return [7]
 
+class Prepared:
+    tags = ["class"]
+    count: int
+
+    def __init__(self):
+        self.prepare()
+
+    def prepare(self) -> None:
+        self.count = 1
+        self.tags = ["instance"]
+
+
+class PreparedChild(Prepared):
+    def prepare(self) -> None:
+        self.count = 2
+        self.tags = ["child"]
+
 class Constructed:
     words = ["class"]
     first: str
@@ -153,3 +170,8 @@ print(cached.tags)
 del cached.tags
 print(cached.tags)
 print(cached.computed)
+prepared = PreparedChild()
+print(prepared.count)
+print(prepared.tags)
+del prepared.tags
+print(prepared.tags is Prepared.tags)
