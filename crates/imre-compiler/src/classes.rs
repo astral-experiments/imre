@@ -566,7 +566,11 @@ fn collect_class(
                     }
                     initializer = Some(methods.len());
                 }
-                methods.push(method.clone());
+                let mut method = method.clone();
+                if forwarder.is_some() {
+                    exception_forwarders::mangle_fields(node.name.as_str(), &mut method);
+                }
+                methods.push(method);
                 method_kinds.push(kind);
                 class_bindings.insert(name.to_owned());
             }
