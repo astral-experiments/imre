@@ -157,12 +157,9 @@ impl Verifier<'_> {
         let fields = match receiver {
             Type::Class(class) => self.module.class_fields[class].clone(),
             Type::Tuple(_) => self.module.types.fields(receiver).unwrap(),
-            Type::CompletedProcess(capture) => {
+            Type::CompletedProcess(capture, cmd) => {
                 return match field {
-                    0 => require(
-                        self.module.types.element(value) == Some(Type::Str),
-                        "process args field must be list[str]",
-                    ),
+                    0 => same(value, self.module.types.completed_command(cmd)),
                     1 => same(value, Type::Int),
                     2 | 3 => same(value, capture.stream(field == 2)),
                     _ => Err(format!("invalid process field #{field}")),
@@ -258,7 +255,13 @@ impl Verifier<'_> {
                 value,
                 ready,
             } => {
-                same(self.local(*iterator)?, Type::Iterator)?;
+                let ty = self.local(*iterator)?;
+                if let Some(element) = self.module.types.cursor_element(ty) {
+                    same(self.local(*key)?, element)?;
+                    require(value.is_none(), "a typed cursor yields one item")?;
+                } else {
+                    same(ty, Type::Iterator)?;
+                }
                 same(self.local(*ready)?, Type::Bool)?;
                 let slots = [*iterator, *key, *ready]
                     .into_iter()
@@ -285,7 +288,10 @@ impl Verifier<'_> {
                 self.block(finalbody)
             }
             Statement::Raise(Some(value)) => require(
-                matches!(value.ty, Type::Exception | Type::TimeoutExpired),
+                matches!(
+                    value.ty,
+                    Type::Exception | Type::ImportException | Type::TimeoutExpired
+                ),
                 "raise needs an exception",
             ),
             Statement::Raise(None)
@@ -310,7 +316,8 @@ impl Verifier<'_> {
                 | Builtin::JsonDumps(ty)
                 | Builtin::JsonDump(ty)
                 | Builtin::TomlDecode(ty)
-                | Builtin::DictTryGet(ty),
+                | Builtin::DictTryGet(ty)
+                | Builtin::DictTryPop(ty),
                 _,
             ) => self.ty(*ty),
             ExprKind::Builtin(Builtin::IsInstance(kinds), _) => {

@@ -27,7 +27,32 @@ CELL = """class Cell:
 """
 
 
+HOOK = """class Build:
+    value: int
+    def __init__(self) -> None:
+        self.prepare()
+    def prepare(self) -> None:
+        self.value = 1
+"""
+
+
 REJECTED = {
+    "init_hook_skips_field": HOOK + "class Child(Build):\n    def prepare(self) -> None: pass\n",
+    "init_hook_reads_before_write": HOOK + "class Child(Build):\n    def prepare(self) -> None: self.value = self.value + 1\n",
+    "init_hook_leaks_receiver": HOOK + "def observe(value: Build) -> int: return value.value\nclass Child(Build):\n    def prepare(self) -> None: self.value = observe(self)\n",
+    "init_hook_observes_pending_field": HOOK + "class Child(Build):\n    def prepare(self) -> None:\n        print(self.value)\n        super().prepare()\n",
+    "init_hook_super_reads_pending_field": HOOK + "    def read(self) -> int: return self.value\nclass Child(Build):\n    def prepare(self) -> None: self.value = super().read()\n",
+    "init_hook_duplicates_field": HOOK.replace("self.prepare()", "self.value = 2\n        self.prepare()"),
+    "read_class_tuple_before_definition": 'def get() -> tuple[str]:\n    return Later.words\nvalue = get()\nclass Later:\n    words = ("late",)\n',
+    "assign_to_class_string": 'class C:\n    label = "fixed"\nC.label = "new"\n',
+    "instance_shadows_class_string": 'class C:\n    label = "fixed"\n    def __init__(self, value: str) -> None:\n        self.label = value\nC("instance")\n',
+    "subclass_rebinds_fixed_string": 'class C:\n    label = "first"\nclass D(C):\n    label = "second"\n',
+    "inherited_name_in_class_expression": 'class C:\n    words = ("a",)\nclass D(C):\n    longer = words + ("b",)\n',
+    "mutable_class_tuple": 'class C:\n    items = (["not fixed"],)\n',
+    "copy_hook_wrong_arity": 'import copy\nclass C:\n    def __copy__(self, extra: int) -> int: return extra\ncopy.copy(C())\n',
+    "inherited_copy_reduction": 'import copy\nclass Base:\n    def __reduce_ex__(self, protocol: int) -> int: return 0\nclass Child(Base): pass\ncopy.copy(Child())\n',
+    "copy_custom_getstate": 'import copy\nclass C:\n    def __getstate__(self) -> int: return 0\ncopy.copy(C())\n',
+    "overridden_static_binding": "import hashlib\nclass Base:\n    make = staticmethod(hashlib.sha256)\nclass Child(Base):\n    def make(self, x: int) -> int:\n        return x\n",
     "literal_unknown_value": 'from typing import Literal\ndef f(s: Literal["a", "b"]) -> str:\n    return s\nf("c")\n',
     "literal_unproven_string": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    return s\n',
     "literal_wider_domain": 'from typing import Literal\ndef f(s: Literal["a", "b"]) -> Literal["a"]:\n    return s\n',
@@ -35,6 +60,11 @@ REJECTED = {
     "literal_mutable_alias": 'from typing import Literal\na: list[Literal["a"]] = ["a"]\nb: list[str] = a\nb.append("b")\n',
     "literal_non_string": 'from typing import Literal\nx: Literal["a", 7] = "a"\n',
     "literal_invalidated_guard": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    if s == "a":\n        s = input()\n        return s\n    return "a"\n',
+    "root_super_wrong_arity": CELL.replace("self.value = value", "super().__init__(value)\n        self.value = value"),
+    "init_alias_partial_self": CELL.replace("self.value = value", "alias = self\n        self.value = value"),
+    "init_rebind_self": CELL.replace("self.value = value", "self = self\n        self.value = value"),
+    "init_assert_unset_field": CELL.replace("self.value = value", "assert self.value\n        self.value = value"),
+    "init_eager_message_escape": CELL.replace("self.value = value", "assert value, self\n        self.value = value"),
     "wrong_field_type": CELL + 'value = Cell(1)\nvalue.value = "wrong"\n',
     "wrong_alias_type": CELL + "value = Cell(1)\nalias = value\nalias.value = True\n",
     "ignored_field_type": CELL + 'value = Cell(1)\nvalue.value = "wrong"  # type: ignore\n',
@@ -71,7 +101,6 @@ REJECTED = {
         + "def escape(value: Cell) -> int:\n    return 0\n",
     "constructor_control_flow": CELL.replace("self.value = value", "if value > 0:\n            self.value = value\n        else:\n            self.value = 0"),
     "constructor_side_effect": CELL.replace("self.value = value", "print(value)\n        self.value = value"),
-    "constructor_local": CELL.replace("self.value = value", "temporary = value\n        self.value = temporary"),
     "constructor_return": CELL.replace("self.value = value", "self.value = value\n        return"),
     "inheritance": CELL + "class Child(Cell):\n    def __init__(self, value: int) -> None:\n        self.value = value\n",
     "metaclass": CELL.replace("class Cell:", "class Cell(metaclass=type):"),
@@ -87,6 +116,9 @@ REJECTED = {
     "staticmethod": CELL.replace("    def add(", "    @staticmethod\n    def add("),
     "classmethod": CELL.replace("    def add(", "    @classmethod\n    def add("),
     "property": CELL.replace("    def add(", "    @property\n    def add("),
+    "read_only_assignment": "class C:\n    @property\n    def value(self) -> int: return 1\nC().value = 2\n",
+    "orphan_setter": "class C:\n    @value.setter\n    def value(self, n: int) -> None: pass\n",
+    "property_setter_arity": "class C:\n    def get(self) -> int: return 1\n    def put(self) -> None: pass\n    value = property(get, put)\n",
     "unused_dynamic_method": CELL.replace("return self.value", 'if False:\n            eval("1")\n        return self.value'),
     "same_shape_different_nominal_type": CELL
         + CELL.replace("Cell", "Other")
@@ -209,7 +241,7 @@ def main() -> None:
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py"]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "instance_layout.py", "property_setters.py", "initializer_hook.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "mapping_abc.py", "mapping_alias.py"]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)
@@ -219,6 +251,8 @@ def main() -> None:
                 command = [compiler, "build", str(source), "-o", str(executable),
                            "--runtime", runtime, "--clang", clang, "--opt-level", level]
                 command += build_flags
+                if relative == "implicit_copy.py":
+                    command.append("--reachable-only")
                 if args.sanitize:
                     command.append("--sanitize")
                 require_success(run(command, temporary))
@@ -235,6 +269,9 @@ def main() -> None:
             result = run([compiler, "check", str(case / "main.py")], temporary)
             assert result.returncode > 0 and result.stderr, (name, result.stdout, result.stderr)
             assert "panicked" not in result.stderr and "AddressSanitizer" not in result.stderr, (name, result.stderr)
+            if name in {"inherited_copy_reduction", "copy_custom_getstate"}:
+                reachable = run([compiler, "check", str(case / "main.py"), "--reachable-only"], temporary)
+                assert reachable.returncode > 0 and "unsupported reconstruction protocol" in reachable.stderr, (name, reachable.stderr)
             if name in {"direct_field_cycle", "mutual_field_cycle"}:
                 assert "cyclic heap types are unsupported" in result.stderr, (name, result.stderr)
             if name in {"recursive_method", "mutual_method_recursion", "constructor_factory_recursion"}:

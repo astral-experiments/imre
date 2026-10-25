@@ -45,23 +45,183 @@ fn parameter(name: &str, ty: Type, kind: ParameterKind, default: Expr) -> Parame
     }
 }
 
-/// CPython also accepts the standard, case-sensitive level names.
-fn named_level(value: &ast::Expr) -> Option<Expr> {
-    let ast::Expr::StringLiteral(value) = value else {
-        return None;
-    };
-    Some(number(match value.value.to_str() {
-        "NOTSET" => 0,
-        "DEBUG" => 10,
-        "INFO" => 20,
-        "WARNING" | "WARN" => 30,
-        "ERROR" => 40,
-        "CRITICAL" | "FATAL" => 50,
-        _ => return None,
-    }))
+fn required(name: &str, ty: Type) -> Parameter {
+    Parameter {
+        name: name.into(),
+        ty,
+        kind: ParameterKind::PositionalOrKeyword,
+        default: None,
+        sign_only: false,
+    }
 }
 
 impl Checker<'_> {
+    /// Bind the private operations used by the public handler implementation.
+    pub(super) fn handler_operation(
+        &mut self,
+        symbol: Intrinsic,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let source = &self.graph.modules[self.module];
+        let Some(Binding::Definition(def)) = source.bindings.get("Handler") else {
+            return Err(error(
+                self.source,
+                call,
+                "missing logging.Handler definition",
+            ));
+        };
+        let handler = Type::Class(self.classes.declarations.ids[def]);
+        let optional_name = self.types.optional(Type::Str);
+        let (op, result, params) = match symbol {
+            Intrinsic::HandlerRename => (
+                Log::HandlerRename,
+                Type::None,
+                vec![
+                    required("handler", handler),
+                    required("old", optional_name),
+                    required("new", optional_name),
+                ],
+            ),
+            Intrinsic::HandlerLookup => (
+                Log::HandlerLookup,
+                self.types.optional(handler),
+                vec![required("name", Type::Str)],
+            ),
+            Intrinsic::PrintActiveException => (Log::PrintActiveException, Type::None, vec![]),
+            _ => unreachable!(),
+        };
+        let args = self.arguments(call, &params, None)?;
+        Ok(self.ordered_builtin(Builtin::Logging(op), result, args))
+    }
+
+    /// A configuration literal can contain differently typed values. Give each
+    /// nested map and list its ordered, mutable document layout at construction.
+    pub(super) fn logging_dictionary_config(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let parameters = [required("config", documents::MAP)];
+        let mut scalar = None;
+        let mut args = self.arguments_with(call, &parameters, None, |checker, _, argument| {
+            if matches!(argument, ast::Expr::Dict(_)) {
+                return checker.expr_expected(argument, documents::MAP);
+            }
+            let value = checker.expr(argument)?;
+            if let Some((Type::Str, ty)) = checker.types.mapping(value.ty) {
+                scalar = match ty {
+                    Type::None => Some(0),
+                    Type::Bool => Some(1),
+                    Type::Int => Some(2),
+                    Type::Str => Some(3),
+                    Type::Float => Some(7),
+                    _ => None,
+                };
+                if scalar.is_some() {
+                    return Ok(value);
+                }
+            }
+            checker.document_coerce(value, documents::MAP, argument)
+        })?;
+        let op = if let Some(kind) = scalar {
+            args.order.push(args.values.len());
+            args.values.push(number(kind));
+            Log::DictConfigTyped
+        } else {
+            Log::DictConfig
+        };
+        Ok(self.ordered_builtin(Builtin::Logging(op), Type::None, args))
+    }
+
+    /// Read the configuration path only after evaluating all call arguments.
+    pub(super) fn logging_file_config(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let parameters = [
+            required("fname", Type::Str),
+            parameter(
+                "defaults",
+                Type::None,
+                ParameterKind::PositionalOrKeyword,
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                },
+            ),
+            parameter(
+                "disable_existing_loggers",
+                Type::Bool,
+                ParameterKind::PositionalOrKeyword,
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(true),
+                },
+            ),
+            parameter(
+                "encoding",
+                self.types.optional(Type::Str),
+                ParameterKind::PositionalOrKeyword,
+                absent(self.types.optional(Type::Str)),
+            ),
+        ];
+        let args = self.arguments(call, &parameters, None)?;
+        Ok(self.ordered_builtin(Builtin::Logging(Log::FileConfig), Type::None, args))
+    }
+
+    pub(super) fn logging_level_map(&self, names: bool) -> Expr {
+        let (op, key, value) = if names {
+            (Log::Names, Type::Str, Type::Int)
+        } else {
+            (Log::Numbers, Type::Int, Type::Str)
+        };
+        operation(op, self.types.dict(key, value), vec![])
+    }
+
+    pub(super) fn logging_levels(
+        &mut self,
+        symbol: Intrinsic,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let (op, ty, args) = match symbol {
+            Intrinsic::AddLevelName => (
+                Log::AddLevel,
+                Type::None,
+                self.arguments(
+                    call,
+                    &[
+                        required("level", Type::Int),
+                        required("levelName", Type::Str),
+                    ],
+                    None,
+                )?,
+            ),
+            Intrinsic::LevelNamesMapping => (
+                Log::NamesCopy,
+                self.types.dict(Type::Str, Type::Int),
+                self.arguments(call, &[], None)?,
+            ),
+            Intrinsic::GetLevelName => {
+                let args = self.arguments_with(
+                    call,
+                    &[required("level", Type::Int)],
+                    None,
+                    |checker, _, arg| Ok(Self::string_value(checker.expr(arg)?)),
+                )?;
+                let (op, ty) = match args.values[0].ty {
+                    Type::Int => (Log::LevelName, Type::Str),
+                    Type::Str => (Log::LevelForName, self.types.string_or_int()),
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "expected a string or integer logging level",
+                        ));
+                    }
+                };
+                (op, ty, args)
+            }
+            _ => unreachable!(),
+        };
+        Ok(self.ordered_builtin(Builtin::Logging(op), ty, args))
+    }
+
     pub(super) fn root_logger(&self) -> Expr {
         operation(
             Log::Get,
@@ -109,15 +269,19 @@ impl Checker<'_> {
                 },
             ),
         ];
+        let mut op = Log::Configure;
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
-            if index == 0
-                && let Some(level) = named_level(arg)
-            {
-                return checker.coerce(level, params[index].ty, arg);
+            if index == 0 {
+                let value = Self::string_value(checker.expr(arg)?);
+                if value.ty == Type::Str {
+                    op = Log::ConfigureName;
+                    return Ok(value);
+                }
+                return checker.coerce(value, level, arg);
             }
             checker.expr_expected(arg, params[index].ty)
         })?;
-        Ok(self.ordered_builtin(Builtin::Logging(Log::Configure), Type::None, args))
+        Ok(self.ordered_builtin(Builtin::Logging(op), Type::None, args))
     }
 
     pub(super) fn logger_attribute(
@@ -126,6 +290,8 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         match attribute.attr.as_str() {
+            "disabled" => Ok(operation(Log::Disabled, Type::Bool, vec![logger])),
+            "propagate" => Ok(operation(Log::Propagate, Type::Bool, vec![logger])),
             "root" => Ok(operation(Log::Root, Type::Logger, vec![logger])),
             "parent" => Ok(operation(
                 Log::Parent,
@@ -148,6 +314,34 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        if attribute.attr.as_str() == "hasHandlers" {
+            let args = self.arguments(call, &[], Some(logger))?;
+            return Ok(self.ordered_builtin(Builtin::Logging(Log::HasHandlers), Type::Bool, args));
+        }
+        if attribute.attr.as_str() == "getChildren" {
+            let args = self.arguments(call, &[], Some(logger))?;
+            return Ok(self.ordered_builtin(
+                Builtin::Logging(Log::Children),
+                self.types.set(Type::Logger),
+                args,
+            ));
+        }
+        if attribute.attr.as_str() == "setLevel" {
+            let args = self.arguments_with(
+                call,
+                &[required("level", Type::Int)],
+                Some(logger),
+                |checker, _, arg| {
+                    let value = Self::string_value(checker.expr(arg)?);
+                    if value.ty == Type::Str {
+                        Ok(operation(Log::CheckLevel, Type::Int, vec![value]))
+                    } else {
+                        checker.coerce(value, Type::Int, arg)
+                    }
+                },
+            )?;
+            return Ok(self.ordered_builtin(Builtin::Logging(Log::SetLevel), Type::None, args));
+        }
         self.reject_builtin_keywords(call)?;
         let args = call.arguments.args.as_ref();
         let name = attribute.attr.as_str();
@@ -155,20 +349,9 @@ impl Checker<'_> {
             ("getEffectiveLevel", []) => {
                 return Ok(operation(Log::EffectiveLevel, Type::Int, vec![logger]));
             }
-            ("setLevel" | "isEnabledFor", [level]) => {
-                let level = if name == "setLevel"
-                    && let Some(level) = named_level(level)
-                {
-                    level
-                } else {
-                    self.expr_expected(level, Type::Int)?
-                };
-                let (op, ty) = if name == "setLevel" {
-                    (Log::SetLevel, Type::None)
-                } else {
-                    (Log::Enabled, Type::Bool)
-                };
-                return Ok(operation(op, ty, vec![logger, level]));
+            ("isEnabledFor", [level]) => {
+                let level = self.expr_expected(level, Type::Int)?;
+                return Ok(operation(Log::Enabled, Type::Bool, vec![logger, level]));
             }
             ("log", [level, args @ ..]) => (self.expr_expected(level, Type::Int)?, args),
             ("debug", args) => (number(10), args),

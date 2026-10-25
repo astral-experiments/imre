@@ -1,0 +1,48 @@
+import cache_fixture
+import functools
+import sys
+
+
+def emit(message: str) -> None:
+    print(message)
+    sys.stdout.flush()
+
+
+@DECORATOR
+def cached(PARAMETERS) -> int:
+    emit("body")
+    while True:
+        command = int(input())
+        if command == -1:
+            return int(input())
+        if command == -2:
+            raise ValueError("host callback")
+        cache_fixture.nested(command)
+    raise RuntimeError("unreachable")
+
+
+def dispatch(command: int) -> int:
+    if command == 0:
+        try:
+            value = cached(ARGUMENTS)
+        except ValueError:
+            emit("raised")
+        else:
+            emit(f"result {value}")
+    elif command == 1:
+        hits, misses, maxsize, current = cached.cache_info()
+        emit(f"info {hits} {misses} {maxsize} {current}")
+    elif command == 2:
+        cached.cache_clear()
+        emit("cleared")
+    elif command == 3:
+        emit("parameters " + repr(cached.cache_parameters()))
+    return 0
+
+
+cache_fixture.install(dispatch)
+while True:
+    command = int(input())
+    if command == -3:
+        break
+    dispatch(command)

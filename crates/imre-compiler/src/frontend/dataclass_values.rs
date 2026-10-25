@@ -23,7 +23,9 @@ fn has_container_float(ty: Type, inside: bool, types: &Types) -> bool {
 pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
     match ty {
         Type::Exception
+        | Type::NamedException(_)
         | Type::StringKeys
+        | Type::ImportException
         | Type::TimeoutExpired
         | Type::EventLoop
         | Type::Coroutine(_)
@@ -32,12 +34,23 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::GeneratorContext
         | Type::DirectoryContext(_)
         | Type::Semaphore
+        | Type::Popen(..)
         | Type::AsyncProcess(_)
+        | Type::NativeModule
+        | Type::ModuleNamespace
+        | Type::LogFormatter
+        | Type::LogRecord
         | Type::Logger
+        | Type::TimedFileHandler
+        | Type::ClockTime
+        | Type::Sha256
+        | Type::JsonDecoder
+        | Type::CsvReader
         | Type::RegexPattern
         | Type::RegexMatch
-        | Type::ExitCode
+        | Type::ObjectValue
         | Type::TextIO
+        | Type::StringIO
         | Type::BinaryIO
         | Type::Iterator
         | Type::Callable(_) => false,
@@ -98,10 +111,18 @@ pub(super) fn validate(
             if options.eq && field.compare && contains_opaque(ty, types) {
                 return Err(module.error(
                     &field.annotation,
-                    "generated dataclass equality cannot compare loggers, regex or TOML key views; use field(compare=False) or dataclass(eq=False)",
+                    "generated dataclass equality cannot compare opaque standard-library objects; use field(compare=False) or dataclass(eq=False)",
                 ));
             }
-            if !graph.reachable_only() && options.repr && field.repr && !repr_supported(ty, types) {
+            if (!graph.reachable_only()
+                || classes
+                    .declarations
+                    .exceptions
+                    .contains_key(&declaration.definition))
+                && options.repr
+                && field.repr
+                && !repr_supported(ty, types)
+            {
                 return Err(module.error(
                     &field.annotation,
                     "generated dataclass repr does not support resource or callable fields; use field(repr=False) or dataclass(repr=False)",
@@ -115,7 +136,17 @@ pub(super) fn validate(
 fn contains_opaque(ty: Type, types: &Types) -> bool {
     matches!(
         ty,
-        Type::Logger | Type::RegexPattern | Type::RegexMatch | Type::StringKeys
+        Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
+            | Type::LogFormatter
+            | Type::LogRecord
+            | Type::Sha256
+            | Type::JsonDecoder
+            | Type::RegexPattern
+            | Type::RegexMatch
+            | Type::StringKeys
+            | Type::CsvReader
     ) || types
         .children(ty)
         .into_iter()
@@ -151,6 +182,7 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
                 && !classes.methods[id].contains_key("__post_init__")
                 && !classes.has_concrete_subclasses(id))
             .then(|| classes.methods[id]["__init__"].id),
+            value_struct: class.dataclass.is_some_and(|options| options.value_struct),
             dataclass_eq: class.dataclass.as_ref().is_some_and(|options| options.eq),
             dataclass_repr: class.dataclass.as_ref().is_some_and(|options| options.repr),
             toml_hash: class.toml_hash,

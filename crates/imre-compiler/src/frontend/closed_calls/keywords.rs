@@ -191,7 +191,7 @@ pub(super) fn scalarize(
     function: &mut ast::StmtFunctionDef,
     graph: &SourceGraph,
     module: ModuleId,
-) {
+) -> bool {
     let mut scan = KeywordUses {
         excluded: graph.entry_profile.ranges(module).collect(),
         ..Default::default()
@@ -202,7 +202,9 @@ pub(super) fn scalarize(
     scan.visit_body(&function.body);
     scan.assigned
         .retain(|name, _| scan.expanded.contains(name) && !scan.escaped.contains(name));
-    if !scan.assigned.is_empty() {
-        KeywordTuples(scan.assigned).visit_body(&mut function.body);
+    if scan.assigned.is_empty() {
+        return false;
     }
+    KeywordTuples(scan.assigned).visit_body(&mut function.body);
+    true
 }

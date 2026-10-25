@@ -59,81 +59,17 @@ fn keyword(name: &str, value: ast::Expr, range: TextRange) -> ast::Keyword {
 }
 
 impl Checker<'_> {
-    /// A checked unpack keeps optional values in dictionaries while enforcing
-    /// the required parameter type before constructing the call or coroutine.
-    pub(super) fn require_keyword_payload(&mut self, value: Expr, ty: Type) -> Expr {
-        let slot = self.hidden(value.ty);
-        let missing = Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Builtin(Builtin::IsNone, vec![self.local(slot)]),
-        };
-        let failure = Expr {
-            ty: Type::Exception,
-            kind: ExprKind::Exception {
-                kind: exception_kind("TypeError").unwrap(),
-                message: Some(Box::new(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Str(format!(
-                        "unpacked keyword expected {}, got None",
-                        self.type_name(ty)
-                    )),
-                })),
-            },
-        };
-        Expr {
-            ty,
-            kind: ExprKind::Scope {
-                body: vec![
-                    Statement::Assign(slot, value),
-                    Statement::If(missing, vec![Statement::Raise(Some(failure))], vec![]),
-                ],
-                value: Box::new(Expr {
-                    ty,
-                    kind: ExprKind::Unwrap(Box::new(self.local(slot))),
-                }),
-                clear: vec![slot],
-            },
-        }
-    }
-
-    /// Positional tuple expressions evaluate in place. A fixed immutable local
-    /// can supply its independent fields; no user iteration or indexing runs.
+    /// Expand fresh keyword displays. Positional spreads use the ordinary binder.
     pub(super) fn expand_closed_call(&self, call: &ast::ExprCall) -> Option<ast::ExprCall> {
-        if !call.arguments.args.iter().any(ast::Expr::is_starred_expr)
-            && !call
-                .arguments
-                .keywords
-                .iter()
-                .any(|kw| kw.arg.is_none() && kw.value.is_dict_expr())
+        if !call
+            .arguments
+            .keywords
+            .iter()
+            .any(|kw| kw.arg.is_none() && kw.value.is_dict_expr())
         {
             return None;
         }
         let mut changed = false;
-        let mut args = Vec::new();
-        for arg in &call.arguments.args {
-            if let ast::Expr::Starred(star) = arg {
-                match &*star.value {
-                    ast::Expr::Tuple(tuple)
-                        if !tuple.elts.iter().any(ast::Expr::is_starred_expr) =>
-                    {
-                        args.extend(tuple.elts.iter().cloned());
-                        changed = true;
-                        continue;
-                    }
-                    ast::Expr::Name(name)
-                        if let Some(&slot) = self.names.get(name.id.as_str())
-                            && self.assigned.contains(&slot)
-                            && let Some(fields) = self.types.fields(self.locals[slot]) =>
-                    {
-                        args.extend((0..fields.len()).map(|i| project((*star.value).clone(), i)));
-                        changed = true;
-                        continue;
-                    }
-                    _ => {}
-                }
-            }
-            args.push(arg.clone());
-        }
         let mut keywords = Vec::new();
         for kw in &call.arguments.keywords {
             if kw.arg.is_none()
@@ -153,7 +89,6 @@ impl Checker<'_> {
         }
         changed.then(|| {
             let mut result = call.clone();
-            result.arguments.args = args.into();
             result.arguments.keywords = keywords.into();
             result
         })
@@ -167,7 +102,7 @@ fn packed_name(n: &mut ast::ExprName) {
 }
 
 /// Only the projections inserted for a proven fresh keyword mapping may carry
-/// an optional payload into a required parameter under a runtime type guard.
+/// their observed dynamic argument type into inference.
 pub(super) fn keyword_field(expr: &ast::Expr) -> bool {
     matches!(expr, ast::Expr::Subscript(s) if matches!(&*s.value,
         ast::Expr::Name(n) if n.id.as_str().starts_with(KEYWORD_PACK)))
@@ -176,9 +111,13 @@ pub(super) fn keyword_field(expr: &ast::Expr) -> bool {
 /// Specialize the continuation of an exhaustive match that binds a function
 /// and its arguments together. Only one arm or its continuation runs. Keeping
 /// their native locals separate preserves correlations a tuple of unions loses.
-pub(super) fn prepare(function: &mut ast::StmtFunctionDef, graph: &SourceGraph, module: ModuleId) {
+pub(super) fn prepare(
+    function: &mut ast::StmtFunctionDef,
+    graph: &SourceGraph,
+    module: ModuleId,
+) -> bool {
     dispatch::specialize(function, graph, module);
-    keywords::scalarize(function, graph, module);
+    keywords::scalarize(function, graph, module)
 }
 
 #[derive(Default)]

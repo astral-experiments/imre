@@ -2,12 +2,28 @@
 
 use super::*;
 
+/// Evaluate the supplied call operands in order, then raise the checked TypeError.
+pub(super) fn type_error(ty: Type, mut values: Vec<Expr>, message: String) -> Expr {
+    values.push(Expr {
+        ty: Type::Exception,
+        kind: ExprKind::Exception {
+            kind: exception_kind("TypeError").unwrap(),
+            message: Some(Box::new(unpacking::string(message))),
+        },
+    });
+    Expr {
+        ty,
+        kind: ExprKind::Builtin(Builtin::RaiseException, values),
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum ParameterKind {
     PositionalOnly,
     PositionalOrKeyword,
     KeywordOnly,
     Variadic,
+    KeywordRest,
 }
 
 #[derive(Clone)]
@@ -115,6 +131,111 @@ pub(super) fn scalar_literal(expression: &ast::Expr, source: &str) -> Result<Exp
     Ok(Expr { ty, kind })
 }
 
+pub(super) fn starred(call: &ast::ExprCall) -> bool {
+    call.arguments
+        .args
+        .iter()
+        .any(|arg| matches!(arg, ast::Expr::Starred(_)))
+}
+
+/// The value of a spread field is already checked when its fixed tuple is evaluated.
+pub(super) enum Supplied<'a> {
+    Source(&'a ast::Expr),
+    Field(Expr, &'a ast::Expr),
+}
+
+impl<'a> Supplied<'a> {
+    pub(super) fn site(&self) -> &'a ast::Expr {
+        match self {
+            Self::Source(node) | Self::Field(_, node) => node,
+        }
+    }
+
+    pub(super) fn value(self, checker: &mut Checker<'_>) -> Result<Expr, String> {
+        match self {
+            Self::Source(node) => checker.expr(node),
+            Self::Field(value, _) => Ok(value),
+        }
+    }
+
+    pub(super) fn checked(
+        self,
+        checker: &mut Checker<'_>,
+        ty: Type,
+        sign_only: bool,
+    ) -> Result<Expr, String> {
+        match self {
+            Self::Source(node) => checker.direct_argument(node, ty, sign_only),
+            Self::Field(value, node) => checker.direct_value(value, node, ty, sign_only),
+        }
+    }
+}
+
+/// Roots source expressions in Python evaluation order while expanding fixed tuples.
+#[derive(Default)]
+pub(super) struct ArgumentScope {
+    body: Vec<Statement>,
+    clear: Vec<usize>,
+}
+
+impl ArgumentScope {
+    /// Evaluate an unused argument in source order, including iterator
+    /// construction, without pulling any items before the call raises.
+    pub(super) fn discard(
+        &mut self,
+        checker: &mut Checker<'_>,
+        argument: &ast::Expr,
+    ) -> Result<(), String> {
+        let input = checker.expansion_input(argument, None)?;
+        checker.capture_consumer_input(input, &mut self.body, &mut self.clear);
+        Ok(())
+    }
+
+    pub(super) fn hold(&mut self, checker: &mut Checker<'_>, value: Expr) -> Expr {
+        let slot = checker.hidden(value.ty);
+        self.body.push(Statement::Assign(slot, value));
+        self.clear.push(slot);
+        checker.local(slot)
+    }
+
+    pub(super) fn spread(
+        &mut self,
+        checker: &mut Checker<'_>,
+        argument: &ast::ExprStarred,
+    ) -> Result<Vec<Expr>, String> {
+        let value = checker.expr(&argument.value)?;
+        let fields = checker.types.fields(value.ty).ok_or_else(|| {
+            error(
+                checker.source,
+                argument,
+                "starred argument requires a fixed tuple",
+            )
+        })?;
+        let tuple = self.hold(checker, value);
+        Ok(fields
+            .into_iter()
+            .enumerate()
+            .map(|(index, ty)| Expr {
+                ty,
+                kind: ExprKind::Field(Box::new(tuple.clone()), index),
+            })
+            .collect())
+    }
+
+    pub(super) fn finish(self, value: Expr) -> Expr {
+        if self.body.is_empty() {
+            return value;
+        }
+        Expr {
+            ty: value.ty,
+            kind: ExprKind::Scope {
+                body: self.body,
+                clear: self.clear,
+                value: Box::new(value),
+            },
+        }
+    }
+}
 /// Every dispatch route uses a closed signature, including methods reached
 /// through iterable consumers before ordinary call-expression lowering.
 pub(super) fn reject_unpacking(call: &ast::ExprCall, source: &str) -> Result<(), String> {
@@ -135,6 +256,77 @@ pub(super) fn reject_unpacking(call: &ast::ExprCall, source: &str) -> Result<(),
 }
 
 impl Checker<'_> {
+    /// Evaluate the supplied arguments before raising a positional arity or
+    /// keyword error. Only the spans belonging to this exact call are proved.
+    pub(super) fn one_positional_error(
+        &mut self,
+        call: &ast::ExprCall,
+        name: &str,
+        parameter: &str,
+        returns: Type,
+    ) -> Result<Expr, String> {
+        let args = &call.arguments;
+        self.graph
+            .checked_missing_argument(self.module, call.range());
+        for kw in &args.keywords {
+            if kw.arg.as_deref() == Some(parameter) {
+                self.graph
+                    .checked_positional_keyword(self.module, kw.range());
+            }
+        }
+        self.graph
+            .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
+        for argument in args.args.iter().skip(1) {
+            self.graph
+                .checked_excess_argument(self.module, argument.range());
+        }
+        let mut values = Vec::new();
+        for argument in &args.args {
+            values.push(self.expr(argument)?);
+        }
+        for kw in &args.keywords {
+            values.push(self.expr(&kw.value)?);
+        }
+        let message = if args.keywords.is_empty() {
+            format!(
+                "{name}() takes exactly one argument ({} given)",
+                args.args.len()
+            )
+        } else {
+            format!("{name}() takes no keyword arguments")
+        };
+        Ok(type_error(returns, values, message))
+    }
+
+    /// Return a Python class name only when the concrete receiver type is known.
+    pub(super) fn exact_argument_type_name(&self, ty: Type) -> Option<&str> {
+        Some(match ty {
+            Type::None => "NoneType",
+            Type::Int => "int",
+            Type::Bool => "bool",
+            Type::Float => "float",
+            Type::Bytes => "bytes",
+            Type::PlainObject => "object",
+            Type::List(_) | Type::ListInt | Type::ByteOutput => "list",
+            Type::Set(_) => "set",
+            Type::Dict(_) if !self.types.is_counter(ty) && !self.types.is_default_list_dict(ty) => {
+                "dict"
+            }
+            Type::Tuple(_) if self.types.namedtuple_definition(ty).is_none() => "tuple",
+            Type::Class(id)
+                if self
+                    .types
+                    .concrete_subclasses(id)
+                    .iter()
+                    .all(|child| *child == Type::Class(id)) =>
+            {
+                &self.classes.declarations.definitions[id].name
+            }
+            Type::Enum(id) => &self.classes.declarations.definitions[id].name,
+            _ => return None,
+        })
+    }
+
     /// The receiver and supplied expressions stay in source order. The separate
     /// permutation binds each parameter only after every supplied value exists.
     /// Literal defaults follow supplied expressions and cannot run user code.
@@ -153,6 +345,29 @@ impl Checker<'_> {
         })
     }
 
+    /// A keyword-rest dictionary is packed after all arguments have evaluated.
+    /// Retain the supplied values in source order even for constructors and local calls.
+    pub(super) fn held_arguments(
+        &mut self,
+        call: &ast::ExprCall,
+        params: &[Parameter],
+        receiver: Option<Expr>,
+        scope: &mut ArgumentScope,
+    ) -> Result<ir::CallArgs, String> {
+        if !params.iter().any(|p| p.kind == ParameterKind::KeywordRest) {
+            return self.arguments(call, params, receiver);
+        }
+        self.bind_supplied(
+            call,
+            params,
+            receiver,
+            Some(scope),
+            |checker, index, argument| {
+                argument.checked(checker, params[index].ty, params[index].sign_only)
+            },
+        )
+    }
+
     /// Discovery and final checking share binding, defaults, and evaluation order.
     /// Only the source of the parameter's concrete type differs between passes.
     pub(super) fn arguments_with(
@@ -162,67 +377,142 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         mut check: impl FnMut(&mut Self, usize, &ast::Expr) -> Result<Expr, String>,
     ) -> Result<ir::CallArgs, String> {
+        self.bind_supplied(call, params, receiver, None, |checker, index, argument| {
+            let Supplied::Source(node) = argument else {
+                unreachable!("only source calls expand tuples")
+            };
+            check(checker, index, node)
+        })
+    }
+
+    pub(super) fn bind_supplied(
+        &mut self,
+        call: &ast::ExprCall,
+        params: &[Parameter],
+        receiver: Option<Expr>,
+        mut scope: Option<&mut ArgumentScope>,
+        mut check: impl FnMut(&mut Self, usize, Supplied<'_>) -> Result<Expr, String>,
+    ) -> Result<ir::CallArgs, String> {
         let offset = usize::from(receiver.is_some());
-        let mut values = receiver.into_iter().collect::<Vec<_>>();
+        let mut values = Vec::new();
         let mut order = vec![usize::MAX; params.len() + offset];
-        if offset != 0 {
+        if let Some(value) = receiver {
+            values.push(if let Some(scope) = scope.as_deref_mut() {
+                scope.hold(self, value)
+            } else {
+                value
+            });
             order[0] = 0;
         }
-        // The tuple for *args never escapes its read-only interface. Its homogeneous
-        // elements share the backend's list layout; the private pack is built at
-        // the same point as the trailing positional expressions.
-        let positional = params
+        let rest = params
             .iter()
-            .take_while(|p| {
-                matches!(
-                    p.kind,
-                    ParameterKind::PositionalOnly | ParameterKind::PositionalOrKeyword
-                )
-            })
-            .count();
+            .position(|p| p.kind == ParameterKind::KeywordRest);
         let pack = params
             .iter()
             .position(|p| p.kind == ParameterKind::Variadic);
-        for (index, argument) in call.arguments.args.iter().enumerate().take(positional) {
-            order[index + offset] = values.len();
-            values.push(check(self, index, argument)?);
+        let mut packed = Vec::new();
+        let mut extra = Vec::new();
+        let mut positional = 0;
+        for arg in &call.arguments.args {
+            let mut bind = |checker: &mut Self,
+                            input: Supplied<'_>,
+                            scope: Option<&mut ArgumentScope>|
+             -> Result<(), String> {
+                let ordinary = params.get(positional).is_some_and(|parameter| {
+                    matches!(
+                        parameter.kind,
+                        ParameterKind::PositionalOnly | ParameterKind::PositionalOrKeyword
+                    )
+                });
+                if !ordinary {
+                    let index = pack.ok_or_else(|| {
+                        error(checker.source, arg, "too many positional arguments")
+                    })?;
+                    let element = checker
+                        .types
+                        .element(params[index].ty)
+                        .expect("typed positional rest");
+                    let value = input.checked(checker, element, false)?;
+                    packed.push(if let Some(scope) = scope {
+                        scope.hold(checker, value)
+                    } else {
+                        value
+                    });
+                    return Ok(());
+                }
+                order[positional + offset] = values.len();
+                let value = check(checker, positional, input)?;
+                values.push(if let Some(scope) = scope {
+                    scope.hold(checker, value)
+                } else {
+                    value
+                });
+                positional += 1;
+                Ok(())
+            };
+            if let ast::Expr::Starred(star) = arg {
+                let scope = scope
+                    .as_deref_mut()
+                    .ok_or_else(|| error(self.source, arg, "argument unpacking is unsupported"))?;
+                for field in scope.spread(self, star)? {
+                    bind(self, Supplied::Field(field, arg), Some(scope))?;
+                }
+            } else {
+                bind(self, Supplied::Source(arg), scope.as_deref_mut())?;
+            }
         }
         if let Some(index) = pack {
-            let extras = ast::Expr::List(ast::ExprList {
-                node_index: ast::AtomicNodeIndex::NONE,
-                range: call.arguments.range(),
-                ctx: ast::ExprContext::Load,
-                elts: call
-                    .arguments
-                    .args
-                    .iter()
-                    .skip(positional)
-                    .cloned()
-                    .collect(),
-            });
             order[index + offset] = values.len();
-            values.push(check(self, index, &extras)?);
-        } else if let Some(extra) = call.arguments.args.get(positional) {
-            return Err(error(self.source, extra, "too many positional arguments"));
+            values.push(Expr {
+                ty: params[index].ty,
+                kind: ExprKind::List(packed),
+            });
         }
         for keyword in &call.arguments.keywords {
             let name = keyword
                 .arg
                 .as_ref()
-                .expect("call lowering rejects argument unpacking")
-                .as_str();
-            let index = params
-                .iter()
-                .position(|parameter| {
-                    parameter.name == name && parameter.kind != ParameterKind::Variadic
-                })
                 .ok_or_else(|| {
                     error(
                         self.source,
                         keyword,
-                        &format!("unexpected keyword argument {name:?}"),
+                        "keyword argument unpacking is unsupported",
                     )
-                })?;
+                })?
+                .as_str();
+            let fixed = params.iter().position(|p| {
+                p.name == name
+                    && !matches!(p.kind, ParameterKind::Variadic | ParameterKind::KeywordRest)
+            });
+            if let Some(index) = rest
+                && fixed.is_none_or(|i| params[i].kind == ParameterKind::PositionalOnly)
+            {
+                let (_, element) = self
+                    .types
+                    .mapping(params[index].ty)
+                    .expect("typed keyword rest");
+                let value = self.expr_expected(&keyword.value, element)?;
+                let value = if let Some(scope) = scope.as_deref_mut() {
+                    scope.hold(self, value)
+                } else {
+                    value
+                };
+                extra.push((
+                    Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str(name.into()),
+                    },
+                    value,
+                ));
+                continue;
+            }
+            let index = fixed.ok_or_else(|| {
+                error(
+                    self.source,
+                    keyword,
+                    &format!("unexpected keyword argument {name:?}"),
+                )
+            })?;
             let parameter = &params[index];
             if parameter.kind == ParameterKind::PositionalOnly {
                 return Err(error(
@@ -239,7 +529,27 @@ impl Checker<'_> {
                 ));
             }
             order[index + offset] = values.len();
-            values.push(check(self, index, &keyword.value)?);
+            let value = check(self, index, Supplied::Source(&keyword.value))?;
+            values.push(if let Some(scope) = scope.as_deref_mut() {
+                scope.hold(self, value)
+            } else {
+                value
+            });
+        }
+        if let Some(index) = rest {
+            let (key, value) = self
+                .types
+                .mapping(params[index].ty)
+                .expect("typed keyword rest");
+            order[index + offset] = values.len();
+            values.push(Expr {
+                ty: params[index].ty,
+                kind: ExprKind::Dict {
+                    key,
+                    value,
+                    entries: extra,
+                },
+            });
         }
         for (index, parameter) in params.iter().enumerate() {
             if order[index + offset] == usize::MAX {

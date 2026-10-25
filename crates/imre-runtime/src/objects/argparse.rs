@@ -2,10 +2,10 @@
 //! input before constructing the compiler-described, owned namespace record.
 
 use std::borrow::Cow;
+use std::collections::{HashSet, TryReserveError};
 use std::io::{self, Write};
 use std::rc::Rc;
 
-use icu_properties::props::{EnumeratedProperty, GeneralCategory};
 use serde::Deserialize;
 
 use super::exceptions::{self, Error, string_repr};
@@ -13,50 +13,111 @@ use super::records::{RecordDescriptor, imre_record_new};
 use super::{Object, Str, Words, fail};
 use crate::objects::paths::imre_path_new;
 
+mod binding;
 mod help;
+mod nargs;
+
+use binding::{Bound, IntegerRange};
+use nargs::{Nargs, positional_counts};
+
+/// Large decimal conversions obey the interpreter's configured digit limit,
+/// including leading zeroes. Underscores and signs do not count.
+fn decimal_digits_allowed(count: usize) -> bool {
+    if count <= 640 {
+        return true;
+    }
+    let limit = std::env::var("PYTHONINTMAXSTRDIGITS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(4300);
+    limit == 0 || count <= limit
+}
 
 #[derive(Deserialize, Copy, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
 enum Kind {
+    Int,
+    Float,
     Str,
     Path,
     Bool,
+    Class,
+}
+
+#[derive(Deserialize, Copy, Clone, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum Action {
+    Store,
+    StoreConst,
+    StoreTrue,
+    StoreFalse,
+    BooleanOptional,
+    Count,
 }
 
 #[derive(Deserialize)]
 struct OptionSpec {
+    action: Action,
     flag: String,
+    dest: String,
+    positional: bool,
     #[serde(default)]
     aliases: Vec<String>,
     enum_default: Option<usize>,
     kind: Kind,
-    many: bool,
+    nargs: Nargs,
+    constant: Option<String>,
+    list_default: bool,
     required: bool,
     choices: Vec<String>,
+    range: Option<IntegerRange>,
+    has_choices: bool,
+    int_default: bool,
+    int_constant: bool,
+    float_default: bool,
+    float_constant: bool,
     converter: Option<String>,
     default: Option<String>,
     path_default: bool,
     help: String,
     optional: bool,
+    group: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct ArgumentGroup {
+    title: Option<String>,
+    description: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct Parser {
+    #[serde(default)]
     prog: String,
     raw: bool,
+    prefixes: String,
+    help_flags: Option<[String; 2]>,
+    abbrev: bool,
     options: Vec<OptionSpec>,
+    #[serde(default)]
+    groups: Vec<ArgumentGroup>,
     subcommands: Option<Subcommands>,
 }
 
 #[derive(Deserialize)]
 struct Subcommands {
-    dest: String,
+    group: Option<ArgumentGroup>,
+    dest: Option<String>,
+    required: bool,
+    metavar: Option<String>,
+    help: Option<String>,
     choices: Vec<Child>,
 }
 
 #[derive(Deserialize)]
 struct Child {
     name: String,
+    aliases: Vec<String>,
     help: Option<String>,
     #[serde(flatten)]
     parser: Parser,
@@ -68,13 +129,44 @@ enum Token<'a> {
     Unknown,
     Ambiguous(Vec<&'a str>),
     Help(Option<&'a str>),
-    Option(usize, Option<&'a str>),
-    Cluster(&'a str),
+    Option(usize, &'a str, Option<&'a str>),
+    Cluster(char, &'a str),
 }
 
 enum Word<'a> {
-    Option(&'a OptionSpec, Option<Vec<&'a str>>),
-    Command(&'a str),
+    Option(&'a OptionSpec, Bound<'a>),
+    Command(Option<&'a str>),
+}
+
+impl Child {
+    fn spellings(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.name.as_str()).chain(self.aliases.iter().map(String::as_str))
+    }
+
+    fn label(&self) -> String {
+        if self.aliases.is_empty() {
+            self.name.clone()
+        } else {
+            format!("{} ({})", self.name, self.aliases.join(", "))
+        }
+    }
+}
+
+impl Subcommands {
+    fn spellings(&self) -> impl Iterator<Item = &str> {
+        let mut seen = HashSet::new();
+        self.choices
+            .iter()
+            .flat_map(Child::spellings)
+            .filter(move |name| seen.insert(*name))
+    }
+
+    fn error_name(&self) -> Option<String> {
+        self.metavar
+            .clone()
+            .or_else(|| self.dest.clone())
+            .or_else(|| (!self.choices.is_empty()).then(|| self.metavar()))
+    }
 }
 
 struct Parsed<'a> {
@@ -86,79 +178,144 @@ struct Parsed<'a> {
 enum Stop<'a> {
     Help(&'a Parser),
     Error(&'a Parser, String),
+    Exception(Error),
+}
+
+impl From<TryReserveError> for Stop<'_> {
+    fn from(_: TryReserveError) -> Self {
+        Self::Exception(Error::allocation())
+    }
 }
 
 impl Parser {
+    fn normalize_numbers(&mut self) {
+        for option in &mut self.options {
+            let integer = |text: &mut String| {
+                if !text
+                    .strip_prefix('-')
+                    .unwrap_or(text)
+                    .bytes()
+                    .all(|ch| ch.is_ascii_digit())
+                {
+                    *text = crate::parse_integer_literal(text)
+                        .expect("integer literal from schema")
+                        .to_string();
+                }
+            };
+            if option.kind == Kind::Int {
+                option.choices.iter_mut().for_each(integer);
+            }
+            if option.int_default
+                && let Some(default) = &mut option.default
+            {
+                integer(default);
+            }
+            if option.int_constant
+                && let Some(constant) = &mut option.constant
+            {
+                integer(constant);
+            }
+            if option.kind != Kind::Float {
+                continue;
+            }
+            let format = |text: &mut String| {
+                *text = crate::floats::render(crate::floats::parse(text).expect("literal float"))
+                    .to_string();
+            };
+            for choice in &mut option.choices {
+                format(choice);
+            }
+            if option.float_default
+                && let Some(default) = &mut option.default
+            {
+                format(default);
+            }
+            if option.float_constant
+                && let Some(constant) = &mut option.constant
+            {
+                format(constant);
+            }
+        }
+        if let Some(commands) = &mut self.subcommands {
+            for child in &mut commands.choices {
+                child.parser.normalize_numbers();
+            }
+        }
+    }
+
+    fn flags(&self) -> impl Iterator<Item = (&str, Option<usize>)> {
+        self.help_flags
+            .iter()
+            .flatten()
+            .map(|flag| (flag.as_str(), None))
+            .chain(
+                self.options
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, o)| !o.positional())
+                    .flat_map(|(i, o)| o.flags().map(move |flag| (flag, Some(i)))),
+            )
+    }
+
+    fn help_name(&self) -> String {
+        self.help_flags.as_ref().expect("help action").join("/")
+    }
+
+    /// Resolve exact spellings first, then enumerate every possible long
+    /// abbreviation and short cluster in declaration order.
     fn token<'a>(&'a self, arg: &'a str) -> Token<'a> {
         if arg == "--" {
             return Token::End;
         }
-        let Some(tail) = arg.strip_prefix('-') else {
+        let mut chars = arg.chars();
+        let Some(prefix) = chars.next().filter(|&c| self.prefixes.contains(c)) else {
             return Token::Value;
         };
-        if tail.is_empty() {
+        let token = |flag, slot, value| match slot {
+            None => Token::Help(value),
+            Some(i) => Token::Option(i, flag, value),
+        };
+        if let Some((flag, slot)) = self.flags().find(|(s, _)| *s == arg) {
+            return token(flag, slot, None);
+        }
+        let Some(second) = chars.next() else {
             return Token::Value;
-        }
-        let (flag, explicit) = arg
+        };
+        let (head, explicit) = arg
             .split_once('=')
-            .map_or((arg, None), |(flag, value)| (flag, Some(value)));
-        if matches!(flag, "-h" | "--help") {
-            return Token::Help(explicit);
-        }
-        if let Some(index) = self
-            .options
-            .iter()
-            .position(|option| option.flags().any(|s| s == flag))
+            .map_or((arg, None), |(h, v)| (h, Some(v)));
+        if explicit.is_some()
+            && let Some((flag, slot)) = self.flags().find(|(s, _)| *s == head)
         {
-            return Token::Option(index, explicit);
+            return token(flag, slot, explicit);
         }
-        if flag.starts_with("--") || flag == "-" {
-            let mut names: Vec<_> = ["-h", "--help"]
-                .into_iter()
-                .filter(|name| name.starts_with(flag))
-                .collect();
-            let help = !names.is_empty();
-            let matches = self
-                .options
-                .iter()
-                .enumerate()
-                .flat_map(|(index, option)| option.flags().map(move |flag| (index, flag)))
-                .filter(|(_, spelling)| spelling.starts_with(flag));
-            let mut option = None;
-            for (index, matched) in matches {
-                names.push(matched);
-                option = Some(index);
-            }
-            if names.len() > 1 {
-                return Token::Ambiguous(names);
-            }
-            if help {
-                return Token::Help(explicit);
-            }
-            if let Some(index) = option {
-                return Token::Option(index, explicit);
+        let long = self.prefixes.contains(second);
+        let short = &arg[..prefix.len_utf8() + second.len_utf8()];
+        let mut matches = Vec::new();
+        for (flag, slot) in self.flags() {
+            if !long && flag == short {
+                matches.push((flag, Token::Cluster(prefix, &arg[prefix.len_utf8()..])));
+            } else if self.abbrev && flag.starts_with(head) {
+                matches.push((flag, token(flag, slot, explicit)));
             }
         }
-        if let Some(first) = arg.get(..2)
-            && arg.len() > first.len()
-            && (first == "-h"
-                || self
-                    .options
-                    .iter()
-                    .any(|option| option.flags().any(|s| s == first)))
-        {
-            return Token::Cluster(&arg[1..]);
+        if matches.len() > 1 {
+            return Token::Ambiguous(matches.into_iter().map(|(flag, _)| flag).collect());
         }
-        let numeric = tail
-            .strip_prefix('.')
-            .unwrap_or(tail)
-            .chars()
-            .next()
-            .is_some_and(|first| {
-                // Python's negative-number matcher starts with -\.?\d.
-                GeneralCategory::for_char(first) == GeneralCategory::DecimalNumber
-            });
-        if numeric || arg.contains(' ') {
+        if let Some((_, found)) = matches.pop() {
+            return found;
+        }
+        let numeric = |s: &str| {
+            s.strip_prefix('-').is_some_and(|s| {
+                s.strip_prefix('.')
+                    .unwrap_or(s)
+                    .chars()
+                    .next()
+                    .and_then(crate::integer_text::decimal_digit)
+                    .is_some()
+            })
+        };
+        if (numeric(arg) && !self.flags().any(|(name, _)| numeric(name))) || arg.contains(' ') {
             Token::Value
         } else {
             Token::Unknown
@@ -166,32 +323,108 @@ impl Parser {
     }
 
     fn parse<'a>(&'a self, args: &[&'a str]) -> Result<Parsed<'a>, Stop<'a>> {
-        let mut values = vec![None; self.options.len()];
+        let mut values = self.options.iter().map(|_| None).collect::<Vec<_>>();
         let mut extras = Vec::new();
         let mut index = 0;
         let mut selected = None;
-        let mut end_options = false;
-        let mut after_positional = None;
-        let mut positionals = self
+        let marker = args.iter().position(|&arg| arg == "--");
+        let positional_slots = self
             .options
             .iter()
             .enumerate()
-            .filter(|(_, o)| o.positional())
-            .peekable();
-        while let Some(&arg) = args.get(index) {
+            .filter_map(|(slot, option)| option.positional().then_some(slot))
+            .collect::<Vec<_>>();
+        let arities = positional_slots
+            .iter()
+            .map(|&slot| self.options[slot].nargs)
+            .chain(self.subcommands.is_some().then_some(Nargs::One))
+            .collect::<Vec<_>>();
+        let mut next_positional = 0;
+        let is_value = |i: usize| {
+            marker.is_some_and(|at| i >= at) || matches!(self.token(args[i]), Token::Value)
+        };
+        'parse: loop {
+            if index == args.len() || is_value(index) {
+                let mut end = index;
+                while end < args.len() && is_value(end) {
+                    end += 1;
+                }
+                let available =
+                    end - index - usize::from(marker.is_some_and(|m| (index..end).contains(&m)));
+                for count in
+                    positional_counts(&arities[next_positional..], available, end < args.len())
+                {
+                    let slot = positional_slots.get(next_positional);
+                    next_positional += 1;
+                    if marker == Some(index) {
+                        index += 1;
+                    }
+                    let Some(&slot) = slot else {
+                        let commands = self.subcommands.as_ref().unwrap();
+                        let name = args[index];
+                        let Some((child, definition)) = commands
+                            .choices
+                            .iter()
+                            .enumerate()
+                            .find(|(_, child)| child.spellings().any(|word| word == name))
+                        else {
+                            let choices = commands
+                                .spellings()
+                                .map(string_repr)
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            let prefix = commands
+                                .error_name()
+                                .map_or_else(String::new, |name| format!("argument {name}: "));
+                            return Err(Stop::Error(
+                                self,
+                                format!(
+                                    "{prefix}invalid choice: {} (choose from {choices})",
+                                    string_repr(name)
+                                ),
+                            ));
+                        };
+                        let mut parsed = definition.parser.parse(&args[index + 1..])?;
+                        extras.try_reserve(parsed.extras.len())?;
+                        extras.append(&mut parsed.extras);
+                        selected = Some((child, name, parsed.words));
+                        break 'parse;
+                    };
+                    let mut taken = Vec::with_capacity(count);
+                    for _ in 0..count {
+                        if marker == Some(index) {
+                            index += 1;
+                        }
+                        taken.push(args[index]);
+                        index += 1;
+                    }
+                    if marker == Some(index) {
+                        index += 1;
+                    }
+                    values[slot] = Some(
+                        self.options[slot]
+                            .bind(Some(&taken))
+                            .map_err(|e| Stop::Error(self, e))?,
+                    );
+                }
+                extras.try_reserve(end - index)?;
+                extras.extend(args[index..end].iter().copied().map(Cow::Borrowed));
+                index = end;
+                if index == args.len() {
+                    break;
+                }
+            }
+            let arg = args[index];
             index += 1;
             let mut clustered_help = false;
-            let (slot, explicit) = match if end_options {
-                Token::Value
-            } else {
-                self.token(arg)
-            } {
+            let (slot, spelling, explicit) = match self.token(arg) {
                 Token::Help(None) => return Err(Stop::Help(self)),
                 Token::Help(Some(value)) => {
                     return Err(Stop::Error(
                         self,
                         format!(
-                            "argument -h/--help: ignored explicit argument {}",
+                            "argument {}: ignored explicit argument {}",
+                            self.help_name(),
                             string_repr(value)
                         ),
                     ));
@@ -202,83 +435,46 @@ impl Parser {
                         format!("ambiguous option: {arg} could match {}", names.join(", ")),
                     ));
                 }
-                Token::Value if let Some((slot, _)) = positionals.next() => {
-                    after_positional = Some(index);
-                    (slot, Some(arg))
-                }
-                Token::End
-                    if self.subcommands.is_some()
-                        || positionals.peek().is_some()
-                        || after_positional == Some(index - 1) =>
-                {
-                    end_options = true;
-                    continue;
-                }
-                Token::Value if let Some(commands) = &self.subcommands => {
-                    let Some((child, definition)) = commands
-                        .choices
-                        .iter()
-                        .enumerate()
-                        .find(|(_, child)| child.name == arg)
-                    else {
-                        let choices = commands
-                            .choices
-                            .iter()
-                            .map(|child| string_repr(&child.name))
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        return Err(Stop::Error(
-                            self,
-                            format!(
-                                "argument {}: invalid choice: {} (choose from {choices})",
-                                commands.dest,
-                                string_repr(arg)
-                            ),
-                        ));
-                    };
-                    let mut parsed = definition.parser.parse(&args[index..])?;
-                    extras.append(&mut parsed.extras);
-                    selected = Some((child, arg, parsed.words));
-                    break;
-                }
-                Token::End => {
-                    extras.extend(args[index - 1..].iter().copied().map(Cow::Borrowed));
-                    break;
-                }
-                Token::Value | Token::Unknown => {
+                Token::End | Token::Value => unreachable!("positional run already consumed"),
+                Token::Unknown => {
+                    extras.try_reserve(1)?;
                     extras.push(Cow::Borrowed(arg));
                     continue;
                 }
-                Token::Cluster(mut suffix) => {
+                Token::Cluster(prefix, mut suffix) => {
                     let mut take = None;
                     while !suffix.is_empty() {
-                        let Some((letter, rest)) = suffix.split_at_checked(1) else {
-                            extras.push(Cow::Owned(format!("-{suffix}")));
+                        let letter = suffix.chars().next().unwrap();
+                        let rest = &suffix[letter.len_utf8()..];
+                        let spelling = format!("{prefix}{letter}");
+                        let Some((matched, slot)) =
+                            self.flags().find(|(name, _)| *name == spelling)
+                        else {
+                            extras.try_reserve(1)?;
+                            extras.push(Cow::Owned(format!("{prefix}{suffix}")));
                             break;
                         };
-                        let option = self.options.iter().enumerate().find(|(_, option)| {
-                            option
-                                .flags()
-                                .any(|flag| flag.strip_prefix('-') == Some(letter))
-                        });
-                        if letter != "h" && option.is_none() {
-                            extras.push(Cow::Owned(format!("-{suffix}")));
-                            break;
-                        }
+                        let option = slot.map(|slot| (slot, &self.options[slot]));
                         if let Some((slot, option)) = option
-                            && option.kind != Kind::Bool
+                            && option.takes_value()
                         {
                             take = Some((
                                 slot,
+                                matched,
                                 (!rest.is_empty()).then(|| rest.strip_prefix('=').unwrap_or(rest)),
                             ));
                             break;
                         }
                         // argparse resolves the entire cluster (including errors)
                         // before invoking its first action, which may be help.
-                        if rest.starts_with(['-', '=']) {
+                        if rest.starts_with('=')
+                            || rest
+                                .chars()
+                                .next()
+                                .is_some_and(|c| self.prefixes.contains(c))
+                        {
                             let name = option.map_or_else(
-                                || "-h/--help".into(),
+                                || self.help_name(),
                                 |(_, option)| option.error_name(),
                             );
                             return Err(Stop::Error(
@@ -289,8 +485,12 @@ impl Parser {
                                 ),
                             ));
                         }
-                        if let Some((slot, _)) = option {
-                            values[slot] = Some(Vec::new());
+                        if let Some((slot, option)) = option {
+                            values[slot] = Some(
+                                option
+                                    .flag_value(values[slot].take(), matched)
+                                    .map_err(|e| Stop::Error(self, e))?,
+                            );
                         } else {
                             clustered_help = true;
                         }
@@ -304,11 +504,11 @@ impl Parser {
                     };
                     take
                 }
-                Token::Option(slot, value) => (slot, value),
+                Token::Option(slot, spelling, value) => (slot, spelling, value),
             };
             let option = &self.options[slot];
             let taken = if let Some(value) = explicit {
-                if option.kind == Kind::Bool {
+                if !option.takes_value() {
                     return Err(Stop::Error(
                         self,
                         format!(
@@ -318,26 +518,43 @@ impl Parser {
                         ),
                     ));
                 }
-                vec![value]
-            } else if option.kind == Kind::Bool {
-                Vec::new()
-            } else {
-                let start = index;
-                while index < args.len() && matches!(self.token(args[index]), Token::Value) {
-                    index += 1;
-                    if !option.many {
-                        break;
-                    }
-                }
-                if index == start {
-                    let message = if option.many {
-                        "expected at least one argument"
-                    } else {
-                        "expected one argument"
-                    };
+                if option.nargs.bounds().0 > 1 {
                     return Err(Stop::Error(
                         self,
-                        format!("argument {}: {message}", option.error_name()),
+                        format!(
+                            "argument {}: {}",
+                            option.error_name(),
+                            option.nargs.expected()
+                        ),
+                    ));
+                }
+                vec![value]
+            } else if !option.takes_value() {
+                values[slot] = Some(
+                    option
+                        .flag_value(values[slot].take(), spelling)
+                        .map_err(|e| Stop::Error(self, e))?,
+                );
+                continue;
+            } else {
+                let start = index;
+                let (min, max) = option.nargs.bounds();
+                while index < args.len()
+                    && index - start < max
+                    && marker != Some(index)
+                    && (matches!(option.nargs, Nargs::Fixed(_))
+                        || matches!(self.token(args[index]), Token::Value))
+                {
+                    index += 1;
+                }
+                if index - start < min {
+                    return Err(Stop::Error(
+                        self,
+                        format!(
+                            "argument {}: {}",
+                            option.error_name(),
+                            option.nargs.expected()
+                        ),
                     ));
                 }
                 args[start..index].to_vec()
@@ -345,39 +562,39 @@ impl Parser {
             if clustered_help {
                 return Err(Stop::Help(self));
             }
-            if !option.choices.is_empty()
-                && let Some(value) = taken
-                    .iter()
-                    .find(|&&value| !option.choices.iter().any(|choice| choice == value))
-            {
-                let choices = option
-                    .choices
-                    .iter()
-                    .map(|choice| string_repr(choice))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                return Err(Stop::Error(
-                    self,
-                    format!(
-                        "argument {}: invalid choice: {} (choose from {choices})",
-                        option.error_name(),
-                        string_repr(value)
-                    ),
-                ));
-            }
-            values[slot] = Some(taken);
+            values[slot] = Some(
+                option
+                    .bind(Some(&taken))
+                    .map_err(|e| Stop::Error(self, e))?,
+            );
         }
-        let mut missing = self
-            .options
-            .iter()
-            .zip(&values)
-            .filter(|(option, value)| option.required && value.is_none())
-            .map(|(option, _)| option.error_name())
-            .collect::<Vec<_>>();
+        let mut missing = Vec::new();
+        let mut words = Vec::with_capacity(values.len());
+        for (option, value) in self.options.iter().zip(values) {
+            let bound = match value {
+                Some(value) => value,
+                None if option.required => {
+                    missing.push(option.error_name());
+                    continue;
+                }
+                None => option.bind(None).map_err(|e| Stop::Error(self, e))?,
+            };
+            words.push(Word::Option(option, bound));
+        }
         if let Some(commands) = &self.subcommands
+            && commands.required
             && selected.is_none()
         {
-            missing.push(commands.dest.clone());
+            let name = commands.error_name().ok_or_else(|| {
+                Stop::Exception(Error::new(
+                    exceptions::Kind::TypeError,
+                    format!(
+                        "sequence item {}: expected str instance, NoneType found",
+                        missing.len()
+                    ),
+                ))
+            })?;
+            missing.push(name);
         }
         if !missing.is_empty() {
             return Err(Stop::Error(
@@ -388,14 +605,14 @@ impl Parser {
                 ),
             ));
         }
-        let mut words: Vec<_> = self
-            .options
-            .iter()
-            .zip(values)
-            .map(|(option, value)| Word::Option(option, value))
-            .collect();
-        let child = selected.map(|(child, name, mut rest)| {
-            words.push(Word::Command(name));
+        if self
+            .subcommands
+            .as_ref()
+            .is_some_and(|commands| commands.dest.is_some())
+        {
+            words.push(Word::Command(selected.as_ref().map(|(_, name, _)| *name)));
+        }
+        let child = selected.map(|(child, _, mut rest)| {
             words.append(&mut rest);
             child
         });
@@ -407,95 +624,130 @@ impl Parser {
     }
 }
 
-fn scalar(kind: Kind, text: &str) -> usize {
-    let text = Rc::new(Str::new(text));
-    match kind {
-        Kind::Str => Rc::into_raw(text) as usize,
-        // SAFETY: the source remains live until Path takes an owner or normalizes it.
-        Kind::Path => unsafe { imre_path_new(Rc::as_ptr(&text)) as usize },
-        Kind::Bool => unreachable!(),
-    }
-}
-
 impl OptionSpec {
+    fn takes_value(&self) -> bool {
+        self.action == Action::Store
+    }
+
     fn flags(&self) -> impl Iterator<Item = &str> {
         std::iter::once(self.flag.as_str()).chain(self.aliases.iter().map(String::as_str))
     }
 
     fn positional(&self) -> bool {
-        !self.flag.starts_with('-')
+        self.positional
     }
 
     fn error_name(&self) -> String {
         self.flags().collect::<Vec<_>>().join("/")
     }
+}
 
-    fn word(&self, args: Option<Vec<&str>>) -> usize {
-        if args.is_none()
-            && let Some(member) = self.enum_default
-        {
-            return (member << 3) | 5;
-        }
-        if self.kind == Kind::Bool {
-            let value = args
-                .is_some()
-                .then_some(true)
-                .or_else(|| self.default.as_deref().map(|value| value == "True"));
-            return value.map_or(0, |value| usize::from(value) + usize::from(self.optional));
-        }
-        if self.many {
-            let Some(args) = args else { return 0 };
-            let mut values = Words::new(if self.kind == Kind::Path { 5 } else { 3 });
-            values
-                .values
-                .extend(args.into_iter().map(|value| scalar(self.kind, value)));
-            return Rc::into_raw(values.into_object()) as usize;
-        }
-        args.as_ref()
-            .and_then(|args| args.first().copied())
-            .or(self.default.as_deref())
-            .map_or(0, |value| scalar(self.kind, value))
+impl Parser {
+    fn from_schema(schema: &str) -> Self {
+        let mut parser: Self = serde_json::from_str(schema)
+            .unwrap_or_else(|_| fail("SystemError", "invalid argparse schema"));
+        parser.normalize_numbers();
+        parser.set_child_programs();
+        parser
     }
 }
 
-/// Parses the current contents of sys.argv[1..] into the fixed namespace layout.
+/// Format help or usage, returning the text or writing it to the requested stream.
+///
+/// # Safety
+/// The compiler roots the descriptor and description; output mode 3 also roots
+/// a native text stream in `file`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_argparse_text(
+    schema: *const Str,
+    description: *const Str,
+    usage: bool,
+    output: u32,
+    file: *const Object,
+) -> *const Str {
+    // SAFETY: both strings stay rooted while the formatter reads them.
+    let (schema, description) = unsafe { (&*schema, &*description) };
+    let parser = Parser::from_schema(schema);
+    let text: Str = if usage {
+        parser.usage(help::width())
+    } else {
+        match parser.help(description) {
+            Ok(help) => help,
+            Err(error) => return error.returning(std::ptr::null()),
+        }
+    }
+    .into();
+    match output {
+        0 => return Rc::into_raw(Rc::new(text)),
+        1 | 2 => {
+            // SAFETY: the native stream borrows the live string. A successful
+            // write returns an owned character count; zero indicates failure.
+            let count = unsafe { crate::sys::imre_sys_stream_write(output - 1, &text) };
+            if count != 0 {
+                drop(crate::Int(count));
+            }
+        }
+        3 => {
+            // SAFETY: file has the exact native text stream type.
+            unsafe { super::files::imre_text_write_discard(file, &text) };
+        }
+        _ => unreachable!(),
+    }
+    // _print_message ignores OSError from write(), but closed files raise
+    // ValueError and that exception must still reach the caller.
+    if let Some(error) = exceptions::take_pending() {
+        // SAFETY: the pending exception stays rooted for the kind check.
+        if unsafe {
+            exceptions::imre_exception_matches(Rc::as_ptr(&error), exceptions::Kind::OSError as u32)
+        } == 0
+        {
+            exceptions::replace_pending(Some(error));
+        }
+    }
+    std::ptr::null()
+}
+
+/// Parses an explicit string list or the current sys.argv[1..] into a namespace.
 ///
 /// # Safety
 /// The compiler roots the inputs. `layout` and each descriptor in `children`
 /// match the inferred fields for that parser. The child table contains one
 /// descriptor per declared subcommand in order, or is null for a flat parser.
+/// For parse_known_args, `pair_layout` describes (namespace, list[str]); otherwise it is null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_argparse_parse(
     layout: *const RecordDescriptor,
     children: *const *const RecordDescriptor,
+    pair_layout: *const RecordDescriptor,
     schema: *const Str,
     description: *const Str,
     argv: *const Object,
+    process_argv: bool,
 ) -> *mut usize {
     // SAFETY: these immutable inputs remain rooted during parsing and construction.
     let (schema, description, argv) = unsafe { (&*schema, &*description, &*argv) };
-    let parser: Parser = serde_json::from_str(schema)
-        .unwrap_or_else(|_| fail("SystemError", "invalid argparse schema"));
+    let parser = Parser::from_schema(schema);
+    let mut owners = Vec::new();
+    let mut args = Vec::new();
     // SAFETY: argv is a rooted list[str]; take independent string owners before
     // reading the argument values or constructing the output namespace.
-    let owners = unsafe {
+    let reserved = unsafe {
         argv.0.with(|storage| {
             let sequence = storage.sequence();
             sequence.check_kind(3);
-            sequence
-                .values
-                .iter()
-                .skip(1)
-                .map(|&word| super::acquire_rc::<Str>(word))
-                .collect::<Vec<_>>()
+            let words = sequence.values.iter().skip(usize::from(process_argv));
+            owners.try_reserve_exact(words.len())?;
+            args.try_reserve_exact(words.len())?;
+            owners.extend(words.map(|&word| super::acquire_rc::<Str>(word)));
+            Ok::<_, std::collections::TryReserveError>(())
         })
     };
-    let args = owners
-        .iter()
-        .map(|value| value.as_str())
-        .collect::<Vec<_>>();
+    if reserved.is_err() {
+        return Error::allocation().returning(std::ptr::null_mut());
+    }
+    args.extend(owners.iter().map(|value| value.as_str()));
     let parsed = match parser.parse(&args).and_then(|parsed| {
-        if parsed.extras.is_empty() {
+        if !pair_layout.is_null() || parsed.extras.is_empty() {
             Ok(parsed)
         } else {
             Err(Stop::Error(
@@ -505,12 +757,16 @@ pub unsafe extern "C" fn imre_argparse_parse(
         }
     }) {
         Ok(values) => values,
+        Err(Stop::Exception(error)) => return error.returning(std::ptr::null_mut()),
         Err(Stop::Help(active)) => {
-            let help = active.help(if std::ptr::eq(active, &parser) {
+            let help = match active.help(if std::ptr::eq(active, &parser) {
                 description
             } else {
                 ""
-            });
+            }) {
+                Ok(help) => help,
+                Err(error) => return error.returning(std::ptr::null_mut()),
+            };
             if crate::write_output(|writer| {
                 writer.write_all(help.trim_end_matches('\n').as_bytes())
             })
@@ -539,6 +795,15 @@ pub unsafe extern "C" fn imre_argparse_parse(
             return Error::exit_status(2).returning(std::ptr::null_mut());
         }
     };
+    let mut extras = Words::new(3);
+    if !pair_layout.is_null()
+        && extras
+            .values
+            .try_reserve_exact(parsed.extras.len())
+            .is_err()
+    {
+        return Error::allocation().returning(std::ptr::null_mut());
+    }
     // SAFETY: every slot receives exactly one owner of its declared kind. All
     // input validation is complete, and option conversion invokes no user code.
     unsafe {
@@ -551,14 +816,30 @@ pub unsafe extern "C" fn imre_argparse_parse(
         for (index, field) in parsed.words.into_iter().enumerate() {
             let word = match field {
                 Word::Option(option, values) => option.word(values),
-                Word::Command(value) => scalar(Kind::Str, value),
+                Word::Command(value) => {
+                    value.map_or(0, |name| Rc::into_raw(Rc::new(Str::new(name))) as usize)
+                }
             };
             let dest = result.add(index);
             match *layout_ref.kinds.add(index) {
-                3 | 5 => dest.cast::<*const ()>().write(word as *const ()),
+                3..=5 => dest.cast::<*const ()>().write(word as *const ()),
                 _ => dest.write(word),
             }
         }
-        result
+        if pair_layout.is_null() {
+            return result;
+        }
+        extras.values.extend(
+            parsed
+                .extras
+                .iter()
+                .map(|value| Rc::into_raw(Rc::new(Str::new(value))) as usize),
+        );
+        let pair = imre_record_new(pair_layout);
+        pair.cast::<*mut usize>().write(result);
+        pair.add(1)
+            .cast::<*const Object>()
+            .write(Rc::into_raw(extras.into_object()));
+        pair
     }
 }

@@ -503,16 +503,17 @@ impl Checker<'_> {
                 "assignment expressions are forbidden in comprehension iterables",
             ));
         }
-        if !narrowing::expression_assignments(expression).is_empty()
+        let input = self.iteration_input(&display.clauses[0].iter)?;
+        if matches!(input, Iteration::Prepared(_))
+            || !narrowing::expression_assignments(expression).is_empty()
             || pipelines::is_pipeline_expression(self, &display.clauses[0].iter)
             || !self.local_functions.is_empty()
                 && free_reads(expression, HashSet::new())
                     .iter()
                     .any(|name| self.local_functions.contains_key(name))
         {
-            return self.inline_comprehension(expression, display, expected);
+            return self.inline_comprehension(expression, display, expected, input);
         }
-        let input = self.iteration_input(&display.clauses[0].iter)?;
         let mut targets = HashSet::new();
         for clause in display.clauses {
             target_names(&clause.target, &mut targets);
@@ -585,7 +586,7 @@ impl Checker<'_> {
                 items,
                 start: start.map(|start| parameter(start, &mut helper)),
             },
-            Iteration::Prepared(_) => unreachable!("pipeline comprehensions run inline"),
+            Iteration::Prepared(_) => unreachable!("prepared inputs were dispatched inline"),
         };
         for name in captures {
             let Some(&source_slot) = self.names.get(&name) else {
@@ -752,8 +753,8 @@ impl Checker<'_> {
         expression: &ast::Expr,
         display: Display<'_>,
         expected: Option<Type>,
+        input: Iteration,
     ) -> Result<Expr, String> {
-        let input = self.iteration_input(&display.clauses[0].iter)?;
         let before = self.local_state();
         let names = self.names.clone();
         let class_receiver = self.class_receiver.clone();

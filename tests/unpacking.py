@@ -10,6 +10,9 @@ from assignments import main
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "unpacking"
 
 REJECTED = {
+    "tuple_after_resize": "def bad(xs: list[int]) -> tuple[int]:\n    if len(xs) != 1:\n        raise ValueError('length')\n    xs.append(2)\n    return tuple(xs)\n",
+    "tuple_alias_resize": "def change(xs: list[int]) -> int:\n    xs.append(2)\n    return 7\ndef bad(xs: list[int]) -> tuple[int]:\n    if len(xs) != 1:\n        raise ValueError('length')\n    xs[0] = change(xs)\n    return tuple(xs)\n",
+    "tuple_untrusted_cast": 'from typing import cast\ndef bad(xs: list[int]) -> tuple[int]:\n    return cast("tuple[int]", tuple(xs))\n',
     "chain_conflicting_slots": 'number = 0\ntext = ""\nnumber = text = 1\n',
     "chain_bool_is_not_int": "number: int = 0\nflag: bool = False\nnumber = flag = True\n",
     "chain_conflicting_empty_contexts": "numbers: list[int] = []\ntexts: list[str] = []\nnumbers = texts = []\n",
