@@ -1,23 +1,23 @@
 //! File type queries on concrete paths and the cached views exposed by `Path.info`.
 
 use super::super::{Object, Storage, StorageCell, Str, object, os};
+use crate::StrOwner;
 use rustix::fs::FileType;
 use std::cell::OnceCell;
 use std::fs::Metadata;
 use std::os::unix::fs::MetadataExt;
-use std::rc::Rc;
 
 /// One path's data, independent of the owner so a saved view can outlive the path.
 pub(in crate::objects) struct Info {
-    name: Rc<Str>,
+    name: StrOwner,
     entry: Option<FileType>,
     follow: OnceCell<Option<Box<Metadata>>>,
     nofollow: OnceCell<Option<Box<Metadata>>>,
 }
 
 impl Info {
-    pub(super) fn object(name: Rc<Str>, entry: Option<FileType>) -> Rc<Object> {
-        Rc::new(Object(StorageCell::new(Storage::PathInfo(Box::new(
+    pub(super) fn object(name: StrOwner, entry: Option<FileType>) -> crate::ObjectOwner {
+        crate::ObjectOwner::new(Object(StorageCell::new(Storage::PathInfo(Box::new(
             Self {
                 name,
                 entry,
@@ -95,7 +95,7 @@ pub unsafe extern "C" fn imre_path_info(path: *const Object) -> *const Object {
             let Storage::Path { text, .. } = s else {
                 unreachable!()
             };
-            Rc::into_raw(text.info())
+            crate::ObjectOwner::into_raw(text.info())
         })
     }
 }
@@ -123,5 +123,5 @@ pub unsafe extern "C" fn imre_path_query(path: *const Object, kind: u32, follow:
 /// The POSIX info view's repr is independent of its pathname and cached values.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_path_info_repr(_info: *const Object) -> *const Str {
-    Rc::into_raw(Rc::new(Str::from("<PosixPath.info>")))
+    StrOwner::into_raw(StrOwner::new(Str::from("<PosixPath.info>")))
 }

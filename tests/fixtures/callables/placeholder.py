@@ -1,5 +1,6 @@
+import builtins
 import functools
-from functools import Placeholder as Hole, partial
+from functools import Placeholder as Hole, partial, singledispatch
 
 
 def mark(events: list[int], n: int) -> int:
@@ -78,6 +79,21 @@ def exercise() -> None:
     except TypeError as error:
         print(str(error))
         print(events)
+
+    @singledispatch
+    def ignores(argument):
+        return "default"
+
+    events = []
+    try:
+        partial(builtins.len, values[mark(events, 0)])
+    except TypeError as error:
+        print(str(error))
+    try:
+        partial(ignores, values[mark(events, 1)])
+    except TypeError as error:
+        print(str(error))
+    print(events)
 
 
 exercise()

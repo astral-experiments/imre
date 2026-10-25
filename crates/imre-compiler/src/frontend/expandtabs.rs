@@ -73,7 +73,12 @@ impl Checker<'_> {
 
     /// Convert an integer or a concrete __index__ result exactly once. Python
     /// does not recursively index objects returned by the method.
-    fn index_word(&mut self, value: Expr, at: &ast::Expr, returned: bool) -> Result<Expr, String> {
+    pub(super) fn index_word(
+        &mut self,
+        value: Expr,
+        at: &ast::Expr,
+        returned: bool,
+    ) -> Result<Expr, String> {
         if value.ty == Type::Int {
             return Ok(value);
         }

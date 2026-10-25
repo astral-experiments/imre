@@ -15,6 +15,7 @@ pub(super) fn check_reads(
     let mut reads = Reads {
         parameter,
         empty_tuple_default,
+        pack: false,
         graph,
         module,
         allowed: HashSet::new(),
@@ -36,9 +37,41 @@ pub(super) fn check_reads(
     }
 }
 
+/// A variadic tuple can use homogeneous backend storage when the body only
+/// observes its elements. Tuple identity, slicing, mutation, and escape remain
+/// unsupported rather than exposing the private list that carries the values.
+pub(super) fn check_pack_reads(
+    function: &ast::StmtFunctionDef,
+    parameter: &str,
+    graph: &SourceGraph,
+    module: ModuleId,
+    source: &str,
+) -> Result<(), String> {
+    let mut reads = Reads {
+        parameter,
+        empty_tuple_default: false,
+        pack: true,
+        graph,
+        module,
+        allowed: HashSet::new(),
+        invalid: None,
+    };
+    reads.visit_body(&function.body);
+    if let Some(expr) = reads.invalid {
+        Err(error(
+            source,
+            expr,
+            "a variadic positional parameter supports iteration, expansion, and len",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 struct Reads<'a, 'ast> {
     parameter: &'a str,
     empty_tuple_default: bool,
+    pack: bool,
     graph: &'a SourceGraph,
     module: ModuleId,
     allowed: HashSet<TextRange>,
@@ -104,13 +137,18 @@ impl<'ast> Visitor<'ast> for Reads<'_, 'ast> {
             return;
         }
         match expr {
+            ast::Expr::Starred(star) if self.pack && star.ctx == ast::ExprContext::Load => {
+                self.allow(&star.value)
+            }
             ast::Expr::Name(name)
                 if name.id == self.parameter && !self.allowed.remove(&expr.range()) =>
             {
                 self.invalid.get_or_insert(expr);
             }
             ast::Expr::Subscript(subscript)
-                if subscript.ctx == ast::ExprContext::Load && !self.empty_tuple_default =>
+                if subscript.ctx == ast::ExprContext::Load
+                    && !self.empty_tuple_default
+                    && !self.pack =>
             {
                 self.allow(&subscript.value);
             }

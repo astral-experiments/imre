@@ -1,6 +1,7 @@
 //! Move by rename first. Copy and remove the source only after a failed rename
 //! and a successful fallback; preserve symbolic links even when their targets are gone.
 
+use crate::StrOwner;
 use rustix::fs::{Access, AtFlags, CWD, accessat};
 use std::path::PathBuf;
 
@@ -64,7 +65,7 @@ fn move_path(
     layout: &RecordDescriptor,
     callback: Option<Callback>,
     handles: (*const (), *const ()),
-    original_src: Option<Rc<Object>>,
+    original_src: Option<crate::ObjectOwner>,
 ) -> TreeResult<Destination> {
     let mut joined = None;
     if let Ok(directory) = fs::metadata(dst.path())
@@ -220,7 +221,7 @@ pub unsafe extern "C" fn imre_shutil_move(
             &*layout,
             Callback::new(function, context, repr).map(|c| c.tagged(tagged)),
             (src, dst),
-            (src_tag == 2).then(|| acquire_rc::<Object>(src as usize)),
+            (src_tag == 2).then(|| crate::ObjectOwner::acquire_word(src as usize)),
         )
         .and_then(|out| {
             Ok(match out {
@@ -228,7 +229,7 @@ pub unsafe extern "C" fn imre_shutil_move(
                 Destination::Original => {
                     retain_handle(dst, dst_tag) | if dst_tag == 2 { 6 } else { 0 }
                 }
-                Destination::Joined(path) => Rc::into_raw(Rc::new(
+                Destination::Joined(path) => StrOwner::into_raw(StrOwner::new(
                     crate::objects::paths::path_utf8(path.into_os_string())?,
                 )) as usize,
             })

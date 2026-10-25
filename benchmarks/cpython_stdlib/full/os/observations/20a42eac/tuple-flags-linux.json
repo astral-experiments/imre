@@ -1,0 +1,183 @@
+{
+  "head": "20a42eac798b81f57ec3a81d13abd10bc737b2b7",
+  "base": "041050c0397e38e68a49546d303c46fad56b93a9",
+  "prospective_tree": "1f10733dd636b7bda5ddf690eb91815065435cf9",
+  "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "product_trees": {
+    "crates": "46379975bd19f2043ae805ea93c1f18bd109be5d",
+    "Cargo.toml": "de9acf13ae17829f7d88e51348700f1e888945cd",
+    "Cargo.lock": "327eb4c772eca891eafdec4f5b9539a52471cc59",
+    "stdlib": "7ecfc4e2013468653ec9fe961c5fbd1fb5c72ecf"
+  },
+  "build": "rustc +ohm with the locked stdlib-os Cargo dependencies and an isolated RAM source archive",
+  "product_sha256": {
+    "imre": "78c9e2892f1289b848ae4bcab6767837cbf39deb7c3d40f734b5d9453f0af0ee",
+    "libimre_runtime.a": "41de04f5b3f75cbc3135a0d1a6ecb092c1531c9bc6676819552b163c737e614f"
+  },
+  "flags_source_sha256": "7f44a7fd0440c9f211080c9836beee1ddaf5a3fcf98c1c3b67e2aaf6c6535e65",
+  "flags": {
+    "whole-program-O0": {
+      "built": true,
+      "match": true,
+      "reference_exit": 0,
+      "native_exit": 0,
+      "lines": 81,
+      "sha256": "8d732f74fd10eb06bfe210540e3205bcc1897dfb48a6acda3023384d23de83d9"
+    },
+    "whole-program-O3": {
+      "built": true,
+      "match": true,
+      "reference_exit": 0,
+      "native_exit": 0,
+      "lines": 81,
+      "sha256": "8d732f74fd10eb06bfe210540e3205bcc1897dfb48a6acda3023384d23de83d9"
+    },
+    "reachable-only-O0": {
+      "built": true,
+      "match": true,
+      "reference_exit": 0,
+      "native_exit": 0,
+      "lines": 81,
+      "sha256": "8d732f74fd10eb06bfe210540e3205bcc1897dfb48a6acda3023384d23de83d9"
+    },
+    "reachable-only-O3": {
+      "built": true,
+      "match": true,
+      "reference_exit": 0,
+      "native_exit": 0,
+      "lines": 81,
+      "sha256": "8d732f74fd10eb06bfe210540e3205bcc1897dfb48a6acda3023384d23de83d9"
+    }
+  },
+  "samples": {
+    "tuple_index": [
+      "whole-program-O0",
+      "whole-program-O3"
+    ],
+    "tuple_format": [
+      "whole-program-O0",
+      "whole-program-O3"
+    ],
+    "value_struct": [
+      "whole-program-O0",
+      "whole-program-O3"
+    ],
+    "repeated_struct": [
+      "whole-program-O0",
+      "whole-program-O3"
+    ],
+    "sparse_struct": [
+      "whole-program-O0",
+      "whole-program-O3"
+    ],
+    "class_lineage": [
+      "whole-program-O0",
+      "whole-program-O3"
+    ],
+    "imported_struct": [
+      "whole-program-O0",
+      "whole-program-O3"
+    ],
+    "pass_fds": [
+      "whole-program-O0",
+      "whole-program-O3"
+    ],
+    "child_settings": [
+      "whole-program-O0",
+      "whole-program-O3"
+    ]
+  },
+  "original_methods": {
+    "0": {
+      "pipe2_cases": {
+        "count": 2,
+        "roles": {
+          "mixed": 1,
+          "host_driven_native": 1
+        },
+        "sha256": "7d55281b2a40e6180d46967c3baed8a99488014ff8ffd483e2b26726ad4edf4f"
+      },
+      "native_descriptors": {
+        "count": 12,
+        "roles": {
+          "native_body_host_fixture": 12
+        },
+        "sha256": "3480f21dcd1b37c4ec08d4fcaa483142aac9bd7f8966728d2bf010da0e2b8adb"
+      },
+      "host_descriptors": {
+        "count": 11,
+        "roles": {
+          "host_driven_native": 11
+        },
+        "sha256": "9000c7212d67e067c004d447d88991fd38a0abf904922d8dc3664fe536a2fb93"
+      },
+      "value_cases": {
+        "count": 5,
+        "roles": {
+          "native_body_host_fixture": 3,
+          "host_driven_native": 1,
+          "mixed": 1
+        },
+        "sha256": "f967866beee71d7d359131e9da063f7524c0f1da5c24e0f506a7b44eda9330f3"
+      },
+      "credential_children": {
+        "count": 14,
+        "roles": {
+          "native_body_host_fixture": 12,
+          "host_driven_native": 2
+        },
+        "sha256": "b46aa83004d581b9da2130d2c45abe9464aecb03519b47c4e7245cb7f3c50603"
+      }
+    },
+    "3": {
+      "pipe2_cases": {
+        "count": 2,
+        "roles": {
+          "mixed": 1,
+          "host_driven_native": 1
+        },
+        "sha256": "a289dee57d09f973e44b2229d242a249a3f86e9553c1a3817fe8aa0e5eb5e1aa"
+      },
+      "native_descriptors": {
+        "count": 12,
+        "roles": {
+          "native_body_host_fixture": 12
+        },
+        "sha256": "1a1d95e45153aad9e1ebd1fd6896a0c533933bbe551d9105979950c2d98e967d"
+      },
+      "host_descriptors": {
+        "count": 11,
+        "roles": {
+          "host_driven_native": 11
+        },
+        "sha256": "b746664b225c5951df1454e7dbb9657b6da5d70a711b03bd22aa910204110633"
+      },
+      "value_cases": {
+        "count": 5,
+        "roles": {
+          "native_body_host_fixture": 3,
+          "host_driven_native": 1,
+          "mixed": 1
+        },
+        "sha256": "b553fae08d3b63e4c9036de58456809ee199e315378a48916c84e115adbf9dc6"
+      },
+      "credential_children": {
+        "count": 14,
+        "roles": {
+          "native_body_host_fixture": 12,
+          "host_driven_native": 2
+        },
+        "sha256": "1d240d75140d960ccb86df20ea1908cc4730ba9bde8c23fe29f6b8a12746225f"
+      }
+    }
+  },
+  "compiler_tests": {
+    "exit": 0,
+    "summary": [
+      "test result: ok. 261 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 167.00s"
+    ],
+    "sha256": "966e4e46d365e676ea72e699b8edfaebd811888c2544a08addac6b2f5d0b3d77"
+  },
+  "iterator_regression": "effects::tests::local_and_final_analysis_agree_on_packed_list_allocations",
+  "occurrence_changes_from_699212be": 0
+}

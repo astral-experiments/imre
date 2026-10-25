@@ -1,0 +1,71 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_revision": "5e74b6dbc44a75899ed8af50558b0350fc7f6dc9",
+  "source_blob": "803de0c6792d64365e7c6f6209a5a794b04a122e",
+  "imre_sha256": "b231852684ac9a9c9d1630818d75adc65f2cdc4c22ce7ee78d98ec963483b4cf",
+  "runtime_sha256": "3aa9b2c578c58d622084d0ccb0508d5d68ff2a1314a0802e505f9d5065da18d8",
+  "reference": {
+    "collections.Counter": 18,
+    "collections.Counter.__add__": 1,
+    "collections.Counter.__and__": 1,
+    "collections.Counter.__iadd__": 3,
+    "collections.Counter.__iand__": 3,
+    "collections.Counter.__init__": 4,
+    "collections.Counter.__ior__": 3,
+    "collections.Counter.__isub__": 3,
+    "collections.Counter.__or__": 1,
+    "collections.Counter.__sub__": 1,
+    "collections.Counter.elements": 5,
+    "collections.Counter.most_common": 1,
+    "collections.Counter.subtract": 5,
+    "collections.Counter.update": 5,
+    "collections.namedtuple": 11
+  },
+  "entries": {
+    "discovery": {
+      "source": "import doctest\nimport collections\nsuite = doctest.DocTestSuite(collections)\nprint(suite.countTestCases())\nfor case in suite:\n    print(case.id())\n",
+      "reference_stdout": "15\ncollections.Counter\ncollections.Counter.__add__\ncollections.Counter.__and__\ncollections.Counter.__iadd__\ncollections.Counter.__iand__\ncollections.Counter.__init__\ncollections.Counter.__ior__\ncollections.Counter.__isub__\ncollections.Counter.__or__\ncollections.Counter.__sub__\ncollections.Counter.elements\ncollections.Counter.most_common\ncollections.Counter.subtract\ncollections.Counter.update\ncollections.namedtuple\n",
+      "reference_stderr": "",
+      "native": {
+        "O0": {
+          "status": "blocked",
+          "reason": "Compiling <entry>/case.py (-O0)\n<entry>/case.py:3:30: Imre: name is not a local value; globals and first-class functions are unsupported"
+        },
+        "O3": {
+          "status": "blocked",
+          "reason": "Compiling <entry>/case.py (-O3)\n<entry>/case.py:3:30: Imre: name is not a local value; globals and first-class functions are unsupported"
+        }
+      }
+    },
+    "elements": {
+      "source": "import doctest\nimport collections\nsuite = doctest.DocTestSuite(collections)\nfor case in suite:\n    if case.id() == 'collections.Counter.elements':\n        case.debug()\n        print(case.id())\n",
+      "reference_stdout": "collections.Counter.elements\n",
+      "reference_stderr": "",
+      "native": {
+        "O0": {
+          "status": "blocked",
+          "reason": "Compiling <entry>/case.py (-O0)\n<entry>/case.py:3:30: Imre: name is not a local value; globals and first-class functions are unsupported"
+        },
+        "O3": {
+          "status": "blocked",
+          "reason": "Compiling <entry>/case.py (-O3)\n<entry>/case.py:3:30: Imre: name is not a local value; globals and first-class functions are unsupported"
+        }
+      }
+    },
+    "all": {
+      "source": "import doctest\nimport collections\nsuite = doctest.DocTestSuite(collections)\nprint(suite.countTestCases())\nsuite.debug()\n",
+      "reference_stdout": "15\n",
+      "reference_stderr": "",
+      "native": {
+        "O0": {
+          "status": "blocked",
+          "reason": "Compiling <entry>/case.py (-O0)\n<entry>/case.py:3:30: Imre: name is not a local value; globals and first-class functions are unsupported"
+        },
+        "O3": {
+          "status": "blocked",
+          "reason": "Compiling <entry>/case.py (-O3)\n<entry>/case.py:3:30: Imre: name is not a local value; globals and first-class functions are unsupported"
+        }
+      }
+    }
+  }
+}

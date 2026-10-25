@@ -1,0 +1,42 @@
+{
+  "containers/array_registration.py": {
+    "lines": 532,
+    "stdout_sha256": "92c6791ec605fc0ef0d3d25f05d2296cfa15583f8bf311cdadad5797d0dd0ddd"
+  },
+  "containers/namedtuple.py": {
+    "lines": 23,
+    "stdout_sha256": "4645b7fdead47d6b82b3ad876375228205673a0946643044b5ed81dde427ba4a"
+  },
+  "module_values/namedtuple/main.py": {
+    "lines": 3,
+    "stdout_sha256": "e30189274b7cb9fe119fb71c37300682aeb8e8c90d953ea7e22bc15631ebbb40"
+  },
+  "bytes/membership.py": {
+    "lines": 128,
+    "stdout_sha256": "ac56aaa1bfea77bb514b0f27e6e600b9c330460dba650264b8d2e2488543d7a2"
+  },
+  "text/percent_scalar.py": {
+    "lines": 132,
+    "stdout_sha256": "018a9b6c9605932033612327366271bfb6f558fe6c5cc6be04ab6688e59361b0"
+  },
+  "processes/file_redirects.py": {
+    "lines": 35,
+    "stdout_sha256": "b845254efdc75b74f592c3e1adea1efbfd41aa1e16d73da7e271a0b55548c48a"
+  },
+  "json_records/stdlib_deep_decode.py": {
+    "lines": 18,
+    "stdout_sha256": "0dc983649b99f10acc1d5b2dd57c864619dd1d53088b1f54e1d2ec6ed1c27f92"
+  },
+  "classes/initializer_hook.py": {
+    "lines": 11,
+    "stdout_sha256": "a9fe1bfb32456ddbf35eff6ddc90adc83e0be30d3fe44fb258d6eeae567b2312"
+  },
+  "classes/property_setters.py": {
+    "lines": 37,
+    "stdout_sha256": "2e2e43b5eaad7a03f1a73237d7d9f78a444e97047627bf04b1b8488aadcd787c"
+  },
+  "callables/forward_refs.py": {
+    "lines": 30,
+    "stdout_sha256": "0dc84b3b19d104d2eb25f087f56b08c66a3e5ecdb82a1b0bbef64e8bf3a0ca42"
+  }
+}

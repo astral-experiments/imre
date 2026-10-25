@@ -20,6 +20,23 @@ def source() -> Iterator[str]:
         yield name
 
 
+def mixed_source(entries: list[str | bytes]) -> Iterator[str | bytes]:
+    for name in entries:
+        print("visit " + repr(name))
+        yield name
+
+
+def mixed_filters(entries: list[str | bytes]) -> None:
+    try:
+        print(repr(filter((name for name in entries), "a*")))
+    except TypeError as exc:
+        print(str(exc))
+    try:
+        print(repr(fnmatch.filterfalse(mixed_source(entries), b"a*")))
+    except TypeError as exc:
+        print(str(exc))
+
+
 print(repr(filter(pat=pattern(), names=names())))
 print(repr(fnmatch.filterfalse(names(), pattern())))
 print(repr(list(filter(["a", "b"], "a"))))
@@ -44,3 +61,6 @@ try:
 except TypeError as exc:
     print(str(exc))
 print(repr(fnmatch.translate("**[b-a]*[!b-a]")))
+mixed_filters(["ab", "z"])
+mixed_filters([b"ab", b"z"])
+mixed_filters([b"z", "mixed", b"unread"])

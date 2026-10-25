@@ -1,0 +1,238 @@
+{
+  "schema": "imre.shutil-mock-startup.v1",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "test_blob": "fb1a7d876a617e17bcecbb8d8b654a2a87dafe48",
+  "denominator": 223,
+  "original_patch": {
+    "source": "Lib/test/test_shutil.py:53",
+    "assignment_sha256": "ff0cb0946e7e0d3c77bebae6469596b473f37285e7cde7bfdccd7e4397c31c89"
+  },
+  "compiler_tree": "e0d012f12c138cd432f7a72e0dc20c42f21523d4",
+  "oracle": {
+    "suite": {
+      "tests_run": 223,
+      "skips": {
+        "test.test_shutil.TestCopy.test_copy2_xattr": "no non-broken extended attribute support",
+        "test.test_shutil.TestCopy.test_copymode_symlink_to_symlink": "requires os.lchmod",
+        "test.test_shutil.TestCopy.test_copystat_handles_harmless_chflags_errors": "requires os.chflags, EOPNOTSUPP & ENOTSUP",
+        "test.test_shutil.TestCopy.test_copyxattr": "no non-broken extended attribute support",
+        "test.test_shutil.TestCopy.test_copyxattr_symlinks": "no non-broken extended attribute support",
+        "test.test_shutil.TestCopyFileObj.test_win_impl": "Windows only",
+        "test.test_shutil.TestGetTerminalSize.test_stty_match": "not on tty",
+        "test.test_shutil.TestMove.test_move_dir_altsep_to_dir": "requires os.path.altsep",
+        "test.test_shutil.TestMove.test_move_dir_permission_denied": "requires CAP_DAC_OVERRIDE",
+        "test.test_shutil.TestRmTree.test_rmtree_fails_on_junctions_onerror": "only relevant on Windows",
+        "test.test_shutil.TestRmTree.test_rmtree_fails_on_junctions_onexc": "only relevant on Windows",
+        "test.test_shutil.TestRmTree.test_rmtree_on_junction": "only relevant on Windows",
+        "test.test_shutil.TestRmTree.test_rmtree_with_dir_fd_unsupported": "dir_fd is supported",
+        "test.test_shutil.TestRmTree.test_rmtree_works_on_junctions": "only relevant on Windows",
+        "test.test_shutil.TestWhich.test_cwd_win32": "test is for win32",
+        "test.test_shutil.TestWhich.test_cwd_win32_added_before_all_other_path": "test is for win32",
+        "test.test_shutil.TestWhich.test_dir_order_with_pathext_extension": "test specific to Windows",
+        "test.test_shutil.TestWhich.test_dir_order_without_pathext_extension": "test specific to Windows",
+        "test.test_shutil.TestWhich.test_pathext": "test specific to Windows",
+        "test.test_shutil.TestWhich.test_pathext_applied_on_files_in_path": "test specific to Windows",
+        "test.test_shutil.TestWhich.test_pathext_checking": "pathext check is Windows-only",
+        "test.test_shutil.TestWhich.test_pathext_extension_ends_with_dot": "test specific to Windows",
+        "test.test_shutil.TestWhich.test_pathext_with_empty_str": "test specific to Windows",
+        "test.test_shutil.TestWhich.test_pathext_with_multidot_extension": "test specific to Windows",
+        "test.test_shutil.TestWhich.test_pathext_with_null_extension": "test specific to Windows",
+        "test.test_shutil.TestWhich.test_same_dir_with_pathext_extension": "test specific to Windows",
+        "test.test_shutil.TestWhich.test_same_dir_without_pathext_extension": "test specific to Windows",
+        "test.test_shutil.TestWhich.test_win_path_needs_curdir": "test specific to Windows",
+        "test.test_shutil.TestWhichBytes.test_cwd_win32": "test is for win32",
+        "test.test_shutil.TestWhichBytes.test_cwd_win32_added_before_all_other_path": "test is for win32",
+        "test.test_shutil.TestWhichBytes.test_dir_order_with_pathext_extension": "test specific to Windows",
+        "test.test_shutil.TestWhichBytes.test_dir_order_without_pathext_extension": "test specific to Windows",
+        "test.test_shutil.TestWhichBytes.test_pathext": "test specific to Windows",
+        "test.test_shutil.TestWhichBytes.test_pathext_applied_on_files_in_path": "test specific to Windows",
+        "test.test_shutil.TestWhichBytes.test_pathext_checking": "pathext check is Windows-only",
+        "test.test_shutil.TestWhichBytes.test_pathext_extension_ends_with_dot": "test specific to Windows",
+        "test.test_shutil.TestWhichBytes.test_pathext_with_empty_str": "test specific to Windows",
+        "test.test_shutil.TestWhichBytes.test_pathext_with_multidot_extension": "test specific to Windows",
+        "test.test_shutil.TestWhichBytes.test_pathext_with_null_extension": "test specific to Windows",
+        "test.test_shutil.TestWhichBytes.test_same_dir_with_pathext_extension": "test specific to Windows",
+        "test.test_shutil.TestWhichBytes.test_same_dir_without_pathext_extension": "test specific to Windows",
+        "test.test_shutil.TestWhichBytes.test_win_path_needs_curdir": "test specific to Windows",
+        "test.test_shutil.TestZeroCopyMACOS.test_empty_file": "macOS only",
+        "test.test_shutil.TestZeroCopyMACOS.test_exception_on_first_call": "macOS only",
+        "test.test_shutil.TestZeroCopyMACOS.test_filesystem_full": "macOS only",
+        "test.test_shutil.TestZeroCopyMACOS.test_non_existent_src": "macOS only",
+        "test.test_shutil.TestZeroCopyMACOS.test_regular_copy": "macOS only",
+        "test.test_shutil.TestZeroCopyMACOS.test_same_file": "macOS only",
+        "test.test_shutil.TestZeroCopyMACOS.test_unhandled_exception": "macOS only"
+      },
+      "failures": {},
+      "errors": {},
+      "reference_differences": {
+        "test.test_shutil.TestArchives.test_unpack_archive_zstdtar": {
+          "paired_reference": {
+            "skipped": "requires zstd"
+          },
+          "observed": "pass"
+        }
+      }
+    },
+    "line4-import": "imported unittest.mock\n",
+    "recorder": "call recorded and reset\n",
+    "patch-restore": "real chdir restored after normal exit\nreal chdir restored after exceptional exit\n"
+  },
+  "native": [
+    {
+      "case": "line4-import",
+      "opt_level": 0,
+      "reachable_only": false,
+      "tests_executed": 0,
+      "stage": "executed",
+      "exit": 0,
+      "stdout": "imported unittest.mock\n",
+      "stderr": "",
+      "matches_oracle": true
+    },
+    {
+      "case": "recorder",
+      "opt_level": 0,
+      "reachable_only": false,
+      "tests_executed": 0,
+      "stage": "executed",
+      "exit": 0,
+      "stdout": "call recorded and reset\n",
+      "stderr": "",
+      "matches_oracle": true
+    },
+    {
+      "case": "patch-restore",
+      "opt_level": 0,
+      "reachable_only": false,
+      "tests_executed": 0,
+      "stage": "compile-blocked",
+      "diagnostic": "patch-restore.py:4:12: Imre: name is not a local value; globals and first-class functions are unsupported",
+      "diagnostics": [
+        "patch-restore.py:4:12: Imre: name is not a local value; globals and first-class functions are unsupported"
+      ]
+    },
+    {
+      "case": "suite-import",
+      "opt_level": 0,
+      "reachable_only": false,
+      "tests_executed": 0,
+      "stage": "compile-blocked",
+      "diagnostic": "staged/Lib/suite_import.py:1:1: Imre: staged/Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+      "diagnostics": [
+        "staged/Lib/suite_import.py:1:1: Imre: staged/Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+      ]
+    },
+    {
+      "case": "suite-import",
+      "opt_level": 0,
+      "reachable_only": true,
+      "tests_executed": 0,
+      "stage": "compile-blocked",
+      "diagnostic": "staged/Lib/suite_import.py:1:1: Imre: staged/Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+      "diagnostics": [
+        "staged/Lib/suite_import.py:1:1: Imre: staged/Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+      ]
+    },
+    {
+      "case": "suite-runner",
+      "opt_level": 0,
+      "reachable_only": false,
+      "tests_executed": 0,
+      "stage": "compile-blocked",
+      "diagnostic": "staged/Lib/suite_runner.py:1:1: Imre: staged/Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+      "diagnostics": [
+        "staged/Lib/suite_runner.py:1:1: Imre: staged/Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+      ]
+    },
+    {
+      "case": "suite-runner",
+      "opt_level": 0,
+      "reachable_only": true,
+      "tests_executed": 0,
+      "stage": "compile-blocked",
+      "diagnostic": "staged/Lib/suite_runner.py:1:1: Imre: staged/Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+      "diagnostics": [
+        "staged/Lib/suite_runner.py:1:1: Imre: staged/Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+      ]
+    },
+    {
+      "case": "line4-import",
+      "opt_level": 3,
+      "reachable_only": false,
+      "tests_executed": 0,
+      "stage": "executed",
+      "exit": 0,
+      "stdout": "imported unittest.mock\n",
+      "stderr": "",
+      "matches_oracle": true
+    },
+    {
+      "case": "recorder",
+      "opt_level": 3,
+      "reachable_only": false,
+      "tests_executed": 0,
+      "stage": "executed",
+      "exit": 0,
+      "stdout": "call recorded and reset\n",
+      "stderr": "",
+      "matches_oracle": true
+    },
+    {
+      "case": "patch-restore",
+      "opt_level": 3,
+      "reachable_only": false,
+      "tests_executed": 0,
+      "stage": "compile-blocked",
+      "diagnostic": "patch-restore.py:4:12: Imre: name is not a local value; globals and first-class functions are unsupported",
+      "diagnostics": [
+        "patch-restore.py:4:12: Imre: name is not a local value; globals and first-class functions are unsupported"
+      ]
+    },
+    {
+      "case": "suite-import",
+      "opt_level": 3,
+      "reachable_only": false,
+      "tests_executed": 0,
+      "stage": "compile-blocked",
+      "diagnostic": "staged/Lib/suite_import.py:1:1: Imre: staged/Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+      "diagnostics": [
+        "staged/Lib/suite_import.py:1:1: Imre: staged/Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+      ]
+    },
+    {
+      "case": "suite-import",
+      "opt_level": 3,
+      "reachable_only": true,
+      "tests_executed": 0,
+      "stage": "compile-blocked",
+      "diagnostic": "staged/Lib/suite_import.py:1:1: Imre: staged/Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+      "diagnostics": [
+        "staged/Lib/suite_import.py:1:1: Imre: staged/Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+      ]
+    },
+    {
+      "case": "suite-runner",
+      "opt_level": 3,
+      "reachable_only": false,
+      "tests_executed": 0,
+      "stage": "compile-blocked",
+      "diagnostic": "staged/Lib/suite_runner.py:1:1: Imre: staged/Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+      "diagnostics": [
+        "staged/Lib/suite_runner.py:1:1: Imre: staged/Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+      ]
+    },
+    {
+      "case": "suite-runner",
+      "opt_level": 3,
+      "reachable_only": true,
+      "tests_executed": 0,
+      "stage": "compile-blocked",
+      "diagnostic": "staged/Lib/suite_runner.py:1:1: Imre: staged/Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+      "diagnostics": [
+        "staged/Lib/suite_runner.py:1:1: Imre: staged/Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+      ]
+    }
+  ],
+  "compiler_sha256": "d82ff3505d555d99e4b8cf6c51f1281b66829db731970e6c56c3baaac3c10b63",
+  "runtime_sha256": "d02b66ec69247c7e8f6775816c4c7d523c46f91ad46c19cba28ee16af2654777"
+}

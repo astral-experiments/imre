@@ -5,6 +5,14 @@ It is one of 120 occurrences discovered in `test.test_dict` on pinned Linux
 CPython 3.14.5, separate from the [659 collections occurrences](../README.md).
 The complete file and [license](upstream/LICENSE) match [the upstream Git blobs](UPSTREAM.json).
 
+On [canonical main `0a46708`](runs/0a46708e7a95/source.json), the [original
+body](runs/0a46708e7a95/fromkeys-original.json) stops at its first dictionary
+assertion at O0 and O3: the available assertion expects an integer. The
+[native default fixture](runs/0a46708e7a95/fromkeys-native-default.json)
+also blocks. Its receiver check sees `self` inside locally defined methods,
+including `BadSeq.__iter__`, as outer test instance state. Neither attempt
+ran the complete method, including its subclasses and failing iterator.
+
 The original method tests class and instance calls, strings, tuples, an empty
 list, a generator, dict/set/list inputs, and a non-iterable. Its dict subclasses
 inherit the constructor, return a UserDict or existing dictionary from
@@ -67,3 +75,9 @@ in all four modes, including the iterator exception and the aliased value. On th
 [merged in #910](runs/5059d6b15f75/source.json), the [original nested set expression](runs/5059d6b15f75/set_range-four-modes.json)
 also matched in all four modes. The [complete DictTest method](runs/5059d6b15f75/evidence-fromkeys-linux.json)
 still stops at the first dictionary assertion at both levels. These controls add no native test occurrence.
+
+On [public main after #905](runs/bea88ce2b9df/source.json), the stock expression
+returned all six ordered pairs at O0 and O3 in ordinary and reachable-only
+compilation. The [original class initializer and complete module](runs/bea88ce2b9df/textwrapper.json)
+both stopped at the computed class attribute at `Lib/textwrap.py:66`, before
+running the expression. This build includes merged #900 and #910.

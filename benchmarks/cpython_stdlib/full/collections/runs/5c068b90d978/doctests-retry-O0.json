@@ -1,0 +1,75 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "opt_level": 0,
+  "tests": {
+    "collections.Counter": {
+      "examples": 18,
+      "status": "compile-blocked",
+      "diagnostic": "case.py:17:16: Imre: supported dictionary methods are clear(), copy() on a plain dictionary, get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
+    },
+    "collections.Counter.__add__": {
+      "examples": 1,
+      "status": "native-body/host-output-check"
+    },
+    "collections.Counter.__and__": {
+      "examples": 1,
+      "status": "native-body/host-output-check"
+    },
+    "collections.Counter.__iadd__": {
+      "examples": 3,
+      "status": "native-body/host-output-check"
+    },
+    "collections.Counter.__iand__": {
+      "examples": 3,
+      "status": "native-body/host-output-check"
+    },
+    "collections.Counter.__init__": {
+      "examples": 4,
+      "status": "native-body/host-output-check"
+    },
+    "collections.Counter.__ior__": {
+      "examples": 3,
+      "status": "native-body/host-output-check"
+    },
+    "collections.Counter.__isub__": {
+      "examples": 3,
+      "status": "native-body/host-output-check"
+    },
+    "collections.Counter.__or__": {
+      "examples": 1,
+      "status": "native-body/host-output-check"
+    },
+    "collections.Counter.__sub__": {
+      "examples": 1,
+      "status": "native-body/host-output-check"
+    },
+    "collections.Counter.elements": {
+      "examples": 5,
+      "status": "compile-blocked",
+      "diagnostic": "case.py:10:1: Imre: imports must precede executable module statements"
+    },
+    "collections.Counter.most_common": {
+      "examples": 1,
+      "status": "native-body/host-output-check"
+    },
+    "collections.Counter.subtract": {
+      "examples": 5,
+      "status": "native-body/host-output-check"
+    },
+    "collections.Counter.update": {
+      "examples": 5,
+      "status": "native-body/host-output-check"
+    },
+    "collections.namedtuple": {
+      "examples": 11,
+      "status": "compile-blocked",
+      "diagnostic": "case.py:5:1: Imre: unsupported namedtuple class attribute"
+    },
+    "test.test_deque.__test__.libreftest": {
+      "examples": 32,
+      "status": "compile-blocked",
+      "diagnostic": "case.py:137:1: Imre: definitions must precede executable module statements"
+    }
+  },
+  "compiler_revision": "5c068b90d978f4b57fe145984fa0459180a755ed"
+}

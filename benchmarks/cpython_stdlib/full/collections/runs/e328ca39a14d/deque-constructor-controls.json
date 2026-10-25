@@ -1,0 +1,98 @@
+{
+  "revision": "e328ca39a14d8f0243f0b50b106a17d32b1e0a2f",
+  "runs": {
+    "valid": {
+      "source": "import unittest\nfrom collections import deque\nclass Check(unittest.TestCase):\n    def test_control(self):\n        self.assertEqual(list(deque('abc', 2)), ['b','c'])\n        self.assertEqual(list(deque([1])), [1])\nif __name__ == '__main__':\n    unittest.main()\n",
+      "sha256": "29b7704c2a4ddccaf6c1cc44164855f854b0072ea124f281d9e90790fb4d787b",
+      "modes": {
+        "O0-whole": {
+          "status": 0,
+          "marker": "OK",
+          "stderr": ".\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK\n"
+        },
+        "O0-reachable": {
+          "status": 0,
+          "marker": "OK",
+          "stderr": ".\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK\n"
+        },
+        "O3-whole": {
+          "status": 0,
+          "marker": "OK",
+          "stderr": ".\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK\n"
+        },
+        "O3-reachable": {
+          "status": 0,
+          "marker": "OK",
+          "stderr": ".\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK\n"
+        }
+      },
+      "reference": {
+        "status": 0,
+        "marker": "OK",
+        "stderr": ".\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK\n"
+      }
+    },
+    "wrong-exception": {
+      "source": "import unittest\nfrom collections import deque\nclass Check(unittest.TestCase):\n    def test_control(self):\n        self.assertRaises(ValueError, deque, 1)\nif __name__ == '__main__':\n    unittest.main()\n",
+      "sha256": "11b578e5260b2467fd068e20ca4c992d9361810daefb7433113103c17aa9a624",
+      "modes": {
+        "O0-whole": {
+          "status": 1,
+          "marker": "'int' object is not iterable",
+          "stderr": "E\n======================================================================\nERROR: test_control (__main__.Check.test_control)\n'int' object is not iterable\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (errors=1)\n"
+        },
+        "O0-reachable": {
+          "status": 1,
+          "marker": "'int' object is not iterable",
+          "stderr": "E\n======================================================================\nERROR: test_control (__main__.Check.test_control)\n'int' object is not iterable\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (errors=1)\n"
+        },
+        "O3-whole": {
+          "status": 1,
+          "marker": "'int' object is not iterable",
+          "stderr": "E\n======================================================================\nERROR: test_control (__main__.Check.test_control)\n'int' object is not iterable\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (errors=1)\n"
+        },
+        "O3-reachable": {
+          "status": 1,
+          "marker": "'int' object is not iterable",
+          "stderr": "E\n======================================================================\nERROR: test_control (__main__.Check.test_control)\n'int' object is not iterable\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (errors=1)\n"
+        }
+      },
+      "reference": {
+        "status": 1,
+        "marker": "'int' object is not iterable",
+        "stderr": "E\n======================================================================\nERROR: test_control (__main__.Check.test_control)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/mnt/devbox-scratch/dev-user/imre-stdlib-collections-tests/tmpdq6e8v6d/case.py\", line 5, in test_control\n    self.assertRaises(ValueError, deque, 1)\n    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/upstream/Lib/unittest/case.py\", line 813, in assertRaises\n    return context.handle('assertRaises', args, kwargs)\n           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/upstream/Lib/unittest/case.py\", line 247, in handle\n    callable_obj(*args, **kwargs)\n    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\nTypeError: 'int' object is not iterable\n\n----------------------------------------------------------------------\nRan 1 test in 0.004s\n\nFAILED (errors=1)\n"
+      }
+    },
+    "no-exception": {
+      "source": "import unittest\nfrom collections import deque\nclass Check(unittest.TestCase):\n    def test_control(self):\n        self.assertRaises(TypeError, deque, [1])\nif __name__ == '__main__':\n    unittest.main()\n",
+      "sha256": "cd442799c192d3508393cbfa1bfcc745648520632a0b4c42831ea69cea026d81",
+      "modes": {
+        "O0-whole": {
+          "status": 1,
+          "marker": "not raised",
+          "stderr": "F\n======================================================================\nFAIL: test_control (__main__.Check.test_control)\nAssertionError: TypeError not raised by deque\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (failures=1)\n"
+        },
+        "O0-reachable": {
+          "status": 1,
+          "marker": "not raised",
+          "stderr": "F\n======================================================================\nFAIL: test_control (__main__.Check.test_control)\nAssertionError: TypeError not raised by deque\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (failures=1)\n"
+        },
+        "O3-whole": {
+          "status": 1,
+          "marker": "not raised",
+          "stderr": "F\n======================================================================\nFAIL: test_control (__main__.Check.test_control)\nAssertionError: TypeError not raised by deque\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (failures=1)\n"
+        },
+        "O3-reachable": {
+          "status": 1,
+          "marker": "not raised",
+          "stderr": "F\n======================================================================\nFAIL: test_control (__main__.Check.test_control)\nAssertionError: TypeError not raised by deque\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (failures=1)\n"
+        }
+      },
+      "reference": {
+        "status": 1,
+        "marker": "not raised",
+        "stderr": "F\n======================================================================\nFAIL: test_control (__main__.Check.test_control)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/mnt/devbox-scratch/dev-user/imre-stdlib-collections-tests/tmph_txvup1/case.py\", line 5, in test_control\n    self.assertRaises(TypeError, deque, [1])\n    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: TypeError not raised by deque\n\n----------------------------------------------------------------------\nRan 1 test in 0.001s\n\nFAILED (failures=1)\n"
+      }
+    }
+  }
+}

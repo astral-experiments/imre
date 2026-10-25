@@ -29,7 +29,7 @@ CASES = {
 
 
 @contextmanager
-def bindings(library):
+def bindings(library, extend=None):
     # Open the capture and its saved descriptor before any test allocates fds.
     # Each call enters generated main against the test process's descriptor
     # table. Host fcntl can observe the same descriptor before and after a call.
@@ -78,6 +78,8 @@ def bindings(library):
             )
             if hasattr(os, "O_PATH"):
                 view.O_PATH = os.O_PATH
+            if extend is not None:
+                extend(view, invoke)
             yield view, calls
         finally:
             os.close(saved)
@@ -86,6 +88,23 @@ def bindings(library):
 def void(data):
     if data:
         raise ValueError(f"unexpected native return data: {data!r}")
+
+
+def build_library(work, source, imre, runtime, clang, level):
+    """Link the compiled entry in the host fixture's descriptor table."""
+    llvm = work / "calls.ll"
+    library = work / "calls.so"
+    runtime = runtime.resolve()
+    clang = clang.resolve()
+    subprocess.run([imre.resolve(), "build", source,
+                    "--whole-program", "--no-cache", "--opt-level", str(level),
+                    "--emit-llvm", llvm, "--runtime", runtime, "--clang", clang,
+                    "-o", work / "calls"], check=True, cwd=work, timeout=120)
+    # Link the unmodified emitted LLVM as a library so the unchanged test
+    # and the compiled calls share an fd table. No CPython API is linked.
+    subprocess.run([clang, "-O" + str(level), "-fPIC", "-shared", llvm, runtime,
+                    "-ldl", "-lpthread", "-lm", "-o", library], check=True, cwd=work, timeout=120)
+    return library
 
 
 def main():
@@ -99,18 +118,7 @@ def main():
     report = {}
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
-        llvm = work / "calls.ll"
-        library = work / "calls.so"
-        runtime = args.runtime.resolve()
-        clang = args.clang.resolve()
-        subprocess.run([args.imre.resolve(), "build", HERE / "descriptor_calls.py",
-                        "--whole-program", "--no-cache", "--opt-level", args.opt_level,
-                        "--emit-llvm", llvm, "--runtime", runtime, "--clang", clang,
-                        "-o", work / "calls"], check=True, cwd=work, timeout=120)
-        # Link the unmodified emitted LLVM as a library so the unchanged test
-        # and the compiled calls share an fd table. No CPython API is linked.
-        subprocess.run([clang, "-O" + args.opt_level, "-fPIC", "-shared", llvm, runtime,
-                        "-ldl", "-lpthread", "-lm", "-o", library], check=True, cwd=work, timeout=120)
+        library = build_library(work, HERE / "descriptor_calls.py", args.imre, args.runtime, args.clang, args.opt_level)
         with chdir(work), bindings(library) as (view, calls):
             for name, selections in CASES.items():
                 module = modules[name]

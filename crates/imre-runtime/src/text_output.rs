@@ -23,6 +23,9 @@ impl PendingText {
             self.drain(raw)?;
             raw.write_all(bytes)?;
         } else {
+            self.0
+                .try_reserve(bytes.len())
+                .map_err(|_| io::ErrorKind::OutOfMemory)?;
             self.0.extend_from_slice(bytes);
             if self.0.len() >= CHUNK_SIZE || flush_line {
                 self.drain(raw)?;

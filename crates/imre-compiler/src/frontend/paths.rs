@@ -3,6 +3,8 @@
 use super::*;
 use crate::ir::PathOperation;
 
+mod samefile;
+mod segments;
 mod stat;
 
 pub(super) fn operation(kind: PathOperation, ty: Type, args: Vec<Expr>) -> Expr {
@@ -130,87 +132,7 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         ty: Type,
     ) -> Result<Expr, String> {
-        self.reject_builtin_keywords(call)?;
-        calls::reject_unpacking(call, self.source)?;
-        let inputs = call
-            .arguments
-            .args
-            .iter()
-            .map(|arg| self.expr(arg))
-            .collect::<Result<Vec<_>, _>>()?;
-        let checked = inputs
-            .iter()
-            .any(|value| self.types.payload(value.ty).is_some());
-        let mut body = Vec::new();
-        let mut clear = Vec::new();
-        let mut parts = Vec::new();
-        for (value, syntax) in inputs.into_iter().zip(&call.arguments.args) {
-            let mut part = if checked {
-                // Method lookup and each argument expression run before the constructor
-                // inspects any part. In particular a later argument may raise first.
-                let slot = self.hidden(value.ty);
-                body.push(Statement::Assign(slot, value));
-                clear.push(slot);
-                self.local(slot)
-            } else {
-                value
-            };
-            if let Some(payload) = self.types.payload(part.ty) {
-                let missing = Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Builtin(Builtin::IsNone, vec![part.clone()]),
-                };
-                let error = Statement::Raise(Some(Expr { ty: Type::Exception, kind: ExprKind::Exception {
-                    kind: exception_kind("TypeError").unwrap(),
-                    message: Some(Box::new(Expr { ty: Type::Str, kind: ExprKind::Str(
-                        "argument should be a str or an os.PathLike object where __fspath__ returns a str, not 'NoneType'".into()) })),
-                }}));
-                part = Expr {
-                    ty: payload,
-                    kind: ExprKind::Scope {
-                        body: vec![Statement::If(missing, vec![error], vec![])],
-                        value: Box::new(Expr {
-                            ty: payload,
-                            kind: ExprKind::Unwrap(Box::new(part)),
-                        }),
-                        clear: vec![],
-                    },
-                };
-            }
-            parts.push((part, syntax));
-        }
-        let mut parts = parts.into_iter();
-        let mut path = match ty {
-            Type::Path => {
-                let first = if let Some((part, syntax)) = parts.next() {
-                    if matches!(part.ty, Type::PurePath(ir::PathFlavor::Windows)) {
-                        operation(PathOperation::AsPosix, Type::Str, vec![part])
-                    } else {
-                        self.path_text(part, syntax)?
-                    }
-                } else {
-                    unpacking::string("")
-                };
-                operation(PathOperation::New, ty, vec![first])
-            }
-            Type::PurePath(flavor) => operation(PathOperation::PureNew(flavor), ty, vec![]),
-            _ => unreachable!(),
-        };
-        for (part, syntax) in parts {
-            path = self.path_join(path, part, syntax)?;
-        }
-        if checked {
-            Ok(Expr {
-                ty,
-                kind: ExprKind::Scope {
-                    body,
-                    clear,
-                    value: Box::new(path),
-                },
-            })
-        } else {
-            Ok(path)
-        }
+        self.path_segments(call, ty, None)
     }
 
     pub(super) fn system_path_call(
@@ -356,6 +278,9 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if receiver.ty == Type::Path && name == "samefile" {
+            return self.path_samefile(receiver, call);
+        }
         if receiver.ty == Type::Path && matches!(name, "stat" | "lstat") {
             return self.path_stat(receiver, name, call);
         }
@@ -516,19 +441,8 @@ impl Checker<'_> {
                 arguments,
             ));
         }
-        if name == "joinpath" {
-            self.reject_builtin_keywords(call)?;
-            calls::reject_unpacking(call, self.source)?;
-            if call.arguments.args.is_empty() {
-                // Joining an empty segment gives the result its own Path identity.
-                return self.path_join(receiver, unpacking::string(""), call);
-            }
-            let mut path = receiver;
-            for argument in &call.arguments.args {
-                let child = self.expr(argument)?;
-                path = self.path_join(path, child, argument)?;
-            }
-            return Ok(path);
+        if matches!(name, "joinpath" | "with_segments") {
+            return self.path_segments(call, receiver.ty, Some((receiver, name == "joinpath")));
         }
         if matches!(receiver.ty, Type::PurePath(_))
             && !matches!(

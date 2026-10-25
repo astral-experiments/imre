@@ -1,0 +1,45 @@
+{
+  "schema": "imre.cpython-stdlib.pathlib.supplemental-entry/v1",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "imre_commit": "66ff11995e158d982b1a69fbf9e3156f0372c12a",
+  "source": "tests/fixtures/paths/samefile/cases.py",
+  "contributes_upstream_occurrences": 0,
+  "source_sha256": "14ee3f3b4281bb40da6b8b2dd52ea42b26e1ff01d220e765547cc71b7b9b7e52",
+  "modes": {
+    "direct": {
+      "reference_lines": 35,
+      "levels": {
+        "0": {
+          "compile_exit": 1,
+          "diagnostic": "<work>/original_samefile.py:106:1: Imre: definitions must precede executable module statements\n"
+        },
+        "3": {
+          "compile_exit": 1,
+          "diagnostic": "<work>/original_samefile.py:106:1: Imre: definitions must precede executable module statements\n"
+        }
+      }
+    },
+    "import": {
+      "reference_lines": 35,
+      "levels": {
+        "0": {
+          "compile_exit": 0,
+          "diagnostic": "",
+          "exitcode": 0,
+          "stdout_matches": true,
+          "stderr_matches": true,
+          "filesystem_matches": true
+        },
+        "3": {
+          "compile_exit": 0,
+          "diagnostic": "",
+          "exitcode": 0,
+          "stdout_matches": true,
+          "stderr_matches": true,
+          "filesystem_matches": true
+        }
+      }
+    }
+  }
+}

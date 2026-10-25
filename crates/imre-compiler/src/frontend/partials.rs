@@ -267,6 +267,7 @@ impl Checker<'_> {
                 },
                 calls,
                 class_reads: HashSet::new(),
+                source_frame: false,
                 recursion_error: self.graph.modules[self.module]
                     .error(function, "recursive calls through partial are unsupported"),
             },

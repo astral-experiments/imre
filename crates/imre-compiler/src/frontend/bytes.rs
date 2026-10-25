@@ -30,6 +30,7 @@ impl Checker<'_> {
                     Type::ListInt | Type::List(_) => "list",
                     Type::Set(_) => "set",
                     Type::Dict(_) if self.types.is_counter(ty) => "Counter",
+                    Type::Dict(_) if self.types.is_ordered_dict(ty) => "collections.OrderedDict",
                     Type::Dict(_) if self.types.is_default_list_dict(ty) => {
                         "collections.defaultdict"
                     }

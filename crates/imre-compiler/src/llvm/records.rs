@@ -70,12 +70,17 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
             };
             let flags = u32::from(metadata.dataclass_eq)
                 | (u32::from(metadata.dataclass_repr) << 1)
-                | (u32::from(metadata.toml_hash) << 2);
-            let layout = metadata.fields.iter().map(|field| {
-                (
-                    field.name.as_str(),
-                    u32::from(field.compare) | (u32::from(field.repr) << 1),
-                )
+                | (u32::from(metadata.toml_hash) << 2)
+                | (u32::from(metadata.value_struct) << 3);
+            // The runtime walks the physical layout. Hidden cache and shadow fields
+            // own their payloads, but have no public name, equality, or repr role.
+            let layout = (0..module.class_fields[class].len()).map(|index| {
+                metadata.fields.get(index).map_or(("", 0), |field| {
+                    (
+                        field.name.as_str(),
+                        u32::from(field.compare) | (u32::from(field.repr) << 1),
+                    )
+                })
             });
             (
                 0,
@@ -83,6 +88,25 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
                 metadata.name.as_str(),
                 metadata.qualified_name.as_str(),
                 field_metadata(output, name, layout),
+            )
+        }
+        Type::ModuleSpec(_) => {
+            let layout = [
+                ("name", 2),
+                ("loader", 2),
+                ("origin", 2),
+                ("loader_state", 0),
+                ("submodule_search_locations", 2),
+                ("_uninitialized_submodules", 0),
+                ("_set_fileattr", 0),
+                ("_cached", 0),
+            ];
+            (
+                2,
+                2,
+                "ModuleSpec",
+                "_frozen_importlib.ModuleSpec",
+                field_metadata(output, name, layout.into_iter()),
             )
         }
         Type::CompletedProcess(capture, _) => {
@@ -146,6 +170,10 @@ fn field_metadata<'a>(
 ) -> String {
     let mut fields = Vec::new();
     for (index, (field, flags)) in layout.enumerate() {
+        if field.is_empty() {
+            fields.push("{ ptr, i64, i32 } zeroinitializer".to_owned());
+            continue;
+        }
         let symbol = format!("repr_field_{name}_{index}");
         bytes(output, &symbol, field);
         fields.push(format!(
@@ -172,7 +200,8 @@ impl Emitter<'_, '_> {
             "call ptr @imre_value_repr(i64 {word}, i32 {})",
             representation_kind(value.ty, &self.module.types)
         ));
-        self.check_error();
+        let failed = self.instruction(format!("icmp eq ptr {operand}, null"));
+        self.check_failed(&failed);
         self.owned(Value {
             ty: Type::Str,
             operand,
@@ -184,6 +213,23 @@ impl Emitter<'_, '_> {
 #[cfg(test)]
 mod tests {
     use crate::{CompileOptions, compile};
+
+    #[test]
+    fn repr_checks_for_failure_before_using_the_result() {
+        let source = "from collections import Counter\ncounts: Counter[int] = Counter()\ntry:\n    print(len(repr(counts)))\nexcept MemoryError:\n    print(0)\n";
+        let ir = compile(source, &CompileOptions::default()).unwrap();
+        let mut lines = ir
+            .lines()
+            .skip_while(|line| !line.contains(" = call ptr @imre_value_repr("));
+        let result = lines.next().unwrap().trim().split_once(" = ").unwrap().0;
+        assert!(
+            lines
+                .next()
+                .unwrap()
+                .contains(&format!("icmp eq ptr {result}, null"))
+        );
+        assert!(lines.next().unwrap().trim_start().starts_with("br i1 "));
+    }
 
     #[test]
     fn loop_record_replacement_requires_only_resource_free_field_stores() {
