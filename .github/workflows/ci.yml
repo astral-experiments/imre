@@ -9,7 +9,7 @@ on:
       audit:
         description: Source of the requested per-occurrence results
         type: choice
-        options: [logging, removal, properties, text-stream]
+        options: [logging, removal, properties, text-stream, file-handler, list-clear]
         required: true
 permissions:
   contents: read
@@ -67,7 +67,12 @@ jobs:
           tools=(--imre "$imre" --runtime "$runtime" --clang /usr/bin/clang-18)
           ref="$PWD/.cpython-stdlib-reference"
           case "$AUDIT" in
-            logging)
+            logging|file-handler)
+              if [[ "$AUDIT" == file-handler ]]; then
+                for opt in 0 3; do
+                  PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/native_files.py "${tools[@]}" --opt-level "$opt" --result "$results/files-O$opt.json"
+                done
+              fi
               PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/evidence.py "${tools[@]}" --result "$results/evidence-linux.json"
               python3 -B benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/logging/reference-linux.json "$results/evidence-linux.json"
               ;;
@@ -78,7 +83,16 @@ jobs:
               python3 -B tests/paths.py "${ordinary[@]}"
               python3 -B tests/processes.py "${ordinary[@]}"
               ;;
+            list-clear)
+              python3 -B tests/assignments.py "${ordinary[@]}"
+              ;;
             text-stream)
+              python3 -I -B tests/fixtures/files/string_io.py > "$results/stringio-reference.txt"
+              for opt in 0 3; do
+                "$imre" build tests/fixtures/files/string_io.py --no-cache --opt-level "$opt" --runtime "$runtime" --clang /usr/bin/clang-18 -o "$RUNNER_TEMP/stringio"
+                "$RUNNER_TEMP/stringio" > "$results/stringio-O$opt.txt"
+                diff -u "$results/stringio-reference.txt" "$results/stringio-O$opt.txt"
+              done
               python3 -B tests/files.py "${ordinary[@]}"
               ;;
             properties)
