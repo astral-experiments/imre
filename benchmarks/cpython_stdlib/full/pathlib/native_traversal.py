@@ -20,7 +20,7 @@ BENCHMARK = HERE.parents[1]
 sys.path.insert(0, str(BENCHMARK))
 from suite_evidence import roles
 from suite_inventory import load_suite, verify_interpreter_tests
-from suite_native import Toolchain, native_method, run_in_fixtures
+from suite_native import NativeCompileError, Toolchain, native_method, run_in_fixtures
 from upstream import verify_upstream
 
 MODULE = BENCHMARK / 'upstream/Lib/test/test_pathlib/test_pathlib.py'
@@ -201,6 +201,22 @@ class NativeCase:
                              'ReadTestBase', case.id(), fixture, operation=('imre', 'Path.iterdir'))(case, original)
     # These IDs have the same definition but distinct concrete fixture classes.
     ctor = case.cls.__name__
+    if case._testMethodName == 'test_glob_case_sensitive':
+        source = f'''from pathlib import {ctor}
+class NativeCase:
+    base: str
+    def __init__(self) -> None:
+        self.base = {case.base!r}
+    def cls(self, value: str, child: str | None = None) -> {ctor}:
+        if child is None:
+            return {ctor}(value)
+        return {ctor}(value, child)
+    def assertEqual(self, left: set[str], right: set[str]) -> None:
+        if left != right:
+            raise AssertionError('different path spellings')
+'''
+        return native_method(tools, directory, MODULE, 'PathTest', case.id(), source,
+                             operation=('imre', 'Path.glob with an explicit case_sensitive option'))(case, original)
     source = f"""from pathlib import {ctor}
 class NativeCase:
     base: str
@@ -214,6 +230,52 @@ class NativeCase:
 """
     return native_method(tools, directory, MODULE, 'PathTest', case.id(), source,
                          operation=('imre', 'Path.glob and Path.rglob across suspended cursors'))(case, original)
+
+
+def native_registered_rglob(tools, directory, case, original):
+    # Both decorators register the unchanged function by name and return it.
+    # PathTest.setUp has already checked the registered platform/symlink gate.
+    name, ctor = case._testMethodName, case.cls.__name__
+    posix = name == 'test_rglob_posix'
+    gate = 'posix' if posix else 'symlinks'
+    module = inspect.getmodule(original)
+    if (original.__func__ is not vars(module.PathTest)[name]
+            or name not in getattr(module, '_tests_needing_' + gate)
+            or not (case.cls.parser is posixpath if posix else case.can_symlink)):
+        raise ValueError(f'original {gate} fixture did not select {case.id()}')
+    data = MODULE.read_bytes()
+    owner, = [c for c in ast.parse(data).body if isinstance(c, ast.ClassDef) and c.name == 'PathTest']
+    method, = [m for m in owner.body if isinstance(m, ast.FunctionDef) and m.name == name]
+    if [ast.unparse(d) for d in method.decorator_list] != ['needs_' + gate]:
+        raise ValueError(f'unexpected decorator on {name}')
+    body = b''.join(data.splitlines(keepends=True)[method.lineno - 1:method.end_lineno])
+    parameters, arguments = ('value: str, child: str', 'value, child') if posix else ('value: str', 'value')
+    fixture = f'''from pathlib import {ctor}
+class NativeCase:
+    base: str
+    checks: int
+    def __init__(self) -> None:
+        self.base = {case.base!r}
+        self.checks = 0
+    def cls(self, {parameters}) -> {ctor}:
+        return {ctor}({arguments})
+    def assertEqual(self, left: set[{ctor}], right: set[{ctor}]) -> None:
+        if left != right:
+            raise AssertionError('different recursive glob paths')
+        self.checks += 1
+'''
+    entry = fixture.encode() + body + f'\ncase = NativeCase()\ncase.{name}()\nprint(case.checks)\n'.encode()
+    binary = tools.build(entry, directory)
+    result = subprocess.run([binary], capture_output=True, timeout=60, check=True)
+    assertions = 2 if posix else 1
+    if result.stderr or result.stdout != f'{assertions}\n'.encode():
+        raise AssertionError((case.id(), result.stdout, result.stderr))
+    detail = {'operation': 'Path.rglob and native set[Path] comparisons',
+              'fixture': f'upstream needs_{gate} registry and setUp; native test instance',
+              'opt_level': tools.level, 'assertions': assertions, 'method_sha256': hashlib.sha256(body).hexdigest()}
+    return {'execution': 'native-body', 'fixture_execution': detail['fixture'], 'method_sha256': detail['method_sha256'],
+            'observation': {'roles': roles(body='imre', assertions='imre', operation='imre', fixture='mixed'),
+                            'evidence': detail}}
 
 
 def host_method(binary, directory, case, original):
@@ -284,20 +346,24 @@ def traversal_adapters(tools, work):
         directory.mkdir()
         if case.id().endswith('test_glob_many_open_files'):
             return native_body(tools, directory, case, original)
-        if case.id() == READ + 'test_iterdir':
+        if case._testMethodName in ('test_rglob_posix', 'test_rglob_symlink_loop'):
+            return native_registered_rglob(tools, directory, case, original)
+        fallback = {
+            'test_iterdir': ('arithmetic requires int or float operands', 'expected += [...]'),
+            'test_glob_case_sensitive': ('local functions require annotated parameters and return types',
+                                         'nested _check(path, pattern, case_sensitive, expected)'),
+        }.get(case._testMethodName)
+        if fallback:
             try:
                 return native_body(tools, directory, case, original)
-            except RuntimeError as exc:
+            except NativeCompileError as exc:
                 diagnostic = str(exc).strip().split('Imre: ')[-1]
-                # The untouched method adds a second list of names in place.
                 # Run the entire routine under its original fixtures and keep
                 # this failed native-body attempt separate from operations.
-                if diagnostic != 'arithmetic requires int or float operands':
+                if diagnostic != fallback[0]:
                     raise
                 evidence = host_method(binary, directory, case, original)
-                evidence['native_body_blocker'] = {
-                    'operation': 'expected += [linkA, linkB, brokenLink, brokenLinkLoop]',
-                    'diagnostic': diagnostic}
+                evidence['native_body_blocker'] = {'operation': fallback[1], 'diagnostic': diagnostic}
                 evidence['observation']['evidence']['native_body_blocker'] = evidence['native_body_blocker']
                 return evidence
         return host_method(binary, directory, case, original)

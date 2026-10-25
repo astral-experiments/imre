@@ -686,6 +686,52 @@ impl Checker<'_> {
         }
     }
 
+    /// Consume the cursor from its current position. Acquire the operand before
+    /// allocating the result, and release both owners if a later pull fails.
+    pub(super) fn collect_cursor_set(
+        &mut self,
+        cursor: Expr,
+        element: Type,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        if !self.types.hashable_key(element) {
+            return Err(error(
+                self.source,
+                node,
+                "set() requires hashable cursor elements",
+            ));
+        }
+        let ty = self.types.set(element);
+        let result = self.hidden(ty);
+        let input = Iteration::Prepared(self.prepare_cursor(cursor, element));
+        let empty = Expr {
+            ty,
+            kind: ExprKind::Set {
+                element,
+                values: Vec::new(),
+            },
+        };
+        let body = self.expand_items_after(
+            input,
+            node,
+            vec![Statement::Assign(result, empty)],
+            |checker, value| {
+                Ok(vec![Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::SetAdd, vec![checker.local(result), value]),
+                })])
+            },
+        )?;
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(self.local(result)),
+                clear: vec![result],
+            },
+        })
+    }
+
     fn may_own_file(&self, ty: Type, opaque_callables: bool) -> bool {
         self.types
             .may_own_file(ty, &self.classes.fields, opaque_callables)

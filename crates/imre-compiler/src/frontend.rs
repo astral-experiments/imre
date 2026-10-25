@@ -2338,18 +2338,23 @@ impl<'a> Checker<'a> {
     /// reach literals before the branches join. Only optional promotion can
     /// widen a result; unrelated concrete storage types never share a value.
     fn conditional(&mut self, value: &ast::ExprIf, expected: Option<Type>) -> Result<Expr, String> {
-        fn empty_display(arm: &ast::Expr) -> bool {
+        fn empty_display(checker: &Checker<'_>, arm: &ast::Expr) -> bool {
             matches!(arm, ast::Expr::Dict(d) if d.items.is_empty())
                 || matches!(arm, ast::Expr::List(l) if l.elts.is_empty())
+                || matches!(arm, ast::Expr::Call(c) if c.arguments.args.is_empty()
+                    && c.arguments.keywords.is_empty()
+                    && matches!(&*c.func, ast::Expr::Name(n) if n.id == "set"
+                        && !checker.names.contains_key(n.id.as_str()) && checker.resolve(&c.func).is_none()))
         }
         // An empty display obtains its invariant element type from its sibling
         // when no surrounding annotation supplied one.
         let mut sibling = None;
         self.conditional_with(
             value,
-            expected.is_none() && empty_display(&value.body),
+            expected.is_none() && empty_display(self, &value.body),
             |checker, arm| {
-                let context = expected.or_else(|| empty_display(arm).then_some(sibling).flatten());
+                let context =
+                    expected.or_else(|| empty_display(checker, arm).then_some(sibling).flatten());
                 let checked = if let Some(ty) = context {
                     checker.expr_expected(arm, ty)?
                 } else {
@@ -5531,6 +5536,9 @@ impl<'a> Checker<'a> {
             && call.arguments.keywords.is_empty()
         {
             let (source, key) = self.union_operand(input)?;
+            if let Some(element) = self.types.cursor_element(source.ty) {
+                return self.collect_cursor_set(source, element, input);
+            }
             let key = key.ok_or_else(|| {
                 error(
                     self.source,
