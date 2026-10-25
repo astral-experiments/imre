@@ -273,6 +273,12 @@ jobs:
           python3 "$dir/coverage.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --baseline "$dir/evidence-linux.json" --result "$RUNNER_TEMP/itertools-evidence-linux.json"
           python3 benchmarks/cpython_stdlib/suite_evidence.py "$dir/reference-linux.json" "$RUNNER_TEMP/itertools-evidence-linux.json"
           python3 benchmarks/cpython_stdlib/suite_evidence.py "$dir/reference-free-threading-linux.json" "$dir/evidence-free-threading-linux.json"
+      - name: Run original fnmatch filters with native unittest
+        run: |
+          dir=benchmarks/cpython_stdlib/full/fnmatch
+          tools=(--imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference)
+          python3 "$dir/run_operations.py" "${tools[@]}" --result "$RUNNER_TEMP/fnmatch-operations.json"
+          python3 "$dir/run_bodies.py" "${tools[@]}" --operations "$RUNNER_TEMP/fnmatch-operations.json" --compiler-commit "$GITHUB_SHA" --result "$RUNNER_TEMP/fnmatch-evidence.json"
       - name: Check POSIX normcase with the original path fixtures
         run: |
           for opt in 0 3; do
