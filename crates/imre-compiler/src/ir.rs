@@ -306,19 +306,21 @@ pub(crate) enum JsonDefault {
 }
 
 impl Module {
-    /// Process argument state is required only by an actual argv expression.
-    /// Merely importing sys emits no startup allocation or runtime query.
-    pub(crate) fn sys_argument_usage(&self) -> (bool, bool) {
+    /// Capture arguments, the original invocation, and source search paths only
+    /// for modules that use them; a bare import needs no runtime state.
+    pub(crate) fn startup_usage(&self) -> (bool, bool, bool) {
+        let mut linecache = false;
         let mut argv = false;
         let mut original = false;
         for function in self.functions.iter().chain([&self.entry]) {
             walk_expressions(&function.body, &mut |value| match value.kind {
                 ExprKind::Builtin(Builtin::SysArgv, _) => argv = true,
                 ExprKind::Builtin(Builtin::SysOrigArgv, _) => original = true,
+                ExprKind::Builtin(Builtin::Linecache(..), _) => linecache = true,
                 _ => {}
             });
         }
-        (argv || original, original)
+        (argv || original, original, linecache)
     }
 }
 
@@ -547,8 +549,20 @@ pub(crate) enum ArgparseOutput {
     File,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum LinecacheOperation {
+    Getline,
+    Getlines,
+    Update,
+    Clear,
+    Check,
+    Lazy,
+    Cache,
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    Linecache(LinecacheOperation, Type, bool),
     Repeat,
     WrapperAttributes(WrapperAttributes),
     CursorLengthHint,
