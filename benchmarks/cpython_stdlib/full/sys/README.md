@@ -32,6 +32,7 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 - `test_43581`: the complete method, both stream attributes, equality and assertion execute in the native binary.
 - `test_getdefaultencoding` and `test_getfilesystemencoding`: all `sys` operations execute in the native driver. The original unittest assertions, codec lookup and transport run on CPython.
 - `test_ioencoding_nonascii`: the original subprocess source executes as a native program. CPython owns the fixture, process pipes and expected filesystem bytes. The default Linux reference skips this test because the locale and filesystem codec names differ in case; `-X utf8` satisfies its unchanged decorator.
+- `test_jit_is_available` and `test_jit_is_enabled`: the parent capability query and both original child sources execute in Imre. The CPython fixture checks child status; each native child checks the predicate under the original `PYTHON_JIT` value.
 
 The existing [stream and exit smoke runner](../../native_sys.py) exercises four
 `test_subprocess` IDs and additional native program fixtures. Those are outside this

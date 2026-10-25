@@ -76,8 +76,6 @@ TestRemoteExec.test_remote_exec_undecodable	blocked	The debugger and native file
 TestRemoteExec.test_remote_exec_with_exception	blocked	An exception in injected code must be reported by the target main thread while its process continues.
 TestRemoteExec.test_remote_exec_with_self_process	blocked	The current native process must schedule its own script and observe its output at a safe point.
 TestSysJIT.test_jit_is_active	proposed	The child imports _testinternalcapi.TIER2_THRESHOLD and _testcapi.pyobject_vectorcall to assert CPython tier transitions around C and inlined frames. The public capability predicates still need real target values.
-TestSysJIT.test_jit_is_available	blocked	Query target JIT availability in the parent and in two compiled children under PYTHON_JIT=0 and =1.
-TestSysJIT.test_jit_is_enabled	blocked	The parent reads native availability; both complete original child sources must agree with the real runtime enablement policy.
 UnraisableHookTest.test_custom_unraisablehook	blocked	The native hook must receive the original error, exception type, traceback, offending object and formatted message. The unchanged trigger uses _testcapi.err_writeunraisable/err_formatunraisable.
 UnraisableHookTest.test_custom_unraisablehook_fail	blocked	Reporting failure of the user's hook needs the actual hook repr and traceback; its input is produced via _testcapi.err_writeunraisable.
 UnraisableHookTest.test_original_unraisablehook	blocked	The default hook must write real diagnostics from the _testcapi.err_writeunraisable/err_formatunraisable fixture, preserving offending object and traceback.

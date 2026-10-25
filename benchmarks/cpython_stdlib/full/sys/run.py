@@ -147,6 +147,50 @@ def select(toolchain, work, source, module):
                                              "native_calls": 1, "child_sha256": sources[0], "opt_level": toolchain.level}}}
 
     executions[SYS + "test_ioencoding_nonascii"] = nonascii
+    from test.support import script_helper
+    # This probes whether the *fixture interpreter* needs its environment.
+    # It does not call any JIT predicate under test.
+    script_helper.interpreter_requires_environment()
+    jit = toolchain.build(b"from sys import _jit\nprint(_jit.is_available())\n",
+                          directory(work, "jit-available"))
+
+    def jit_case(case, original):
+        calls = []
+        children = []
+
+        def available():
+            stdout, stderr = output(jit)
+            value = ast.literal_eval(stdout.decode())
+            if stderr or type(value) is not bool:
+                raise AssertionError((stdout, stderr))
+            calls.append("sys._jit.is_available")
+            return value
+
+        def popen(argv, **kwargs):
+            if argv[:-1] != [sys.executable, "-X", "faulthandler", "-c"]:
+                raise ValueError(f"unexpected fixture invocation: {argv!r}")
+            data = argv[-1].encode()
+            dest = directory(work, f"{case._testMethodName}-child-{len(children)}")
+            child = toolchain.build(data, dest)
+            children.append({"sha256": hashlib.sha256(data).hexdigest(),
+                             "PYTHON_JIT": kwargs["env"]["PYTHON_JIT"]})
+            # The original assert_python_ok controls its environment, pipes,
+            # cleanup and status assertion. The child executes the original source.
+            return subprocess.Popen([child], **kwargs)
+
+        fixture = SimpleNamespace(Popen=popen, PIPE=subprocess.PIPE, _cleanup=subprocess._cleanup)
+        with patch.object(module, "sys", SimpleNamespace(_jit=SimpleNamespace(is_available=available))), \
+                patch.object(script_helper, "subprocess", fixture):
+            original()
+        if len(calls) != 1 or [child["PYTHON_JIT"] for child in children] != ["0", "1"]:
+            raise AssertionError((calls, children))
+        return {"execution": "host-driven-native", "body": "CPython; both child sources: Imre",
+                "assertions": "Imre in each child; CPython checks child status",
+                "fixture_execution": "CPython unittest hooks and original assert_python_ok",
+                "calls": calls, "children": children}
+
+    for method in ("test_jit_is_available", "test_jit_is_enabled"):
+        executions[f"{MODULE}.TestSysJIT.{method}"] = jit_case
     return executions
 
 

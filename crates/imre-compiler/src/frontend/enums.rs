@@ -148,6 +148,14 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
+        // Python has exactly two bool singletons. Restrict this to exact bools:
+        // False and the integer zero can compare equal without being identical.
+        if left.ty == Type::Bool && right.ty == Type::Bool {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
         if types.contains(&Type::StringIterable) && types == [left.ty, right.ty] {
             // Both operands must reach identity with the same pointer tag.
