@@ -119,15 +119,14 @@ impl Error {
         });
         let mut message = String::from("[Errno None] None");
         paths.append_message(&mut message);
-        Self {
-            kind: Kind::OSError,
-            payload: Some(Payload::Arguments(Box::new(super::BuiltinArguments {
+        Self::builtin(
+            Kind::OSError,
+            Payload::Arguments(Box::new(super::BuiltinArguments {
                 message: Rc::new(message.into()),
                 args: std::iter::once(Self::string_arg(arg)).collect(),
                 os_paths: Some(paths),
-            }))),
-            cause: None,
-        }
+            })),
+        )
     }
 }
 
