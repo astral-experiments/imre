@@ -83,11 +83,11 @@ for format in ("no-such-format", "zip"):
     try:
         shutil.unpack_archive("packet.unknown", format=format)
     except FileNotFoundError as error:
-        print(error.errno, error.filename is None, error.filename2 is None)
+        print(repr(error.errno) + " " + str(error.filename is None) + " " + str(error.filename2 is None))
 try:
     shutil.unpack_archive("packet.unknown")
 except FileNotFoundError as error:
-    print(error.errno, error.filename is None, error.filename2 is None)
+    print(repr(error.errno) + " " + str(error.filename is None) + " " + str(error.filename2 is None))
 try:
     shutil.unpack_archive("packet.unknown", "", "no-such-format")
 except ValueError as error:

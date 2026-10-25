@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 
 HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
-sys.path.insert(0, str(STDLIB))
+sys.path[:0] = [str(HERE), str(STDLIB)]
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
 from suite_evidence import roles
 from suite_native import NativeCompileError, Toolchain, native_method, run_in_fixtures

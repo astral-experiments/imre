@@ -19,7 +19,7 @@ def zip_extensions() -> list[str]:
 
 
 names = pack_names()
-print(names == sorted(names))
+print(repr(names) == repr(sorted(names)))
 listed = shutil.get_archive_formats()
 while listed:
     listed.pop()
@@ -43,7 +43,7 @@ try:
 except ValueError as error:
     print(str(error))
 shutil.unpack_archive(alias, "unpacked")
-print(Path("unpacked/payload").read_bytes())
+print(repr(Path("unpacked/payload").read_bytes()))
 
 shutil.unregister_unpack_format("zip")
 try:
@@ -58,6 +58,6 @@ try:
     shutil.unregister_unpack_format("zip")
 except KeyError as error:
     print(str(error))
-print(extensions)
+print(repr(extensions))
 Path(archive).unlink()
 alias.unlink()

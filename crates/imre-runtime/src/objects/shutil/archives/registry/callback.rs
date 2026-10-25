@@ -6,7 +6,7 @@ use crate::{Bytes, Int, List};
 
 pub(in super::super) struct Callback {
     function: OwnedWord,
-    adapter: unsafe extern "C" fn(*const (), *const usize) -> u8,
+    adapter: unsafe extern "C" fn(*const (), *const usize, *const usize) -> u8,
     frame: *const RecordDescriptor,
     metadata: OwnedWord,
     extras: OwnedWord,
@@ -138,7 +138,7 @@ impl Callback {
                 function: WordKind::new(6).acquire(function as usize),
                 adapter: std::mem::transmute::<
                     *const (),
-                    unsafe extern "C" fn(*const (), *const usize) -> u8,
+                    unsafe extern "C" fn(*const (), *const usize, *const usize) -> u8,
                 >(adapter),
                 frame,
                 metadata: WordKind::new(6).acquire(metadata as usize),
@@ -310,20 +310,19 @@ impl Callback {
                 )));
             }
         }
-        // SAFETY: the layout holds the callable followed by precisely these scalar
-        // arguments. Keep partially initialized records owned on every error path.
+        // SAFETY: the frame holds precisely these scalar arguments. The original
+        // callable is rooted separately and survives a callback removing itself.
         unsafe {
             let frame = allocate_record(self.frame);
             if frame.is_null() {
                 return Err(Error::allocation());
             }
             let _owner = OwnedWord::from_owned(frame as usize, WordKind::new(6));
-            self.function.clone().initialize_record_field(frame);
             for (i, (v, (_, _, default))) in bound.into_iter().zip(params).enumerate() {
-                let kind = WordKind::new(*(*self.frame).kinds.add(i + 1));
-                stored(v.or(default).unwrap(), kind)?.initialize_record_field(frame.add(i + 1));
+                let kind = WordKind::new(*(*self.frame).kinds.add(i));
+                stored(v.or(default).unwrap(), kind)?.initialize_record_field(frame.add(i));
             }
-            (self.adapter)(std::ptr::null(), frame);
+            (self.adapter)(std::ptr::null(), self.function.word as *const usize, frame);
         }
         // The checked caller observes a callback's original pending exception.
         Ok(())

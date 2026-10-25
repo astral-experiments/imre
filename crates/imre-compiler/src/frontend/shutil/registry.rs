@@ -83,16 +83,15 @@ impl Checker<'_> {
                         "registered archive callback parameters require scalar types",
                     ));
                 }
-                let all = std::iter::once(callback)
-                    .chain(fields.iter().copied())
-                    .collect();
-                let frame = self.types.tuple(all);
+                // Keep the callable as a separate adapter argument; only its scalar
+                // parameters belong in the tuple used for keyword binding.
+                let frame = self.types.tuple(fields.clone());
                 let field = |ty, index| Expr {
                     ty,
                     kind: ExprKind::Field(
                         Box::new(Expr {
                             ty: frame,
-                            kind: ExprKind::Local(0),
+                            kind: ExprKind::Local(1),
                         }),
                         index,
                     ),
@@ -100,12 +99,15 @@ impl Checker<'_> {
                 let invoke = Expr {
                     ty: returns,
                     kind: ExprKind::Invoke {
-                        callable: Box::new(field(callback, 0)),
+                        callable: Box::new(Expr {
+                            ty: callback,
+                            kind: ExprKind::Local(0),
+                        }),
                         args: ir::CallArgs::positional(
                             fields
                                 .into_iter()
                                 .enumerate()
-                                .map(|(i, ty)| field(ty, i + 1))
+                                .map(|(i, ty)| field(ty, i))
                                 .collect(),
                         ),
                     },
@@ -122,8 +124,8 @@ impl Checker<'_> {
                             "recursive calls through registered archive formats are unsupported",
                         ),
                         function: ir::Function {
-                            params: vec![0],
-                            locals: vec![frame],
+                            params: vec![0, 1],
+                            locals: vec![callback, frame],
                             returns: Type::None,
                             body: vec![Statement::Expr(invoke), Statement::Return(none.clone())],
                         },
@@ -133,7 +135,12 @@ impl Checker<'_> {
                     ty: self.types.tuple(values.iter().map(|v| v.ty).collect()),
                     kind: ExprKind::Tuple(values),
                 };
-                let qualified = format!("{}.{}", self.graph.modules[module].name, name);
+                let origin = if module == self.graph.entry {
+                    "__main__"
+                } else {
+                    &self.graph.modules[module].name
+                };
+                let qualified = format!("{origin}.{name}");
                 let metadata = tuple(
                     [unpacking::string(qualified), unpacking::string(name)]
                         .into_iter()
@@ -158,7 +165,7 @@ impl Checker<'_> {
                 (
                     Some(frame),
                     Expr {
-                        ty: self.types.callable(vec![frame], Type::None),
+                        ty: self.types.callable(vec![callback, frame], Type::None),
                         kind: ExprKind::Callable {
                             function: id,
                             receiver: None,
