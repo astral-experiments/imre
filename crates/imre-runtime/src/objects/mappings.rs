@@ -641,6 +641,29 @@ impl Mapping {
             .map(|entry| (&*entry.key, entry.value))
     }
 
+    /// Keeps exact field owners alive after a string-key dictionary borrow ends.
+    pub(super) fn owned_string_entries(&self) -> Vec<(String, OwnedWord)> {
+        self.string_entries()
+            .map(|(key, word)| {
+                // SAFETY: the dictionary owns this value under its homogeneous descriptor.
+                (key.to_string(), unsafe { self.value_kind.acquire(word) })
+            })
+            .collect()
+    }
+
+    /// A numeric-key dictionary cannot match a string placeholder.
+    pub(super) fn logging_key(&self, key: &Str) -> Option<OwnedWord> {
+        let Tables::Str(table) = &self.tables else {
+            return None;
+        };
+        // SAFETY: the table and the lookup key are both exact strings under live borrows.
+        unsafe {
+            table
+                .lookup(std::ptr::from_ref(key) as usize)
+                .map(|e| self.value_kind.acquire(e.value))
+        }
+    }
+
     pub(super) fn integer_entries(&self) -> impl Iterator<Item = (&Int, usize)> {
         let Tables::Int(table) = &self.tables else {
             fail("SystemError", "expected an integer-key dictionary");

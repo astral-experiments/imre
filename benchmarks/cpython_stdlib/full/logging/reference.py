@@ -10,7 +10,11 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path.insert(0, str(STDLIB))
-from suite_inventory import cases, load_suite, reference_results, unique_ids, verify_files
+from suite_inventory import cases, load_suite, reference_results, verify_files
+try:
+    from suite_inventory import id_counts
+except ImportError:  # Shared runner before per-ID occurrence accounting.
+    from suite_inventory import unique_ids as id_counts
 
 
 def main():
@@ -26,7 +30,7 @@ def main():
     verify_files(Path(test.__file__).resolve().parents[2],
                  manifest["files"] | manifest["reference_files"])
     module = manifest["module"]
-    ids = unique_ids(case.id() for case in cases(load_suite(module)))
+    ids = id_counts(case.id() for case in cases(load_suite(module)))
     with tempfile.TemporaryDirectory() as work:
         xml = Path(work) / "reference.xml"
         run = subprocess.run([sys.executable, "-B", "-m", "test", "--single-process",
@@ -34,7 +38,7 @@ def main():
                               "--junit-xml", xml, module.removeprefix("test.")], cwd=work)
         results = reference_results(xml, ids)
     report = {"module": module, "cpython_commit": manifest["commit"], "platform": sys.platform,
-              "resources": "all", "denominator": len(ids), "reference": results}
+              "resources": "all", "denominator": sum(ids.values()) if isinstance(ids, dict) else len(ids), "reference": results}
     args.result.write_text(json.dumps(report, indent=2) + "\n")
     return run.returncode
 

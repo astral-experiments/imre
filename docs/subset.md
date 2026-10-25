@@ -649,6 +649,9 @@ Keep each builder local. Declare parent options first, followed by each subparse
 
 ## Standard logging
 
+
+`logging.LogRecord` and `makeLogRecord` retain named scalar and container fields. `getMessage()` formats positional and mapping arguments when called. A record captures its creation time and thread/process metadata; changes to `logging.logThreads`, `logProcesses` or `logMultiprocessing` affect subsequent records. An annotated scalar read can fetch an extra field (for example, `request_id: str = record.request_id`).
+
 `logging.getLogger(name=None)` returns the same native logger for each name. Omitted, None, empty, and `"root"` names refer to `logging.root`. Loggers expose `name`, `level`, `root`, `parent`, `setLevel(int)`, `getEffectiveLevel()`, and `isEnabledFor(int)`. Named levels inherit through dot-separated parents. Integer levels retain Python's full precision.
 
 `debug`, `info`, `warning`, `error`, `critical`, `fatal`, and `log(level, message, ...)` write to standard error. Scalar message arguments support literal `%s`, `%r`, `%d`, and `%%`. Arguments execute in source order and conversion waits until the event is enabled. The fallback handler emits warning and higher levels before configuration. The module-level convenience functions configure the root handler on first use.
