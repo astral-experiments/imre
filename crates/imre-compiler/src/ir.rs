@@ -70,6 +70,7 @@ pub(crate) enum Type {
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
     LogRecord,
+    LogFormatter,
     Logger,
     TimedFileHandler,
     ClockTime,
@@ -181,6 +182,7 @@ impl std::fmt::Display for Type {
             Self::DirectoryContext(_) => "directory context",
             Self::Semaphore => "asyncio.Semaphore",
             Self::RegexPattern => "re.Pattern[str]",
+            Self::LogFormatter => "logging.Formatter",
             Self::LogRecord => "logging.LogRecord",
             Self::Logger => "logging.Logger",
             Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
@@ -517,9 +519,12 @@ pub(crate) enum Builtin {
     /// Evaluates and roots all arguments, then raises the last (an exception).
     RaiseException,
     WallTime,
+    TimeSleep,
+    PercentInteger,
     Logging(LogOperation),
     Timed(TimedOperation),
     LogRecord(LogRecordOperation),
+    Formatter(FormatterOperation),
     Input,
     Chr,
     Int,
@@ -983,6 +988,25 @@ pub(crate) enum TimedOperation {
     FilesToDelete,
     ShouldRollover,
     DoRollover,
+}
+
+/// Public formatting operations on a retained style, defaults mapping, and clock converter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FormatterOperation {
+    New,
+    Text,
+    Date,
+    UsesTime,
+    Format,
+    Message,
+    Time,
+    SetUtc,
+    SetDate,
+    DefaultTime,
+    DefaultMsec,
+    SetDefaultTime,
+    SetDefaultMsec,
+    Stack,
 }
 
 /// Operations on a record with individually owned, named Python fields.
