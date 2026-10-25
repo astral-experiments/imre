@@ -5,6 +5,23 @@
   "fixture": "CPython module, class, instance, unmodified method, sorted and identity assertions",
   "operation": "Imre json.loads and a live JSONDecoder instance; key owner comparisons in Imre",
   "distinct-owner-negative-control": "passed",
+  "compile-only-components": {
+    "pass module loads": {
+      "source": "import json\nfrom typing import Any, Callable\nload: Callable[[str], list[dict[str, Any]]] = json.loads\nprint(repr(load('[]')))\n",
+      "exit": 1,
+      "diagnostic": "<case>:3:47: Imre: name is not a local value; globals and first-class functions are unsupported"
+    },
+    "pass bound decoder decode": {
+      "source": "import json\nfrom typing import Any, Callable\ndecoder = json.JSONDecoder()\nload: Callable[[str], list[dict[str, Any]]] = decoder.decode\nprint(repr(load('[]')))\n",
+      "exit": 1,
+      "diagnostic": "<case>:4:47: Imre: expected a fixed bound method"
+    },
+    "sort decoded object": {
+      "source": "import json\nrows = json.loads('[{\"b_key\": 1, \"a_key\": 2}]')\nprint(sorted(rows[0]))\n",
+      "exit": 1,
+      "diagnostic": "<case>:3:7: Imre: iteration requires a concrete container, homogeneous tuple, string, bytes, or range"
+    }
+  },
   "levels": {
     "0": {
       "repr": {

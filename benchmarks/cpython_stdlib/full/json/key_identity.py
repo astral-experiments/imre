@@ -23,6 +23,32 @@ from suite_native import NativeCompileError, Toolchain, method_bytes, native_met
 
 METHOD = "test.test_json.test_decode.TestDecode.test_keys_reuse"
 SOURCE = BENCH / "upstream/Lib/test/test_json/test_decode.py"
+
+
+def component_checks(compiler):
+    """Isolate operations used by the unchanged helper; a check executes no method."""
+    annotation = "from typing import Any, Callable\n"
+    signature = "load: Callable[[str], list[dict[str, Any]]] = "
+    programs = {
+        "pass module loads": annotation + signature + "json.loads\nprint(repr(load('[]')))\n",
+        "pass bound decoder decode": annotation + "decoder = json.JSONDecoder()\n" + signature
+                                     + "decoder.decode\nprint(repr(load('[]')))\n",
+        "sort decoded object": """rows = json.loads('[{"b_key": 1, "a_key": 2}]')
+print(sorted(rows[0]))
+""",
+    }
+    result = {}
+    with tempfile.TemporaryDirectory() as work:
+        entry = Path(work) / "case.py"
+        for name, body in programs.items():
+            source = "import json\n" + body
+            entry.write_text(source)
+            proc = subprocess.run([compiler.resolve(), "check", entry], capture_output=True, text=True, timeout=30)
+            result[name] = {"source": source, "exit": proc.returncode,
+                            "diagnostic": (proc.stderr + proc.stdout).strip().replace(str(entry), "<case>")}
+    return result
+
+
 # Emit the complete native result, followed by the native owner equivalence class
 # of each key. Equal spellings must stay separate when the owners are distinct.
 EXPOSE = b"""print(repr(doc))
@@ -233,7 +259,8 @@ def main():
               "method_sha256": hashlib.sha256(method_bytes(SOURCE, "TestDecode", "test_keys_reuse")).hexdigest(),
               "fixture": "CPython module, class, instance, unmodified method, sorted and identity assertions",
               "operation": "Imre json.loads and a live JSONDecoder instance; key owner comparisons in Imre",
-              "distinct-owner-negative-control": "passed", "levels": {}}
+              "distinct-owner-negative-control": "passed",
+              "compile-only-components": component_checks(args.imre), "levels": {}}
     for level in (0, 3):
         with tempfile.TemporaryDirectory() as tmp:
             tools = Toolchain(args.imre.resolve(), args.runtime.resolve(), args.clang.resolve(), level)
