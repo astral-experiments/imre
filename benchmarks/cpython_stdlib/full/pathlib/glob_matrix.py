@@ -1,6 +1,7 @@
 """Compare ordered traversal, duplicates, and exception messages on the same POSIX tree."""
 
 import argparse
+import ast
 from contextlib import chdir
 from itertools import product
 from pathlib import Path
@@ -78,7 +79,28 @@ def main():
             if result.returncode or result.stderr or result.stdout != expected:
                 raise AssertionError((root, pattern, case, follow, method, result, expected))
             total += 1
-    print(f'O{args.opt_level}: all {total} ordered glob results matched CPython')
+        # The kernel can stop resolving a directory symlink loop at different
+        # depths on repeated calls, even for CPython on the very same tree.
+        # Compare through the first back edge, as the original pathlib tests do.
+        cycle = Path('cycle')
+        (cycle / 'd').mkdir(parents=True)
+        (cycle / 'd' / 'leaf').touch()
+        (cycle / 'd' / 'back').symlink_to('../d')
+        requests = (('glob', '**'), ('glob', '**/'), ('glob', '**/leaf'),
+                    ('rglob', '*'), ('rglob', '*/'), ('rglob', 'leaf'))
+        for method, pattern in requests:
+            expected = list(getattr(cycle, method)(pattern, recurse_symlinks=True))
+            result = subprocess.run([binary, str(cycle), pattern, 'none', 'true', method],
+                                    capture_output=True, text=True, timeout=10, check=True)
+            actual = [Path(ast.literal_eval(line)) for line in result.stdout.splitlines()]
+            if result.stderr or not all(any(p.parts.count('back') > 1 for p in paths)
+                                        for paths in (actual, expected)):
+                raise AssertionError((method, pattern, result))
+            if [p for p in actual if p.parts.count('back') <= 1] != [
+                    p for p in expected if p.parts.count('back') <= 1]:
+                raise AssertionError((method, pattern, actual, expected))
+    print(f'O{args.opt_level}: all {total} ordered glob results and {len(requests)} '
+          'bounded symlink-cycle comparisons matched CPython')
 
 
 if __name__ == '__main__':

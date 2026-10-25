@@ -65,7 +65,11 @@ bodies and assertions that drive native operations. The other nine also use a
 host parser, third-party path conversion, or an iterator type assertion on a
 host proxy; their records identify the specific use. The [glob comparison](glob_matrix.py)
 checks the order, duplicates and errors of 1,920 requests at each level independently
-of the unittest counts.
+of the unittest counts. Six additional requests exercise a directory symlink cycle.
+Repeated scans of the same cycle by CPython can stop at different depths on this
+Linux host. The original tests compare paths through the first link and discard
+deeper repetitions; the report retains the actual number of native iterator pulls
+on each run.
 
 | Execution at each of O0 and O3 | Occurrences |
 | --- | ---: |
