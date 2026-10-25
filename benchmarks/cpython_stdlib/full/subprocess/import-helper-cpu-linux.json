@@ -1,0 +1,85 @@
+{
+  "schema": "imre.subprocess.import-helper/v1",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "execution": "reference-only",
+  "blobs": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/test/subprocessdata/fd_status.py": "90e785981aeab0f3730b373a3b5d05bd694e5a0a",
+    "Lib/test/subprocessdata/input_reader.py": "1dc3191ad183f751b4631462fbf3cb97b8c7de52",
+    "Lib/test/subprocessdata/qcat.py": "fe6f9db25c97014c59948f1643c09f4afaaa2513",
+    "Lib/test/subprocessdata/qgrep.py": "69906379a9b3876285dff230a528cad150d343ca",
+    "Lib/test/subprocessdata/sigchild_ignore.py": "86320fb35e719ffc9720b86d9a92ceccf9d64648",
+    "Lib/test/test_subprocess.py": "7e04934c317a91d1f5f1a284929d5f35c9cf5a58",
+    "Lib/test/support/import_helper.py": "4c7eac0b7eb674f508fe40e8ad1e0f2b184fa533",
+    "Lib/importlib/__init__.py": "a7d57561ead046c481d4d78bf33a6726185e399d",
+    "Python/import.c": "5914722c8f75177e111dd9f3dd69fead54d0db19"
+  },
+  "denominator": 353,
+  "resources": "cpu",
+  "passed": 314,
+  "skipped": 39,
+  "native_credits": 0,
+  "original_import_bound_real_imp": true,
+  "helper_entries": [
+    {
+      "phase": "test.test_subprocess.POSIXProcessTestCase.test_select_unbuffered",
+      "function": "import_module",
+      "caller": "test.test_subprocess",
+      "line": 3306
+    },
+    {
+      "phase": "test.test_subprocess.POSIXProcessTestCase.test_select_unbuffered",
+      "function": "_ignore_deprecated_imports",
+      "caller": "contextlib",
+      "line": 141
+    }
+  ],
+  "import_module_calls": [
+    {
+      "phase": "test.test_subprocess.POSIXProcessTestCase.test_select_unbuffered",
+      "name": "select",
+      "deprecated": false,
+      "required_on": [],
+      "previously_cached": true,
+      "returned_cached_module": true,
+      "returned_same_preexisting_module": true
+    }
+  ],
+  "delegated_importlib_calls": [
+    {
+      "phase": "test.test_subprocess.POSIXProcessTestCase.test_select_unbuffered",
+      "line": 80,
+      "name": "select"
+    }
+  ],
+  "select_calls": [
+    {
+      "line": 3316,
+      "first_input_is_child_stdout": true
+    }
+  ],
+  "helper_issued_imp_calls": [],
+  "separate_positive_control": [
+    {
+      "phase": "positive controls",
+      "caller": "frozen_modules",
+      "line": 103,
+      "builtin": "_override_frozen_modules_for_tests",
+      "argument": -1
+    },
+    {
+      "phase": "positive controls",
+      "caller": "frozen_modules",
+      "line": 107,
+      "builtin": "_override_frozen_modules_for_tests",
+      "argument": 0
+    },
+    {
+      "phase": "positive controls",
+      "caller": "multi_interp_extensions_check",
+      "line": 123,
+      "builtin": "_override_multi_interp_extensions_check",
+      "argument": 1
+    }
+  ]
+}

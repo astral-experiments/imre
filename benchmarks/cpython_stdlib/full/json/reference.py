@@ -105,6 +105,9 @@ def main():
         outcomes[row.attrib["name"]].append(result)
     report = {
         "cpython_commit": COMMIT, "platform": sys.platform,
+        "module": "test.test_json", "denominator": len(rows),
+        "reference": {name: values[0] if len(values) == 1 else values
+                      for name, values in sorted(outcomes.items())},
         "executions": len(rows), "unique_ids": len(seen), "source_routines": len(groups),
         "routines": {k: {i: outcomes[i] for i in sorted(ids)} for k, ids in sorted(groups.items())},
     }

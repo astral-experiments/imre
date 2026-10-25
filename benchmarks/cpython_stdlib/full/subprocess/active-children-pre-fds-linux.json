@@ -1,0 +1,188 @@
+{
+  "schema": "imre.subprocess.active-children/v1",
+  "platform": "linux",
+  "imre_revision": "0551437d17e5c89b603f14d9e25853b0ab04f969",
+  "tested_tree": "f04223515ebf1c7c1ab464d28427fcb620ffd097",
+  "main": "de248d8137084688eaa8ca7d2d03fcf6eed6ea3f",
+  "toolchain": {
+    "imre": "717e5b05c8b28a4e0cb9558873ee4578a218fcb0456f95d843878a487f893c5c",
+    "runtime": "7c64d8e29e8d588e0649d295eec831a0e3f80d66522d185452306e36ceac8979",
+    "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+  },
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "actor_sha256": "e67792d9a2f09471e551a61305a3b4405a97f9364576441ff3cfa98f6e0a5e87",
+      "parent_source_sha256": "f4eae65a6929b61d33adf58980e0eaedf1a77b76d1a0a945cbd4fce4dbbedba8",
+      "fixture_os_sha256": "5545832dee55d5fa0b93a8bd60d78fc872cb34bbb9bde90afcc780709f218a29",
+      "toolchain": {
+        "imre": "717e5b05c8b28a4e0cb9558873ee4578a218fcb0456f95d843878a487f893c5c",
+        "runtime": "7c64d8e29e8d588e0649d295eec831a0e3f80d66522d185452306e36ceac8979",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_leak_fast_process_del_killed": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "mixed",
+              "operation": "imre"
+            },
+            "observed": {
+              "parent_executable_verified": true,
+              "data_child_argv": [
+                "<pinned-cpython>",
+                "-c",
+                "import time;time.sleep(3)"
+              ],
+              "parent_warning_pid_matched": true,
+              "applied_host_filter": "always",
+              "original_object_identity_retained": true,
+              "membership_lengths": [
+                1,
+                0,
+                0,
+                0
+              ],
+              "successful_kernel_reaps": 1,
+              "kernel_status": -9,
+              "fixture_waitpid_errno": 10,
+              "failed_launch_errno": 2,
+              "fixture_closed_parent_pipe_ends": 2,
+              "fixture_cleanup_calls": 1
+            }
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_zombie_fast_process_del": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "mixed",
+              "operation": "imre"
+            },
+            "observed": {
+              "parent_executable_verified": true,
+              "data_child_argv": [
+                "<pinned-cpython>",
+                "-c",
+                "import sys, time;time.sleep(0.2)"
+              ],
+              "parent_warning_pid_matched": true,
+              "applied_host_filter": "always",
+              "original_object_identity_retained": true,
+              "membership_lengths": [
+                1,
+                1,
+                0
+              ],
+              "successful_kernel_reaps": 1,
+              "kernel_status": 0,
+              "fixture_waitpid_errno": null,
+              "failed_launch_errno": null,
+              "fixture_closed_parent_pipe_ends": 2,
+              "fixture_cleanup_calls": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "actor_sha256": "c21a0adf913e9aad14cca8623f37d3e7acbd6507fd20c4bd04c9e4e32c7dbb2e",
+      "parent_source_sha256": "f4eae65a6929b61d33adf58980e0eaedf1a77b76d1a0a945cbd4fce4dbbedba8",
+      "fixture_os_sha256": "5545832dee55d5fa0b93a8bd60d78fc872cb34bbb9bde90afcc780709f218a29",
+      "toolchain": {
+        "imre": "717e5b05c8b28a4e0cb9558873ee4578a218fcb0456f95d843878a487f893c5c",
+        "runtime": "7c64d8e29e8d588e0649d295eec831a0e3f80d66522d185452306e36ceac8979",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_leak_fast_process_del_killed": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "mixed",
+              "operation": "imre"
+            },
+            "observed": {
+              "parent_executable_verified": true,
+              "data_child_argv": [
+                "<pinned-cpython>",
+                "-c",
+                "import time;time.sleep(3)"
+              ],
+              "parent_warning_pid_matched": true,
+              "applied_host_filter": "always",
+              "original_object_identity_retained": true,
+              "membership_lengths": [
+                1,
+                0,
+                0,
+                0
+              ],
+              "successful_kernel_reaps": 1,
+              "kernel_status": -9,
+              "fixture_waitpid_errno": 10,
+              "failed_launch_errno": 2,
+              "fixture_closed_parent_pipe_ends": 2,
+              "fixture_cleanup_calls": 1
+            }
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_zombie_fast_process_del": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "mixed",
+              "operation": "imre"
+            },
+            "observed": {
+              "parent_executable_verified": true,
+              "data_child_argv": [
+                "<pinned-cpython>",
+                "-c",
+                "import sys, time;time.sleep(0.2)"
+              ],
+              "parent_warning_pid_matched": true,
+              "applied_host_filter": "always",
+              "original_object_identity_retained": true,
+              "membership_lengths": [
+                1,
+                1,
+                0
+              ],
+              "successful_kernel_reaps": 1,
+              "kernel_status": 0,
+              "fixture_waitpid_errno": null,
+              "failed_launch_errno": null,
+              "fixture_closed_parent_pipe_ends": 2,
+              "fixture_cleanup_calls": 1
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

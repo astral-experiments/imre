@@ -75,7 +75,7 @@ class Native:
     def invoke(self, method, shape, data, ensure_ascii=True, allow_nan=True, indent=None):
         (self.directory / "input.bin").write_bytes(data)
         (self.directory / "output.txt").unlink(missing_ok=True)
-        args = [method, shape, str(int(ensure_ascii)), str(int(allow_nan)), str(indent)]
+        args = [method, shape, str(int(ensure_ascii)), str(int(allow_nan)), str(indent), "fields"]
         run = subprocess.run([self.program, *args], cwd=self.directory, capture_output=True,
                              timeout=10)
         if run.returncode or run.stderr:
@@ -85,9 +85,12 @@ class Native:
         if not sep or not run.stdout.endswith(b"\n"):
             raise RuntimeError("incomplete native JSON response")
         if tag == "JSONDecodeError":
-            # The selected upstream method checks only the native category and message.
+            # Do not call CPython's initializer: that would recompute line and
+            # column on the host and could hide an incorrect native position.
+            message, fields = payload.rsplit("\n", 1)
             error = self.error.__new__(self.error)
-            ValueError.__init__(error, payload)
+            ValueError.__init__(error, message)
+            error.msg, error.doc, error.pos, error.lineno, error.colno = ast.literal_eval(fields)
             raise error
         if tag in {"TypeError", "ValueError"}:
             raise {"TypeError": TypeError, "ValueError": ValueError}[tag](payload)

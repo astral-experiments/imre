@@ -4,7 +4,7 @@ mod callables;
 mod classes;
 mod contracts;
 mod effects;
-mod fixed_regex;
+use imre_regex as fixed_regex;
 mod frontend;
 mod guarded_text;
 mod ir;
@@ -23,13 +23,35 @@ mod tuples;
 mod types;
 #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
 mod verify;
+mod version;
 mod watch;
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
+/// Startup choices made before a native Python command executes.
+#[derive(Clone, Copy)]
+pub struct CommandFlags {
+    pub isolated: bool,
+    /// Python's language optimization level; independent of LLVM optimization.
+    pub optimize: i32,
+    pub safe_path: bool,
+    pub no_user_site: bool,
+    pub dont_write_bytecode: bool,
+    pub utf8_mode: bool,
+}
+
+/// The in-memory entry and launcher used by a Python-style `-c` invocation.
+pub struct PythonCommand {
+    pub source: String,
+    pub flags: CommandFlags,
+    pub executable: String,
+}
+
 #[derive(Default)]
 pub struct CompileOptions {
+    /// Compile the supplied command without creating a script in the caller's working directory.
+    pub command: Option<PythonCommand>,
     /// A file describing the branches to include in a closed executable.
     pub entry_profile: Option<PathBuf>,
     /// Limit native lowering to definitions a closed entry program can use.
@@ -47,6 +69,9 @@ impl CompileOptions {
         module_root: Option<&Path>,
         filesystem: watch::FileSystem<'_>,
     ) -> Result<modules::SourceGraph, String> {
+        if let Some(command) = &self.command {
+            return modules::SourceGraph::command(command, self, filesystem);
+        }
         modules::SourceGraph::load_with(
             path,
             module_root,
@@ -308,10 +333,8 @@ fn checked_lower(
     graph: &mut modules::SourceGraph,
 ) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
     let lowered = frontend::lower_with_owners(graph)?;
-    let (skipped, decorators) = graph.diagnostic_scopes();
-    graph
-        .session
-        .check_scopes(skipped.as_deref(), &decorators)?;
+    let (skipped, overloads) = graph.diagnostic_scopes();
+    graph.session.check_scopes(skipped.as_deref(), &overloads)?;
     Ok(lowered)
 }
 
@@ -326,12 +349,12 @@ fn checked_lower_with(
     let lowered = frontend::lower_with_owners(graph);
     cache.retain_hints(graph, lowered.is_ok());
     let lowered = lowered?;
-    let (skipped, decorators) = graph.diagnostic_scopes();
+    let (skipped, overloads) = graph.diagnostic_scopes();
     cache.check_scopes(
         &mut graph.session,
         &graph.inputs,
         skipped.as_deref(),
-        &decorators,
+        &overloads,
     )?;
     Ok(lowered)
 }
@@ -369,8 +392,15 @@ fn verify_after(module: &ir::Module, stage: &str) -> Result<(), String> {
     }
 }
 
-/// Applies Python's source preprocessing before Ruff, ty, and source-range checks.
-fn normalize_source(source: &str) -> Result<Cow<'_, str>, String> {
+/// Python applies file encodings and source-file indentation policy only to disk input.
+#[derive(Clone, Copy, PartialEq)]
+enum SourceKind {
+    File,
+    Command,
+}
+
+/// Normalize physical newlines before Ruff, ty, and source-range checks.
+fn normalize_source(source: &str, kind: SourceKind) -> Result<Cow<'_, str>, String> {
     if source.contains('\0') {
         return Err("source code cannot contain null bytes".into());
     }
@@ -381,7 +411,10 @@ fn normalize_source(source: &str) -> Result<Cow<'_, str>, String> {
     } else {
         Cow::Borrowed(source)
     };
-    check_encoding(&source)?;
+    // A -c operand is already decoded; Python ignores file encoding cookies here.
+    if kind == SourceKind::File {
+        check_encoding(&source)?;
+    }
     Ok(source)
 }
 
@@ -427,6 +460,22 @@ fn check_encoding(source: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{CompileOptions, compile};
+
+    #[test]
+    fn unsupported_handle_comparisons_are_diagnosed_before_lowering() {
+        for source in [
+            "import tomli\nv = tomli.loads('x = 1')\nprint(v == v != v)\n",
+            "import logging\nv = logging.getLogger('x')\nprint(v != v)\n",
+            "import asyncio\nv = asyncio.Semaphore(1)\nprint(v != v)\n",
+            "from tempfile import TemporaryDirectory\nv = TemporaryDirectory()\nprint(v == v)\n",
+        ] {
+            let error = super::check(source).unwrap_err();
+            assert!(
+                error.contains("unsupported comparison for these types"),
+                "{error}"
+            );
+        }
+    }
 
     #[test]
     fn unsupported_operations_on_shared_tuple_types_have_bounded_diagnostics() {
@@ -478,6 +527,16 @@ mod tests {
         }
         let flat = format!("print(len([{}]))\n", "(1 + 2),".repeat(256));
         compile(&flat, &CompileOptions::default()).unwrap();
+
+        let fields = "{1 + 2} ".repeat(256);
+        super::check(&format!("print(f'{fields}')\n")).unwrap();
+        for fields in [
+            format!("{fields}{{{}}}", "1+".repeat(256) + "1"),
+            format!("{{{}}}{fields}", "1+".repeat(256) + "1"),
+        ] {
+            let error = super::check(&format!("print(f'{fields}')\n")).unwrap_err();
+            assert!(error.contains("syntax complexity limit"), "{error}");
+        }
     }
 
     #[test]
@@ -617,7 +676,7 @@ mod tests {
             &CompileOptions::default(),
         )
         .unwrap();
-        assert!(llvm.contains("call ptr @imre_subprocess_run_modes"));
+        assert!(llvm.contains("call ptr @imre_run_config"));
         assert!(llvm.contains("call i64 @imre_subprocess_timeout_field"));
         compile(
             include_str!("../../../tests/fixtures/processes/timeout_arguments.py"),

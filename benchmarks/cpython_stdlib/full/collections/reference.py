@@ -48,7 +48,7 @@ def main():
         results = reference_results(xml, expected)
     if results.keys() & skipped.keys():
         raise ValueError("import-skipped collections IDs also ran")
-    report = {"cpython_commit": manifest["commit"], "platform": sys.platform,
+    report = {"module": "collections", "cpython_commit": manifest["commit"], "platform": sys.platform,
               "denominator": sum(expected.values()) + len(skipped),
               "reference": dict(sorted((results | skipped).items()))}
     args.result.write_text(json.dumps(report, indent=2) + "\n")
