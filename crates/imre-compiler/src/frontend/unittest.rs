@@ -221,6 +221,7 @@ impl Checker<'_> {
                 ("tomllib", "TOMLDecodeError"),
                 ("json", "JSONDecodeError"),
                 ("csv", "Error"),
+                ("socket", "gaierror"),
             ]
             .into_iter()
             .find(|(module, name)| symbol.exported_by(module, name))?;

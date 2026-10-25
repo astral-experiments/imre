@@ -206,6 +206,7 @@ impl Types {
             | Type::PlainObject
             | Type::PathInfo
             | Type::Poll
+            | Type::Socket
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -395,6 +396,7 @@ impl Types {
                 | Type::Enum(_)
                 | Type::Bytes
                 | Type::Logger
+                | Type::Socket
                 | Type::Path
                 | Type::PurePath(_)
         ) || matches!(ty, Type::Tuple(_) | Type::Class(_)) && self.immutable_key_field(ty)
@@ -415,6 +417,7 @@ impl Types {
             | Type::Path
             | Type::PurePath(_)
             | Type::Logger
+            | Type::Socket
             | Type::None => true,
             Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
             Type::Tuple(_) => self
@@ -624,6 +627,7 @@ impl Types {
             | Type::PlainObject
             | Type::PathInfo
             | Type::Poll
+            | Type::Socket
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -1208,6 +1212,7 @@ impl Types {
                 | Type::BinaryIO
                 | Type::CsvReader
                 | Type::ZipFile
+                | Type::Socket
                 | Type::Popen(..)
                 | Type::ActivePopen
                 | Type::AsyncProcess(_)

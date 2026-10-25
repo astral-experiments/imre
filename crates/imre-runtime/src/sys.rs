@@ -1,6 +1,7 @@
 //! The process's two UTF-8 text output streams use the same buffering as print.
 mod intern;
-use super::{Int, LazyLock, Mutex, OUTPUT, Output, Rc, Str, flush_stdout, initialize_io};
+use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_io};
+use crate::StrOwner;
 use crate::objects::errno_error;
 use std::io::{self, Write};
 
@@ -65,13 +66,13 @@ pub extern "C" fn imre_sys_platform() -> *const Str {
         "windows" => "win32",
         other => other,
     };
-    Rc::into_raw(Rc::new(Str::new(platform)))
+    StrOwner::into_raw(StrOwner::new(Str::new(platform)))
 }
 
 /// Return the OS interface Python exposes on the target that built this runtime.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_name() -> *const Str {
-    Rc::into_raw(Rc::new(Str::new(if cfg!(windows) {
+    StrOwner::into_raw(StrOwner::new(Str::new(if cfg!(windows) {
         "nt"
     } else {
         "posix"

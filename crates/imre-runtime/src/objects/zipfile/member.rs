@@ -1,5 +1,6 @@
 //! Independent member cursors with incremental CRC. Compressed and inflated
 //! buffers are each bounded even when the caller requests the entire member.
+use crate::StrOwner;
 use std::io::SeekFrom;
 use std::rc::Rc;
 
@@ -142,7 +143,7 @@ impl Member {
         })
     }
 
-    pub(in crate::objects) fn name(&self) -> &Rc<Str> {
+    pub(in crate::objects) fn name(&self) -> &StrOwner {
         &self.info.filename
     }
 

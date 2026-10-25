@@ -1,5 +1,6 @@
 //! Fixed native records with a compact header and compiler-described payload.
 
+use crate::StrOwner;
 use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::rc::Rc;
@@ -657,7 +658,7 @@ unsafe fn release_fields<const PACKED: bool>(
             let kind = WordKind::new(descriptor.kinds.add(index).read());
             let word = kind.read_record_field(payload.add(index));
             if PACKED && kind.raw() & !super::words::NULLABLE == 3 && word != 0 {
-                strings::release(Rc::from_raw(word as *const crate::Str));
+                strings::release(StrOwner::from_raw(word as *const crate::Str));
             } else {
                 kind.release(word);
             }
@@ -728,12 +729,12 @@ mod tests {
             kinds: string_kind.as_ptr(),
             semantics: std::ptr::null(),
         };
-        let text = Rc::new(Str::from("shared leaf"));
+        let text = StrOwner::new(Str::from("shared leaf"));
         // SAFETY: each new field receives one live owner of its declared kind.
         // Both descriptors outlive every release, including the saved leaf.
         unsafe {
             let leaf = imre_record_new(&leaf_descriptor);
-            leaf.write(Rc::into_raw(text.clone()) as usize);
+            leaf.write(StrOwner::into_raw(text.clone()) as usize);
             imre_record_retain(leaf);
             let mut root = leaf;
             for _ in 0..50_000 {
@@ -742,9 +743,9 @@ mod tests {
                 root = parent;
             }
             imre_record_release(root);
-            assert_eq!(Rc::strong_count(&text), 2);
+            assert_eq!(StrOwner::strong_count(&text), 2);
             imre_record_release(leaf);
-            assert_eq!(Rc::strong_count(&text), 1);
+            assert_eq!(StrOwner::strong_count(&text), 1);
         }
     }
 
@@ -787,8 +788,8 @@ mod tests {
             semantics: std::ptr::null(),
         };
         assert_eq!(layout(kinds.len()).size(), 16 + kinds.len() * 8);
-        let text = Rc::new(Str::from("partial owned field"));
-        let weak_text = Rc::downgrade(&text);
+        let text = StrOwner::new(Str::from("partial owned field"));
+        let weak_text = StrOwner::downgrade(&text);
         let integer = Rc::new(BigInt::from(1_u128 << 120));
         let weak_integer = Rc::downgrade(&integer);
         // SAFETY: metadata outlives all allocated records, every word has the
@@ -799,12 +800,12 @@ mod tests {
             let object = Rc::from_raw(imre_seq_new(2));
             let weak_object = Rc::downgrade(&object);
             let child = imre_record_new(&child_descriptor);
-            replace(child, 0, Rc::as_ptr(&text) as usize, 3);
+            replace(child, 0, StrOwner::as_ptr(&text) as usize, 3);
             let record = imre_record_new(&descriptor);
             assert!((0..kinds.len()).all(|index| record.add(index).read() == 0));
             replace(record, 1, 1, 1);
             replace(record, 2, Rc::as_ptr(&integer) as usize, 2);
-            replace(record, 3, Rc::as_ptr(&text) as usize, 3);
+            replace(record, 3, StrOwner::as_ptr(&text) as usize, 3);
             replace(record, 4, Rc::as_ptr(&list) as usize, 4);
             replace(record, 5, Rc::as_ptr(&object) as usize, 5);
             replace(record, 6, child as usize, 6);
@@ -835,9 +836,9 @@ mod tests {
             kinds: kinds.as_ptr(),
             semantics: std::ptr::null(),
         };
-        let text = Rc::new(Str::from("snapshot"));
-        let weak = Rc::downgrade(&text);
-        let word = Rc::as_ptr(&text) as usize;
+        let text = StrOwner::new(Str::from("snapshot"));
+        let weak = StrOwner::downgrade(&text);
+        let word = StrOwner::as_ptr(&text) as usize;
         // SAFETY: metadata outlives the aliases; the replacement function models
         // exactly the compiler's owned field access protocol.
         unsafe {
@@ -849,9 +850,9 @@ mod tests {
             imre_record_retain(record);
             replace(record, 0, word, 3);
             let saved = WordKind::new(3).acquire(WordKind::new(3).read_record_field(record));
-            let replacement = Rc::new(Str::from("replacement"));
-            let replacement_weak = Rc::downgrade(&replacement);
-            replace(record, 0, Rc::as_ptr(&replacement) as usize, 3);
+            let replacement = StrOwner::new(Str::from("replacement"));
+            let replacement_weak = StrOwner::downgrade(&replacement);
+            replace(record, 0, StrOwner::as_ptr(&replacement) as usize, 3);
             drop(replacement);
             imre_record_release(record);
             assert_eq!(record.add(1).read(), 1);
@@ -908,9 +909,9 @@ mod tests {
                 if blocks.last().is_none_or(|previous| !block.ptr_eq(previous)) {
                     blocks.push(block);
                 }
-                let field = Rc::new(Str::new("owned field"));
-                fields.push(Rc::downgrade(&field));
-                replace(row, 0, Rc::as_ptr(&field) as usize, 3);
+                let field = StrOwner::new(Str::new("owned field"));
+                fields.push(StrOwner::downgrade(&field));
+                replace(row, 0, StrOwner::as_ptr(&field) as usize, 3);
                 rows.values.push(row as usize);
             }
             assert!(blocks.len() > 1 && blocks.len() < fields.len());
@@ -933,11 +934,11 @@ mod tests {
                     .all(|(index, field)| (field.strong_count() > 0) == (index == 20))
             );
 
-            let replacement = Rc::new(Str::new("replacement"));
-            replace(escaped, 0, Rc::as_ptr(&replacement) as usize, 3);
+            let replacement = StrOwner::new(Str::new("replacement"));
+            replace(escaped, 0, StrOwner::as_ptr(&replacement) as usize, 3);
             assert_eq!(fields[20].strong_count(), 0);
             imre_record_release(escaped);
-            assert_eq!(Rc::strong_count(&replacement), 1);
+            assert_eq!(StrOwner::strong_count(&replacement), 1);
             assert!(blocks.iter().all(|block| block.strong_count() == 0));
         }
     }
@@ -950,17 +951,17 @@ mod tests {
             kinds: kinds.as_ptr(),
             semantics: std::ptr::null(),
         };
-        let original = Rc::new(Str::from("cached field"));
-        let original_weak = Rc::downgrade(&original);
-        let replacement = Rc::new(Str::from("independent field"));
-        let replacement_weak = Rc::downgrade(&replacement);
+        let original = StrOwner::new(Str::from("cached field"));
+        let original_weak = StrOwner::downgrade(&original);
+        let replacement = StrOwner::new(Str::from("independent field"));
+        let replacement_weak = StrOwner::downgrade(&replacement);
         // SAFETY: immutable metadata outlives every record. Each returned owner
         // is released once, and only a returned result mutates record fields.
         unsafe {
             let cache = imre_record_new(&descriptor);
             let exclusive = imre_record_cached_result(cache);
             assert_eq!(exclusive, cache);
-            replace(exclusive, 0, Rc::as_ptr(&original) as usize, 3);
+            replace(exclusive, 0, StrOwner::as_ptr(&original) as usize, 3);
             replace(exclusive, 1, Int::small(7).unwrap().into_raw(), 258);
             drop(original);
 
@@ -968,7 +969,7 @@ mod tests {
             assert_ne!(shared, cache);
             assert_eq!(shared.read(), 0);
             assert_eq!(shared.add(1).read(), 0);
-            replace(shared, 0, Rc::as_ptr(&replacement) as usize, 3);
+            replace(shared, 0, StrOwner::as_ptr(&replacement) as usize, 3);
             replace(shared, 1, Int::small(9).unwrap().into_raw(), 258);
             drop(replacement);
             assert_eq!(

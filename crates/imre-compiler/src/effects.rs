@@ -304,6 +304,7 @@ mod tests {
             }
         }
         let module = Module {
+            ignore_python_environment: false,
             types,
             functions,
             class_fields: Vec::new(),

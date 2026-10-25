@@ -1,7 +1,7 @@
 //! Default warning display uses the public line cache before writing to the
 //! destination. The writer catches OSError only; formatting failures propagate.
 use super::super::{Kind, Object, Str, linecache, object, python_whitespace, records};
-use std::rc::Rc;
+use crate::StrOwner;
 
 /// # Safety
 /// All strings, the tagged int and cache layout are live. A null line requests
@@ -55,7 +55,7 @@ pub unsafe extern "C" fn imre_warning_format(
             text.push_str(line.trim_matches(python_whitespace));
             text.push('\n');
         }
-        Rc::into_raw(Rc::new(Str::new(text)))
+        StrOwner::into_raw(StrOwner::new(Str::new(text)))
     }
 }
 

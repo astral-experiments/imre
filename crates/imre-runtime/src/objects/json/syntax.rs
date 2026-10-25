@@ -1,12 +1,12 @@
 //! Format a failed stdlib JSON parse at Python's character offset. Serde owns
 //! the shallow successful path; the iterative decoder reuses these token rules.
 
-use std::rc::Rc;
+use crate::StrOwner;
 use std::sync::LazyLock;
 
 use regex_automata::meta::Regex;
 
-use crate::{Error, Str};
+use crate::Error;
 
 pub(super) type Failure = (usize, &'static str);
 
@@ -137,7 +137,7 @@ impl<'a> Cursor<'a> {
 pub(super) fn decode_error(
     text: &str,
     fallback: serde_json::Error,
-    owner: impl FnOnce() -> Option<Rc<Str>>,
+    owner: impl FnOnce() -> Option<StrOwner>,
 ) -> Error {
     let mut cursor = Cursor {
         source: text,
@@ -176,7 +176,7 @@ pub(super) fn decode_error(
 }
 
 #[cold]
-pub(super) fn at_error(doc: Rc<Str>, at: usize, msg: &str) -> Error {
+pub(super) fn at_error(doc: StrOwner, at: usize, msg: &str) -> Error {
     let prefix = &doc[..at];
     let lineno = 1 + memchr::memchr_iter(b'\n', prefix.as_bytes()).count();
     let colno = 1 + prefix

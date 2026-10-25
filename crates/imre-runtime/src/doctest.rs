@@ -1,7 +1,8 @@
 //! Capture Python standard output at the stream shared by print and sys.stdout.
 //! Nested examples restore their caller's stream; stderr is never captured.
 
-use super::{Error, Kind, OUTPUT, Rc, Str};
+use super::{Error, Kind, OUTPUT, Str};
+use crate::StrOwner;
 use std::fmt::Write;
 
 /// Python's ASCII backslash replacement used by doctest.OutputChecker.
@@ -14,7 +15,7 @@ pub unsafe extern "C" fn imre_doctest_ascii(value: *const Str) -> *const Str {
     let text = unsafe { &*value };
     if text.is_ascii() {
         // SAFETY: transfer another ownership share to the checked caller.
-        unsafe { Rc::increment_strong_count(value) };
+        unsafe { StrOwner::increment_strong_count(value) };
         return value;
     }
     let mut ascii = String::new();
@@ -38,7 +39,7 @@ pub unsafe extern "C" fn imre_doctest_ascii(value: *const Str) -> *const Str {
             _ => write!(ascii, "\\U{n:08x}").unwrap(),
         }
     }
-    Rc::into_raw(Rc::new(Str::from(ascii)))
+    StrOwner::into_raw(StrOwner::new(Str::from(ascii)))
 }
 
 #[unsafe(no_mangle)]
@@ -75,5 +76,5 @@ pub extern "C" fn imre_doctest_capture_take() -> *const Str {
         }
         text.push('\n');
     }
-    Rc::into_raw(Rc::new(Str::from(text)))
+    StrOwner::into_raw(StrOwner::new(Str::from(text)))
 }
