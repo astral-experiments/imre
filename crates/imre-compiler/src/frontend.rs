@@ -2532,6 +2532,10 @@ impl<'a> Checker<'a> {
             }
         }
         if matches!(concrete, Type::Callable(_)) {
+            if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::JsonLoads)) {
+                let value = self.json_load_callable(None, Some(concrete), expression)?;
+                return self.coerce(value, expected, expression);
+            }
             if let Some(Binding::Intrinsic(
                 op @ (Intrinsic::Copy(_)
                 | Intrinsic::RmTree
@@ -2556,6 +2560,11 @@ impl<'a> Checker<'a> {
                     return self.coerce(value, expected, expression);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
+                    let value =
+                        self.json_load_callable(Some(receiver), Some(concrete), expression)?;
+                    return self.coerce(value, expected, expression);
+                }
                 if let Type::Class(class) | Type::StrEnum(class) | Type::Enum(class) = receiver.ty {
                     let value =
                         self.class_attribute(attribute, class, Some(receiver), Some(concrete))?;
@@ -3130,18 +3139,7 @@ impl<'a> Checker<'a> {
             }
         }
         let value = self.iteration_expression(expression, None)?;
-        let value = if matches!(
-            value.ty,
-            Type::JsonRoot | Type::JsonValue | Type::JsonObject
-        ) {
-            Expr {
-                ty: self.types.list(Type::JsonValue),
-                kind: ExprKind::Builtin(Builtin::JsonIter, vec![value]),
-            }
-        } else {
-            value
-        };
-        Ok((value, false))
+        Ok((self.json_iteration(value), false))
     }
 
     /// Checks an iterable in its current lexical scope, before target binding.
@@ -3433,6 +3431,11 @@ impl<'a> Checker<'a> {
                 lower_body,
             );
         }
+        let iterable = if items {
+            iterable
+        } else {
+            self.json_iteration(iterable)
+        };
         if matches!(
             iterable.ty,
             Type::TextIO | Type::StringIO | Type::BinaryIO | Type::CsvReader
@@ -5280,6 +5283,7 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::BuiltinsLast, vec![]),
                     });
                 }
+                Intrinsic::JsonLoads => return self.json_load_callable(None, None, expression),
                 Intrinsic::DescriptorConstant(name) => {
                     return Ok(Expr {
                         ty: Type::Int,
@@ -5914,11 +5918,12 @@ impl<'a> Checker<'a> {
                             "regex objects do not support value comparisons in Imre",
                         ));
                     }
-                    let tuple_list = self.types.element(ty).is_some_and(|item| {
-                        self.types.is_value_struct(item)
+                    let comparable_list = self.types.element(ty).is_some_and(|item| {
+                        item == Type::Str
+                            || self.types.is_value_struct(item)
                             || matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
                     });
-                    if matches!(ty, Type::ListInt | Type::List(_)) && !tuple_list
+                    if matches!(ty, Type::ListInt | Type::List(_)) && !comparable_list
                         || matches!(
                             ty,
                             Type::ChainMap(_)
@@ -6220,6 +6225,9 @@ impl<'a> Checker<'a> {
                 }
                 if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
                     return Ok(self.string_join_value(Some(receiver), attribute));
+                }
+                if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
+                    return self.json_load_callable(Some(receiver), None, attribute);
                 }
                 if let Some(element) = self.types.deque_element(receiver.ty) {
                     return self.deque_attribute(attribute, receiver, element);

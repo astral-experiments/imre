@@ -851,6 +851,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_import_error_reject_reset"
                 | "imre_exception_repr"
                 | "imre_json_iter"
+                | "imre_json_object_keys"
                 | "imre_json_len"
                 | "imre_json_get_receiver"
                 | "imre_json_add"
