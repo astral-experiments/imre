@@ -34,6 +34,7 @@ mod json;
 mod literals;
 mod local_functions;
 mod logging;
+mod logging_records;
 mod matching;
 mod module_values;
 mod native_generators;
@@ -1305,6 +1306,7 @@ fn annotation_at(
         Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
+        Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return Ok(Type::LogRecord),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
         Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return Ok(Type::ClockTime),
@@ -2028,6 +2030,26 @@ impl<'a> Checker<'a> {
 
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
+        // A record can carry user fields with distinct types. An expected scalar type
+        // permits reading such a field; the runtime checks its actual representation.
+        if let ast::Expr::Attribute(attr) = expression
+            && let ast::Expr::Name(owner) = &*attr.value
+            && self
+                .names
+                .get(owner.id.as_str())
+                .is_some_and(|&slot| self.locals[slot] == Type::LogRecord)
+            && matches!(
+                self.types.payload(expected).unwrap_or(expected),
+                Type::Str | Type::Int | Type::Float | Type::Bool | Type::Bytes | Type::None
+            )
+        {
+            let record = self.expr(&attr.value)?;
+            return Ok(logging_records::op(
+                ir::LogRecordOperation::Read,
+                expected,
+                vec![record, unpacking::string(attr.attr.as_str())],
+            ));
+        }
         if expected == Type::JsonObject
             && matches!(expression, ast::Expr::Dict(_))
             && documents::constant(expression)
@@ -4390,6 +4412,13 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Str("/dev/null".into()),
                     });
                 }
+                Intrinsic::LogRecordFlag(mask) => {
+                    return Ok(logging_records::op(
+                        ir::LogRecordOperation::Flag,
+                        Type::Bool,
+                        vec![logging::number(mask)],
+                    ));
+                }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
                 Intrinsic::SysExecutable | Intrinsic::SysPlatform | Intrinsic::OsName => {
@@ -5116,6 +5145,9 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::TimedFileHandler | Type::ClockTime) {
                     return self.timed_attribute(receiver, attribute);
                 }
+                if receiver.ty == Type::LogRecord {
+                    return self.log_record_field(receiver, attribute);
+                }
                 if receiver.ty == Type::Logger {
                     return self.logger_attribute(receiver, attribute);
                 }
@@ -5142,6 +5174,11 @@ impl<'a> Checker<'a> {
                     }
                     let (ty, builtin) = match attribute.attr.as_str() {
                         "code" => (Type::ExitCode, Builtin::SystemExitCode),
+                        "msg" => (Type::Str, Builtin::JsonErrorField(0)),
+                        "doc" => (Type::Str, Builtin::JsonErrorField(1)),
+                        "pos" => (Type::Int, Builtin::JsonErrorField(2)),
+                        "lineno" => (Type::Int, Builtin::JsonErrorField(3)),
+                        "colno" => (Type::Int, Builtin::JsonErrorField(4)),
                         "__cause__" => (
                             self.types.optional(Type::Exception),
                             Builtin::ExceptionCause,
@@ -5563,6 +5600,10 @@ impl<'a> Checker<'a> {
                 };
                 return self.fspath_argument(path);
             }
+            Some(Binding::Intrinsic(Intrinsic::MakeLogRecord)) => {
+                return self.make_log_record(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return self.log_record(call),
             Some(Binding::Intrinsic(Intrinsic::GetLogger)) => return self.get_logger(call),
             Some(Binding::Intrinsic(
                 symbol @ (Intrinsic::AddLevelName
@@ -5803,8 +5844,16 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::TimedFileHandler {
                 return self.timed_method(receiver, attribute, call);
             }
+            if receiver.ty == Type::LogRecord {
+                return self.log_record_method(receiver, attribute, call);
+            }
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
+            }
+            if attribute.attr.as_str() == "lower"
+                && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            {
+                return self.text_method(Self::string_value(receiver), "lower", call);
             }
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
@@ -6356,6 +6405,20 @@ impl<'a> Checker<'a> {
             return Ok(Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::ExceptionRepr, args),
+            });
+        }
+        if args.len() == 1
+            && args[0].ty == Type::LogRecord
+            && matches!(name.id.as_str(), "repr" | "str" | "print")
+        {
+            let text = logging_records::op(ir::LogRecordOperation::Repr, Type::Str, args);
+            return Ok(if name.id == "print" {
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::Print, vec![text]),
+                }
+            } else {
+                text
             });
         }
         if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {

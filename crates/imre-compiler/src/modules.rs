@@ -15,6 +15,7 @@ use crate::watch::FileSystem;
 mod declarations;
 mod empty_keywords;
 mod entry_profile;
+mod os;
 mod reachability;
 
 pub(crate) type ModuleId = usize;
@@ -114,6 +115,9 @@ pub(crate) enum Intrinsic {
     AddLevelName,
     LevelNamesMapping,
     LevelMap { names: bool },
+    LogRecord,
+    MakeLogRecord,
+    LogRecordFlag(u8),
     BasicConfig,
     LogLevel(i64),
     Abc,
@@ -302,14 +306,17 @@ impl IntrinsicModule {
         }
     }
 
-    fn symbol(self, name: &str) -> Option<Binding> {
-        use crate::ir::FdOperation;
-
+    pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
         if self == Self::Logging && name == "handlers" {
             return Some(Binding::IntrinsicModule(Self::LoggingHandlers));
         }
-        if self == Self::Os && name == "path" {
-            return Some(Binding::IntrinsicModule(Self::PosixPath));
+        if self == Self::Os {
+            if name == "path" {
+                return Some(Binding::IntrinsicModule(Self::PosixPath));
+            }
+            if let Some(symbol) = os::descriptor(name) {
+                return Some(Binding::Intrinsic(symbol));
+            }
         }
         if self == Self::Urllib && name == "parse" {
             return Some(Binding::IntrinsicModule(Self::UrllibParse));
@@ -325,6 +332,12 @@ impl IntrinsicModule {
         }
         let symbol = match (self, name) {
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
+            (Self::Logging, "LogRecord") => Intrinsic::LogRecord,
+            (Self::Logging, "logThreads") => Intrinsic::LogRecordFlag(1),
+            (Self::Logging, "logProcesses") => Intrinsic::LogRecordFlag(2),
+            (Self::Logging, "logMultiprocessing") => Intrinsic::LogRecordFlag(4),
+            (Self::Logging, "logAsyncioTasks") => Intrinsic::LogRecordFlag(8),
+            (Self::Logging, "makeLogRecord") => Intrinsic::MakeLogRecord,
             (Self::Logging, "getLogger") => Intrinsic::GetLogger,
             (Self::Logging, "getLevelName") => Intrinsic::GetLevelName,
             (Self::Logging, "addLevelName") => Intrinsic::AddLevelName,
@@ -484,27 +497,6 @@ impl IntrinsicModule {
             (Self::Os, "environ") => Intrinsic::Environ,
             (Self::Os, "getenv") => Intrinsic::GetEnv,
             (Self::Os, "getcwd") => Intrinsic::GetCwd,
-            (Self::Os, "close") => Intrinsic::Fd(FdOperation::Close),
-            (Self::Os, "open") => Intrinsic::Fd(FdOperation::Open),
-            (Self::Os, "O_RDONLY") => Intrinsic::OpenFlag("rdonly"),
-            (Self::Os, "O_WRONLY") => Intrinsic::OpenFlag("wronly"),
-            (Self::Os, "O_RDWR") => Intrinsic::OpenFlag("rdwr"),
-            (Self::Os, "O_APPEND") => Intrinsic::OpenFlag("append"),
-            (Self::Os, "O_CREAT") => Intrinsic::OpenFlag("creat"),
-            (Self::Os, "O_EXCL") => Intrinsic::OpenFlag("excl"),
-            (Self::Os, "O_TRUNC") => Intrinsic::OpenFlag("trunc"),
-            (Self::Os, "O_CLOEXEC") => Intrinsic::OpenFlag("cloexec"),
-            (Self::Os, "O_DIRECTORY") => Intrinsic::OpenFlag("directory"),
-            (Self::Os, "O_NOFOLLOW") => Intrinsic::OpenFlag("nofollow"),
-            (Self::Os, "O_NONBLOCK") => Intrinsic::OpenFlag("nonblock"),
-            (Self::Os, "dup") => Intrinsic::Fd(FdOperation::Dup),
-            (Self::Os, "dup2") => Intrinsic::Fd(FdOperation::Dup2),
-            (Self::Os, "pipe") => Intrinsic::Fd(FdOperation::Pipe),
-            (Self::Os, "isatty") => Intrinsic::Fd(FdOperation::Isatty),
-            (Self::Os, "get_blocking") => Intrinsic::Fd(FdOperation::GetBlocking),
-            (Self::Os, "set_blocking") => Intrinsic::Fd(FdOperation::SetBlocking),
-            (Self::Os, "get_inheritable") => Intrinsic::Fd(FdOperation::GetInheritable),
-            (Self::Os, "set_inheritable") => Intrinsic::Fd(FdOperation::SetInheritable),
             (Self::Os, "fspath") => Intrinsic::FsPath,
             (Self::Os, "devnull") => Intrinsic::OsDevnull,
             (Self::PosixPath, "exists") => Intrinsic::OsPathExists,

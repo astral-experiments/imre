@@ -80,3 +80,5 @@ for document in ["", '["🌗",\n falsex]', '["é" 2]', '{"key"\n1}',
         select(document)
     except json.JSONDecodeError as error:
         print(str(error))
+        print(f"{error.msg}|{error.pos}|{error.lineno}|{error.colno}")
+        print(error.doc == document)

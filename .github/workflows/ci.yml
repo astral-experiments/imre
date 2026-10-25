@@ -26,8 +26,11 @@ jobs:
         with:
           python-version: '3.14.5'
       - run: cargo build --workspace --release --locked
-      - name: Verify the standard library reference ledgers
-        run: python3 benchmarks/cpython_stdlib/full/reference_report.py
+      - name: Verify the standard library reference and native ledgers
+        run: |
+          python3 benchmarks/cpython_stdlib/full/reference_report.py
+          python3 benchmarks/cpython_stdlib/full/native_report.py
+          python3 benchmarks/cpython_stdlib/full/test_native_report.py
       - run: cargo test --workspace --release --locked
       - name: Build and install a Imre extension wheel
         run: |
@@ -140,6 +143,11 @@ jobs:
           python3 benchmarks/cpython_stdlib/full/logging/native_timed.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
           python3 benchmarks/cpython_stdlib/native_logging.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
           python3 benchmarks/cpython_stdlib/full/logging/native_levels.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
+      - name: Run CPython logging record methods at O0 and O3
+        run: |
+          for opt in 0 3; do
+            python3 benchmarks/cpython_stdlib/full/logging/native_records.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-records-O$opt.json"
+          done
       - name: Build and install a Imre extension wheel
         run: |
           python3 -m pip install "wheel==0.45.1" "packaging==25.0"
