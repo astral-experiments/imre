@@ -93,7 +93,7 @@ impl Types {
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
-            | Type::ExceptionField
+            | Type::ValueView
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::TextIO

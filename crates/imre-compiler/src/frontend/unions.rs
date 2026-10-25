@@ -217,7 +217,7 @@ impl Checker<'_> {
     /// other category checks are exact for every admitted concrete layout.
     /// A stored builtin exception can be either a SystemExit or an Exception.
     fn instance_member_matches(ty: Type, classes: &[InstanceType]) -> Option<bool> {
-        if matches!(ty, Type::ExceptionField | Type::StringIterable) {
+        if matches!(ty, Type::ValueView | Type::StringIterable) {
             return None;
         }
         let mut unknown = false;

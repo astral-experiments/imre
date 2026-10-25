@@ -243,6 +243,19 @@ impl Checker<'_> {
                         vec![logging::number(mask), value],
                     )));
                 }
+                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
+                    if !sys::displayable(value.ty) {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "builtins._ requires a supported display value",
+                        ));
+                    }
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::BuiltinsSetLast, vec![value]),
+                    }));
+                }
                 let receiver = self.expr(&attribute.value)?;
                 if receiver.ty == Type::LogFormatter {
                     return self.formatter_set(receiver, attribute, value);

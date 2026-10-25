@@ -68,12 +68,13 @@ def select(toolchain, work, source, module):
         executions[case_id] = native_method(toolchain, directory(work, method),
                                              source, cls, case_id, fixture, operation=("imre", operation))
 
-    # Independent object-identity regression; never counts as an upstream ID.
-    exercise = HERE / "active_exception.py"
-    ref = subprocess.run([sys.executable, exercise], capture_output=True, check=True, timeout=15)
-    binary = toolchain.build(exercise.read_bytes(), directory(work, "exception-identity"))
-    if output(binary) != (ref.stdout, ref.stderr):
-        raise AssertionError("native exception identity differs from CPython")
+    # Process regressions use the real hooks and retained objects; neither is an additional test ID.
+    for filename in ("active_exception.py", "display_values.py"):
+        exercise = HERE / filename
+        ref = subprocess.run([sys.executable, exercise], capture_output=True, check=True, timeout=15)
+        binary = toolchain.build(exercise.read_bytes(), directory(work, exercise.stem))
+        if output(binary) != (ref.stdout, ref.stderr):
+            raise AssertionError(f"{filename}: native output differs from CPython")
 
     encoding = toolchain.build((HERE / "encoding_driver.py").read_bytes(), directory(work, "encoding"))
 

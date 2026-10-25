@@ -84,7 +84,7 @@ impl Emitter<'_, '_> {
                 "phi i1 [ false, %{absent} ], [ {result}, %{inspected} ]"
             ));
         }
-        if value.ty == Type::ExceptionField {
+        if value.ty == Type::ValueView {
             // The view retains its heterogeneous payload. None is not a class
             // accepted by this subset, and bool is also an instance of int.
             let mask = [
@@ -92,6 +92,7 @@ impl Emitter<'_, '_> {
                 (1, Type::Bool),
                 (2, Type::Int),
                 (3, Type::Str),
+                (4, Type::ListInt),
                 (6, Type::Tuple(0)),
                 (8, Type::Bytes),
             ]

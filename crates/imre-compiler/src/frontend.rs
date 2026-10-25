@@ -3539,6 +3539,15 @@ impl<'a> Checker<'a> {
             ast::Stmt::Delete(delete) => {
                 let mut statements = Vec::new();
                 for target in &delete.targets {
+                    if matches!(target, ast::Expr::Attribute(_))
+                        && self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast))
+                    {
+                        statements.push(Statement::Expr(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Builtin(Builtin::BuiltinsDeleteLast, vec![]),
+                        }));
+                        continue;
+                    }
                     if let ast::Expr::Name(name) = target
                         && let Some(&slot) = self.names.get(name.id.as_str())
                         && matches!(self.locals[slot], Type::Cursor(_))
@@ -4475,6 +4484,12 @@ impl<'a> Checker<'a> {
         }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
             match symbol {
+                Intrinsic::BuiltinsLast => {
+                    return Ok(Expr {
+                        ty: Type::ValueView,
+                        kind: ExprKind::Builtin(Builtin::BuiltinsLast, vec![]),
+                    });
+                }
                 Intrinsic::OpenFlag(name) => {
                     return Ok(Expr {
                         ty: Type::Int,
@@ -4914,19 +4929,19 @@ impl<'a> Checker<'a> {
                         compare.ops[0] == ast::CmpOp::NotEq,
                     ));
                 }
-                if values.iter().any(|value| value.ty == Type::ExceptionField) {
+                if values.iter().any(|value| value.ty == Type::ValueView) {
                     if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
-                        || !values.iter().all(|v| {
-                            v.ty == Type::ExceptionField || self.import_argument_supported(v.ty)
-                        })
+                        || !values
+                            .iter()
+                            .all(|v| sys::displayable(v.ty) || self.import_argument_supported(v.ty))
                     {
                         return Err(error(
                             self.source,
                             expression,
-                            "exception fields support equality with None, bool, int, str, bytes, or tuples",
+                            "retained values support equality with native scalar, int list, or tuple values",
                         ));
                     }
-                    let reversed = values[0].ty != Type::ExceptionField;
+                    let reversed = values[0].ty != Type::ValueView;
                     let eq = Expr {
                         ty: Type::Bool,
                         kind: ExprKind::Builtin(Builtin::SystemExitCodeEqual { reversed }, values),
@@ -5026,10 +5041,10 @@ impl<'a> Checker<'a> {
                     }
                 }
                 let list = Self::enum_text(self.expr(&subscript.value)?);
-                if list.ty == Type::ExceptionField {
+                if list.ty == Type::ValueView {
                     let index = self.expr_expected(&subscript.slice, Type::Int)?;
                     return Ok(Expr {
-                        ty: Type::ExceptionField,
+                        ty: Type::ValueView,
                         kind: ExprKind::Builtin(Builtin::ExceptionFieldIndex, vec![list, index]),
                     });
                 }
@@ -5287,7 +5302,7 @@ impl<'a> Checker<'a> {
                             if receiver.ty == Type::ImportException =>
                         {
                             (
-                                Type::ExceptionField,
+                                Type::ValueView,
                                 Builtin::ImportErrorField(match field {
                                     "args" => 0,
                                     "msg" => 1,
@@ -5297,7 +5312,7 @@ impl<'a> Checker<'a> {
                                 }),
                             )
                         }
-                        "code" => (Type::ExceptionField, Builtin::SystemExitCode),
+                        "code" => (Type::ValueView, Builtin::SystemExitCode),
                         "msg" => (Type::Str, Builtin::JsonErrorField(0)),
                         "doc" => (Type::Str, Builtin::JsonErrorField(1)),
                         "pos" => (Type::Int, Builtin::JsonErrorField(2)),
@@ -6567,7 +6582,7 @@ impl<'a> Checker<'a> {
                 },
             });
         }
-        if args.len() == 1 && args[0].ty == Type::ExceptionField {
+        if args.len() == 1 && args[0].ty == Type::ValueView {
             let op = match name.id.as_str() {
                 "repr" => Some((Type::Str, Builtin::ExceptionFieldRepr)),
                 "len" => Some((Type::Int, Builtin::ExceptionFieldLen)),
@@ -6582,7 +6597,7 @@ impl<'a> Checker<'a> {
         }
         if matches!(name.id.as_str(), "str" | "print")
             && args.len() == 1
-            && args[0].ty == Type::ExceptionField
+            && args[0].ty == Type::ValueView
         {
             let text = Expr {
                 ty: Type::Str,
