@@ -4488,6 +4488,14 @@ impl Emitter<'_, '_> {
             }
             Builtin::DocCaptureTake => self.call("imre_doctest_capture_take", returns, &[]),
             Builtin::DocAscii => self.call("imre_doctest_ascii", returns, &[&args[0].value]),
+            Builtin::MockCallList { mark } => Value {
+                ty: Type::Bool,
+                operand: self.instruction(format!(
+                    "call i1 @imre_seq_mock_call_list(ptr {}, i1 {})",
+                    args[0].value.operand, mark
+                )),
+                small_integer: false,
+            },
             Builtin::SysStreamWrite { stderr } => Value {
                 ty: returns,
                 operand: self.checked_instruction(format!(
@@ -7531,6 +7539,7 @@ declare ptr @imre_value_repr(i64, i32)
 declare void @imre_object_retain(ptr)
 declare void @imre_object_release(ptr)
 declare ptr @imre_seq_new(i32)
+declare i1 @imre_seq_mock_call_list(ptr, i1) nounwind
 declare i64 @imre_seq_get(ptr, i64)
 declare void @imre_seq_set(ptr, i64, i64, i32)
 declare i64 @imre_seq_get_index(ptr, i64)
