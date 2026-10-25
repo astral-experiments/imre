@@ -91,11 +91,23 @@ def main():
         work = Path(tmp)
         sample = HERE / "file_values.py"
         binary = tools.build(sample.read_bytes(), work)
-        def observe(cmd, dest):
-            child = subprocess.run([*cmd, dest], capture_output=True, check=True, timeout=30)
-            return child.stdout, child.stderr, dest.read_bytes()
-        if observe([binary], work / "native.log") != observe([sys.executable, sample], work / "reference.log"):
-            raise AssertionError("native file lifecycle or bytes differ from CPython")
+        def observe(cmd, dest, report):
+            args = [*cmd, dest, *(["report"] if report else [])]
+            child = subprocess.run(args, capture_output=True, check=True, timeout=30)
+            if report:
+                expected = ["--- Logging error ---", "UnsupportedOperation: not writable",
+                            "Call stack:", "Message: 'π'", "Arguments: ()"]
+                lines = [line.removeprefix("io.") for line in child.stderr.decode().splitlines()]
+                if [line for line in lines if line in expected] != expected:
+                    raise AssertionError((cmd, child.stderr))
+            elif child.stderr:
+                raise AssertionError((cmd, child.stderr))
+            return child.stdout, dest.read_bytes()
+        for report in (False, True):
+            actual = observe([binary], work / f"native-{report}.log", report)
+            reference = observe([sys.executable, sample], work / f"reference-{report}.log", report)
+            if actual != reference:
+                raise AssertionError("native file lifecycle or bytes differ from CPython")
         callbacks = file_cases(tools, work)
         observed, errors, skips = run_in_fixtures(suite, callbacks)
         if errors or skips or set(observed) != set(callbacks):

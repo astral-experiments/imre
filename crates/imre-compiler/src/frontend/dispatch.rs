@@ -16,11 +16,37 @@ impl ClassInfo {
             .collect()
     }
 
+    /// A generated dataclass repr shadows an inherited override even though the
+    /// generated method has no source signature in the method table.
+    pub(super) fn has_repr_override(&self, id: usize) -> bool {
+        for &owner in std::iter::once(&id).chain(&self.declarations.definitions[id].bases) {
+            let class = &self.declarations.definitions[owner];
+            if class.node.body.iter().any(
+                |stmt| matches!(stmt, ast::Stmt::FunctionDef(f) if f.name.as_str() == "__repr__"),
+            ) {
+                return true;
+            }
+            if class.dataclass.is_some_and(|options| options.repr) {
+                return false;
+            }
+        }
+        false
+    }
+
     pub(super) fn has_concrete_subclasses(&self, class: usize) -> bool {
         self.declarations
             .definitions
             .iter()
             .any(|c| c.abstract_methods.is_empty() && c.bases.contains(&class))
+    }
+
+    /// A concrete Mapping subclass supplies an iterator omitted by its abstract base.
+    pub(super) fn has_record_iterator(&self, class: usize) -> bool {
+        self.methods[class].contains_key("__iter__")
+            || (self.declarations.definitions[class]
+                .abstract_methods
+                .contains("__iter__")
+                && self.has_concrete_subclasses(class))
     }
 }
 
@@ -44,6 +70,15 @@ impl Checker<'_> {
             };
             alternatives.push((class, invoke(self, class, view)?));
         }
+        // An override can return one member of another implementation's declared
+        // union. Find that layout before folding so class declaration order does
+        // not decide whether, for example, None and a record can coexist.
+        let union_result = alternatives.iter().map(|(_, expr)| expr.ty).find(|&ty| {
+            matches!(ty, Type::Optional(_) | Type::Union(_))
+                && alternatives
+                    .iter()
+                    .all(|(_, expr)| self.types.join(expr.ty, ty) == Some(ty))
+        });
         let Some((_, mut value)) = alternatives.pop() else {
             return Err(error(
                 self.source,
@@ -53,18 +88,22 @@ impl Checker<'_> {
         };
         while let Some((class, mut next)) = alternatives.pop() {
             if next.ty != value.ty {
-                if !matches!((next.ty, value.ty), (Type::Class(a), Type::Class(b)) if
+                let ty = if let Some(ty) = union_result {
+                    ty
+                } else if matches!((next.ty, value.ty), (Type::Class(a), Type::Class(b)) if
                     (a == base || self.classes.declarations.definitions[a].bases.contains(&base)) &&
                     (b == base || self.classes.declarations.definitions[b].bases.contains(&base)))
                 {
+                    Type::Class(base)
+                } else {
                     return Err(error(
                         self.source,
                         at,
                         "record overrides must have a common result layout",
                     ));
-                }
-                next = self.coerce(next, Type::Class(base), at)?;
-                value = self.coerce(value, Type::Class(base), at)?;
+                };
+                next = self.coerce(next, ty, at)?;
+                value = self.coerce(value, ty, at)?;
             }
             let test = Expr {
                 ty: Type::Bool,
@@ -82,6 +121,64 @@ impl Checker<'_> {
                 value: Box::new(value),
                 clear: vec![slot],
             },
+        })
+    }
+
+    /// Invoke the concrete slot, including overrides on a fixed-layout subclass.
+    pub(super) fn record_primitive(
+        &mut self,
+        receiver: Expr,
+        name: &str,
+        arguments: &[Expr],
+        at: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let Type::Class(class) = receiver.ty else {
+            unreachable!("record primitives require a fixed-layout receiver")
+        };
+        let direct = |checker: &mut Self, class: usize, receiver: Expr| {
+            checker.record_slot(class, receiver, name, arguments, at)
+        };
+        if self.classes.has_concrete_subclasses(class) {
+            self.dispatch_record(class, receiver, at, direct)
+        } else {
+            direct(self, class, receiver)
+        }
+    }
+
+    /// Lower a primitive after its concrete receiver has been selected.
+    pub(super) fn record_slot(
+        &mut self,
+        class: usize,
+        receiver: Expr,
+        name: &str,
+        arguments: &[Expr],
+        at: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let method = self.classes.methods[class]
+            .get(name)
+            .ok_or_else(|| error(self.source, at, "missing record primitive"))?
+            .clone();
+        if method.params.len() != arguments.len() + 1 {
+            return Err(error(
+                self.source,
+                at,
+                "unsupported record primitive signature",
+            ));
+        }
+        let mut inputs = vec![receiver];
+        for (index, (argument, param)) in arguments.iter().zip(&method.params[1..]).enumerate() {
+            let ty = if let Some(inference) = self.inference {
+                inference.learn_parameter(method.id, index + 1, argument.ty);
+                inference.parameter(method.id, index + 1).unwrap()
+            } else {
+                param.ty
+            };
+            inputs.push(self.coerce(argument.clone(), ty, at)?);
+        }
+        self.calls.insert(method.id);
+        Ok(Expr {
+            ty: method.returns,
+            kind: ExprKind::Call(method.id, ir::CallArgs::positional(inputs)),
         })
     }
 

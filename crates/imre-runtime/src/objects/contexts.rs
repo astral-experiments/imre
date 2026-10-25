@@ -6,12 +6,15 @@ use std::rc::Rc;
 
 use corosensei::{Coroutine, CoroutineResult, Yielder};
 
-use super::exceptions::{active_exception, replace_pending, swap_active, take_pending};
+use super::exceptions::{
+    active_exception, propagates_context_exception, replace_pending, swap_active, take_pending,
+    wrap_stop_iteration,
+};
 use super::records::imre_record_retain;
 use super::words::WordKind;
 use super::*;
 
-type Signal = Option<Rc<Object>>;
+type Signal = Option<crate::ObjectOwner>;
 type Fiber = Coroutine<Signal, (), Signal>;
 type Callback = unsafe extern "C" fn(*const usize) -> usize;
 
@@ -93,7 +96,7 @@ pub unsafe extern "C" fn imre_context_new(
         // SAFETY: the frame roots this thunk's exact parameters.
         unsafe { callback(frame.word as *const usize) };
         drop(frame);
-        take_pending()
+        take_pending().map(|error| wrap_stop_iteration(error, "generator raised StopIteration"))
     });
     let manager = Rc::new(Manager {
         fiber: RefCell::new(Some(fiber)),
@@ -103,7 +106,7 @@ pub unsafe extern "C" fn imre_context_new(
         closing: Cell::new(false),
         item: RefCell::default(),
     });
-    Rc::into_raw(Rc::new(Object(StorageCell::new(
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
         Storage::GeneratorContext(manager),
     ))))
 }
@@ -143,7 +146,9 @@ fn exit(manager: &Manager, error: Signal) -> bool {
     }
     match manager.resume(error.clone()) {
         CoroutineResult::Return(None) => true,
-        CoroutineResult::Return(Some(raised)) if error.is_some_and(|e| Rc::ptr_eq(&e, &raised)) => {
+        CoroutineResult::Return(Some(raised))
+            if error.is_some_and(|e| propagates_context_exception(&raised, &e)) =>
+        {
             false
         }
         CoroutineResult::Return(Some(raised)) => {
@@ -170,7 +175,7 @@ pub unsafe extern "C" fn imre_context_exit(handle: *const Object) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_context_throw(handle: *const Object, error: *const Object) -> u32 {
     // SAFETY: acquire the injected exception independently of the caller's handler.
-    let error = unsafe { acquire_rc(error as usize) };
+    let error = unsafe { crate::ObjectOwner::acquire_word(error as usize) };
     // SAFETY: the caller roots the exact manager handle through this operation.
     let manager = unsafe { manager(handle) };
     u32::from(exit(&manager, Some(error)))
@@ -209,13 +214,8 @@ pub unsafe extern "C" fn imre_generator_next(handle: *const Object) -> u32 {
         CoroutineResult::Yield(()) => 1,
         CoroutineResult::Return(None) => 0,
         CoroutineResult::Return(Some(error)) => {
-            if super::exceptions::kind_of(&error) == Kind::StopIteration {
-                replace_pending(Some(super::exceptions::generator_stop(error)));
-                0
-            } else {
-                replace_pending(Some(error));
-                0
-            }
+            replace_pending(Some(error));
+            0
         }
     }
 }
