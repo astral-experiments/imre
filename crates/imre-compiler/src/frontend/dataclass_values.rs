@@ -10,7 +10,12 @@ fn has_container_float(ty: Type, inside: bool, types: &Types) -> bool {
     match ty {
         Type::Float => inside,
         Type::Optional(_) => has_container_float(types.payload(ty).unwrap(), inside, types),
-        Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_) | Type::Tuple(_) => types
+        Type::ListInt
+        | Type::List(_)
+        | Type::Dict(_)
+        | Type::Set(_)
+        | Type::Tuple(_)
+        | Type::VarTuple(_) => types
             .children(ty)
             .into_iter()
             .any(|child| has_container_float(child, true, types)),
