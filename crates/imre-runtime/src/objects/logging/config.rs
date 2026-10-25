@@ -289,6 +289,7 @@ fn configure(cfg: Pairs) -> Result<()> {
                     Kind::ValueError,
                     format!("Unable to configure logger {}", string_repr(&name)),
                 )
+                .with_cause(err)
             })?;
             configured.insert(name.to_string());
         }
@@ -307,7 +308,7 @@ fn configure(cfg: Pairs) -> Result<()> {
             if err.is_kind(Kind::NotImplementedError) {
                 err
             } else {
-                Error::new(Kind::ValueError, "Unable to configure root logger")
+                Error::new(Kind::ValueError, "Unable to configure root logger").with_cause(err)
             }
         })?;
     }
@@ -450,7 +451,7 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
             format!("{path} is an empty file"),
         ));
     }
-    let bytes = std::fs::read(path).map_err(|_| Error::new(Kind::KeyError, "formatters"))?;
+    let bytes = std::fs::read(path).map_err(|_| Error::string_key(Str::from("formatters")))?;
     let encoding = encoding
         .map(|s| s.to_ascii_lowercase())
         .unwrap_or_else(|| "utf-8".into());
@@ -471,14 +472,14 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
     let section = |name: &str| {
         sections
             .get(name)
-            .ok_or_else(|| Error::new(Kind::KeyError, name.to_owned()))
+            .ok_or_else(|| Error::string_key(Str::from(name)))
     };
     let option = |name: &str, key: &str| -> Result<&str> {
         section(name)?
             .get(key)
             .or_else(|| sections.get("DEFAULT").and_then(|d| d.get(key)))
             .map(String::as_str)
-            .ok_or_else(|| Error::new(Kind::KeyError, key.to_owned()))
+            .ok_or_else(|| Error::string_key(Str::from(key)))
     };
     for group in ["formatters", "handlers"] {
         if !option(group, "keys")?.trim().is_empty() {
