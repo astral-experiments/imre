@@ -66,6 +66,7 @@ impl Builtin {
                 Contract::new(true, Unknown)
             }
             Self::ImportErrorReset => Contract::new(false, Unknown),
+            Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
             | Self::ImportErrorField(_)
             | Self::ExceptionFieldLen
@@ -124,7 +125,7 @@ impl Builtin {
                     | PathOperation::TemporaryDirectory
                     | PathOperation::CleanupTemporaryDirectory
                     | PathOperation::Iterdir
-                    | PathOperation::Next => true,
+                    | PathOperation::Glob { .. } => true,
                     PathOperation::ContextNew { .. }
                     | PathOperation::ContextEnter
                     | PathOperation::UnionText
@@ -136,6 +137,7 @@ impl Builtin {
                     | PathOperation::Drive
                     | PathOperation::Root
                     | PathOperation::Anchor
+                    | PathOperation::CountPart
                     | PathOperation::AsPosix
                     | PathOperation::Join
                     | PathOperation::Text
@@ -146,8 +148,7 @@ impl Builtin {
                     | PathOperation::IsAbsolute
                     | PathOperation::Exists
                     | PathOperation::IsFile
-                    | PathOperation::IsDir
-                    | PathOperation::Glob => false,
+                    | PathOperation::IsDir => false,
                 },
                 PreservesLists,
             ),
@@ -286,6 +287,7 @@ impl Builtin {
             | Self::JsonGet { .. }
             | Self::JsonGetReceiver
             | Self::JsonAdd
+            | Self::JsonEqual
             | Self::JsonAddFields(_, _)
             | Self::JsonDumps(_)
             | Self::JsonDump(_)
@@ -360,6 +362,7 @@ impl Builtin {
             | Self::StringListNonempty
             | Self::Str
             | Self::NominalIdentity
+            | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
             | Self::StrEnumName
             | Self::StrEnumValue
@@ -659,6 +662,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_int_negative_pow"
                 | "imre_json_index"
                 | "imre_exception_message"
+                | "imre_import_error_reject_reset"
                 | "imre_exception_repr"
                 | "imre_json_iter"
                 | "imre_json_len"

@@ -131,7 +131,7 @@ impl Cursor<'_> {
 pub(super) fn decode_error(
     text: &str,
     fallback: serde_json::Error,
-    owner: impl FnOnce() -> Rc<Str>,
+    owner: impl FnOnce() -> Option<Rc<Str>>,
 ) -> Error {
     let mut cursor = Cursor {
         source: text,
@@ -163,7 +163,10 @@ pub(super) fn decode_error(
             .map_or(fallback_message.as_str(), |(msg, _)| msg);
         (at, msg)
     };
-    at_error(owner(), at, msg)
+    let Some(doc) = owner() else {
+        return Error::allocation();
+    };
+    at_error(doc, at, msg)
 }
 
 #[cold]
@@ -178,4 +181,15 @@ pub(super) fn at_error(doc: Rc<Str>, at: usize, msg: &str) -> Error {
         .count();
     let pos = prefix.chars().count();
     Error::json_decode(msg, doc, pos, lineno, colno)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refused_diagnostic_owner_raises_memory_error() {
+        let error = serde_json::from_str::<serde_json::Value>("!").unwrap_err();
+        assert!(decode_error("!", error, || None).is_kind(crate::Kind::MemoryError));
+    }
 }

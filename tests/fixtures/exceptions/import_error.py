@@ -49,6 +49,24 @@ def exercise() -> None:
     print(old.name is None)
     print(old.path is None)
     print(old.msg is None)
+    for message in ["original", ""]:
+        old.__init__(message, name="pkg", path="module.py", name_from="symbol")
+        prior = old.args
+        seen: list[int] = []
+        try:
+            old.__init__(
+                record(1, seen), record(2, seen),
+                unexpected=record(3, seen), name=record(4, seen),
+            )
+        except TypeError:
+            print(repr(seen))
+            print(repr(prior))
+            describe(old)
+    old.__init__(42)
+    try:
+        old.__init__("new", unexpected=True)
+    except TypeError:
+        describe(old)
     try:
         raise Missing('missing', name='pkg')
     except OSError:
