@@ -187,7 +187,9 @@ jobs:
           target/release/imre check --entry-profile examples/ruff_ecosystem/check-entry.json examples/ruff_ecosystem/ruff_ecosystem/__main__.py
           python3 tests/ruff_ecosystem_live.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
       - name: Check CSV reader behavior with vendored CPython methods
-        run: python3 benchmarks/cpython_stdlib/native_csv.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+        run: |
+          python3 benchmarks/cpython_stdlib/native_csv.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+          python3 benchmarks/cpython_stdlib/full/shutil/check_csv_handlers.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Compare native suites with CPython
         run: |
           python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-ordinary --suites differential imports classes text containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
