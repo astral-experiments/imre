@@ -775,7 +775,7 @@ impl Parsers {
                         Some(ast::Stmt::Return(stmt)) => stmt.value.as_deref(),
                         _ => None,
                     }.and_then(|expr| method(expr, builder, "parse_args"))
-                        .ok_or_else(|| module.error(ctor, "literal add_argument declarations must be followed by an assignment or return of parse_args()"))?;
+                        .ok_or_else(|| module.error(ctor, "literal add_argument declarations must be followed by a parse_args() call"))?;
                     for builder in builders {
                         let mut outside = ContainsName(&builder, false);
                         outside.visit_body(&function.body[..start]);
