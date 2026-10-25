@@ -258,7 +258,7 @@ def main() -> None:
                     files.check_result(reference, None, f"CPython {name}")
                 expected_files = snapshot(reference_dir)
                 if name == "pipe_buffer_allocation":
-                    assert reference.stdout == b"stdin: MemoryError\nstdout: MemoryError\n"
+                    assert reference.stdout == b"stdin: MemoryError()\nstdout: MemoryError()\n"
                     assert "child-ran" not in expected_files
                 if name == "stdin_fds":
                     assert b"closed\n" in reference.stdout and reference.stdout.endswith(b"-13\n"), reference.stdout

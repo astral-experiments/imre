@@ -94,7 +94,7 @@ impl Read for Source {
 fn reserve(capacity: usize) -> Result<Vec<u8>> {
     let mut data = Vec::new();
     data.try_reserve_exact(capacity)
-        .map_err(|_| Error::allocation())?;
+        .map_err(|_| Error::memory_error())?;
     Ok(data)
 }
 
