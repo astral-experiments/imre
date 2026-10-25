@@ -26,7 +26,8 @@ assert unchanged_argument(7) == 7
 first_id, first_pid, first_pipe = drop_local(argv)
 second_id, second_pid, second_pipe = drop_sequence(argv)
 assert active is subprocess._active
-assert [id(item) for item in active] == [first_id, second_id]
+identities = [id(item) for item in active]
+assert len(identities) == 2 and identities[0] == first_id and identities[1] == second_id
 assert first_id != second_id
 first = active[0]
 second = active[1]
@@ -44,8 +45,9 @@ for attempt in range(100):
         pass
     if len(active) == 1:
         break
-assert [id(item) for item in active] == [second_id]
-assert first.returncode == -9 and first.wait() == -9
+assert len(active) == 1 and id(active[0]) == second_id
+first_status = first.returncode
+assert first_status is not None and first_status == -9 and first.wait() == -9
 assert not first_pipe.closed
 first_pipe.close()
 
@@ -56,7 +58,8 @@ for attempt in range(100):
     if not active:
         break
 assert not active
-assert second.returncode == -9
+second_status = second.returncode
+assert second_status is not None and second_status == -9
 second_pipe.close()
 
 third_id, third_pid, third_pipe = drop_local(argv)
@@ -72,7 +75,8 @@ for attempt in range(100):
     if not active:
         break
     time.sleep(0.001)
-assert not active and third.returncode == -9
+third_status = third.returncode
+assert not active and third_status is not None and third_status == -9
 third_pipe.close()
 
 fourth_id, fourth_pid, fourth_pipe = drop_sequence(argv)
