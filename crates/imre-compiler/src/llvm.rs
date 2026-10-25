@@ -110,6 +110,7 @@ impl Type {
             | Self::JsonValue
             | Self::JsonObject
             | Self::RegexMatch
+            | Self::SourceModule
             | Self::BinaryIO
             | Self::Tuple(_) => "ptr",
             Self::None => "i8",
@@ -180,6 +181,7 @@ impl Type {
             | Self::JsonValue
             | Self::JsonObject
             | Self::RegexMatch
+            | Self::SourceModule
             | Self::BinaryIO
             | Self::Tuple(_) => "null",
             Self::Bool
@@ -793,6 +795,7 @@ impl Emitter<'_, '_> {
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
+            | Type::SourceModule
             | Type::BinaryIO => "object",
             Type::Float | Type::Bool | Type::StrEnum(_) | Type::Enum(_) | Type::None => return,
             Type::Optional(_) => unreachable!("optional types are flattened"),
@@ -3419,6 +3422,7 @@ impl Emitter<'_, '_> {
                 | Type::TextIO
                 | Type::StringIO
                 | Type::CompletedProcess(..)
+                | Type::SourceModule
                 | Type::BinaryIO => self.instruction(format!(
                     "icmp {predicate} {} {}, {}",
                     left.ty.llvm(),
@@ -3766,6 +3770,19 @@ impl Emitter<'_, '_> {
             }
             Builtin::StrEnumName | Builtin::StrEnumValue => {
                 self.enum_text(&args[0].value, matches!(builtin, Builtin::StrEnumName))
+            }
+            Builtin::SourceModule => self.call(
+                "imre_source_module",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::SourceModuleAttribute { filename } => {
+                let name = if *filename {
+                    "imre_source_module_filename"
+                } else {
+                    "imre_source_module_name"
+                };
+                self.call(name, returns, &[&args[0].value])
             }
             Builtin::NominalIdentity => {
                 let left = self.word(&args[0].value);
@@ -6250,6 +6267,7 @@ impl Emitter<'_, '_> {
                     | Type::JsonValue
                     | Type::JsonObject
                     | Type::RegexMatch
+                    | Type::SourceModule
                     | Type::BinaryIO
                     | Type::CompletedProcess(..)
                     | Type::Tuple(_)
@@ -6482,6 +6500,7 @@ impl Emitter<'_, '_> {
             | Type::PurePath(_)
             | Type::TextIO
             | Type::StringIO
+            | Type::SourceModule
             | Type::BinaryIO
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -6566,6 +6585,7 @@ impl Emitter<'_, '_> {
             | Type::PurePath(_)
             | Type::TextIO
             | Type::StringIO
+            | Type::SourceModule
             | Type::BinaryIO
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -7198,6 +7218,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::JsonValue
         | Type::JsonObject
         | Type::RegexMatch
+        | Type::SourceModule
         | Type::BinaryIO => 5,
         Type::Optional(_) => 256 | representation_kind(types.payload(ty).unwrap(), types),
     }
@@ -7621,6 +7642,9 @@ declare ptr @imre_error_take()
 declare void @imre_error_set(ptr)
 declare i32 @imre_error_unhandled()
 declare i32 @imre_record_has_type(ptr, ptr) nounwind memory(read)
+declare ptr @imre_source_module(ptr, ptr)
+declare ptr @imre_source_module_name(ptr)
+declare ptr @imre_source_module_filename(ptr)
 declare ptr @imre_named_exception_new(ptr, ptr)
 declare ptr @imre_exception_new(i32, ptr)
 declare i32 @imre_exception_matches(ptr, i32)

@@ -431,6 +431,8 @@ impl Builtin {
             | Self::StringListFilter(_)
             | Self::StringListNonempty
             | Self::Str
+            | Self::SourceModule
+            | Self::SourceModuleAttribute { .. }
             | Self::NominalIdentity
             | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
