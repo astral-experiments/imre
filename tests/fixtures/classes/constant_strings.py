@@ -1,5 +1,6 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
+from _constant_strings import Foreign
 
 
 class Defaults:
@@ -74,3 +75,7 @@ print(extended.left is extended.right)
 for candidate in [Defaults.repeated, Other.repeated, Defaults.suffix_literal, Defaults.joined]:
     pair = Sequences(Defaults.cases, candidate)
     print(pair.left is pair.right)
+separate = Sequences(Defaults.cases, Foreign.cases)
+empty = Sequences(Defaults.empty, Foreign.empty)
+print(separate.left is separate.right)
+print(empty.left is empty.right)

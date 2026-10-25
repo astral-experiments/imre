@@ -6,11 +6,13 @@ use std::rc::Rc;
 
 use super::*;
 
+type ClassLiteral = (Option<ModuleId>, Rc<[String]>);
+
 #[derive(Default)]
 pub(super) struct ModuleValues {
     definitions: RefCell<HashMap<DefinitionId, (usize, Type)>>,
     class_tuples: RefCell<HashMap<(DefinitionId, usize), usize>>,
-    literal_tuples: RefCell<HashMap<(Option<ModuleId>, Rc<[String]>), usize>>,
+    literal_tuples: RefCell<HashMap<ClassLiteral, usize>>,
     types: RefCell<Vec<Type>>,
     pub(super) regex_literals: RefCell<HashMap<String, regex::CaptureLayout>>,
     regex_globals: RefCell<HashMap<usize, regex::CaptureLayout>>,
