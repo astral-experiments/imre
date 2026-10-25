@@ -697,7 +697,12 @@ impl Checker<'_> {
                 Type::Str | Type::StrLiteral(_) | Type::Bytes | Type::Path | Type::PurePath(_)
             )
         };
-        let value = if let ast::Expr::List(display) = arg {
+        let value = if let ast::Expr::List(display) = arg
+            && !display
+                .elts
+                .iter()
+                .any(|item| matches!(item, ast::Expr::Starred(_)))
+        {
             let items = display
                 .elts
                 .iter()

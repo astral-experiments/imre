@@ -13,6 +13,12 @@ print(subprocess.run("printf shell", shell=True, executable=Path("/bin/sh"), cap
 print(subprocess.run("directory/exit-zero", input="text", text=True).returncode)
 print(subprocess.run([sys.argv[1], "-c", "import os; os.write(1,b'a\\xffb')"], errors="replace", stdout=subprocess.PIPE).stdout)
 
+prefix = [sys.argv[1], "-c"]
+paths = [Path("first"), Path("second")]
+expanded = subprocess.run([*prefix, "import sys; print(*sys.argv[1:])", *map(str, paths)], capture_output=True)
+print(repr(expanded.stdout))
+print(repr(expanded.args[2:]))
+
 command = ["/bin/sh", "-c", "printf out; printf err >&2; exit 7"]
 result = subprocess.run(command, capture_output=True)
 command.append("after launch")
