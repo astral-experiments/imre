@@ -1202,6 +1202,10 @@ A function returning `Sequence[T]` can return an exact `list[T]`.
 
 Counter equality and multiset inclusion (`<`, `<=`, `>`, `>=`) compare the counts for every key of either counter. An absent key contributes zero.
 
+`Counter.elements()` returns an iterator over the stored keys in insertion
+order. Each positive integer count repeats its key; a change to a later entry
+is visible when the iterator reaches it.
+
 `mapping.clear()` removes every entry in place and returns `None`. Aliases see
 the empty dictionary; a `Counter` still returns zero for a missing key, and a
 `defaultdict` keeps its factory. `dict.clear(mapping)` and the inherited class
@@ -1233,6 +1237,14 @@ It evaluates the value once, defaults it to `None`, and shares that object
 among all keys. A bound call uses the receiver's class without copying its
 entries. A native defaultdict produces a new mapping with no default factory;
 a native Counter raises `NotImplementedError`.
+
+`collections.OrderedDict[K, V]` accepts the same typed mappings, pairs and
+keyword entries as `dict`. Replacing a value preserves its position; deleting
+and reinserting the key moves it to the end. Two ordered dictionaries compare
+both their keys' order and their values. When one operand is a plain dictionary
+of the same key and value types, equality ignores order. The bound `copy()`
+retains the concrete mapping type and shares its values. Changing keys during
+iteration raises `RuntimeError` if another key remained to be yielded.
 
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.
 

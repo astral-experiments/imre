@@ -164,6 +164,19 @@ impl Emitter<'_, '_> {
         function: usize,
         receiver: Option<&Expr>,
     ) -> Value {
+        if let Some(slot) = self.module.types.constructor_slot(function, ty) {
+            let slot = self.output.global_ref(format!("module_value_{slot}"));
+            let layout = self.output.global_ref("layout_callable".to_owned());
+            let target = self.output.adapter_ref(function, false);
+            let operand = self.checked_pointer(format!(
+                "call ptr @imre_record_class_factory(ptr @{slot}, ptr @{layout}, ptr @{target})"
+            ));
+            return self.owned(Value {
+                ty,
+                operand,
+                small_integer: false,
+            });
+        }
         let bound = receiver.is_some();
         let receiver = receiver.map(|receiver| self.expr(receiver));
         // The hidden context is one pointer-sized ABI word. A StrEnum stores its

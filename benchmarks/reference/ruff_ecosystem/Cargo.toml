@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.98"
 license = "MIT OR Apache-2.0"
 publish = false
+default-run = "ruff-ecosystem-reference"
 
 [workspace]
 

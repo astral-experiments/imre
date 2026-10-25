@@ -4295,6 +4295,9 @@ impl Emitter<'_, '_> {
                     LevelName => "imre_log_level_name",
                     LevelForName => "imre_log_level_for_name",
                     CheckLevel => "imre_log_check_level",
+                    InvalidLevel => "imre_log_invalid_level",
+                    Disable => "imre_log_disable",
+                    EnabledCache => "imre_log_enabled_cache",
                     Names => "imre_log_names",
                     Numbers => "imre_log_numbers",
                     NamesCopy => "imre_log_names_copy",
@@ -6395,6 +6398,7 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::OrderedDict => self.call("imre_ordered_dict", returns, &[&args[0].value]),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
             Builtin::ChainMapNew => self.call("imre_chainmap_new", returns, &[&args[0].value]),
             Builtin::ChainMapMaps => self.call("imre_chainmap_maps", returns, &[&args[0].value]),
@@ -6495,6 +6499,9 @@ impl Emitter<'_, '_> {
                     )),
                     small_integer: false,
                 }
+            }
+            Builtin::CounterElements => {
+                self.call("imre_counter_elements", returns, &[&args[0].value])
             }
             Builtin::CounterTotal => self.call("imre_counter_total", returns, &[&args[0].value]),
             Builtin::CounterMostCommon => {
@@ -8231,6 +8238,7 @@ declare i64 @imre_popen_identity(ptr)
 declare ptr @imre_popen_args(ptr)
 declare ptr @imre_popen_control(ptr)
 declare i64 @imre_child_status(ptr, i1 zeroext)
+declare void @imre_child_set_status(ptr, i64)
 declare ptr @imre_popen_communicate(ptr, ptr, i1 zeroext, i32, i64, ptr)
 declare i64 @imre_child_wait(ptr, i32, i64, ptr)
 declare void @imre_popen_exit(ptr)
@@ -8458,10 +8466,14 @@ declare ptr @imre_inspect_str_descriptor(i32)
 @imre_socket_so_rcvbuf = external constant i64
 @imre_socket_so_linger = external constant i64
 @imre_socket_msg_peek = external constant i64
+@imre_socket_shut_rd = external constant i64
+@imre_socket_shut_wr = external constant i64
+@imre_socket_shut_rdwr = external constant i64
 @imre_socket_default_backlog = external constant i64
 declare ptr @imre_socket_new(i64, i64, i64)
 declare void @imre_socket_bind(ptr, ptr)
 declare void @imre_socket_listen(ptr, i64)
+declare void @imre_socket_shutdown(ptr, i64)
 declare ptr @imre_socket_accept(ptr, ptr, ptr)
 declare void @imre_socket_connect(ptr, ptr)
 declare ptr @imre_socket_sockname(ptr, ptr)
@@ -8588,6 +8600,7 @@ declare void @imre_record_error_init()
 declare void @imre_stdio_init()
 declare i64 @imre_tuple_index(i64, i64)
 declare ptr @imre_record_try_new(ptr)
+declare ptr @imre_record_class_factory(ptr, ptr, ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
 declare ptr @imre_json_loads(ptr)
@@ -8737,6 +8750,7 @@ declare i64 @imre_namespace_get(ptr, ptr)
 declare void @imre_namespace_delete(ptr, ptr)
 declare ptr @imre_dict_copy(ptr)
 declare ptr @imre_dict_fromkeys_target(ptr, ptr)
+declare ptr @imre_ordered_dict(ptr)
 declare i64 @imre_deep_copy(i64, i32)
 declare ptr @imre_record_shallow_copy(ptr)
 declare ptr @imre_default_list_dict_new(i32, i32)
@@ -8765,6 +8779,7 @@ declare void @imre_dict_update(ptr, ptr)
 declare ptr @imre_counter_math(ptr, ptr, i32, i32)
 declare i64 @imre_dict_sum_values(ptr, i64)
 declare i64 @imre_counter_total(ptr)
+declare ptr @imre_counter_elements(ptr)
 declare ptr @imre_counter_most_common(ptr, i64, ptr)
 declare i32 @imre_counter_subset(ptr, ptr, i32)
 declare ptr @imre_key_union(ptr, ptr)
@@ -9009,6 +9024,9 @@ declare void @imre_log_add_level(i64, ptr)
 declare ptr @imre_log_level_name(i64)
 declare i64 @imre_log_level_for_name(ptr)
 declare i64 @imre_log_check_level(ptr)
+declare i64 @imre_log_invalid_level(ptr)
+declare void @imre_log_disable(i64)
+declare ptr @imre_log_enabled_cache(ptr)
 declare ptr @imre_log_names()
 declare ptr @imre_log_numbers()
 declare ptr @imre_log_names_copy()

@@ -250,13 +250,16 @@ impl Builtin {
                         | crate::ir::LogOperation::LockEnter
                         | crate::ir::LogOperation::LockExit
                         | crate::ir::LogOperation::LockRelease
+                        | crate::ir::LogOperation::InvalidLevel
+                        | crate::ir::LogOperation::Enabled
                 ),
                 PreservesLists,
             ),
             Self::Process(operation) => match operation {
                 ProcessOperation::DescriptorConstant(_)
                 | ProcessOperation::SelectorClass(_)
-                | ProcessOperation::SetSelector => Contract::new(false, PreservesLists),
+                | ProcessOperation::SetSelector
+                | ProcessOperation::PopenSetStatus => Contract::new(false, PreservesLists),
                 ProcessOperation::RunUntilComplete
                 | ProcessOperation::CloseLoop
                 | ProcessOperation::Gather { .. }
@@ -609,10 +612,12 @@ impl Builtin {
             | Self::DefaultFactorySet { .. }
             | Self::DequeMaxlen
             | Self::DequeIter { .. }
+            | Self::OrderedDict
             | Self::CounterNew
             | Self::ChainMapNew
             | Self::ChainMapMaps
             | Self::ChainMapSetMaps
+            | Self::CounterElements
             | Self::CounterTotal
             | Self::DictAsBase
             | Self::DictClear
@@ -958,6 +963,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_lock_enter"
                 | "imre_log_lock_exit"
                 | "imre_log_lock_release"
+                | "imre_log_invalid_level"
+                | "imre_log_is_enabled"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
                 | "imre_str_unquote"

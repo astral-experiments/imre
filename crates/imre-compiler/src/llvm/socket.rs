@@ -44,6 +44,7 @@ impl Emitter<'_, '_> {
             Bind => "imre_socket_bind",
             Listen => "imre_socket_listen",
             Connect => "imre_socket_connect",
+            Shutdown => "imre_socket_shutdown",
             Recv => "imre_socket_recv",
             Send => "imre_socket_send",
             SendAll => "imre_socket_sendall",

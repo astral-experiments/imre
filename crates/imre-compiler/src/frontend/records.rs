@@ -1233,6 +1233,102 @@ impl Checker<'_> {
         Ok(self.evaluated_receiver(discarded, value))
     }
 
+    /// Build a capture-free constructor. Each call allocates the concrete subclass
+    /// and runs its initializer; storing the class never retains a handler instance.
+    pub(super) fn record_constructor_value(
+        &mut self,
+        class: usize,
+        base: usize,
+        ty: Type,
+        at: &ast::Expr,
+    ) -> Result<Expr, String> {
+        let declared = &self.classes.declarations.definitions[class];
+        if (class != base && !declared.bases.contains(&base))
+            || !declared.abstract_methods.is_empty()
+        {
+            return Err(error(
+                self.source,
+                at,
+                "expected a concrete subclass of the declared factory class",
+            ));
+        }
+        let initializer = self.classes.methods[class].get("__init__").ok_or_else(|| {
+            error(
+                self.source,
+                at,
+                "class factory requires an annotated initializer",
+            )
+        })?;
+        let (params, returns) = self.types.signature(ty).unwrap();
+        if !initializer
+            .params
+            .iter()
+            .skip(1)
+            .map(|p| p.ty)
+            .eq(params.iter().copied())
+            || initializer.params.iter().skip(1).any(|p| {
+                !matches!(
+                    p.kind,
+                    ParameterKind::PositionalOnly | ParameterKind::PositionalOrKeyword
+                )
+            })
+        {
+            return Err(error(
+                self.source,
+                at,
+                "subclass initializer does not match the factory signature",
+            ));
+        }
+        let constructor = initializer.id;
+        let args = params
+            .iter()
+            .enumerate()
+            .map(|(slot, &ty)| Expr {
+                ty,
+                kind: ExprKind::Local(slot),
+            })
+            .collect();
+        let result = self.coerce(
+            Expr {
+                ty: Type::Class(class),
+                kind: ExprKind::Construct {
+                    initializer: constructor,
+                    args: ir::CallArgs::positional(args),
+                },
+            },
+            returns,
+            at,
+        )?;
+        let id = self.helpers.reserve();
+        self.types.register_constructor(id, class);
+        self.helpers.finish(
+            id,
+            comprehensions::Helper {
+                module: self.module,
+                function: ir::Function {
+                    params: (0..params.len()).collect(),
+                    locals: params,
+                    returns,
+                    body: vec![Statement::Return(result)],
+                },
+                calls: HashSet::from([constructor]),
+                class_reads: HashSet::new(),
+                recursion_error: error(
+                    self.source,
+                    at,
+                    "recursive class constructor callbacks are unsupported",
+                ),
+            },
+        );
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Callable {
+                function: id,
+                receiver: None,
+            },
+        })
+    }
+
     pub(super) fn construct(&mut self, call: &ast::ExprCall, class: usize) -> Result<Expr, String> {
         if self.classes.declarations.definitions[class]
             .forwarder
