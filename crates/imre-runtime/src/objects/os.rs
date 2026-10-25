@@ -9,6 +9,18 @@ use std::ffi::CString;
 use std::io;
 use std::rc::Rc;
 
+/// Query the same POSIX metadata for Path views, fresh predicates, and metadata copies.
+pub(super) fn metadata(
+    path: impl AsRef<std::path::Path>,
+    follow: bool,
+) -> io::Result<std::fs::Metadata> {
+    if follow {
+        std::fs::metadata(path)
+    } else {
+        std::fs::symlink_metadata(path)
+    }
+}
+
 macro_rules! descriptor_constants {
     ($($name:ident = $flag:ident),* $(,)?) => {$(
         #[unsafe(no_mangle)]

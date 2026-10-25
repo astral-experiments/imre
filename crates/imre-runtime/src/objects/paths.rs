@@ -15,9 +15,11 @@ use super::{Bytes, Int, Object, Storage, StorageCell, Str, fail, files, object};
 
 mod components;
 mod matching;
+mod metadata;
 mod pure;
 mod traversal;
 mod walking;
+pub(super) use metadata::Info;
 pub(super) use pure::PurePath;
 pub(super) use walking::Walker;
 
@@ -305,9 +307,14 @@ fn new_path(path: impl Into<Rc<Str>>) -> *const Object {
 }
 
 fn path_with_text(text: PathText) -> *const Object {
+    path_with_info(text, std::cell::OnceCell::new())
+}
+
+fn path_with_info(text: PathText, info: std::cell::OnceCell<Rc<Object>>) -> *const Object {
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Path {
         text,
         name: std::cell::OnceCell::new(),
+        info,
     }))))
 }
 
@@ -956,7 +963,7 @@ pub(super) struct PathIterator {
 
 enum IterationState {
     Glob(traversal::Glob),
-    Snapshot(std::vec::IntoIter<OsString>),
+    Snapshot(std::vec::IntoIter<(OsString, Option<fs::FileType>)>),
     Exhausted,
 }
 
@@ -1001,19 +1008,29 @@ impl PathIterator {
                 false,
             )?)
         } else {
-            IterationState::Snapshot(snapshot(&root, false)?.into_iter())
+            check_directory_path(&root)?;
+            let entries = directory_entries(&root, |entry| {
+                (entry.file_name(), entry.file_type().ok())
+            }).map_err(files::os_error)?;
+            IterationState::Snapshot(entries.into_iter())
         };
         Ok(Self { root, state })
     }
 
     pub(super) fn next(&mut self) -> Result<*const Object> {
         let next = match &mut self.state {
-            IterationState::Glob(glob) => glob.next(),
+            IterationState::Glob(glob) => glob.next().map(|next| {
+                next.map(|path| path_with_text(PathText::from_parsed_string(path)))
+            }),
             IterationState::Snapshot(names) => names
                 .next()
-                .map(|name| {
+                .map(|(name, kind)| {
                     name.into_string()
-                        .map(|name| join(&self.root, &name))
+                        .map(|name| {
+                            let text = PathText::from_parsed_string(join(&self.root, &name));
+                            let view = Info::object(Rc::clone(text.spelling()), metadata::Origin::Entry(kind));
+                            path_with_info(text, std::cell::OnceCell::from(view))
+                        })
                         .map_err(|_| {
                             Error::new(
                                 Kind::UnicodeDecodeError,
@@ -1025,7 +1042,7 @@ impl PathIterator {
             IterationState::Exhausted => Ok(None),
         };
         match next {
-            Ok(Some(path)) => Ok(path_with_text(PathText::from_parsed_string(path))),
+            Ok(Some(path)) => Ok(path),
             result => {
                 self.state = IterationState::Exhausted;
                 result.map(|_| std::ptr::null())
@@ -1317,6 +1334,50 @@ mod tests {
         let text = Rc::new(Str::from(text));
         // SAFETY: the input is rooted and the new path transfers one owner.
         unsafe { Rc::from_raw(imre_path_new(Rc::as_ptr(&text))) }
+    }
+
+    #[test]
+    fn metadata_views_distinguish_regular_paths_and_scanned_entries_after_mutation() {
+        let directory = Directory::new();
+        let filename = directory.0.join("entry");
+        let entry_name = filename.to_str().unwrap();
+        let ordinary = path(entry_name);
+        // SAFETY: each ABI result transfers one owner; take the view before dropping
+        // its path to also check the independently retained spelling.
+        let view =
+            |p: &Rc<Object>| unsafe { Rc::from_raw(metadata::imre_path_info(Rc::as_ptr(p))) };
+        // SAFETY: both object kinds accepted by this predicate remain rooted here.
+        let query = |p: &Rc<Object>, kind, follow| unsafe {
+            metadata::imre_path_query(Rc::as_ptr(p), kind, u32::from(follow)) != 0
+        };
+        let first = view(&ordinary);
+        assert!(Rc::ptr_eq(&first, &view(&ordinary)));
+        assert!(!query(&first, 0, true));
+        drop(ordinary);
+        fs::write(&filename, "file").unwrap();
+        assert!(!query(&first, 2, true));
+        assert!(query(&first, 2, false));
+        assert!(query(&view(&path(entry_name)), 2, true));
+
+        // SAFETY: the directory is rooted until acquisition; the single entry
+        // and its view outlive the directory iterator's snapshot.
+        let scanned = unsafe {
+            let dir = directory.path();
+            let it = Rc::from_raw(imre_path_iter(Rc::as_ptr(&dir), std::ptr::null()));
+            let item = imre_path_next(Rc::as_ptr(&it));
+            assert!(!item.is_null());
+            Rc::from_raw(item)
+        };
+        let entry = view(&scanned);
+        fs::remove_file(&filename).unwrap();
+        assert!(query(&entry, 0, false));
+        assert!(query(&entry, 2, true));
+        assert!(!query(&entry, 0, true));
+        fs::create_dir(&filename).unwrap();
+        assert!(query(&entry, 0, true));
+        assert!(query(&entry, 2, false));
+        assert!(!query(&entry, 1, true));
+        assert!(query(&scanned, 1, true));
     }
 
     #[test]
