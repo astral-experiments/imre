@@ -1,6 +1,7 @@
 //! Process-local logging state for the native single-threaded runtime.
 use crate::StrOwner;
 mod levels;
+pub(super) mod timed;
 
 use std::cell::RefCell;
 use std::collections::HashMap;

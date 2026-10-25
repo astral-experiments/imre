@@ -103,6 +103,50 @@ pub unsafe extern "C" fn imre_union_truthy(value: usize) -> u32 {
     }
 }
 
+/// Reads the list or tuple length without copying its elements.
+///
+/// # Safety
+/// The caller roots a tagged str list (2) or a tuple of strs (4).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_string_iterable_len(value: usize) -> usize {
+    let (word, _) = member(value);
+    if value & 7 == 2 {
+        // SAFETY: the original list is rooted throughout this length read.
+        return unsafe { super::imre_seq_len(word as *const Object) };
+    }
+    debug_assert_eq!(value & 7, 4);
+    // SAFETY: the tuple owns a live descriptor with its fixed, bounded arity.
+    (unsafe { super::records::descriptor(word as *const usize).length } << 1) | 1
+}
+
+/// Returns the original list for live iteration, or copies immutable tuple field references.
+/// The tuple itself remains available wherever the Iterable is stored or formatted.
+///
+/// # Safety
+/// The caller roots an exact list of strings (tag 2) or a tuple containing only strings (tag 4).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_string_iterable_list(value: usize) -> *const Object {
+    let (word, _) = member(value);
+    if value & 7 == 2 {
+        // SAFETY: the tagged value roots this live sequence handle.
+        return std::rc::Rc::into_raw(unsafe { super::acquire_rc::<Object>(word) });
+    }
+    debug_assert_eq!(value & 7, 4);
+    let fields = word as *const usize;
+    // SAFETY: the descriptor describes the rooted tuple payload and all its initialized str fields.
+    let entries =
+        unsafe { std::slice::from_raw_parts(fields, super::records::descriptor(fields).length) };
+    let mut words = super::Words::new(3);
+    if words.values.try_reserve_exact(entries.len()).is_err() {
+        return super::finish(Err(super::Error::allocation()), std::ptr::null());
+    }
+    words.values.extend(entries.iter().map(|&entry| {
+        // SAFETY: the immutable tuple keeps this str alive while taking the list's own reference.
+        unsafe { WordKind::new(3).acquire(entry) }.into_word()
+    }));
+    std::rc::Rc::into_raw(words.into_object())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

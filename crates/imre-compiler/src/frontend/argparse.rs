@@ -31,12 +31,6 @@ struct OptionField {
     option: Value,
 }
 
-impl OptionField {
-    fn many_positional(&self) -> bool {
-        self.option["flag"] == self.name && self.option["many"] == true
-    }
-}
-
 fn literal<'a>(expr: &'a ast::Expr, module: &SourceModule) -> Result<&'a str, String> {
     let ast::Expr::StringLiteral(value) = expr else {
         return Err(module.error(expr, "argparse declarations require literal strings"));
@@ -175,19 +169,12 @@ fn option(
     let kw = keywords(
         call,
         &[
-            "type", "nargs", "help", "action", "default", "required", "choices",
+            "type", "nargs", "help", "action", "default", "const", "required", "choices",
         ],
         module,
     )?;
-    if positional
-        && ["required", "action", "default"]
-            .iter()
-            .any(|k| kw.contains_key(k))
-    {
-        return Err(module.error(
-            call,
-            "argparse positionals do not accept required, action, or default",
-        ));
+    if positional && kw.contains_key("required") {
+        return Err(module.error(call, "argparse positionals do not accept required"));
     }
     let mut element = Type::Str;
     if let Some(&ty) = kw.get("type") {
@@ -197,34 +184,57 @@ fn option(
             return Err(module.error(ty, "argparse type must be str or pathlib.Path"));
         }
     }
-    let mut required = positional;
+    let nargs = match kw.get("nargs").copied() {
+        None | Some(ast::Expr::NoneLiteral(_)) => json!("one"),
+        Some(ast::Expr::StringLiteral(s)) => match s.value.to_str() {
+            "?" => json!("optional"),
+            "*" => json!("zero_or_more"),
+            "+" => json!("one_or_more"),
+            _ => return Err(module.error(call, "unsupported argparse nargs")),
+        },
+        Some(ast::Expr::NumberLiteral(n))
+            if let ast::Number::Int(value) = &n.value
+                && let Some(count) = value.as_i64().and_then(|n| usize::try_from(n).ok())
+                && count > 0 =>
+        {
+            json!({"fixed": count})
+        }
+        Some(value) => {
+            return Err(module.error(
+                value,
+                "argparse nargs requires a positive count, '?', '*' or '+'",
+            ));
+        }
+    };
+    let many = nargs != "one" && nargs != "optional";
+    let mut required = positional && nargs != "optional" && nargs != "zero_or_more";
     if let Some(&expr) = kw.get("required") {
         let ast::Expr::BooleanLiteral(value) = expr else {
             return Err(module.error(expr, "argparse required must be a literal bool"));
         };
         required = value.value;
     }
-    let many = if let Some(&value) = kw.get("nargs") {
-        if literal(value, module)? != "+" {
-            return Err(module.error(value, "argparse supports nargs='+'"));
-        }
-        true
-    } else {
-        false
-    };
     if let Some(&action) = kw.get("action") {
-        if literal(action, module)? != "store_true"
-            || kw.contains_key("type")
-            || many
-            || kw.contains_key("choices")
-        {
-            return Err(module.error(
-                action,
-                "argparse store_true takes no type, choices, or nargs",
-            ));
+        match literal(action, module)? {
+            "store" => {}
+            "store_true"
+                if !positional
+                    && !kw.contains_key("type")
+                    && !kw.contains_key("nargs")
+                    && !kw.contains_key("const")
+                    && !kw.contains_key("choices") =>
+            {
+                element = Type::Bool
+            }
+            _ => return Err(module.error(action, "unsupported argparse action or action keywords")),
         }
-        element = Type::Bool;
     }
+    let constant = match kw.get("const").copied() {
+        None if element == Type::Bool => Some("True"),
+        None | Some(ast::Expr::NoneLiteral(_)) => None,
+        Some(value) if nargs == "optional" => Some(literal(value, module)?),
+        Some(value) => return Err(module.error(value, "argparse const requires nargs='?'")),
+    };
     let choices = if let Some(&choices) = kw.get("choices") {
         let choices = match choices {
             ast::Expr::ListComp(comp)
@@ -276,7 +286,9 @@ fn option(
     let default = match kw.get("default").copied() {
         None if element == Type::Bool => Some("False"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
-        Some(expr @ ast::Expr::StringLiteral(_)) if !many && element != Type::Bool => {
+        Some(expr @ ast::Expr::StringLiteral(_))
+            if element == Type::Str || !many && element == Type::Path =>
+        {
             Some(literal(expr, module)?)
         }
         Some(ast::Expr::BooleanLiteral(value)) if element == Type::Bool => {
@@ -328,7 +340,7 @@ fn option(
     if !template(
         help,
         &[
-            "prog", "dest", "type", "default", "choices", "required", "nargs",
+            "prog", "dest", "type", "default", "const", "choices", "required", "nargs",
         ],
     ) {
         return Err(module.error(call, "unsupported argparse help substitution"));
@@ -342,9 +354,18 @@ fn option(
         Type::Bool => "bool",
         _ => unreachable!(),
     };
-    let optional = !required && default.is_none();
+    let optional = (!required && default.is_none() && !(positional && nargs == "zero_or_more"))
+        || (!positional && nargs == "optional" && constant.is_none());
+    let list_default = many && !required && default.is_some();
     let ty = if many {
-        types.list(element)
+        let list = types.list(element);
+        if list_default {
+            types.union(&[Type::Str, list]).ok_or_else(|| {
+                module.error(call, "argparse list and default need a representable union")
+            })?
+        } else {
+            list
+        }
     } else if let Some((class, _)) = enum_default {
         types
             .union(&[Type::Str, Type::Enum(class)])
@@ -354,6 +375,7 @@ fn option(
             .iter()
             .map(|s| s.to_string())
             .chain(default.map(str::to_owned))
+            .chain(constant.map(str::to_owned))
             .collect();
         types.string_literal(values)
     } else {
@@ -363,7 +385,7 @@ fn option(
         name: dest,
         annotation: flag.clone(),
         ty: if optional { types.optional(ty) } else { ty },
-        option: json!({ "flag": flag_name, "aliases": aliases, "enum_default": enum_default.map(|(_, tag)| tag), "kind": kind, "many": many, "required": required,
+        option: json!({ "flag": flag_name, "aliases": aliases, "enum_default": enum_default.map(|(_, tag)| tag), "kind": kind, "nargs": nargs, "constant": constant, "list_default":list_default, "required": required,
             "choices": choices, "converter": converter, "default": default, "path_default": path_default, "help": help, "optional": optional }),
     })
 }
@@ -623,14 +645,6 @@ impl Parsers {
                                 if let Some(group) = group {
                                     field.option["group"] = json!(group);
                                 }
-                                if field.option["flag"] == field.name
-                                    && options.iter().any(OptionField::many_positional)
-                                {
-                                    return Err(module.error(
-                                        add,
-                                        "a positional with nargs='+' must be the last positional",
-                                    ));
-                                }
                                 for value in &add.arguments.args {
                                     let name = literal(value, module)?;
                                     if !spellings.insert(name) {
@@ -663,12 +677,6 @@ impl Parsers {
                     if let Some((group, add)) =
                         assigned_call(function.body.get(index), builder, "add_subparsers")
                     {
-                        if options.iter().any(OptionField::many_positional) {
-                            return Err(module.error(
-                                add,
-                                "a positional with nargs='+' cannot precede a subcommand",
-                            ));
-                        }
                         register(group, &builders)?;
                         builders.push(group.id.to_string());
                         let kw = keywords(add, &["dest", "required"], module)?;
