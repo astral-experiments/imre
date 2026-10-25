@@ -8,11 +8,15 @@ def choose(log: list[int], number: int):
     return [array, MutableMapping, Mapping, list, dict][number]
 
 
-
 def shadowed():
     Mapping = list
     print(issubclass(dict, Mapping))
     print(issubclass(Mapping, TypingMapping))
+
+
+def invalid(log: list[int]) -> int:
+    log.append(8)
+    return 1
 
 
 shadowed()
@@ -42,11 +46,6 @@ print(isinstance(values, Mapping))
 print(isinstance(items, Mapping))
 print(choose(log, 2) is Mapping)
 print(issubclass(choose(log, 4), choose(log, 2)))
-
-
-def invalid(log: list[int]) -> int:
-    log.append(8)
-    return 1
 
 
 try:
