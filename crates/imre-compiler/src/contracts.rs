@@ -261,6 +261,7 @@ impl Builtin {
                 | ProcessOperation::IgnorePatterns
                 | ProcessOperation::TreeErrorArgs
                 | ProcessOperation::Copy(_)
+                | ProcessOperation::CopyFileObj
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)

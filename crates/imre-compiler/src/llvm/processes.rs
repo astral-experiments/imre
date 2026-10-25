@@ -627,6 +627,16 @@ impl Emitter<'_, '_> {
                 ));
                 self.unpack_word(operand, returns)
             }
+            ProcessOperation::CopyFileObj => {
+                let [src, dst, size] = args else {
+                    unreachable!()
+                };
+                self.checked_line(format!(
+                    "call void @imre_shutil_copyfileobj(ptr {}, ptr {}, i64 {})",
+                    src.value.operand, dst.value.operand, size.value.operand
+                ));
+                none()
+            }
             ProcessOperation::Which => {
                 let path =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));

@@ -185,9 +185,8 @@ impl FileState {
             Stream::Read(input) => input.seek(at),
             Stream::Memory(m) => m.seek(at),
             Stream::Member(m) => m.seek(at),
-            Stream::Write(_) | Stream::TextMemory(_) => {
-                Err(Error::new(Kind::UnsupportedOperation, "seek"))
-            }
+            Stream::Write(output) => output.seek(at),
+            Stream::TextMemory(_) => Err(Error::new(Kind::UnsupportedOperation, "seek")),
         }
     }
 
@@ -352,8 +351,12 @@ pub unsafe extern "C" fn imre_binary_tell(file: *const Object) -> usize {
         object(file).0.with_mut(|s| {
             let f = s.file_mut();
             f.check_member("tell on closed file.")?;
-            if f.kind == FileKind::BinaryRead && f.stream.is_none() {
+            if matches!(f.kind, FileKind::BinaryRead | FileKind::BinaryWrite) && f.stream.is_none()
+            {
                 return Err(Error::new(Kind::ValueError, "I/O operation on closed file"));
+            }
+            if let Some(Stream::Write(output)) = &mut f.stream {
+                return output.tell();
             }
             f.seek(SeekFrom::Current(0))
         })

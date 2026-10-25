@@ -6396,6 +6396,9 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
+            Some(Binding::Intrinsic(Intrinsic::CopyFileObj)) => {
+                return self.shutil_copyfileobj(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::CopyTree)) => return self.shutil_copytree(call),
             Some(Binding::Intrinsic(Intrinsic::IgnorePatterns)) => {
                 return self.shutil_ignore_patterns(call);
