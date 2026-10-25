@@ -6,6 +6,7 @@
 //! attributes can introduce ownership cycles.
 
 mod imports;
+pub(super) use imports::imre_exception_field_repr;
 mod tree;
 pub(super) use tree::append_tree_entries;
 
@@ -1233,21 +1234,26 @@ pub unsafe extern "C" fn imre_system_exit_code(value: *const Object) -> *const O
 }
 
 pub(super) unsafe fn exit_word(value: *const Object) -> (WordKind, usize) {
-    // SAFETY: a code view keeps its immutable typed exit payload alive.
+    // SAFETY: the caller roots the expected boxed or exception value.
     unsafe {
-        (*value).0.with(|s| match s {
-            Storage::ObjectValue(v) => (v.kind, v.word),
-            Storage::ModuleMember(m) => {
-                let (kind, word) = m.scalar().expect("non-scalar module metadata was handled");
-                (WordKind::new(kind), word)
-            }
-            Storage::Exception(e) => match &e.payload {
-                Payload::Exit(Some(code)) => (code.kind, code.word),
-                Payload::Exit(None) => (WordKind::new(0), 0),
-                _ => unreachable!("checked SystemExit code view"),
-            },
-            _ => unreachable!("checked exception field"),
-        })
+        (*value)
+            .0
+            .with(projected_word)
+            .expect("checked boxed value")
+    }
+}
+
+/// Borrow the concrete Python value from a box, scalar module member or exit-code view.
+pub(super) fn projected_word(storage: &Storage) -> Option<(WordKind, usize)> {
+    match storage {
+        Storage::ObjectValue(v) => Some((v.kind, v.word)),
+        Storage::ModuleMember(m) => m.scalar().map(|(k, w)| (WordKind::new(k), w)),
+        Storage::Exception(e) => match &e.payload {
+            Payload::Exit(Some(code)) => Some((code.kind, code.word)),
+            Payload::Exit(None) => Some((WordKind::new(0), 0)),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -1284,7 +1290,7 @@ pub unsafe extern "C" fn imre_system_exit_code_text(value: *const Object) -> *co
     }
 }
 
-/// Compare the original exit code against a scalar, tuple or a second code view.
+/// Compare a retained field against another Python value (including a field view).
 ///
 /// # Safety
 /// `value` is a rooted code view. `word` is rooted with kind 0 (None), 1
@@ -1300,6 +1306,17 @@ pub unsafe extern "C" fn imre_system_exit_code_equal(
     // dict[int, str]. Other representation tags are scalar/tuple word kinds.
     // SAFETY: both inputs stay rooted while we compare their borrowed fields.
     unsafe {
+        // 18 is a concrete generic list. Its ordinary storage kind (5) is also
+        // used for a boxed comparison operand, whose representation is different.
+        if kind == 18 {
+            if super::errno::with_nonscalar_member(object(value), |_| ()).is_some() {
+                return 0;
+            }
+            return u32::from(super::boxed_values::equal(
+                exit_word(value),
+                (WordKind::new(5), word),
+            ));
+        }
         if super::errno::with_nonscalar_member(object(value), |_| ()).is_some() {
             let (other, payload) = if kind == 5 {
                 if super::errno::with_nonscalar_member(object(word as *const Object), |_| ())
@@ -1308,6 +1325,9 @@ pub unsafe extern "C" fn imre_system_exit_code_equal(
                     (16, word)
                 } else {
                     let (other, payload) = exit_word(word as *const Object);
+                    if other.raw() == 5 {
+                        return 0;
+                    }
                     (other.raw(), payload)
                 }
             } else {
@@ -1322,6 +1342,9 @@ pub unsafe extern "C" fn imre_system_exit_code_equal(
             && super::errno::with_nonscalar_member(object(word as *const Object), |_| ()).is_some()
         {
             let (other, payload) = exit_word(value);
+            if other.raw() == 5 {
+                return 0;
+            }
             return super::errno::imre_errno_member_equal(
                 word as *const Object,
                 other.raw(),
@@ -1360,6 +1383,8 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
         2 => word != 1, // tagged zero
         // SAFETY: the immutable exit code owns this string.
         3 => !unsafe { &*(word as *const Str) }.is_empty(),
+        4 | 5 => super::boxed_values::length(kind, word).is_some_and(|n| n != 0),
+        7 => f64::from_bits(word as u64) != 0.0,
         // SAFETY: the view owns this exact byte buffer.
         8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),
         // SAFETY: the tuple remains rooted while its immutable length is read.
@@ -1887,8 +1912,24 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
         }
         return status_after_flush(status, stdout, stderr.and(crate::sys::flush_stderr()));
     }
+    write_exception_chain(pending);
+    status_after_flush(1, stdout, stderr.and(crate::sys::flush_stderr()))
+}
+
+/// Print the handled exception without changing the active handler or the process exit status.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_log_print_active_exception() {
+    if let Some(exception) = active_exception() {
+        write_exception_chain(exception);
+    } else {
+        let _ = crate::sys::write_stderr("NoneType: None", true);
+    }
+}
+
+/// Render the exception and its explicit causes without retaining any native frames.
+fn write_exception_chain(exception: Rc<Object>) {
     let mut chain = Vec::new();
-    let mut current = Some(pending.clone());
+    let mut current = Some(exception.clone());
     while let Some(exception) = current {
         // SAFETY: the current owner roots the exception; only owned data escapes.
         let (name, cause) = unsafe {
@@ -1920,7 +1961,7 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
         chain.push((name, message, suggestion));
         current = cause;
     }
-    drop(pending);
+    drop(exception);
     let mut diagnostic = crate::sys::stderr_writer();
     for (index, (name, message, suggestion)) in chain.into_iter().rev().enumerate() {
         if index != 0 {
@@ -1937,8 +1978,6 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
             let _ = writeln!(diagnostic, "{name}: {message}");
         }
     }
-    drop(diagnostic);
-    status_after_flush(1, stdout, stderr.and(crate::sys::flush_stderr()))
 }
 
 /// CPython reports a stdout flush error, silently records a stderr flush error,
