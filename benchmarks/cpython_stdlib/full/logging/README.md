@@ -25,17 +25,17 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-The [full replay](https://github.com/astral-sh/imre/actions/runs/40217698324) of [`cd496fb`](https://github.com/astral-sh/imre/commit/cd496fb748aebd1b48faeb82b0ef07a80a16a594)
-includes logger hierarchy and handler propagation, the level registry, ordinary
+The replay covers logger hierarchy and handler propagation, the level registry, ordinary
 and timed file handlers, records, formatters, filters and configuration.
+The [standalone logger comparison](standalone.md) adds the original handler-removal loop.
 Both levels have the same counts:
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 14 |
+| Imre | Imre | Imre | CPython hooks and native child | 15 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
-| CPython | CPython | Imre | CPython | 35 |
-| Blocked before execution | | | | 216 |
+| CPython | CPython | Imre | CPython | 36 |
+| Blocked before execution | | | | 214 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -47,8 +47,8 @@ delayed creation and emission after closing a file opened in write mode. The
 bytes, including the newline, under its original host fixture. The stream replacement
 method checks the actual sys.stderr, the previous stream, and the unchanged-stream return.
 Four bodies verify native stderr with the original
-CPython output helper. The 35 host-driven methods exercise named handler registration, the registry, timed
-files, record flags, [formatters](formatters.md), or [configuration](config.md).
+CPython output helper. The 36 host-driven methods exercise named handler registration, the registry, timed
+files, record flags, [formatters](formatters.md), [configuration](config.md), or [live level caches](cache.md).
 Setup and registered cleanup stay with their test. The report keeps original method locations, individual
 compiler or adapter blockers, and the three pinned skip conditions. It
 does not treat a compiled source or a passing CPython reference as a native pass.

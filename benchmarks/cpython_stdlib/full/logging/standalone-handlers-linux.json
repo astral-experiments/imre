@@ -1,0 +1,43 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "denominator": 272,
+  "test_id": "test.test_logging.LoggerTest.test_has_handlers",
+  "levels": {
+    "0": {
+      "observed": {
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "Find and remove the standalone logger's live handlers",
+          "fixture": "Original CPython LoggerTest/BaseTest setup, teardown and cleanup; the child recreates the real root stream, separate Logger('blah') and its RecordingHandler with the unchanged handle method",
+          "opt_level": 0,
+          "method_sha256": "92b04020521ecb656af344d79cce217b1669b74b74d9294092079cb998c2f8dc"
+        }
+      },
+      "control_stdout_sha256": "57c0b38c0d53e1b9c609e1aaa6b71fc41f62d502a8c6ef44ba0eb03e2263f31b",
+      "control_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "3": {
+      "observed": {
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "Find and remove the standalone logger's live handlers",
+          "fixture": "Original CPython LoggerTest/BaseTest setup, teardown and cleanup; the child recreates the real root stream, separate Logger('blah') and its RecordingHandler with the unchanged handle method",
+          "opt_level": 3,
+          "method_sha256": "92b04020521ecb656af344d79cce217b1669b74b74d9294092079cb998c2f8dc"
+        }
+      },
+      "control_stdout_sha256": "57c0b38c0d53e1b9c609e1aaa6b71fc41f62d502a8c6ef44ba0eb03e2263f31b",
+      "control_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}
