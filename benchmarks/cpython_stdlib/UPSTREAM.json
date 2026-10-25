@@ -6,6 +6,7 @@
     "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
     "Lib/test/test_base64.py": "9fe69f4f692d8f5782bdf33270d08070a0a580ad",
     "Lib/test/test_collections.py": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+    "Lib/test/test_csv.py": "a0a1e91777d89345d543b27ee23049162cf3a0a3",
     "Lib/test/test_genericpath.py": "1a44cedcd360b11f2924bf7effca09a04c5e259a",
     "Lib/test/test_hashlib.py": "c7d7b801ac732a34f887460fb61b382787dd116e",
     "Lib/test/test_json/__init__.py": "74b64ed86a3183db5a54166d89cf2fb227281e06",
