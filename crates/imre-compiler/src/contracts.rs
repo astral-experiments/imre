@@ -116,6 +116,7 @@ impl Builtin {
                     | PathOperation::JoinObject
                     | PathOperation::Parent
                     | PathOperation::IsRelativeTo
+                    | PathOperation::AsPosix
                     | PathOperation::ReadText
                     | PathOperation::ReadBytes
                     | PathOperation::Absolute
@@ -150,7 +151,6 @@ impl Builtin {
                     | PathOperation::Root
                     | PathOperation::Anchor
                     | PathOperation::CountPart
-                    | PathOperation::AsPosix
                     | PathOperation::Text
                     | PathOperation::Name
                     | PathOperation::Stem
@@ -808,6 +808,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_input"
                 | "imre_sys_argv"
                 | "imre_sys_orig_argv"
+                | "imre_path_as_posix"
                 | "imre_path_join"
                 | "imre_path_join_object"
                 | "imre_path_parent"
