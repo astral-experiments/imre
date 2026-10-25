@@ -1,4 +1,4 @@
-"""Run original string methods against counted native assertions and a CPython control."""
+"""Run original string methods with native assertions and compare them with CPython."""
 import argparse
 import ast
 import hashlib
@@ -13,6 +13,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1])]
 from suite_evidence import build_report, roles, validate_pair
 from suite_inventory import verify_files
 from template_controls import controls
+from template_unittest import REPAIRED_INPUT, run_method
 
 METHODS = {
     "ModuleTest": {"test_attrs", "test_capwords"},
@@ -20,7 +21,7 @@ METHODS = {
         "test_regular_templates_with_upper_case", "test_regular_templates_with_non_letters",
         "test_escapes", "test_percents", "test_SafeTemplate", "test_unicode_values",
         "test_keyword_arguments", "test_stringification", "test_tupleargs",
-    },
+    } | set(REPAIRED_INPUT),
 }
 ADAPTER = '''import string
 from string import Template
@@ -49,7 +50,7 @@ def compile_run(args, level, source, work):
         cmd.append("--sanitize")
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, cwd=work, timeout=120)
     result = subprocess.run([exe], capture_output=True, cwd=work, timeout=60)
-    if result.returncode:
+    if result.returncode or result.stderr:
         raise AssertionError(f"native process exited {result.returncode}: {result.stderr.decode(errors='replace')}")
     return result.stdout
 
@@ -83,7 +84,8 @@ def main():
     source = HERE / "upstream/Lib/test/test_string/test_string.py"
     original = dict(methods(source))
     owners = json.loads((HERE / "template-cases.json").read_text())
-    assert set(owners["native_default_pattern"]) == METHODS["TestTemplate"]
+    assert set(owners["native_callable_assertions"]) == set(REPAIRED_INPUT)
+    assert set(owners["native_default_pattern"]) | set(REPAIRED_INPUT) == METHODS["TestTemplate"]
     prefix = f"{manifest['module']}.test_string.TestTemplate."
     upstream_ids = {key.removeprefix(prefix) for key in ref["reference"] if key.startswith(prefix)}
     grouped = [name for group in owners.values() for name in group]
@@ -99,6 +101,17 @@ def main():
             work = Path(d)
             assertions = 0
             for (cls, name), method in original.items():
+                key = f"{manifest['module']}.test_string.{cls}.{name}"
+                if cls == "TestTemplate" and name in REPAIRED_INPUT:
+                    checks, failure = run_method(args, level, work, name, method, compile_run)
+                    assertions += checks
+                    observations[(key, 1)] = {"outcome": "pass", "roles": roles(
+                        body="imre", assertions="imre", operation="imre", fixture="imre"),
+                        "evidence": {"operation": f"compiled {name} against the bundled string module",
+                                     "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+                                     "method_sha256": hashlib.sha256(method).hexdigest(),
+                                     "source_assertions": checks, "negative_control": failure}}
+                    continue
                 # The method and its expected operands are byte-for-byte upstream.
                 entry = f'''\ncase = Case()\ncase.{name}()\nprint(case.checks)
 try:
@@ -114,7 +127,6 @@ except AssertionError as exc:
                 checks = int(got.splitlines()[0])
                 assert checks > 0
                 assertions += checks
-                key = f"{manifest['module']}.test_string.{cls}.{name}"
                 observations[(key, 1)] = {"outcome": "pass", "roles": roles(
                     body="imre", assertions="imre", operation="imre", fixture="imre"),
                     "evidence": {"operation": f"compiled {name} against the bundled string module",
@@ -124,8 +136,10 @@ except AssertionError as exc:
             if compile_run(args, level, extra.read_bytes(), work) != expected:
                 raise AssertionError("supplemental Unicode and separator comparison failed")
             template_lines, logging_formats = controls(args, level, work, compile_run)
-        variants = [(key, "original method, native str assertEqual" if (key, 1) in observations
-                     else "upstream discovery") for key in ref["reference"]]
+        callback_ids = {prefix + name for name in REPAIRED_INPUT}
+        variants = [(key, "upstream discovery" if (key, 1) not in observations else
+                     "original method, native unittest.TestCase callbacks" if key in callback_ids else
+                     "original method, native str assertEqual") for key in ref["reference"]]
         reports.append(build_report(ref, level, variants, observations))
         print(f"O{level}: {len(original)}/54 original methods; {assertions} assertions, {len(original)} negative controls, {len(expected.splitlines())} core and {template_lines} Template output lines; {logging_formats} upstream logging formats matched")
     if args.evidence:
