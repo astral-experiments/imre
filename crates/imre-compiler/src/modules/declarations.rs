@@ -13,7 +13,6 @@ pub(super) fn module(name: &str) -> Option<&'static str> {
         "email.policy",
         "importlib",
         "importlib.resources",
-        "stat",
         "warnings",
     ]
     .into_iter()

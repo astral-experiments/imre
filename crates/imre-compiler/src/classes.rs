@@ -385,12 +385,14 @@ fn collect_class(
                         "StrEnum methods cannot override member metadata or special behavior",
                     ));
                 }
+                let unary_protocol = matches!(
+                    name,
+                    "__str__" | "__bool__" | "__iter__" | "__copy__" | "__fspath__"
+                ) || (mapping && name == "__len__");
                 if name.starts_with("__")
-                    && !matches!(
-                        name,
-                        "__init__" | "__str__" | "__bool__" | "__iter__" | "__copy__"
-                    )
-                    && !(mapping && matches!(name, "__getitem__" | "__len__" | "__contains__"))
+                    && name != "__init__"
+                    && !unary_protocol
+                    && !(mapping && matches!(name, "__getitem__" | "__contains__"))
                     && !(name == "__post_init__" && dataclass.is_some())
                     && !(name == "__repr__" && exception_layout)
                 {
@@ -427,18 +429,10 @@ fn collect_class(
                 {
                     return Err(module.error(method, "a property getter must take only self"));
                 }
-                if matches!(
-                    name,
-                    "__str__"
-                        | "__repr__"
-                        | "__post_init__"
-                        | "__bool__"
-                        | "__iter__"
-                        | "__copy__"
-                        | "__len__"
-                ) && (kind != MethodKind::Instance
-                    || method.parameters.len() != 1
-                    || first.is_none_or(|parameter| parameter.default.is_some()))
+                if (unary_protocol || matches!(name, "__repr__" | "__post_init__"))
+                    && (kind != MethodKind::Instance
+                        || method.parameters.len() != 1
+                        || first.is_none_or(|parameter| parameter.default.is_some()))
                 {
                     return Err(module.error(
                         method,

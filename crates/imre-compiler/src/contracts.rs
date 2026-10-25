@@ -85,7 +85,8 @@ impl Builtin {
                     | TextOperation::Split(_)
                     | TextOperation::Partition
                     | TextOperation::Unquote
-                    | TextOperation::ShlexSplit => true,
+                    | TextOperation::ShlexSplit
+                    | TextOperation::ShlexQuote => true,
                     TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
@@ -173,7 +174,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::TimeSleep | Self::PercentInteger => Contract::new(true, PreservesLists),
+            Self::TimeSleep | Self::PercentScalar => Contract::new(true, PreservesLists),
             Self::Formatter(_) => Contract::new(true, PreservesLists),
             Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
@@ -189,7 +190,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::Process(operation) => match operation {
-                ProcessOperation::OpenFlag(_) => Contract::new(false, PreservesLists),
+                ProcessOperation::DescriptorConstant(_) => Contract::new(false, PreservesLists),
                 ProcessOperation::RunUntilComplete
                 | ProcessOperation::CloseLoop
                 | ProcessOperation::Gather { .. }
@@ -246,6 +247,7 @@ impl Builtin {
                 | ProcessOperation::OsErrorField(_)
                 | ProcessOperation::Strerror
                 | ProcessOperation::Which
+                | ProcessOperation::RmTree
                 | ProcessOperation::Copy(_)
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
@@ -288,6 +290,7 @@ impl Builtin {
             | Self::RegexGroupDict
             | Self::DictGet
             | Self::DictCopy
+            | Self::DeepCopy
             | Self::RecordCopy
             | Self::JsonDecode(_)
             | Self::CsvReader { .. }
@@ -380,6 +383,7 @@ impl Builtin {
             | Self::EnumString
             | Self::StringListContains
             | Self::StringContains
+            | Self::BytesContains
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
             Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
@@ -391,6 +395,7 @@ impl Builtin {
             | Self::StringListSortSuffix(_)
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
+            | Self::BytesContainsInt
             | Self::DictDelete
             | Self::DictPop
             | Self::DictTryPop(_)
@@ -450,6 +455,7 @@ impl Builtin {
             | Self::CounterNew
             | Self::CounterTotal
             | Self::DictAsBase
+            | Self::DictClear
             | Self::DictIter(_)
             | Self::ExceptionWithCause
             | Self::GlobalSet(_)
@@ -712,6 +718,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_roll"
                 | "imre_time_sleep"
                 | "imre_str_percent_int"
+                | "imre_str_percent_text"
                 | "imre_formatter_format"
                 | "imre_formatter_time"
                 | "imre_formatter_message"
@@ -732,6 +739,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_bytes"
                 | "imre_bytes_count"
                 | "imre_bytes_list"
+                | "imre_bytes_contains_int"
                 | "imre_byte_output_finish"
                 | "imre_bytes_get"
                 | "imre_bytes_get_index"

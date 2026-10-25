@@ -15,6 +15,7 @@ use crate::watch::FileSystem;
 mod declarations;
 mod empty_keywords;
 mod entry_profile;
+mod namedtuple_fields;
 mod os;
 mod reachability;
 mod type_aliases;
@@ -122,6 +123,7 @@ pub(crate) enum Intrinsic {
     RawDescriptionHelpFormatter,
     FutureAnnotations,
     ShallowCopy,
+    DeepCopy,
     TypeChecking,
     GetLogger,
     GetLevelName,
@@ -175,6 +177,8 @@ pub(crate) enum Intrinsic {
     Stderr,
     Stdout,
     SysExecutable,
+    SysFlags,
+    SysDontWriteBytecode,
     SysPlatform,
     SysEncoding(&'static str),
     SysException,
@@ -185,6 +189,8 @@ pub(crate) enum Intrinsic {
     OsDevnull,
     SysExit,
     ShlexSplit,
+    ShlexQuote,
+    ShlexJoin,
     Ndiff,
     Final,
     Argv,
@@ -261,6 +267,7 @@ pub(crate) enum Intrinsic {
     PurePath(crate::ir::PathFlavor),
     Which,
     Copy(CopyOperation),
+    RmTree,
     ShutilError,
     SameFileError,
     SpecialFileError,
@@ -280,8 +287,9 @@ pub(crate) enum Intrinsic {
     GetCwd,
     Strerror,
     Fd(crate::ir::FdOperation),
-    OpenFlag(&'static str),
+    DescriptorConstant(&'static str),
     FsPath,
+    PosixNormcase,
     PosixPath(PosixPathOperation),
     Fnmatch(FnmatchOperation),
     Unquote,
@@ -466,6 +474,8 @@ impl IntrinsicModule {
             (Self::Sys, "exception") => Intrinsic::SysException,
             (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding("getdefaultencoding"),
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
+            (Self::Sys, "flags") => Intrinsic::SysFlags,
+            (Self::Sys, "dont_write_bytecode") => Intrinsic::SysDontWriteBytecode,
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
             (Self::Os, "name") => Intrinsic::OsName,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
@@ -493,6 +503,8 @@ impl IntrinsicModule {
             (Self::Logging, "ERROR") => Intrinsic::LogLevel(40),
             (Self::Logging, "CRITICAL" | "FATAL") => Intrinsic::LogLevel(50),
             (Self::Shlex, "split") => Intrinsic::ShlexSplit,
+            (Self::Shlex, "quote") => Intrinsic::ShlexQuote,
+            (Self::Shlex, "join") => Intrinsic::ShlexJoin,
             (Self::Difflib, "ndiff") => Intrinsic::Ndiff,
             (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
@@ -535,6 +547,7 @@ impl IntrinsicModule {
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,
+            (Self::Copy, "deepcopy") => Intrinsic::DeepCopy,
             (Self::Itertools, "count") => Intrinsic::Count,
             (Self::Itertools, "tee") => Intrinsic::Tee,
             (Self::Itertools, "islice") => Intrinsic::Islice,
@@ -566,6 +579,7 @@ impl IntrinsicModule {
             (Self::Pathlib, "PureWindowsPath") => {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
+            (Self::Shutil, "rmtree") => Intrinsic::RmTree,
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Shutil, "copyfile") => Intrinsic::Copy(CopyOperation::File),
             (Self::Shutil, "copymode") => Intrinsic::Copy(CopyOperation::Mode),
@@ -594,6 +608,7 @@ impl IntrinsicModule {
             (Self::Os, "getenv") => Intrinsic::GetEnv,
             (Self::Os, "getcwd") => Intrinsic::GetCwd,
             (Self::Os, "fspath") => Intrinsic::FsPath,
+            (Self::PosixPath, "normcase") => Intrinsic::PosixNormcase,
             (Self::Os, "devnull") => Intrinsic::OsDevnull,
             (Self::PosixPath, "exists") => Intrinsic::OsPathExists,
             (Self::PosixPath, "commonpath") => Intrinsic::PosixPath(PosixPathOperation::Commonpath),
@@ -636,6 +651,10 @@ pub(crate) struct SourceModule {
 }
 
 impl SourceModule {
+    pub(crate) fn is_bundled(&self, name: &str) -> bool {
+        self.bundled && self.name == name
+    }
+
     /// A type-only import in a native stub does not add a member to the C module.
     fn export(&self, name: &str) -> Option<Binding> {
         let binding = *self.bindings.get(name)?;
@@ -651,6 +670,7 @@ impl SourceModule {
 }
 
 pub(crate) struct SourceGraph {
+    pub(crate) command_startup: Option<(crate::CommandFlags, String)>,
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) entry_profile: entry_profile::Profile,
@@ -668,6 +688,13 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    pub(crate) fn is_unittest_main(&self, id: DefinitionId) -> bool {
+        let owner = &self.modules[id.module];
+        owner.bundled
+            && owner.name == "unittest"
+            && owner.bindings.get("main") == Some(&Binding::Definition(id))
+    }
+
     /// Keep module indices stable for the semantic cache. Only after lowering
     /// expose the files a disk build must revalidate and protect from writes.
     pub(crate) fn disk_inputs(
@@ -675,10 +702,11 @@ impl SourceGraph {
         profile: Option<&Path>,
     ) -> (crate::SourceInputs, Vec<PathBuf>) {
         let mut inputs = std::mem::take(&mut self.inputs);
-        let mut modules = self.modules.iter();
-        inputs
-            .files
-            .retain(|_| !modules.next().expect("one input per module").bundled);
+        let mut modules = self.modules.iter().enumerate();
+        inputs.files.retain(|_| {
+            let (id, module) = modules.next().expect("one input per module");
+            !module.bundled && !(id == self.entry && self.command_startup.is_some())
+        });
         let paths = inputs
             .files
             .iter()
@@ -886,6 +914,37 @@ impl SourceGraph {
         loader.finish(entry, filename, reachable_only, None)
     }
 
+    /// Parse command bytes as __main__; only a non-safe command sees the working directory.
+    pub(crate) fn command(
+        command: &crate::PythonCommand,
+        options: &crate::CompileOptions,
+        fs: FileSystem<'_>,
+    ) -> Result<Self, String> {
+        let root = std::env::current_dir().map_err(|e| e.to_string())?;
+        let mut loader = Loader::new(root.clone(), &options.extension_paths, fs)?;
+        loader.skip_current_root = command.flags.safe_path;
+        loader.reachable_only = options.reachable_only || options.entry_profile.is_some();
+        let filename = root.join("<string>.py");
+        let entry = loader.add_source(
+            filename.clone(),
+            filename.clone(),
+            "__main__".into(),
+            false,
+            &command.source,
+            crate::SourceKind::Command,
+        )?;
+        loader.scan(entry)?;
+        let reachable_only = loader.reachable_only;
+        let mut graph = loader.finish(
+            entry,
+            filename,
+            reachable_only,
+            options.entry_profile.as_deref(),
+        )?;
+        graph.command_startup = Some((command.flags, command.executable.clone()));
+        Ok(graph)
+    }
+
     #[cfg(test)]
     pub(crate) fn load(
         entry: &Path,
@@ -1060,6 +1119,7 @@ struct Loader<'a> {
     loading: HashSet<ModuleId>,
     import_depth: usize,
     allow_imports: bool,
+    skip_current_root: bool,
     reachable_only: bool,
     initialization: Vec<(ModuleId, Range<usize>)>,
 }
@@ -1097,6 +1157,7 @@ impl<'a> Loader<'a> {
             loading: HashSet::new(),
             import_depth: 0,
             allow_imports: true,
+            skip_current_root: false,
             reachable_only: false,
             initialization: Vec::new(),
         })
@@ -1110,15 +1171,34 @@ impl<'a> Loader<'a> {
         is_package: bool,
         source: &str,
     ) -> Result<ModuleId, String> {
+        self.add_source(
+            path,
+            identity,
+            name,
+            is_package,
+            source,
+            crate::SourceKind::File,
+        )
+    }
+
+    fn add_source(
+        &mut self,
+        path: PathBuf,
+        identity: PathBuf,
+        name: String,
+        is_package: bool,
+        source: &str,
+        kind: crate::SourceKind,
+    ) -> Result<ModuleId, String> {
         self.inputs.files.push((
             path.clone(),
             identity.clone(),
             blake3::hash(source.as_bytes()).to_hex().to_string(),
         ));
-        let source = crate::normalize_source(source)
+        let source = crate::normalize_source(source, kind)
             .map_err(|error| format!("{}: {error}", path.display()))?
             .into_owned();
-        let parsed = self.session.add(&path, &source)?;
+        let parsed = self.session.add(&path, &source, kind)?;
         let id = self.modules.len();
         self.by_name.insert(name.clone(), id);
         self.by_path.insert(identity, id);
@@ -1219,6 +1299,7 @@ impl<'a> Loader<'a> {
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
         let mut graph = SourceGraph {
+            command_startup: None,
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
@@ -1250,6 +1331,7 @@ impl<'a> Loader<'a> {
         });
         let mut executable = false;
         let mut segment = 0;
+        let mut field_separators = Vec::new();
         for (index, statement) in parsed.syntax().body.iter().enumerate() {
             if self.modules[id].archive.is_some() && !native_declaration(statement) {
                 return Err(self.modules[id].error(statement,
@@ -1346,6 +1428,15 @@ impl<'a> Loader<'a> {
                         && matches!(module_value(statement), Some(ast::Expr::Call(call))
                         if resolve_binding(&self.modules, id, &call.func) == Some(Binding::Intrinsic(Intrinsic::NamedTuple))) =>
                 {
+                    if let Some(ast::Expr::Call(call)) = module_value(statement)
+                        && let [_, fields] = call.arguments.args.as_ref()
+                    {
+                        namedtuple_fields::separators(
+                            fields,
+                            &self.modules[id].source,
+                            &mut field_separators,
+                        );
+                    }
                     if executable && id == 0 {
                         return Err(self.modules[id].error(
                             statement,
@@ -1391,6 +1482,15 @@ impl<'a> Loader<'a> {
                     self.modules[id].executable.push(index);
                 }
             }
+        }
+        if !field_separators.is_empty() {
+            let module = &mut self.modules[id];
+            let mut source = module.source.clone();
+            for range in field_separators {
+                let spaces = " ".repeat(range.len());
+                source.replace_range(range, &spaces);
+            }
+            module.parsed = self.session.replace_source(id, source);
         }
         self.loading.remove(&id);
         self.initialization
@@ -1562,7 +1662,7 @@ impl<'a> Loader<'a> {
     }
 
     fn reject_stdlib_shadow(&mut self, name: &str) -> Result<(), String> {
-        if self.allow_imports {
+        if self.allow_imports && !self.skip_current_root {
             for base in [
                 self.root.join(name.split('.').next().unwrap()),
                 self.root.join(name.replace('.', "/")),
@@ -1631,6 +1731,20 @@ impl<'a> Loader<'a> {
             self.scan(id)?;
             return Ok(id);
         }
+        if name == "stat" {
+            self.reject_stdlib_shadow(name)?;
+            let prefix = if cfg!(target_os = "macos") {
+                include_str!("../stdlib/stat/darwin.py")
+            } else {
+                include_str!("../stdlib/stat/linux.py")
+            };
+            let source = format!("{prefix}\n{}", include_str!("../stdlib/stat/common.py"));
+            let path = self.root.join("stat.py");
+            let id = self.add(path.clone(), path, name.into(), false, &source)?;
+            self.modules[id].bundled = true;
+            self.scan(id)?;
+            return Ok(id);
+        }
         if !self.allow_imports {
             return Err("imports require a source file and a first-party module root".into());
         }
@@ -1682,6 +1796,9 @@ impl<'a> Loader<'a> {
         let roots = std::iter::once(&self.root).chain(&self.extension_roots);
         let mut resolved = None;
         for (root_index, root) in roots.enumerate() {
+            if root_index == 0 && self.skip_current_root {
+                continue;
+            }
             if parent_root.is_some_and(|index| index != root_index) {
                 continue;
             }
