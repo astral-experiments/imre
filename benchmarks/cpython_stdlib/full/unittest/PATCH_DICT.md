@@ -7,26 +7,8 @@ the context exits, including after a return or an exception. A patcher also
 supports explicit `start()` and `stop()`; an unstarted patcher's `stop()`
 returns `None`. Passing `None` as the updates argument raises `TypeError`.
 
-The [default-fixture receipt](patch-dict-default-linux.json.gz) covers all 18
-unchanged methods in the pinned `testmock/testpatch.py` that directly use
-`patch.dict`. For ordinary and reachable compilation at both O0 and O3:
+The [primary report](native-linux.json) attempts all 18 unchanged methods that directly call `patch.dict`. In the [ordinary and reachable O0/O3 run](https://github.com/astral-sh/imre/actions/runs/40226227778), three passed with native fixtures, bodies and assertions: `test_patch_dict_as_context_manager`, `test_patch_dict_start_stop` and `test_patch_dict_stop_without_start`. Nine stopped in native compilation; six stopped while staging their original fixtures. The report retains their individual diagnostics.
 
-| Original fixture and body | Occurrences |
-| --- | ---: |
-| Passed, body, assertions, patch and fixture all native | 2 |
-| Native compiler stopped with the recorded diagnostic | 10 |
-| Original fixture or module binding could not be staged | 6 |
+The [earlier standalone receipt](patch-dict-default-linux.json.gz) records two native passes, ten compiler blockers and six fixture blockers for the same 18 occurrences on compiler `f446325`.
 
-The two passes are `PatchTest.test_patch_dict_as_context_manager` and
-`PatchTest.test_patch_dict_start_stop`. The primary [1,090-occurrence
-report](native-linux.json) runs those same bodies and assertions with a host
-fixture. These are two ways to run the same occurrences. The remaining
-`test_patch_dict_stop_without_start` reaches its original line 827,
-`self.assertFalse(patcher.stop())`: the assertion parameter on this compiler
-requires `bool`, while `stop()` may return `None`. It remains a reported
-compiler failure. The supplemental receipt records the diagnostic or fixture
-binding for every other method, along with the upstream and compiler hashes.
-
-```sh
-gzip -dc patch-dict-default-linux.json.gz | jq '.modes["reachable-O3"].records'
-```
+The original `test_patch_dict_decorator_resolution` now gets past the custom exception layout during the verified import of `test.support`. The [per-mode receipt](patch-dict-rechecked-linux.json) keeps this occurrence blocked: ordinary compilation stops at `_MemoryWatchdog.__init__` assigning `procfile` (line 1155), while reachable compilation reaches a platform conditional in the class body (line 1613). Both diagnostics were independently reproduced at O0 and O3.

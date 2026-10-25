@@ -13,12 +13,17 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from reference_report import checked_reference
 sys.path.insert(0, str(HERE.parent))
-from suite_inventory import cases, load_suite
+from suite_inventory import cases, discovery_resources, load_suite
 
 
-def suite_names(mod, default, refs):
+def suite_metadata(mod):
     manifest = HERE / mod / "UPSTREAM.json"
-    metadata = json.loads(manifest.read_bytes()) if manifest.exists() else {}
+    return json.loads(manifest.read_bytes()) if manifest.exists() else {}
+
+
+def suite_names(mod, default, refs, metadata=None):
+    if metadata is None:
+        metadata = suite_metadata(mod)
     names = []
     for path in refs:
         name = json.loads(path.read_bytes()).get("module")
@@ -102,16 +107,18 @@ def main():
             raise ValueError(f"no {sys.platform} reference ledger for {mod}")
         seen = Counter()
         early = 0
-        for suite in suite_names(mod, primary[mod], refs):
-            try:
-                module = importlib.import_module(suite)
-                if not Path(module.__file__).resolve().is_relative_to(lib / "test"):
-                    raise ValueError(f"{suite} resolved outside the staged tree")
-                seen.update(case.id() for case in cases(load_suite(suite)))
-            except unittest.SkipTest as exc:
-                skips = early_skips(suite, str(exc), entries)
-                seen.update(skips.keys())
-                early += len(skips)
+        metadata = suite_metadata(mod)
+        with discovery_resources(metadata):
+            for suite in suite_names(mod, primary[mod], refs, metadata):
+                try:
+                    module = importlib.import_module(suite)
+                    if not Path(module.__file__).resolve().is_relative_to(lib / "test"):
+                        raise ValueError(f"{suite} resolved outside the staged tree")
+                    seen.update(case.id() for case in cases(load_suite(suite)))
+                except unittest.SkipTest as exc:
+                    skips = early_skips(suite, str(exc), entries)
+                    seen.update(skips.keys())
+                    early += len(skips)
         if seen != expected:
             raise ValueError(f"{mod}: missing {dict(expected-seen)}, extra {dict(seen-expected)}")
         print(f"{mod}: {seen.total() - early} discovered, {early} skipped before discovery")

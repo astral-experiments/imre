@@ -42,7 +42,10 @@ def stage(root, cpython_source):
 
 def known_blockers(reachable, level):
     archive = json.loads(gzip.decompress((HERE / 'patch-dict-default-linux.json.gz').read_bytes()))
-    records = archive['modes'][('reachable' if reachable else 'ordinary') + f'-O{level}']['records']
+    mode = ('reachable' if reachable else 'ordinary') + f'-O{level}'
+    records = archive['modes'][mode]['records']
+    rechecked = json.loads((HERE / 'patch-dict-rechecked-linux.json').read_bytes())
+    records = [*records, *rechecked['modes'][mode]]
     return {r['id']: r for r in records if r['outcome'] == 'blocked'}
 
 

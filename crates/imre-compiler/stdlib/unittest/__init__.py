@@ -3,6 +3,7 @@
 
 import difflib
 import re
+from fnmatch import fnmatchcase
 from types import ModuleType
 from typing import ClassVar
 
@@ -134,17 +135,22 @@ def _mapping_text(mapping: dict[str, str], pretty: bool) -> str:
 
 class TestCase:
     failureException: ClassVar[type[Exception]] = AssertionError
+    _testMethodName: str
     longMessage: bool
     maxDiff: int | None
     _diffThreshold: int
 
     def __init__(self) -> None:
+        self._testMethodName = "runTest"
         self.longMessage = True
         self.maxDiff = 640
         self._diffThreshold = 65536
 
     def countTestCases(self) -> int:
         return 1
+
+    def id(self) -> str:
+        return self.__class__.__module__ + "." + self.__class__.__qualname__ + "." + self._testMethodName
 
     def _formatMessage(self, msg: str | None, standardMsg: str) -> str:
         if msg is None:
@@ -160,6 +166,14 @@ class TestCase:
 
     def skipTest(self, reason: str) -> None:
         raise SkipTest(reason)
+
+    def assertIsNone(self, obj: object, msg: str | None = None) -> None:
+        if obj is not None:
+            self.fail(self._formatMessage(msg, repr(obj) + " is not None"))
+
+    def assertIsNotNone(self, obj: object, msg: str | None = None) -> None:
+        if obj is None:
+            self.fail(self._formatMessage(msg, "unexpectedly None"))
 
     def _raise_missing_callable(self, kind: str, name: str) -> None:
         raise self.failureException(self._formatMessage(None, kind + " not raised by " + name))
@@ -197,9 +211,10 @@ class TestCase:
         if not a >= b:
             self.fail(self._formatMessage(msg, f"{a!r} not greater than or equal to {b!r}"))
 
-    def _baseAssertEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    def _baseAssertEqual(self, first: bool | int, second: bool | int, msg: str | None = None) -> None:
         if first != second:
-            raise self.failureException(self._formatMessage(msg, f"{first!r} != {second!r}"))
+            left, right = _short_reprs(repr(first), repr(second))
+            raise self.failureException(self._formatMessage(msg, left + " != " + right))
 
     def _truncateMessage(self, message: str, diff: str) -> str:
         limit = self.maxDiff
@@ -296,6 +311,35 @@ class TestCase:
         message = sides[0] + " != " + sides[1]
         diff = list(difflib.ndiff(_mapping_text(d1, True).splitlines(), _mapping_text(d2, True).splitlines()))
         self.fail(self._formatMessage(msg, self._truncateMessage(message, "\n" + "\n".join(diff))))
+
+    def _failMembership(self, member: str, container: str, msg: str | None, expected: bool) -> None:
+        detail = " not found in " if expected else " unexpectedly found in "
+        self.fail(self._formatMessage(msg, member + detail + container))
+
+    def _assertTextMembership(self, member: str, container: str, msg: str | None = None, *, expected: bool) -> None:
+        if (member in container) != expected:
+            self._failMembership(repr(member), repr(container), msg, expected)
+
+    def _assertTextListMembership(self, member: str, container: list[str], msg: str | None = None, *, expected: bool) -> None:
+        if (member in container) != expected:
+            self._failMembership(repr(member), repr(container), msg, expected)
+
+    def _assertIntListMembership(self, member: int, container: list[int], msg: str | None = None, *, expected: bool) -> None:
+        found = False
+        for item in container:
+            if member == item:
+                found = True
+                break
+        if found != expected:
+            self._failMembership(repr(member), repr(container), msg, expected)
+
+    def _assertTextDictMembership(self, member: str, container: dict[str, str], msg: str | None = None, *, expected: bool) -> None:
+        if (member in container) != expected:
+            self._failMembership(repr(member), repr(container), msg, expected)
+
+    def _assertIntKeyMembership(self, member: object, container: dict[int, str], msg: str | None = None, *, expected: bool) -> None:
+        if (member in container) != expected:
+            self._failMembership(repr(member), repr(container), msg, expected)
 
     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
         if first == second:
@@ -425,6 +469,40 @@ class TestResult:
 from typing import Callable
 import sys
 import time
+
+
+class TestLoader:
+    testMethodPrefix: str
+    testNamePatterns: list[str] | None
+    errors: list[str]
+
+    def __init__(self) -> None:
+        self.testMethodPrefix = "test"
+        self.testNamePatterns = None
+        self.errors = []
+
+    def _getTestCaseNames(self, owner: str, names: list[str], descriptors: list[str]) -> list[str]:
+        prefix = self.testMethodPrefix
+        if not prefix or prefix.startswith("_"):
+            raise NotImplementedError("native TestLoader cannot enumerate Python's private class metadata")
+        for name in descriptors:
+            if name.startswith(prefix):
+                raise NotImplementedError("native TestLoader cannot inspect descriptor " + owner + "." + name)
+        patterns = self.testNamePatterns
+        selected: list[str] = []
+        for name in names:
+            if name.startswith(prefix):
+                if patterns is None:
+                    selected.append(name)
+                else:
+                    for pattern in patterns:
+                        if fnmatchcase(owner + "." + name, pattern):
+                            selected.append(name)
+                            break
+        return selected
+
+
+defaultTestLoader = TestLoader()
 
 
 def main() -> None:
