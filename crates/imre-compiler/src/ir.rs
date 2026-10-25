@@ -570,6 +570,7 @@ pub(crate) enum Builtin {
     },
     ImportErrorField(u32),
     ImportErrorReset,
+    ImportErrorRejectReset,
     ExceptionFieldRepr,
     ExceptionFieldLen,
     ExceptionFieldIndex,

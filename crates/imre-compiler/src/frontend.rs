@@ -3868,7 +3868,7 @@ impl<'a> Checker<'a> {
     /// Class-form raises construct a new instance, just like an explicit call.
     fn simple_exception(&mut self, call: &ast::ExprCall, kind: u32) -> Result<Expr, String> {
         if self.is_import_error(kind) {
-            return self.import_error(call, kind);
+            return self.import_error(call, kind, None);
         }
         if kind == 32 {
             return self.system_exit(call, false);
@@ -6028,11 +6028,7 @@ impl<'a> Checker<'a> {
                 None => self.expr(&attribute.value)?,
             };
             if receiver.ty == Type::ImportException && attribute.attr.as_str() == "__init__" {
-                let replacement = self.import_error(call, 41)?;
-                return Ok(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(Builtin::ImportErrorReset, vec![receiver, replacement]),
-                });
+                return self.import_error(call, 41, Some(receiver));
             }
             if matches!(receiver.ty, Type::NamedException(_))
                 && matches!(attribute.attr.as_str(), "__init__" | "__post_init__")

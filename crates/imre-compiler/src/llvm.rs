@@ -4588,6 +4588,13 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_import_error_reset", &[&args[0].value, &args[1].value]);
                 none()
             }
+            Builtin::ImportErrorRejectReset => {
+                self.void_call(
+                    "imre_import_error_reject_reset",
+                    &[&args[0].value, &args[1].value, &args.last().unwrap().value],
+                );
+                none()
+            }
             Builtin::ImportErrorField(field) => Value {
                 ty: returns,
                 operand: self.instruction(format!(
@@ -6685,6 +6692,7 @@ declare ptr @imre_exception_message(ptr)
 declare ptr @imre_import_error_new(i32, ptr, ptr, i32, i64, i32, i64, i32, i64)
 declare ptr @imre_import_error_field(ptr, i32)
 declare void @imre_import_error_reset(ptr, ptr)
+declare void @imre_import_error_reject_reset(ptr, ptr, ptr)
 declare ptr @imre_exception_field_repr(ptr)
 declare i64 @imre_exception_field_len(ptr)
 declare ptr @imre_exception_field_index(ptr, i64)
