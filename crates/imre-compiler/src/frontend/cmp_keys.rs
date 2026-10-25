@@ -291,6 +291,61 @@ impl Checker<'_> {
         }))
     }
 
+    /// Sorting calls the saved comparator only when there are two objects to order.
+    pub(super) fn sort_cmp_key(
+        &mut self,
+        values: Expr,
+        key: Expr,
+        frame: usize,
+        element: Type,
+        reverse: Expr,
+        site: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let comparator = if let Some(source) = self.types.deferred_cmp_source(frame) {
+            self.specialize_comparator(source, element, element, site)?
+        } else {
+            self.cmp_field(key, frame, 0)
+        };
+        let Some((params, returns)) = self.types.signature(comparator.ty) else {
+            let name = functools::noncallable_type(comparator.ty)
+                .ok_or_else(|| error(self.source, site, "unsupported sort comparator"))?;
+            let length = Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(Builtin::Len, vec![values]),
+            };
+            let test = pipelines::compare(Compare::Greater, length, pipelines::integer(1));
+            let fail = raised(
+                Type::None,
+                "TypeError",
+                &format!("'{name}' object is not callable"),
+                vec![comparator],
+            );
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::Conditional(
+                    Box::new(test),
+                    Box::new(fail),
+                    Box::new(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::None,
+                    }),
+                ),
+            });
+        };
+        if params != [element, element] || !matches!(returns, Type::Bool | Type::Int | Type::Float)
+        {
+            return Err(error(
+                self.source,
+                site,
+                "sort comparator needs two element arguments and a numeric result",
+            ));
+        }
+        Ok(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::SortByComparator, vec![values, comparator, reverse]),
+        })
+    }
+
     /// Only the left key supplies the comparator, even when two factories are involved.
     fn compare_cmp_keys(
         &mut self,
@@ -365,7 +420,8 @@ impl Checker<'_> {
                 args: ir::CallArgs::positional(args),
             },
         };
-        let zero = match returns {
+        let comparison = powers::integer(comparison);
+        let zero = match comparison.ty {
             Type::Int => pipelines::integer(0),
             Type::Float => Expr {
                 ty: Type::Float,

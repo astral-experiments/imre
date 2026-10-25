@@ -30,13 +30,7 @@ impl Checker<'_> {
             && self.resolve(expr).is_none()
     }
 
-    /// Keep the actual argument alive through the cached or original function call.
-    pub(super) fn pack_len_argument(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        let value = self.expr(expression)?;
-        self.pack_len_value(value, expression)
-    }
-
-    /// Pack the concrete item when a direct call or iterator invokes len.
+    /// Pack and retain the actual argument for a direct, cached or iterator call to len.
     pub(super) fn pack_len_value(
         &mut self,
         value: Expr,

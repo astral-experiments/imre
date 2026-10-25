@@ -20,7 +20,7 @@ REJECTED = {
     "conditional_wrong_context": "values: list[str] = [] if True else [1]\n",
     "conditional_wrong_optional": "value: int | None = None if True else False\n",
     "conditional_distinct_optionals": "def bad(number: int | None, flag: bool | None, choose: bool) -> int | None:\n    return number if choose else flag\n",
-    "conditional_narrowing_does_not_escape": "def bad(value: int | None) -> int:\n    result = value + 1 if value is not None else 0\n    return value * result\n",
+    "conditional_narrowing_does_not_escape": "def bad(value: int | None) -> int:\n    result = value + 1 if value is not None else 0\n    return value\n",
     "conditional_dead_dynamic": 'print(1 if True else eval("2"))\n',
     "conditional_unused_dynamic": 'def unused() -> int:\n    return eval("1") if False else 2\nprint(1)\n',
     "conditional_recursion": "def recursive(value: int) -> int:\n    return recursive(value) if False else value\nrecursive(1)\n",

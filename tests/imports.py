@@ -17,7 +17,7 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 REJECTED = {
     "private_textwrap_module": ({"main.py": "import __imre_textwrap_wrapper__\n"}, "private textwrap implementation"),
     "private_textwrap_helper": ({"main.py": "from textwrap import _chunk_text\n"}, "unsupported sealed standard-library export textwrap._chunk_text"),
-    "missing_stdlib_export": ({"main.py": "from math import imre_test_missing_export\n"}, "unsupported sealed standard-library export"),
+    "unsupported_stdlib": ({"main.py": "import turtle\n"}, 'standard-library imports and shadowing are unsupported: "turtle"'),
     "missing": ({"main.py": "import missing_dependency\n"}, "cannot resolve first-party"),
     "wildcard": ({"main.py": "from helper import *\n", "helper.py": HELPER}, "wildcard"),
     "dynamic": ({"main.py": '__import__("helper")\n', "helper.py": HELPER}, "unsupported"),

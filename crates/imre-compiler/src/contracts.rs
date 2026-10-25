@@ -448,6 +448,7 @@ impl Builtin {
             | Self::Sha256Hex
             | Self::Sha256New
             | Self::StrDescriptor(_)
+            | Self::Placeholder(_)
             | Self::NewPlainObject
             | Self::InspectSentinel
             | Self::JsonDecoderNew
@@ -526,6 +527,7 @@ impl Builtin {
             Self::Append | Self::JoinBufferAppend | Self::SortByKeys => {
                 Contract::new(true, PreservesOwners)
             }
+            Self::SortByComparator => Contract::new(true, Unknown),
             Self::ListReserveRange => Contract::new(false, PreservesOwners),
             Self::AnnotationRef
             | Self::BinaryOpen(_)

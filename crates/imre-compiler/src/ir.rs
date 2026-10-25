@@ -112,6 +112,8 @@ pub(crate) enum Type {
     Calendar(CalendarType),
     /// An exact instance of Python's plain, identity-only object.
     PlainObject,
+    /// The functools singleton and its publicly observable constructor are distinct objects.
+    Placeholder(PlaceholderKind),
     /// A source function from a heterogeneous overload list.
     FunctionRef,
     /// The shared failing function returned by typing.overload.
@@ -356,6 +358,8 @@ impl std::fmt::Display for Type {
             Self::PlainObject => "object",
             Self::FunctionRef | Self::OverloadStub => "function",
             Self::StrDescriptor(_) => "method_descriptor",
+            Self::Placeholder(PlaceholderKind::Value) => "functools._PlaceholderType",
+            Self::Placeholder(PlaceholderKind::Class) => "type",
             Self::ProcessSelectorClass => "subprocess selector class",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::ModuleSpec(_) => "importlib.machinery.ModuleSpec",
@@ -979,6 +983,7 @@ pub(crate) enum Builtin {
     Abs,
     /// Stable permutation of a fully typed list by precomputed scalar keys.
     SortByKeys,
+    SortByComparator,
     ListExtendUnhinted,
     SortDetach,
     SortRestore,
@@ -1074,6 +1079,7 @@ pub(crate) enum Builtin {
     NewPlainObject,
     Typing(TypingOperation),
     StrDescriptor(StrDescriptor),
+    Placeholder(PlaceholderKind),
     InspectSentinel,
     HashAvailable,
     Sha256Update,
@@ -1459,6 +1465,13 @@ pub(crate) enum RegexCapture {
     Absent,
     Start,
     End,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[repr(u32)]
+pub(crate) enum PlaceholderKind {
+    Value,
+    Class,
 }
 
 /// These descriptor values call the same native operation as their bound string methods.
@@ -2015,6 +2028,10 @@ impl InstanceType {
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
             }
+            Self::Exact(Type::BuiltinClass) => matches!(
+                ty,
+                Type::BuiltinClass | Type::Placeholder(PlaceholderKind::Class)
+            ),
             Self::Exact(expected) => expected == ty,
             Self::ForwardRef => matches!(ty, Type::ForwardRef(_)),
             Self::StrEnum => matches!(ty, Type::StrEnum(_)),

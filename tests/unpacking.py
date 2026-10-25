@@ -27,7 +27,7 @@ REJECTED = {
     "multiple_starred_targets": "first, *middle, *last = [1, 2, 3]\n",
     "bare_starred_target": "*rest = [1, 2]\n",
     "optional_sequence_needs_guard": "def bad(values: list[int] | None) -> int:\n    first, = values\n    return first\n",
-    "optional_element_needs_guard": "def bad(values: list[int | None]) -> int:\n    first, = values\n    return first * 2\n",
+    "optional_element_needs_guard": "def bad(values: list[int | None]) -> int:\n    first, = values\n    return first\n",
     "chain_rhs_may_fail_before_binding": 'def fail() -> int:\n    raise ValueError("rhs")\ndef bad() -> None:\n    try:\n        first = second = fail()\n    except ValueError:\n        print(first)\n',
     "starred_loop_target_may_be_unbound": "rows: list[list[int]] = []\nfor first, *rest in rows:\n    pass\nprint(rest)\n",
     "starred_comprehension_target_is_private": "values = [first for first, *rest in [[1, 2]]]\nprint(rest)\n",
