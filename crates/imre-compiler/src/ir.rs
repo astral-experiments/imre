@@ -1003,6 +1003,9 @@ pub(crate) enum ProcessOperation {
     },
     ContextEnter,
     ContextYield,
+    GeneratorNext,
+    GeneratorTake,
+    GeneratorYield,
     ContextExit,
     ContextThrow,
     IndirectCoroutine {

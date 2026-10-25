@@ -35,6 +35,7 @@ mod local_functions;
 mod logging;
 mod matching;
 mod module_values;
+mod native_generators;
 mod paths;
 mod pipelines;
 mod posixpath;
@@ -79,6 +80,7 @@ struct ClassInfo {
     keyword_copies: HashSet<usize>,
     cached: HashSet<usize>,
     generators: HashSet<usize>,
+    producer_items: HashMap<usize, Type>,
     contexts: HashSet<usize>,
 }
 
@@ -249,6 +251,7 @@ impl ClassInfo {
             keyword_copies: HashSet::new(),
             cached: HashSet::new(),
             generators: HashSet::new(),
+            producer_items: HashMap::new(),
             contexts: HashSet::new(),
             declarations,
             fields,
@@ -434,6 +437,22 @@ pub(crate) fn lower_with_owners(
                     if cached {
                         function.decorator_list.clear();
                     }
+                    let element = native_generators::item_type(
+                        &function, graph, module_id, &classes, &types,
+                    )?;
+                    if element.is_some() {
+                        if cached {
+                            return Err(
+                                module.error(&function, "generator functions cannot be cached")
+                            );
+                        }
+                        let range = function.returns.as_ref().unwrap().range();
+                        function.returns =
+                            Some(Box::new(ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+                                range,
+                                node_index: ast::AtomicNodeIndex::NONE,
+                            })));
+                    }
                     let signature = signature(
                         &function,
                         graph,
@@ -452,6 +471,9 @@ pub(crate) fn lower_with_owners(
                             return Err(module.error(&function, "@cache requires one exact immutable positional key and an annotated synchronous result"));
                         }
                         classes.cached.insert(signature.id);
+                    }
+                    if let Some(element) = element {
+                        classes.producer_items.insert(signature.id, element);
                     }
                     signatures.insert(
                         DefinitionId {
@@ -655,6 +677,7 @@ pub(crate) fn lower_with_owners(
             checker.returns = signature.returns;
             checker.asynchronous = signature.asynchronous;
             checker.method_context(signature.method);
+            checker.generator_item = classes.producer_items.get(&signature.id).copied();
             let mut params = Vec::new();
             for (parameter, signature) in definition
                 .parameters
@@ -1608,6 +1631,7 @@ struct Checker<'a> {
     /// A later local assignment shadows builtin iter throughout a function.
     local_iter: bool,
     context_method: bool,
+    generator_item: Option<Type>,
     asynchronous: bool,
     /// Capture only the outer sum of an assignment with a neighboring sum.
     zip_sum_rhs: Option<TextRange>,
@@ -1668,6 +1692,7 @@ impl<'a> Checker<'a> {
             zip_sum_rhs: None,
             asynchronous: false,
             context_method: false,
+            generator_item: None,
             zip_sums: HashMap::new(),
             source: &graph.modules[module].source,
             graph,
@@ -3385,6 +3410,25 @@ impl<'a> Checker<'a> {
                 }
             }
             ast::Stmt::Expr(expression) => {
+                if let ast::Expr::Yield(yielded) = &*expression.value
+                    && let Some(element) = self.generator_item
+                    && let Some(value) = &yielded.value
+                {
+                    let item = self.expr_expected(value, element)?;
+                    let resume =
+                        contexts::op(ir::ProcessOperation::GeneratorYield, Type::Bool, vec![item]);
+                    return Ok((
+                        vec![Statement::If(
+                            resume,
+                            Vec::new(),
+                            vec![Statement::Return(Expr {
+                                ty: Type::None,
+                                kind: ExprKind::None,
+                            })],
+                        )],
+                        true,
+                    ));
+                }
                 if let ast::Expr::Yield(yielded) = &*expression.value
                     && yielded.value.is_none()
                     && self.context_method
@@ -5602,6 +5646,13 @@ impl<'a> Checker<'a> {
                 .get(&definition)
                 .ok_or_else(|| error(self.source, call, "definition is not a callable function"))?
                 .clone();
+            if self.classes.producer_items.contains_key(&signature.id) {
+                return Err(error(
+                    self.source,
+                    call,
+                    "generator functions require direct iteration",
+                ));
+            }
             return self.source_call(call, &signature, None, 0);
         }
         if matches!(&*call.func, ast::Expr::Name(name) if self.names.contains_key(name.id.as_str()))
