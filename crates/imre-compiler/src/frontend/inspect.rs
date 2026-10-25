@@ -140,6 +140,12 @@ impl Checker<'_> {
         attr: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         let text = match attr.attr.as_str() {
+            "__objclass__" => {
+                return Ok(evaluated(
+                    receiver,
+                    annotations::builtin_type("str").unwrap(),
+                ));
+            }
             "__name__" => method.name().to_owned(),
             "__qualname__" => format!("str.{}", method.name()),
             _ => {
@@ -151,6 +157,52 @@ impl Checker<'_> {
             }
         };
         Ok(evaluated(receiver, unpacking::string(text)))
+    }
+
+    /// The supported descriptor values come from builtin type dictionaries.
+    /// Other exact scalar values have no descriptor protocol.
+    pub(super) fn is_method_descriptor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let arg = match (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) {
+            ([arg], []) => arg,
+            ([], [kw]) if kw.arg.as_deref() == Some("object") => &kw.value,
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "inspect.ismethoddescriptor requires one object",
+                ));
+            }
+        };
+        let value = self.expr(arg)?;
+        let result = match value.ty {
+            Type::StrDescriptor(_) => true,
+            Type::PlainObject
+            | Type::BuiltinClass
+            | Type::Int
+            | Type::Bool
+            | Type::Float
+            | Type::Str
+            | Type::StrLiteral(_)
+            | Type::Bytes
+            | Type::None => false,
+            _ => {
+                return Err(error(
+                    self.source,
+                    arg,
+                    "the native descriptor protocol for this type is unknown",
+                ));
+            }
+        };
+        Ok(evaluated(
+            value,
+            Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Bool(result),
+            },
+        ))
     }
 
     pub(super) fn invoke_descriptor(

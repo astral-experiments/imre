@@ -6030,6 +6030,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
                 return self.root_log(level, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::InspectIsMethodDescriptor)) => {
+                return self.is_method_descriptor(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::InspectGetattrStatic)) => {
                 return self.static_attribute(call);
             }

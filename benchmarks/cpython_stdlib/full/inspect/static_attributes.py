@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from annotationlib import get_annotations
 from inspect import _sentinel as sentinel, getattr_static
 import inspect
 
@@ -26,6 +27,10 @@ def change(row: Row) -> int:
 
 def omitted(default=inspect._sentinel) -> bool:
     return default is sentinel
+
+
+def annotated(value: str) -> bool:
+    return bool(value)
 
 
 def run() -> None:
@@ -61,6 +66,11 @@ def run() -> None:
     print(lower != None)
     print(lower.__name__)
     print(lower.__qualname__)
+    print(lower.__objclass__ is str)
+    print(get_annotations(annotated)["value"] is lower.__objclass__)
+    print(inspect.ismethoddescriptor(lower))
+    print(inspect.ismethoddescriptor(object=first))
+    print(inspect.ismethoddescriptor(str))
     print(repr(lower))
     print(lower("İßΜΈΣΟΣ"))
     print(str.lower("ΣΟΣ"))
