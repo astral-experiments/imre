@@ -9,7 +9,7 @@ on:
       audit:
         description: Source of the requested per-occurrence results
         type: choice
-        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup]
+        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace]
         required: true
 permissions:
   contents: read
@@ -75,6 +75,39 @@ jobs:
               fi
               PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/evidence.py "${tools[@]}" --result "$results/evidence-linux.json"
               python3 -B benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/logging/reference-linux.json "$results/evidence-linux.json"
+              ;;
+            cache-trace)
+              python3 -B - "$imre" "$runtime" "$results" <<'PYTHON'
+          import ast, json, shutil, subprocess, sys
+          from pathlib import Path
+          imre, runtime, out = map(Path, sys.argv[1:])
+          source = Path('benchmarks/cpython_stdlib/full/logging/cache_values.py').read_text()
+          lines = source.splitlines(keepends=True)
+          nodes = ast.parse(source).body
+          def probe(n):
+              entry, binary = out.parent/'cache-prefix.py', out.parent/'cache-prefix'
+              entry.write_text(''.join(lines[:nodes[n-1].end_lineno]))
+              built = subprocess.run([imre, 'build', entry, '-o', binary, '--no-cache', '--opt-level', '0', '--clang', '/usr/bin/clang-18', '--runtime', runtime], capture_output=True, text=True, timeout=90)
+              if built.returncode: raise RuntimeError(built.stderr)
+              child = subprocess.run([binary], capture_output=True, text=True, timeout=20)
+              print(n, nodes[n-1].lineno, child.returncode, child.stdout[-130:], child.stderr[-320:], flush=True)
+              return child
+          low, high = 0, len(nodes)
+          failed = probe(high)
+          if failed.returncode:
+              while high-low>1:
+                  middle=(low+high)//2
+                  if probe(middle).returncode: high=middle
+                  else: low=middle
+              failed=probe(high)
+              details={'node':high,'source':ast.get_source_segment(source,nodes[high-1]),'line':nodes[high-1].lineno,'returncode':failed.returncode,'stdout':failed.stdout,'stderr':failed.stderr}
+              if shutil.which('gdb'):
+                  bt=subprocess.run(['gdb','-q','--batch','-ex','run','-ex','bt','--args',out.parent/'cache-prefix'],capture_output=True,text=True,timeout=60)
+                  details['backtrace']=bt.stdout[-12000:]+bt.stderr[-900:]
+          else: details={'returncode':0,'stdout':failed.stdout,'stderr':failed.stderr}
+          print(details,flush=True)
+          (out/'cache-trace.json').write_text(json.dumps(details,indent=2)+chr(10))
+          PYTHON
               ;;
             startup)
               python3 -B - "$ref" "$imre" "$results" <<'PYTHON'
