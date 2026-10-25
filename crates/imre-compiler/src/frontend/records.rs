@@ -656,7 +656,11 @@ impl Checker<'_> {
         while let ast::Expr::Attribute(attribute) = root {
             root = &attribute.value;
         }
-        if self.is_class_receiver(root) {
+        if self.is_class_receiver(root)
+            || root
+                .as_name_expr()
+                .is_some_and(|n| self.class_lexical.contains(n.id.as_str()))
+        {
             None
         } else {
             let binding = self.graph.resolve(self.module, expression);
@@ -790,7 +794,7 @@ impl Checker<'_> {
 
     /// Instance access still evaluates the receiver for class/static methods,
     /// even though their native calls have no receiver parameter.
-    fn evaluated_receiver(&self, receiver: Option<Expr>, value: Expr) -> Expr {
+    pub(super) fn evaluated_receiver(&self, receiver: Option<Expr>, value: Expr) -> Expr {
         match receiver {
             None => value,
             Some(receiver) => Expr {
@@ -847,13 +851,32 @@ impl Checker<'_> {
         expected: Option<Type>,
     ) -> Result<Expr, String> {
         let owner = &self.classes.declarations.definitions[class];
+        if matches!(
+            owner.static_bindings.get(attribute.attr.as_str()),
+            Some(crate::classes::ClassValue::Runtime { .. })
+        ) {
+            self.class_reads.borrow_mut().insert(owner.definition);
+            if self.classes.has_concrete_subclasses(class)
+                && let Some(receiver) = receiver
+            {
+                return self.dispatch_record(
+                    class,
+                    receiver,
+                    attribute,
+                    |checker, layout, receiver| {
+                        checker.runtime_class_attribute(attribute, layout, Some(receiver))
+                    },
+                );
+            }
+            return self.runtime_class_attribute(attribute, class, receiver);
+        }
         let literal = match owner.static_bindings.get(attribute.attr.as_str()) {
             Some(crate::classes::ClassValue::String(value)) => Some(Expr {
                 ty: Type::Str,
                 kind: ExprKind::Str(value.clone()),
             }),
             Some(crate::classes::ClassValue::Strings { owner, ordinal, .. }) => {
-                Some(self.globals.class_tuple(*owner, *ordinal).ok_or_else(|| {
+                Some(self.globals.class_value(*owner, *ordinal).ok_or_else(|| {
                     error(
                         self.source,
                         attribute,
@@ -875,6 +898,32 @@ impl Checker<'_> {
             });
         }
         self.direct_class_attribute(attribute, class, receiver, expected)
+    }
+
+    fn runtime_class_attribute(
+        &mut self,
+        attribute: &ast::ExprAttribute,
+        class: usize,
+        receiver: Option<Expr>,
+    ) -> Result<Expr, String> {
+        let owner = &self.classes.declarations.definitions[class];
+        let Some(crate::classes::ClassValue::Runtime { owner, ordinal }) =
+            owner.static_bindings.get(attribute.attr.as_str())
+        else {
+            return Err(error(
+                self.source,
+                attribute,
+                "a class data override must retain its storage type",
+            ));
+        };
+        let value = self.globals.class_value(*owner, *ordinal).ok_or_else(|| {
+            error(
+                self.source,
+                attribute,
+                "class value is read before its declaration",
+            )
+        })?;
+        self.data_attribute(class, attribute, receiver, value)
     }
 
     fn direct_class_attribute(
