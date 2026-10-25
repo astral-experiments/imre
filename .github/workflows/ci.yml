@@ -9,7 +9,7 @@ on:
       audit:
         description: Source of the requested per-occurrence results
         type: choice
-        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks]
+        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup]
         required: true
 permissions:
   contents: read
@@ -75,6 +75,32 @@ jobs:
               fi
               PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/evidence.py "${tools[@]}" --result "$results/evidence-linux.json"
               python3 -B benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/logging/reference-linux.json "$results/evidence-linux.json"
+              ;;
+            startup)
+              python3 -B - "$ref" "$imre" "$results" <<'PYTHON'
+          import hashlib, json, os, subprocess, sys
+          from pathlib import Path
+          ref, compiler, results = map(Path, sys.argv[1:])
+          pin = "5607950ef232dad16d75c0cf53101d9649d89115"
+          all_paths = subprocess.check_output(["git", "-C", ref, "ls-tree", "-r", "--name-only", pin, "--", "Lib/"], text=True).splitlines()
+          support = [p.removeprefix("Lib/") for p in all_paths if p.endswith(".py") and not p.startswith("Lib/test/")]
+          args = [sys.executable, "-B", "benchmarks/cpython_stdlib/full/check_suite_startup.py", "--compiler", compiler, "--cpython-git", ref]
+          for name in support:
+              args.extend(["--support-file", name])
+          child = subprocess.run([*args, "test.test_logging"], stdout=subprocess.PIPE, check=False)
+          report = json.loads(child.stdout)
+          assert child.returncode == int(any(r["exit"] for r in report["checks"])) and len(report["checks"]) == 4
+          assert report["tests_executed"] == 0 and report["support_files"] == support
+          report["imre_revision"] = os.environ["EXPECTED_SOURCE"]
+          report["imre_tree"] = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
+          report["primary_denominator"] = 272
+          report["support_python_files"] = len(report.pop("support_files"))
+          report["support_paths_sha256"] = hashlib.sha256(("\n".join(support)+"\n").encode()).hexdigest()
+          report["staging"] = "Full pinned Lib/test plus every pinned Python source outside it under Lib/"
+          (results / "startup-linux.json").write_text(json.dumps(report, indent=2) + "\n")
+          for row in report["checks"]:
+              print(row["entry"], row["reachable_only"], row["exit"], row["diagnostic"])
+          PYTHON
               ;;
             removal)
               for opt in 0 3; do
