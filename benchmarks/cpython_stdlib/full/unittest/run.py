@@ -103,7 +103,7 @@ def run(args, level, root):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
-    for name in ["equality_protocol", "mapping_protocol", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
+    for name in ["equality_protocol", "mapping_protocol", "dictionary_patch", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
                  "callable_binding", "context_regex", *("context_" + family for family in families)]:
         control = root / name
         control.mkdir()
@@ -144,6 +144,9 @@ def run(args, level, root):
           for method, assertion in (("test_assert_any_call", "assert_any_call"),
                                     ("test_assert_called_with", "assert_called_with"),
                                     ("test_assert_called_once_with", "assert_called_once_with"))),
+        *(("testmock.testpatch", "PatchTest", method, "unittest.mock.patch.dict and restoration")
+          for method in ("test_patch_dict_as_context_manager", "test_patch_dict_start_stop",
+                         "test_patch_dict_stop_without_start")),
         *(("testmock.testmock", "MockTest", method, "unittest.mock recording, reset, and call assertions")
           for method in MOCK_BLOCKERS),
     ):
@@ -154,6 +157,8 @@ def run(args, level, root):
         fixture = testcase_fixture("bool" if method == "test_stop" else None)
         if module == "testmock.testmock":
             fixture = "from unittest.mock import Mock\n" + fixture
+        elif module == "testmock.testpatch":
+            fixture = "from unittest.mock import patch\n" + fixture
         try:
             executions[case_id] = native_method(lang, directory, path, owner, case_id, fixture,
                                                 operation=("imre", operation))
