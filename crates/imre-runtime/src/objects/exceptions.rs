@@ -53,6 +53,7 @@ pub(crate) enum Kind {
     SameFileError = 65,
     SpecialFileError = 66,
     CsvError = 67,
+    GaiError = 68,
     TypeError = 13,
     AttributeError = 14,
     MemoryError = 15,
@@ -84,6 +85,14 @@ pub(crate) enum Kind {
     ImportError = 41,
     ModuleNotFoundError = 42,
     RecursionError = 43,
+    BlockingIOError = 44,
+    ConnectionError = 45,
+    BrokenPipeError = 46,
+    ConnectionAbortedError = 47,
+    ConnectionRefusedError = 48,
+    ConnectionResetError = 49,
+    InterruptedError = 50,
+    TimeoutError = 51,
     // Warning exception identities use a separate block from module errors and filter categories.
     Warning = 80,
     RuntimeWarning = 81,
@@ -113,6 +122,7 @@ impl Kind {
             65 => Self::SameFileError,
             66 => Self::SpecialFileError,
             67 => Self::CsvError,
+            68 => Self::GaiError,
             13 => Self::TypeError,
             14 => Self::AttributeError,
             15 => Self::MemoryError,
@@ -144,6 +154,14 @@ impl Kind {
             41 => Self::ImportError,
             42 => Self::ModuleNotFoundError,
             43 => Self::RecursionError,
+            44 => Self::BlockingIOError,
+            45 => Self::ConnectionError,
+            46 => Self::BrokenPipeError,
+            47 => Self::ConnectionAbortedError,
+            48 => Self::ConnectionRefusedError,
+            49 => Self::ConnectionResetError,
+            50 => Self::InterruptedError,
+            51 => Self::TimeoutError,
             80 => Self::Warning,
             81 => Self::RuntimeWarning,
             _ => return None,
@@ -186,6 +204,7 @@ impl Kind {
             Self::TimeoutExpired => "TimeoutExpired",
             Self::BadGzipFile => "BadGzipFile",
             Self::CsvError => "_csv.Error",
+            Self::GaiError => "socket.gaierror",
             Self::ZlibError => "error",
             Self::TomlDecodeError => "TOMLDecodeError",
             Self::JsonDecodeError => "JSONDecodeError",
@@ -200,6 +219,14 @@ impl Kind {
             Self::ImportError => "ImportError",
             Self::ModuleNotFoundError => "ModuleNotFoundError",
             Self::RecursionError => "RecursionError",
+            Self::BlockingIOError => "BlockingIOError",
+            Self::ConnectionError => "ConnectionError",
+            Self::BrokenPipeError => "BrokenPipeError",
+            Self::ConnectionAbortedError => "ConnectionAbortedError",
+            Self::ConnectionRefusedError => "ConnectionRefusedError",
+            Self::ConnectionResetError => "ConnectionResetError",
+            Self::InterruptedError => "InterruptedError",
+            Self::TimeoutError => "TimeoutError",
             Self::Warning => "Warning",
             Self::RuntimeWarning => "RuntimeWarning",
         }
@@ -247,6 +274,14 @@ impl Kind {
                 Self::RuntimeError | Self::NotImplementedError | Self::RecursionError
             ),
             Self::ShutilError => matches!(self, Self::ShutilError | Self::SameFileError),
+            Self::ConnectionError => matches!(
+                self,
+                Self::ConnectionError
+                    | Self::BrokenPipeError
+                    | Self::ConnectionAbortedError
+                    | Self::ConnectionRefusedError
+                    | Self::ConnectionResetError
+            ),
             Self::OSError => matches!(
                 self,
                 Self::OSError
@@ -256,6 +291,15 @@ impl Kind {
                     | Self::IsADirectoryError
                     | Self::NotADirectoryError
                     | Self::FileExistsError
+                    | Self::BlockingIOError
+                    | Self::ConnectionError
+                    | Self::BrokenPipeError
+                    | Self::ConnectionAbortedError
+                    | Self::ConnectionRefusedError
+                    | Self::ConnectionResetError
+                    | Self::InterruptedError
+                    | Self::TimeoutError
+                    | Self::GaiError
                     | Self::BadGzipFile
                     | Self::ShutilError
                     | Self::SameFileError

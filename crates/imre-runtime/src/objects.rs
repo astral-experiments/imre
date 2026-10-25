@@ -38,6 +38,7 @@ pub(crate) mod records;
 mod regexes;
 mod sequences;
 mod shutil;
+mod socket;
 mod stdlib;
 mod string_enums;
 mod tempdirs;
@@ -82,6 +83,7 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Plain,
+    Socket(socket::Socket),
     StrDescriptor(u32),
     Sequence(Words),
     Deque(Box<deque::Deque>),
