@@ -4,7 +4,7 @@ mod callables;
 mod classes;
 mod contracts;
 mod effects;
-mod fixed_regex;
+use imre_regex as fixed_regex;
 mod frontend;
 mod guarded_text;
 mod ir;
@@ -23,6 +23,7 @@ mod tuples;
 mod types;
 #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
 mod verify;
+mod version;
 mod watch;
 
 use std::borrow::Cow;
@@ -32,6 +33,8 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Copy)]
 pub struct CommandFlags {
     pub isolated: bool,
+    /// Python's language optimization level; independent of LLVM optimization.
+    pub optimize: i32,
     pub safe_path: bool,
     pub no_user_site: bool,
     pub dont_write_bytecode: bool,

@@ -1,8 +1,8 @@
 {
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
-  "compiler_sha256": "07a60facc36c2d94701c0051f2c3bb6544cbcc022534428748993b0b342eaed0",
-  "compiler_tree": "d6aa3eccebad9fc011341575e3745c7d063ca482",
-  "runtime_sha256": "8bda0ae998a6fbb0bb67ddfcc4b90589a024151545a1ee4f3d19010209898780",
+  "compiler_sha256": "453b92d988a996ddc9c4e956174bdad8ca9e3c84b0066cd43a920b25f794b3e9",
+  "compiler_tree": "aeb787b3d67616a86cfc3a4e7ff2524614381187",
+  "runtime_sha256": "167ab5e7b460b45ef69e9c1cc37d11eccb62326f01107bb0680446e44be9f358",
   "fixture_manifest_sha256": "eb43d0c33580d4a45ffa369afd186b3243f9bf38b15f80fbee02b50254f4bdd9",
   "schema": "imre.shutil-method-attempts.v1",
   "denominator": 223,
@@ -796,7 +796,7 @@
           "unittest.skipUnless(hasattr(os, 'link'), 'requires os.link')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:21:5: Imre: method decorators must be unshadowed @property, @classmethod, or @staticmethod; properties are read-only",
+        "reason": "case.py:21:5: Imre: unsupported method decorator on a fixed-layout class",
         "opt_levels": [
           0,
           3
@@ -1263,7 +1263,7 @@
           "unittest.skipUnless(hasattr(shutil, 'disk_usage'), 'disk_usage not available on this platform')"
         ],
         "status": "compile-blocked",
-        "reason": "case.py:8:5: Imre: method decorators must be unshadowed @property, @classmethod, or @staticmethod; properties are read-only",
+        "reason": "case.py:8:5: Imre: unsupported method decorator on a fixed-layout class",
         "opt_levels": [
           0,
           3
@@ -1337,8 +1337,8 @@
         "method_sha256": "dbd1d68a2e375d6e6efb6adf1bfd8bb855eec38cce7ec4795a1cf07098e17ec7",
         "decorated_sha256": "dbd1d68a2e375d6e6efb6adf1bfd8bb855eec38cce7ec4795a1cf07098e17ec7",
         "decorators": [],
-        "status": "compile-blocked",
-        "reason": "case.py:14:14: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "status": "body-completed",
+        "fixture": "original CPython module, class and instance fixtures; native child",
         "opt_levels": [
           0,
           3
@@ -1438,7 +1438,7 @@
         "decorated_sha256": "1972a7b50fe4ff8889a05aeb0cd24e27239e03314c59f512fc588337dfc5653a",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:20:45: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "reason": "case.py:19:40: Imre: container and optional value comparisons are unsupported",
         "opt_levels": [
           0,
           3
@@ -1488,7 +1488,7 @@
         "decorated_sha256": "710a58fd44575d015bd7ac051110e399a748f09e449efd00164c32ba21a9ea69",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:13:27: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "reason": "case.py:19:40: Imre: container and optional value comparisons are unsupported",
         "opt_levels": [
           0,
           3
@@ -1519,8 +1519,8 @@
         "method_sha256": "0644aa8603e32f510cf59230549b32cd082ab5dc07e80cd7f4f6d9a61400a6cc",
         "decorated_sha256": "0644aa8603e32f510cf59230549b32cd082ab5dc07e80cd7f4f6d9a61400a6cc",
         "decorators": [],
-        "status": "compile-blocked",
-        "reason": "case.py:15:9: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "status": "body-completed",
+        "fixture": "original CPython module, class and instance fixtures; native child",
         "opt_levels": [
           0,
           3
@@ -1604,8 +1604,8 @@
         "method_sha256": "0a5caa86e17167c82133cacc9e555fa44f39a3923f982c621f3a8f49593cdec8",
         "decorated_sha256": "0a5caa86e17167c82133cacc9e555fa44f39a3923f982c621f3a8f49593cdec8",
         "decorators": [],
-        "status": "compile-blocked",
-        "reason": "case.py:17:9: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "status": "body-completed",
+        "fixture": "original CPython module, class and instance fixtures; native child",
         "opt_levels": [
           0,
           3
@@ -1666,8 +1666,8 @@
         "method_sha256": "c2e6c87923a55a6bef273f3fc171b2e2d0ff5a5eb61b3bfbc908da7ada76f32e",
         "decorated_sha256": "c2e6c87923a55a6bef273f3fc171b2e2d0ff5a5eb61b3bfbc908da7ada76f32e",
         "decorators": [],
-        "status": "compile-blocked",
-        "reason": "case.py:14:14: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "status": "body-completed",
+        "fixture": "original CPython module, class and instance fixtures; native child",
         "opt_levels": [
           0,
           3

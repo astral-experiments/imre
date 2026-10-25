@@ -109,11 +109,13 @@ impl Checker<'_> {
         &self,
         attribute: &ast::ExprAttribute,
         receiver: Expr,
-        definition: DefinitionId,
+        declaration: &NamedTuple,
     ) -> Result<Expr, String> {
-        let declaration = self.types.namedtuple(definition).unwrap();
-        if matches!(attribute.attr.as_str(), "_fields" | "__match_args__") {
-            let fields = self.namedtuple_fields(&declaration);
+        if attribute.attr.as_str() == "__match_args__"
+            || (attribute.attr.as_str() == "_fields"
+                && self.types.namedtuple_definition(receiver.ty).is_some())
+        {
+            let fields = self.namedtuple_fields(declaration);
             return Ok(Expr {
                 ty: fields.ty,
                 kind: ExprKind::Scope {
