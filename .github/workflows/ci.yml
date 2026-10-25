@@ -161,7 +161,15 @@ jobs:
               python3 -I -B benchmarks/cpython_stdlib/full/sys/codec_device.py "${tools[@]}" --cpython-source "$ref" --result "$results/sys-codec-device.json"
               cmp benchmarks/cpython_stdlib/full/sys/codec-device-linux.json "$results/sys-codec-device.json"
               if [[ -f benchmarks/cpython_stdlib/full/logging/native_encoding.py ]]; then
-                python3 -I -B benchmarks/cpython_stdlib/full/logging/native_encoding.py "${tools[@]}" --cpython-source "$ref" --result "$results/unchanged-stream.json"
+                binding=benchmarks/cpython_stdlib/full/sys/stdout_binding.py
+                python3 -I -B "$binding" "$results/binding-reference-file" > "$results/binding-reference-stdout"
+                for opt in 0 3; do
+                  "$imre" build "$binding" --no-cache --opt-level "$opt" --runtime "$runtime" --clang /usr/bin/clang-18 -o "$RUNNER_TEMP/binding"
+                  "$RUNNER_TEMP/binding" "$results/binding-file-O$opt" > "$results/binding-stdout-O$opt"
+                  cmp "$results/binding-reference-file" "$results/binding-file-O$opt"
+                  cmp "$results/binding-reference-stdout" "$results/binding-stdout-O$opt"
+                done
+                PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/native_encoding.py "${tools[@]}" --cpython-source "$ref" --result "$results/unchanged-stream.json"
               fi
               python3 -B tests/files.py "${ordinary[@]}"
               ;;
