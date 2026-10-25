@@ -1126,8 +1126,8 @@ impl Storage {
                 "{}: line {} column {} (char {})",
                 e.msg, e.lineno, e.colno, e.pos
             ))),
-            Payload::Process(process) => Rc::new(process.message()),
-            Payload::Timeout(timeout) => Rc::new(timeout.message()),
+            Payload::Process(process) => Rc::new(process.message()?),
+            Payload::Timeout(timeout) => Rc::new(timeout.message()?),
             Payload::Key(key) => imports::word_text(key.kind, key.word, true)?,
             Payload::Group(members) => {
                 let count = members.len();
