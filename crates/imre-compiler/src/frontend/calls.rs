@@ -46,6 +46,12 @@ pub(super) fn scalar_default(
     let mut value = scalar_literal(expression, source)?;
     let ty = value.ty;
     let concrete = types.payload(expected).unwrap_or(expected);
+    if expected == Type::ObjectValue && ty == Type::None {
+        return Ok(Expr {
+            ty: expected,
+            kind: ExprKind::Builtin(Builtin::BoxValue, vec![value]),
+        });
+    }
     if literals::accepts(types, concrete, &value) {
         value = literals::view(value, concrete);
     }

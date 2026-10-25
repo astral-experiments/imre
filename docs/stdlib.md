@@ -2,13 +2,13 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 60 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 30 modules with recorded suites, 78 complete test executions pass natively at both optimization levels; 12,239 of 12,507 upstream executions have a classification.
+**At a glance:** 58 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 28 modules with recorded suites, 79 complete test executions pass natively at both optimization levels; 10,781 of 11,049 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
 **Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.
 
-The last two columns show where CPython still helps at O3. **CPython fixture**: 347 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,465 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
+The last two columns show where CPython still helps at O3. **CPython fixture**: 338 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,463 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
 
 ## Modules with examples, accepted imports or suite results
 
@@ -50,14 +50,14 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `pathlib` | Yes | Construct paths from segments or path-like objects; POSIX and Windows pure paths, traversal and selected file I/O. [Evidence](../benchmarks/cpython_stdlib/full/pathlib/README.md) | [0 / 1,369](../benchmarks/cpython_stdlib/full/pathlib/) | 136 | 63 |
 | `posix` | Yes | Read and set supported POSIX user and group IDs; the companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/CREDENTIALS.md) | — | — | — |
 | `posixpath` | Yes | POSIX `os.path` operations on strings and bytes; path tests are counted under `os`. [Evidence](../tests/fixtures/paths/os_path.py) | — | — | — |
-| `random` | Yes | Seed the shared generator and draw floats, bits, integer ranges, and choices from supported sequences. [Evidence](../benchmarks/cpython_stdlib/full/shutil/random.md) | — | — | — |
+| `random` | Rejected | Seed the shared generator and draw floats, bits, integer ranges, and choices from supported sequences. [Evidence](../benchmarks/cpython_stdlib/full/shutil/random.md) | — | — | — |
 | `re` | Yes | Fixed regular expressions, captures and replacement escapes in `sub`. [Evidence](../benchmarks/cpython_stdlib/README.md) | — | — | — |
-| `select` | Yes | Wait for readable or writable POSIX file descriptors with `poll` or `select`. [Evidence](../benchmarks/cpython_stdlib/full/select/operations.py) | [0 / 134 (13 assessed)](../benchmarks/cpython_stdlib/full/select/) | 3 | 1 |
-| `selectors` | Yes | Use `SelectSelector` and `PollSelector` with `subprocess._PopenSelector` to choose how `Popen.communicate` waits for pipes. [Evidence](../tests/fixtures/processes/select_backend.py) | — | — | — |
+| `select` | Yes | No API example recorded. | [0 / 134 (13 assessed)](../benchmarks/cpython_stdlib/full/select/) | 3 | 1 |
+| `selectors` | Rejected | Use `SelectSelector` and `PollSelector` with `subprocess._PopenSelector` to choose how `Popen.communicate` waits for pipes. [Evidence](../tests/fixtures/processes/select_backend.py) | — | — | — |
 | `shlex` | Yes | POSIX shell word splitting, quoting and joining. [Evidence](../benchmarks/cpython_stdlib/full/shlex/README.md) | [0 / 19](../benchmarks/cpython_stdlib/full/shlex/) | 2 | 3 |
 | `shutil` | Yes | `which`, file and directory copies, removal and selected moves. [Evidence](../benchmarks/cpython_stdlib/full/shutil/README.md) | [0 / 223](../benchmarks/cpython_stdlib/full/shutil/) | 12 | 59 |
 | `signal` | Yes | `SIGINT` and `SIGTERM` constants for supported event-loop handlers. [Evidence](../tests/fixtures/processes/async_gather_cancel.py) | — | — | — |
-| `socket` | Yes | Bind an IPv4 TCP listener to port zero, accept a client, read bytes, and send a reply. [Evidence](../tests/fixtures/socket/listener.py) | [0 / 746](../benchmarks/cpython_stdlib/full/socket/) | 7 | 2 |
+| `socket` | Yes | No API example recorded. | — | — | — |
 | `stat` | Yes | POSIX mode constants and predicates, permission masks and `filemode`. [Evidence](../benchmarks/cpython_stdlib/full/stat/README.md) | [0 / 22](../benchmarks/cpython_stdlib/full/stat/) | 0 | 18 |
 | `string` | Yes | Selected `Template` substitution, validation and identifier operations. [Evidence](../benchmarks/cpython_stdlib/full/string/README.md) | [15 / 54](../benchmarks/cpython_stdlib/full/string/) | 0 | 0 |
 | `subprocess` | Yes | Selected `Popen` and `run` calls, captured streams, deadlines and errors. [Evidence](../benchmarks/cpython_stdlib/full/subprocess/README.md) | [0 / 353](../benchmarks/cpython_stdlib/full/subprocess/) | 32 | 82 |
@@ -68,8 +68,8 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `time` | Yes | `sleep` and wall-clock time for supported process and logging paths. [Evidence](../tests/fixtures/processes/unobserved_child.py) | — | — | — |
 | `tomllib` | Yes | Read selected TOML table keys with `load` on a binary stream. [Evidence](../tests/fixtures/paths/toml_discovery.py) | — | — | — |
 | `types` | Yes | Fixed-layout `SimpleNamespace` construction and attributes. [Evidence](../benchmarks/cpython_stdlib/full/types/README.md) | [0 / 129](../benchmarks/cpython_stdlib/full/types/) | 3 | 0 |
-| `typing` | Yes | Use selected annotations and aliases; register, look up and clear overloads for supported named functions. [Evidence](../benchmarks/cpython_stdlib/full/typing/README.md) | [0 / 712](../benchmarks/cpython_stdlib/full/typing/) | 3 | 2 |
-| `unittest` | Yes | Selected `TestCase` assertions, fixtures, discovery and result handling. [Evidence](../benchmarks/cpython_stdlib/full/unittest/README.md) | [13 / 1,090](../benchmarks/cpython_stdlib/full/unittest/) | 8 | 10 |
+| `typing` | Yes | Selected annotations and aliases, including `Callable`, `Literal`, `Self` and `Union`. [Evidence](../docs/subset.md) | — | — | — |
+| `unittest` | Yes | Selected `TestCase` assertions, fixtures, discovery and result handling. [Evidence](../benchmarks/cpython_stdlib/full/unittest/README.md) | [14 / 1,090](../benchmarks/cpython_stdlib/full/unittest/) | 9 | 12 |
 | `urllib` | Yes | `urllib.parse.unquote` on strings with the default UTF-8 replacement behavior. [Evidence](../tests/fixtures/text/unquote.py) | — | — | — |
 | `warnings` | Yes | Filter supported native warnings; format and display them with `formatwarning` and the default `showwarning`. [Evidence](../benchmarks/cpython_stdlib/full/warnings/README.md) | [0 / 187](../benchmarks/cpython_stdlib/full/warnings/) | 0 | 6 |
 | `zipfile` | Yes | Read stored and deflated members and report CRC failures. [Evidence](../benchmarks/cpython_stdlib/native_zip_members.py) | — | — | — |
