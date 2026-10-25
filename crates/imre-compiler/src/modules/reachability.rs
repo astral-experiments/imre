@@ -40,6 +40,13 @@ impl<'a> Visitor<'a> for References<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        if let ast::Expr::Call(call) = expr
+            && self.graph.resolve(self.module, &call.func)
+                == Some(Binding::Intrinsic(Intrinsic::ShallowCopy))
+        {
+            self.found.attributes.insert("__copy__".to_owned());
+            self.found.instance_attributes.insert("__copy__".to_owned());
+        }
         if !matches!(expr, ast::Expr::Name(n) if n.ctx == ast::ExprContext::Store)
             && let Some(Binding::Value(id)) = self.graph.resolve(self.module, expr)
         {
@@ -50,6 +57,17 @@ impl<'a> Visitor<'a> for References<'_> {
         }
         if let ast::Expr::Attribute(attr) = expr {
             let name = attr.attr.to_string();
+            if name == "assertRaises"
+                && let Some(module) = self
+                    .graph
+                    .modules
+                    .iter()
+                    .find(|m| m.bundled && m.name == "unittest")
+                && let Some(Binding::Definition(context)) =
+                    module.bindings.get("_AssertRaisesContext")
+            {
+                self.found.definitions.insert(*context);
+            }
             if let Some(Binding::Definition(owner)) = self.graph.resolve(self.module, &attr.value) {
                 self.found.class_attributes.insert((owner, name.clone()));
                 self.found.attributes.insert(name);
@@ -131,7 +149,12 @@ impl Reachable {
                             // These protocols have implicit call sites in the supported language.
                             // An unsupported operator still fails when checking its expression.
                             let property = refs.found.properties.contains(name) && method.decorator_list.iter().any(|d| matches!(&d.expression, ast::Expr::Name(n) if n.id == "property") || graph.resolve(id.module, &d.expression) == Some(Binding::Intrinsic(Intrinsic::CachedProperty)));
+                            let assertion_exit = source.bundled
+                                && source.name == "unittest"
+                                && class.name.as_str() == "_AssertRaisesContext"
+                                && name == "_missing";
                             if (property
+                                || assertion_exit
                                 || refs.found.attributes.contains(name)
                                 || matches!(
                                     name,

@@ -2,9 +2,10 @@
 use std::rc::Rc;
 use std::sync::LazyLock;
 
+use compact_str::ReserveError;
 use regex_syntax::hir::{Class, ClassUnicode, HirKind};
 
-use super::{Error, Result, Str, finish};
+use super::{Error, Str, finish};
 
 /// Read a binary property from the runtime's pinned Unicode 16 regex tables.
 fn property(pattern: &str) -> ClassUnicode {
@@ -35,13 +36,14 @@ fn is_final_sigma(before: &str, after: &str) -> bool {
         && !after.chars().find(significant).is_some_and(is_cased)
 }
 
-fn lowercase(source: &str) -> Result<Str> {
+/// Lowercase a full string with the runtime's pinned Unicode data.
+pub(in crate::objects) fn lowercase(source: &str) -> Result<Str, ReserveError> {
     if source.is_ascii() {
-        let mut result = Str::try_new(source).map_err(|_| Error::allocation())?;
+        let mut result = Str::try_new(source)?;
         result.as_mut_str().make_ascii_lowercase();
         return Ok(result);
     }
-    let mut result = Str::try_with_capacity(source.len()).map_err(|_| Error::allocation())?;
+    let mut result = Str::try_with_capacity(source.len())?;
     for (i, ch) in source.char_indices() {
         let mapping = if ch == 'Σ' && is_final_sigma(&source[..i], &source[i + ch.len_utf8()..]) {
             ['ς' as u32, 0]
@@ -54,9 +56,7 @@ fn lowercase(source: &str) -> Result<Str> {
             char::from_u32(mapping[0]).unwrap()
         };
         let second = (mapping[1] != 0).then(|| char::from_u32(mapping[1]).unwrap());
-        result
-            .try_reserve(first.len_utf8() + second.map_or(0, char::len_utf8))
-            .map_err(|_| Error::allocation())?;
+        result.try_reserve(first.len_utf8() + second.map_or(0, char::len_utf8))?;
         result.push(first);
         if let Some(second) = second {
             result.push(second);
@@ -74,7 +74,9 @@ pub unsafe extern "C" fn imre_str_lower(value: *const Str) -> *const Str {
     // SAFETY: the caller roots the string.
     let source = unsafe { &*value };
     finish(
-        lowercase(source).map(|s| Rc::into_raw(Rc::new(s))),
+        lowercase(source)
+            .map(|s| Rc::into_raw(Rc::new(s)))
+            .map_err(|_| Error::allocation()),
         std::ptr::null(),
     )
 }

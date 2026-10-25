@@ -37,13 +37,32 @@ and run boundaries. Their complete bodies, result objects and checks run in the
 native process. CPython applies the upstream class fixture that disables color
 before launching that process.
 
-Eight `TestLongMessage` methods run under the original CPython class and setup.
+The unchanged `Test_TestCase.testAssertRaisesNoExceptionType` exercises five
+invalid calls. Its nested assertions, validation, and catches run in Imre under
+the upstream host fixture runner.
+
+Nine `TestLongMessage` methods run under the original CPython class and setup.
 Each tests all four combinations of long/short diagnostics and omitted/explicit
 messages. The bound operation executes in a native child, which returns the
 actual assertion failure and its message. The original helper checks those
-messages on the host. These eight are host-driven native operations.
+messages on the host. For `testAssertRaises`, the original host callback returns
+normally before Imre performs the missing-exception check. These nine are
+host-driven native operations.
 
-At each of O0 and O3: 0 fully native passes, 2 native bodies with host class
-fixtures, 8 host-driven native operations (32 calls), 1,078 reference-only and
+At each of O0 and O3: 0 fully native passes, 3 native bodies with host
+fixtures, 9 host-driven native operations (36 calls), 1,076 reference-only and
 2 reference skips. The [versioned evidence reports](native-linux.json) retain
 all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
+
+The [context control](context_protocol.py) compares caught errors, stored managers, argument order and early exits with CPython at both levels. It adds no upstream IDs.
+
+## Exception-family integration controls
+
+`run.py` compares the shipped context protocol against pinned CPython at
+both optimization levels. It exercises nested mismatched handlers and the
+identity of the original caught object for LookupError, NameError,
+UnicodeEncodeError and shutil's OSError subclasses. The default gate also checks
+the identity, name and path of [structured import errors](https://github.com/astral-sh/imre/pull/590).
+On a build that includes [native CSV](https://github.com/astral-sh/imre/pull/468),
+add `--exception-family csv` to exercise csv.Error against unrelated handlers.
+These controls must compile, run, and match the reference; they contribute no upstream IDs.
