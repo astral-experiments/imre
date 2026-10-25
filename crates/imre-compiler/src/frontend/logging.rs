@@ -56,6 +56,95 @@ fn required(name: &str, ty: Type) -> Parameter {
 }
 
 impl Checker<'_> {
+    /// Resolve a bundled definition even when a caller only imported getLogger.
+    fn logging_definition(&self, name: &str) -> Option<DefinitionId> {
+        let module = self
+            .graph
+            .modules
+            .iter()
+            .find(|module| module.is_bundled("__imre_logging_classes__"))?;
+        match module.bindings.get(name)? {
+            Binding::Definition(def) => Some(*def),
+            _ => None,
+        }
+    }
+
+    fn handler_type(&self) -> Option<Type> {
+        let id = self.logging_definition("Handler")?;
+        Some(Type::Class(*self.classes.declarations.ids.get(&id)?))
+    }
+
+    pub(super) fn text_output_method(
+        &mut self,
+        stream: Expr,
+        attribute: &ast::ExprAttribute,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let (op, ty, params) = match attribute.attr.as_str() {
+            "write" => (
+                Log::WriteStream,
+                self.types.optional(Type::Int),
+                vec![required("s", Type::Str)],
+            ),
+            "flush" => (Log::FlushStream, Type::None, vec![]),
+            _ => {
+                return Err(error(
+                    self.source,
+                    attribute,
+                    "writable text stream supports write and flush",
+                ));
+            }
+        };
+        let args = self.arguments(call, &params, Some(stream))?;
+        Ok(self.ordered_builtin(Builtin::Logging(op), ty, args))
+    }
+    /// Bind the private weak registry to the public fixed Handler record type.
+    pub(super) fn named_handler(
+        &mut self,
+        symbol: Intrinsic,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let source = &self.graph.modules[self.module];
+        let Some(Binding::Definition(def)) = source.bindings.get("Handler") else {
+            return Err(error(
+                self.source,
+                call,
+                "missing logging.Handler definition",
+            ));
+        };
+        let handler = Type::Class(self.classes.declarations.ids[def]);
+        let optional_name = self.types.optional(Type::Str);
+        let (op, result, params) = match symbol {
+            Intrinsic::HandlerFallback => (
+                Log::Emit,
+                Type::None,
+                vec![
+                    required("logger", Type::Logger),
+                    required("level", Type::Int),
+                    required("msg", Type::Str),
+                    required("found", Type::Bool),
+                ],
+            ),
+            Intrinsic::HandlerRename => (
+                Log::HandlerRename,
+                Type::None,
+                vec![
+                    required("handler", handler),
+                    required("old", optional_name),
+                    required("new", optional_name),
+                ],
+            ),
+            Intrinsic::HandlerLookup => (
+                Log::HandlerLookup,
+                self.types.optional(handler),
+                vec![required("name", Type::Str)],
+            ),
+            _ => unreachable!(),
+        };
+        let args = self.arguments(call, &params, None)?;
+        Ok(self.ordered_builtin(Builtin::Logging(op), result, args))
+    }
+
     /// A configuration literal can contain differently typed values. Give each
     /// nested map and list its ordered, mutable document layout at construction.
     pub(super) fn logging_dictionary_config(
@@ -328,6 +417,16 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         match attribute.attr.as_str() {
+            "handlers" => {
+                let handler = self.handler_type().ok_or_else(|| {
+                    error(self.source, attribute, "missing logging.Handler definition")
+                })?;
+                Ok(operation(
+                    Log::Handlers,
+                    self.types.list(handler),
+                    vec![logger],
+                ))
+            }
             "_cache" => Ok(operation(
                 Log::EnabledCache,
                 self.types.dict(Type::Int, Type::Bool),
@@ -357,6 +456,18 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        if matches!(attribute.attr.as_str(), "addHandler" | "removeHandler") {
+            let handler = self.handler_type().ok_or_else(|| {
+                error(self.source, attribute, "missing logging.Handler definition")
+            })?;
+            let args = self.arguments(call, &[required("hdlr", handler)], Some(logger))?;
+            let op = if attribute.attr.as_str() == "addHandler" {
+                Log::AddHandler
+            } else {
+                Log::RemoveHandler
+            };
+            return Ok(self.ordered_builtin(Builtin::Logging(op), Type::None, args));
+        }
         if attribute.attr.as_str() == "hasHandlers" {
             let args = self.arguments(call, &[], Some(logger))?;
             return Ok(self.ordered_builtin(Builtin::Logging(Log::HasHandlers), Type::Bool, args));
@@ -483,7 +594,37 @@ impl Checker<'_> {
             Type::Bool,
             vec![logger.clone(), level.clone()],
         );
-        let emit = operation(Log::Emit, Type::None, vec![logger, level, message]);
+        let def = self
+            .logging_definition("_deliver")
+            .ok_or_else(|| error(self.source, call, "missing native logging delivery"))?;
+        let sig = self.functions.get(&def).ok_or_else(|| {
+            error(
+                self.source,
+                call,
+                "missing native logging delivery signature",
+            )
+        })?;
+        self.calls.insert(sig.id);
+        let path = text(
+            self.graph.modules[self.module]
+                .path
+                .to_string_lossy()
+                .as_ref(),
+        );
+        let line = self.source[..usize::from(call.start())]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count()
+            + 1;
+        let lineno = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Int(line.to_string()),
+        };
+        let emit = self.call_value(
+            sig,
+            Type::None,
+            ir::CallArgs::positional(vec![logger, level, message, path, lineno]),
+        );
         Ok(Expr {
             ty: Type::None,
             kind: ExprKind::Scope {

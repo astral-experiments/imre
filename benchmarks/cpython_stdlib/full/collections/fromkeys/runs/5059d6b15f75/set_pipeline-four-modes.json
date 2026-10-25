@@ -1,0 +1,32 @@
+{
+  "fixture_sha256": "e3a990c4d41dcdcbfb5b57e8e3f1222f901da3bfa4c1e5ca1bf6ce81d5ad73e4",
+  "imre_sha256": "bae6c6e0ea741f2b6c886a3c2192e34a76afe578e491adb6d3e5905a901dc283",
+  "runtime_sha256": "11a56f72e140643a6cea8ef10cf83e025ce732e53d2b8979951f626ea58408e2",
+  "reference": "True\nTrue\n0\nTrue\nTrue\nbad key\n[0, 1, 2, 3]\nrange() arg 3 must not be zero\n",
+  "modes": {
+    "O0-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "True\nTrue\n0\nTrue\nTrue\nbad key\n[0, 1, 2, 3]\nrange() arg 3 must not be zero\n",
+      "stderr": ""
+    },
+    "O0-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "True\nTrue\n0\nTrue\nTrue\nbad key\n[0, 1, 2, 3]\nrange() arg 3 must not be zero\n",
+      "stderr": ""
+    },
+    "O3-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "True\nTrue\n0\nTrue\nTrue\nbad key\n[0, 1, 2, 3]\nrange() arg 3 must not be zero\n",
+      "stderr": ""
+    },
+    "O3-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "True\nTrue\n0\nTrue\nTrue\nbad key\n[0, 1, 2, 3]\nrange() arg 3 must not be zero\n",
+      "stderr": ""
+    }
+  }
+}

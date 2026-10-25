@@ -100,8 +100,22 @@ pub unsafe extern "C" fn imre_log_set_propagate(value: bool, logger: *const Obje
 pub unsafe extern "C" fn imre_log_has_handlers(logger: *const Object) -> bool {
     // SAFETY: the incoming logger stays live for the walk.
     let logger = unsafe { state(logger) };
-    logger.standalone_propagate.is_none()
-        && LOGGERS.with_borrow(|logs| logs.format.is_some() && reaches_root(logs, &logger.name))
+    LOGGERS.with_borrow(|logs| {
+        let mut current = logger.as_ref();
+        loop {
+            // SAFETY: the current logger retains its list throughout the borrow.
+            if unsafe { current.handlers.0.with(|s| !s.sequence().values.is_empty()) } {
+                return true;
+            }
+            let Some(parent) = logs.parent(current) else {
+                return current.standalone_propagate.is_none() && logs.format.is_some();
+            };
+            if !control(&current.name).propagate {
+                return false;
+            }
+            current = &parent.logger;
+        }
+    })
 }
 
 /// A logger with propagation stopped before root has only the default last-resort handler.
@@ -113,12 +127,17 @@ pub unsafe extern "C" fn imre_log_routed_emit(
     logger: *const Object,
     level: usize,
     message: *const Str,
+    found: bool,
 ) {
     // SAFETY: the caller holds each owner through this synchronous call.
     let receiver = unsafe { state(logger) };
-    if receiver.standalone_propagate.is_none()
-        && LOGGERS.with_borrow(|logs| reaches_root(logs, &receiver.name))
-    {
+    let (root, configured) = LOGGERS.with_borrow(|logs| {
+        (receiver.standalone_propagate.is_none() && reaches_root(logs, &receiver.name), logs.format.is_some())
+    });
+    if found && !(root && configured) {
+        return;
+    }
+    if root {
         // SAFETY: all three original owners remain live.
         unsafe { super::imre_log_emit(logger, level, message) };
     } else {

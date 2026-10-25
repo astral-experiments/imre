@@ -39,23 +39,78 @@ includes all seven child suites; adding their counts again would duplicate them.
 All 391 skips name their fixture, original reason and pinned source condition.
 There are no additional exclusions.
 
-Generate both levels with the test-enabled 3.14.5 interpreter and validate them:
+Reproduce the walking-head baseline with the test-enabled 3.14.5 interpreter:
 
 ```sh
 python -B benchmarks/cpython_stdlib/full/pathlib/evidence.py \
     --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
     --imre-commit 906b10a80a61bbf4efc5cd05cc5c2ae82689e32a \
     --body-report benchmarks/cpython_stdlib/full/pathlib/body-probes-linux.json \
-    --result benchmarks/cpython_stdlib/full/pathlib/evidence-linux.json
+    --cohort lexical --cohort files --cohort traversal --cohort components --cohort walk --cohort basics \
+    --result /tmp/pathlib-baseline.json
+```
+
+Run the metadata cohort with a compiler that implements Path.info, then verify
+those six observations against the versioned per-occurrence records:
+
+```sh
+python -B benchmarks/cpython_stdlib/full/pathlib/evidence.py \
+    --imre /path/to/metadata/imre --runtime /path/to/metadata/libimre_runtime.a --clang /path/to/clang \
+    --cohort metadata --result /tmp/pathlib-metadata.json
+python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py /tmp/pathlib-metadata.json
 python3 benchmarks/cpython_stdlib/suite_evidence.py \
     benchmarks/cpython_stdlib/full/pathlib/reference-linux.json \
     benchmarks/cpython_stdlib/full/pathlib/evidence-linux.json
 ```
 
-Both the audited adapters and the complete-method probes used the same compiler
-and runtime, built from walking head `906b10a`. Each observed or blocked row
-records that commit. The 978 per-method probe results and diagnostics matched
-between optimization levels.
+The baseline adapters and complete-method probes used the compiler and runtime
+from walking head `906b10a`. The six newer Path.info records use the measured
+revision `13b6945`. Four link observations use `ad70f73`, and ten stat/lstat
+observations use `6c448e3`. Each other row retains its original revision and roles.
+The 978 baseline probe results and diagnostics matched between optimization levels.
+
+The [stat-branch sweep](body-probes-stat-linux.json) ran all 978 reference
+passes again on `2e4c78d` at both levels. Each produced 119 native candidates,
+820 compile blockers and 39 original wrapper blockers. All fixtures completed
+without an unexpected failure or skip. The eight new candidates were the
+four caching checks on both concrete classes; all already had separately
+audited native receipts. A candidate does not change an execution role.
+Use the complete-method commands below with that compiler and commit to
+reproduce this second snapshot.
+
+For both Path and PosixPath, the original existence, directory and file cache
+methods check a missing name, create a file or directory and query the same view
+again. The complete bodies, filesystem mutations and 24 boolean assertions per
+level run in Imre; CPython supplies the original fixture setup and teardown.
+The [filesystem comparison](../../../../tests/fixtures/paths/metadata_views.py)
+compares 31 output lines, including stale views, fresh Path queries and directory
+entry information for a dangling symlink whose target appears and disappears.
+The last four lines check a scanned regular file replaced with a dangling symlink.
+
+The four link occurrences run the complete `test_readlink` and
+`test_info_is_symlink_caching` methods on both Path and PosixPath. At each level
+Imre executes 18 unconditional assertions, including two that require an OS
+error for reading the link target of a regular file. The original symlink gates
+and filesystem setup/teardown run in CPython. Running the metadata command above
+with `--cohort metadata` measures all ten methods. Check these four separately
+with `metadata_receipt.py --links /tmp/pathlib-metadata.json`.
+
+For the ten original stat/lstat occurrences, run the same evidence command
+with `--cohort stat --result /tmp/pathlib-stat.json`, then run
+`metadata_receipt.py --stat /tmp/pathlib-stat.json`. For both `Path` and
+`PosixPath`, four complete methods compare followed and unfollowed results
+natively under the original CPython filesystem fixtures. In `test_stat`
+CPython runs the body and its eleven assertions; Imre constructs three paths,
+joins them, calls stat three times and reads 19 integer fields. The adapter
+rejects any host pathlib, `os.stat` or `os.lstat` call in those bodies.
+
+The [link](../../../../tests/fixtures/paths/links.py) and
+[protocol](../../../../tests/fixtures/paths/link_protocols.py) fixtures separately
+compare string and byte error filenames, NUL validation order, stored relative
+targets, and links to a symlink source against the pinned interpreter. Raw
+non-UTF-8 link targets and preservation of StrEnum identity in OSError filename
+fields remain implementation gaps. The four original `test_symlink_to` and
+`test_hardlink_to` occurrences also need `stat()` or `lstat()`; they remain blocked.
 
 The lexical runner dispatches each original method under its upstream class.
 It checks that class and its separator before starting the typed native receiver.
@@ -129,10 +184,10 @@ python3 benchmarks/cpython_stdlib/full/pathlib/body_report.py --work /tmp/pathli
 
 | Execution at each of O0 and O3 | Occurrences |
 | --- | ---: |
-| Native body and operation, native assertions if present, host fixture | 116 |
-| Host body and assertions, native operation | 54 |
+| Native body and operation, native assertions if present, host fixture | 134 |
+| Host body and assertions, native operation | 56 |
 | Mixed execution | 11 |
-| Blocked: diagnostic in the original body | 360 |
+| Blocked: diagnostic in the original body | 340 |
 | Blocked: fixture or dependency diagnostic | 398 |
 | Blocked: original fixture wrapper | 39 |
 | Upstream reference skip | 391 |
@@ -141,7 +196,7 @@ python3 benchmarks/cpython_stdlib/full/pathlib/body_report.py --work /tmp/pathli
 There are no fully native fixture lifecycles, extra exclusions, or native execution
 failures in this run. Some methods that the general probe could not compile have
 a more specific native or host-driven adapter. Those occurrences keep the observed
-execution roles; the 797 blocked rows above have no successful adapter. The
+execution roles; the 777 blocked rows above have no successful adapter. The
 per-ID records give the original source location, diagnostic or wrapper, and any
 missing fixture behavior. A blocked row is an outstanding failure to run the method.
 
@@ -155,5 +210,11 @@ head `ea9845a` reached `inspect` in `test/support/__init__.py:9`. The prospectiv
 walk merge against main `13759fb` confirmed the same four outcomes. Once #784
 landed, both entry points in both check modes reached `_opcode` at
 `test/support/__init__.py:11`. The published [walk merge](https://github.com/astral-sh/imre/pull/785)
-confirmed that result on main `4fe38f6`. None
-of these startup checks executed an upstream method.
+confirmed that result on main `4fe38f6`. On the tree published by [the link
+merge](https://github.com/astral-sh/imre/pull/923), the test-package-only root
+reached `TestFailedWithDetails(TestFailed)` in both normal checks
+(`test/support/__init__.py:133`) and the `PythonSymlink` class conditional in
+both reachable-only checks (line 1613). A separate hosted check with the full
+CPython `Lib` on the module search path stopped at the package's first
+`import os` in all four modes because that root contains an `os.py`.
+None of these startup checks executed an upstream method.

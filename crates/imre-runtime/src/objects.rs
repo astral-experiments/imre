@@ -6,15 +6,22 @@
 //! except for compiler-proven readonly loop views; displaced owners are dropped
 //! only after mutable storage access ends.
 
+mod annotations;
 mod argparse;
 mod args;
 mod asyncio;
+mod boxed_values;
+mod builtins;
 mod bytes;
+mod charmaps;
+mod codecs;
 mod contexts;
 mod copying;
 mod csv;
 mod deferred_diff;
+mod deque;
 mod difflib;
+mod errno;
 pub(crate) mod exceptions;
 mod files;
 mod fnmatch;
@@ -34,12 +41,14 @@ pub(crate) mod records;
 mod regexes;
 mod sequences;
 mod shutil;
+pub(crate) mod stdio;
 mod stdlib;
 mod string_enums;
 mod tempdirs;
 mod text;
 mod unions;
 mod values;
+mod warnings;
 mod words;
 mod zipfile;
 
@@ -51,6 +60,11 @@ use super::{
 };
 use num_traits::ToPrimitive;
 use std::rc::Rc;
+
+/// Literal constructors share the same empty and Latin-1 owners as chr and indexing.
+pub(crate) fn literal_string(text: &str) -> Rc<Str> {
+    self::text::owned_string(text)
+}
 use words::{OwnedWord, Words};
 
 // All C ints fit in the immediate representation. Heap integers cannot fit.
@@ -74,11 +88,14 @@ enum Storage {
     Plain,
     StrDescriptor(u32),
     Sequence(Words),
+    Deque(Box<deque::Deque>),
+    DequeIterator(deque::DequeIterator),
     Dictionary(mappings::TableOwner<mappings::Mapping>),
     FunctionCache(Box<mappings::FunctionCache>),
     Set(mappings::TableOwner<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
+    RegexIterator(regexes::FindIter),
     Repeat(itertools::Repeat),
     IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
@@ -86,9 +103,15 @@ enum Storage {
     ByteOutput(bytes::ByteOutput),
     SimpleNamespace(Rc<Object>),
     Sha256(Box<sha2::Sha256>),
+    NativeModule(errno::Module),
+    ModuleNamespace(Rc<errno::Registry>),
+    ModuleMember(errno::Member),
     CsvReader(Box<csv::Reader>),
+    CodecInfo(codecs::Codec),
+    CodecWriterClass(codecs::writer::WriterClass),
+    CodecWriter(Box<codecs::writer::Writer>),
     Exception(exceptions::Exception),
-    ExceptionField(OwnedWord),
+    ObjectValue(OwnedWord),
     File(Box<files::FileState>),
     ZipFile(Box<zipfile::Archive>),
     ZipInfo(Rc<zipfile::Info>),
@@ -105,16 +128,19 @@ enum Storage {
         text: paths::PathText,
         name: std::cell::OnceCell<Rc<Str>>,
     },
+    PathInfo(Box<paths::Info>),
     PurePath(Box<paths::PurePath>),
     PathIterator(Box<paths::PathIterator>),
     RegexPattern(Box<regexes::Pattern>),
     Logger(Rc<logging::Logger>),
+    HandlerLock(std::sync::Arc<logging::locks::HandlerLock>),
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),
     LogRecord(Box<logging::record::Record>),
     LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
+    JsonDecoder(Rc<Object>),
 }
 
 /// Acquires a reference without consuming the caller's live Rc handle.
@@ -184,6 +210,25 @@ pub unsafe extern "C" fn imre_object_release(value: *const Object) {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_seq_new(kind: u32) -> *const Object {
     Rc::into_raw(Words::new(kind).into_object())
+}
+
+/// Remember a mock history's `_CallList` identity across aliases and resets.
+/// Copies get the ordinary list representation from their fresh sequence storage.
+///
+/// # Safety
+/// The caller roots a native sequence of recorded mock calls.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_seq_mock_call_list(value: *const Object, mark: bool) -> bool {
+    // SAFETY: the caller roots the list and only the copied flag escapes the borrow.
+    unsafe {
+        object(value).0.with(|storage| {
+            let flag = &storage.sequence_storage().mock_call_list;
+            if mark {
+                flag.set(true);
+            }
+            flag.get()
+        })
+    }
 }
 
 /// Tests string membership with the list and needle rooted for the whole read.
@@ -381,6 +426,34 @@ pub unsafe extern "C" fn imre_seq_append(value: *const Object, word: usize, kind
         exceptions::sequence_allocation_failed();
     }
     i32::from(appended)
+}
+
+/// Publish an empty typed list before releasing the elements of the old buffer.
+///
+/// # Safety
+/// The caller keeps the mutable list rooted for the duration of the operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_seq_clear(value: *const Object) {
+    // SAFETY: only the detached buffer escapes; no element destructor runs under the borrow.
+    let previous = unsafe {
+        object(value).0.with_mut(|storage| {
+            let Storage::Sequence(words) = storage else {
+                unreachable!("a typed list owns sequence storage")
+            };
+            if words.is_sorting_empty() {
+                return None;
+            }
+            // A deferred diff is a list of strings. Clearing it discards its plan
+            // without materializing values that no observer can access.
+            let kind = if words.plan().is_some() {
+                3
+            } else {
+                words.kind.raw()
+            };
+            Some(std::mem::replace(words, Words::new(kind)))
+        })
+    };
+    drop(previous);
 }
 
 /// # Safety

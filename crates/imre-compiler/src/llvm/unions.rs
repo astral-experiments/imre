@@ -7,7 +7,9 @@ fn tag(ty: Type) -> u8 {
         Type::Str => 0,
         Type::Bytes => 1,
         Type::List(_) => 2,
-        Type::Exception => 3,
+        // These owners share the always-true Object tag. No admitted union
+        // contains both an exception and a LogRecord.
+        Type::Exception | Type::LogRecord => 3,
         Type::Class(_) | Type::Tuple(_) => 4,
         Type::Enum(_) => 5,
         Type::Path => 6,
@@ -137,7 +139,7 @@ impl Emitter<'_, '_> {
         {
             return "true".to_owned();
         }
-        if value.ty == Type::ExceptionField {
+        if value.ty == Type::ObjectValue {
             // The view retains its heterogeneous payload. None is not a class
             // accepted by this subset, and bool is also an instance of int.
             let mask = [
@@ -145,6 +147,8 @@ impl Emitter<'_, '_> {
                 (1, Type::Bool),
                 (2, Type::Int),
                 (3, Type::Str),
+                (4, Type::ListInt),
+                (5, Type::Dict(0)),
                 (6, Type::Tuple(0)),
                 (8, Type::Bytes),
             ]

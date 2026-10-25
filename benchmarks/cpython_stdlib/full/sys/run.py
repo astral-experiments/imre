@@ -8,33 +8,27 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path[:0] = [str(HERE), str(STDLIB)]
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
-from suite_native import Toolchain, native_method, run_evidence, run_in_fixtures
+from suite_native import Toolchain, native_method, run_evidence, run_in_fixtures, testcase_fixture
 from suite_evidence import roles
 from occurrences import blocked_methods, reference_skips
 import argv_case
 import jit_case
 import locale_case
+from display_case import CASE_ID as DISPLAY_ID, display_observer
+from import_snapshots import check_import_snapshots
 
 MODULE = "test.test_sys"
 SYS = MODULE + ".SysModuleTest."
 EXCEPTION = MODULE + ".ActiveExceptionTests."
 
-# The native TestCase currently accepts ints for assertEqual. These are the
-# operand types of the original assertions; the upstream definitions stay intact.
-STRING_EQUAL = """import sys
-
-class NativeCase:
-    def assertEqual(self, actual: str, expected: str) -> None:
-        if actual != expected:
-            raise AssertionError("strings differ")
-"""
-
+# The shared TestCase cannot yet compare an optional exception with None.
 EXCEPTION_EQUAL = """import sys
 
 class NativeCase:
@@ -67,19 +61,46 @@ def select(toolchain, work, source, module):
     executions = {}
     pinned_methods = method_hashes(source)
     for cls, method, fixture, operation in [
-        ("SysModuleTest", "test_43581", STRING_EQUAL, "sys.__stdout__.encoding and sys.__stderr__.encoding"),
+        ("SysModuleTest", "test_43581", "import sys\n" + testcase_fixture(), "sys.__stdout__.encoding and sys.__stderr__.encoding"),
         ("ActiveExceptionTests", "test_sys_exception_no_exception", EXCEPTION_EQUAL, "sys.exception() outside a handler"),
     ]:
         case_id = f"{MODULE}.{cls}.{method}"
         executions[case_id] = native_method(toolchain, directory(work, method),
                                              source, cls, case_id, fixture, operation=("imre", operation))
 
-    # Independent object-identity regression; never counts as an upstream ID.
-    exercise = HERE / "active_exception.py"
-    ref = subprocess.run([sys.executable, exercise], capture_output=True, check=True, timeout=15)
-    binary = toolchain.build(exercise.read_bytes(), directory(work, "exception-identity"))
-    if output(binary) != (ref.stdout, ref.stderr):
-        raise AssertionError("native exception identity differs from CPython")
+    # Both implementations check internal consistency using their own language version.
+    metadata = HERE / "version_info.py"
+    version_work = directory(work, "language-version")
+    owner = HERE / "version_info_owner.py"
+    (version_work / owner.name).write_bytes(owner.read_bytes())
+    program = toolchain.build(metadata.read_bytes(), version_work)
+    reference = subprocess.run([sys.executable, "-E", "-B", version_work / "case.py"],
+                               capture_output=True, check=True, timeout=15)
+    if (reference.stdout, reference.stderr) != (b"", b"") or output(program) != (b"", b""):
+        raise AssertionError("unexpected output from language version checks")
+
+    # Process regressions use the real hooks and retained objects; none adds a test ID.
+    for filename in ("active_exception.py", "display_values.py", "codec_lookup.py"):
+        exercise = HERE / filename
+        ref = subprocess.run([sys.executable, exercise], capture_output=True, check=True, timeout=15)
+        binary = toolchain.build(exercise.read_bytes(), directory(work, exercise.stem))
+        if output(binary) != (ref.stdout, ref.stderr):
+            raise AssertionError(f"{filename}: native output differs from CPython")
+
+    display = toolchain.build((HERE / "display_driver.py").read_bytes(), directory(work, "display-driver"))
+    executions[DISPLAY_ID] = display_observer(module, display, work, toolchain.level)
+    check_import_snapshots(toolchain, directory(work, "import-snapshots"))
+
+    binding_source = HERE / "stdout_binding.py"
+    binding = toolchain.build(binding_source.read_bytes(), directory(work, "stdout-binding"))
+    redirected = work / "redirected"
+    observations = []
+    for command in ([sys.executable, binding_source], [binding]):
+        run = subprocess.run([*command, redirected], capture_output=True, check=True, timeout=15)
+        observations.append((run.stdout, run.stderr, redirected.read_bytes()))
+        redirected.unlink()
+    if observations[0] != observations[1]:
+        raise AssertionError(("stdout binding", observations))
 
     encoding = toolchain.build((HERE / "encoding_driver.py").read_bytes(), directory(work, "encoding"))
 
@@ -108,18 +129,24 @@ def select(toolchain, work, source, module):
             def getfilesystemencoding(self):
                 return invoke("filesystem")
 
-        with patch.object(module, "sys", NativeSys()):
+        def lookup(name):
+            # The upstream helper discards the CodecInfo. Only its name crosses the process boundary.
+            return SimpleNamespace(name=invoke("lookup", name))
+
+        with (patch.object(module, "sys", NativeSys()),
+              patch.object(module, "codecs", SimpleNamespace(lookup=lookup))):
             original()
-        if not calls:
-            raise AssertionError(f"{case.id()} made no native calls")
-        is_default = "default" in calls
+        is_default = case._testMethodName == "test_getdefaultencoding"
+        expected_calls = ["default-argument", "default"] if is_default else ["filesystem", "platform", "lookup"]
+        if calls != expected_calls:
+            raise AssertionError((case.id(), calls))
         return {"execution": "host-driven-native", "body": "CPython", "assertions": "CPython",
                 "fixture_execution": "CPython module/class/instance hooks", "calls": calls,
                 "observation": {"roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
-                                "evidence": {"operation": ", ".join("sys." + name for name in
-                                             (["getdefaultencoding"] if is_default else ["getfilesystemencoding", "platform"])),
+                                "evidence": {"operation": ("sys.getdefaultencoding" if is_default else
+                                             "sys.getfilesystemencoding, sys.platform, codecs.lookup"),
                                              "assertions": ("upstream TypeError and result type assertions" if is_default else
-                                                            "upstream check_fsencoding; codecs.lookup runs on the host"),
+                                                            "upstream check_fsencoding validates the encoding; Imre resolves its codec"),
                                              "method_sha256": pinned_methods[type(case).__name__, case._testMethodName],
                                              "fixture": "original SysModuleTest lifecycle and reap_children teardown",
                                              "native_calls": len(calls), "calls": calls, "opt_level": toolchain.level}}}

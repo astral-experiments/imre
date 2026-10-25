@@ -122,7 +122,7 @@ impl ModuleValues {
 
     pub(super) fn regex_groups(&self, pattern: &Expr) -> Option<regex::CaptureLayout> {
         match &pattern.kind {
-            ExprKind::Builtin(Builtin::RegexCompile(source), _) => {
+            ExprKind::Builtin(Builtin::RegexCompile { source, .. }, _) => {
                 self.regex_literals.borrow().get(source).cloned()
             }
             ExprKind::Builtin(Builtin::GlobalGet(slot), _) => {
@@ -148,6 +148,8 @@ impl Checker<'_> {
         definition: DefinitionId,
     ) -> Result<Statement, String> {
         let value = match statement {
+            ast::Stmt::ImportFrom(_) => self
+                .import_sys_value(self.graph.modules[self.module].snapshots[&definition.statement]),
             ast::Stmt::Assign(assignment) => self.expr(&assignment.value)?,
             ast::Stmt::AnnAssign(assignment) => {
                 let value = assignment.value.as_deref().ok_or_else(|| {
@@ -241,7 +243,30 @@ impl Initialization {
                     available.insert(definition);
                     continue;
                 }
-                ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_) => continue,
+                ast::Stmt::ImportFrom(import)
+                    if crate::modules::errno_import(statement).is_some() =>
+                {
+                    let start = body.len();
+                    body.extend(import.names.iter().map(|alias| {
+                        checker
+                            .graph
+                            .checked_builtin_import(checker.module, alias.range());
+                        checker.check_errno_import(alias.name.as_str())
+                    }));
+                    checkpoints.push(Checkpoint {
+                        statement: index,
+                        body: start..body.len(),
+                        initialized: checker.globals.types.borrow().len(),
+                        definitions: available.clone(),
+                        class_reads: std::mem::take(checker.class_reads.get_mut()),
+                    });
+                    continue;
+                }
+                ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_)
+                    if !module.snapshots.contains_key(&index) =>
+                {
+                    continue;
+                }
                 _ if crate::modules::value_name(statement).is_some_and(|name| {
                     module.bindings.get(name) == Some(&Binding::Definition(definition))
                 }) =>
@@ -254,13 +279,16 @@ impl Initialization {
                 _ => {}
             }
             if checker.module == checker.graph.entry
+                && !module.snapshots.contains_key(&index)
                 && module.entry_globals.binary_search(&index).is_err()
             {
                 continue;
             }
             let initialized = checker.globals.types.borrow().len();
             let start = body.len();
-            if crate::modules::value_name(statement).is_some() {
+            if module.snapshots.contains_key(&index)
+                || crate::modules::value_name(statement).is_some()
+            {
                 body.push(checker.initialize_global(statement, definition)?);
             } else {
                 body.extend(checker.statement(statement)?.0);

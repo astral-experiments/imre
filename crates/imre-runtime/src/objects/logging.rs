@@ -1,8 +1,11 @@
 //! Process-local logging state for the native single-threaded runtime.
 mod cache;
 mod config;
+mod delivery;
+mod handler;
 mod hierarchy;
 mod levels;
+pub(super) mod locks;
 pub(super) mod timed;
 
 pub(super) mod formatter;
@@ -10,7 +13,6 @@ pub(super) mod record;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::mem::MaybeUninit;
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,6 +25,7 @@ pub(super) struct Logger {
     name: Rc<Str>,
     level: RefCell<Int>,
     enabled: cache::EnabledCache,
+    handlers: Rc<Object>,
     standalone_propagate: Option<Cell<bool>>,
 }
 
@@ -32,6 +35,7 @@ impl Logger {
             name,
             level: RefCell::new(level),
             enabled: cache::EnabledCache::new(),
+            handlers: super::Words::new(6).into_object(),
             standalone_propagate: standalone.then(|| Cell::new(true)),
         })
     }
@@ -204,29 +208,13 @@ fn timestamp(format: Option<&str>) -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    timestamp_at(format, now.as_secs() as libc::time_t, now, false)
+    timed::civil(now.as_secs() as libc::time_t, false)
+        .map(|local| format_timestamp(format, &local, now))
+        .unwrap_or_default()
 }
 
 /// Renders either an emitted timestamp or the time captured earlier by a LogRecord.
-fn timestamp_at(
-    format: Option<&str>,
-    seconds: libc::time_t,
-    now: std::time::Duration,
-    utc: bool,
-) -> String {
-    let mut local = MaybeUninit::<libc::tm>::uninit();
-    // SAFETY: the scalar and destination are live for the call.
-    if unsafe {
-        if utc {
-            libc::gmtime_r(&seconds, local.as_mut_ptr())
-        } else {
-            libc::localtime_r(&seconds, local.as_mut_ptr())
-        }
-    }
-    .is_null()
-    {
-        return String::new();
-    }
+fn format_timestamp(format: Option<&str>, local: &libc::tm, now: std::time::Duration) -> String {
     let custom = format.filter(|value| !value.is_empty());
     // A trailing sentinel distinguishes an empty expansion from a small buffer.
     let pattern = format!("{}!", custom.unwrap_or("%Y-%m-%d %H:%M:%S"));
@@ -235,15 +223,9 @@ fn timestamp_at(
     };
     let mut buf = vec![0u8; fmt.as_bytes().len().max(64)];
     loop {
-        // SAFETY: localtime_r initialized local; strftime receives a valid format and writable bytes.
-        let len = unsafe {
-            libc::strftime(
-                buf.as_mut_ptr().cast(),
-                buf.len(),
-                fmt.as_ptr(),
-                local.as_ptr(),
-            )
-        };
+        // SAFETY: the calendar time and format are valid and the buffer is writable.
+        let len =
+            unsafe { libc::strftime(buf.as_mut_ptr().cast(), buf.len(), fmt.as_ptr(), local) };
         if len > 0 {
             let mut text = String::from_utf8_lossy(&buf[..len - 1]).into_owned();
             if custom.is_none() {

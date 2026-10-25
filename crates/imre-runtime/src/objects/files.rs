@@ -15,6 +15,7 @@ mod buffered;
 mod gzip;
 mod path_text;
 mod seekable;
+mod text_memory;
 use seekable::Memory;
 pub(super) use seekable::disk_offset;
 
@@ -34,25 +35,28 @@ enum FileKind {
     BinaryRead,
     GzipBinaryRead,
     Memory,
+    TextMemory,
     Member,
     BinaryWrite,
 }
 
 enum Stream {
+    Standard(bool),
     Read(Input),
     Write(Output),
     Memory(Memory),
+    TextMemory(text_memory::TextMemory),
     Member(Box<super::zipfile::Member>),
 }
 
 impl Stream {
-    /// Closes exactly once even when flushing fails. `into_parts` prevents a
-    /// second implicit flush; a close error takes precedence over a flush error.
+    /// Closes exactly once even when flushing fails. A close error takes precedence.
     fn close(self) -> io::Result<()> {
         let (file, flushed) = match self {
+            Self::Standard(stderr) => return crate::sys::flush_standard(stderr),
             Self::Read(input) => (input.into_file(), Ok(())),
             Self::Write(writer) => writer.finish(),
-            Self::Memory(_) | Self::Member(_) => return Ok(()),
+            Self::Memory(_) | Self::TextMemory(_) | Self::Member(_) => return Ok(()),
         };
         close_file(file).and(flushed)
     }
@@ -153,11 +157,29 @@ impl FileState {
             .ok_or_else(|| Error::new(Kind::ValueError, "I/O operation on closed file."))
     }
 
+    /// A codec writer forwards missing attributes to the actual binary stream.
+    pub(super) fn binary_type_name(&self) -> &'static str {
+        match self.kind {
+            FileKind::Memory => "_io.BytesIO",
+            FileKind::BinaryRead => "_io.BufferedReader",
+            FileKind::BinaryWrite => "_io.BufferedWriter",
+            FileKind::GzipBinaryRead => "GzipFile",
+            FileKind::Member => "ZipExtFile",
+            FileKind::Text | FileKind::TextMemory => unreachable!("expected a binary stream"),
+        }
+    }
+
     pub(super) fn read(&mut self) -> Result<Str> {
+        if self.kind == FileKind::TextMemory {
+            return self.text_memory()?.read(None, false);
+        }
         self.input()?.read_text()
     }
 
     pub(super) fn readline(&mut self) -> Result<Str> {
+        if self.kind == FileKind::TextMemory {
+            return self.text_memory()?.read(None, true);
+        }
         self.input()?.text_line()
     }
 
@@ -251,6 +273,9 @@ impl FileState {
             .stream
             .as_mut()
             .ok_or_else(|| Error::new(Kind::ValueError, closed))?;
+        if let Stream::Standard(stderr) = stream {
+            return crate::sys::write_standard(*stderr, bytes).map_err(super::errno_error);
+        }
         let Stream::Write(writer) = stream else {
             return Err(Error::new(Kind::UnsupportedOperation, "not writable"));
         };
@@ -258,15 +283,26 @@ impl FileState {
     }
 
     pub(super) fn write(&mut self, text: &str) -> Result<()> {
+        if self.kind == FileKind::TextMemory {
+            return self.text_memory()?.write(text);
+        }
         self.write_bytes(text.as_bytes())
     }
 
     pub(super) fn flush(&mut self) -> Result<()> {
+        if self.kind == FileKind::TextMemory {
+            return Ok(());
+        }
         if self.kind == FileKind::BinaryWrite && self.stream.is_none() {
             return Err(Error::new(Kind::ValueError, "flush of closed file"));
         }
         match self.stream()? {
-            Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) => Ok(()),
+            Stream::Standard(stderr) => {
+                crate::sys::flush_standard(*stderr).map_err(super::errno_error)
+            }
+            Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) | Stream::TextMemory(_) => {
+                Ok(())
+            }
             Stream::Write(writer) => writer.flush().map_err(os_error),
         }
     }
@@ -348,7 +384,7 @@ pub(crate) fn errno_error(error: io::Error) -> Error {
     errno_with_filename(error, None)
 }
 
-fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
+pub(super) fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
     errno_with_filenames(
         error,
         path.map(|s| super::exceptions::Filename::Str(Rc::new(Str::from(s)))),
@@ -421,6 +457,26 @@ pub unsafe extern "C" fn imre_gzip_open(path: *const Str, binary: u32) -> *const
     )
 }
 
+/// The original Python wrapper shares the runtime's stdout/stderr buffer, even through an alias.
+pub(super) fn standard_stream(stderr: bool) -> Rc<Object> {
+    Rc::new(Object(StorageCell::new(Storage::File(Box::new(
+        FileState {
+            fd: Some(if stderr {
+                io::stderr().as_raw_fd()
+            } else {
+                io::stdout().as_raw_fd()
+            }),
+            stream: Some(Stream::Standard(stderr)),
+            kind: FileKind::Text,
+            name: Some(Rc::new(Str::new(if stderr {
+                "<stderr>"
+            } else {
+                "<stdout>"
+            }))),
+        },
+    )))))
+}
+
 /// Shares descriptor ownership and buffering while preserving text/binary access errors.
 pub(super) fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*const Object> {
     let state = open_state(path, mode, binary, gzip)?;
@@ -432,7 +488,7 @@ pub(super) fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*c
 fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
     let (file, metadata) = open_file(path, mode)?;
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
-    let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
+    let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
     let fd = file.as_raw_fd();
     let stream = match mode {
         0 | 4 => {
