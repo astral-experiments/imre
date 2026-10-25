@@ -330,11 +330,8 @@ impl Checker<'_> {
         {
             let raw = self.expr(&attribute.value)?;
             if let Type::Class(class) = raw.ty {
-                return Ok(Some(Iteration::Container {
-                    iterable: self.class_method_call(call, attribute, class, Some(raw))?,
-                    items: false,
-                    start: None,
-                }));
+                let iterable = self.iteration_method_call(call, attribute, class, raw)?;
+                return self.iteration_value(iterable, false, call).map(Some);
             }
             let source = if matches!(raw.ty, Type::Document(_)) {
                 self.document_map(raw)
@@ -384,13 +381,8 @@ impl Checker<'_> {
                 )));
             }
             if let Type::Class(class) = receiver.ty {
-                // A first-party method with the same spelling returns an ordinary
-                // value. Preserve its length hint and list.extend's alias snapshot.
-                return Ok(Some(Iteration::Container {
-                    iterable: self.class_method_call(call, attribute, class, Some(receiver))?,
-                    items: false,
-                    start: None,
-                }));
+                let iterable = self.iteration_method_call(call, attribute, class, receiver)?;
+                return self.iteration_value(iterable, false, call).map(Some);
             }
             return Err(error(
                 self.source,
