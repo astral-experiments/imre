@@ -33,6 +33,7 @@ mod text;
 mod unions;
 mod values;
 mod words;
+mod zipfile;
 
 use super::{
     Bytes, Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish,
@@ -58,6 +59,8 @@ enum Storage {
     Sha256(Box<sha2::Sha256>),
     Exception(exceptions::Exception),
     File(Box<files::FileState>),
+    ZipFile(Box<zipfile::Archive>),
+    ZipInfo(Rc<zipfile::Info>),
     AsyncProcess(Box<processes::AsyncProcess>),
     AsyncTask(Rc<asyncio::Task>),
     GeneratorContext(Rc<contexts::Manager>),
@@ -427,6 +430,7 @@ pub unsafe extern "C" fn imre_seq_repeat(value: *const Object, count: usize) -> 
 
 /// # Safety
 /// Both arguments must be rooted, non-null immutable string handles.
+/// Allocation failure raises MemoryError and returns null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_concat(a: *const Str, b: *const Str) -> *const Str {
     // SAFETY: both immutable strings remain rooted for this call.
@@ -436,12 +440,11 @@ pub unsafe extern "C" fn imre_str_concat(a: *const Str, b: *const Str) -> *const
         // SAFETY: the caller roots the original immutable string handle.
         return Rc::into_raw(unsafe { acquire_rc::<Str>(retained as usize) });
     }
-    let length = left
-        .len()
-        .checked_add(right.len())
-        .unwrap_or_else(|| fail("MemoryError", "string is too large"));
-    let mut result = Str::try_with_capacity(length)
-        .unwrap_or_else(|_| fail("MemoryError", "string allocation failed"));
+    let Some(mut result) = concatenated_length(left.len(), [right.len()])
+        .and_then(|length| Str::try_with_capacity(length).ok())
+    else {
+        return Error::allocation().returning(std::ptr::null());
+    };
     result.push_str(left);
     result.push_str(right);
     Rc::into_raw(Rc::new(result))
@@ -595,15 +598,17 @@ pub unsafe extern "C" fn imre_int_str_part(
 /// `parts` is an aligned, readable array of `count` initialized descriptors,
 /// or null when `count` is zero. Each handle remains rooted and each byte span
 /// remains immutable and valid UTF-8 for this call. The array and spans obey Rust
-/// slice size limits. This private ABI borrows every input; allocation exhaustion
-/// is fatal.
+/// slice size limits. Allocation failure raises MemoryError and returns null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_concat_parts(
     parts: *const StringPart,
     count: usize,
 ) -> *const Str {
     // SAFETY: this entry point has the builder's same fragment-lifetime contract.
-    Rc::into_raw(unsafe { concat_parts(parts, count) })
+    finish(
+        unsafe { concat_parts(parts, count) }.map(Rc::into_raw),
+        std::ptr::null(),
+    )
 }
 
 /// Appends already evaluated fragments, reusing uniquely owned string storage.
@@ -618,7 +623,8 @@ pub unsafe extern "C" fn imre_str_concat_parts(
 /// through its handle or initialized bytes in its character storage, without
 /// acquiring another owner. Other inputs stay rooted, immutable, and disjoint
 /// from the transferred Str object's representation throughout the call.
-/// The returned handle owns one reference; allocation exhaustion is fatal.
+/// On success the returned handle owns one reference. On allocation failure,
+/// returns null with MemoryError pending and restores the original left owner.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_concat_parts_owned(
     left: *const Str,
@@ -634,7 +640,9 @@ pub unsafe extern "C" fn imre_str_concat_parts_owned(
         unsafe { std::slice::from_raw_parts(parts, count) }
     };
     // SAFETY: the caller and the consumed owner root all fragments through the call.
-    let (length, shared) = unsafe { concat_size(owner.len(), parts) };
+    let Some((length, shared)) = (unsafe { concat_size(owner.len(), parts) }) else {
+        return failed_append(owner);
+    };
     if let Some(shared) = shared {
         return Rc::into_raw(shared);
     }
@@ -656,9 +664,9 @@ pub unsafe extern "C" fn imre_str_concat_parts_owned(
         }
     });
     if !borrows_left && let Some(value) = Rc::get_mut(&mut owner) {
-        value
-            .try_reserve(length - value.len())
-            .unwrap_or_else(|_| fail("MemoryError", "string allocation failed"));
+        if value.try_reserve(length - value.len()).is_err() {
+            return failed_append(owner);
+        }
         {
             // SAFETY: reservation covers the complete suffix, and alias screening
             // excludes every borrowed source from the storage being mutated. The
@@ -686,8 +694,9 @@ pub unsafe extern "C" fn imre_str_concat_parts_owned(
         return Rc::into_raw(owner);
     }
 
-    let mut result = Str::try_with_capacity(length)
-        .unwrap_or_else(|_| fail("MemoryError", "string allocation failed"));
+    let Ok(mut result) = Str::try_with_capacity(length) else {
+        return failed_append(owner);
+    };
     result.push_str(&owner);
     for part in parts {
         // SAFETY: all inputs, including self-borrows, remain rooted and unchanged.
@@ -701,6 +710,7 @@ pub unsafe extern "C" fn imre_str_concat_parts_owned(
 /// # Safety
 /// The caller transfers one left owner. The root points to a live Str handle
 /// containing exactly the immutable, program-lifetime UTF-8 span in data.
+/// A null result restores the original left owner with MemoryError pending.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_append_literal_owned(
     left: *const Str,
@@ -736,8 +746,8 @@ pub unsafe extern "C" fn imre_str_append_literal_owned(
 /// `length` immutable valid UTF-8 bytes disjoint from both the Str object and
 /// its character allocation, including spare capacity. The span obeys Rust
 /// slice size limits and remains readable until return; it may be null only
-/// when `length` is zero. The returned handle owns one reference. Allocation
-/// exhaustion is fatal.
+/// when `length` is zero. On success the returned handle owns one reference.
+/// On allocation failure, returns null and restores the original left owner.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_append_utf8_owned(
     left: *const Str,
@@ -788,13 +798,12 @@ unsafe fn append_reserved(owner: &mut Rc<Str>, data: *const u8, length: usize) -
 #[cold]
 #[inline(never)]
 unsafe fn append_utf8_slow(mut owner: Rc<Str>, data: *const u8, length: usize) -> *const Str {
-    let total = concatenated_length(owner.len(), [length])
-        .unwrap_or_else(|| fail("MemoryError", "string is too large"));
+    let Some(total) = concatenated_length(owner.len(), [length]) else {
+        return failed_append(owner);
+    };
     if let Some(value) = Rc::get_mut(&mut owner) {
-        if value.capacity() < total {
-            value
-                .try_reserve(length)
-                .unwrap_or_else(|_| fail("MemoryError", "string allocation failed"));
+        if value.capacity() < total && value.try_reserve(length).is_err() {
+            return failed_append(owner);
         }
         // SAFETY: capacity covers the checked total and the caller guarantees
         // a disjoint initialized suffix. Do not inspect or move the string after
@@ -809,12 +818,20 @@ unsafe fn append_utf8_slow(mut owner: Rc<Str>, data: *const u8, length: usize) -
         // SAFETY: the validated nonempty UTF-8 span remains readable and disjoint.
         let suffix =
             unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(data, length)) };
-        let mut result = Str::try_with_capacity(total)
-            .unwrap_or_else(|_| fail("MemoryError", "string allocation failed"));
+        let Ok(mut result) = Str::try_with_capacity(total) else {
+            return failed_append(owner);
+        };
         result.push_str(&owner);
         result.push_str(suffix);
         Rc::into_raw(Rc::new(result))
     }
+}
+
+/// Give the unmodified reference back to the caller's existing slot.
+#[cold]
+fn failed_append(owner: Rc<Str>) -> *const Str {
+    let _ = Rc::into_raw(owner);
+    Error::allocation().returning(std::ptr::null())
 }
 
 /// Checks both arithmetic overflow and Rust's maximum contiguous allocation size.
@@ -829,7 +846,7 @@ fn concatenated_length(initial: usize, lengths: impl IntoIterator<Item = usize>)
 ///
 /// # Safety
 /// All fragments obey the rooted handle and borrowed UTF-8 span contracts.
-unsafe fn concat_size(initial: usize, parts: &[StringPart]) -> (usize, Option<Rc<Str>>) {
+unsafe fn concat_size(initial: usize, parts: &[StringPart]) -> Option<(usize, Option<Rc<Str>>)> {
     let mut handle = None;
     let length = concatenated_length(
         initial,
@@ -841,20 +858,19 @@ unsafe fn concat_size(initial: usize, parts: &[StringPart]) -> (usize, Option<Rc
             }
             size
         }),
-    )
-    .unwrap_or_else(|| fail("MemoryError", "string is too large"));
+    )?;
     let shared = handle.filter(|&(_, size)| size == length).map(|(data, _)| {
         // SAFETY: the sentinel selected a live Str handle which the caller roots.
         unsafe { acquire_rc::<Str>(data as usize) }
     });
-    (length, shared)
+    Some((length, shared))
 }
 
 /// Builds a complete concatenation before publishing it or accessing a writer.
 ///
 /// # Safety
 /// The descriptors, handles, and spans obey `imre_str_concat_parts`'s contract.
-unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Rc<Str> {
+unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Result<Rc<Str>, Error> {
     let parts = if count == 0 {
         &[]
     } else {
@@ -862,15 +878,14 @@ unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Rc<Str> {
         unsafe { std::slice::from_raw_parts(parts, count) }
     };
     // SAFETY: all descriptor sources remain rooted through this call.
-    let (length, shared) = unsafe { concat_size(0, parts) };
+    let (length, shared) = unsafe { concat_size(0, parts) }.ok_or_else(Error::allocation)?;
     if let Some(shared) = shared {
-        return shared;
+        return Ok(shared);
     }
     if length == 0 {
-        return text::owned_string("");
+        return Ok(text::owned_string(""));
     }
-    let mut result = Str::try_with_capacity(length)
-        .unwrap_or_else(|_| fail("MemoryError", "string allocation failed"));
+    let mut result = Str::try_with_capacity(length).map_err(|_| Error::allocation())?;
     {
         // SAFETY: the fresh result has capacity for the checked total. We fill
         // its spare bytes without reading or moving it, then publish length once.
@@ -894,7 +909,7 @@ unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Rc<Str> {
     // SAFETY: exactly `length` bytes were initialized within capacity; joining
     // complete UTF-8 fragments preserves UTF-8, including the full-inline case.
     unsafe { result.set_len(length) };
-    Rc::new(result)
+    Ok(Rc::new(result))
 }
 
 /// Python also treats the four ASCII information separators as whitespace.
@@ -1085,25 +1100,31 @@ pub unsafe extern "C" fn imre_str_splitlines_iter(value: *const Str) -> *const O
 /// boundary; a final boundary creates no extra item, and U+001F is not a boundary.
 ///
 /// # Safety
-/// `value` must be a rooted string. Returns an owned generic sequence of strings.
+/// `value` must be rooted. Returns an owned string sequence or null on error.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_splitlines(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { std::mem::ManuallyDrop::new(Rc::from_raw(value)) };
-    split_lines(&value, |range| owned_line(&value, range))
+    finish(
+        split_lines(&value, |range| owned_line(&value, range)),
+        std::ptr::null(),
+    )
 }
 
-fn split_lines(value: &str, own: impl Fn(std::ops::Range<usize>) -> Rc<Str>) -> *const Object {
+fn split_lines(
+    value: &str,
+    own: impl Fn(std::ops::Range<usize>) -> Rc<Str>,
+) -> Result<*const Object, Error> {
     let mut offsets = LineOffsets::new(value);
     let mut result = Words::new(3);
     while let Some(range) = offsets.next(value) {
         result
             .values
             .try_reserve(1)
-            .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
+            .map_err(|_| Error::allocation())?;
         result.values.push(Rc::into_raw(own(range)) as usize);
     }
-    Rc::into_raw(result.into_object())
+    Ok(Rc::into_raw(result.into_object()))
 }
 
 #[cfg(test)]
@@ -1194,7 +1215,9 @@ mod tests {
             ];
             // SAFETY: the ASCII padding, complete UTF-8 ending, and owned handle
             // remain immutable; null descriptors have zero length.
-            let mut result = unsafe { concat_parts(parts.as_ptr(), parts.len()) };
+            let Ok(mut result) = (unsafe { concat_parts(parts.as_ptr(), parts.len()) }) else {
+                panic!("test fragments must fit");
+            };
             let source = Rc::into_raw(Rc::new(Str::new(&padding[..split])));
             let suffix = &parts[1..];
             // SAFETY: source transfers its only owner, and the remaining suffix
@@ -1518,6 +1541,28 @@ mod tests {
             "capacity grew {growths} times for 1024 appends"
         );
         assert_eq!(source.as_str(), "é\0".repeat(1024));
+    }
+
+    #[test]
+    fn failed_append_restores_the_callers_reference() {
+        let original = Rc::new(Str::from("preserved"));
+        let alias = Rc::clone(&original);
+        let pointer = Rc::as_ptr(&original);
+        assert!(failed_append(original).is_null());
+        assert_eq!(Rc::strong_count(&alias), 2);
+
+        // SAFETY: failure returned the transferred reference to its original
+        // pointer, and taking the pending exception transfers one owner.
+        unsafe {
+            let restored = Rc::from_raw(pointer);
+            assert!(Rc::ptr_eq(&restored, &alias));
+            assert_eq!(restored.as_str(), "preserved");
+            let error = Rc::from_raw(exceptions::imre_error_take());
+            assert_eq!(
+                exceptions::imre_exception_matches(Rc::as_ptr(&error), Kind::MemoryError as u32),
+                1
+            );
+        }
     }
 
     #[test]

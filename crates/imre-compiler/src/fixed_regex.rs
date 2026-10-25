@@ -12,6 +12,7 @@ const SPACE: &str =
 
 pub(crate) struct FixedPattern {
     pub(crate) source: String,
+    pub(crate) may_match_empty: bool,
     pub(crate) groups: Vec<Capture>,
 }
 
@@ -97,7 +98,7 @@ pub(crate) fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, St
                 output.push(c);
                 can_repeat = c == '.';
             }
-            '$' if input.peek().is_none() => {
+            '$' if input.peek().is_none() || verbose && verbose_tail(input.clone()) => {
                 // Remember a consumed final newline so the runtime can exclude it
                 // from group zero. Dots are not valid in Python group names.
                 output.push_str(r"(?P<imre.eol>\n)?\z");
@@ -157,7 +158,8 @@ pub(crate) fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, St
         if let HirKind::Repetition(repeat) = node.kind()
             && repeat.max != Some(1)
             && (repeat.sub.properties().minimum_len() == Some(0)
-                || repeat.sub.properties().explicit_captures_len() != 0)
+                || repeat.sub.properties().explicit_captures_len() != 0
+                    && !matches!(repeat.sub.kind(), HirKind::Capture(c) if c.sub.properties().explicit_captures_len() == 0))
         {
             return Err("repeating a nullable expression or capture is not supported".into());
         }
@@ -185,12 +187,114 @@ pub(crate) fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, St
     }
     Ok(FixedPattern {
         source: output,
+        may_match_empty: hir.properties().minimum_len() == Some(0),
         groups: groups
             .into_iter()
             .zip(required)
             .map(|(name, required)| Capture { name, required })
             .collect(),
     })
+}
+
+/// Encode a literal replacement as UTF-8 runs and capture indices. The high
+/// bit distinguishes a group from a byte count, so user text needs no sentinel.
+pub(crate) fn replacement(template: &str, groups: &[Capture]) -> Result<Vec<u8>, &'static str> {
+    fn flush(out: &mut Vec<u8>, literal: &mut String) -> Result<(), &'static str> {
+        if !literal.is_empty() {
+            let n = u32::try_from(literal.len())
+                .ok()
+                .filter(|&n| n < 1 << 31)
+                .ok_or("replacement literal is too long")?;
+            out.extend(n.to_le_bytes());
+            out.extend_from_slice(literal.as_bytes());
+            literal.clear();
+        }
+        Ok(())
+    }
+    let mut chars = template.chars().peekable();
+    let mut out = Vec::new();
+    let mut literal = String::new();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            literal.push(c);
+            continue;
+        }
+        let escape = chars.next().ok_or("incomplete replacement escape")?;
+        let group = match escape {
+            'g' => {
+                if chars.next() != Some('<') {
+                    return Err("expected < in replacement group");
+                }
+                let mut name = String::new();
+                loop {
+                    match chars.next() {
+                        Some('>') => break,
+                        Some(c) => name.push(c),
+                        None => return Err("unterminated replacement group"),
+                    }
+                }
+                if !name.is_empty() && name.bytes().all(|c| c.is_ascii_digit()) {
+                    name.parse().ok()
+                } else {
+                    groups.iter().position(|g| g.name.as_deref() == Some(&name))
+                }
+            }
+            '1'..='9' => {
+                let mut digits = String::from(escape);
+                if let Some(c) = chars.next_if(char::is_ascii_digit) {
+                    digits.push(c);
+                    if digits.bytes().all(|d| (b'0'..=b'7').contains(&d))
+                        && let Some(c) = chars.next_if(|c| matches!(c, '0'..='7'))
+                    {
+                        digits.push(c);
+                        let octal = u8::from_str_radix(&digits, 8)
+                            .map_err(|_| "octal escape exceeds 0o377")?;
+                        literal.push(char::from(octal));
+                        continue;
+                    }
+                }
+                digits.parse().ok()
+            }
+            '0' => {
+                let mut octal = 0;
+                for _ in 0..2 {
+                    if let Some(c) = chars.next_if(|c| matches!(c, '0'..='7')) {
+                        octal = octal * 8 + c.to_digit(8).unwrap() as u8;
+                    } else {
+                        break;
+                    }
+                }
+                literal.push(char::from(octal));
+                continue;
+            }
+            _ => {
+                let decoded = match escape {
+                    '\\' => '\\',
+                    'a' => '\x07',
+                    'b' => '\x08',
+                    'f' => '\x0c',
+                    'v' => '\x0b',
+                    'n' => '\n',
+                    'r' => '\r',
+                    't' => '\t',
+                    c if c.is_ascii_alphabetic() => return Err("invalid replacement escape"),
+                    c => {
+                        literal.push('\\');
+                        c
+                    }
+                };
+                literal.push(decoded);
+                continue;
+            }
+        };
+        let group = group
+            .filter(|&i| i < groups.len())
+            .ok_or("unknown replacement group")?;
+        flush(&mut out, &mut literal)?;
+        out.extend((group as u32 | 1 << 31).to_le_bytes());
+    }
+    flush(&mut out, &mut literal)?;
+    Ok(out)
 }
 
 type Input<'a> = std::iter::Peekable<std::str::Chars<'a>>;
@@ -206,6 +310,30 @@ fn count(input: &mut Input<'_>, output: &mut String) -> Result<bool, String> {
     }
     output.push_str(&digits);
     Ok(true)
+}
+
+/// A terminal dollar may be followed by ignored layout and comments in VERBOSE mode.
+fn verbose_tail(mut input: Input<'_>) -> bool {
+    while let Some(c) = input.next() {
+        if verbose_space(c) {
+            continue;
+        }
+        if c != '#' {
+            return false;
+        }
+        while let Some(c) = input.next() {
+            match c {
+                '\\' => {
+                    if input.next().is_none() {
+                        return false;
+                    }
+                }
+                '\n' => break,
+                _ => {}
+            }
+        }
+    }
+    true
 }
 
 fn verbose_space(c: char) -> bool {
@@ -408,7 +536,7 @@ mod tests {
             r"a*+",
             r"a* ?",
             r"a{1, 3}",
-            r"(a)+",
+            r"((a)?b)+",
             r"(x?)*",
             r"[a&&b]",
             r"[[a]]",
@@ -424,6 +552,7 @@ mod tests {
             r"[a-z]{2,4}?",
             r"[\-\]]+",
             r"(?P<empty>x*)?",
+            r"(a)+",
         ] {
             assert!(translate(source, false).is_ok(), "{source}");
         }

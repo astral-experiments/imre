@@ -318,7 +318,24 @@ impl Parser {
                         ),
                     ));
                 }
-                vec![value]
+                let mut taken = vec![value];
+                if option.positional() && option.many {
+                    // Once an option ends this positional's run, parse_args
+                    // treats later bare words as extras. The first -- inside
+                    // the run consumes the marker and makes all following words values.
+                    while let Some(&next) = args.get(index) {
+                        if !end_options && next == "--" {
+                            end_options = true;
+                        } else if end_options || matches!(self.token(next), Token::Value) {
+                            taken.push(next);
+                        } else {
+                            break;
+                        }
+                        index += 1;
+                    }
+                    after_positional = Some(index);
+                }
+                taken
             } else if option.kind == Kind::Bool {
                 Vec::new()
             } else {
@@ -458,7 +475,7 @@ impl OptionSpec {
     }
 }
 
-/// Parses the current contents of sys.argv[1..] into the fixed namespace layout.
+/// Parses an explicit string list or the current sys.argv[1..] into a namespace.
 ///
 /// # Safety
 /// The compiler roots the inputs. `layout` and each descriptor in `children`
@@ -471,6 +488,7 @@ pub unsafe extern "C" fn imre_argparse_parse(
     schema: *const Str,
     description: *const Str,
     argv: *const Object,
+    process_argv: bool,
 ) -> *mut usize {
     // SAFETY: these immutable inputs remain rooted during parsing and construction.
     let (schema, description, argv) = unsafe { (&*schema, &*description, &*argv) };
@@ -485,7 +503,7 @@ pub unsafe extern "C" fn imre_argparse_parse(
             sequence
                 .values
                 .iter()
-                .skip(1)
+                .skip(usize::from(process_argv))
                 .map(|&word| super::acquire_rc::<Str>(word))
                 .collect::<Vec<_>>()
         })

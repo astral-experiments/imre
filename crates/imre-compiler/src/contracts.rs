@@ -77,6 +77,7 @@ impl Builtin {
                 matches!(
                     operation,
                     PosixPathOperation::MixedJoin { .. }
+                        | PosixPathOperation::Commonpath
                         | PosixPathOperation::Splitext
                         | PosixPathOperation::Normpath
                         | PosixPathOperation::Abspath
@@ -90,6 +91,7 @@ impl Builtin {
                     | PathOperation::ReadBytes
                     | PathOperation::Absolute
                     | PathOperation::WithName
+                    | PathOperation::Match { .. }
                     | PathOperation::Resolve
                     | PathOperation::WriteText
                     | PathOperation::WriteBytes
@@ -122,7 +124,12 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::Logging(operation) => Contract::new(
-                matches!(operation, crate::ir::LogOperation::Configure),
+                matches!(
+                    operation,
+                    crate::ir::LogOperation::Configure
+                        | crate::ir::LogOperation::ConfigureName
+                        | crate::ir::LogOperation::CheckLevel
+                ),
                 PreservesLists,
             ),
             Self::Process(operation) => match operation {
@@ -190,6 +197,7 @@ impl Builtin {
             Self::BytesGet
             | Self::Decode
             | Self::DecodeSplitLines
+            | Self::SplitLines
             | Self::DictGet
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
@@ -211,6 +219,7 @@ impl Builtin {
             | Self::ListSliceSum
             | Self::Slice
             | Self::StringFormat
+            | Self::RegexSub(_)
             | Self::StringJoin
             | Self::StringReplace
             | Self::StringGet
@@ -257,7 +266,6 @@ impl Builtin {
             | Self::SequenceGetInBounds
             | Self::SetContains
             | Self::Split
-            | Self::SplitLines
             | Self::Ndiff
             | Self::StringListCopy
             | Self::StringListFilter(_)
@@ -285,15 +293,30 @@ impl Builtin {
             | Self::DictGatherStrInt
             | Self::FileReadline
             | Self::GzipOpen
+            | Self::BytesIo
+            | Self::BinarySeek
+            | Self::BinaryTell
+            | Self::ZipOpenFile
+            | Self::ZipGetInfo
+            | Self::ZipInfoList
+            | Self::ZipMember
+            | Self::ZipRead
+            | Self::ZipTest
+            | Self::ZipFilename
+            | Self::ZipMinReadSize
+            | Self::ZipField(_)
+            | Self::ZipOpen
+            | Self::ZipNamelist
+            | Self::ZipClose
             | Self::Input
-            | Self::ParseArgs(_)
+            | Self::ParseArgs { .. }
             | Self::Pop
             | Self::Print
             | Self::SortRestore
             | Self::StderrLine
             | Self::SysStreamWrite { .. }
             | Self::SysStreamFlush { .. }
-            | Self::SysExit
+            | Self::RaiseException
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
@@ -317,6 +340,7 @@ impl Builtin {
             | Self::KeyUnion
             | Self::KeySet
             | Self::KeyIntersection
+            | Self::KeyDifference
             | Self::ExactRecord(_)
             | Self::RecordView
             | Self::ListAllI32
@@ -430,7 +454,7 @@ impl Binary {
     /// Includes checked byte concatenation and conversion of mixed integer/float operands.
     pub(crate) fn may_raise_with_operands(self, left: Type, right: Type) -> bool {
         self.may_raise()
-            || (matches!(self, Self::Concat) && left == Type::Bytes)
+            || (matches!(self, Self::Concat) && matches!(left, Type::Str | Type::Bytes))
             || matches!(
                 (left, right),
                 (Type::Int, Type::Float) | (Type::Float, Type::Int)
@@ -558,6 +582,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_int"
                 | "imre_print_float"
                 | "imre_log_config"
+                | "imre_log_config_named"
+                | "imre_log_check_level"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
                 | "imre_str_unquote"
@@ -571,9 +597,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_get"
                 | "imre_bytes_get_index"
                 | "imre_bytes_slice"
+                | "imre_str_concat"
                 | "imre_bytes_concat"
                 | "imre_bytes_repeat"
                 | "imre_bytes_decode_splitlines"
+                | "imre_str_splitlines"
                 | "imre_bytes_decode"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
@@ -608,6 +636,19 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_text_write"
                 | "imre_text_flush"
                 | "imre_text_close"
+                | "imre_bytes_io"
+                | "imre_binary_seek"
+                | "imre_binary_tell"
+                | "imre_zip_open_file"
+                | "imre_zip_getinfo"
+                | "imre_zip_infolist"
+                | "imre_zip_member"
+                | "imre_zip_read"
+                | "imre_zip_test"
+                | "imre_zip_min_read_size"
+                | "imre_zip_open"
+                | "imre_zip_namelist"
+                | "imre_zip_close"
                 | "imre_int_parse"
                 | "imre_int_float"
                 | "imre_float_int"

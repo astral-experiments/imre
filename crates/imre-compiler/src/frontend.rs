@@ -52,6 +52,7 @@ mod truthiness;
 mod unions;
 mod unpacking;
 mod zip_sums;
+mod zipfile;
 use assignments::LocalState;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
@@ -327,6 +328,9 @@ const RESERVED: &[&str] = &[
 
 /// These numbers are the sealed exception categories in the runtime ABI.
 pub(crate) fn exception_kind(name: &str) -> Option<u32> {
+    if name == "NotImplementedError" {
+        return Some(37);
+    }
     if name == "StopIteration" {
         return Some(35);
     }
@@ -601,11 +605,11 @@ pub(crate) fn lower_with_owners(
         }
     }
     let initializer_start = definitions.len();
-    let helpers = Helpers::new(definitions.len() + graph.initializer_modules().count());
+    let helpers = Helpers::new(definitions.len() + graph.initializers().count());
     let globals = ModuleValues::default();
     let mut initializations = Vec::new();
     let mut available = HashSet::new();
-    for module_id in graph.initializer_modules() {
+    for (module_id, range) in graph.initializers() {
         let checker = Checker::new(
             graph,
             module_id,
@@ -616,7 +620,7 @@ pub(crate) fn lower_with_owners(
             &globals,
         );
         initializations.push(
-            Initialization::lower(checker, &mut available)
+            Initialization::lower(checker, &mut available, range)
                 .map_err(|error| format!("{}:{error}", graph.modules[module_id].path.display()))?,
         );
     }
@@ -1248,6 +1252,9 @@ fn annotation_at(
         Some(Binding::Intrinsic(Intrinsic::Counter)) => return Ok(types.counter(Type::Str)),
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
+        Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
+        Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
+        Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
@@ -1741,6 +1748,14 @@ impl<'a> Checker<'a> {
     /// Resolves a fixed field without evaluating its receiver more than once.
     fn field(&mut self, attribute: &ast::ExprAttribute) -> Result<(Expr, usize, Type), String> {
         let receiver = self.expr(&attribute.value)?;
+        self.writable_field_value(attribute, receiver)
+    }
+
+    fn writable_field_value(
+        &self,
+        attribute: &ast::ExprAttribute,
+        receiver: Expr,
+    ) -> Result<(Expr, usize, Type), String> {
         if let Type::Class(class) = receiver.ty {
             let declaration = &self.classes.declarations.definitions[class];
             if self.classes.parsers.namespace(class) {
@@ -3530,14 +3545,16 @@ impl<'a> Checker<'a> {
             return self.generator_scope(item, remaining, body, manager);
         }
         let stored = self.types.directory_value(manager.ty);
+        let archive = manager.ty == Type::ZipFile;
         if temporary.is_none()
             && stored.is_none()
+            && !archive
             && !matches!(manager.ty, Type::TextIO | Type::BinaryIO)
         {
             return Err(error(
                 self.source,
                 &item.context_expr,
-                "with requires a sealed file or a direct TemporaryDirectory call",
+                "with requires a supported file, ZIP archive, or directory context",
             ));
         }
         let captured = self.hidden(manager.ty);
@@ -3564,7 +3581,7 @@ impl<'a> Checker<'a> {
         let (nested, falls) = self.with_items(remaining, body)?;
         protected.extend(nested);
         let mut statements = vec![Statement::Assign(captured, manager)];
-        if temporary.is_none() && stored.is_none() {
+        if temporary.is_none() && stored.is_none() && !archive {
             statements.push(Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::TextEnter, vec![self.local(captured)]),
@@ -3574,6 +3591,8 @@ impl<'a> Checker<'a> {
             Builtin::Path(ir::PathOperation::ContextExit)
         } else if temporary.is_some() {
             Builtin::Path(ir::PathOperation::CleanupTemporaryDirectory)
+        } else if archive {
+            Builtin::ZipClose
         } else {
             Builtin::TextClose
         };
@@ -3644,6 +3663,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CalledProcessError)) => Some(26),
             Some(Binding::Intrinsic(Intrinsic::TimeoutExpired)) => Some(27),
             Some(Binding::Intrinsic(Intrinsic::BadGzipFile)) => Some(28),
+            Some(Binding::Intrinsic(Intrinsic::BadZipFile)) => Some(36),
             Some(Binding::Intrinsic(Intrinsic::ZlibError)) => Some(29),
             Some(Binding::Intrinsic(Intrinsic::TomlDecodeError)) => Some(30),
             Some(Binding::Intrinsic(Intrinsic::JsonDecodeError)) => Some(31),
@@ -4104,7 +4124,14 @@ impl<'a> Checker<'a> {
         }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
             match symbol {
+                Intrinsic::OsDevnull => {
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str("/dev/null".into()),
+                    });
+                }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
+                Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
                 Intrinsic::SysExecutable | Intrinsic::SysPlatform => {
                     let operation = match symbol {
                         Intrinsic::SysExecutable => {
@@ -4252,28 +4279,30 @@ impl<'a> Checker<'a> {
                 (ty, ExprKind::Tuple(values))
             }
             ast::Expr::BinOp(binary) => {
-                let (mut left, mut right) =
-                    if matches!(binary.op, ast::Operator::BitOr | ast::Operator::BitAnd) {
-                        let (left, left_key) = self.union_operand(&binary.left)?;
-                        let (right, right_key) = self.union_operand(&binary.right)?;
-                        if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
-                            self.expect(left_key, right_key, binary)?;
-                            return Ok(Expr {
-                                ty: self.types.set(left_key),
-                                kind: ExprKind::Builtin(
-                                    if binary.op == ast::Operator::BitAnd {
-                                        Builtin::KeyIntersection
-                                    } else {
-                                        Builtin::KeyUnion
-                                    },
-                                    vec![left, right],
-                                ),
-                            });
-                        }
-                        (left, right)
-                    } else {
-                        (self.expr(&binary.left)?, self.expr(&binary.right)?)
-                    };
+                let (mut left, mut right) = if matches!(
+                    binary.op,
+                    ast::Operator::BitOr | ast::Operator::BitAnd | ast::Operator::Sub
+                ) {
+                    let (left, left_key) = self.union_operand(&binary.left)?;
+                    let (right, right_key) = self.union_operand(&binary.right)?;
+                    if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
+                        self.expect(left_key, right_key, binary)?;
+                        return Ok(Expr {
+                            ty: self.types.set(left_key),
+                            kind: ExprKind::Builtin(
+                                match binary.op {
+                                    ast::Operator::Sub => Builtin::KeyDifference,
+                                    ast::Operator::BitAnd => Builtin::KeyIntersection,
+                                    _ => Builtin::KeyUnion,
+                                },
+                                vec![left, right],
+                            ),
+                        });
+                    }
+                    (left, right)
+                } else {
+                    (self.expr(&binary.left)?, self.expr(&binary.right)?)
+                };
                 if binary.op == ast::Operator::Add
                     && left.ty == Type::JsonValue
                     && right.ty == Type::JsonValue
@@ -4591,10 +4620,7 @@ impl<'a> Checker<'a> {
                         matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
                     });
                     if matches!(ty, Type::ListInt | Type::List(_)) && !tuple_list
-                        || matches!(
-                            ty,
-                            Type::Set(_) | Type::StringKeys | Type::Optional(_) | Type::Union(_)
-                        )
+                        || matches!(ty, Type::StringKeys | Type::Optional(_) | Type::Union(_))
                         || matches!(ty, Type::Dict(_)) && !self.types.is_counter(ty)
                         || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
                     {
@@ -4764,6 +4790,16 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if attribute.attr.as_str() == "encoding"
+                    && matches!(
+                        self.resolve(&attribute.value),
+                        Some(Binding::Intrinsic(
+                            Intrinsic::Stdin | Intrinsic::Stdout | Intrinsic::Stderr
+                        ))
+                    )
+                {
+                    return Ok(unpacking::string("utf-8"));
+                }
                 if let Some(class) = self.class_reference(&attribute.value) {
                     if let Some(member) = self.enum_member(class, attribute.attr.as_str()) {
                         return Ok(member);
@@ -4787,6 +4823,9 @@ impl<'a> Checker<'a> {
                         }
                         _ => return self.class_attribute(attribute, class, Some(receiver), None),
                     }
+                }
+                if matches!(receiver.ty, Type::ZipFile | Type::ZipInfo) {
+                    return self.zip_attribute(receiver, attribute);
                 }
                 if receiver.ty == Type::Sha256 {
                     return self.sha256_attribute(receiver, attribute);
@@ -4917,9 +4956,11 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        // A formatted string evaluates every interpolation before joining them.
         Ok(parts
             .into_iter()
-            .reduce(|left, right| Expr {
+            .rev()
+            .reduce(|right, left| Expr {
                 ty: Type::Str,
                 kind: ExprKind::Binary(Binary::Concat, Box::new(left), Box::new(right)),
             })
@@ -5115,7 +5156,39 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.async_builtin(kind, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::Cast)) => {
+                self.reject_builtin_keywords(call)?;
+                let [ast::Expr::StringLiteral(target), value] = call.arguments.args.as_ref() else {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "typing.cast requires a quoted type and a value",
+                    ));
+                };
+                // cast returns its second argument verbatim. The quoted type is a
+                // runtime string constant; it does not check or change the value.
+                check_string(target, self.source)?;
+                return self.typed_expr(value);
+            }
             Some(Binding::Intrinsic(Intrinsic::Sha256)) => return self.sha256_constructor(call),
+            Some(Binding::Intrinsic(Intrinsic::BytesIo)) => {
+                let args = self.arguments(
+                    call,
+                    &[Parameter {
+                        name: "initial_bytes".into(),
+                        ty: Type::Bytes,
+                        kind: ParameterKind::PositionalOrKeyword,
+                        default: Some(Expr {
+                            ty: Type::Bytes,
+                            kind: ExprKind::Bytes(Vec::new()),
+                        }),
+                        sign_only: false,
+                    }],
+                    None,
+                )?;
+                return Ok(self.ordered_builtin(Builtin::BytesIo, Type::BinaryIO, args));
+            }
+            Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
                 return Err(error(
@@ -5141,6 +5214,11 @@ impl<'a> Checker<'a> {
                 return self.fspath_argument(path);
             }
             Some(Binding::Intrinsic(Intrinsic::GetLogger)) => return self.get_logger(call),
+            Some(Binding::Intrinsic(
+                symbol @ (Intrinsic::AddLevelName
+                | Intrinsic::GetLevelName
+                | Intrinsic::LevelNamesMapping),
+            )) => return self.logging_levels(symbol, call),
             Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
                 return self.configure_logging(call);
             }
@@ -5162,6 +5240,7 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::RegexSub)) => return self.sub_regex(call),
             Some(Binding::Intrinsic(
                 intrinsic @ (Intrinsic::GetSysconfigPath | Intrinsic::OsPathExists),
             )) => {
@@ -5360,6 +5439,18 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Sha256 {
                 return self.sha256_method(receiver, attribute, call);
             }
+            if receiver.ty == Type::ZipInfo
+                && attribute.attr.as_str() == "is_dir"
+                && call.arguments.is_empty()
+            {
+                return Ok(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::ZipField(ir::ZipField::IsDir), vec![receiver]),
+                });
+            }
+            if receiver.ty == Type::ZipFile {
+                return self.zipfile_method(receiver, attribute, call);
+            }
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
             }
@@ -5424,6 +5515,27 @@ impl<'a> Checker<'a> {
             if matches!(receiver.ty, Type::TextIO | Type::BinaryIO) {
                 let binary = receiver.ty == Type::BinaryIO;
                 let data_type = if binary { Type::Bytes } else { Type::Str };
+                if binary
+                    && attribute.attr.as_str() == "seek"
+                    && let [offset, rest @ ..] = call.arguments.args.as_ref()
+                    && rest.len() <= 1
+                {
+                    let offset = self.expr_expected(offset, Type::Int)?;
+                    let whence = match rest {
+                        [whence] => self.expr_expected(whence, Type::Int)?,
+                        _ => Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Int("0".into()),
+                        },
+                    };
+                    return Ok(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(
+                            Builtin::BinarySeek,
+                            vec![receiver, offset, whence],
+                        ),
+                    });
+                }
                 let (builtin, ty) = match (attribute.attr.as_str(), call.arguments.args.len()) {
                     ("read", 0) => (
                         if binary {
@@ -5434,6 +5546,7 @@ impl<'a> Checker<'a> {
                         data_type,
                     ),
                     ("read", 1) if binary => (Builtin::BinaryReadSize, Type::Bytes),
+                    ("tell", 0) if binary => (Builtin::BinaryTell, Type::Int),
                     ("readline", 0) => (Builtin::FileReadline, data_type),
                     ("write", 1) => (
                         if binary {
@@ -5638,14 +5751,15 @@ impl<'a> Checker<'a> {
                 .as_ref()
                 .is_some_and(|name| name.as_str() == "file")
             && self.resolve(&field.value) == Some(Binding::Intrinsic(Intrinsic::Stderr))
-            && let [text] = call.arguments.args.as_slice()
+            && call.arguments.args.len() <= 1
         {
+            let text = match call.arguments.args.first() {
+                Some(text) => self.expr_expected(text, Type::Str)?,
+                None => unpacking::string(""),
+            };
             return Ok(Expr {
                 ty: Type::None,
-                kind: ExprKind::Builtin(
-                    Builtin::StderrLine,
-                    vec![self.expr_expected(text, Type::Str)?],
-                ),
+                kind: ExprKind::Builtin(Builtin::StderrLine, vec![text]),
             });
         }
         match name.id.as_str() {

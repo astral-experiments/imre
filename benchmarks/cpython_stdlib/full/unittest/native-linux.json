@@ -1,0 +1,226 @@
+[
+  {
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "opt_level": 0,
+    "denominator": 1090,
+    "counts": {
+      "host-driven-native-operation": 8,
+      "native-body": 2,
+      "reference-only": 1078,
+      "reference-skip": 2
+    },
+    "evidence": {
+      "test.test_unittest.test_assertions.TestLongMessage.testAssertFalse": [
+        {
+          "execution": "host-driven-native-operation",
+          "body": "CPython",
+          "assertions": "CPython checks the native failure message",
+          "fixture_execution": "CPython",
+          "operation": "assertFalse",
+          "calls": 4
+        }
+      ],
+      "test.test_unittest.test_assertions.TestLongMessage.testAssertGreater": [
+        {
+          "execution": "host-driven-native-operation",
+          "body": "CPython",
+          "assertions": "CPython checks the native failure message",
+          "fixture_execution": "CPython",
+          "operation": "assertGreater",
+          "calls": 4
+        }
+      ],
+      "test.test_unittest.test_assertions.TestLongMessage.testAssertGreaterEqual": [
+        {
+          "execution": "host-driven-native-operation",
+          "body": "CPython",
+          "assertions": "CPython checks the native failure message",
+          "fixture_execution": "CPython",
+          "operation": "assertGreaterEqual",
+          "calls": 4
+        }
+      ],
+      "test.test_unittest.test_assertions.TestLongMessage.testAssertLess": [
+        {
+          "execution": "host-driven-native-operation",
+          "body": "CPython",
+          "assertions": "CPython checks the native failure message",
+          "fixture_execution": "CPython",
+          "operation": "assertLess",
+          "calls": 4
+        }
+      ],
+      "test.test_unittest.test_assertions.TestLongMessage.testAssertLessEqual": [
+        {
+          "execution": "host-driven-native-operation",
+          "body": "CPython",
+          "assertions": "CPython checks the native failure message",
+          "fixture_execution": "CPython",
+          "operation": "assertLessEqual",
+          "calls": 4
+        }
+      ],
+      "test.test_unittest.test_assertions.TestLongMessage.testAssertTrue": [
+        {
+          "execution": "host-driven-native-operation",
+          "body": "CPython",
+          "assertions": "CPython checks the native failure message",
+          "fixture_execution": "CPython",
+          "operation": "assertTrue",
+          "calls": 4
+        }
+      ],
+      "test.test_unittest.test_assertions.TestLongMessage.testNotEqual": [
+        {
+          "execution": "host-driven-native-operation",
+          "body": "CPython",
+          "assertions": "CPython checks the native failure message",
+          "fixture_execution": "CPython",
+          "operation": "assertNotEqual",
+          "calls": 4
+        }
+      ],
+      "test.test_unittest.test_assertions.TestLongMessage.test_baseAssertEqual": [
+        {
+          "execution": "host-driven-native-operation",
+          "body": "CPython",
+          "assertions": "CPython checks the native failure message",
+          "fixture_execution": "CPython",
+          "operation": "_baseAssertEqual",
+          "calls": 4
+        }
+      ],
+      "test.test_unittest.test_result.Test_TestResult.test_startTestRun_stopTestRun": [
+        {
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "dc75a0e34ad9e3142def5ecbbb968d69718df1877b8189e998a11a22715812af"
+        }
+      ],
+      "test.test_unittest.test_result.Test_TestResult.test_stop": [
+        {
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "c6801d8c1e4650b734f0c05842b93c8d67b8591e8d25989c75e266234118829c"
+        }
+      ]
+    },
+    "failures": []
+  },
+  {
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "opt_level": 3,
+    "denominator": 1090,
+    "counts": {
+      "host-driven-native-operation": 8,
+      "native-body": 2,
+      "reference-only": 1078,
+      "reference-skip": 2
+    },
+    "evidence": {
+      "test.test_unittest.test_assertions.TestLongMessage.testAssertFalse": [
+        {
+          "execution": "host-driven-native-operation",
+          "body": "CPython",
+          "assertions": "CPython checks the native failure message",
+          "fixture_execution": "CPython",
+          "operation": "assertFalse",
+          "calls": 4
+        }
+      ],
+      "test.test_unittest.test_assertions.TestLongMessage.testAssertGreater": [
+        {
+          "execution": "host-driven-native-operation",
+          "body": "CPython",
+          "assertions": "CPython checks the native failure message",
+          "fixture_execution": "CPython",
+          "operation": "assertGreater",
+          "calls": 4
+        }
+      ],
+      "test.test_unittest.test_assertions.TestLongMessage.testAssertGreaterEqual": [
+        {
+          "execution": "host-driven-native-operation",
+          "body": "CPython",
+          "assertions": "CPython checks the native failure message",
+          "fixture_execution": "CPython",
+          "operation": "assertGreaterEqual",
+          "calls": 4
+        }
+      ],
+      "test.test_unittest.test_assertions.TestLongMessage.testAssertLess": [
+        {
+          "execution": "host-driven-native-operation",
+          "body": "CPython",
+          "assertions": "CPython checks the native failure message",
+          "fixture_execution": "CPython",
+          "operation": "assertLess",
+          "calls": 4
+        }
+      ],
+      "test.test_unittest.test_assertions.TestLongMessage.testAssertLessEqual": [
+        {
+          "execution": "host-driven-native-operation",
+          "body": "CPython",
+          "assertions": "CPython checks the native failure message",
+          "fixture_execution": "CPython",
+          "operation": "assertLessEqual",
+          "calls": 4
+        }
+      ],
+      "test.test_unittest.test_assertions.TestLongMessage.testAssertTrue": [
+        {
+          "execution": "host-driven-native-operation",
+          "body": "CPython",
+          "assertions": "CPython checks the native failure message",
+          "fixture_execution": "CPython",
+          "operation": "assertTrue",
+          "calls": 4
+        }
+      ],
+      "test.test_unittest.test_assertions.TestLongMessage.testNotEqual": [
+        {
+          "execution": "host-driven-native-operation",
+          "body": "CPython",
+          "assertions": "CPython checks the native failure message",
+          "fixture_execution": "CPython",
+          "operation": "assertNotEqual",
+          "calls": 4
+        }
+      ],
+      "test.test_unittest.test_assertions.TestLongMessage.test_baseAssertEqual": [
+        {
+          "execution": "host-driven-native-operation",
+          "body": "CPython",
+          "assertions": "CPython checks the native failure message",
+          "fixture_execution": "CPython",
+          "operation": "_baseAssertEqual",
+          "calls": 4
+        }
+      ],
+      "test.test_unittest.test_result.Test_TestResult.test_startTestRun_stopTestRun": [
+        {
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "dc75a0e34ad9e3142def5ecbbb968d69718df1877b8189e998a11a22715812af"
+        }
+      ],
+      "test.test_unittest.test_result.Test_TestResult.test_stop": [
+        {
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "c6801d8c1e4650b734f0c05842b93c8d67b8591e8d25989c75e266234118829c"
+        }
+      ]
+    },
+    "failures": []
+  }
+]

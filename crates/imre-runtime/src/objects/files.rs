@@ -2,7 +2,7 @@
 //! final ownership cleanup only closes resources and never changes error state.
 
 use std::fs::OpenOptions;
-use std::io;
+use std::io::{self, SeekFrom};
 use std::os::fd::IntoRawFd;
 use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
@@ -13,11 +13,14 @@ use super::{
 };
 mod buffered;
 mod gzip;
+mod seekable;
+use seekable::Memory;
 
 use buffered::{Input, Output};
 
 pub(super) struct FileState {
     stream: Option<Stream>,
+    pub(super) name: Option<Rc<Str>>,
     // Preserve access mode after close: binary wrong-direction errors take precedence.
     kind: FileKind,
 }
@@ -27,12 +30,16 @@ enum FileKind {
     Text,
     BinaryRead,
     GzipBinaryRead,
+    Memory,
+    Member,
     BinaryWrite,
 }
 
 enum Stream {
     Read(Input),
     Write(Output),
+    Memory(Memory),
+    Member(Box<super::zipfile::Member>),
 }
 
 impl Stream {
@@ -42,6 +49,7 @@ impl Stream {
         let (file, flushed) = match self {
             Self::Read(input) => (input.into_file(), Ok(())),
             Self::Write(writer) => writer.finish(),
+            Self::Memory(_) | Self::Member(_) => return Ok(()),
         };
         let descriptor = file.into_raw_fd();
         // SAFETY: into_raw_fd transfers our unique descriptor owner. Do not
@@ -97,6 +105,19 @@ impl FileState {
     fn read_size(&mut self, value: &Int) -> Result<Bytes> {
         // GzipFile checks its own closed state before forwarding the argument
         // to BufferedReader. A plain BufferedWriter validates a C int first.
+        if self.kind == FileKind::Member {
+            self.check_member("read from closed file.")?;
+            // ZipExtFile is a Python implementation: it accepts any integer, even
+            // values larger than Py_ssize_t. Never reserve the requested size.
+            let limit = if let Some(value) = value.as_small() {
+                usize::try_from(value).ok()
+            } else if value.big().sign() == num_bigint::Sign::Minus {
+                None
+            } else {
+                Some(num_traits::ToPrimitive::to_usize(value.big().as_ref()).unwrap_or(usize::MAX))
+            };
+            return self.read_bytes(limit);
+        }
         if self.kind == FileKind::GzipBinaryRead {
             self.stream()?;
         }
@@ -110,6 +131,9 @@ impl FileState {
             })?;
             return Err(Error::new(Kind::UnsupportedOperation, "read"));
         }
+        if self.kind == FileKind::Memory {
+            return self.read_bytes(usize::try_from(size).ok());
+        }
         if size < -1 {
             return Err(Error::new(
                 Kind::ValueError,
@@ -120,6 +144,16 @@ impl FileState {
     }
 
     pub(super) fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        if self.kind == FileKind::Memory {
+            let Stream::Memory(memory) = self.stream()? else {
+                unreachable!()
+            };
+            return memory.write(bytes);
+        }
+        if self.kind == FileKind::Member {
+            return Err(Error::new(Kind::UnsupportedOperation, "write"));
+        }
+
         if self.kind == FileKind::BinaryRead {
             return Err(Error::new(Kind::UnsupportedOperation, "write"));
         }
@@ -154,7 +188,7 @@ impl FileState {
             return Err(Error::new(Kind::ValueError, "flush of closed file"));
         }
         match self.stream()? {
-            Stream::Read(_) => Ok(()),
+            Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) => Ok(()),
             Stream::Write(writer) => writer.flush().map_err(os_error),
         }
     }
@@ -188,7 +222,7 @@ pub(super) fn decode_utf8_text(bytes: Vec<u8>) -> Result<Str> {
 }
 
 impl Storage {
-    fn file(&self) -> &FileState {
+    pub(super) fn file(&self) -> &FileState {
         match self {
             Self::File(file) => file,
             _ => fail("SystemError", "expected a file stream object"),
@@ -298,6 +332,27 @@ fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*const Object
 }
 
 fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
+    let (file, metadata) = open_file(path, mode)?;
+    // CPython 3.14 bounds the device's preferred block size for buffered I/O.
+    let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
+    let stream = match mode {
+        0 => Stream::Read(Input::new(file, gzip, binary, capacity)),
+        _ => Stream::Write(Output::new(file, capacity, binary)),
+    };
+    Ok(FileState {
+        stream: Some(stream),
+        name: Some(Rc::new(Str::new(path))),
+        kind: match (binary, mode) {
+            (false, _) => FileKind::Text,
+            (true, 0) if gzip => FileKind::GzipBinaryRead,
+            (true, 0) => FileKind::BinaryRead,
+            (true, _) => FileKind::BinaryWrite,
+        },
+    })
+}
+
+/// Open a raw descriptor with the same pathname and directory errors as Python open().
+pub(super) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
     super::super::initialize_io();
     if path.contains('\0') {
         return Err(Error::new(Kind::ValueError, "embedded null byte"));
@@ -321,21 +376,7 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
             Some(path),
         ));
     }
-    // CPython 3.14 bounds the device's preferred block size for buffered I/O.
-    let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
-    let stream = match mode {
-        0 => Stream::Read(Input::new(file, gzip, binary, capacity)),
-        _ => Stream::Write(Output::new(file, capacity, binary)),
-    };
-    Ok(FileState {
-        stream: Some(stream),
-        kind: match (binary, mode) {
-            (false, _) => FileKind::Text,
-            (true, 0) if gzip => FileKind::GzipBinaryRead,
-            (true, 0) => FileKind::BinaryRead,
-            (true, _) => FileKind::BinaryWrite,
-        },
-    })
+    Ok((file, metadata))
 }
 
 /// A close failure takes precedence over a read or write failure, matching
@@ -382,7 +423,7 @@ pub unsafe extern "C" fn imre_binary_read(value: *const Object) -> *const Bytes 
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.file_mut().input()?.read_bytes(None))
+            .with_mut(|storage| storage.file_mut().read_bytes(None))
     };
     finish(
         result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
@@ -419,7 +460,7 @@ pub unsafe extern "C" fn imre_binary_readline(value: *const Object) -> *const By
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.file_mut().input()?.binary_line())
+            .with_mut(|storage| storage.file_mut().read_line_bytes())
     };
     finish(
         result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
@@ -549,7 +590,10 @@ pub unsafe extern "C" fn imre_text_write_parts(
     count: usize,
 ) -> u32 {
     // SAFETY: all fragments remain rooted and immutable through assembly.
-    let text = unsafe { concat_parts(parts, count) };
+    let text = match unsafe { concat_parts(parts, count) } {
+        Ok(text) => text,
+        Err(error) => return error.returning(0),
+    };
     // SAFETY: the file remains rooted; no callback or storage reference escapes.
     // Assembly precedes even the stream-state check, preserving evaluation order.
     let result = unsafe {
@@ -673,6 +717,7 @@ mod tests {
             FileState {
                 stream: Some(Stream::Write(Output::new(file, 8192, false))),
                 kind: FileKind::Text,
+                name: None,
             },
         )))))
     }

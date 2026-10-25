@@ -99,6 +99,8 @@ impl Types {
             | Type::Document(_)
             | Type::Logger
             | Type::Sha256
+            | Type::ZipFile
+            | Type::ZipInfo
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::JsonRoot
@@ -368,6 +370,12 @@ impl Types {
         Some(if nullable { self.optional(ty) } else { ty })
     }
 
+    /// A dynamic logging name resolves to an integer or to its fallback string.
+    /// Narrow this result before using it as either concrete type.
+    pub(crate) fn logging_level_result(&self) -> Type {
+        Type::Union(self.intern(Shape::Union(vec![Type::Str, Type::Int])))
+    }
+
     pub(crate) fn members(&self, ty: Type) -> Option<Vec<Type>> {
         let Type::Union(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
@@ -404,6 +412,8 @@ impl Types {
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::Sha256
+            | Type::ZipFile
+            | Type::ZipInfo
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::BinaryIO => Some(true),
@@ -613,6 +623,7 @@ impl Types {
             match ty {
                 Type::TextIO
                 | Type::BinaryIO
+                | Type::ZipFile
                 | Type::AsyncProcess(_)
                 | Type::DirectoryContext(_)
                 | Type::GeneratorContext
