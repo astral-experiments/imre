@@ -71,11 +71,15 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
             let flags = u32::from(metadata.dataclass_eq)
                 | (u32::from(metadata.dataclass_repr) << 1)
                 | (u32::from(metadata.toml_hash) << 2);
-            let layout = metadata.fields.iter().map(|field| {
-                (
-                    field.name.as_str(),
-                    u32::from(field.compare) | (u32::from(field.repr) << 1),
-                )
+            // The runtime walks the physical layout. Hidden cache and shadow fields
+            // own their payloads, but have no public name, equality, or repr role.
+            let layout = (0..module.class_fields[class].len()).map(|index| {
+                metadata.fields.get(index).map_or(("", 0), |field| {
+                    (
+                        field.name.as_str(),
+                        u32::from(field.compare) | (u32::from(field.repr) << 1),
+                    )
+                })
             });
             (
                 0,
@@ -144,6 +148,10 @@ fn field_metadata<'a>(
 ) -> String {
     let mut fields = Vec::new();
     for (index, (field, flags)) in layout.enumerate() {
+        if field.is_empty() {
+            fields.push("{ ptr, i64, i32 } zeroinitializer".to_owned());
+            continue;
+        }
         let symbol = format!("repr_field_{name}_{index}");
         bytes(output, &symbol, field);
         fields.push(format!(

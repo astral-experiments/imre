@@ -1,4 +1,5 @@
 import copy
+from dataclasses import dataclass
 
 events: list[int] = []
 values: list[int] = [41]
@@ -28,6 +29,18 @@ class Replaced(Defaults):
 
 class Unused:
     values = make(3)
+
+@dataclass
+class Counted(Defaults):
+    count: int
+
+class ImmutableBase:
+    marks = ["before"]
+
+
+@dataclass(frozen=True)
+class Immutable(ImmutableBase):
+    count: int
 
 class Constructed:
     words = ["class"]
@@ -108,3 +121,19 @@ own.words = []
 print(own.words)
 del own.words
 print(own.words is Constructed.words)
+a = Counted(3)
+b = Counted(3)
+a.values = [100]
+b.values = [200]
+print(a == b)
+print(repr(a))
+del b.values
+print(b.values is Defaults.values)
+print(a == b)
+print(repr(b))
+frozen = Immutable(7)
+lookup = {frozen: 11}
+ImmutableBase.marks = ["after"]
+print(frozen.marks)
+print(lookup[Immutable(7)])
+print(repr(frozen))

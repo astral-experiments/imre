@@ -164,6 +164,11 @@ impl Checker<'_> {
                 data.cells.insert(key.clone(), c);
                 c
             };
+            // A frozen instance cannot bind an inherited attribute. Its hash and
+            // wire schema continue to describe only its exact declared fields.
+            if def.dataclass.is_some_and(|options| options.frozen) {
+                continue;
+            }
             let extra = data.fields.entry(class).or_default();
             let ready = self.classes.fields[class].len() + extra.len();
             let stored = self.types.optional(cell.ty);
@@ -251,6 +256,12 @@ impl Checker<'_> {
         let Some(receiver) = receiver else {
             return Ok(value);
         };
+        if self.classes.declarations.definitions[class]
+            .dataclass
+            .is_some_and(|options| options.frozen)
+        {
+            return Ok(self.evaluated_receiver(Some(receiver), value));
+        }
         let s = self
             .shadow(class, name)
             .ok_or_else(|| error(self.source, attr, "class data layout is not initialized"))?;
