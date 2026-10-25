@@ -6878,6 +6878,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::SubprocessCheckCall)) => {
                 return self.popen(call, Some(true));
             }
+            Some(Binding::Intrinsic(Intrinsic::SubprocessList2Cmdline)) => {
+                return self.subprocess_list2cmdline(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
             Some(Binding::Intrinsic(Intrinsic::CopyTree)) => return self.shutil_copytree(call),

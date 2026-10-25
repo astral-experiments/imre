@@ -1556,6 +1556,7 @@ pub(crate) enum ProcessOperation {
     },
     OsErrorField(u32),
     Strerror,
+    QuoteCommandArgument,
     DescriptorConstant(&'static str),
     Which,
     RmTree,

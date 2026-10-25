@@ -275,6 +275,7 @@ impl Builtin {
                 | ProcessOperation::CredentialId { .. }
                 | ProcessOperation::OsErrorField(_)
                 | ProcessOperation::Strerror
+                | ProcessOperation::QuoteCommandArgument
                 | ProcessOperation::Which
                 | ProcessOperation::RmTree
                 | ProcessOperation::CopyTree(_)

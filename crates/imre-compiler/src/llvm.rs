@@ -7393,6 +7393,7 @@ declare void @imre_os_close(i64)
 declare i64 @imre_os_open(ptr, i32, i64, i64, i64)
 declare i64 @imre_os_error_field(ptr, i32)
 declare ptr @imre_os_strerror(i64)
+declare ptr @imre_subprocess_quote_argument(i64, i32)
 @imre_os_o_rdonly = external constant i64
 @imre_os_o_wronly = external constant i64
 @imre_os_o_rdwr = external constant i64
