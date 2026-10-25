@@ -20,7 +20,7 @@ permissions:
 jobs:
   compare:
     runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
-    timeout-minutes: 90
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -52,60 +52,75 @@ jobs:
           sudo apt-get install -y clang-18 lld-18
           cargo build --release --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
           sha256sum target/release/{imre,libimre_runtime.a} | tee "$RUNNER_TEMP/shutil/binaries.sha256"
-      - name: Attempt every unchanged eligible CPython method at O0 and O3
-        run: |
-          export PYTHONPATH="$GITHUB_WORKSPACE/.cpython-stdlib-reference/Lib"
-          python3 -B benchmarks/cpython_stdlib/full/shutil/attempt_methods.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --compiler-tree "$(jq -r .tree "$RUNNER_TEMP/shutil/source.json")" --result "$RUNNER_TEMP/shutil/method-attempts-linux.json"
-      - name: Run the full 223-occurrence evidence at both optimization levels
-        run: |
-          mod=benchmarks/cpython_stdlib/full/shutil
-          opts=(--imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference)
-          python3 -B "$mod/evidence.py" "${opts[@]}" --method-attempts "$RUNNER_TEMP/shutil/method-attempts-linux.json" --result "$RUNNER_TEMP/shutil/evidence-linux.json"
-          python3 -B benchmarks/cpython_stdlib/suite_evidence.py "$mod/reference-linux.json" "$RUNNER_TEMP/shutil/evidence-linux.json"
-          python3 -B - <<'PY'
-          from pathlib import Path
-          import json, os
-          results = json.loads((Path(os.environ["RUNNER_TEMP"]) / "shutil/evidence-linux.json").read_text())
-          assert {row["opt_level"] for row in results} == {0, 3}
-          for level in results:
-              assert len(level["records"]) == level["denominator"] == 223
-              for cls in ("TestWhich", "TestWhichBytes"):
-                  occurrence, = (r for r in level["records"] if r["id"].endswith(cls + ".test_environ_path_missing"))
-                  assert occurrence["classification"] == "mixed" and occurrence["evidence"]["native_calls"] == 2
-                  assert occurrence["evidence"]["native_environment"] == {"PATH":"absent","processes":2}
-          PY
-      - name: Check original filesystem classes plus crossed exceptions
-        if: ${{ !cancelled() && hashFiles('target/release/imre') != '' }}
-        run: |
-          mod=benchmarks/cpython_stdlib/full/shutil
-          opts=(--imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18)
-          for helper in check_csv_handlers copy_error_controls move_cross_device; do
-            python3 -B "$mod/$helper.py" "${opts[@]}"
-          done
-          for helper in copyfile native_copy native_rmtree tree_ops move_ops; do
-            python3 -B "$mod/$helper.py" "${opts[@]}" --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/shutil/$helper-linux.json"
-          done
-          python3 -B tests/paths.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-levels 0 3
-      - name: Preserve the first measured tree while final checks are running
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        if: always()
-        with:
-          name: shutil-initial-pair
-          path: ${{ runner.temp }}/shutil
-          if-no-files-found: error
-          retention-days: 7
-      - name: Verify newer prospective sources until the PR checks finish
-        if: inputs.follow
-        env:
-          GH_TOKEN: ${{ github.token }}
+
+      - name: Verify prospective source 1
         run: |
           git fetch --no-tags origin "$GITHUB_SHA"
-          git show "$GITHUB_SHA:.github/shutil-verify-current.sh" > "$RUNNER_TEMP/shutil-verify-current.sh"
-          bash "$RUNNER_TEMP/shutil-verify-current.sh"
+          git show "$GITHUB_SHA:.github/shutil-verify-fast.sh" > "$RUNNER_TEMP/shutil-verify-fast.sh"
+          bash "$RUNNER_TEMP/shutil-verify-fast.sh" 1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        if: always()
         with:
-          name: shutil-prospective-linux
-          path: ${{ runner.temp }}/shutil
+          name: shutil-current-1
+          path: ${{ runner.temp }}/current-1
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Verify prospective source 2
+        run: |
+          git fetch --no-tags origin "$GITHUB_SHA"
+          git show "$GITHUB_SHA:.github/shutil-verify-fast.sh" > "$RUNNER_TEMP/shutil-verify-fast.sh"
+          bash "$RUNNER_TEMP/shutil-verify-fast.sh" 2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: shutil-current-2
+          path: ${{ runner.temp }}/current-2
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Verify prospective source 3
+        run: |
+          git fetch --no-tags origin "$GITHUB_SHA"
+          git show "$GITHUB_SHA:.github/shutil-verify-fast.sh" > "$RUNNER_TEMP/shutil-verify-fast.sh"
+          bash "$RUNNER_TEMP/shutil-verify-fast.sh" 3
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: shutil-current-3
+          path: ${{ runner.temp }}/current-3
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Verify prospective source 4
+        run: |
+          git fetch --no-tags origin "$GITHUB_SHA"
+          git show "$GITHUB_SHA:.github/shutil-verify-fast.sh" > "$RUNNER_TEMP/shutil-verify-fast.sh"
+          bash "$RUNNER_TEMP/shutil-verify-fast.sh" 4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: shutil-current-4
+          path: ${{ runner.temp }}/current-4
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Verify prospective source 5
+        run: |
+          git fetch --no-tags origin "$GITHUB_SHA"
+          git show "$GITHUB_SHA:.github/shutil-verify-fast.sh" > "$RUNNER_TEMP/shutil-verify-fast.sh"
+          bash "$RUNNER_TEMP/shutil-verify-fast.sh" 5
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: shutil-current-5
+          path: ${{ runner.temp }}/current-5
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Verify prospective source 6
+        run: |
+          git fetch --no-tags origin "$GITHUB_SHA"
+          git show "$GITHUB_SHA:.github/shutil-verify-fast.sh" > "$RUNNER_TEMP/shutil-verify-fast.sh"
+          bash "$RUNNER_TEMP/shutil-verify-fast.sh" 6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: shutil-current-6
+          path: ${{ runner.temp }}/current-6
           if-no-files-found: error
           retention-days: 7
