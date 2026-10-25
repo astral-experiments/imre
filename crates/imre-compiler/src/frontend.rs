@@ -4953,6 +4953,7 @@ impl<'a> Checker<'a> {
                 } else {
                     Self::exception_record(receiver)
                 };
+                let receiver = self.checked_record_receiver(receiver, attribute);
                 if let Type::StrEnum(class) | Type::Enum(class) = receiver.ty {
                     match attribute.attr.as_str() {
                         "name" => {
@@ -5543,6 +5544,7 @@ impl<'a> Checker<'a> {
                 ));
             }
             let receiver = Self::exception_record(receiver);
+            let receiver = self.checked_record_receiver(receiver, attribute);
             if let Type::Class(class) = receiver.ty {
                 if self.classes.declarations.definitions[class]
                     .exception_aliases
