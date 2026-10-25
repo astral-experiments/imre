@@ -28,6 +28,12 @@ python3.14 benchmarks/cpython_stdlib/suite_inventory.py \
 Both optimization levels have the same results. See `reduce-linux.json` for
 every attempted ID, including the failure and native call counts.
 
+All seven complete methods were also submitted to the shared native-method
+runner under their original CPython fixtures. The compiler rejects the native
+fixture's class assignment `reduce = staticmethod(functools.reduce)` before
+checking the body. This setup blocker is recorded independently from the
+outcome of running the original method against the native fold.
+
 | Execution at each of -O0 and -O3 | IDs |
 | --- | ---: |
 | Complete native test body | 0 |
