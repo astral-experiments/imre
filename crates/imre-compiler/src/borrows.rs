@@ -491,6 +491,7 @@ mod tests {
 
     fn module(functions: Vec<Function>) -> Module {
         Module {
+            ignore_python_environment: false,
             types: Types::default(),
             class_fields: vec![vec![Type::Class(0)]],
             class_metadata: Vec::new(),

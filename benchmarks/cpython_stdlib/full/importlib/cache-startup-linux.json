@@ -1,0 +1,305 @@
+{
+  "base_revision": "a042b81f29f7ebb8de1e6f9daedb9f8e4337500e",
+  "implementation_revision": "525ea1aff352c837e72ba00ddaec95e18844ef0e",
+  "before": {
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "compiler_sha256": "7d89798fb5788cb4a324906c289a9f228e435bd752d6df2f6782d480ef8a4ac5",
+    "operation": "check",
+    "tests_executed": 0,
+    "source": "git",
+    "support_files": [],
+    "checks": [
+      {
+        "suite": "test.test_importlib",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+      },
+      {
+        "suite": "test.test_importlib",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      },
+      {
+        "suite": "test.test_importlib",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+      },
+      {
+        "suite": "test.test_importlib",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      },
+      {
+        "suite": "test.test_importlib.test_util",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_importlib/test_util.py:1:1: Imre: Lib/test/test_importlib/util.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+      },
+      {
+        "suite": "test.test_importlib.test_util",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_importlib/test_util.py:1:1: Imre: Lib/test/test_importlib/util.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+      },
+      {
+        "suite": "test.test_importlib.test_util",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_importlib/test_util.py:1:1: Imre: Lib/test/test_importlib/util.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+      },
+      {
+        "suite": "test.test_importlib.test_util",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_importlib/test_util.py:1:1: Imre: Lib/test/test_importlib/util.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+      },
+      {
+        "suite": "test.test_importlib.test_spec",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_importlib/test_spec.py:1:1: Imre: Lib/test/test_importlib/util.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+      },
+      {
+        "suite": "test.test_importlib.test_spec",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_importlib/test_spec.py:1:1: Imre: Lib/test/test_importlib/util.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+      },
+      {
+        "suite": "test.test_importlib.test_spec",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_importlib/test_spec.py:1:1: Imre: Lib/test/test_importlib/util.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+      },
+      {
+        "suite": "test.test_importlib.test_spec",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_importlib/test_spec.py:1:1: Imre: Lib/test/test_importlib/util.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+      },
+      {
+        "suite": "test.test_warnings",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:12:1: Imre: unsupported sealed standard-library export typing.overload"
+      },
+      {
+        "suite": "test.test_warnings",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:12:1: Imre: unsupported sealed standard-library export typing.overload"
+      },
+      {
+        "suite": "test.test_warnings",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:12:1: Imre: unsupported sealed standard-library export typing.overload"
+      },
+      {
+        "suite": "test.test_warnings",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:12:1: Imre: unsupported sealed standard-library export typing.overload"
+      },
+      {
+        "suite": "test.test_pathlib",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+      },
+      {
+        "suite": "test.test_pathlib",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      },
+      {
+        "suite": "test.test_pathlib",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+      },
+      {
+        "suite": "test.test_pathlib",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      }
+    ]
+  },
+  "after": {
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "compiler_sha256": "19be4b7a173836f0042ebe3d8bab8bcec76a1e2c2c36db054921801da5ad16c3",
+    "operation": "check",
+    "tests_executed": 0,
+    "source": "git",
+    "support_files": [],
+    "checks": [
+      {
+        "suite": "test.test_importlib",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+      },
+      {
+        "suite": "test.test_importlib",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      },
+      {
+        "suite": "test.test_importlib",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+      },
+      {
+        "suite": "test.test_importlib",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      },
+      {
+        "suite": "test.test_importlib.test_util",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_importlib/test_util.py:1:1: Imre: Lib/test/test_importlib/util.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+      },
+      {
+        "suite": "test.test_importlib.test_util",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_importlib/test_util.py:1:1: Imre: Lib/test/test_importlib/util.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+      },
+      {
+        "suite": "test.test_importlib.test_util",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_importlib/test_util.py:1:1: Imre: Lib/test/test_importlib/util.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+      },
+      {
+        "suite": "test.test_importlib.test_util",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_importlib/test_util.py:1:1: Imre: Lib/test/test_importlib/util.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+      },
+      {
+        "suite": "test.test_importlib.test_spec",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_importlib/test_spec.py:1:1: Imre: Lib/test/test_importlib/util.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+      },
+      {
+        "suite": "test.test_importlib.test_spec",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_importlib/test_spec.py:1:1: Imre: Lib/test/test_importlib/util.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+      },
+      {
+        "suite": "test.test_importlib.test_spec",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_importlib/test_spec.py:1:1: Imre: Lib/test/test_importlib/util.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+      },
+      {
+        "suite": "test.test_importlib.test_spec",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_importlib/test_spec.py:1:1: Imre: Lib/test/test_importlib/util.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+      },
+      {
+        "suite": "test.test_warnings",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:12:1: Imre: unsupported sealed standard-library export typing.overload"
+      },
+      {
+        "suite": "test.test_warnings",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:12:1: Imre: unsupported sealed standard-library export typing.overload"
+      },
+      {
+        "suite": "test.test_warnings",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:12:1: Imre: unsupported sealed standard-library export typing.overload"
+      },
+      {
+        "suite": "test.test_warnings",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:12:1: Imre: unsupported sealed standard-library export typing.overload"
+      },
+      {
+        "suite": "test.test_pathlib",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+      },
+      {
+        "suite": "test.test_pathlib",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      },
+      {
+        "suite": "test.test_pathlib",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+      },
+      {
+        "suite": "test.test_pathlib",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      }
+    ]
+  },
+  "tests_executed": 0
+}

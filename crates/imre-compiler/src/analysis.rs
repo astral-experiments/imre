@@ -133,6 +133,31 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
+        // CPython truth-tests any non-None debug_override and raises for conflicting
+        // optimization arguments. Preserve these catchable routes and the original
+        // unrelated frozen-importlib declarations, including their version guards.
+        let bootstrap = vendored
+            .read_to_string("stdlib/_frozen_importlib_external.pyi")
+            .map_err(|e| e.to_string())?
+            .replace(
+                "def cache_from_source(path: StrPath,",
+                "def cache_from_source(path: object,",
+            )
+            .replace(
+                "debug_override: bool, *, optimization: None = None",
+                "debug_override: object, *, optimization: object = None",
+            )
+            .replace(
+                "def source_from_cache(path: StrPath)",
+                "def source_from_cache(path: object)",
+            );
+        system
+            .fs()
+            .write_file_all(
+                SystemPathBuf::from(root).join("_frozen_importlib_external.pyi"),
+                bootstrap,
+            )
+            .map_err(|e| e.to_string())?;
         // typeshed omits inspect's private default; preserve all its public signatures.
         let inspect = vendored
             .read_to_string("stdlib/inspect.pyi")
