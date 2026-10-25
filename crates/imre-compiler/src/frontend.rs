@@ -42,6 +42,7 @@ mod record_inputs;
 mod records;
 mod regex;
 mod sequences;
+mod shutil;
 mod sign_parameters;
 mod sorted_rows;
 mod stdlib;
@@ -3654,6 +3655,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::TimeoutExpired)) => Some(27),
             Some(Binding::Intrinsic(Intrinsic::BadGzipFile)) => Some(28),
             Some(Binding::Intrinsic(Intrinsic::BadZipFile)) => Some(36),
+            Some(Binding::Intrinsic(Intrinsic::ShutilError)) => Some(38),
+            Some(Binding::Intrinsic(Intrinsic::SameFileError)) => Some(39),
+            Some(Binding::Intrinsic(Intrinsic::SpecialFileError)) => Some(40),
             Some(Binding::Intrinsic(Intrinsic::ZlibError)) => Some(29),
             Some(Binding::Intrinsic(Intrinsic::TomlDecodeError)) => Some(30),
             Some(Binding::Intrinsic(Intrinsic::JsonDecodeError)) => Some(31),
@@ -5158,6 +5162,7 @@ impl<'a> Checker<'a> {
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
+            Some(Binding::Intrinsic(Intrinsic::CopyFile)) => return self.shutil_copyfile(call),
             Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
                 self.reject_builtin_keywords(call)?;
                 let [path] = call.arguments.args.as_ref() else {

@@ -66,6 +66,9 @@ pub(crate) enum Kind {
     StopIteration = 35,
     BadZipFile = 36,
     NotImplementedError = 37,
+    ShutilError = 38,
+    SameFileError = 39,
+    SpecialFileError = 40,
 }
 
 impl Kind {
@@ -109,6 +112,9 @@ impl Kind {
             35 => Self::StopIteration,
             36 => Self::BadZipFile,
             37 => Self::NotImplementedError,
+            38 => Self::ShutilError,
+            39 => Self::SameFileError,
+            40 => Self::SpecialFileError,
             _ => fail("SystemError", "invalid exception kind"),
         }
     }
@@ -153,6 +159,9 @@ impl Kind {
             Self::StopIteration => "StopIteration",
             Self::BadZipFile => "BadZipFile",
             Self::NotImplementedError => "NotImplementedError",
+            Self::ShutilError => "Error",
+            Self::SameFileError => "SameFileError",
+            Self::SpecialFileError => "SpecialFileError",
         }
     }
 
@@ -187,6 +196,7 @@ impl Kind {
                 )
             }
             Self::RuntimeError => matches!(self, Self::RuntimeError | Self::NotImplementedError),
+            Self::ShutilError => matches!(self, Self::ShutilError | Self::SameFileError),
             Self::OSError => matches!(
                 self,
                 Self::OSError
@@ -197,6 +207,9 @@ impl Kind {
                     | Self::NotADirectoryError
                     | Self::FileExistsError
                     | Self::BadGzipFile
+                    | Self::ShutilError
+                    | Self::SameFileError
+                    | Self::SpecialFileError
             ),
             _ => self == expected,
         }

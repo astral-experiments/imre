@@ -43,15 +43,18 @@ impl Stream {
             Self::Read(input) => (input.into_file(), Ok(())),
             Self::Write(writer) => writer.finish(),
         };
-        let descriptor = file.into_raw_fd();
-        // SAFETY: into_raw_fd transfers our unique descriptor owner. Do not
-        // retry close after EINTR: the descriptor may already have been reused.
-        let closed = if unsafe { libc::close(descriptor) } == 0 {
-            Ok(())
-        } else {
-            Err(io::Error::last_os_error())
-        };
-        closed.and(flushed)
+        close_file(file).and(flushed)
+    }
+}
+
+/// Close once, observing delayed I/O errors without retrying a possibly reused descriptor.
+pub(super) fn close_file(file: std::fs::File) -> io::Result<()> {
+    let descriptor = file.into_raw_fd();
+    // SAFETY: into_raw_fd transfers our unique descriptor owner to close.
+    if unsafe { libc::close(descriptor) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
     }
 }
 
@@ -230,6 +233,15 @@ pub(super) fn errno_error(error: io::Error) -> Error {
 }
 
 fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
+    errno_with_paths(error, |message| {
+        if let Some(path) = path {
+            message.push_str(": ");
+            super::exceptions::push_string_repr(path, message);
+        }
+    })
+}
+
+pub(super) fn errno_with_paths(error: io::Error, paths: impl FnOnce(&mut String)) -> Error {
     let Some(errno) = error.raw_os_error() else {
         return os_error(error);
     };
@@ -241,10 +253,7 @@ fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
     // SAFETY: the successful call initialized a terminated string.
     let description = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
     let mut message = format!("[Errno {errno}] {description}");
-    if let Some(path) = path {
-        message.push_str(": ");
-        super::exceptions::push_string_repr(path, &mut message);
-    }
+    paths(&mut message);
     Error::new(os_error_kind(error.kind()), message)
 }
 

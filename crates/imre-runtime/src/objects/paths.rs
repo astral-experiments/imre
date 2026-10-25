@@ -162,7 +162,7 @@ impl Storage {
         })
     }
 
-    fn path_text(&self) -> &Rc<Str> {
+    pub(super) fn path_text(&self) -> &Rc<Str> {
         self.path_value().spelling()
     }
 
