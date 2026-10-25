@@ -499,16 +499,25 @@ impl Launch {
         &mut self,
         close_fds: bool,
         attributes: &ChildAttributes,
+        inherited_pipe: Option<&libc::sigaction>,
     ) -> io::Result<()> {
         if let Some(mask) = attributes.mask {
             // SAFETY: this is the forked child; umask never fails.
             unsafe { libc::umask(mask) };
         }
-        for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
-            // SAFETY: restore_signals resets dispositions Python ignores; signal
-            // is async-signal-safe and both arguments are valid signal constants.
-            if unsafe { libc::signal(signal, libc::SIG_DFL) } == libc::SIG_ERR {
+        if let Some(action) = inherited_pipe {
+            // Command can reset SIGPIPE before pre_exec. Restore the parent's
+            // actual action; exec itself handles any caught signal normally.
+            // SAFETY: sigaction is async-signal-safe and action was read before fork.
+            if unsafe { libc::sigaction(libc::SIGPIPE, action, std::ptr::null_mut()) } < 0 {
                 return Err(io::Error::last_os_error());
+            }
+        } else {
+            for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
+                // SAFETY: signal is async-signal-safe and both constants are valid.
+                if unsafe { libc::signal(signal, libc::SIG_DFL) } == libc::SIG_ERR {
+                    return Err(io::Error::last_os_error());
+                }
             }
         }
         // SAFETY: setsid and setpgid are async-signal-safe. Apply them in
@@ -628,6 +637,18 @@ impl Launch {
             .stdout(output(streams & 15, descriptors[1])?)
             .stderr(output(stderr, descriptors[2])?);
         let cwd = cwd.cloned();
+        let inherited_pipe = if streams & (1 << 20) != 0 {
+            let mut action = std::mem::MaybeUninit::uninit();
+            // SAFETY: a null new action queries the disposition without changing it.
+            if unsafe { libc::sigaction(libc::SIGPIPE, std::ptr::null(), action.as_mut_ptr()) } < 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: sigaction successfully initialized its output.
+            Some(unsafe { action.assume_init() })
+        } else {
+            None
+        };
         // SAFETY: this private closure contains only owned immutable native data;
         // exec_child performs no allocation, locking, callback, or language drop.
         // It never returns Ok, so Command cannot fall through to libc execvp.
@@ -647,7 +668,11 @@ impl Launch {
                 if stderr == 5 && libc::dup2(libc::STDOUT_FILENO, libc::STDERR_FILENO) < 0 {
                     return Err(io::Error::last_os_error());
                 }
-                self.exec_child(streams & (1 << 17) == 0, &attributes)
+                self.exec_child(
+                    streams & (1 << 17) == 0,
+                    &attributes,
+                    inherited_pipe.as_ref(),
+                )
             })
         };
         command.spawn()

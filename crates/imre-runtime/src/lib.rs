@@ -347,22 +347,22 @@ pub type Str = compact_str::CompactString;
 /// Immutable byte storage; ABI handles own an Rc and never expose a mutable view.
 pub type Bytes = Vec<u8>;
 
-/// LLVM's C main bypasses Rust's SIGPIPE setup. Ignore it once before publishing
-/// buffered writers, so a disconnected pipe reports an ordinary I/O error. The
-/// closed runtime has no signal API or callbacks that could change this policy.
+/// Generated main installs Python's I/O signal dispositions before user code.
+/// Native callers that enter through a writer use the same initialization.
 fn initialize_io() {
     static INITIALIZED: Once = Once::new();
     INITIALIZED.call_once(|| {
-        // SAFETY: SIG_IGN is a valid process-wide disposition, not a Rust callback.
-        if unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) } == libc::SIG_ERR {
-            // This fixed startup operation cannot be induced by source code.
-            // Avoid fail(), which would recursively initialize OUTPUT here.
-            let error = io::Error::last_os_error();
-            let _ = writeln!(
-                io::stderr().lock(),
-                "OSError: could not initialize I/O signals: {error}"
-            );
-            std::process::exit(1);
+        for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
+            // SAFETY: SIG_IGN is a valid disposition for both fixed signals.
+            if unsafe { libc::signal(signal, libc::SIG_IGN) } == libc::SIG_ERR {
+                // Avoid fail(), which would recursively initialize OUTPUT here.
+                let error = io::Error::last_os_error();
+                let _ = writeln!(
+                    io::stderr().lock(),
+                    "OSError: could not initialize I/O signals: {error}"
+                );
+                std::process::exit(1);
+            }
         }
     });
 }

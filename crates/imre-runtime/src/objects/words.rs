@@ -407,6 +407,7 @@ pub extern "C" fn imre_seq_layout_with_orig_argv() -> SequenceLayout {
 }
 
 fn sequence_layout() -> SequenceLayout {
+    crate::initialize_io();
     let mut sample = Words::new(0);
     sample.values.push(0);
     // One non-owning word fits inline and needs no destructor.
