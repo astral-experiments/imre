@@ -2,7 +2,10 @@
 use super::*;
 
 impl Checker<'_> {
-    pub(super) fn accumulate_cursor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+    pub(in crate::frontend) fn accumulate_cursor(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
         let none = Expr {
             ty: Type::None,
             kind: ExprKind::None,
