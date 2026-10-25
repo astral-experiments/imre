@@ -9,7 +9,7 @@ on:
       audit:
         description: Source of the requested per-occurrence results
         type: choice
-        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace, percent-scalar, record-attributes, adapter-events, adapter-tools, codec-writer, plain-file]
+        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace, percent-scalar, record-attributes, adapter-events, adapter-tools, codec-writer, plain-file, standalone]
         required: true
 permissions:
   contents: read
@@ -154,6 +154,16 @@ jobs:
                 cargo test --locked -p imre-runtime --lib -j 2 only_the_outermost_release_unblocks_another_thread
               fi
               PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/null_handler.py "${tools[@]}" --result "$results/null-handler.json"
+              ;;
+            standalone)
+              fixture=benchmarks/cpython_stdlib/full/logging/standalone_values.py
+              python3 -I -B "$fixture" > "$results/standalone-reference.stdout" 2> "$results/standalone-reference.stderr"
+              for opt in 0 3; do
+                "$imre" build "$fixture" --no-cache --opt-level "$opt" --runtime "$runtime" --clang /usr/bin/clang-18 -o "$RUNNER_TEMP/standalone-logger"
+                "$RUNNER_TEMP/standalone-logger" > "$results/standalone-O$opt.stdout" 2> "$results/standalone-O$opt.stderr"
+                cmp "$results/standalone-reference.stdout" "$results/standalone-O$opt.stdout"
+                cmp "$results/standalone-reference.stderr" "$results/standalone-O$opt.stderr"
+              done
               ;;
             plain-file)
               python3 -I -B benchmarks/cpython_stdlib/full/logging/native_plain_encoding.py "${tools[@]}" --cpython-source "$ref" --result "$results/plain-file-encoding.json"
