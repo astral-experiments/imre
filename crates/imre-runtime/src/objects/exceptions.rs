@@ -1641,6 +1641,7 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
         };
         // Traceback suggestions decorate only uncaught output. The owned exception's
         // message, positional arguments, str() and repr() stay independent.
+        // SAFETY: the owned exception stays live; this read does not invoke callbacks.
         let suggestion = unsafe {
             exception
                 .0
