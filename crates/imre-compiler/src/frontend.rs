@@ -3534,6 +3534,11 @@ impl<'a> Checker<'a> {
     }
 
     fn statement(&mut self, statement: &ast::Stmt) -> Result<(Vec<Statement>, bool), String> {
+        if let ast::Stmt::ImportFrom(import) = statement
+            && let Some(bindings) = self.local_sys_import(import)?
+        {
+            return Ok((bindings, true));
+        }
         if self.module_scope && local_functions::type_variable(self.graph, self.module, statement) {
             return Ok((Vec::new(), true));
         }
@@ -3753,6 +3758,15 @@ impl<'a> Checker<'a> {
             ast::Stmt::Delete(delete) => {
                 let mut statements = Vec::new();
                 for target in &delete.targets {
+                    if matches!(target, ast::Expr::Attribute(_))
+                        && self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::Stdout))
+                    {
+                        statements.push(Statement::Expr(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Builtin(Builtin::SysStdoutDelete, vec![]),
+                        }));
+                        continue;
+                    }
                     if matches!(target, ast::Expr::Attribute(_))
                         && self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast))
                     {
@@ -4862,6 +4876,18 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Bytes(bytes.to_vec()),
                     });
                 }
+                Intrinsic::Stdout => return Ok(self.stdout_value()),
+                Intrinsic::OriginalStdout | Intrinsic::Stderr => {
+                    return Ok(Expr {
+                        ty: Type::TextIO,
+                        kind: ExprKind::Builtin(
+                            Builtin::SysOriginalOutput {
+                                stderr: symbol == Intrinsic::Stderr,
+                            },
+                            vec![],
+                        ),
+                    });
+                }
                 Intrinsic::BuiltinsLast => {
                     return Ok(Expr {
                         ty: Type::ValueView,
@@ -5634,11 +5660,25 @@ impl<'a> Checker<'a> {
                     && matches!(
                         self.resolve(&attribute.value),
                         Some(Binding::Intrinsic(
-                            Intrinsic::Stdin | Intrinsic::Stdout | Intrinsic::Stderr
+                            Intrinsic::Stdin | Intrinsic::OriginalStdout | Intrinsic::Stderr
                         ))
                     )
                 {
                     return Ok(unpacking::string("utf-8"));
+                }
+                if attribute.attr.as_str() == "encoding"
+                    && self.resolve(&attribute.value) == Some(Binding::Intrinsic(Intrinsic::Stdout))
+                {
+                    let receiver = self.stdout_value();
+                    let checked = self.optional_stream(receiver, "encoding");
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Scope {
+                            body: vec![Statement::Expr(checked)],
+                            value: Box::new(unpacking::string("utf-8")),
+                            clear: vec![],
+                        },
+                    });
                 }
                 if let Some(class) = self.class_reference(&attribute.value) {
                     if let Some(member) = self.enum_member(class, attribute.attr.as_str()) {
@@ -6736,6 +6776,7 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::ImportException && attribute.attr.as_str() == "__init__" {
                 return self.import_error(call, 41, Some(receiver));
             }
+            let receiver = self.optional_stream(receiver, attribute.attr.as_str());
             if matches!(receiver.ty, Type::NamedException(_))
                 && matches!(attribute.attr.as_str(), "__init__" | "__post_init__")
             {

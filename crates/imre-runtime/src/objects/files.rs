@@ -41,6 +41,7 @@ enum FileKind {
 }
 
 enum Stream {
+    Standard(bool),
     Read(Input),
     Write(Output),
     Memory(Memory),
@@ -53,6 +54,7 @@ impl Stream {
     /// second implicit flush; a close error takes precedence over a flush error.
     fn close(self) -> io::Result<()> {
         let (file, flushed) = match self {
+            Self::Standard(stderr) => return crate::sys::flush_standard(stderr),
             Self::Read(input) => (input.into_file(), Ok(())),
             Self::Write(writer) => writer.finish(),
             Self::Memory(_) | Self::TextMemory(_) | Self::Member(_) => return Ok(()),
@@ -272,6 +274,10 @@ impl FileState {
             .stream
             .as_mut()
             .ok_or_else(|| Error::new(Kind::ValueError, closed))?;
+        if let Stream::Standard(stderr) = stream {
+            return crate::sys::write_standard(*stderr, bytes)
+                .map_err(super::errno_error);
+        }
         let Stream::Write(writer) = stream else {
             return Err(Error::new(Kind::UnsupportedOperation, "not writable"));
         };
@@ -293,6 +299,7 @@ impl FileState {
             return Err(Error::new(Kind::ValueError, "flush of closed file"));
         }
         match self.stream()? {
+            Stream::Standard(stderr) => crate::sys::flush_standard(*stderr).map_err(super::errno_error),
             Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) | Stream::TextMemory(_) => {
                 Ok(())
             }
@@ -448,6 +455,26 @@ pub unsafe extern "C" fn imre_gzip_open(path: *const Str, binary: u32) -> *const
         open(unsafe { &*path }, 0, binary == 1, true),
         std::ptr::null(),
     )
+}
+
+/// The original Python wrapper shares the runtime's stdout/stderr buffer, even through an alias.
+pub(super) fn standard_stream(stderr: bool) -> Rc<Object> {
+    Rc::new(Object(StorageCell::new(Storage::File(Box::new(
+        FileState {
+            fd: Some(if stderr {
+                io::stderr().as_raw_fd()
+            } else {
+                io::stdout().as_raw_fd()
+            }),
+            stream: Some(Stream::Standard(stderr)),
+            kind: FileKind::Text,
+            name: Some(Rc::new(Str::new(if stderr {
+                "<stderr>"
+            } else {
+                "<stdout>"
+            }))),
+        },
+    )))))
 }
 
 /// Shares descriptor ownership and buffering while preserving text/binary access errors.
