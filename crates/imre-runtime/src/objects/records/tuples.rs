@@ -70,6 +70,10 @@ pub(super) struct TupleLayout {
     kinds: Vec<u32>,
 }
 
+pub(super) const LAYOUT_TAG: usize = 4;
+const _: () =
+    assert!(align_of::<RecordDescriptor>() > LAYOUT_TAG && align_of::<TupleLayout>() > LAYOUT_TAG);
+
 const SEMANTICS: RecordSemantics = RecordSemantics {
     kind: 1,
     flags: 3,
@@ -136,13 +140,13 @@ impl TupleBuilder {
         assert_eq!(self.allocation, layout(self.len()));
         let descriptor = Rc::into_raw(self.metadata.take().unwrap())
             .cast::<RecordDescriptor>()
-            .map_addr(|addr| addr | 2);
+            .map_addr(|addr| addr | LAYOUT_TAG);
         // SAFETY: every slot described by the now immutable metadata is initialized.
         // The ordinary final-record release owns both the allocation and its metadata.
         unsafe {
             self.base.as_ptr().write(Header {
                 references: Cell::new(1),
-                descriptor,
+                descriptor: Cell::new(descriptor),
             });
             OwnedWord::from_owned(self.base.as_ptr().add(1) as usize, WordKind::new(6))
         }
@@ -200,6 +204,34 @@ pub unsafe extern "C" fn imre_tuple_get(tuple: *const usize, index: usize) -> us
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_observed_tuple_cache_transfers_only_its_layout_to_a_fresh_result() {
+        let kind = WordKind::new(2);
+        let zero = Int::small(0).unwrap().into_raw();
+        let first = Int::small(17).unwrap().into_raw();
+        let second = Int::small(23).unwrap().into_raw();
+        let mut builder = TupleBuilder::new(1).ok().unwrap();
+        // SAFETY: the integers are immediate; every record owner is released once.
+        unsafe {
+            builder.push(kind.acquire(first));
+            let original = builder.finish();
+            let payload = original.word as *const usize;
+            let observer = weak::WeakRecord::new(payload);
+            assert_eq!(imre_tuple_get(payload, zero), first);
+            let copy = imre_record_try_cached_result(payload);
+            assert!(!copy.is_null());
+            assert_ne!(payload, copy.cast_const());
+            kind.acquire(second).initialize_record_field(copy);
+            assert_eq!(imre_tuple_get(payload, zero), first);
+            drop(original);
+            assert!(!observer.is_live());
+            assert!(observer.upgrade().is_none());
+            assert_eq!(imre_tuple_get(copy, zero), second);
+            assert_eq!(imre_tuple_len(copy), Int::small(1).unwrap().into_raw());
+            imre_record_release(copy);
+        }
+    }
 
     #[test]
     fn discarding_an_unfinished_display_releases_its_captured_values() {

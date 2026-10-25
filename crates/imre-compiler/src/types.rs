@@ -155,7 +155,8 @@ impl Types {
             | Type::ByteOutput
             | Type::TupleBuffer
             | Type::Exception
-            | Type::ExceptionField
+            | Type::ObjectValue
+            | Type::ReadOnlyObjectMapping
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::TextIO
@@ -171,7 +172,6 @@ impl Types {
             | Type::Document(_)
             | Type::NativeModule
             | Type::ModuleNamespace
-            | Type::ModuleMember
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger

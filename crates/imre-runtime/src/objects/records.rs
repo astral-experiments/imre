@@ -8,6 +8,7 @@ use super::{Object, fail, words::WordKind};
 
 pub(super) mod strings;
 pub(super) mod tuples;
+pub(super) mod weak;
 
 enum Release {
     Fields(*const usize, usize),
@@ -72,8 +73,9 @@ pub struct RecordField {
 #[repr(C)]
 struct Header {
     references: Cell<usize>,
-    /// An aligned descriptor, a shared block (bit zero), or an owned tuple layout (bit one).
-    descriptor: *const RecordDescriptor,
+    /// Descriptor (untagged), shared block (bit 0), weak anchor (bit 1),
+    /// or owned tuple layout (bit 2). An anchor retains the original tagged layout.
+    descriptor: Cell<*const RecordDescriptor>,
 }
 
 const _: () = assert!(size_of::<Header>() == 16 && align_of::<Header>() == 8);
@@ -179,7 +181,7 @@ pub unsafe extern "C" fn imre_tuple_probe(
         let header = scratch.cast::<Header>();
         header.write(Header {
             references: Cell::new(0),
-            descriptor,
+            descriptor: Cell::new(descriptor),
         });
         header.add(1).cast()
     }
@@ -187,24 +189,30 @@ pub unsafe extern "C" fn imre_tuple_probe(
 
 impl Header {
     fn tuple_layout(&self) -> Option<*const tuples::TupleLayout> {
-        (self.descriptor.addr() & 2 != 0).then(|| self.descriptor.map_addr(|addr| addr & !2).cast())
+        let layout = self.layout_pointer();
+        (layout.addr() & tuples::LAYOUT_TAG != 0)
+            .then(|| layout.map_addr(|addr| addr & !tuples::LAYOUT_TAG).cast())
     }
 
     fn block(&self) -> Option<*const Block> {
-        if self.descriptor.addr() & 1 == 0 {
+        let layout = self.layout_pointer();
+        if layout.addr() & 1 == 0 {
             return None;
         }
         // Each tagged pointer owns a live block. Removing its tag
         // recovers the original aligned pointer and its allocation provenance.
-        Some(self.descriptor.map_addr(|addr| addr - 1).cast::<Block>())
+        Some(layout.map_addr(|addr| addr - 1).cast::<Block>())
     }
 
     fn descriptor(&self) -> &RecordDescriptor {
         // SAFETY: a tagged header owns its Rc until its last record owner drops.
-        let descriptor = self.block().map_or_else(
-            || self.descriptor.map_addr(|addr| addr & !2),
-            |block| unsafe { (*block).descriptor },
-        );
+        let layout = self.layout_pointer();
+        let descriptor = if layout.addr() & 1 == 0 {
+            layout.map_addr(|addr| addr & !tuples::LAYOUT_TAG)
+        } else {
+            // SAFETY: the untagged block is rooted for this record's lifetime.
+            unsafe { (*layout.map_addr(|addr| addr - 1).cast::<Block>()).descriptor }
+        };
         // SAFETY: both forms carry the original immutable compiler metadata.
         unsafe { &*descriptor }
     }
@@ -277,7 +285,7 @@ impl<'a> RecordBatch<'a> {
             self.next += self.words;
             slot.write(Header {
                 references: Cell::new(1),
-                descriptor: block.cast::<RecordDescriptor>().map_addr(|addr| addr | 1),
+                descriptor: Cell::new(block.cast::<RecordDescriptor>().map_addr(|addr| addr | 1)),
             });
             slot.add(1).cast()
         }
@@ -366,7 +374,7 @@ pub(super) unsafe fn allocate_record(descriptor: *const RecordDescriptor) -> *mu
     unsafe {
         allocation.cast::<Header>().write(Header {
             references: Cell::new(1),
-            descriptor,
+            descriptor: Cell::new(descriptor),
         });
         // Only the payload needs zeroing for partial-field cleanup. The ordinary
         // allocation can reuse a freed small record without clearing its header.
@@ -426,7 +434,7 @@ unsafe fn cached_result(
 ) -> *mut usize {
     // SAFETY: the caller roots this cache and its immutable descriptor.
     let header = unsafe { &*payload.cast::<Header>().sub(1) };
-    if header.references.get() == 1 {
+    if header.references.get() == 1 && !header.has_weak_anchor() {
         header.references.set(2);
         payload.cast_mut()
     } else {
@@ -438,7 +446,10 @@ unsafe fn cached_result(
                 && !next.is_null()
             {
                 Rc::increment_strong_count(layout);
-                (*next.cast::<Header>().sub(1)).descriptor = header.descriptor;
+                // The new record shares its immutable layout, not the cache's identity.
+                (*next.cast::<Header>().sub(1))
+                    .descriptor
+                    .set(header.layout_pointer());
             }
             next
         }
@@ -539,6 +550,7 @@ unsafe fn release_record_owner(payload: *const usize, pending: &RefCell<Vec<Rele
     if count != 1 {
         return;
     }
+    header.drop_weak_anchor();
     // SAFETY: metadata remains immutable and live even while payloads are released.
     let descriptor = header.descriptor();
     if let Some(block) = header.block() {
