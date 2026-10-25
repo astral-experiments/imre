@@ -148,6 +148,28 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
+        if [left.ty, right.ty].contains(&Type::ObjectValue)
+            && [left.ty, right.ty]
+                .iter()
+                .any(|ty| matches!(ty, Type::ListInt | Type::List(_)))
+        {
+            let reversed = right.ty == Type::ObjectValue;
+            let same = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(
+                    Builtin::ExceptionFieldIdentity { reversed },
+                    vec![left, right],
+                ),
+            };
+            return Ok(if op == ast::CmpOp::IsNot {
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Not(Box::new(same)),
+                }
+            } else {
+                same
+            });
+        }
         // A comparison with a bool singleton only observes whether the other
         // operand is that same singleton; integer object identity is irrelevant.
         if let Some(union) = [left.ty, right.ty]
@@ -187,6 +209,13 @@ impl Checker<'_> {
             ));
         }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
+        if types.iter().any(|&ty| self.types.is_value_struct(ty)) {
+            return Err(error(
+                self.source,
+                node,
+                "imre.struct values have no observable identity; compare them with ==",
+            ));
+        }
         let wrapper_attributes = matches!((left.ty, right.ty), (Type::Tuple(_), Type::Tuple(_)))
             && [&left, &right].iter().any(|value| {
                 matches!(
@@ -291,7 +320,12 @@ impl Checker<'_> {
             || types.iter().all(|ty| {
                 matches!(
                     ty,
-                    Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_) | Type::Class(_)
+                    Type::ListInt
+                        | Type::List(_)
+                        | Type::Dict(_)
+                        | Type::ChainMap(_)
+                        | Type::Set(_)
+                        | Type::Class(_)
                 )
             })
             || types == [Type::Str; 2]

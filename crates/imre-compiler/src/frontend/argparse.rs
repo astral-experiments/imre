@@ -785,6 +785,7 @@ fn namespace_class(
     let class = classes.definitions.len();
     layouts.push(fields.iter().map(|field| field.ty).collect());
     classes.definitions.push(Class {
+        forwarder: None,
         init_hooks: Default::default(),
         exception_aliases: Default::default(),
         static_bindings: Default::default(),
@@ -820,6 +821,7 @@ fn namespace_class(
         abc: false,
         mapping: false,
         dataclass: Some(DataclassOptions {
+            value_struct: false,
             slots: false,
             init: false,
             eq: true,
@@ -876,8 +878,7 @@ impl<'ast> Visitor<'ast> for Uses<'_> {
         {
             self.operations.push(call.start());
             self.visit_arguments(&call.arguments);
-        } else if self.allow_calls
-            && let ast::Expr::Call(call) = node
+        } else if let ast::Expr::Call(call) = node
             && self.registration_errors.contains_key(&call.start())
         {
             self.visit_arguments(&call.arguments);
@@ -1048,21 +1049,25 @@ impl Parsers {
                             .iter_non_variadic_params()
                             .map(|p| p.name().to_string()),
                     );
-                    let registration_errors = registration::failures(
-                        &function.body[start + 1..],
-                        builder,
-                        graph,
-                        module_id,
-                        &locals,
-                        flags.prefixes,
-                    );
-                    let read_options =
+                    let mut registration_errors = HashMap::new();
+                    let mut read_options =
                         |builder: &str,
                          flags: &Flags,
                          index: &mut usize,
                          mut names: HashSet<String>,
                          builders: &mut Vec<String>|
                          -> Result<(Vec<OptionField>, Vec<Value>), String> {
+                            let failures = |owner, from| {
+                                registration::failures(
+                                    &function.body[from..],
+                                    owner,
+                                    graph,
+                                    module_id,
+                                    &locals,
+                                    flags.prefixes,
+                                )
+                            };
+                            registration_errors.extend(failures(builder, *index));
                             let mut options: Vec<OptionField> = Vec::new();
                             let mut spellings = HashSet::new();
                             let mut groups = Vec::new();
@@ -1073,6 +1078,8 @@ impl Parsers {
                                 {
                                     register(group, builders)?;
                                     builders.push(group.id.to_string());
+                                    registration_errors
+                                        .extend(failures(group.id.as_str(), *index + 1));
                                     group_names.insert(group.id.as_str(), groups.len());
                                     groups.push(argument_group(call, module)?);
                                     *index += 1;

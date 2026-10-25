@@ -142,6 +142,12 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
             let kind = WordKind::new(*left_layout.kinds.add(index));
             let left_word = kind.read_record_field(left.add(index));
             let right_word = kind.read_record_field(right.add(index));
+            if left_layout.is_value_struct() && kind.raw() == 7 {
+                if super::structs::float_key(left_word) != super::structs::float_key(right_word) {
+                    return Comparison::Done(false);
+                }
+                continue;
+            }
             if !matches!(kind.raw() & !NULLABLE, 5 | 6 | 9) {
                 if !scalar_equal(left_word, right_word, kind) {
                     return Comparison::Done(false);
@@ -307,6 +313,12 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
         object(left).0.with(|left| {
             object(right).0.with(|right| match (left, right) {
                 (Storage::Sequence(left), Storage::Sequence(right)) => {
+                    match (left.rows(), right.rows()) {
+                        (Some(a), Some(b)) => return Comparison::Done(a.equal(b)),
+                        (Some(a), None) => return Comparison::Done(a.equal_words(right)),
+                        (None, Some(b)) => return Comparison::Done(b.equal_words(left)),
+                        (None, None) => {}
+                    }
                     let (left, right) = (left.resolved(), right.resolved());
                     if left.kind != right.kind || left.values.len() != right.values.len() {
                         return Comparison::Done(false);
@@ -327,6 +339,9 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         kind: left.kind,
                         resume: (position + 1 < left.values.len()).then_some(position + 1),
                     }
+                }
+                (Storage::ModuleMember(left), Storage::ModuleMember(right)) => {
+                    Comparison::Done(left.equal_member(right))
                 }
                 (Storage::ObjectValue(l), Storage::ObjectValue(r)) => Comparison::Done(
                     super::boxed_values::equal((l.kind, l.word), (r.kind, r.word)),
@@ -402,6 +417,14 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
                         Storage::ObjectValue(field) => Some(ReprTask::Word(field.word, field.kind)),
+                        Storage::ModuleMember(member) => {
+                            let text = member.text(1);
+                            if !text.is_null() {
+                                // SAFETY: the metadata formatter returns an independently owned string.
+                                output.push_str(Rc::from_raw(text).as_str());
+                            }
+                            None
+                        }
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None
@@ -433,6 +456,26 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                             }
                         }
                         Storage::Sequence(values) => {
+                            if let Some(rows) = values.rows() {
+                                output.push('[');
+                                for i in 0..rows.len() {
+                                    if i != 0 {
+                                        output.push_str(", ");
+                                    }
+                                    // Struct fields are scalars: formatting never queues a child.
+                                    let next = fields_repr(
+                                        output,
+                                        rows.row(i).as_ptr(),
+                                        rows.layout(),
+                                        0,
+                                        0,
+                                        &mut pending,
+                                    );
+                                    debug_assert!(next.is_none());
+                                }
+                                output.push(']');
+                                return None;
+                            }
                             let values = values.resolved();
                             if position == 0 {
                                 output.push('[');
@@ -453,6 +496,26 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         }
                         Storage::Dictionary(mapping) => {
                             format_entry(owner, mapping.repr_entry(output, position), &mut pending)
+                        }
+                        Storage::ChainMap(maps) => {
+                            if position == 0 {
+                                if pending.iter().any(|task| matches!(task, ReprTask::Object(active, _) if *active == owner)) {
+                                    output.push_str("...");
+                                    return None;
+                                }
+                                output.push_str("ChainMap(");
+                            }
+                            let mapping = maps.0.with(|s| s.sequence().values.get(position).copied());
+                            if let Some(mapping) = mapping {
+                                if position != 0 {
+                                    output.push_str(", ");
+                                }
+                                pending.push(ReprTask::Object(owner, position + 1));
+                                Some(ReprTask::Object(mapping as *const Object, 0))
+                            } else {
+                                output.push(')');
+                                None
+                            }
                         }
                         Storage::SimpleNamespace(dict) => dict
                             .0
@@ -491,9 +554,14 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         _ => fail("SystemError", "unsupported resource representation"),
                     })
                 }
-                ReprTask::Record(payload, position, written) => {
-                    record_field_repr(output, payload, position, written, &mut pending)
-                }
+                ReprTask::Record(payload, position, written) => fields_repr(
+                    output,
+                    payload,
+                    descriptor(payload),
+                    position,
+                    written,
+                    &mut pending,
+                ),
                 ReprTask::KeySeparator => {
                     output.push_str(": ");
                     None
@@ -588,15 +656,14 @@ unsafe fn text<'a>(pointer: *const u8, length: usize) -> &'a str {
     unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(pointer, length)) }
 }
 
-unsafe fn record_field_repr(
+unsafe fn fields_repr(
     output: &mut String,
     payload: *const usize,
+    layout: &super::records::RecordDescriptor,
     position: usize,
     mut written: usize,
     pending: &mut Vec<ReprTask>,
 ) -> Option<ReprTask> {
-    // SAFETY: the caller roots a fully initialized record and its descriptor.
-    let layout = unsafe { descriptor(payload) };
     // SAFETY: public record representations always have static semantic metadata.
     let semantics = unsafe { layout.semantics.as_ref() }
         .unwrap_or_else(|| fail("SystemError", "internal records have no representation"));
