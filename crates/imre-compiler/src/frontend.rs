@@ -25,6 +25,7 @@ mod copying;
 mod counter;
 mod csv;
 mod dataclass_values;
+mod deque;
 mod dispatch;
 mod documents;
 mod enums;
@@ -1409,6 +1410,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::Any)) if graph.mutable_documents => {
             return Ok(documents::ANY);
         }
+        Some(Binding::Intrinsic(Intrinsic::Deque)) => return Ok(types.deque(Type::Int)),
         Some(Binding::Intrinsic(Intrinsic::Counter)) => return Ok(types.counter(Type::Str)),
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
@@ -1576,6 +1578,11 @@ fn annotation_with_aliases(
                 } else {
                     Ok(types.list(element))
                 }
+            }
+            item if graph.resolve_type(module, item)
+                == Some(Binding::Intrinsic(Intrinsic::Deque)) =>
+            {
+                Ok(types.deque(nested(&value.slice)?))
             }
             item if graph.resolve_type(module, item)
                 == Some(Binding::Intrinsic(Intrinsic::Counter)) =>
@@ -2287,6 +2294,12 @@ impl<'a> Checker<'a> {
                 } else {
                     self.list_call(call, self.types.element(concrete))?
                 }
+            }
+            ast::Expr::Call(call)
+                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Deque))
+                    && self.types.deque_element(concrete).is_some() =>
+            {
+                self.deque_new(call, self.types.deque_element(concrete))?
             }
             ast::Expr::Call(call)
                 if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Counter))
@@ -3079,6 +3092,7 @@ impl<'a> Checker<'a> {
             .types
             .element(iterable.ty)
             .or(set_element)
+            .or_else(|| self.types.deque_element(iterable.ty))
             .or(string.then_some(Type::Str))
             .or(bytes.then_some(Type::Int))
             .or_else(|| {
@@ -3098,7 +3112,12 @@ impl<'a> Checker<'a> {
                 )
             })?;
         let captured = self.hidden(iterable.ty);
-        let cursor = if mapping.is_none() && set_element.is_none() && !string && !bytes {
+        let cursor = if mapping.is_none()
+            && set_element.is_none()
+            && self.types.deque_element(iterable.ty).is_none()
+            && !string
+            && !bytes
+        {
             Some(self.hidden(Type::Int))
         } else {
             None
@@ -3163,6 +3182,8 @@ impl<'a> Checker<'a> {
                             Builtin::StringIter
                         } else if bytes {
                             Builtin::BytesIter
+                        } else if self.types.deque_element(self.locals[captured]).is_some() {
+                            Builtin::DequeIter { reverse: false }
                         } else if set_element.is_some() {
                             Builtin::SetIter
                         } else {
@@ -5539,6 +5560,9 @@ impl<'a> Checker<'a> {
                 if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
                     return Ok(self.string_join_value(Some(receiver), attribute));
                 }
+                if let Some(element) = self.types.deque_element(receiver.ty) {
+                    return self.deque_attribute(attribute, receiver, element);
+                }
                 if let Type::NamedException(class) = receiver.ty
                     && attribute.attr.as_str() == "args"
                 {
@@ -6076,6 +6100,18 @@ impl<'a> Checker<'a> {
             });
         }
         if let ast::Expr::Subscript(s) = &*call.func
+            && self.resolve(&s.value) == Some(Binding::Intrinsic(Intrinsic::Deque))
+        {
+            let ty = annotation(
+                &s.slice,
+                self.graph,
+                self.module,
+                &self.classes.declarations,
+                self.types,
+            )?;
+            return self.deque_new(call, Some(ty));
+        }
+        if let ast::Expr::Subscript(s) = &*call.func
             && self.resolve(&s.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
         {
             let ty = annotation(
@@ -6161,6 +6197,7 @@ impl<'a> Checker<'a> {
                 return Ok(self.ordered_builtin(Builtin::BytesIo, Type::BinaryIO, args));
             }
             Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
+            Some(Binding::Intrinsic(Intrinsic::Deque)) => return self.deque_new(call, None),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
                 return self.cursor_length_hint(call);
@@ -6530,6 +6567,9 @@ impl<'a> Checker<'a> {
                 Type::TaskGroup | Type::EventLoop | Type::Task(_)
             ) {
                 return self.task_method(receiver, attribute, call);
+            }
+            if let Some(element) = self.types.deque_element(receiver.ty) {
+                return self.deque_method(call, attribute, receiver, element);
             }
             if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch) {
                 return self.regex_method(receiver, attribute, call);
@@ -7315,6 +7355,7 @@ impl<'a> Checker<'a> {
                             | Type::List(_)
                             | Type::Dict(_)
                             | Type::Set(_)
+                            | Type::Deque(_)
                             | Type::StringKeys
                             | Type::Tuple(_)
                     ) =>
