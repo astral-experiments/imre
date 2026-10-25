@@ -108,9 +108,11 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
         }
         Type::Tuple(_) if named.is_some() => {
             let declaration = named.as_ref().unwrap();
+            // stat_result appends raw numeric attributes after the visible tuple.
+            let flags = 3 | (u32::from(module.types.is_stat_result(ty)) << 3);
             (
                 1,
-                3,
+                flags,
                 declaration.name.as_str(),
                 declaration.name.as_str(),
                 field_metadata(

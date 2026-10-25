@@ -134,7 +134,7 @@ impl ModuleValues {
 
     pub(super) fn regex_groups(&self, pattern: &Expr) -> Option<regex::CaptureLayout> {
         match &pattern.kind {
-            ExprKind::Builtin(Builtin::RegexCompile(source), _) => {
+            ExprKind::Builtin(Builtin::RegexCompile { source, .. }, _) => {
                 self.regex_literals.borrow().get(source).cloned()
             }
             ExprKind::Builtin(Builtin::GlobalGet(slot), _) => {
