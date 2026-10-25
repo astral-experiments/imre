@@ -134,7 +134,10 @@ impl Emitter<'_, '_> {
                     }
                 }
             } else if let InstanceType::Exception(kind) = class
-                && matches!(value.ty, Type::Exception | Type::TimeoutExpired)
+                && matches!(
+                    value.ty,
+                    Type::Exception | Type::TimeoutExpired | Type::NamedException(_)
+                )
             {
                 let matched = self.instruction(format!(
                     "call i32 @imre_exception_matches(ptr {}, i32 {kind})",
