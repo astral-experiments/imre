@@ -234,6 +234,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::BytesGet
+            | Self::Chr
             | Self::Decode
             | Self::HashNew
             | Self::DecodeSplitLines
@@ -292,6 +293,7 @@ impl Builtin {
             | Self::ExceptionCause
             | Self::ExceptionSuppressContext
             | Self::FloatFormat { .. }
+            | Self::HexFormat { .. }
             | Self::GlobalGet(_)
             | Self::IntBounded { .. }
             | Self::IntSignAsFloat
@@ -605,6 +607,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || matches!(
             name,
             "int_floordiv"
+                | "imre_chr"
                 | "imre_json_index"
                 | "imre_exception_message"
                 | "imre_exception_repr"
