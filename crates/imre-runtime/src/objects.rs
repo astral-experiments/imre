@@ -10,6 +10,7 @@ mod annotations;
 mod argparse;
 mod args;
 mod asyncio;
+mod boxed_values;
 mod bytes;
 mod chainmap;
 mod contexts;
@@ -92,6 +93,7 @@ enum Storage {
     Set(mappings::TableOwner<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
+    RegexIterator(regexes::FindIter),
     Repeat(itertools::Repeat),
     IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
@@ -104,7 +106,7 @@ enum Storage {
     ModuleMember(errno::Member),
     CsvReader(Box<csv::Reader>),
     Exception(exceptions::Exception),
-    ExceptionField(OwnedWord),
+    ObjectValue(OwnedWord),
     File(Box<files::FileState>),
     ZipFile(Box<zipfile::Archive>),
     ZipInfo(Rc<zipfile::Info>),

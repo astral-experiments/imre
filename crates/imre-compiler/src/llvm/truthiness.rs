@@ -77,14 +77,7 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
-                Type::ModuleMember => {
-                    let bit = self.instruction(format!(
-                        "call i32 @imre_module_value_truth(ptr {})",
-                        value.operand
-                    ));
-                    self.instruction(format!("icmp ne i32 {bit}, 0"))
-                }
-                Type::ExceptionField => {
+                Type::ObjectValue => {
                     let bit = self.instruction(format!(
                         "call i32 @imre_system_exit_code_truth(ptr {})",
                         value.operand
@@ -120,11 +113,12 @@ impl Emitter<'_, '_> {
                 Type::ListInt
                 | Type::Deque(_)
                 | Type::Dict(_)
+                | Type::ReadOnlyObjectMapping
                 | Type::Set(_)
                 | Type::StringKeys => {
                     let family = match value.ty {
                         Type::ListInt => "list",
-                        Type::Dict(_) => "dict",
+                        Type::Dict(_) | Type::ReadOnlyObjectMapping => "dict",
                         Type::Set(_) | Type::StringKeys => "set",
                         Type::Deque(_) => "deque",
                         _ => unreachable!(),
