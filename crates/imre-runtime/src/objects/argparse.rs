@@ -2,14 +2,14 @@
 //! input before constructing the compiler-described, owned namespace record.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashSet, TryReserveError};
 use std::io::{self, Write};
 use std::rc::Rc;
 
 use serde::Deserialize;
 
 use super::exceptions::{self, Error, string_repr};
-use super::records::{RecordDescriptor, imre_record_new};
+use super::records::{RecordDescriptor, imre_record_new, imre_record_release};
 use super::{Object, Str, Words, fail};
 use crate::objects::paths::imre_path_new;
 
@@ -179,6 +179,11 @@ enum Stop<'a> {
     Help(&'a Parser),
     Error(&'a Parser, String),
     Exception(Error),
+}
+impl From<TryReserveError> for Stop<'_> {
+    fn from(_: TryReserveError) -> Self {
+        Self::Exception(Error::allocation())
+    }
 }
 
 impl Parser {
@@ -383,7 +388,8 @@ impl Parser {
                         selected = Some((child, name, parsed.words));
                         break 'parse;
                     };
-                    let mut taken = Vec::with_capacity(count);
+                    let mut taken = Vec::new();
+                    taken.try_reserve_exact(count)?;
                     for _ in 0..count {
                         if marker == Some(index) {
                             index += 1;
@@ -394,11 +400,7 @@ impl Parser {
                     if marker == Some(index) {
                         index += 1;
                     }
-                    values[slot] = Some(
-                        self.options[slot]
-                            .bind(Some(&taken))
-                            .map_err(|e| Stop::Error(self, e))?,
-                    );
+                    values[slot] = Some(self.options[slot].bind(self, Some(&taken))?);
                 }
                 extras.extend(args[index..end].iter().copied().map(Cow::Borrowed));
                 index = end;
@@ -476,11 +478,8 @@ impl Parser {
                             ));
                         }
                         if let Some((slot, option)) = option {
-                            values[slot] = Some(
-                                option
-                                    .flag_value(values[slot].take(), matched)
-                                    .map_err(|e| Stop::Error(self, e))?,
-                            );
+                            values[slot] =
+                                Some(option.flag_value(self, values[slot].take(), matched)?);
                         } else {
                             clustered_help = true;
                         }
@@ -518,13 +517,9 @@ impl Parser {
                         ),
                     ));
                 }
-                vec![value]
+                explicit.as_slice()
             } else if !option.takes_value() {
-                values[slot] = Some(
-                    option
-                        .flag_value(values[slot].take(), spelling)
-                        .map_err(|e| Stop::Error(self, e))?,
-                );
+                values[slot] = Some(option.flag_value(self, values[slot].take(), spelling)?);
                 continue;
             } else {
                 let start = index;
@@ -547,16 +542,12 @@ impl Parser {
                         ),
                     ));
                 }
-                args[start..index].to_vec()
+                &args[start..index]
             };
             if clustered_help {
                 return Err(Stop::Help(self));
             }
-            values[slot] = Some(
-                option
-                    .bind(Some(&taken))
-                    .map_err(|e| Stop::Error(self, e))?,
-            );
+            values[slot] = Some(option.bind(self, Some(taken))?);
         }
         let mut missing = Vec::new();
         let mut words = Vec::with_capacity(values.len());
@@ -567,7 +558,7 @@ impl Parser {
                     missing.push(option.error_name());
                     continue;
                 }
-                None => option.bind(None).map_err(|e| Stop::Error(self, e))?,
+                None => option.bind(self, None)?,
             };
             words.push(Word::Option(option, bound));
         }
@@ -795,7 +786,14 @@ pub unsafe extern "C" fn imre_argparse_parse(
         let result = imre_record_new(layout);
         for (index, field) in parsed.words.into_iter().enumerate() {
             let word = match field {
-                Word::Option(option, values) => option.word(values),
+                Word::Option(option, values) => match option.word(values) {
+                    Ok(word) => word,
+                    Err(error) => {
+                        // Unfilled record slots are zeroed so its initialized fields can be released.
+                        imre_record_release(result);
+                        return error.returning(std::ptr::null_mut());
+                    }
+                },
                 Word::Command(value) => {
                     value.map_or(0, |name| Rc::into_raw(Rc::new(Str::new(name))) as usize)
                 }
