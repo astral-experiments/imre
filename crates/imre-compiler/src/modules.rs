@@ -1605,18 +1605,16 @@ impl<'a> Loader<'a> {
             }
             return Ok(id);
         }
-        if name == "unittest" {
+        let bundled = match name {
+            "unittest" => Some(include_str!("../stdlib/unittest/__init__.py")),
+            "string" => Some(include_str!("../stdlib/string/__init__.py")),
+            _ => None,
+        };
+        if let Some(source) = bundled {
             self.reject_stdlib_shadow(name)?;
-            // ty resolves this immutable source at its Python import path in the
-            // in-memory project. It is part of the compiler, not a disk input.
-            let path = self.root.join("unittest/__init__.py");
-            let id = self.add(
-                path.clone(),
-                path,
-                name.into(),
-                true,
-                include_str!("../stdlib/unittest/__init__.py"),
-            )?;
+            // ty resolves bundled source at its Python import path in the in-memory project.
+            let path = self.root.join(name).join("__init__.py");
+            let id = self.add(path.clone(), path, name.into(), true, source)?;
             self.modules[id].bundled = true;
             self.scan(id)?;
             return Ok(id);

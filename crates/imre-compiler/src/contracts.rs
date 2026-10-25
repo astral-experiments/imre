@@ -81,6 +81,7 @@ impl Builtin {
             Self::Text(operation) => Contract::new(
                 match operation {
                     TextOperation::Lower
+                    | TextOperation::Capitalize
                     | TextOperation::Split(_)
                     | TextOperation::Partition
                     | TextOperation::Unquote
@@ -811,6 +812,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_list_slice_sum"
                 | "imre_str_get"
                 | "imre_str_lower"
+                | "imre_str_capitalize"
                 | "imre_str_slice"
                 | "imre_str_int_list"
                 | "imre_seq_get"

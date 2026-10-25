@@ -6236,10 +6236,14 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
             }
-            if attribute.attr.as_str() == "lower"
+            if matches!(attribute.attr.as_str(), "lower" | "capitalize")
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
-                return self.text_method(Self::string_value(receiver), "lower", call);
+                return self.text_method(
+                    Self::string_value(receiver),
+                    attribute.attr.as_str(),
+                    call,
+                );
             }
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
