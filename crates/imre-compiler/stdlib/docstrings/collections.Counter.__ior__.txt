@@ -1,0 +1,7 @@
+Inplace union is the maximum of value from either counter.
+
+>>> c = Counter('abbb')
+>>> c |= Counter('bcc')
+>>> c
+Counter({'b': 3, 'c': 2, 'a': 1})
+

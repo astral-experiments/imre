@@ -112,6 +112,29 @@ pub unsafe extern "C" fn imre_str_contains(needle: *const Str, text: *const Str)
     unsafe { u32::from((&*text).contains((&*needle).as_str())) }
 }
 
+/// CPython 3.14's alphanumeric characters are Unicode 16 letters and numbers.
+pub(super) fn python_alnum(text: &str) -> bool {
+    if text.is_ascii() {
+        return !text.is_empty() && text.bytes().all(|b| b.is_ascii_alphanumeric());
+    }
+    const RANGES: &[(u32, u32)] = include!(concat!(env!("OUT_DIR"), "/unicode_alnum.rs"));
+    text.chars().all(|ch| {
+        let cp = u32::from(ch);
+        let index = RANGES.partition_point(|&(_, end)| end < cp);
+        RANGES.get(index).is_some_and(|&(start, _)| start <= cp)
+    })
+}
+
+/// Tests a native string with Python's alphanumeric predicate.
+///
+/// # Safety
+/// The caller roots the immutable string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isalnum(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive for this call.
+    u32::from(python_alnum(unsafe { &*value }))
+}
+
 /// Tests a nonempty Python string against the shared Unicode whitespace table.
 ///
 /// # Safety
@@ -199,16 +222,21 @@ thread_local! {
 
 /// Reuses immutable owners for empty and single Latin-1 strings.
 pub(super) fn owned_string(value: &str) -> Rc<Str> {
+    short_string(value).unwrap_or_else(|| Rc::new(Str::new(value)))
+}
+
+/// Return the shared native owner for empty and single Latin-1 strings.
+pub(crate) fn short_string(value: &str) -> Option<Rc<Str>> {
     let index = match value.as_bytes() {
         [] => 256,
         [byte] => usize::from(*byte),
         // These UTF-8 lead bytes encode U+0080 through U+00FF.
         [0xc2 | 0xc3, _] => value.chars().next().unwrap() as usize,
-        _ => return Rc::new(Str::new(value)),
+        _ => return None,
     };
-    SHORT_STRINGS.with_borrow_mut(|strings| {
+    Some(SHORT_STRINGS.with_borrow_mut(|strings| {
         Rc::clone(strings[index].get_or_insert_with(|| Rc::new(Str::new(value))))
-    })
+    }))
 }
 
 /// Appends an owned slice of source, retaining its allocation for a full slice.
