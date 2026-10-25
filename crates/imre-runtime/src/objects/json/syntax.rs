@@ -54,14 +54,16 @@ impl Cursor<'_> {
                 0..=31 => return Err((self.pos - 1, "Invalid control character at")),
                 b'\\' => match self.peek() {
                     Some(b'u') => {
-                        let escape = self.pos;
-                        self.pos += 1;
-                        for _ in 0..4 {
-                            if !self.peek().is_some_and(|c| c.is_ascii_hexdigit()) {
-                                return Err((escape, r"Invalid \uXXXX escape"));
-                            }
-                            self.pos += 1;
+                        let end = self.pos + 5;
+                        // CPython requires a character after the four hex digits.
+                        if end >= self.source.len()
+                            || !self.source.as_bytes()[self.pos + 1..end]
+                                .iter()
+                                .all(u8::is_ascii_hexdigit)
+                        {
+                            return Err((self.pos, r"Invalid \uXXXX escape"));
                         }
+                        self.pos = end;
                     }
                     Some(b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't') => self.pos += 1,
                     Some(_) => return Err((self.pos - 1, r"Invalid \escape")),

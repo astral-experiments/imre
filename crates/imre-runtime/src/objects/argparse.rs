@@ -5,7 +5,6 @@ use std::borrow::Cow;
 use std::io::{self, Write};
 use std::rc::Rc;
 
-use icu_properties::props::{EnumeratedProperty, GeneralCategory};
 use serde::Deserialize;
 
 use super::exceptions::{self, Error, string_repr};
@@ -242,15 +241,14 @@ impl Parser {
         {
             return Token::Cluster(&arg[1..]);
         }
+        // Python's negative-number matcher starts with -\.?\d.
         let numeric = tail
             .strip_prefix('.')
             .unwrap_or(tail)
             .chars()
             .next()
-            .is_some_and(|first| {
-                // Python's negative-number matcher starts with -\.?\d.
-                GeneralCategory::for_char(first) == GeneralCategory::DecimalNumber
-            });
+            .and_then(crate::integer_text::decimal_digit)
+            .is_some();
         if numeric || arg.contains(' ') {
             Token::Value
         } else {
