@@ -5,7 +5,7 @@
   "revision": "7d4011f0413c63d0a4d111817c37f460a0656cac",
   "validation_revision": "7d4011f0413c63d0a4d111817c37f460a0656cac",
   "validation_tree": "1075effc3065b7eef963a8c9e1e27ea136059843",
-  "validation_index": "/tmp/relar-luhn-validation-v1/index.json",
+  "validation_index": "/tmp/imre-luhn-validation-v1/index.json",
   "validation_index_sha256": "0ea4e260b52165cc76deaaf6170c2ff2fc487b8822a4b88436ba75436d79a590",
   "audit_script_sha256": "9cdc07202c0a122598f93a4df811b37e572833a80f443abce71c9b1f69a5f313",
   "counts": {

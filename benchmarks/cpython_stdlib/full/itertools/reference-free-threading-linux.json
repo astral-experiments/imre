@@ -1,0 +1,10 @@
+{
+  "module": "test.test_free_threading.test_itertools_batched",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "configuration": "free-threaded CPython, GIL disabled",
+  "denominator": 1,
+  "reference": {
+    "test.test_free_threading.test_itertools_batched.EnumerateThreading.test_threading": "pass"
+  }
+}

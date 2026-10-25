@@ -4,7 +4,7 @@
   "script_sha256": "67f6b6ccc97aef17f0fe04028913b9c9a7e6dafc07ee7b21bed22b0a67d8b282",
   "audit_python": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
   "build_manifest": {
-    "path": "/tmp/relar-string-reuse-frozen/build.json",
+    "path": "/tmp/imre-string-reuse-frozen/build.json",
     "sha256": "abbc5d55d4a1ee85098f7e5d83dc07b07134c3052712d5f1199dda7ca2ee9614",
     "revision": "31bffb7e1aa929497c89b6de38f8e9efa83302e8"
   },
@@ -18,7 +18,7 @@
       "requested_target": null,
       "effective_target": "x86_64-<vendor>-linux-gnu",
       "engines": [
-        "relar",
+        "imre",
         "cpython",
         "rust"
       ],
@@ -28,25 +28,25 @@
       "process_results_checked": 837,
       "balanced_orders_per_workload": {
         "warmups": {
-          "relar/cpython/rust": 1,
-          "relar/rust/cpython": 1,
-          "cpython/relar/rust": 1,
-          "cpython/rust/relar": 1,
-          "rust/relar/cpython": 1,
-          "rust/cpython/relar": 1
+          "imre/cpython/rust": 1,
+          "imre/rust/cpython": 1,
+          "cpython/imre/rust": 1,
+          "cpython/rust/imre": 1,
+          "rust/imre/cpython": 1,
+          "rust/cpython/imre": 1
         },
         "samples": {
-          "relar/cpython/rust": 4,
-          "relar/rust/cpython": 4,
-          "cpython/relar/rust": 4,
-          "cpython/rust/relar": 4,
-          "rust/relar/cpython": 4,
-          "rust/cpython/relar": 4
+          "imre/cpython/rust": 4,
+          "imre/rust/cpython": 4,
+          "cpython/imre/rust": 4,
+          "cpython/rust/imre": 4,
+          "rust/imre/cpython": 4,
+          "rust/cpython/imre": 4
         }
       },
       "correctness": {
-        "relar_upstream_calls": 323,
-        "relar_exact_cases": 289,
+        "imre_upstream_calls": 323,
+        "imre_exact_cases": 289,
         "compile_rejections": 2,
         "rust_cases": 295,
         "rust_exact_cases": 291,
@@ -64,7 +64,7 @@
           "label": "encode-64",
           "repetitions": 32768,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.0232743275,
               "min_seconds": 0.022884086,
               "max_seconds": 0.024328915,
@@ -86,15 +86,15 @@
               "p75_seconds": 0.00954968475
             }
           },
-          "cpython_over_relar": 14.114934513145439,
-          "relar_over_rust": 2.4645803624928004,
+          "cpython_over_imre": 14.114934513145439,
+          "imre_over_rust": 2.4645803624928004,
           "cpython_over_rust": 34.78739041897012
         },
         {
           "label": "decode-bytes-64",
           "repetitions": 32768,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.2794194965,
               "min_seconds": 0.275776482,
               "max_seconds": 0.307176897,
@@ -116,15 +116,15 @@
               "p75_seconds": 0.00704949475
             }
           },
-          "cpython_over_relar": 1.1735747061587023,
-          "relar_over_rust": 39.98927728145699,
+          "cpython_over_imre": 1.1735747061587023,
+          "imre_over_rust": 39.98927728145699,
           "cpython_over_rust": 46.93040433508476
         },
         {
           "label": "decode-text-64",
           "repetitions": 32768,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.2786318,
               "min_seconds": 0.276682305,
               "max_seconds": 0.284335252,
@@ -146,15 +146,15 @@
               "p75_seconds": 0.0066337295
             }
           },
-          "cpython_over_relar": 1.1635538082874963,
-          "relar_over_rust": 42.81400666476233,
+          "cpython_over_imre": 1.1635538082874963,
+          "imre_over_rust": 42.81400666476233,
           "cpython_over_rust": 49.81640050283046
         },
         {
           "label": "encode-1024",
           "repetitions": 2048,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.0167929445,
               "min_seconds": 0.016450999,
               "max_seconds": 0.017402539,
@@ -176,15 +176,15 @@
               "p75_seconds": 0.00887860425
             }
           },
-          "cpython_over_relar": 20.174401279060977,
-          "relar_over_rust": 1.9163993279057046,
+          "cpython_over_imre": 20.174401279060977,
+          "imre_over_rust": 1.9163993279057046,
           "cpython_over_rust": 38.66220905209244
         },
         {
           "label": "decode-bytes-1024",
           "repetitions": 2048,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.264623072,
               "min_seconds": 0.262124751,
               "max_seconds": 0.270036974,
@@ -206,15 +206,15 @@
               "p75_seconds": 0.0063443095
             }
           },
-          "cpython_over_relar": 1.197473000389021,
-          "relar_over_rust": 42.889090475610864,
+          "cpython_over_imre": 1.197473000389021,
+          "imre_over_rust": 42.889090475610864,
           "cpython_over_rust": 51.35852785578593
         },
         {
           "label": "decode-text-1024",
           "repetitions": 2048,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.2649600005,
               "min_seconds": 0.262559776,
               "max_seconds": 0.278104374,
@@ -236,15 +236,15 @@
               "p75_seconds": 0.0062126215
             }
           },
-          "cpython_over_relar": 1.1919188137984624,
-          "relar_over_rust": 43.177154908064814,
+          "cpython_over_imre": 1.1919188137984624,
+          "imre_over_rust": 43.177154908064814,
           "cpython_over_rust": 51.46366326121307
         },
         {
           "label": "encode-16384",
           "repetitions": 128,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.015768904,
               "min_seconds": 0.015432083,
               "max_seconds": 0.017501364,
@@ -266,15 +266,15 @@
               "p75_seconds": 0.0089058375
             }
           },
-          "cpython_over_relar": 21.666652355801013,
-          "relar_over_rust": 1.7955457691319905,
+          "cpython_over_imre": 21.666652355801013,
+          "imre_over_rust": 1.7955457691319905,
           "cpython_over_rust": 38.903465968712176
         },
         {
           "label": "decode-bytes-16384",
           "repetitions": 128,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.289577756,
               "min_seconds": 0.287633013,
               "max_seconds": 0.298242377,
@@ -296,15 +296,15 @@
               "p75_seconds": 0.006480322
             }
           },
-          "cpython_over_relar": 1.1779696590369324,
-          "relar_over_rust": 45.97315158572723,
+          "cpython_over_imre": 1.1779696590369324,
+          "imre_over_rust": 45.97315158572723,
           "cpython_over_rust": 54.154977698292306
         },
         {
           "label": "decode-text-16384",
           "repetitions": 128,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.2663145955,
               "min_seconds": 0.262506426,
               "max_seconds": 0.269956757,
@@ -326,12 +326,12 @@
               "p75_seconds": 0.0060974095
             }
           },
-          "cpython_over_relar": 1.2707546778073604,
-          "relar_over_rust": 44.77718192099723,
+          "cpython_over_imre": 1.2707546778073604,
+          "imre_over_rust": 44.77718192099723,
           "cpython_over_rust": 56.900813385138406
         }
       ],
-      "path": "/tmp/relar-string-reuse-normal.json",
+      "path": "/tmp/imre-string-reuse-normal.json",
       "sha256": "73f80f4a979bd02e0e846814e93bde907ba2b022458be6fa218b4c9dc3e408b7"
     },
     "thinlto": {
@@ -342,7 +342,7 @@
       "requested_target": "x86_64-unknown-linux-gnu",
       "effective_target": "x86_64-<vendor>-linux-gnu",
       "engines": [
-        "relar",
+        "imre",
         "cpython",
         "rust"
       ],
@@ -352,25 +352,25 @@
       "process_results_checked": 837,
       "balanced_orders_per_workload": {
         "warmups": {
-          "relar/cpython/rust": 1,
-          "relar/rust/cpython": 1,
-          "cpython/relar/rust": 1,
-          "cpython/rust/relar": 1,
-          "rust/relar/cpython": 1,
-          "rust/cpython/relar": 1
+          "imre/cpython/rust": 1,
+          "imre/rust/cpython": 1,
+          "cpython/imre/rust": 1,
+          "cpython/rust/imre": 1,
+          "rust/imre/cpython": 1,
+          "rust/cpython/imre": 1
         },
         "samples": {
-          "relar/cpython/rust": 4,
-          "relar/rust/cpython": 4,
-          "cpython/relar/rust": 4,
-          "cpython/rust/relar": 4,
-          "rust/relar/cpython": 4,
-          "rust/cpython/relar": 4
+          "imre/cpython/rust": 4,
+          "imre/rust/cpython": 4,
+          "cpython/imre/rust": 4,
+          "cpython/rust/imre": 4,
+          "rust/imre/cpython": 4,
+          "rust/cpython/imre": 4
         }
       },
       "correctness": {
-        "relar_upstream_calls": 323,
-        "relar_exact_cases": 289,
+        "imre_upstream_calls": 323,
+        "imre_exact_cases": 289,
         "compile_rejections": 2,
         "rust_cases": 295,
         "rust_exact_cases": 291,
@@ -388,7 +388,7 @@
           "label": "encode-64",
           "repetitions": 32768,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.0181874145,
               "min_seconds": 0.017643669,
               "max_seconds": 0.018783769,
@@ -410,15 +410,15 @@
               "p75_seconds": 0.00964882875
             }
           },
-          "cpython_over_relar": 18.0972758937231,
-          "relar_over_rust": 1.925239642519293,
+          "cpython_over_imre": 18.0972758937231,
+          "imre_over_rust": 1.925239642519293,
           "cpython_over_rust": 34.84159297220449
         },
         {
           "label": "decode-bytes-64",
           "repetitions": 32768,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.179763891,
               "min_seconds": 0.177167424,
               "max_seconds": 0.189765556,
@@ -440,15 +440,15 @@
               "p75_seconds": 0.00674310925
             }
           },
-          "cpython_over_relar": 1.8287664400855674,
-          "relar_over_rust": 26.948195105146805,
+          "cpython_over_imre": 1.8287664400855674,
+          "imre_over_rust": 26.948195105146805,
           "cpython_over_rust": 49.28195482917064
         },
         {
           "label": "decode-text-64",
           "repetitions": 32768,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.177508757,
               "min_seconds": 0.17565982,
               "max_seconds": 0.184575642,
@@ -470,15 +470,15 @@
               "p75_seconds": 0.0064719545
             }
           },
-          "cpython_over_relar": 1.8396911454909237,
-          "relar_over_rust": 27.927302759978165,
+          "cpython_over_imre": 1.8396911454909237,
+          "imre_over_rust": 27.927302759978165,
           "cpython_over_rust": 51.37761160497607
         },
         {
           "label": "encode-1024",
           "repetitions": 2048,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.012728794,
               "min_seconds": 0.012437461,
               "max_seconds": 0.013324252,
@@ -500,15 +500,15 @@
               "p75_seconds": 0.0089200595
             }
           },
-          "cpython_over_relar": 26.7963417036995,
-          "relar_over_rust": 1.444300051185034,
+          "cpython_over_imre": 26.7963417036995,
+          "imre_over_rust": 1.444300051185034,
           "cpython_over_rust": 38.701957694224845
         },
         {
           "label": "decode-bytes-1024",
           "repetitions": 2048,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.1671406695,
               "min_seconds": 0.1652091,
               "max_seconds": 0.176220418,
@@ -530,15 +530,15 @@
               "p75_seconds": 0.006200209
             }
           },
-          "cpython_over_relar": 1.9179097909500715,
-          "relar_over_rust": 28.073302956822143,
+          "cpython_over_imre": 1.9179097909500715,
+          "imre_over_rust": 28.073302956822143,
           "cpython_over_rust": 53.84206260519678
         },
         {
           "label": "decode-text-1024",
           "repetitions": 2048,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.1647347385,
               "min_seconds": 0.162744554,
               "max_seconds": 0.172981693,
@@ -560,15 +560,15 @@
               "p75_seconds": 0.005956258
             }
           },
-          "cpython_over_relar": 1.9388150726933653,
-          "relar_over_rust": 28.112744768859834,
+          "cpython_over_imre": 1.9388150726933653,
+          "imre_over_rust": 28.112744768859834,
           "cpython_over_rust": 54.505413292647
         },
         {
           "label": "encode-16384",
           "repetitions": 128,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.012137168,
               "min_seconds": 0.011845991,
               "max_seconds": 0.012577983,
@@ -590,15 +590,15 @@
               "p75_seconds": 0.00905440225
             }
           },
-          "cpython_over_relar": 28.3098532128747,
-          "relar_over_rust": 1.3651190095786456,
+          "cpython_over_imre": 28.3098532128747,
+          "imre_over_rust": 1.3651190095786456,
           "cpython_over_rust": 38.64631877927635
         },
         {
           "label": "decode-bytes-16384",
           "repetitions": 128,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.1909637895,
               "min_seconds": 0.189251498,
               "max_seconds": 0.20323094,
@@ -620,15 +620,15 @@
               "p75_seconds": 0.006197987
             }
           },
-          "cpython_over_relar": 1.8000134365787708,
-          "relar_over_rust": 31.514095412740478,
+          "cpython_over_imre": 1.8000134365787708,
+          "imre_over_rust": 31.514095412740478,
           "cpython_over_rust": 56.725795184558265
         },
         {
           "label": "decode-text-16384",
           "repetitions": 128,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.16531456,
               "min_seconds": 0.163125176,
               "max_seconds": 0.177189677,
@@ -650,12 +650,12 @@
               "p75_seconds": 0.00608253325
             }
           },
-          "cpython_over_relar": 2.0772812902868325,
-          "relar_over_rust": 27.560047019667604,
+          "cpython_over_imre": 2.0772812902868325,
+          "imre_over_rust": 27.560047019667604,
           "cpython_over_rust": 57.24997003338089
         }
       ],
-      "path": "/tmp/relar-string-reuse-thinlto.json",
+      "path": "/tmp/imre-string-reuse-thinlto.json",
       "sha256": "204b8fbab5dfa29845619031909a67b6ce7c1453fa557a7b400064e683edcf4b"
     },
     "sustained": {
@@ -666,7 +666,7 @@
       "requested_target": "x86_64-unknown-linux-gnu",
       "effective_target": "x86_64-<vendor>-linux-gnu",
       "engines": [
-        "relar",
+        "imre",
         "rust"
       ],
       "samples": 20,
@@ -675,17 +675,17 @@
       "process_results_checked": 138,
       "balanced_orders_per_workload": {
         "warmups": {
-          "relar/rust": 1,
-          "rust/relar": 1
+          "imre/rust": 1,
+          "rust/imre": 1
         },
         "samples": {
-          "relar/rust": 10,
-          "rust/relar": 10
+          "imre/rust": 10,
+          "rust/imre": 10
         }
       },
       "correctness": {
-        "relar_upstream_calls": 323,
-        "relar_exact_cases": 289,
+        "imre_upstream_calls": 323,
+        "imre_exact_cases": 289,
         "compile_rejections": 2,
         "rust_cases": 295,
         "rust_exact_cases": 291,
@@ -703,7 +703,7 @@
           "label": "encode-64",
           "repetitions": 1048576,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.4624375725,
               "min_seconds": 0.457678236,
               "max_seconds": 0.470541305,
@@ -718,13 +718,13 @@
               "p75_seconds": 0.19317327425
             }
           },
-          "relar_over_rust": 2.405851085630654
+          "imre_over_rust": 2.405851085630654
         },
         {
           "label": "encode-1024",
           "repetitions": 65536,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.294292504,
               "min_seconds": 0.292539313,
               "max_seconds": 0.300159403,
@@ -739,13 +739,13 @@
               "p75_seconds": 0.176571336
             }
           },
-          "relar_over_rust": 1.676329349006719
+          "imre_over_rust": 1.676329349006719
         },
         {
           "label": "encode-16384",
           "repetitions": 4096,
           "summary_seconds": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.26850386,
               "min_seconds": 0.266643369,
               "max_seconds": 0.273535573,
@@ -760,10 +760,10 @@
               "p75_seconds": 0.17598339775
             }
           },
-          "relar_over_rust": 1.535245236033843
+          "imre_over_rust": 1.535245236033843
         }
       ],
-      "path": "/tmp/relar-string-reuse-sustained.json",
+      "path": "/tmp/imre-string-reuse-sustained.json",
       "sha256": "4fb8bbae1712518c4c5880599cade36160a7e17ea71f5266cd20f958c569785b"
     }
   },
@@ -791,7 +791,7 @@
   ],
   "before_after": {
     "passed": true,
-    "path": "/tmp/relar-string-reuse-before-after.json",
+    "path": "/tmp/imre-string-reuse-before-after.json",
     "sha256": "3d6a00be56a367e322ddf2c11f3aed38f5be7a7fcc8b6d3f0a671c9bbed00357",
     "process_results_checked": 138,
     "samples": 20,
@@ -802,17 +802,17 @@
     "old_new_codec_driver_python_identical": true,
     "binary_provenance": {
       "previous": {
-        "path": "/tmp/relar-base45-thinlto.json",
+        "path": "/tmp/imre-base45-thinlto.json",
         "sha256": "014b5af700ed088e259745969c409bc2648a72b4fcc61c9a5ae048d0ca779475",
         "revision": "2963aa2a690139c23be23653009096da03c7b94e",
-        "binary": "/home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45",
+        "binary": "/home/dev-user/code/oss/imre/benchmarks/local/base45-thinlto/base45",
         "binary_sha256": "cd6e2cd00b3a35604c891cdb788dfddf72f025e7024cc230ba4f21420a2a3563"
       },
-      "relar": {
-        "path": "/tmp/relar-string-reuse-thinlto.json",
+      "imre": {
+        "path": "/tmp/imre-string-reuse-thinlto.json",
         "sha256": "204b8fbab5dfa29845619031909a67b6ce7c1453fa557a7b400064e683edcf4b",
         "revision": "3349b85efc78e5ac09a92d8d367d914264679067",
-        "binary": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45",
+        "binary": "/home/dev-user/code/oss/imre/benchmarks/local/base45-string-reuse-thinlto/base45",
         "binary_sha256": "9d7619afb8ceb43830dc676b7137947d2222336a44c693c36a2642fa6d3c8a09"
       }
     },
@@ -828,7 +828,7 @@
             "p25_seconds": 0.22044066125,
             "p75_seconds": 0.22330474725
           },
-          "relar": {
+          "imre": {
             "median_seconds": 0.0182289885,
             "min_seconds": 0.016642798,
             "max_seconds": 0.019607034,
@@ -836,7 +836,7 @@
             "p75_seconds": 0.01869936925
           }
         },
-        "previous_over_relar": 12.171467083870287
+        "previous_over_imre": 12.171467083870287
       },
       {
         "label": "encode-1024",
@@ -849,7 +849,7 @@
             "p25_seconds": 0.26184238425,
             "p75_seconds": 0.26399928275
           },
-          "relar": {
+          "imre": {
             "median_seconds": 0.0130579375,
             "min_seconds": 0.011539362,
             "max_seconds": 0.013641553,
@@ -857,7 +857,7 @@
             "p75_seconds": 0.0133343045
           }
         },
-        "previous_over_relar": 20.120260646062977
+        "previous_over_imre": 20.120260646062977
       },
       {
         "label": "encode-16384",
@@ -870,7 +870,7 @@
             "p25_seconds": 0.51304363225,
             "p75_seconds": 0.5197101145
           },
-          "relar": {
+          "imre": {
             "median_seconds": 0.011723059,
             "min_seconds": 0.010781507,
             "max_seconds": 0.012770062,
@@ -878,7 +878,7 @@
             "p75_seconds": 0.012349837
           }
         },
-        "previous_over_relar": 43.963160511262465
+        "previous_over_imre": 43.963160511262465
       }
     ]
   },
@@ -887,7 +887,7 @@
     "balanced_orders_and_counts": true,
     "positive_timings_and_all_run_guards": true,
     "exact_upstream_files": true,
-    "relar_exact_errors_all_289_cases": true,
+    "imre_exact_errors_all_289_cases": true,
     "rust_291_exact_and_4_explicit_repr_boundaries": true,
     "rust_build_source_binary_provenance": true,
     "cross_record_consistency": true,
@@ -900,7 +900,7 @@
     "Normal and ThinLTO each use balanced three-engine 2 MiB batches; sustained encode uses balanced two-engine 64 MiB batches.",
     "Record validation and retained hashes are audited; binaries are not rebuilt or rerun by this script.",
     "Two wrong-typed upstream calls are compile-time rejections, not runtime TypeError equivalence.",
-    "Rust deliberately differs at four explicit Unicode repr boundaries; all Relar errors and all other Rust cases are exact.",
+    "Rust deliberately differs at four explicit Unicode repr boundaries; all Imre errors and all other Rust cases are exact.",
     "File hashes cover recorded artifacts and tools, not every transitive system library."
   ],
   "passed": true

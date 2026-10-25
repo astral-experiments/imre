@@ -28,7 +28,7 @@
         "elapsed_ns": 554699995.0,
         "peak_rss_kib": 43520.0
       },
-      "relar": {
+      "imre": {
         "elapsed_ns": 151752741.0,
         "peak_rss_kib": 15580.0
       },
@@ -36,7 +36,7 @@
         "elapsed_ns": 108933224.0,
         "peak_rss_kib": 11500.0
       },
-      "relar_thin": {
+      "imre_thin": {
         "elapsed_ns": 113885328.5,
         "peak_rss_kib": 15816.0
       },
@@ -58,7 +58,7 @@
         "elapsed_ns": 592569088.5,
         "peak_rss_kib": 43776.0
       },
-      "relar": {
+      "imre": {
         "elapsed_ns": 167651239.0,
         "peak_rss_kib": 16008.0
       },
@@ -66,7 +66,7 @@
         "elapsed_ns": 127129890.0,
         "peak_rss_kib": 11580.0
       },
-      "relar_thin": {
+      "imre_thin": {
         "elapsed_ns": 128819055.0,
         "peak_rss_kib": 15988.0
       },
@@ -88,7 +88,7 @@
         "elapsed_ns": 4477666236.5,
         "peak_rss_kib": 43520.0
       },
-      "relar": {
+      "imre": {
         "elapsed_ns": 1029684823.0,
         "peak_rss_kib": 15940.0
       },
@@ -96,7 +96,7 @@
         "elapsed_ns": 736183073.5,
         "peak_rss_kib": 11612.0
       },
-      "relar_thin": {
+      "imre_thin": {
         "elapsed_ns": 744931224.5,
         "peak_rss_kib": 16172.0
       },
@@ -118,7 +118,7 @@
         "elapsed_ns": 4870733549.0,
         "peak_rss_kib": 43648.0
       },
-      "relar": {
+      "imre": {
         "elapsed_ns": 1220614372.0,
         "peak_rss_kib": 16116.0
       },
@@ -126,7 +126,7 @@
         "elapsed_ns": 945128692.0,
         "peak_rss_kib": 11684.0
       },
-      "relar_thin": {
+      "imre_thin": {
         "elapsed_ns": 918692228.0,
         "peak_rss_kib": 16096.0
       },
@@ -136,7 +136,7 @@
       }
     }
   },
-  "relar_over_rust": {
+  "imre_over_rust": {
     "1x-plain": {
       "ordinary": {
         "elapsed_ns": 1.3930804159436243,
@@ -183,18 +183,18 @@
       "original": 8.317528547053419,
       "port": 1.0429740351781458,
       "codon": 1.0,
-      "relar": 1.0231065468549423,
+      "imre": 1.0231065468549423,
       "rust": 1.0097391304347827,
-      "relar_thin": 1.02250885179565,
+      "imre_thin": 1.02250885179565,
       "rust_thin": 1.0316521739130435
     },
     "gzip": {
       "original": 8.30302931062715,
       "port": 1.0345607641070755,
       "codon": 0.9970760233918129,
-      "relar": 1.0067466266866567,
+      "imre": 1.0067466266866567,
       "rust": 1.0089810017271157,
-      "relar_thin": 1.0067550662997249,
+      "imre_thin": 1.0067550662997249,
       "rust_thin": 1.0086385625431928
     }
   },
@@ -203,18 +203,18 @@
       "original": 9.624126794925344,
       "port": 8.99032224683643,
       "codon": 8.072230533371467,
-      "relar": 6.785279898173306,
+      "imre": 6.785279898173306,
       "rust": 6.758113332806527,
-      "relar_thin": 6.541064018619395,
+      "imre_thin": 6.541064018619395,
       "rust_thin": 6.214905131842506
     },
     "gzip": {
       "original": 10.178428514755776,
       "port": 9.116211311333434,
       "codon": 8.219688882741982,
-      "relar": 7.280676118355439,
+      "imre": 7.280676118355439,
       "rust": 7.434354674577317,
-      "relar_thin": 7.13164855929117,
+      "imre_thin": 7.13164855929117,
       "rust_thin": 7.104873642051941
     }
   }

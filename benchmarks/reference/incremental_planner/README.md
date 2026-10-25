@@ -48,9 +48,9 @@ CARGO_PROFILE_RELEASE_LTO=thin \
 ```
 
 The explicit budget sets LLVM's import and inlining limits to 1,000, matching
-Relar's optional O3 ThinLTO mode. Other `CARGO_PROFILE_RELEASE_*` overrides are
+Imre's optional O3 ThinLTO mode. Other `CARGO_PROFILE_RELEASE_*` overrides are
 recorded; the comparison requires release optimization level 3 and matching
-LTO/budget settings. Build the Relar runtime normally for the ordinary comparison,
+LTO/budget settings. Build the Imre runtime normally for the ordinary comparison,
 or with `RUSTFLAGS=-Clinker-plugin-lto` in a separate target directory for ThinLTO,
 as described in [the subset guide](../../../docs/subset.md).
 
@@ -82,7 +82,7 @@ An ordinary four-engine comparison:
 
 ```sh
 python3 benchmarks/incremental_benchmark.py \
-  --compiler target/release/relar --runtime target/release/librelar_runtime.a \
+  --compiler target/release/imre --runtime target/release/libimre_runtime.a \
   --rust-bigint benchmarks/local/incremental-reference-normal/planner-bigint \
   --rust-i64 benchmarks/local/incremental-reference-normal/planner-i64 \
   --rust-build-record benchmarks/local/incremental-reference-normal/build-record.json \
@@ -94,7 +94,7 @@ python3 benchmarks/incremental_benchmark.py \
 For ThinLTO, select the ThinLTO runtime archive and Rust artifacts/record, add
 `--lto-linker /path/to/ld.lld --target x86_64-unknown-linux-gnu`, and use different
 artifact/output paths. The lexical `ld.lld` name is preserved for linker flavor;
-its resolved file contents are hashed. An optional `--relar-build-record` checks
+its resolved file contents are hashed. An optional `--imre-build-record` checks
 frozen compiler/runtime identities and source hashes. Existing Rust artifacts
 can be reused with their original record and `--rust-source-root`; their Cargo
 and Rust sources must still match this tracked reference exactly.
@@ -107,7 +107,7 @@ SHAPE:SIZE:CHANGES` to select other cases: shapes are `layered`, `wide`, and
 to 20261017, so ordinary and ThinLTO runs generate identical inputs. For example,
 `--workload wide:128:all --samples 4 --warmups 1` is a small harness check.
 
-The harness compiles Relar once at O3, outside workload timing, then validates all
+The harness compiles Imre once at O3, outside workload timing, then validates all
 engines against the oracle. By default each workload has two warmups and 32
 measured rounds. Four Williams orders balance every execution position and every
 directed adjacent pair within a round; cross-round predecessors are not balanced.

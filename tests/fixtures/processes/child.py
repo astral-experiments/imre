@@ -26,7 +26,7 @@ elif mode == "stdin":
     os.write(1, sys.stdin.buffer.read())
 elif mode == "environment":
     print(Path.cwd().name)
-    for key in ["RELAR_PROCESS_PARENT", "RELAR_PROCESS_OVERRIDE", "RELAR_PROCESS_EMPTY", ""]:
+    for key in ["IMRE_PROCESS_PARENT", "IMRE_PROCESS_OVERRIDE", "IMRE_PROCESS_EMPTY", ""]:
         print(key + "=" + repr(os.environ.get(key)))
 elif mode == "status":
     os.write(1, "out:λ\r\n".encode())

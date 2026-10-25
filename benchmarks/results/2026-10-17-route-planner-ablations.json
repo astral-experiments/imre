@@ -6,7 +6,7 @@
       "change": "index inlining alone",
       "record": {
         "schema_version": 1,
-        "comparison": "prebuilt baseline vs optimized Relar vs unchanged CPython",
+        "comparison": "prebuilt baseline vs optimized Imre vs unchanged CPython",
         "started_at_utc": "2026-10-17T15:48:45.642975+00:00",
         "completed_at_utc": "2026-10-17T15:48:53.524930+00:00",
         "git": {
@@ -63,7 +63,7 @@
               "llvm_ir": "d65c178647480bdfc6fd783497171f8b126be157043d6478dac3ee73b0aaab09"
             },
             "tools": {
-              "relar": "relar 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
+              "imre": "imre 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
               "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-18/bin",
               "cpython": {
                 "implementation": "cpython",
@@ -92,7 +92,7 @@
               "returncode": 0
             },
             "compile_command": [
-              "relar",
+              "imre",
               "build",
               "examples/route_planner.py",
               "-o",
@@ -501,7 +501,7 @@
       "change": "borrowed locals and parameters alone",
       "record": {
         "schema_version": 1,
-        "comparison": "prebuilt baseline vs optimized Relar vs unchanged CPython",
+        "comparison": "prebuilt baseline vs optimized Imre vs unchanged CPython",
         "started_at_utc": "2026-10-17T15:50:33.882291+00:00",
         "completed_at_utc": "2026-10-17T15:50:41.114944+00:00",
         "git": {
@@ -558,7 +558,7 @@
               "llvm_ir": "d65c178647480bdfc6fd783497171f8b126be157043d6478dac3ee73b0aaab09"
             },
             "tools": {
-              "relar": "relar 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
+              "imre": "imre 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
               "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-18/bin",
               "cpython": {
                 "implementation": "cpython",
@@ -587,7 +587,7 @@
               "returncode": 0
             },
             "compile_command": [
-              "relar",
+              "imre",
               "build",
               "examples/route_planner.py",
               "-o",
@@ -996,7 +996,7 @@
       "change": "ownership and index inlining",
       "record": {
         "schema_version": 1,
-        "comparison": "prebuilt baseline vs optimized Relar vs unchanged CPython",
+        "comparison": "prebuilt baseline vs optimized Imre vs unchanged CPython",
         "started_at_utc": "2026-10-17T15:50:41.227662+00:00",
         "completed_at_utc": "2026-10-17T15:50:48.325818+00:00",
         "git": {
@@ -1053,7 +1053,7 @@
               "llvm_ir": "d65c178647480bdfc6fd783497171f8b126be157043d6478dac3ee73b0aaab09"
             },
             "tools": {
-              "relar": "relar 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
+              "imre": "imre 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
               "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-18/bin",
               "cpython": {
                 "implementation": "cpython",
@@ -1082,7 +1082,7 @@
               "returncode": 0
             },
             "compile_command": [
-              "relar",
+              "imre",
               "build",
               "examples/route_planner.py",
               "-o",
@@ -1491,7 +1491,7 @@
       "change": "simpler negative-index normalization added",
       "record": {
         "schema_version": 1,
-        "comparison": "prebuilt baseline vs optimized Relar vs unchanged CPython",
+        "comparison": "prebuilt baseline vs optimized Imre vs unchanged CPython",
         "started_at_utc": "2026-10-17T15:55:05.527392+00:00",
         "completed_at_utc": "2026-10-17T15:55:11.644997+00:00",
         "git": {
@@ -1924,7 +1924,7 @@
       "change": "inline small-integer floor division and modulo added",
       "record": {
         "schema_version": 1,
-        "comparison": "prebuilt baseline vs optimized Relar vs unchanged CPython",
+        "comparison": "prebuilt baseline vs optimized Imre vs unchanged CPython",
         "started_at_utc": "2026-10-17T15:55:11.754152+00:00",
         "completed_at_utc": "2026-10-17T15:55:17.828744+00:00",
         "git": {

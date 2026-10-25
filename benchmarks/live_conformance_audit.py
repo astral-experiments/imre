@@ -19,10 +19,10 @@ import stat
 import sys
 
 
-ENGINES = ("relar", "port", "original", "codon", "rust")
+ENGINES = ("imre", "port", "original", "codon", "rust")
 BASES = ("unchanged-github", "changed-github", "changed-diff")
-PAIRS = (("relar", "rust"), ("codon", "rust"), ("original", "relar"),
-         ("port", "relar"), ("codon", "relar"), ("original", "rust"), ("port", "rust"))
+PAIRS = (("imre", "rust"), ("codon", "rust"), ("original", "imre"),
+         ("port", "imre"), ("codon", "imre"), ("original", "rust"), ("port", "rust"))
 EMPTY = hashlib.sha256(b"").hexdigest()
 SENTINEL = b"previous complete report must survive\n"
 
@@ -185,7 +185,7 @@ def provenance(record: dict, evidence: Evidence) -> str:
     assert codon["native_platform"]["sha256"] == platform["library"]["sha256"]
     for commands, suffix in ((record["commands"], ""), (record["compute_commands"], "-compute")):
         assert set(commands) == set(ENGINES)
-        for engine, build in (("relar", program), ("codon", codon)):
+        for engine, build in (("imre", program), ("codon", codon)):
             assert record["inputs"][commands[engine][0]]["sha256"] == build["binaries"]["conformance_report" + suffix]["sha256"]
         assert record["inputs"][commands["rust"][0]]["sha256"] == rust["binary_sha256"]
     for path, item in record["inputs"].items():

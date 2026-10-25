@@ -1,30 +1,32 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Ruff’s diagnostic collector within 2× Rust
 
-Relar compared and sorted Ruff’s 249 diagnostic entries in 268.0 µs with ordinary linking and 215.4 µs with ThinLTO. This is 1.45× and 1.51× the time of the unchanged native Rust collector. The corresponding #95 builds took 829.6 µs and 541.9 µs. All seven implementations matched every title, test-case key and source, in order. [Ruff collector](../../examples/conformance_report/render.py) · [Previous comparison](2026-10-22-entry-sort.md)
+Imre compared and sorted Ruff’s 249 diagnostic entries in 268.0 µs with ordinary linking and 215.4 µs with ThinLTO. This is 1.45× and 1.51× the time of the unchanged native Rust collector. The corresponding #95 builds took 829.6 µs and 541.9 µs. All seven implementations matched every title, test-case key and source, in order. [Ruff collector](../../examples/conformance_report/render.py) · [Previous comparison](2026-10-22-entry-sort.md)
 
 ## Collector
 
 Microseconds per complete collection of 1,269 preloaded groups. The harness times zero and 256 rounds in separate processes. Every round exchanges two cases, executes the application’s collector and consumes every row in order. A full transcript checks exact field values independently of the timed checksum.
 
-| Workload | Link | Upstream CPython | Typed CPython | #93 port | #95 Relar | Relar | Codon | Rust | Relar/Rust |
+| Workload | Link | Upstream CPython | Typed CPython | #93 port | #95 Imre | Imre | Codon | Rust | Imre/Rust |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
 | Collect entries | Ordinary | 2,082.28 | 1,907.24 | 860.37 | 829.58 | 267.96 | 1,601.09 | 185.39 | 1.45× |
 | Collect entries | ThinLTO | 2,115.19 | 1,938.67 | 543.15 | 541.88 | 215.43 | 1,585.26 | 142.70 | 1.51× |
 
-A separate 512-pass run interleaved ordinary Relar, ThinLTO Relar and both corresponding Rust builds on CPU 31. It measured 1.44× and 1.53× Rust across eight balanced rounds.
+A separate 512-pass run interleaved ordinary Imre, ThinLTO Imre and both corresponding Rust builds on CPU 31. It measured 1.44× and 1.53× Rust across eight balanced rounds.
 
 ## Where the allocations went
 
 Ruff compares old and new diagnostics by mapping each diagnostic to a six-field fingerprint tuple, sorting both projected lists, and checking corresponding tuples. Of 1,011 groups with equal nonempty lengths, 972 contained a single diagnostic on each side. Another 37 contained two on each side and two contained three. Eighteen groups with two populated sides exited at the unequal-length check. [Python diagnostic equivalence](../../examples/conformance_report/model.py)
 
-When each input has one element and the mapper only reads stored fields, Relar compares those fields directly. Two empty inputs return the reduction’s empty result. The collector’s generated singleton path executes four string comparisons and two Python-integer comparisons with no record allocation, retain or release calls. Longer inputs take the existing sort and compare path. Direct synchronous calls to statically known map/filter callbacks avoid heap-allocating a callable environment. [Compiler proof](../../crates/relar-compiler/src/frontend/projected_equality.rs) · [Pipeline lowering](../../crates/relar-compiler/src/frontend/pipelines.rs)
+When each input has one element and the mapper only reads stored fields, Imre compares those fields directly. Two empty inputs return the reduction’s empty result. The collector’s generated singleton path executes four string comparisons and two Python-integer comparisons with no record allocation, retain or release calls. Longer inputs take the existing sort and compare path. Direct synchronous calls to statically known map/filter callbacks avoid heap-allocating a callable environment. [Compiler proof](../../crates/imre-compiler/src/frontend/projected_equality.rs) · [Pipeline lowering](../../crates/imre-compiler/src/frontend/pipelines.rs)
 
 Ordinary native builds, subtracting zero rounds from 64 collector rounds under Callgrind and DHAT. Allocation events and bytes count cumulative heap traffic.
 
 | Implementation | Instructions/collection | Allocations/collection | Allocated bytes/collection |
 |---|---:|---:|---:|
-| #95 Relar | 7,313,108 | 10,963 | 388,617 |
-| Relar | 2,124,692 | 1,008 | 55,952 |
+| #95 Imre | 7,313,108 | 10,963 | 388,617 |
+| Imre | 2,124,692 | 1,008 | 55,952 |
 | Rust | 1,665,013 | 2,822 | 224,663 |
 
 The observed diagnostic equivalence call stacks accounted for 10,192 allocations per pass in #95 and 238 after the optimization. The archive contains the allocation counts and byte totals for each observed stack.
@@ -33,7 +35,7 @@ The observed diagnostic equivalence call stacks accounted for 10,192 allocations
 
 Milliseconds per report. Complete starts a fresh process on captures. Repeated subtracts zero-pass startup from four passes. Live discovers the checkout and runs both real ty binaries. Each complete output file matches the vendored Ruff implementation byte-for-byte.
 
-| Workload | Link | Upstream CPython | Typed CPython | #93 port | #95 Relar | Relar | Codon | Rust | Relar/Rust |
+| Workload | Link | Upstream CPython | Typed CPython | #93 port | #95 Imre | Imre | Codon | Rust | Imre/Rust |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
 | Unchanged GitHub · complete | Ordinary | 145.85 | 280.47 | 36.48 | 36.22 | 35.60 | 62.13 | 23.58 | 1.51× |
 | Unchanged GitHub · repeated | Ordinary | 52.11 | 171.76 | 17.73 | 17.21 | 16.64 | 32.14 | 10.47 | 1.59× |

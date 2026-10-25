@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "relar-luhn-reference"
+name = "imre-luhn-reference"
 version = "0.1.0"

@@ -1,4 +1,4 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # Route planner: profiling and native optimization
 
@@ -8,13 +8,13 @@ The optimized compiler runs three routes on 256 × 256 grids in **74.17 ms**, co
 
 These are medians from twelve measured triplets after two warmup triplets. Every invocation starts a fresh process. The six possible execution orders each occur twice per workload, balancing execution position and immediate predecessor. Each process solves three routes, using seeds 42, 43, and 44.
 
-| Grid | CPython, ms | Original Relar, ms | Optimized Relar, ms | Original / optimized | CPython / optimized |
+| Grid | CPython, ms | Original Imre, ms | Optimized Imre, ms | Original / optimized | CPython / optimized |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | 32 × 32 | 22.87 | 5.58 | 4.00 | 1.40× | 5.72× |
 | 128 × 128 | 109.60 | 46.93 | 19.42 | 2.42× | 5.64× |
 | 256 × 256 | 419.76 | 192.89 | 74.17 | 2.60× | 5.66× |
 
-For the largest workload, observed minimum–maximum times were 413.52–446.38 ms for CPython, 189.44–197.00 ms for original Relar, and 73.11–77.39 ms for optimized Relar. These ranges describe observed samples, not confidence intervals. Every optimized sample was faster than every original-native sample for its workload.
+For the largest workload, observed minimum–maximum times were 413.52–446.38 ms for CPython, 189.44–197.00 ms for original Imre, and 73.11–77.39 ms for optimized Imre. These ranges describe observed samples, not confidence intervals. Every optimized sample was faster than every original-native sample for its workload.
 
 The [comparison JSON](2026-10-17-route-planner-comparison.json) retains all 108 measured executions and 18 warmups, their order, outputs, durations, hashes, host information, and build provenance. Both native executables also passed 22 validation inputs covering 64 routes against CPython and an independent Bellman-Ford oracle before timing. The [separate optimized-build record](2026-10-17-route-planner-optimized.json) records AOT compilation and an additional eleven-pair CPython comparison. Its large-workload result was 5.67×; the table above uses the direct three-way comparison throughout.
 
@@ -35,7 +35,7 @@ The original compiler acquired and released a list reference around almost every
 
 The final executable executes **55.53% fewer instructions**. Checked list reads and writes now account for **48.13%** of its instructions; generated heap/Dijkstra control flow and arithmetic account for most of the rest. List-access counts are unchanged. The generic integer fallback remains implemented and tested; this particular workload's integer values fit the tagged representation, so its calls disappear after inlining the small-integer paths.
 
-The [profile JSON](2026-10-17-route-planner-profile.json) includes complete function aggregates, input/output and binary hashes, and links to compressed traces for the original, intermediate, and final executables. Environment-specific source/object path prefixes are normalized to `/relar/`, `/cargo-registry/`, and `/valgrind/`; instruction counts, call records, and symbols are unchanged. Hashes identify both the published traces and the original local captures. Source-location rows are summed by function, excluding inclusive call-cost records, and the resulting function totals equal each trace's instruction total. `relar_list_retain` and `relar_str_retain` share a machine-code address; the profiler labels these list-retain calls with the string-retain symbol. Inlining also changes which generated function contains the route-planner work.
+The [profile JSON](2026-10-17-route-planner-profile.json) includes complete function aggregates, input/output and binary hashes, and links to compressed traces for the original, intermediate, and final executables. Environment-specific source/object path prefixes are normalized to `/imre/`, `/cargo-registry/`, and `/valgrind/`; instruction counts, call records, and symbols are unchanged. Hashes identify both the published traces and the original local captures. Source-location rows are summed by function, excluding inclusive call-cost records, and the resulting function totals equal each trace's instruction total. `imre_list_retain` and `imre_str_retain` share a machine-code address; the profiler labels these list-retain calls with the string-retain symbol. Inlining also changes which generated function contains the route-planner work.
 
 ## Changes and their evidence
 
@@ -63,8 +63,8 @@ The differential suite passed **92 checks at O0/O3** and **62 checks at O1 with 
 
 Memory reclamation remains reference counting. The supported heap graph is acyclic because lists contain integers; a tracing or cycle collector is unnecessary for these types. General recursive containers and user-defined object graphs will require a collection design. This optimization removes redundant ownership operations while retaining the roots needed for safe reclamation.
 
-The measured optimized revision is [`2f8687ab3488445ded4554f44c8a9b1267963b0e`](https://github.com/viarius-experiments/relar/commit/2f8687ab3488445ded4554f44c8a9b1267963b0e), with a clean worktree. The original executable is byte-identical to the one recorded at [`312557ad1cfc94fcff05741f328c2596273a3f2c`](https://github.com/viarius-experiments/relar/commit/312557ad1cfc94fcff05741f328c2596273a3f2c). The first report and its raw data are preserved.
+The measured optimized revision is [`2f8687ab3488445ded4554f44c8a9b1267963b0e`](https://github.com/viarius-experiments/imre/commit/2f8687ab3488445ded4554f44c8a9b1267963b0e), with a clean worktree. The original executable is byte-identical to the one recorded at [`312557ad1cfc94fcff05741f328c2596273a3f2c`](https://github.com/viarius-experiments/imre/commit/312557ad1cfc94fcff05741f328c2596273a3f2c). The first report and its raw data are preserved.
 
-Both implementations ran pinned to CPU 0 on the same AMD EPYC-Milan devbox, x86-64 Linux `6.8.0-146-generic`, outside the tracing sandbox and after local builds finished. CPython 3.14.5 was non-debug, GIL-enabled, with JIT disabled and PGO/LTO configuration reported. Relar used Ruff/ty 0.0.14 and Clang/LLVM 18.1.3 at O3. The Rust compiler/runtime used Ohm `1.98.1-1`, Rust `1.98.1-dev` (`f6270311094cd4b48fefce03debdffcf8396c64c`), and Rust's LLVM 22.1.8 backend, with Ohm's experimental Cargo defaults disabled.
+Both implementations ran pinned to CPU 0 on the same AMD EPYC-Milan devbox, x86-64 Linux `6.8.0-146-generic`, outside the tracing sandbox and after local builds finished. CPython 3.14.5 was non-debug, GIL-enabled, with JIT disabled and PGO/LTO configuration reported. Imre used Ruff/ty 0.0.14 and Clang/LLVM 18.1.3 at O3. The Rust compiler/runtime used Ohm `1.98.1-1`, Rust `1.98.1-dev` (`f6270311094cd4b48fefce03debdffcf8396c64c`), and Rust's LLVM 22.1.8 backend, with Ohm's experimental Cargo defaults disabled.
 
 AOT compilation took **0.464 seconds**, excluding the Rust workspace build. The final executable is **2,381,192 bytes**, and emitted LLVM IR is **45,442 bytes**. The [reproduction instructions](../README.md) describe both comparison and profiling commands. Timings include startup, stdin/stdout pipes, route generation, solving, validation, and process exit. This is a shared host without exclusive CPU ownership or fixed frequencies, and these results apply to this workload and toolchain.

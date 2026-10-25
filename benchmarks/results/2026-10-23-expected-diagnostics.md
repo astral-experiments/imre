@@ -1,24 +1,26 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Ruff’s expected diagnostic collector
 
-Relar compiles all 37 lines of Ruff’s `collect_expected_diagnostics` unchanged. The live reporter discovers paths, collects the annotations before either ty invocation, and renders from those records. The Rust reference also scans once. Frozen replay reads each source and both JSON captures once, then scans the buffered text on each compute round. [Ruff source](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/conformance.py#L469-L505)
+Imre compiles all 37 lines of Ruff’s `collect_expected_diagnostics` unchanged. The live reporter discovers paths, collects the annotations before either ty invocation, and renders from those records. The Rust reference also scans once. Frozen replay reads each source and both JSON captures once, then scans the buffered text on each compute round. [Ruff source](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/conformance.py#L469-L505)
 
 ## Live reporter
 
-Wall times are medians in milliseconds from eight runs per engine after one warmup, with engine order balanced across runs. The changed GitHub report includes the forced summary table. These are ordinary optimized Linux x86-64 builds on an AMD EPYC-Milan host. Relar and Rust both use jemalloc. The comparison uses CPython 3.14.5 and native Codon 0.20.4 with its existing JSON, regex and OS adapters.
+Wall times are medians in milliseconds from eight runs per engine after one warmup, with engine order balanced across runs. The changed GitHub report includes the forced summary table. These are ordinary optimized Linux x86-64 builds on an AMD EPYC-Milan host. Imre and Rust both use jemalloc. The comparison uses CPython 3.14.5 and native Codon 0.20.4 with its existing JSON, regex and OS adapters.
 
-| Workload | Ruff on CPython | Codon | Relar | Rust | Relar / Rust |
+| Workload | Ruff on CPython | Codon | Imre | Rust | Imre / Rust |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | 146 files, two real ty runs | 750.8 | 791.4 | 668.3 | 666.9 | 1.002× |
 | 146 files, replayed ty output | 249.8 | 269.2 | 185.9 | 172.7 | 1.077× |
 | 1,460 files, replayed ty output | 1,615.3 | 2,701.8 | 1,790.3 | 1,643.7 | 1.089× |
 
-The real checkout uses ty 0.0.60 and 0.0.90 on two CPU cores. To measure the same live reporter with analyzer computation removed, the replay launches two child processes that stream the captured JSON. Every engine still discovers and reads the source files, collects expected diagnostics, resolves diagnostic paths, and publishes the report. At 1,460 files, Ruff on CPython completed this replay faster than both native Rust and Relar. All four engines published the same 109,258 bytes at 1× and 1,101,967 bytes at 10×.
+The real checkout uses ty 0.0.60 and 0.0.90 on two CPU cores. To measure the same live reporter with analyzer computation removed, the replay launches two child processes that stream the captured JSON. Every engine still discovers and reads the source files, collects expected diagnostics, resolves diagnostic paths, and publishes the report. At 1,460 files, Ruff on CPython completed this replay faster than both native Rust and Imre. All four engines published the same 109,258 bytes at 1× and 1,101,967 bytes at 10×.
 
 ## Frozen reports
 
-Each fresh process reads the manifest, sources and two captures, then writes a complete report. The 10× fixture contains ten copies of the suite with distinct filenames. Each value is the median of 12 runs following one warmup, in balanced order on one CPU per build configuration. Ordinary ran on CPU 8 and ThinLTO on CPU 9. The previous Relar control is the merged #115 compiler and reporter, linked against the same runtime archive as the new reporter. Native Codon uses the matching build of its platform library.
+Each fresh process reads the manifest, sources and two captures, then writes a complete report. The 10× fixture contains ten copies of the suite with distinct filenames. Each value is the median of 12 runs following one warmup, in balanced order on one CPU per build configuration. Ordinary ran on CPU 8 and ThinLTO on CPU 9. The previous Imre control is the merged #115 compiler and reporter, linked against the same runtime archive as the new reporter. Native Codon uses the matching build of its platform library.
 
-| Build | Files | Report | Ruff on CPython | Typed CPython | Previous Relar | Codon | Relar | Rust | Relar / Rust |
+| Build | Files | Report | Ruff on CPython | Typed CPython | Previous Imre | Codon | Imre | Rust | Imre / Rust |
 | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Ordinary | 146 | changed GitHub | 172.4 | 271.8 | 39.4 | 75.5 | 39.7 | 27.7 | 1.44× |
 | Ordinary | 146 | changed diff | 167.8 | 270.4 | 38.5 | 74.0 | 38.4 | 26.3 | 1.46× |
@@ -43,7 +45,7 @@ Every timed output matched the pinned upstream byte for byte in both builds. Fro
 
 Ordinary builds with the shipped system allocator also passed the 2× target against system-allocator Rust. The table gives medians in milliseconds over eight paired live runs. Each run alternated which engine went first. All output hashes matched the four-engine comparison.
 
-| Live workload | Relar | Rust | Relar / Rust |
+| Live workload | Imre | Rust | Imre / Rust |
 | --- | ---: | ---: | ---: |
 | 146 files, two real ty runs | 660.9 | 649.1 | 1.018× |
 | 146 files, replayed ty output | 191.9 | 172.9 | 1.110× |

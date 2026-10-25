@@ -11,10 +11,10 @@
   },
   "modes": {
     "normal": {
-      "record": "/tmp/relar-memory-timing-normal-final-v1.json",
+      "record": "/tmp/imre-memory-timing-normal-final-v1.json",
       "record_sha256": "dbdbb9b6bc2e5ff9ce7a714c3d78b290d7449d0ca7595d7e2514924915fe7686",
       "control_milliseconds": {
-        "relar": 2.8816505,
+        "imre": 2.8816505,
         "port": 48.008917499999995,
         "original": 74.3927625,
         "rust": 2.694681
@@ -27,22 +27,22 @@
             "project.json": 168
           },
           "median_milliseconds": {
-            "relar": 3.1866925000000004,
+            "imre": 3.1866925000000004,
             "port": 55.0859025,
             "original": 75.9184675,
             "rust": 3.0115670000000003
           },
-          "relar_over_rust": 1.0581509559641211,
-          "original_over_relar": 23.823593741787136,
-          "port_over_relar": 17.286230943211496,
+          "imre_over_rust": 1.0581509559641211,
+          "original_over_imre": 23.823593741787136,
+          "port_over_imre": 17.286230943211496,
           "empty_control_fraction": {
-            "relar": 0.9042762990153583,
+            "imre": 0.9042762990153583,
             "port": 0.8715282008858799,
             "original": 0.9799033746301583,
             "rust": 0.8947770380004828
           },
-          "baseline_relar_milliseconds": 4.110817,
-          "baseline_over_final_relar": 1.2899948771335796
+          "baseline_imre_milliseconds": 4.110817,
+          "baseline_over_final_imre": 1.2899948771335796
         },
         {
           "label": "real-ruff-scripts",
@@ -51,22 +51,22 @@
             "project.json": 254
           },
           "median_milliseconds": {
-            "relar": 3.5344645,
+            "imre": 3.5344645,
             "port": 57.988121500000005,
             "original": 75.41714900000001,
             "rust": 3.3125575
           },
-          "relar_over_rust": 1.0669896296139765,
-          "original_over_relar": 21.337645066176222,
-          "port_over_relar": 16.406480104694786,
+          "imre_over_rust": 1.0669896296139765,
+          "original_over_imre": 21.337645066176222,
+          "port_over_imre": 16.406480104694786,
           "empty_control_fraction": {
-            "relar": 0.8153004507472066,
+            "imre": 0.8153004507472066,
             "port": 0.8279095141924885,
             "original": 0.986417061456407,
             "rust": 0.8134744830844446
           },
-          "baseline_relar_milliseconds": 3.976783,
-          "baseline_over_final_relar": 1.125144417209453
+          "baseline_imre_milliseconds": 3.976783,
+          "baseline_over_final_imre": 1.125144417209453
         },
         {
           "label": "scaled-full-32",
@@ -75,22 +75,22 @@
             "project.json": 8128
           },
           "median_milliseconds": {
-            "relar": 22.6645735,
+            "imre": 22.6645735,
             "port": 347.725917,
             "original": 111.00335550000001,
             "rust": 18.064436
           },
-          "relar_over_rust": 1.2546515983117326,
-          "original_over_relar": 4.897659137508147,
-          "port_over_relar": 15.34226606999686,
+          "imre_over_rust": 1.2546515983117326,
+          "original_over_imre": 4.897659137508147,
+          "port_over_imre": 15.34226606999686,
           "empty_control_fraction": {
-            "relar": 0.1271433808361759,
+            "imre": 0.1271433808361759,
             "port": 0.13806539907694024,
             "original": 0.6701848080619508,
             "rust": 0.14917050274915863
           },
-          "baseline_relar_milliseconds": 24.213564,
-          "baseline_over_final_relar": 1.0683441274551229
+          "baseline_imre_milliseconds": 24.213564,
+          "baseline_over_final_imre": 1.0683441274551229
         },
         {
           "label": "scaled-unchanged-32",
@@ -99,22 +99,22 @@
             "project.json": 8128
           },
           "median_milliseconds": {
-            "relar": 16.775862,
+            "imre": 16.775862,
             "port": 337.1308375,
             "original": 103.3947895,
             "rust": 15.2624585
           },
-          "relar_over_rust": 1.09915856609864,
-          "original_over_relar": 6.163307107557276,
-          "port_over_relar": 20.09618566843242,
+          "imre_over_rust": 1.09915856609864,
+          "original_over_imre": 6.163307107557276,
+          "port_over_imre": 20.09618566843242,
           "empty_control_fraction": {
-            "relar": 0.17177361735569835,
+            "imre": 0.17177361735569835,
             "port": 0.14240440849615246,
             "original": 0.7195020451199816,
             "rust": 0.1765561557464677
           },
-          "baseline_relar_milliseconds": 18.183623500000003,
-          "baseline_over_final_relar": 1.0839158965423061
+          "baseline_imre_milliseconds": 18.183623500000003,
+          "baseline_over_final_imre": 1.0839158965423061
         },
         {
           "label": "scaled-full-256",
@@ -123,22 +123,22 @@
             "project.json": 65024
           },
           "median_milliseconds": {
-            "relar": 179.8990435,
+            "imre": 179.8990435,
             "port": 2507.6374729999998,
             "original": 428.650695,
             "rust": 123.1479795
           },
-          "relar_over_rust": 1.4608363387724115,
-          "original_over_relar": 2.3827291499746077,
-          "port_over_relar": 13.939137330655123,
+          "imre_over_rust": 1.4608363387724115,
+          "original_over_imre": 2.3827291499746077,
+          "port_over_imre": 13.939137330655123,
           "empty_control_fraction": {
-            "relar": 0.01601815353731995,
+            "imre": 0.01601815353731995,
             "port": 0.019145078990451026,
             "original": 0.17355101337232173,
             "rust": 0.021881650116719942
           },
-          "baseline_relar_milliseconds": 199.92924200000002,
-          "baseline_over_final_relar": 1.1113413285046176
+          "baseline_imre_milliseconds": 199.92924200000002,
+          "baseline_over_final_imre": 1.1113413285046176
         },
         {
           "label": "scaled-unchanged-256",
@@ -147,30 +147,30 @@
             "project.json": 65024
           },
           "median_milliseconds": {
-            "relar": 107.3305425,
+            "imre": 107.3305425,
             "port": 2442.4231725,
             "original": 295.0345215,
             "rust": 95.1147245
           },
-          "relar_over_rust": 1.128432459476871,
-          "original_over_relar": 2.748840307967324,
-          "port_over_relar": 22.756087089562598,
+          "imre_over_rust": 1.128432459476871,
+          "original_over_imre": 2.748840307967324,
+          "port_over_imre": 22.756087089562598,
           "empty_control_fraction": {
-            "relar": 0.026848373565241227,
+            "imre": 0.026848373565241227,
             "port": 0.01965626515525536,
             "original": 0.2521493489025487,
             "rust": 0.02833085007779211
           },
-          "baseline_relar_milliseconds": 125.19102500000001,
-          "baseline_over_final_relar": 1.1664063376927403
+          "baseline_imre_milliseconds": 125.19102500000001,
+          "baseline_over_final_imre": 1.1664063376927403
         }
       ]
     },
     "thinlto": {
-      "record": "/tmp/relar-memory-timing-thinlto-final-v1.json",
+      "record": "/tmp/imre-memory-timing-thinlto-final-v1.json",
       "record_sha256": "bfa7d1f8af6e87173e424853610f87ad9cc57991ea2baaa8bf743d576f21823a",
       "control_milliseconds": {
-        "relar": 2.8479170000000003,
+        "imre": 2.8479170000000003,
         "port": 49.0879525,
         "original": 75.142127,
         "rust": 2.7517875000000003
@@ -183,22 +183,22 @@
             "project.json": 168
           },
           "median_milliseconds": {
-            "relar": 3.214029,
+            "imre": 3.214029,
             "port": 56.65515,
             "original": 77.43646300000002,
             "rust": 3.1588315
           },
-          "relar_over_rust": 1.0174740248094907,
-          "original_over_relar": 24.093268293472153,
-          "port_over_relar": 17.627454512700414,
+          "imre_over_rust": 1.0174740248094907,
+          "original_over_imre": 24.093268293472153,
+          "port_over_imre": 17.627454512700414,
           "empty_control_fraction": {
-            "relar": 0.8860893912282684,
+            "imre": 0.8860893912282684,
             "port": 0.8664340752782403,
             "original": 0.9703713740127825,
             "rust": 0.8711409582942301
           },
-          "baseline_relar_milliseconds": 3.0069275,
-          "baseline_over_final_relar": 0.9355632758758555
+          "baseline_imre_milliseconds": 3.0069275,
+          "baseline_over_final_imre": 0.9355632758758555
         },
         {
           "label": "real-ruff-scripts",
@@ -207,22 +207,22 @@
             "project.json": 254
           },
           "median_milliseconds": {
-            "relar": 3.5325015,
+            "imre": 3.5325015,
             "port": 58.483945000000006,
             "original": 77.1292465,
             "rust": 3.2576705
           },
-          "relar_over_rust": 1.0843642719544533,
-          "original_over_relar": 21.834172328023072,
-          "port_over_relar": 16.555957584165217,
+          "imre_over_rust": 1.0843642719544533,
+          "original_over_imre": 21.834172328023072,
+          "port_over_imre": 16.555957584165217,
           "empty_control_fraction": {
-            "relar": 0.8062040454901435,
+            "imre": 0.8062040454901435,
             "port": 0.8393406515241062,
             "original": 0.9742364979541192,
             "rust": 0.8447102001261331
           },
-          "baseline_relar_milliseconds": 4.5393859999999995,
-          "baseline_over_final_relar": 1.2850344154135531
+          "baseline_imre_milliseconds": 4.5393859999999995,
+          "baseline_over_final_imre": 1.2850344154135531
         },
         {
           "label": "scaled-full-32",
@@ -231,22 +231,22 @@
             "project.json": 8128
           },
           "median_milliseconds": {
-            "relar": 21.153772500000002,
+            "imre": 21.153772500000002,
             "port": 345.271993,
             "original": 115.3627505,
             "rust": 17.064544
           },
-          "relar_over_rust": 1.2396330367808246,
-          "original_over_relar": 5.453530830020981,
-          "port_over_relar": 16.322005590255827,
+          "imre_over_rust": 1.2396330367808246,
+          "original_over_imre": 5.453530830020981,
+          "port_over_imre": 16.322005590255827,
           "empty_control_fraction": {
-            "relar": 0.13462927239101205,
+            "imre": 0.13462927239101205,
             "port": 0.14217183407633066,
             "original": 0.6513551963204969,
             "rust": 0.16125760524277707
           },
-          "baseline_relar_milliseconds": 22.8949195,
-          "baseline_over_final_relar": 1.0823090538578874
+          "baseline_imre_milliseconds": 22.8949195,
+          "baseline_over_final_imre": 1.0823090538578874
         },
         {
           "label": "scaled-unchanged-32",
@@ -255,22 +255,22 @@
             "project.json": 8128
           },
           "median_milliseconds": {
-            "relar": 17.339361500000003,
+            "imre": 17.339361500000003,
             "port": 347.572361,
             "original": 104.9095305,
             "rust": 14.5512695
           },
-          "relar_over_rust": 1.1916047256220497,
-          "original_over_relar": 6.050368723208176,
-          "port_over_relar": 20.04528027171012,
+          "imre_over_rust": 1.1916047256220497,
+          "original_over_imre": 6.050368723208176,
+          "port_over_imre": 20.04528027171012,
           "empty_control_fraction": {
-            "relar": 0.16424578263738257,
+            "imre": 0.16424578263738257,
             "port": 0.14123088601973158,
             "original": 0.7162564415441741,
             "rust": 0.18910978866826705
           },
-          "baseline_relar_milliseconds": 17.826613,
-          "baseline_over_final_relar": 1.0281008905662412
+          "baseline_imre_milliseconds": 17.826613,
+          "baseline_over_final_imre": 1.0281008905662412
         },
         {
           "label": "scaled-full-256",
@@ -279,22 +279,22 @@
             "project.json": 65024
           },
           "median_milliseconds": {
-            "relar": 163.695793,
+            "imre": 163.695793,
             "port": 2518.9683525,
             "original": 439.78346849999997,
             "rust": 113.034867
           },
-          "relar_over_rust": 1.4481884868321204,
-          "original_over_relar": 2.686589926596342,
-          "port_over_relar": 15.38810684340556,
+          "imre_over_rust": 1.4481884868321204,
+          "original_over_imre": 2.686589926596342,
+          "port_over_imre": 15.38810684340556,
           "empty_control_fraction": {
-            "relar": 0.017397618764704602,
+            "imre": 0.017397618764704602,
             "port": 0.019487324027426423,
             "original": 0.17086164529169884,
             "rust": 0.02434459006352438
           },
-          "baseline_relar_milliseconds": 195.27608349999997,
-          "baseline_over_final_relar": 1.1929205993705652
+          "baseline_imre_milliseconds": 195.27608349999997,
+          "baseline_over_final_imre": 1.1929205993705652
         },
         {
           "label": "scaled-unchanged-256",
@@ -303,111 +303,111 @@
             "project.json": 65024
           },
           "median_milliseconds": {
-            "relar": 103.43587649999999,
+            "imre": 103.43587649999999,
             "port": 2409.6568155,
             "original": 287.37948950000003,
             "rust": 85.7752785
           },
-          "relar_over_rust": 1.2058937995753636,
-          "original_over_relar": 2.778334744424968,
-          "port_over_relar": 23.2961415036687,
+          "imre_over_rust": 1.2058937995753636,
+          "original_over_imre": 2.778334744424968,
+          "port_over_imre": 23.2961415036687,
           "empty_control_fraction": {
-            "relar": 0.027533164472193554,
+            "imre": 0.027533164472193554,
             "port": 0.020371345904630127,
             "original": 0.26147352106003374,
             "rust": 0.032081358966383304
           },
-          "baseline_relar_milliseconds": 118.14820100000001,
-          "baseline_over_final_relar": 1.1422361853336256
+          "baseline_imre_milliseconds": 118.14820100000001,
+          "baseline_over_final_imre": 1.1422361853336256
         }
       ]
     }
   },
   "target": {
-    "limit_relar_over_rust": 2,
+    "limit_imre_over_rust": 2,
     "cases": [
       {
         "mode": "normal",
         "label": "scaled-full-256",
-        "relar_over_rust": 1.4608363387724115
+        "imre_over_rust": 1.4608363387724115
       },
       {
         "mode": "normal",
         "label": "scaled-unchanged-256",
-        "relar_over_rust": 1.128432459476871
+        "imre_over_rust": 1.128432459476871
       },
       {
         "mode": "thinlto",
         "label": "scaled-full-256",
-        "relar_over_rust": 1.4481884868321204
+        "imre_over_rust": 1.4481884868321204
       },
       {
         "mode": "thinlto",
         "label": "scaled-unchanged-256",
-        "relar_over_rust": 1.2058937995753636
+        "imre_over_rust": 1.2058937995753636
       }
     ],
     "passed": true
   },
   "guarded_inputs": {
-    "/tmp/relar-memory-final-audit.py": "277dcdcd2a437ee2b3970bbb4f6fb166792a680d9959f9ae289bfef59fb73b7e",
-    "/tmp/relar-memory-timing-normal-final-v1.json": "dbdbb9b6bc2e5ff9ce7a714c3d78b290d7449d0ca7595d7e2514924915fe7686",
-    "/tmp/relar-memory-build-optimized/relar": "a2302f086b8374f342afe1a53db2bde2e8fd44c2638319814ace91e36692300e",
+    "/tmp/imre-memory-final-audit.py": "277dcdcd2a437ee2b3970bbb4f6fb166792a680d9959f9ae289bfef59fb73b7e",
+    "/tmp/imre-memory-timing-normal-final-v1.json": "dbdbb9b6bc2e5ff9ce7a714c3d78b290d7449d0ca7595d7e2514924915fe7686",
+    "/tmp/imre-memory-build-optimized/imre": "a2302f086b8374f342afe1a53db2bde2e8fd44c2638319814ace91e36692300e",
     "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
     "/usr/lib/llvm-18/bin/clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
-    "/tmp/relar-memory-reference-normal-v3/memory-report-reference": "69f320073186d5d7ffb3f8926d6c4679dd9a926bbff4529c3d7594d6465c677c",
-    "/tmp/relar-memory-build-optimized/normal_runtime.a": "83c388195cbff47429c3e6a16771b561145f3aab041cd631579d64964b53e744",
-    "/tmp/relar-memory-reference-normal-v3/build-record.json": "e323f496bfa0425bd910ac7acdce95fd7e50afef030d7a4080f72752ce6aaf90",
-    "/home/dev-user/code/oss/relar/benchmarks/memory_benchmark.py": "081b893c5ca094b0f2f6f24ede16deb2fae0a6311d797119e23acf4acb3315fc",
-    "/home/dev-user/code/oss/relar/benchmarks/memory_validate.py": "f6d8231487a06ba8bd8bc998edd1fdcd07f40d139f5e5945162e492a98bf1a04",
-    "/home/dev-user/code/oss/relar/benchmarks/benchmark.py": "feb47f652cac3221b11faf49760771c2ae124fec861e9ad29e66995988941343",
-    "/home/dev-user/code/oss/relar/benchmarks/telemetry_benchmark.py": "f6cddddba10646a5d4d6ae5d22b442164511b84b0c48116eecf6c6e7e2c65b7f",
-    "/home/dev-user/code/oss/relar/benchmarks/telemetry_validate.py": "1f6970287034de04aa9a3d8f594e5bd411e65ce631f417533d5494c61c1dde5d",
-    "/home/dev-user/code/oss/relar/benchmarks/validate.py": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
-    "/home/dev-user/code/oss/relar/benchmarks/manifest_validate.py": "1337f29e3b9bd1252c01bdee439841b5dee284d3ba4e8bb00fc11d861762dd5c",
-    "/home/dev-user/code/oss/relar/benchmarks/batch_validate.py": "bee3fc5aa4c8f8a42d91179745892ff7c1e4e1d2cb3bd9c7880f2cfb217a6f22",
-    "/home/dev-user/code/oss/relar/benchmarks/incremental_validate.py": "987720fae809d912b663c3ce2e4a46941a70eed40434f4c43abd9fa473b6fbc8",
-    "/home/dev-user/code/oss/relar/examples/memory_report/render.py": "4f72189e3581cea9295d2bd98b4fcbadf56fce78c5f1f0c0fb49694c983751eb",
-    "/home/dev-user/code/oss/relar/examples/memory_report/load.py": "0d8d8de5f1c3a2fab18c618cfb805c6da19a5151111799a518dc9887deb9f70a",
-    "/home/dev-user/code/oss/relar/examples/memory_report/__main__.py": "268efd43a0b2526b9d29d3f760dcf53aeb687efa12ac11f8b16eee67fcb0968c",
-    "/home/dev-user/code/oss/relar/examples/memory_report/model.py": "a8617cde24326d3e041f0754fb8db8a6625d5f0ce752035757525a29e0d44fb1",
-    "/home/dev-user/code/oss/relar/examples/memory_report/__init__.py": "d72a6e29ef2c32911a3750bcce1476e4624abf95011cd7f577788fe85cdfebba",
-    "/home/dev-user/code/oss/relar/examples/memory_report/compare.py": "5e05439cb12d45be47c3df24bed0daebe597b70979b74ab1511aa6bebd27d7ef",
-    "/home/dev-user/code/oss/relar/examples/memory_report/upstream/memory_report.py": "102cd577ea1409bb567ca3ea9a8863ca74878f0eaecdc8d92af71de61d8ed5f7",
-    "/home/dev-user/code/oss/relar/stdlib/relar/__init__.py": "17f31217adfe9f230bad1560745950f0e63dd3d6ffab43c34a3578a6c39c5275",
-    "/home/dev-user/code/oss/relar/stdlib/relar/json.py": "9443a59c6445b054e5a33907c824ff9e28c7c353a140642eed23d8b36c191ad8",
-    "/home/dev-user/code/oss/relar/examples/memory_report/sample/ruff-scripts.json": "6f3b1e97cfb8a3d862ca4f52e6ec2bc91e454a7241aff15db788246ce089c6b1",
-    "/home/dev-user/code/oss/relar/examples/memory_report/sample/inventory-old.stderr": "4a3a96ec5d635ef8ec0ce73ead5d7122e9e943d59057029fdf1a77fb590f0d42",
-    "/home/dev-user/code/oss/relar/examples/memory_report/sample/inventory.json": "2c9296fb6baecd89df20ef9cb0e164f6f7562d77666f0ac001e7eb37e07f0043",
-    "/home/dev-user/code/oss/relar/examples/memory_report/sample/ruff-scripts-old.stderr": "81ce7eb514af0b283953ffdf0612b85ccad9b7862cf659ea0f0fb3c954136c0b",
-    "/home/dev-user/code/oss/relar/examples/memory_report/sample/provenance.json": "10b2fafdbe29693d6b57ad4cba3fe5f6069589399665deb87c12f918ca6b4f0d",
-    "/home/dev-user/code/oss/relar/examples/memory_report/sample/ruff-scripts-old.json": "30dbdf19729cfa8bca64d7e4cba2020ad43d87c17b47968b3cbca31208c50882",
-    "/home/dev-user/code/oss/relar/examples/memory_report/sample/inventory-new.stderr": "5909e9f64159d113a4904833b6285de45b79146207578de3fc707614cf363cc3",
-    "/home/dev-user/code/oss/relar/examples/memory_report/sample/inventory-old.json": "acd9b7a4a66899573f0535c79266ab604e8ce8bf332332dd383d1fab9e96fb75",
-    "/home/dev-user/code/oss/relar/examples/memory_report/sample/ruff-scripts-new.stderr": "963853f0cd2c37999f9e4e945100a33500154febe24948ed1996ccbf9981a0b2",
-    "/home/dev-user/code/oss/relar/examples/memory_report/upstream/LICENSE": "2597d854122b77ddc71971564ca2350a37608575ce324adc5650a2b2051c8f18",
-    "/home/dev-user/code/oss/relar/examples/memory_report/upstream/UPSTREAM.json": "ea1e538c6b8decc56309829f0bc1b4c627bcd438e2a04ccdd4a5b04728487832",
-    "/home/dev-user/code/oss/relar/benchmarks/reference/memory_report/Cargo.toml": "1036bc4bea773d031b509ac2f3894c78d0a39ed950b50684cb06bdf9bccd84d6",
-    "/home/dev-user/code/oss/relar/benchmarks/reference/memory_report/Cargo.lock": "1ebacc64378a590ddd93b35a4a8eecf9e6a3615b25e56e8889eddc65f3528bda",
-    "/home/dev-user/code/oss/relar/benchmarks/reference/memory_report/build.py": "f44ddd5ea5d101e8f6987ad0e10408b72d89bbd12b09d3d2b333358cef6ddf33",
-    "/home/dev-user/code/oss/relar/benchmarks/reference/memory_report/src/main.rs": "77621202fb73cfc3e759e2f49912aa65fb6a69d370ce97a938d886b96f1192bf",
-    "/tmp/relar-memory-build-optimized/build-record.json": "f836c34cd8146bb3150b300d81218ee385d8ff952cac471a371628aaadc54408",
-    "/tmp/relar-memory-prepared-normal-final-v1/memory-report": "2a11729ee6ef0a8bc96ea1b3910015d72f58f6d02521b435f2ca8870af4a6496",
-    "/tmp/relar-memory-prepared-normal-final-v1/memory-report.ll": "754a5ea37ba39e6157350ed41de91fb542c32b1e9d61a27b6ef0e24dc5f2fcb8",
-    "/tmp/relar-memory-prepared-normal-final-v1/validation.json": "a8404f534d4face9fd755be0a38062759787fe6ed3753cb9922c5240a0467538",
-    "/tmp/relar-memory-prepared-normal-final-v1.json": "91c1e8ee293e1300cce69f9817e1a8bae69f151441c8f20971fc5a737d701ec1",
-    "/tmp/relar-memory-timing-normal-v2.json": "d1fffd17767d83638254c2c88cd142a5d37d3cab18a2c2c74211e78dd30c64ad",
-    "/tmp/relar-memory-timing-normal-final-v1-status.json": "8621673b287ab4f60e1ee66a8ac61167e9c4248d0bd4cf4f075b063f5363db71",
-    "/tmp/relar-memory-timing-thinlto-final-v1.json": "bfa7d1f8af6e87173e424853610f87ad9cc57991ea2baaa8bf743d576f21823a",
-    "/tmp/relar-memory-reference-thinlto-v3/memory-report-reference": "2deae108ff829f5572deb06a9e167f80910f9a658eb6a28bc71fbfd2422fe30c",
-    "/tmp/relar-memory-build-optimized/thinlto_runtime.a": "8fff7c90cc8b7e4acc41711e735afa9e9d85130c425b3d65b3cd6f84887d8343",
-    "/tmp/relar-memory-reference-thinlto-v3/build-record.json": "52cd80be6bb58abc0853b08d653430b88aa4950b1b8f21e9e1f7380a07acda00",
+    "/tmp/imre-memory-reference-normal-v3/memory-report-reference": "69f320073186d5d7ffb3f8926d6c4679dd9a926bbff4529c3d7594d6465c677c",
+    "/tmp/imre-memory-build-optimized/normal_runtime.a": "83c388195cbff47429c3e6a16771b561145f3aab041cd631579d64964b53e744",
+    "/tmp/imre-memory-reference-normal-v3/build-record.json": "e323f496bfa0425bd910ac7acdce95fd7e50afef030d7a4080f72752ce6aaf90",
+    "/home/dev-user/code/oss/imre/benchmarks/memory_benchmark.py": "081b893c5ca094b0f2f6f24ede16deb2fae0a6311d797119e23acf4acb3315fc",
+    "/home/dev-user/code/oss/imre/benchmarks/memory_validate.py": "f6d8231487a06ba8bd8bc998edd1fdcd07f40d139f5e5945162e492a98bf1a04",
+    "/home/dev-user/code/oss/imre/benchmarks/benchmark.py": "feb47f652cac3221b11faf49760771c2ae124fec861e9ad29e66995988941343",
+    "/home/dev-user/code/oss/imre/benchmarks/telemetry_benchmark.py": "f6cddddba10646a5d4d6ae5d22b442164511b84b0c48116eecf6c6e7e2c65b7f",
+    "/home/dev-user/code/oss/imre/benchmarks/telemetry_validate.py": "1f6970287034de04aa9a3d8f594e5bd411e65ce631f417533d5494c61c1dde5d",
+    "/home/dev-user/code/oss/imre/benchmarks/validate.py": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+    "/home/dev-user/code/oss/imre/benchmarks/manifest_validate.py": "1337f29e3b9bd1252c01bdee439841b5dee284d3ba4e8bb00fc11d861762dd5c",
+    "/home/dev-user/code/oss/imre/benchmarks/batch_validate.py": "bee3fc5aa4c8f8a42d91179745892ff7c1e4e1d2cb3bd9c7880f2cfb217a6f22",
+    "/home/dev-user/code/oss/imre/benchmarks/incremental_validate.py": "987720fae809d912b663c3ce2e4a46941a70eed40434f4c43abd9fa473b6fbc8",
+    "/home/dev-user/code/oss/imre/examples/memory_report/render.py": "4f72189e3581cea9295d2bd98b4fcbadf56fce78c5f1f0c0fb49694c983751eb",
+    "/home/dev-user/code/oss/imre/examples/memory_report/load.py": "0d8d8de5f1c3a2fab18c618cfb805c6da19a5151111799a518dc9887deb9f70a",
+    "/home/dev-user/code/oss/imre/examples/memory_report/__main__.py": "268efd43a0b2526b9d29d3f760dcf53aeb687efa12ac11f8b16eee67fcb0968c",
+    "/home/dev-user/code/oss/imre/examples/memory_report/model.py": "a8617cde24326d3e041f0754fb8db8a6625d5f0ce752035757525a29e0d44fb1",
+    "/home/dev-user/code/oss/imre/examples/memory_report/__init__.py": "d72a6e29ef2c32911a3750bcce1476e4624abf95011cd7f577788fe85cdfebba",
+    "/home/dev-user/code/oss/imre/examples/memory_report/compare.py": "5e05439cb12d45be47c3df24bed0daebe597b70979b74ab1511aa6bebd27d7ef",
+    "/home/dev-user/code/oss/imre/examples/memory_report/upstream/memory_report.py": "102cd577ea1409bb567ca3ea9a8863ca74878f0eaecdc8d92af71de61d8ed5f7",
+    "/home/dev-user/code/oss/imre/stdlib/imre/__init__.py": "17f31217adfe9f230bad1560745950f0e63dd3d6ffab43c34a3578a6c39c5275",
+    "/home/dev-user/code/oss/imre/stdlib/imre/json.py": "9443a59c6445b054e5a33907c824ff9e28c7c353a140642eed23d8b36c191ad8",
+    "/home/dev-user/code/oss/imre/examples/memory_report/sample/ruff-scripts.json": "6f3b1e97cfb8a3d862ca4f52e6ec2bc91e454a7241aff15db788246ce089c6b1",
+    "/home/dev-user/code/oss/imre/examples/memory_report/sample/inventory-old.stderr": "4a3a96ec5d635ef8ec0ce73ead5d7122e9e943d59057029fdf1a77fb590f0d42",
+    "/home/dev-user/code/oss/imre/examples/memory_report/sample/inventory.json": "2c9296fb6baecd89df20ef9cb0e164f6f7562d77666f0ac001e7eb37e07f0043",
+    "/home/dev-user/code/oss/imre/examples/memory_report/sample/ruff-scripts-old.stderr": "81ce7eb514af0b283953ffdf0612b85ccad9b7862cf659ea0f0fb3c954136c0b",
+    "/home/dev-user/code/oss/imre/examples/memory_report/sample/provenance.json": "10b2fafdbe29693d6b57ad4cba3fe5f6069589399665deb87c12f918ca6b4f0d",
+    "/home/dev-user/code/oss/imre/examples/memory_report/sample/ruff-scripts-old.json": "30dbdf19729cfa8bca64d7e4cba2020ad43d87c17b47968b3cbca31208c50882",
+    "/home/dev-user/code/oss/imre/examples/memory_report/sample/inventory-new.stderr": "5909e9f64159d113a4904833b6285de45b79146207578de3fc707614cf363cc3",
+    "/home/dev-user/code/oss/imre/examples/memory_report/sample/inventory-old.json": "acd9b7a4a66899573f0535c79266ab604e8ce8bf332332dd383d1fab9e96fb75",
+    "/home/dev-user/code/oss/imre/examples/memory_report/sample/ruff-scripts-new.stderr": "963853f0cd2c37999f9e4e945100a33500154febe24948ed1996ccbf9981a0b2",
+    "/home/dev-user/code/oss/imre/examples/memory_report/upstream/LICENSE": "2597d854122b77ddc71971564ca2350a37608575ce324adc5650a2b2051c8f18",
+    "/home/dev-user/code/oss/imre/examples/memory_report/upstream/UPSTREAM.json": "ea1e538c6b8decc56309829f0bc1b4c627bcd438e2a04ccdd4a5b04728487832",
+    "/home/dev-user/code/oss/imre/benchmarks/reference/memory_report/Cargo.toml": "1036bc4bea773d031b509ac2f3894c78d0a39ed950b50684cb06bdf9bccd84d6",
+    "/home/dev-user/code/oss/imre/benchmarks/reference/memory_report/Cargo.lock": "1ebacc64378a590ddd93b35a4a8eecf9e6a3615b25e56e8889eddc65f3528bda",
+    "/home/dev-user/code/oss/imre/benchmarks/reference/memory_report/build.py": "f44ddd5ea5d101e8f6987ad0e10408b72d89bbd12b09d3d2b333358cef6ddf33",
+    "/home/dev-user/code/oss/imre/benchmarks/reference/memory_report/src/main.rs": "77621202fb73cfc3e759e2f49912aa65fb6a69d370ce97a938d886b96f1192bf",
+    "/tmp/imre-memory-build-optimized/build-record.json": "f836c34cd8146bb3150b300d81218ee385d8ff952cac471a371628aaadc54408",
+    "/tmp/imre-memory-prepared-normal-final-v1/memory-report": "2a11729ee6ef0a8bc96ea1b3910015d72f58f6d02521b435f2ca8870af4a6496",
+    "/tmp/imre-memory-prepared-normal-final-v1/memory-report.ll": "754a5ea37ba39e6157350ed41de91fb542c32b1e9d61a27b6ef0e24dc5f2fcb8",
+    "/tmp/imre-memory-prepared-normal-final-v1/validation.json": "a8404f534d4face9fd755be0a38062759787fe6ed3753cb9922c5240a0467538",
+    "/tmp/imre-memory-prepared-normal-final-v1.json": "91c1e8ee293e1300cce69f9817e1a8bae69f151441c8f20971fc5a737d701ec1",
+    "/tmp/imre-memory-timing-normal-v2.json": "d1fffd17767d83638254c2c88cd142a5d37d3cab18a2c2c74211e78dd30c64ad",
+    "/tmp/imre-memory-timing-normal-final-v1-status.json": "8621673b287ab4f60e1ee66a8ac61167e9c4248d0bd4cf4f075b063f5363db71",
+    "/tmp/imre-memory-timing-thinlto-final-v1.json": "bfa7d1f8af6e87173e424853610f87ad9cc57991ea2baaa8bf743d576f21823a",
+    "/tmp/imre-memory-reference-thinlto-v3/memory-report-reference": "2deae108ff829f5572deb06a9e167f80910f9a658eb6a28bc71fbfd2422fe30c",
+    "/tmp/imre-memory-build-optimized/thinlto_runtime.a": "8fff7c90cc8b7e4acc41711e735afa9e9d85130c425b3d65b3cd6f84887d8343",
+    "/tmp/imre-memory-reference-thinlto-v3/build-record.json": "52cd80be6bb58abc0853b08d653430b88aa4950b1b8f21e9e1f7380a07acda00",
     "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld": "bf1b9bc68d0f70523a95618cb9be2e4d04698564229838cfe29eb913bba7ce67",
-    "/tmp/relar-memory-prepared-thinlto-final-v1/memory-report": "6cb51c65359537969cfc9b72ab924ee7aefa6a6a67244f25bf555b046deb3c8c",
-    "/tmp/relar-memory-prepared-thinlto-final-v1/memory-report.ll": "754a5ea37ba39e6157350ed41de91fb542c32b1e9d61a27b6ef0e24dc5f2fcb8",
-    "/tmp/relar-memory-prepared-thinlto-final-v1/validation.json": "a8404f534d4face9fd755be0a38062759787fe6ed3753cb9922c5240a0467538",
-    "/tmp/relar-memory-prepared-thinlto-final-v1.json": "2c66ab7efa911e46fd844b0e64c3aa234dd04528a84e5a5ec623425d8b966f94",
-    "/tmp/relar-memory-timing-thinlto-v2.json": "b0a18d19c2e49466c155023fb69ab4bd6622140574ec3b879cd1bf95c4d7638d",
-    "/tmp/relar-memory-timing-thinlto-final-v1-status.json": "2e24c6e8ac6edb213377b48943729b0311d7e6bb2327d1968305c032fb054ce9"
+    "/tmp/imre-memory-prepared-thinlto-final-v1/memory-report": "6cb51c65359537969cfc9b72ab924ee7aefa6a6a67244f25bf555b046deb3c8c",
+    "/tmp/imre-memory-prepared-thinlto-final-v1/memory-report.ll": "754a5ea37ba39e6157350ed41de91fb542c32b1e9d61a27b6ef0e24dc5f2fcb8",
+    "/tmp/imre-memory-prepared-thinlto-final-v1/validation.json": "a8404f534d4face9fd755be0a38062759787fe6ed3753cb9922c5240a0467538",
+    "/tmp/imre-memory-prepared-thinlto-final-v1.json": "2c66ab7efa911e46fd844b0e64c3aa234dd04528a84e5a5ec623425d8b966f94",
+    "/tmp/imre-memory-timing-thinlto-v2.json": "b0a18d19c2e49466c155023fb69ab4bd6622140574ec3b879cd1bf95c4d7638d",
+    "/tmp/imre-memory-timing-thinlto-final-v1-status.json": "2e24c6e8ac6edb213377b48943729b0311d7e6bb2327d1968305c032fb054ce9"
   }
 }

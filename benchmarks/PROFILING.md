@@ -24,7 +24,7 @@ recorded; a newly optimized executable can intentionally differ from those
 earlier artifacts. Every executable is hashed before and after profiling.
 
 The driver requires Linux, Python 3.10 or newer, and Valgrind with Callgrind and
-DHAT. It discovers `valgrind` on `PATH`, then checks the local Relar tool cache.
+DHAT. It discovers `valgrind` on `PATH`, then checks the local Imre tool cache.
 For an extracted package, pass both locations explicitly:
 
 ```sh

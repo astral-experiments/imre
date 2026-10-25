@@ -1,3 +1,5 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Three telemetry error reductions in one traversal
 
 Compiling the unchanged telemetry application with automatic fusion produced **1.49× and 1.47× speedups** over main `f246f53` for 2,048 reports over the same 4,096 aligned sample pairs. At 96 reports the speedups were 1.07× and 1.07×. One of the two one-report intervals includes 1. The 2,048-report hand/automatic ratios were 0.973 and 0.961. The prespecified ±5% margin held on CPU 12. On CPU 20 the interval reached 0.944.

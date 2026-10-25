@@ -38,10 +38,10 @@ def profile(args: argparse.Namespace) -> None:
     tool_root = build_path.parent
     inputs = {
         "comparison": record_path,
-        "relar_build_record": build_path,
-        "compiler": tool_root / "relar",
+        "imre_build_record": build_path,
+        "compiler": tool_root / "imre",
         "runtime": tool_root
-        / ("librelar_runtime_lto.a" if thin_lto else "librelar_runtime.a"),
+        / ("libimre_runtime_lto.a" if thin_lto else "libimre_runtime.a"),
         "clang": Path(shared.executable(args.clang)),
         "harness": Path(__file__).resolve(),
         "comparison_harness": HERE / "layout_benchmark.py",
@@ -50,7 +50,7 @@ def profile(args: argparse.Namespace) -> None:
     if thin_lto:
         inputs["lto_linker"] = args.lto_linker.absolute()
     hashes = {name: shared.sha256(path) for name, path in inputs.items()}
-    for name in ("relar_build_record", "compiler", "runtime", "clang", "lto_linker"):
+    for name in ("imre_build_record", "compiler", "runtime", "clang", "lto_linker"):
         if name in inputs and hashes[name] != record["sha256"].get(name):
             raise ValueError(f"profile {name} differs from the comparison")
     baseline = layout.load_baseline(args.baseline_record, thin_lto, inputs, hashes)
@@ -85,7 +85,7 @@ def profile(args: argparse.Namespace) -> None:
         "comparison_options": record["options"],
         "comparison_tools": record["tools"],
         "baseline_index_sha256": hashes["baseline_index"],
-        "relar_build": layout.build_provenance(build),
+        "imre_build": layout.build_provenance(build),
         "baseline_build": layout.build_provenance(baseline["tool_record"]),
         "rust_build": {
             key: value
@@ -190,7 +190,7 @@ def profile(args: argparse.Namespace) -> None:
                 [case for case in workloads if case["tasks"] == size],
                 {
                     "baseline": baseline["binaries"]["incremental"],
-                    "relar": inputs["incremental_binary"],
+                    "imre": inputs["incremental_binary"],
                     "rust_bigint": baseline["references"]["incremental"],
                 },
                 args.tools,
@@ -212,13 +212,13 @@ def profile(args: argparse.Namespace) -> None:
         artifacts = output / "probe-tools"
         artifacts.mkdir()
         binaries, compilation = {}, {}
-        mode_runtime = "librelar_runtime_lto.a" if thin_lto else "librelar_runtime.a"
+        mode_runtime = "libimre_runtime_lto.a" if thin_lto else "libimre_runtime.a"
         flags = ["--target", record["options"]["target"]]
         if thin_lto:
             flags += ["--lto-linker", str(inputs["lto_linker"])]
         for engine, compiler, runtime in (
-            ("baseline", inputs["baseline:relar"], inputs["baseline:" + mode_runtime]),
-            ("relar", inputs["compiler"], inputs["runtime"]),
+            ("baseline", inputs["baseline:imre"], inputs["baseline:" + mode_runtime]),
+            ("imre", inputs["compiler"], inputs["runtime"]),
         ):
             binary, llvm = artifacts / engine, artifacts / (engine + ".ll")
             command = [

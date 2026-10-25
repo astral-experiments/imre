@@ -1,8 +1,8 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # File-based first-party AOT programs
 
-Relar now supports a complete file-driven command-line application: the [manifest dependency planner](../../examples/manifest_planner/README.md) reads UTF-8 request files, recovers from malformed or missing inputs, and writes a complete report. On the large workloads, matched ThinLTO takes **139.94–140.46 ms** for layered graphs and **77.60–79.01 ms** for wide graphs. That is **1.86–3.27× faster than CPython**, while taking **1.72–1.79× Rust BigInt's time**. Rust remains faster.
+Imre now supports a complete file-driven command-line application: the [manifest dependency planner](../../examples/manifest_planner/README.md) reads UTF-8 request files, recovers from malformed or missing inputs, and writes a complete report. On the large workloads, matched ThinLTO takes **139.94–140.46 ms** for layered graphs and **77.60–79.01 ms** for wide graphs. That is **1.86–3.27× faster than CPython**, while taking **1.72–1.79× Rust BigInt's time**. Rust remains faster.
 
 The five unchanged incremental workloads move by less than 1% versus the preserved [exception-optimized compiler](2026-10-18-exception-performance.md) in both linking modes. Their observed interquartile ranges overlap. This supports a small impact on these workloads; it is not a universal zero-overhead claim.
 
@@ -30,11 +30,11 @@ All 1,980 measured executions and 132 warmups passed full output and filesystem 
 
 ## File-workload results
 
-Times are milliseconds. `CPython/Relar` is a speed ratio; `Relar/Rust` is an elapsed-time ratio, so values above one mean Rust is faster.
+Times are milliseconds. `CPython/Imre` is a speed ratio; `Imre/Rust` is an elapsed-time ratio, so values above one mean Rust is faster.
 
 ### Ordinary linking
 
-| Input | CPython | Relar [Q1–Q3] | Rust BigInt | CPython/Relar | Relar/Rust |
+| Input | CPython | Imre [Q1–Q3] | Rust BigInt | CPython/Imre | Imre/Rust |
 |---|---:|---:|---:|---:|---:|
 | layered-16384-all-valid | 263.67 | 163.38 [161.91–166.51] | 89.67 | 1.61× | 1.82× |
 | layered-16384-all-mixed | 262.12 | 163.01 [161.31–165.36] | 89.33 | 1.61× | 1.82× |
@@ -45,7 +45,7 @@ Times are milliseconds. `CPython/Relar` is a speed ratio; `Relar/Rust` is an ela
 
 ### ThinLTO
 
-| Input | CPython | Relar [Q1–Q3] | Rust BigInt | CPython/Relar | Relar/Rust |
+| Input | CPython | Imre [Q1–Q3] | Rust BigInt | CPython/Imre | Imre/Rust |
 |---|---:|---:|---:|---:|---:|
 | layered-16384-all-valid | 260.59 | 139.94 [138.48–140.94] | 81.21 | 1.86× | 1.72× |
 | layered-16384-all-mixed | 260.71 | 140.46 [138.92–143.21] | 81.48 | 1.86× | 1.72× |
@@ -54,7 +54,7 @@ Times are milliseconds. `CPython/Relar` is a speed ratio; `Relar/Rust` is an ela
 | boundary-128-all-valid | 29.24 | 3.27 [3.14–4.37] | 2.73 | 8.95× | 1.20× |
 | boundary-128-all-mixed | 29.67 | 4.48 [3.39–4.58] | 2.92 | 6.63× | 1.53× |
 
-Relar's large mixed and valid medians differ by less than 2%. Their differences do not isolate the cost of an exception or file operation. This milestone adds functionality; it does not establish Rust parity or identify the remaining performance gap's cause. No C comparison was performed.
+Imre's large mixed and valid medians differ by less than 2%. Their differences do not isolate the cost of an exception or file operation. This milestone adds functionality; it does not establish Rust parity or identify the remaining performance gap's cause. No C comparison was performed.
 
 ## Unchanged-program controls
 
@@ -62,7 +62,7 @@ These use the exact five captured inputs and unchanged incremental Python source
 
 ### Ordinary linking
 
-| Input | CPython | Preserved Relar | New Relar [Q1–Q3] | Change |
+| Input | CPython | Preserved Imre | New Imre [Q1–Q3] | Change |
 |---|---:|---:|---:|---:|
 | layered-16384-sparse | 113.88 | 58.70 | 59.26 [58.89–60.33] | +0.94% |
 | layered-16384-all | 192.24 | 87.63 | 87.67 [86.94–88.88] | +0.04% |
@@ -72,7 +72,7 @@ These use the exact five captured inputs and unchanged incremental Python source
 
 ### ThinLTO
 
-| Input | CPython | Preserved Relar | New Relar [Q1–Q3] | Change |
+| Input | CPython | Preserved Imre | New Imre [Q1–Q3] | Change |
 |---|---:|---:|---:|---:|
 | layered-16384-sparse | 113.83 | 51.83 | 52.31 [51.87–53.46] | +0.93% |
 | layered-16384-all | 192.31 | 76.83 | 76.96 [76.56–77.37] | +0.17% |
@@ -84,11 +84,11 @@ The median changes range from −0.684% to +0.943% ordinary and −0.576% to +0.
 
 ## Validation, toolchain, and limits
 
-The independent manifest oracle checks all file bytes and directory entries across 196 cases, including Unicode/newlines, parser and graph errors, invalid UTF-8, missing/directory/NUL paths, repeated recovery, output aliases, hard links, and terminal failures. It covers 199 completed parses, 92 recovered invalid requests, and nine terminal cases. A separate Linux `/dev/full` case verifies that report-write errors remain terminal and preserve inputs. CPython, ordinary Relar/Rust, and ThinLTO Relar/Rust all pass. Each control engine also passes the existing 155 graph cases and 17 parser cases.
+The independent manifest oracle checks all file bytes and directory entries across 196 cases, including Unicode/newlines, parser and graph errors, invalid UTF-8, missing/directory/NUL paths, repeated recovery, output aliases, hard links, and terminal failures. It covers 199 completed parses, 92 recovered invalid requests, and nine terminal cases. A separate Linux `/dev/full` case verifies that report-write errors remain terminal and preserve inputs. CPython, ordinary Imre/Rust, and ThinLTO Imre/Rust all pass. Each control engine also passes the existing 155 graph cases and 17 parser cases.
 
 All seven native semantic suites pass with ordinary O0/O3, ThinLTO O3, and AddressSanitizer O1: files/arguments, exceptions, containers, integers, imports, classes, and I/O. The new file suite reports 72 ordinary checks and 51 each for ThinLTO/ASan, including descriptor-exhaustion cleanup and a synchronized broken-pipe test. The fully instrumented manifest application passes all 196 cases and `/dev/full`; both generated code and the Rust runtime/target dependencies use AddressSanitizer, with leak detection enabled outside ptrace. The prebuilt Rust standard library is not instrumented. The record also includes 19 compiler and 36 runtime unit tests, formatting, Clippy, and 10 ThinLTO CLI checks. Earlier workspace logs preserve outcomes but not their exact command lines; the evidence marks that limitation explicitly.
 
-The host is Linux x86-64 on AMD EPYC-Milan. CPython is 3.14.5, with the GIL enabled and JIT disabled; its recorded build configuration uses PGO/LTO. Relar uses Clang 18.1.3 and Rust 1.98.1-dev (`f62703110`, Ohm `ohm-1.98.1-1`, LLVM 22.1.8). Both native ThinLTO configurations use LLVM import/inline budgets of 1000. Ordinary Rust uses the recorded no-LTO release profile. The frontend, runtime, and backend details still differ. This shared devbox has uncontrolled frequency and shared-resource noise despite CPU affinity and balanced ordering.
+The host is Linux x86-64 on AMD EPYC-Milan. CPython is 3.14.5, with the GIL enabled and JIT disabled; its recorded build configuration uses PGO/LTO. Imre uses Clang 18.1.3 and Rust 1.98.1-dev (`f62703110`, Ohm `ohm-1.98.1-1`, LLVM 22.1.8). Both native ThinLTO configurations use LLVM import/inline budgets of 1000. Ordinary Rust uses the recorded no-LTO release profile. The frontend, runtime, and backend details still differ. This shared devbox has uncontrolled frequency and shared-resource noise despite CPU affinity and balanced ordering.
 
 Application AOT compilation takes 0.750 s ordinary and 6.908 s with ThinLTO, excluding compiler/runtime builds; neither is included in execution times. The manifest executables are 3,283,640 / 3,154,440 bytes, and generated LLVM IR is 224,699 bytes. The unchanged control executable grows from 3,152,616 to 3,275,392 bytes ordinary and from 2,752,968 to 2,810,488 bytes with ThinLTO, despite its similar measured runtime.
 
@@ -103,4 +103,4 @@ The gzip files preserve the original JSON bytes and use `mtime=0`. Decompressed 
 
 The [example guide](../../examples/manifest_planner/README.md#correctness-and-comparison) provides the sample and exact comparison invocation. Build at the recorded source commit with the normal pinned toolchain, or the documented local Ohm wrapper, and retain a compiler/runtime build record. Build the [Rust manifest reference](../reference/incremental_planner/README.md) with `--manifest`, selecting matching ordinary/ThinLTO mode and LLVM budget. Supply the preserved exception-optimized control executable and its original comparison record; the harness rejects changed sources, mismatched binaries, targets, and modes. Rebuilding a baseline requires a new corresponding baseline record rather than modifying saved hashes.
 
-Run `manifest_benchmark.py` with 30 samples, two warmups, and CPU 0 after other work stops, outside ptrace. For ThinLTO select `librelar_runtime_lto.a` and an actual compatible LLD backend named `ld.lld`; preserve that lexical symlink name. The raw comparison and build records retain compilation commands, program commands, build environment, source hashes, full input bytes, and the filesystem timing boundary.
+Run `manifest_benchmark.py` with 30 samples, two warmups, and CPU 0 after other work stops, outside ptrace. For ThinLTO select `libimre_runtime_lto.a` and an actual compatible LLD backend named `ld.lld`; preserve that lexical symlink name. The raw comparison and build records retain compilation commands, program commands, build environment, source hashes, full input bytes, and the filesystem timing boundary.

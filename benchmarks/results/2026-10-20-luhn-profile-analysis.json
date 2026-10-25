@@ -9,8 +9,8 @@
   "llvm_sha256": "33c78c648acd309cd9290f663da343e6593f6a92d3190acd43d26d03422c4a10",
   "derivation_script_sha256": "be4e25aa0e3f815e59c00b964bc5c4296086e0e904a91f82788da1d5c3ddf652",
   "raw_profile_sha256": {
-    "relar-callgrind": "b677c0613b84c0bad523653f19ae41a93874d23a7679ef3bb9f71673bbe5e583",
-    "relar-dhat": "949ec74e9eb2fc1b0a01d4e52bd430671d66939e91dbd8aeafa88d298a8d38aa",
+    "imre-callgrind": "b677c0613b84c0bad523653f19ae41a93874d23a7679ef3bb9f71673bbe5e583",
+    "imre-dhat": "949ec74e9eb2fc1b0a01d4e52bd430671d66939e91dbd8aeafa88d298a8d38aa",
     "rust-callgrind": "100a2394d8c1f1caff7c13cc5108ccfae35c8553a77646937576d720bf1a4153",
     "rust-dhat": "5748b5439528311480e85c9cb41583b3207c09dd74926b635aabd3caf95c18bb"
   },
@@ -24,10 +24,10 @@
   },
   "measurement_scope": "Whole-process instrumented guest instructions and requested heap allocations for 64 calls; not CPU time or an optimization speedup estimate. Timed results use a separate 4096-call batch.",
   "instruction_totals": {
-    "relar": 212067563,
+    "imre": 212067563,
     "rust": 5125141
   },
-  "instruction_ratio_relar_over_rust": 41.377898286115446,
+  "instruction_ratio_imre_over_rust": 41.377898286115446,
   "top_self_instruction_functions": [
     {
       "name": "fn_3",
@@ -37,7 +37,7 @@
       "incoming_inclusive_instructions": 211643573
     },
     {
-      "name": "relar_int_parse",
+      "name": "imre_int_parse",
       "self_instructions": 24641653,
       "self_fraction": 0.11619718098990933,
       "calls": 262145,
@@ -51,7 +51,7 @@
       "incoming_inclusive_instructions": 24118124
     },
     {
-      "name": "relar_mapping_iter_next",
+      "name": "imre_mapping_iter_next",
       "self_instructions": 20974848,
       "self_fraction": 0.09890644143442154,
       "calls": 262208,
@@ -93,7 +93,7 @@
       "incoming_inclusive_instructions": 20214480
     },
     {
-      "name": "<relar_runtime::objects::words::WordKind>::release",
+      "name": "<imre_runtime::objects::words::WordKind>::release",
       "self_instructions": 7340255,
       "self_fraction": 0.03461281346454667,
       "calls": 262151,
@@ -107,7 +107,7 @@
       "incoming_inclusive_instructions": 5246148
     },
     {
-      "name": "relar_list_slice",
+      "name": "imre_list_slice",
       "self_instructions": 4991232,
       "self_fraction": 0.023536046387254424,
       "calls": 128,
@@ -135,7 +135,7 @@
       "incoming_inclusive_instructions": 14217303
     },
     {
-      "name": "<alloc::rc::Rc<relar_runtime::List>>::drop_slow",
+      "name": "<alloc::rc::Rc<imre_runtime::List>>::drop_slow",
       "self_instructions": 1171964,
       "self_fraction": 0.005526370857574291,
       "calls": 256,
@@ -167,13 +167,13 @@
     "scope": "Only direct fn_3 outgoing inclusive call edges for character iteration/construction, integer parsing, and string destruction.",
     "functions": [
       {
-        "name": "relar_mapping_iter_next",
+        "name": "imre_mapping_iter_next",
         "calls_from_checksum": 262208,
         "inclusive_instructions_from_checksum": 54529570,
         "self_instructions_all_callers": 20974848
       },
       {
-        "name": "relar_int_parse",
+        "name": "imre_int_parse",
         "calls_from_checksum": 262144,
         "inclusive_instructions_from_checksum": 24641536,
         "self_instructions_all_callers": 24641653
@@ -189,7 +189,7 @@
     "fraction_of_process_instructions": 0.4944708022131607,
     "no_double_counting_check": "No selected root is reachable from another selected root through a positive-cost observed call edge.",
     "observed_descendants": {
-      "relar_mapping_iter_next": [
+      "imre_mapping_iter_next": [
         "0x00000000000a92d0",
         "0x00000000000a9bb0",
         "0x00000000000a9c90",
@@ -206,7 +206,7 @@
         "malloc",
         "sbrk"
       ],
-      "relar_int_parse": [],
+      "imre_int_parse": [],
       "<alloc::rc::Rc<compact_str::CompactString>>::drop_slow": [
         "0x00000000000a9bb0",
         "0x00000000000a9c90",
@@ -228,7 +228,7 @@
     "scope": "Allocation only; excludes tuple arithmetic, ownership checks and destruction in fn_3 or other calls."
   },
   "allocation_totals": {
-    "relar": {
+    "imre": {
       "allocated_bytes": 23105570,
       "allocated_blocks": 395039,
       "peak_live_bytes": 123793,
@@ -332,19 +332,19 @@
       "fraction_of_requested_blocks": 0.001620093205987257
     }
   },
-  "allocation_partition_check": "Every DHAT point belongs to exactly one category; bytes and blocks sum to the complete Relar process totals. Resizing requests remain attributed to their original allocation stack.",
+  "allocation_partition_check": "Every DHAT point belongs to exactly one category; bytes and blocks sum to the complete Imre process totals. Resizing requests remain attributed to their original allocation stack.",
   "allocation_attribution_evidence": {
-    "character_owners": "All stacks containing relar_mapping_iter_next; sequences.rs StringIterator::next constructs Rc<Str>. Exactly 262144 blocks of 40 bytes, one per input character.",
+    "character_owners": "All stacks containing imre_mapping_iter_next; sequences.rs StringIterator::next constructs Rc<Str>. Exactly 262144 blocks of 40 bytes, one per input character.",
     "divmod_pair": "DHAT fn_3 site 0x20ec5f is consistent with the sole native fn_3 zeroed 32-byte allocation at 0x106c5b (reported return-IP-minus-one plus PIE bias 0x108000). The emitted fn_8 helper constructs layout_tuple_4 then computes/stores floor quotient and remainder, reads both fields for sum, and releases the record. ThinLTO inlines that helper into fn_3. Exactly one pair per doubled digit.",
-    "digit_list_buffers": "DHAT original allocation site 0x20e6ba; native fn_3 list-capacity growth after relar_int_parse and before storing the converted digit.",
+    "digit_list_buffers": "DHAT original allocation site 0x20e6ba; native fn_3 list-capacity growth after imre_int_parse and before storing the converted digit.",
     "comprehension_result_buffers": "DHAT original allocation site 0x20f2fb; native fn_3 list-capacity growth after the divmod pair is summed.",
-    "slices": "Every DHAT stack containing relar_list_slice: both backing buffers and list owners for the two consumed slices.",
+    "slices": "Every DHAT stack containing imre_list_slice: both backing buffers and list owners for the two consumed slices.",
     "assembly_command": [
       "/usr/bin/objdump",
       "-d",
       "--no-show-raw-insn",
       "--disassemble=fn_3",
-      "/tmp/relar-luhn-v2-thinlto/luhn"
+      "/tmp/imre-luhn-v2-thinlto/luhn"
     ],
     "objdump_sha256": "325c4205a4c658a9d1e1ebc469ae55975a2b897a3d3c1e79d9b158612d37f745",
     "assembly_sha256": "fd3e919d17d073ff0d1567199d934013898d91ef798d195143d18263f01ffbbc",
@@ -354,12 +354,12 @@
   "separate_wall_time_reference": {
     "repetitions": 4096,
     "median_seconds": {
-      "relar": 0.898480894,
+      "imre": 0.898480894,
       "rust": 0.02275305,
       "cpython": 1.455759966
     },
-    "relar_over_rust": 39.48837162490303,
-    "cpython_over_relar": 1.6202458791516607
+    "imre_over_rust": 39.48837162490303,
+    "cpython_over_imre": 1.6202458791516607
   },
   "conclusions": [
     "Character materialization/conversion/destruction is the largest separately identified CPU path: almost half of guest instructions and two thirds of allocated blocks.",
