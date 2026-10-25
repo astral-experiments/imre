@@ -358,6 +358,23 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 },
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
+                        Storage::IteratorAdapter(adapter) => {
+                            adapter.write_repr(output, owner);
+                            None
+                        }
+                        Storage::Repeat(repeat) => {
+                            if position == 0 {
+                                output.push_str("repeat(");
+                                pending.push(ReprTask::Object(owner, 1));
+                                Some(ReprTask::Word(repeat.value.word, repeat.value.kind))
+                            } else {
+                                if let Some(count) = repeat.remaining {
+                                    write!(output, ", {count}").unwrap();
+                                }
+                                output.push(')');
+                                None
+                            }
+                        }
                         Storage::Sequence(values) => {
                             let values = values.resolved();
                             if position == 0 {

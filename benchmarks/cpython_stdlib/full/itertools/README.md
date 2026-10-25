@@ -21,3 +21,37 @@ From the repository root, with the test-enabled pinned interpreter:
     benchmarks/cpython_stdlib/full/itertools/UPSTREAM.json --result /tmp/itertools-reference.json
 "$CPYTHON" -B -m test --single-process --randseed 1 -u cpu --junit-xml /tmp/itertools-cpu.xml test_itertools
 ```
+
+## Native execution
+
+[native.py](native.py) copies complete undecorated methods from the verified
+source and compiles each with an assertion adapter. The adapter checks equality
+and returns an assertion count from the executable. Both the method and every
+operation it invokes run in Imre; CPython does not supply iterator results.
+
+At [O0](native-O0.json) and [O3](native-O3.json), **10/137** run fully natively:
+four repeat methods, four examples of chain/count/cycle/islice, and two builtin filter/zip examples.
+There are no host-driven native or mixed results in these reports. The other
+127 IDs have no native pass in this run (including the four reference skips).
+The larger repeat test also needs complex numbers and callable exception
+assertions; the repeat GC case creates a cycle between a list and its iterator.
+Neither is implied by the four passing repeat methods.
+
+```sh
+for opt in 0 3; do
+    python3 benchmarks/cpython_stdlib/full/itertools/native.py --imre "$IMRE" --runtime "$RUNTIME" \
+        --clang "$CLANG" --opt-level "$opt" --result "/tmp/itertools-O$opt.json"
+done
+```
+
+[repeat.py](repeat.py) separately compares interleaved pulls from the same
+cursor, a live mutable element, repeated exhaustion, eager evaluation of the
+default in `next()`, and constructor overflow with CPython. It adds no suite ID.
+
+
+[sources.py](sources.py) additionally compares partial consumption through two
+aliases, a stop before the start, live list changes during cycle's first pass,
+mutation during islice argument evaluation, release after a dictionary size
+error, and the timing of float step conversion. These differential checks are
+outside the denominator. The various-iterator-argument methods still require
+Python-defined iterator protocols, including sources that raise mid-pull.
