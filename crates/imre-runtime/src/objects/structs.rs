@@ -164,7 +164,13 @@ impl Rows {
 
     pub(super) fn append(&mut self, row: &[usize]) -> Result<()> {
         debug_assert_eq!(row.len(), self.layout.length);
-        if self.repeated() && self.words() == row {
+        if let RowStorage::Packed(words) = &mut self.storage {
+            // Vec checks the dense byte-size limit as part of this reservation.
+            words
+                .try_reserve(row.len())
+                .map_err(|_| Error::allocation())?;
+            words.extend_from_slice(row);
+        } else if self.words() == row {
             self.word_count(self.len + 1)?;
         } else {
             self.writable(self.len + 1)?.extend_from_slice(row);
