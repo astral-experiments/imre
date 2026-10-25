@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/copy.py": "c64fc0761793f54847882d46a4368e3f34690592",
+    "Lib/test/test_copy.py": "cfef24727e8c82eb0f75a85596fa0de339e66213"
+  },
+  "module": "test.test_copy"
+}

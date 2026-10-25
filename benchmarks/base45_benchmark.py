@@ -1,4 +1,4 @@
-"""Compare unchanged Base45 in balanced Relar/CPython/Rust process batches."""
+"""Compare unchanged Base45 in balanced Imre/CPython/Rust process batches."""
 
 import argparse
 import base64
@@ -116,7 +116,7 @@ def measure(workload: dict, commands: dict, directory: Path, args) -> dict:
     ratios = {
         f"{left}_over_{right}": summaries[left]["median_seconds"]
         / summaries[right]["median_seconds"]
-        for left, right in (("cpython", "relar"), ("relar", "rust"), ("cpython", "rust"))
+        for left, right in (("cpython", "imre"), ("imre", "rust"), ("cpython", "rust"))
         if left in summaries and right in summaries
     }
     return {
@@ -177,7 +177,7 @@ def main() -> None:
     parser.add_argument(
         "--native-only",
         action="store_true",
-        help="measure Relar/Rust only; still validate against CPython",
+        help="measure Imre/Rust only; still validate against CPython",
     )
     parser.add_argument(
         "--operations",
@@ -339,7 +339,7 @@ def main() -> None:
     assert python_info["implementation"] == "cpython"
     python_info.pop("executable")
     codec, _ = validator.load_upstream_tests()
-    commands = {"relar": [str(binary)]}
+    commands = {"imre": [str(binary)]}
     if not args.native_only:
         commands["cpython"] = validator.python_command(python)
     if rust:

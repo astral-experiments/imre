@@ -67,3 +67,10 @@ for source in sources:
             print(repr(source.partition(needle)))
         except ValueError as error:
             print("ValueError:" + str(error))
+
+
+for data in [b"", b"a\r\nb\r", b"a\xc2\x85b", b"a\xe2\x80\xa8b", b"a\n\xff"]:
+    try:
+        print(repr(data.decode("utf-8").splitlines()))
+    except UnicodeDecodeError as error:
+        print(str(error))

@@ -791,7 +791,7 @@ fn publish_report(target: &str, rendered: &str) -> Result<(), Failure> {
     } else {
         parent
     };
-    with_workspace(parent, ".relar-report-", |workspace| {
+    with_workspace(parent, ".imre-report-", |workspace| {
         let staged = workspace.join("report.md");
         write_text(&staged, rendered)?;
         fs::rename(staged, &target).map_err(process_error)
@@ -966,7 +966,7 @@ fn prepared_inputs(
     if let Some(path) = capture_directory {
         let directory = PathBuf::from(normalize_path(path));
         fs::create_dir(&directory).map_err(process_error)?;
-        with_workspace(&directory, ".relar-capture-", |workspace| {
+        with_workspace(&directory, ".imre-capture-", |workspace| {
             let staged = workspace.join("projects.json");
             write_text(&staged, &text)?;
             fs::rename(staged, directory.join("projects.json")).map_err(process_error)?;

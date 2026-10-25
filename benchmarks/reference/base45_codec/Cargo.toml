@@ -1,5 +1,5 @@
 [package]
-name = "relar-base45-reference"
+name = "imre-base45-reference"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.98"

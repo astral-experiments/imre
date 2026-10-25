@@ -1,12 +1,12 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # Generator expressions and telemetry comparison
 
-Relar now compiles immediately consumed generator expressions, `zip` (including `strict=True`), `reversed`, `any`, and `all`. The [telemetry comparator](../../examples/telemetry_comparison/README.md) runs the same typed Python package on CPython and Relar, with an independent Rust implementation of the same file protocol and queries.
+Imre now compiles immediately consumed generator expressions, `zip` (including `strict=True`), `reversed`, `any`, and `all`. The [telemetry comparator](../../examples/telemetry_comparison/README.md) runs the same typed Python package on CPython and Imre, with an independent Rust implementation of the same file protocol and queries.
 
 At 4,096 samples with ThinLTO, the full-scan group runs **4.48–5.84× faster than CPython** and takes **8.46–13.44× Rust's time**. Early-exit queries run **12.81–19.40× faster than CPython** and take **1.55–2.91× Rust's time**. These are complete-program measurements, not isolated iterator instruction costs.
 
-The [implementation PR](https://github.com/viarius-experiments/relar/pull/57) continues the existing GitHub stack. This milestone adds functionality and measures its cost; the remaining Rust gap is visible in the results.
+The [implementation PR](https://github.com/viarius-experiments/imre/pull/57) continues the existing GitHub stack. This milestone adds functionality and measures its cost; the remaining Rust gap is visible in the results.
 
 ## Supported behavior
 
@@ -18,7 +18,7 @@ The compiler lowers these pipelines to typed local state. It can remove private 
 
 The program reads reference and observed timestamp/value recordings, validates complete timestamp alignment using strict zip, then answers repeated queries. `report-mixed` makes separate signed, absolute, and squared-error reductions, two threshold predicates, and a reverse search. Quiet predicates and searches scan the complete input. Early/recent cases stop after one inspected pair. Complete alignment is validated once before queries, so an early result cannot hide a missing sample.
 
-All engines retain arbitrary-precision integer results and the same errors. The independent Rust reference uses contiguous native records and checked `i128` reductions when values fit, restarting a pure query with `BigInt` on overflow. Relar uses the typed Python object's storage and generated loops. Rust applies `black_box` around every repeated query and result; all engines render the final complete result once and return a repetition checksum.
+All engines retain arbitrary-precision integer results and the same errors. The independent Rust reference uses contiguous native records and checked `i128` reductions when values fit, restarting a pure query with `BigInt` on overflow. Imre uses the typed Python object's storage and generated loops. Rust applies `black_box` around every repeated query and result; all engines render the final complete result once and return a repetition checksum.
 
 Full-scan processes target **8,388,608 source-level inspected pairs**; early-exit processes target **2,097,152**. Repetition counts round down to whole queries. Input sizes are 16, 256, and 4,096 records per file. The raw records retain each exact input, pair count, repetition count, output, and filesystem result.
 
@@ -26,11 +26,11 @@ Each condition has eight warmup rounds and twelve measured rounds. All six engin
 
 ## Wall-time results
 
-Values are median milliseconds. **CPython / Relar** is a speedup (higher is better); **Relar / Rust** is a time ratio (lower is better). Raw samples and inclusive quartiles are retained in the linked records.
+Values are median milliseconds. **CPython / Imre** is a speedup (higher is better); **Imre / Rust** is a time ratio (lower is better). Raw samples and inclusive quartiles are retained in the linked records.
 
 ### Ordinary linking
 
-| Workload / records | Relar ms | Rust ms | CPython ms | CPython / Relar | Relar / Rust |
+| Workload / records | Imre ms | Rust ms | CPython ms | CPython / Imre | Imre / Rust |
 |---|---:|---:|---:|---:|---:|
 | `report-mixed` / 16 | 868.458 | 26.712 | 1324.274 | 1.525× | 32.511× |
 | `alert-quiet` / 16 | 819.448 | 21.170 | 1232.438 | 1.504× | 38.708× |
@@ -56,7 +56,7 @@ Values are median milliseconds. **CPython / Relar** is a speedup (higher is bett
 
 ### ThinLTO
 
-| Workload / records | Relar ms | Rust ms | CPython ms | CPython / Relar | Relar / Rust |
+| Workload / records | Imre ms | Rust ms | CPython ms | CPython / Imre | Imre / Rust |
 |---|---:|---:|---:|---:|---:|
 | `report-mixed` / 16 | 203.186 | 19.884 | 1299.883 | 6.398× | 10.219× |
 | `alert-quiet` / 16 | 181.773 | 15.149 | 1231.137 | 6.773× | 11.999× |
@@ -84,14 +84,14 @@ Ordinary and ThinLTO families have separate interleaved baselines. Native engine
 
 ### Startup controls
 
-| Batch / linking | Relar ms | Rust ms | CPython ms |
+| Batch / linking | Imre ms | Rust ms | CPython ms |
 |---|---:|---:|---:|
 | full / normal | 2.387 | 2.510 | 24.432 |
 | full / thinlto | 2.297 | 2.304 | 24.030 |
 | early / normal | 2.804 | 2.656 | 24.381 |
 | early / thinlto | 2.257 | 2.307 | 24.396 |
 
-The empty-recording, one-query controls are reported without subtraction. The largest control/workload median fractions are 4.20% for Relar, 24.30% for Rust, and 3.09% for CPython. The pilot used smaller batches; the final batch sizes were selected before final measurement to reduce startup's contribution.
+The empty-recording, one-query controls are reported without subtraction. The largest control/workload median fractions are 4.20% for Imre, 24.30% for Rust, and 3.09% for CPython. The pilot used smaller batches; the final batch sizes were selected before final measurement to reduce startup's contribution.
 The empty control excludes nonempty parsing and alignment, so it is not an estimate of all fixed costs. Those operations remain included in every workload measurement. Rust startup remains material, so these ratios should not be presented as isolated steady-state throughput.
 
 ## CPU and allocation profile
@@ -100,12 +100,12 @@ Profiles use the exact timed ThinLTO executables on `alert-quiet-4096`, with 128
 
 | Engine | Guest instructions | Allocated bytes, 128 queries | Allocation blocks | Additional bytes / query, 128→256 |
 |---|---:|---:|---:|---:|
-| Relar | 230,051,902 | 7,100,626 | 168,152 | 40 |
+| Imre | 230,051,902 | 7,100,626 | 168,152 | 40 |
 | Rust | 29,380,573 | 2,656,473 | 41,065 | 0 |
 
-The generated alert query (`fn_7`) accounts for 46.86% of Relar self instructions; `relar_seq_get` accounts for another 23.43%, with 1,056,768 calls. Concrete class fields already use direct loads. The query still performs generic sequence access, bounds and exception checks, record ownership handoffs, and tagged-integer arithmetic around each pair. Borrowed sequence access and stronger integer proofs are candidates for later specialization; the emitted LLVM does not assign a measured cost to each individual check. Callgrind counts guest instructions, not CPU cycles or wall-time shares.
+The generated alert query (`fn_7`) accounts for 46.86% of Imre self instructions; `imre_seq_get` accounts for another 23.43%, with 1,056,768 calls. Concrete class fields already use direct loads. The query still performs generic sequence access, bounds and exception checks, record ownership handoffs, and tagged-integer arithmetic around each pair. Borrowed sequence access and stronger integer proofs are candidates for later specialization; the emitted LLVM does not assign a measured cost to each individual check. Callgrind counts guest instructions, not CPU cycles or wall-time shares.
 
-Doubling queries adds 40 bytes and one allocation per extra Relar query, and no allocations for Rust. This two-point observation suggests that most allocation work is in loading and setup, while repeated per-pair operations dominate the query gap; it is not a proof of allocation behavior for other inputs. The Rust reference also spends substantial profile work parsing and loading. Both profiles include the complete process, so the instruction ratio is not an isolated query-loop ratio.
+Doubling queries adds 40 bytes and one allocation per extra Imre query, and no allocations for Rust. This two-point observation suggests that most allocation work is in loading and setup, while repeated per-pair operations dominate the query gap; it is not a proof of allocation behavior for other inputs. The Rust reference also spends substantial profile work parsing and loading. Both profiles include the complete process, so the instruction ratio is not an isolated query-loop ratio.
 
 See the [profile summary](2026-10-20-iterator-pipelines-profile.json), [independent profile audit](2026-10-20-iterator-pipelines-profile-audit.json), and raw Callgrind/DHAT data in the evidence archive.
 
@@ -119,7 +119,7 @@ Compiler, runtime, and telemetry reference builds have raw evidence of fresh com
 
 An unchanged-Luhn control compares emitted LLVM from the previous and current compiler. Every byte is identical after removing only the two new, unused runtime declarations. This checks generated-code stability; it is not a new Luhn wall-time measurement.
 
-Measurements ran pinned to CPU 0, outside ptrace, with task-owned builds, tests, profiles, and large evidence audits stopped. The host is AMD EPYC-Milan; CPython 3.14.5 has PGO/LTO, the GIL enabled, and JIT disabled. Relar uses Clang 18 at O3; Rust uses Ohm 1.98.1-1, rustc 1.98.1-dev, and LLVM 22.1.8. Shared-host activity and frequency remain uncontrolled.
+Measurements ran pinned to CPU 0, outside ptrace, with task-owned builds, tests, profiles, and large evidence audits stopped. The host is AMD EPYC-Milan; CPython 3.14.5 has PGO/LTO, the GIL enabled, and JIT disabled. Imre uses Clang 18 at O3; Rust uses Ohm 1.98.1-1, rustc 1.98.1-dev, and LLVM 22.1.8. Shared-host activity and frequency remain uncontrolled.
 
 Timing includes process startup, imports, parsing and complete input alignment once, repeated queries, checksum accumulation, final output, flush/close, and exit. Fixture creation, verification, compilation, and hashing are outside the clock. OS caches are warm and output is not fsynced.
 

@@ -105,6 +105,9 @@ def generated() -> dict[str, str]:
         -(2**53 + 1),
         2**62 - 1,
         2**62,
+        2**128 + 2**75,
+        2**128 + 2**75 + 2,
+        -(2**128 + 2**75 + 2),
         10**400,
         -(10**400),
     ]
@@ -191,6 +194,9 @@ def generated() -> dict[str, str]:
         " \u2003-١_٢.٥e+٢\u00a0",
         "１２.３",
         "𝟏𝟐.𝟓",
+        "\U000116d1.\U0001ccf8",
+        "\U00011de0",
+        "1e\U00011de9",
         "",
         "_1",
         "1_",
@@ -243,7 +249,7 @@ def main() -> None:
     if args.sanitize:
         flags.append("--sanitize")
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-floats-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-floats-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(FIXTURES, project)

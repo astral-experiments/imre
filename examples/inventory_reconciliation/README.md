@@ -1,6 +1,6 @@
 # Inventory reconciliation
 
-`inventory_reconciliation STOCK ORDERS REPORT` fulfills positive requests in batch/input order, reports shortages, and preserves the remaining stock. The same typed Python package runs unchanged on CPython and Relar. Quantities and totals are arbitrary-precision integers.
+`inventory_reconciliation STOCK ORDERS REPORT` fulfills positive requests in batch/input order, reports shortages, and preserves the remaining stock. The same typed Python package runs unchanged on CPython and Imre. Quantities and totals are arbitrary-precision integers.
 
 From the repository root:
 
@@ -11,8 +11,8 @@ PYTHONPATH=examples python3.14 -m inventory_reconciliation \
 cat /tmp/inventory-report.txt
 
 cargo build --release --workspace --locked
-target/release/relar build examples/inventory_reconciliation/__main__.py \
-  --module-root examples --runtime target/release/librelar_runtime.a \
+target/release/imre build examples/inventory_reconciliation/__main__.py \
+  --module-root examples --runtime target/release/libimre_runtime.a \
   --clang clang-18 --target x86_64-unknown-linux-gnu --opt-level 3 \
   -o /tmp/inventory-reconciliation
 /tmp/inventory-reconciliation \
@@ -53,7 +53,7 @@ Malformed input is terminal and leaves an existing report untouched. Report open
 
 Nested eager list comprehensions read batches with effectful inner bounds, flatten/filter positive requests, and fulfill requests through shared mutable inventory. Dict comprehensions implement last-wins stock and ordered requested totals. Set expansion copies the requested dictionary keys into the membership set. Filtered comprehensions derive shortages and untouched `(SKU, quantity)` tuples. These are whole-program uses of the new syntax, not replacement benchmark kernels.
 
-The renderer uses scalar f-strings for report fields and the newline passed to `write`. Fields retain their existing left-to-right evaluation and conversion order, and the report format is unchanged. Adjacent f-strings keep longer rows readable without adding intermediate strings. Relar lowers these fields through the same typed conversions and ordered string construction used by explicit concatenation.
+The renderer uses scalar f-strings for report fields and the newline passed to `write`. Fields retain their existing left-to-right evaluation and conversion order, and the report format is unchanged. Adjacent f-strings keep longer rows readable without adding intermediate strings. Imre lowers these fields through the same typed conversions and ordered string construction used by explicit concatenation.
 
 Parser rows use sequence unpacking while retaining the existing count/SKU diagnostics and conversion order. Report totals share one chained initialization.
 
@@ -75,18 +75,18 @@ python3 benchmarks/inventory_validate.py --python python3.14 \
   --output benchmarks/local/inventory-validation.json
 ```
 
-The [Rust reference](../../benchmarks/reference/inventory_reconciliation/README.md) uses the same eager algorithm, BigInt quantities, ordered dictionary traversal, and explicit checked file close. Native Rust containers and allocation representations differ from Relar.
+The [Rust reference](../../benchmarks/reference/inventory_reconciliation/README.md) uses the same eager algorithm, BigInt quantities, ordered dictionary traversal, and explicit checked file close. Native Rust containers and allocation representations differ from Imre.
 
 ## Benchmark
 
-`benchmarks/inventory_benchmark.py` defaults to empty and 128-request boundary cases, plus dense-repeat and sparse/unknown-SKU cases with 2,048 and 16,384 positive requests. Nonpositive rows and empty batches are retained. Each workload uses 30 measured rounds covering all six CPython/Relar/Rust orders five times, two warmups, a pinned CPU, and fresh processes/directories. Positions and within-round predecessors are balanced; cross-round predecessors are not. Complete output and directory snapshots are checked for every run, with no discarded samples.
+`benchmarks/inventory_benchmark.py` defaults to empty and 128-request boundary cases, plus dense-repeat and sparse/unknown-SKU cases with 2,048 and 16,384 positive requests. Nonpositive rows and empty batches are retained. Each workload uses 30 measured rounds covering all six CPython/Imre/Rust orders five times, two warmups, a pinned CPU, and fresh processes/directories. Positions and within-round predecessors are balanced; cross-round predecessors are not. Complete output and directory snapshots are checked for every run, with no discarded samples.
 
 The timer includes startup/imports, file operations, parsing, eager allocations, reconciliation, complete rendering, flush/close, and exit. Build/oracle work, fixture creation, hashing/comparison, and fixture deletion are excluded. Inputs are created before timing, OS caches are not deliberately flushed, and writes are not fsynced. These are whole-program results on a shared machine, not isolated comprehension costs or cold-storage throughput.
 
 ```sh
 python3 benchmarks/inventory_benchmark.py \
-  --compiler "$TOOLS/relar" --runtime "$TOOLS/librelar_runtime.a" \
-  --relar-build-record "$TOOLS/build-record.json" \
+  --compiler "$TOOLS/imre" --runtime "$TOOLS/libimre_runtime.a" \
+  --imre-build-record "$TOOLS/build-record.json" \
   --rust-bigint "$RUST/inventory-bigint" --rust-build-record "$RUST/build-record.json" \
   --python python3.14 --clang clang-18 --target x86_64-unknown-linux-gnu \
   --cpu 0 --samples 30 --warmups 2 \
@@ -94,6 +94,6 @@ python3 benchmarks/inventory_benchmark.py \
   --output benchmarks/local/inventory-normal.json
 ```
 
-`TOOLS` and `RUST` identify separately frozen tool/reference directories. Add `--validate-only` to compile and validate all oracle and captured workload cases without timing. `--baseline BINARY --baseline-record JSON` optionally adds the five unchanged incremental-planner controls from the concrete-layout comparison: CPython, preserved Relar, and new Relar. The harness verifies exact old source/input/binary identity; the old programs are unchanged. Decompress published JSON before passing it.
+`TOOLS` and `RUST` identify separately frozen tool/reference directories. Add `--validate-only` to compile and validate all oracle and captured workload cases without timing. `--baseline BINARY --baseline-record JSON` optionally adds the five unchanged incremental-planner controls from the concrete-layout comparison: CPython, preserved Imre, and new Imre. The harness verifies exact old source/input/binary identity; the old programs are unchanged. Decompress published JSON before passing it.
 
-For ThinLTO, select matching compiler/runtime/reference records, use `librelar_runtime_lto.a`, and pass `--lto-linker /path/to/ld.lld`; the Rust helper must use ThinLTO and `--llvm-budget 1000`. The lexical linker filename is preserved. The harness records hashes, exact versions, source/build provenance, all inputs/outputs, all raw samples, and relevant inherited environment. Run outside ptrace only after other builds, tests, and profilers stop. No timing result is implied by functional validation.
+For ThinLTO, select matching compiler/runtime/reference records, use `libimre_runtime_lto.a`, and pass `--lto-linker /path/to/ld.lld`; the Rust helper must use ThinLTO and `--llvm-budget 1000`. The lexical linker filename is preserved. The harness records hashes, exact versions, source/build provenance, all inputs/outputs, all raw samples, and relevant inherited environment. Run outside ptrace only after other builds, tests, and profilers stop. No timing result is implied by functional validation.

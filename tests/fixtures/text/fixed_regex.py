@@ -71,6 +71,10 @@ if literal := re.compile(r"[ #]+\ \#", re.VERBOSE).search("é#  #"):
     print(literal.start())
     print(literal.end())
 
+if priority := re.search(r"(?P<left>.*?b|.*?a)(?P<tail>.*)", "ab"):
+    print(repr(priority.group("left")))
+    print(repr(priority.group("tail")))
+
 if matched := MARKER.search("# E"):
     try:
         matched.group("unknown")

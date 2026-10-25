@@ -1,4 +1,4 @@
-"""Compare the unchanged route planner on CPython and Relar in fresh processes."""
+"""Compare the unchanged route planner on CPython and Imre in fresh processes."""
 
 import argparse
 import hashlib
@@ -203,7 +203,7 @@ def benchmark(args: argparse.Namespace) -> dict:
     inputs.update({"binary": binary, "llvm_ir": llvm})
     hashes.update({name: sha256(inputs[name]) for name in ("binary", "llvm_ir")})
     validation = validate(binary, python, SOURCE)
-    commands = {"cpython": [python, "-I", str(SOURCE)], "relar": [str(binary)]}
+    commands = {"cpython": [python, "-I", str(SOURCE)], "imre": [str(binary)]}
     workloads = []
     for width in args.sizes:
         stdin = input_text(width, args.routes, args.seed).encode("ascii")
@@ -211,7 +211,7 @@ def benchmark(args: argparse.Namespace) -> dict:
         phases = {"warmups": [], "samples": []}
         for phase, count in (("warmups", args.warmups), ("samples", args.samples)):
             for index in range(count):
-                order = ["cpython", "relar"] if index % 2 == 0 else ["relar", "cpython"]
+                order = ["cpython", "imre"] if index % 2 == 0 else ["imre", "cpython"]
                 pair = {"index": index, "order": order}
                 for implementation in order:
                     result = run(commands[implementation], stdin, args.timeout)
@@ -223,7 +223,7 @@ def benchmark(args: argparse.Namespace) -> dict:
                     pair[implementation] = result
                 phases[phase].append(pair)
         cpython = summary(phases["samples"], "cpython")
-        relar = summary(phases["samples"], "relar")
+        imre = summary(phases["samples"], "imre")
         workloads.append(
             {
                 "width": width,
@@ -235,17 +235,17 @@ def benchmark(args: argparse.Namespace) -> dict:
                 **phases,
                 "summary": {
                     "cpython": cpython,
-                    "relar": relar,
+                    "imre": imre,
                     "speedup_ratio_of_medians": (
-                        cpython["median_seconds"] / relar["median_seconds"]
+                        cpython["median_seconds"] / imre["median_seconds"]
                     ),
                 },
             }
         )
         print(
             f"{width}x{width}, {args.routes} routes: "
-            f"CPython {cpython['median_seconds']:.6f}s, Relar {relar['median_seconds']:.6f}s, "
-            f"{cpython['median_seconds'] / relar['median_seconds']:.2f}x",
+            f"CPython {cpython['median_seconds']:.6f}s, Imre {imre['median_seconds']:.6f}s, "
+            f"{cpython['median_seconds'] / imre['median_seconds']:.2f}x",
             flush=True,
         )
 
@@ -259,7 +259,7 @@ def benchmark(args: argparse.Namespace) -> dict:
         "completed_at_utc": datetime.now(timezone.utc).isoformat(),
         "git": {"revision": revision, "dirty": dirty},
         "sha256": hashes,
-        "tools": {"relar": compiler_version, "clang": clang_version, "cpython": python_info},
+        "tools": {"imre": compiler_version, "clang": clang_version, "cpython": python_info},
         "host": {
             "os": platform.system(),
             "kernel_release": platform.release(),
@@ -279,12 +279,12 @@ def benchmark(args: argparse.Namespace) -> dict:
             "timer": "time.perf_counter_ns around subprocess.run",
             "includes": "fresh process startup, stdin/stdout pipes, complete route-planner execution, and process exit",
             "excludes": "Rust compiler/runtime builds, AOT compilation, correctness validation, and warmups",
-            "ordering": "paired samples alternate CPython first and Relar first, starting with CPython",
+            "ordering": "paired samples alternate CPython first and Imre first, starting with CPython",
             "cpu": "harness and all child processes inherit the same single-CPU affinity",
             "cpython_command": [python_path.name, "-I", "examples/route_planner.py"],
-            "relar_command": ["<artifact-dir>/route_planner"],
+            "imre_command": ["<artifact-dir>/route_planner"],
             "compile_command": [
-                "relar", "build", "examples/route_planner.py",
+                "imre", "build", "examples/route_planner.py",
                 "-o", "<artifact-dir>/route_planner",
                 "--runtime", "<runtime.a>",
                 "--clang", Path(clang).name,

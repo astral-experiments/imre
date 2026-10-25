@@ -1,7 +1,9 @@
 """Compare sealed scalar f-strings with CPython, including ownership and file effects."""
 
 import argparse
+import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -21,13 +23,17 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "fstrings"
 
 # Literal whitespace is data, while expression/code indentation remains checked.
 ACCEPTED = {
+    "shadowed_ascii": 'def ascii(value: str) -> str:\n    return "shadow: " + value\nprint(ascii("é"))\nprint(f"{\'é\'!a}")\n',
+    "ascii_conversion": 'print(f"{1!a}")\n',
     "repr_conversion": 'print(f"{1!r}:{True!r}:{None!r}")\n',
     "literal_control_characters": 'value = 7\nprint(f"""first\n\tliteral tab {value}\n\fliteral form feed\nlast""")\n',
     "nested_literal_whitespace": 'print(f"""outer:{"""inner\n\ttext\n\fform feed"""}:end""")\n',
 }
 
 REJECTED = {
-    "ascii_conversion": 'print(f"{1!a}")\n',
+    "descriptor_user_repr": 'class Item:\n    def __repr__(self) -> str:\n        return "é"\nprint(repr([Item()]))\n',
+    "nested_user_repr": 'class Item:\n    def __repr__(self) -> str:\n        return "é"\nprint(ascii([Item()]))\n',
+    "ascii_format_spec": 'print(f"{1!a:+d}")\n',
     "debug_field": 'value = 1\nprint(f"{value=}")\n',
     "debug_str_conversion": 'value = 1\nprint(f"{value=!s}")\n',
     "debug_empty_spec": 'value = 1\nprint(f"{value=:}")\n',
@@ -42,7 +48,6 @@ REJECTED = {
     "numeric_string_conversion": 'print(f"{1!s:.2f}")\n',
     "numeric_string_field": "print(f\"{'text':.2f}\")\n",
     "dict_field": 'values = {1: 2}\nprint(f"{values}")\n',
-    "set_field": 'values = {1}\nprint(f"{values}")\n',
     "tuple_field": 'print(f"{(1, 2)}")\n',
     "optional_integer_field": 'def render(value: int | None) -> str:\n    return f"{value}"\nprint(render(1))\n',
     "builtin_rebinding": 'def render() -> None:\n    str = 101\n    print(f"{str!s}")\nrender()\n',
@@ -80,8 +85,12 @@ def rejection_message(name: str) -> str:
         return "rebinding a builtin, definition, or imported module is unsupported"
     if name.startswith("debug_"):
         return "debug f-string fields are unsupported"
-    if name.endswith("_conversion"):
-        return "f-string conversions support only !s and !r"
+    if name == "nested_user_repr":
+        return "ascii requires a supported representation"
+    if name == "descriptor_user_repr":
+        return "generated repr cannot format"
+    if name == "ascii_format_spec":
+        return "formatted strings support !a with an empty format specification"
     if name.endswith("_spec"):
         if "dynamic" in name:
             return "f-string format specifications must be literal"
@@ -93,6 +102,30 @@ def rejection_message(name: str) -> str:
     if name == "unused_dynamic_field":
         return ""
     return "unsupported value type for default f-string conversion"
+
+
+def integer_limits(python: str, source: Path, binary: Path, cwd: Path) -> int:
+    # Each invocation starts a fresh interpreter. In particular malformed values
+    # must exit before executing the first print in the fixture.
+    settings = ("0", "640", "4301", "2147483647", "640 ", "-1")
+    for setting in settings:
+        env = {
+            **os.environ,
+            "PYTHONINTMAXSTRDIGITS": setting,
+            "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+            "LSAN_OPTIONS": "exitcode=23",
+        }
+
+        def output(argv: list[str]) -> tuple[int, str, str]:
+            result = subprocess.run(
+                argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=60
+            )
+            return result.returncode, result.stdout, result.stderr
+
+        expected = output([python, "-B", str(source)])
+        actual = output([str(binary)])
+        assert actual == expected, (setting, expected, actual)
+    return len(settings)
 
 
 def cases(project: Path) -> list[tuple[str, Path, str | None]]:
@@ -136,7 +169,7 @@ def main() -> None:
     if args.sanitize:
         flags.append("--sanitize")
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-fstrings-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-fstrings-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
@@ -174,6 +207,8 @@ def main() -> None:
                     built.stdout,
                     built.stderr,
                 )
+                if name == "ascii_integer_limit":
+                    checks += integer_limits(python, source, binary, actual_dir)
                 actual = run([str(binary)], actual_dir)
                 require_result(actual, error)
                 assert actual.stdout == expected.stdout, (

@@ -23,12 +23,12 @@ if sys.flags.optimize:
 REVISION = '4fb67dcd36ae47c91be7e78fdc80cfd8b2f58b3a'
 AUDIT_SHA = 'a6e1c7f4f9029ac007edbe9d8472e875b49ca16b0d516b4b89d34476ecef538e'
 RECORDS = {
-    ('baseline', 'normal'): ('/tmp/relar-memory-timing-normal-v2.json', 'd1fffd17767d83638254c2c88cd142a5d37d3cab18a2c2c74211e78dd30c64ad'),
-    ('baseline', 'thinlto'): ('/tmp/relar-memory-timing-thinlto-v2.json', 'b0a18d19c2e49466c155023fb69ab4bd6622140574ec3b879cd1bf95c4d7638d'),
-    ('final', 'normal'): ('/tmp/relar-memory-timing-normal-final-v1.json', 'dbdbb9b6bc2e5ff9ce7a714c3d78b290d7449d0ca7595d7e2514924915fe7686'),
-    ('final', 'thinlto'): ('/tmp/relar-memory-timing-thinlto-final-v1.json', 'bfa7d1f8af6e87173e424853610f87ad9cc57991ea2baaa8bf743d576f21823a'),
+    ('baseline', 'normal'): ('/tmp/imre-memory-timing-normal-v2.json', 'd1fffd17767d83638254c2c88cd142a5d37d3cab18a2c2c74211e78dd30c64ad'),
+    ('baseline', 'thinlto'): ('/tmp/imre-memory-timing-thinlto-v2.json', 'b0a18d19c2e49466c155023fb69ab4bd6622140574ec3b879cd1bf95c4d7638d'),
+    ('final', 'normal'): ('/tmp/imre-memory-timing-normal-final-v1.json', 'dbdbb9b6bc2e5ff9ce7a714c3d78b290d7449d0ca7595d7e2514924915fe7686'),
+    ('final', 'thinlto'): ('/tmp/imre-memory-timing-thinlto-final-v1.json', 'bfa7d1f8af6e87173e424853610f87ad9cc57991ea2baaa8bf743d576f21823a'),
 }
-ENGINES = ('relar', 'port', 'original', 'rust')
+ENGINES = ('imre', 'port', 'original', 'rust')
 
 
 def sha(data):
@@ -59,7 +59,7 @@ def main():
             return blob(index['files'][str(path)], expected)
 
         records = {key: json.loads(retained(path, expected)) for key, (path, expected) in RECORDS.items()}
-        audit = json.loads(retained('/tmp/relar-memory-final-audit.json', AUDIT_SHA))
+        audit = json.loads(retained('/tmp/imre-memory-final-audit.json', AUDIT_SHA))
         final = records['final', 'normal']['preparation']
         historical_root = Path(final['source_and_tool_paths']['helper:memory_benchmark.py']).parent.parent
         for name, path in final['source_and_tool_paths'].items():
@@ -139,12 +139,12 @@ def main():
                     values = {'median_seconds': statistics.median(times), 'min_seconds': min(times), 'max_seconds': max(times), 'p25_seconds': q[0], 'p75_seconds': q[2]}
                     assert values == row['summary'][engine]
                     medians[engine] = values['median_seconds']
-                for left, right in (('original', 'relar'), ('port', 'relar'), ('relar', 'rust'), ('original', 'rust'), ('port', 'rust')):
+                for left, right in (('original', 'imre'), ('port', 'imre'), ('imre', 'rust'), ('original', 'rust'), ('port', 'rust')):
                     assert row[f'{left}_over_{right}'] == medians[left] / medians[right]
                 if row is not record['startup_control']:
                     fractions = {engine: record['startup_control']['summary'][engine]['median_seconds'] / medians[engine] for engine in ENGINES}
                     assert row['startup_control_fraction'] == fractions
-                    results.append({'label': row['label'], 'median_milliseconds': {key: value * 1000 for key, value in medians.items()}, 'relar_over_rust': medians['relar'] / medians['rust']})
+                    results.append({'label': row['label'], 'median_milliseconds': {key: value * 1000 for key, value in medians.items()}, 'imre_over_rust': medians['imre'] / medians['rust']})
                 counts['gates'] += 4
                 counts['warmups'] += 8
                 counts['measured'] += sample_count * 4
@@ -155,7 +155,7 @@ def main():
         targets = [row for key, rows in recomputed.items() if key.startswith('final-') for row in rows if row['label'].endswith('-256')]
         assert len(targets) == 4
         result = {'status': 'passed', 'scope': 'Archived sources, complete output oracle, filesystem bytes, order balance and statistics; no engine execution.',
-                  'counts': counts, 'all_four_large_cases_at_most_twice_rust': all(row['relar_over_rust'] <= 2 for row in targets), 'records': recomputed}
+                  'counts': counts, 'all_four_large_cases_at_most_twice_rust': all(row['imre_over_rust'] <= 2 for row in targets), 'records': recomputed}
         output = json.dumps(result, indent=2) + '\n'
         if args.output:
             args.output.write_text(output)

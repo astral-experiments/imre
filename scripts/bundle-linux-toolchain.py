@@ -1,4 +1,4 @@
-"""Assemble Relar's relocatable native LLVM 18 tools on the Ubuntu release runner."""
+"""Assemble Imre's relocatable native LLVM 18 tools on the Ubuntu release runner."""
 
 import platform
 import re
@@ -24,7 +24,7 @@ def bundle(dest):
     tools = [llvm / "bin" / name for name in ("clang", "ld.lld")]
 
     # ldd includes dependencies of dependencies. Leave glibc and the GCC unwinder
-    # to the host, which already supplies both to run the Relar executable.
+    # to the host, which already supplies both to run the Imre executable.
     host = {"libc.so.6", "libm.so.6", "libdl.so.2", "libpthread.so.0", "librt.so.1", "libgcc_s.so.1"}
     libraries = {}
     for tool in tools:
@@ -64,7 +64,7 @@ def bundle(dest):
         (link / path.name).write_text(script)
     (link / "libresolv.so").write_text("INPUT ( libresolv.so.2 )\n")
 
-    # Relar hands Clang LLVM IR; its address-sanitizer mode also needs compiler-rt.
+    # Imre hands Clang LLVM IR; its address-sanitizer mode also needs compiler-rt.
     runtimes = Path("clang/18/lib/linux")
     (lib / runtimes).mkdir(parents=True)
     for filename in (f"libclang_rt.asan-{arch}.a", f"libclang_rt.asan-{arch}.a.syms",

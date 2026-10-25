@@ -16,6 +16,7 @@ from pathlib import Path
 from textwrap import dedent
 
 ACCEPTED = {
+    "string_io_import": "from io import StringIO\nStringIO()",
     "concat_write_order": r"""
 from typing import TextIO
 
@@ -109,7 +110,16 @@ print(output.closed)
 with open("empty.txt", "r", encoding="utf-8") as empty:
     print(empty.read())
     print(empty.read())
+with open("buffered.txt", "w", encoding="utf-8") as writer:
+    for size in [122880, 8191, 2]:
+        writer.write(bytes(size).decode())
+        with open("buffered.txt", "rb") as reader:
+            print(len(reader.read()))
+    writer.flush()
+    with open("buffered.txt", "rb") as reader:
+        print(len(reader.read()))
 """,
+    "splitlines_argument": 'print("a\\nb".splitlines(True))',
     "splitlines_and_formatting": r"""
 def nothing() -> None:
     print("None argument evaluated")
@@ -364,6 +374,7 @@ class Group:
     first: Leaf
     direct: BinaryIO
     nested: list[Leaf]
+    mapped: dict[tuple[int, int], Leaf]
     pair: tuple[Leaf, Leaf]
     last: Leaf
 
@@ -375,7 +386,11 @@ def writer(mark: bytes) -> BinaryIO:
 def group(shared: bool) -> Group:
     first = Leaf(writer(b"A"))
     last = first if shared else Leaf(writer(b"D"))
-    return Group(first, writer(b"B"), [Leaf(writer(b"C")), Leaf(writer(b"E"))],
+    nested = [Leaf(writer(b"C")), Leaf(writer(b"E")), Leaf(writer(b"H")), Leaf(writer(b"I"))]
+    mapped: dict[tuple[int, int], Leaf] = {}
+    for i, mark in enumerate([b"J", b"K", b"L", b"M"]):
+        mapped[(i, i + 1)] = Leaf(writer(mark))
+    return Group(first, writer(b"B"), nested, mapped,
                  (Leaf(writer(b"F")), Leaf(writer(b"G"))), last)
 
 def discard(shared: bool) -> None:
@@ -544,13 +559,12 @@ ERRORS = {
 }
 
 REJECTED = {
-    "missing_encoding": 'open("input.txt", "r")',
     "dynamic_mode": 'mode = "r"\nopen("input.txt", mode, encoding="utf-8")',
     "binary_mode": 'open("input.txt", "rb", encoding="utf-8")',
     "append_mode": 'open("input.txt", "a", encoding="utf-8")',
     "encoding": 'open("input.txt", "r", encoding="latin1")',
     "dynamic_encoding": 'encoding = "utf-8"\nopen("input.txt", "r", encoding=encoding)',
-    "newline_keyword": 'open("input.txt", "r", encoding="utf-8", newline="")',
+    "unsupported_newline": 'open("input.txt", "r", encoding="utf-8", newline="other")',
     "read_size": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.read(1)',
     "readline_size": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.readline(2)',
     "gzip_write": 'import gzip\ngzip.open("output.gz", "wb")',
@@ -561,15 +575,15 @@ REJECTED = {
     "seek": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.seek(0)',
     "write_type": 'with open("output.txt", "w", encoding="utf-8") as stream:\n    stream.write(1)',
     "closed_assignment": 'stream = open("input.txt", "r", encoding="utf-8")\nstream.closed = False',
-    "splitlines_argument": 'print("a\\nb".splitlines(True))',
-    "str_container": "print(str([1]))",
+    "str_resource_list": "print(str([open('input.txt', 'r')]))",
     "text_constructor": "from typing import TextIO\nTextIO()",
     "decode_constructor": 'raise UnicodeDecodeError("not a valid constructor")',
     "generic_context": "with [1] as values:\n    print(values[0])",
     "tuple_target": 'with open("input.txt", "r", encoding="utf-8") as (left, right):\n    pass',
     "attribute_target": 'from typing import TextIO\nclass Box:\n    stream: TextIO\n    def __init__(self, stream: TextIO) -> None:\n        self.stream = stream\nbox = Box(open("input.txt", "r", encoding="utf-8"))\nwith box.stream as box.stream:\n    pass',
     "sys_member": "import sys\nprint(sys.path)",
-    "io_member": "from io import StringIO\nStringIO()",
+    "io_unknown_member": "from io import TextCapture\nTextCapture()",
+    "string_io_binary_input": "from io import StringIO\nStringIO(b'input')",
     "typing_member": "from typing import Any\nvalue: Any = 1",
     "module_rebind": 'import sys\nsys.argv = ["replacement"]',
     "alias_rebind": 'from sys import argv\nargv = ["replacement"]',
@@ -668,9 +682,18 @@ def seed(directory: Path, case: str) -> None:
     (directory / "output.txt").write_bytes(b"old data that must be truncated")
     (directory / "directory").mkdir()
     if case == "stream_reads":
+        (directory / "truncated-after-open.gz").write_bytes(
+            gzip.compress(b"x" * 300_000, compresslevel=0, mtime=0)
+        )
         (directory / "long-rows.txt").write_bytes(
             b"a" * 32768 + b"\n" + b"b" * 32769 + b"\r\n" + b"c" * 160000 + b"\rdone"
         )
+    if case == "stream_errors":
+        first = gzip.compress(b"\n" * 65536, compresslevel=1, mtime=0)
+        for name, length in [("partial", 131071), ("bulk", 262144)]:
+            second = bytearray(gzip.compress(b"x" * length, compresslevel=6, mtime=0))
+            second[10] &= ~1  # Clear BFINAL so the decoder encounters an invalid next block.
+            (directory / f"{name}.gz").write_bytes(first + second)
     if case.startswith("stream_"):
         # Split both a CRLF and a four-byte UTF-8 scalar at 8 KiB boundaries.
         contents = b"a" * 8191 + b"\r\n" + b"b" * 8189 + "🙂\rC\n\nD\0".encode()
@@ -683,6 +706,11 @@ def seed(directory: Path, case: str) -> None:
         (directory / "crc.gz").write_bytes(members[:-8] + bytes([members[-8] ^ 1]) + members[-7:])
         (directory / "invalid-block.gz").write_bytes(bytes.fromhex("1f8b0800000000000003ff") + bytes(16))
         (directory / "invalid-text.gz").write_bytes(gzip.compress(b"bad\xff", mtime=0))
+    if case == "stream_errors":
+        header = bytes.fromhex("1f8b08040000000000ff") + b"\xff\xff" + bytes(65535)
+        # A nonfinal stored block followed by a reserved block type.
+        body = bytes.fromhex("00ffff0000") + b"x" * 65535 + b"\x07"
+        (directory / "long-header.gz").write_bytes(header + body)
 
 
 def snapshot(directory: Path) -> dict[str, bytes | None]:
@@ -778,7 +806,7 @@ def main() -> None:
     if args.sanitize:
         flags += ["--sanitize"]
     passed = 0
-    with tempfile.TemporaryDirectory(prefix="relar-files-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-files-") as directory:
         temporary = Path(directory)
         for name, source in REJECTED.items():
             path = temporary / f"{name}.py"
@@ -845,9 +873,9 @@ def main() -> None:
                 )
                 assert built.returncode == 0, (name, level, built.stderr.decode())
                 if name == "text_roundtrip":
-                    assert "call void @relar_args_init" not in llvm.read_text()
-                    assert "call void @relar_args_clear" not in llvm.read_text()
-                native_dir = project / f"relar-O{level}"
+                    assert "call void @imre_args_init" not in llvm.read_text()
+                    assert "call void @imre_args_clear" not in llvm.read_text()
+                native_dir = project / f"imre-O{level}"
                 seed(native_dir, name)
                 actual = run(
                     [str(binary), *argv],
@@ -855,7 +883,7 @@ def main() -> None:
                     limit_descriptors=name == "descriptor_recovery",
                     runner=runner,
                 )
-                check_result(actual, category, f"Relar {name} O{level}")
+                check_result(actual, category, f"Imre {name} O{level}")
                 assert actual.stdout == reference.stdout, (
                     name,
                     level,
@@ -915,7 +943,7 @@ def main() -> None:
                 temporary,
             )
             assert built.returncode == 0, built.stderr.decode()
-            actual = broken_pipe([str(binary)], temporary / f"pipe-relar-O{level}")
+            actual = broken_pipe([str(binary)], temporary / f"pipe-imre-O{level}")
             assert actual == reference, (level, actual, reference)
             passed += 1
     print(

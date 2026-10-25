@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from urllib.parse import unquote
 
-from relar.json import decode
+from imre.json import decode
 
 
 @dataclass(slots=True)

@@ -19,7 +19,7 @@ import subprocess
 import sys
 import tarfile
 
-ENGINES = ('relar', 'rust', 'cpython')
+ENGINES = ('imre', 'rust', 'cpython')
 SCENARIOS = ('report-mixed', 'alert-quiet', 'within-quiet', 'latest-quiet')
 PILOT_NUMBERS = ('003', '005', '006', '007', '008', '009', '010')
 GUARDS = {}
@@ -85,12 +85,12 @@ def main():
     parser.add_argument('--prefix', type=Path, required=True, help='Full path to published filename prefix')
     parser.add_argument('--report', type=Path, required=True)
     parser.add_argument('--render-record', type=Path, required=True)
-    parser.add_argument('--renderer', type=Path, default=Path('/tmp/relar-iterator-performance-render-report.py'))
+    parser.add_argument('--renderer', type=Path, default=Path('/tmp/imre-iterator-performance-render-report.py'))
     for number in PILOT_NUMBERS:
         parser.add_argument(f'--pilot-{number}-audit', type=Path,
-                            default=Path(f'/tmp/relar-telemetry-candidate-{number}-audit.json'))
-    parser.add_argument('--branch-audit', type=Path, default=Path('/tmp/relar-telemetry-candidate-005-branch-audit.json'))
-    parser.add_argument('--root', type=Path, default=Path('/home/dev-user/code/oss/relar'))
+                            default=Path(f'/tmp/imre-telemetry-candidate-{number}-audit.json'))
+    parser.add_argument('--branch-audit', type=Path, default=Path('/tmp/imre-telemetry-candidate-005-branch-audit.json'))
+    parser.add_argument('--root', type=Path, default=Path('/home/dev-user/code/oss/imre'))
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     check(not args.output.exists() and not args.output.is_symlink(), 'use a new audit output')
@@ -239,7 +239,7 @@ def main():
         mode = run['mode']
         bound('preparation/' + mode + '.json', audit['preparations'][mode]['sha256'])
         prepared = values['preparation/' + mode + '.json']
-        check(prepared['relar_build_record'] == build and prepared['input_guards_passed'] and prepared['revision'] == revision, 'prepared build differs')
+        check(prepared['imre_build_record'] == build and prepared['input_guards_passed'] and prepared['revision'] == revision, 'prepared build differs')
         for key in ('stdout', 'stderr'):
             bound(f'preparation/logs/{mode}.{key}', run[key + '_sha256'])
         directory = Path(prepared['binary']).parent
@@ -322,28 +322,28 @@ def main():
                 summary = {'median_seconds': statistics.median(samples), 'min_seconds': min(samples), 'max_seconds': max(samples), 'p25_seconds': q[0], 'p75_seconds': q[2]}
                 check(summary == row['summary'][engine] == audit['records'][key]['ratios_and_medians'][row['label']]['summary'][engine], 'raw timing distribution differs')
             timings = row['summary']
-            relar_rust = timings['relar']['median_seconds'] / timings['rust']['median_seconds']
-            cpython_relar = timings['cpython']['median_seconds'] / timings['relar']['median_seconds']
-            check(relar_rust == row['relar_over_rust'] and cpython_relar == row['cpython_over_relar'], 'raw timing ratio differs')
+            imre_rust = timings['imre']['median_seconds'] / timings['rust']['median_seconds']
+            cpython_imre = timings['cpython']['median_seconds'] / timings['imre']['median_seconds']
+            check(imre_rust == row['imre_over_rust'] and cpython_imre == row['cpython_over_imre'], 'raw timing ratio differs')
             medians[(key, row['label'])] = row
             if row['label'] != 'empty-control':
-                rendered = f"| `{row['scenario']}` / {row['records']:,} | {ms(timings['relar']['median_seconds'])} | {ms(timings['rust']['median_seconds'])} | {ms(timings['cpython']['median_seconds'])} | {ratio(cpython_relar)} | {ratio(relar_rust)} |"
+                rendered = f"| `{row['scenario']}` / {row['records']:,} | {ms(timings['imre']['median_seconds'])} | {ms(timings['rust']['median_seconds'])} | {ms(timings['cpython']['median_seconds'])} | {ratio(cpython_imre)} | {ratio(imre_rust)} |"
                 expect(rendered)
                 tables['thinlto' if record['thinlto'] else 'normal'].append(rendered)
         timings = record['startup_control']['summary']
-        fraction = max(record['startup_control']['summary']['relar']['median_seconds'] / row['summary']['relar']['median_seconds'] for row in record['workloads'])
-        check(fraction == audit['records'][key]['max_control_fractions']['relar'], 'control fraction differs')
-        rendered = f"| {key} | {ms(timings['relar']['median_seconds'])} | {ms(timings['rust']['median_seconds'])} | {ms(timings['cpython']['median_seconds'])} | {fraction:.2%} |"
+        fraction = max(record['startup_control']['summary']['imre']['median_seconds'] / row['summary']['imre']['median_seconds'] for row in record['workloads'])
+        check(fraction == audit['records'][key]['max_control_fractions']['imre'], 'control fraction differs')
+        rendered = f"| {key} | {ms(timings['imre']['median_seconds'])} | {ms(timings['rust']['median_seconds'])} | {ms(timings['cpython']['median_seconds'])} | {fraction:.2%} |"
         expect(rendered)
         tables['control'].append(rendered)
     target = {}
     for scenario in SCENARIOS:
         row = medians[('full-thinlto', scenario + '-4096')]
-        target[row['label']] = row['relar_over_rust']
-        rendered = f"| `{scenario}` | {interval(row['summary']['relar'])} | {interval(row['summary']['rust'])} | {ratio(row['cpython_over_relar'])} | {ratio(row['relar_over_rust'])} | {'yes' if row['relar_over_rust'] < 2 else 'no'} |"
+        target[row['label']] = row['imre_over_rust']
+        rendered = f"| `{scenario}` | {interval(row['summary']['imre'])} | {interval(row['summary']['rust'])} | {ratio(row['cpython_over_imre'])} | {ratio(row['imre_over_rust'])} | {'yes' if row['imre_over_rust'] < 2 else 'no'} |"
         expect(rendered)
         tables['target'].append(rendered)
-    check(target == audit['performance_target']['individual_relar_over_rust'] and all(value < 2 for value in target.values()) == audit['performance_target']['all_four_below_two'], 'report goal differs')
+    check(target == audit['performance_target']['individual_imre_over_rust'] and all(value < 2 for value in target.values()) == audit['performance_target']['all_four_below_two'], 'report goal differs')
     check(f"**{min(target.values()):.3f}–{max(target.values()):.3f}× Rust's time**" in report, 'headline range differs')
     met = all(value < 2 for value in target.values())
     success = 'All four cases meet the requested **below 2× Rust** target.'
@@ -351,11 +351,11 @@ def main():
     check((success in report) == met and (failure in report) == (not met), 'goal sentence differs')
     fractions = {engine: max(record['startup_control']['summary'][engine]['median_seconds'] / row['summary'][engine]['median_seconds'] for record in records.values() for row in record['workloads']) for engine in ENGINES}
     check(fractions == audit['maximum_control_fractions'], 'maximum control fraction differs')
-    check(f"maximum empty-control/workload fractions are {fractions['relar']:.2%} for Relar, {fractions['rust']:.2%} for Rust, and {fractions['cpython']:.2%} for CPython" in report, 'control fraction prose differs')
-    instruction_ratio = audit['profile']['metrics']['relar-callgrind-128']['instructions'] / audit['profile']['metrics']['rust-callgrind-128']['instructions']
-    check(instruction_ratio == audit['profile']['whole_process_instruction_ratio_relar_over_rust']
+    check(f"maximum empty-control/workload fractions are {fractions['imre']:.2%} for Imre, {fractions['rust']:.2%} for Rust, and {fractions['cpython']:.2%} for CPython" in report, 'control fraction prose differs')
+    instruction_ratio = audit['profile']['metrics']['imre-callgrind-128']['instructions'] / audit['profile']['metrics']['rust-callgrind-128']['instructions']
+    check(instruction_ratio == audit['profile']['whole_process_instruction_ratio_imre_over_rust']
           and f"instruction ratio is {instruction_ratio:.3f}× Rust" in report, 'instruction ratio prose differs')
-    for engine in ('relar', 'rust'):
+    for engine in ('imre', 'rust'):
         cpu = audit['profile']['metrics'][engine + '-callgrind-128']
         heap = audit['profile']['metrics'][engine + '-dhat-128']
         growth = audit['profile']['allocation_growth'][engine]
@@ -425,7 +425,7 @@ def main():
     historical = {row['label']: row for row in baseline['workloads']}
     stages = [('Historical original ThinLTO', [historical[scenario + '-4096']['elir_over_rust'] for scenario in SCENARIOS])]
     for number in PILOT_NUMBERS:
-        stages.append(('Pilot ' + number, [pilots[number]['pilot_audit']['ratios_and_medians'][scenario + '-4096']['relar_over_rust'] for scenario in SCENARIOS]))
+        stages.append(('Pilot ' + number, [pilots[number]['pilot_audit']['ratios_and_medians'][scenario + '-4096']['imre_over_rust'] for scenario in SCENARIOS]))
     stages.append(('Final', [target[scenario + '-4096'] for scenario in SCENARIOS]))
     for stage, ratios in stages:
         rendered = '| ' + stage + ' | ' + ' | '.join(ratio(value) for value in ratios) + ' |'
@@ -444,17 +444,17 @@ def main():
         check(re.fullmatch(r'\|[-:| ]+\|', lines[position + 1]), 'invalid table separator')
         check(lines[position + 2:position + 2 + len(rows)] == rows and lines[position + 2 + len(rows)] == '', 'numeric table row order/content differs')
         covered_lines.update(range(position, position + 2 + len(rows)))
-    table('| Full scan, 4,096 records | Relar ms [p25, p75] | Rust ms [p25, p75] | CPython / Relar | Relar / Rust | <2× |', tables['target'])
+    table('| Full scan, 4,096 records | Imre ms [p25, p75] | Rust ms [p25, p75] | CPython / Imre | Imre / Rust | <2× |', tables['target'])
     for mode, title in [('normal', 'Ordinary linking'), ('thinlto', 'ThinLTO')]:
-        table('| Workload / records | Relar ms | Rust ms | CPython ms | CPython / Relar | Relar / Rust |', tables[mode], '### ' + title)
-    table('| Batch / linking | Relar ms | Rust ms | CPython ms | Largest Relar control/workload fraction |', tables['control'])
+        table('| Workload / records | Imre ms | Rust ms | CPython ms | CPython / Imre | Imre / Rust |', tables[mode], '### ' + title)
+    table('| Batch / linking | Imre ms | Rust ms | CPython ms | Largest Imre control/workload fraction |', tables['control'])
     table('| Engine | Guest instructions, 128 queries | Allocated bytes, 128 queries | Allocation blocks | Additional bytes / query, 128→256 | Additional blocks / query |', tables['cpu'])
     table('| Stage | Report / Rust | Alert / Rust | Within / Rust | Latest / Rust |', tables['trajectory'])
     table('| Raw complete measurement record | Uncompressed JSON SHA256 |', tables['raw'])
     check(covered_lines == {i for i, line in enumerate(lines) if line.startswith('|')}, 'unverified extra report table rows')
-    old_instructions = pilots['003']['metrics']['relar-callgrind-128']['instructions']
-    middle_instructions = pilots['005']['metrics']['relar-callgrind-128']['instructions']
-    final_instructions = audit['profile']['metrics']['relar-callgrind-128']['instructions']
+    old_instructions = pilots['003']['metrics']['imre-callgrind-128']['instructions']
+    middle_instructions = pilots['005']['metrics']['imre-callgrind-128']['instructions']
+    final_instructions = audit['profile']['metrics']['imre-callgrind-128']['instructions']
     instruction_text = f"from {old_instructions:,} in exploratory candidate 003 to {middle_instructions:,} in 005 and {final_instructions:,} in the final build ({(1-final_instructions/old_instructions):+.2%} reduction relative to 003)"
     check(instruction_text in report, 'instruction trajectory prose differs')
     branch_totals = branch['function_self_totals']
@@ -475,7 +475,7 @@ def main():
         check(lines.count(line) == count, 'numeric report row multiplicity differs: ' + line)
     closure_path = Path(str(prefix) + '-rename-closure.json')
     closure = read(closure_path)
-    check(closure['status'] == 'passed' and closure['kind'] == 'public-relar-rename-closure', 'public rename closure differs')
+    check(closure['status'] == 'passed' and closure['kind'] == 'public-imre-rename-closure', 'public rename closure differs')
     check(guard(closure_path) in render['inputs'].values(), 'rename closure is not a renderer input')
     links = re.findall(r'\]\(([^)]+)\)', report)
     for target in links:

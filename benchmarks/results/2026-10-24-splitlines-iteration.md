@@ -1,4 +1,6 @@
-# Splitlines on Relar 0.1.2
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
+# Splitlines on Imre 0.1.2
 
 The independent confirmation compared 120 balanced blocks per primary workload against main c9a33681. Baseline, owned-line iteration and borrowed slices were cold-compiled with the same split-module settings and the same 464 external dependency objects. Each timing is a separate, default-system-heap native process on an AMD EPYC Milan Linux VM. The ratio columns are paired speedups with 95% intervals.
 
@@ -46,7 +48,7 @@ List removal saved 8,520 requests and 3.39 MB for the 10× Ruff diff, and its 1�
 
 The current catalog validation covered 66 cases across 325 engine executions, and the original Ruff CLI matched in 13 cases per native arm. All 180 splitline differentials agreed with CPython 3.14.5. The existing file-read UTF-8 error has the same class and occurs before loop entry in each native build, with wording that differs from CPython. The owned-line candidate passed 363 Rust tests and the workspace formatting check. A correction to one Rust test assertion preserved every allocated ELF section byte and address in both measured owned-line programs except the build ID.
 
-The benchmark runs Relar's unchanged uv streaming catalog port on its checked-in release index and Ruff's unchanged upstream conformance reporter on the 146-file typing suite. The catalog oracle runs the upstream finder and renderer on CPython. Ruff runs both ty captures through its real subprocess calls. One 10× input repeats the release index and the other replays 1,460 source files. Plain/gzip and diff/GitHub paths have independent byte-for-byte output checks.
+The benchmark runs Imre's unchanged uv streaming catalog port on its checked-in release index and Ruff's unchanged upstream conformance reporter on the 146-file typing suite. The catalog oracle runs the upstream finder and renderer on CPython. Ruff runs both ty captures through its real subprocess calls. One 10× input repeats the release index and the other replays 1,460 source files. Plain/gzip and diff/GitHub paths have independent byte-for-byte output checks.
 
 The measurement driver accepts `prepare`, `oracles`, `timing` and `allocations`. Set `--work` to an empty absolute output directory, and use python/typing revision `835b70f3f795f8e061b1f7621178515b0a77a0ad` with `--typing-conformance` during preparation. Build each catalog executable with `--module-root examples` and the reporter at `examples/conformance_report/upstream/conformance.py`. Use `--opt-level 3` and a matching single-package runtime archive for each compiler. Place the binaries in `<work>/apps/{baseline,owned,borrowed}/{catalog,ruff}`. For the two primary cases, run `timing --case catalog-10-plain --cpu 12 --blocks 120 --seed 604397` and `timing --case ruff-10-diff --cpu 18 --blocks 120 --seed 604397` sequentially with `--work`. Run `allocations` separately with Valgrind DHAT.
 

@@ -237,7 +237,7 @@
     }
   },
   "callgrind": {
-    "relar": {
+    "imre": {
       "instructions_per_group": 143359872.0,
       "grouping_calls_zero_four": [
         0,

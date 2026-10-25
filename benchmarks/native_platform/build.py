@@ -69,7 +69,7 @@ def main() -> None:
     elapsed = time.perf_counter_ns() - started
     messages = [json.loads(line) for line in result.stdout.splitlines() if line]
     outputs = [message for message in messages if message.get("reason") == "compiler-artifact"
-               and message["target"]["name"] == "relar_benchmark_platform"]
+               and message["target"]["name"] == "imre_benchmark_platform"]
     assert len(outputs) == 1 and outputs[0]["fresh"] is False
     libraries = [Path(path) for path in outputs[0]["filenames"] if path.endswith(".so")]
     assert len(libraries) == 1
@@ -86,7 +86,7 @@ def main() -> None:
               "thinlto": args.thinlto, "llvm_budget": 1000 if args.thinlto else None,
               "build_ns": elapsed, "build_stdout": result.stdout, "build_stderr": result.stderr,
               "library": {"path": str(destination), "sha256": digest(destination), "bytes": destination.stat().st_size},
-              "scope": "native TOML, captured child processes/timeouts, temporary directories; no report computation, Python, or Relar runtime",
+              "scope": "native TOML, captured child processes/timeouts, temporary directories; no report computation, Python, or Imre runtime",
               "input_guards_passed": True}
     (artifact / "build-record.json").write_text(json.dumps(record, indent=2) + "\n")
     print(str(destination))

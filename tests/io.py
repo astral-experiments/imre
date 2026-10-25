@@ -25,8 +25,29 @@ print(0)
 print(-17)
 print(1000000000000000000000000000000000000000000000000000000000001)
 ''',
-    "large": "print(" + repr("prefix\0" + "éλ🙂" * 8192 + "\0suffix") + ")\n"
+    # Exceed the 128 KiB binary buffer CPython 3.14 uses for a pipe.
+    "large": "print(" + repr("prefix\0" + "éλ🙂" * 32768 + "\0suffix") + ")\n"
     'for index in range(160):\n    print(index)\nprint("large output finished")\n',
+    "blocked_write": (Path(__file__).parent / "fixtures/sys/blocked_write.py").read_text(encoding="utf-8"),
+    "print_errno": """import os
+import sys
+for fd in [1, 2]:
+    saved = os.dup(fd)
+    os.dup2(int(sys.argv[1]), fd)
+    try:
+        if fd == 1:
+            print("x" * 131072)
+        else:
+            print("x", file=sys.stderr)
+    except OSError as error:
+        code = repr(error.errno)
+    else:
+        code = "missing error"
+    finally:
+        os.dup2(saved, fd)
+        os.close(saved)
+    print(code)
+""",
     "division_error": '''print("before division error")
 print(1000000000000000000000000000000000000000000000000000000000001)
 zero = int("0")
@@ -78,6 +99,24 @@ def same_output(actual: bytes, expected: bytes, label: str) -> None:
             f"actual={actual[offset:offset + 120]!r}, expected={expected[offset:offset + 120]!r}; "
             f"lengths={len(actual)}/{len(expected)}"
         )
+
+
+def blocked_write(command: list[str], free: int, mode: str) -> subprocess.CompletedProcess[bytes]:
+    reader, writer = os.pipe()
+    try:
+        os.set_blocking(writer, False)
+        for chunk in (b"x" * 4096, b"x"):
+            try:
+                while True:
+                    os.write(writer, chunk)
+            except BlockingIOError:
+                pass
+        if free:
+            os.read(reader, free)
+        return run([*command, str(writer), mode], pass_fds=(writer,))
+    finally:
+        os.close(reader)
+        os.close(writer)
 
 
 def visible_output(fd: int, expected: bytes, timeout: float) -> bytes:
@@ -172,8 +211,8 @@ def check_link_options(directory: Path, compiler: str, runtime: str) -> int:
     driver.chmod(0o755)
     base = [compiler, "build", str(source), "--runtime", runtime, "--clang", str(driver)]
     clean_env = os.environ.copy()
-    clean_env.pop("RELARFLAGS", None)
-    clean_env.pop("RELAR_ENCODED_FLAGS", None)
+    clean_env.pop("IMREFLAGS", None)
+    clean_env.pop("IMRE_ENCODED_FLAGS", None)
 
     def link(*flags: str, **env: str) -> list[bytes]:
         result = subprocess.run(
@@ -191,19 +230,19 @@ def check_link_options(directory: Path, compiler: str, runtime: str) -> int:
     macho = link(*macos)
     assert b"-Wl,-dead_strip" in macho and b"-liconv" in macho
     assert not any(b"relro" in arg or b"gc-sections" in arg for arg in macho)
-    assert b"-Wl,-dead_strip" not in link(*macos, RELARFLAGS="--no-gc-sections")
+    assert b"-Wl,-dead_strip" not in link(*macos, IMREFLAGS="--no-gc-sections")
 
-    elf = link(*linux, RELARFLAGS="--no-gc-sections\t-C relro-level=off")
+    elf = link(*linux, IMREFLAGS="--no-gc-sections\t-C relro-level=off")
     assert b"-Wl,--no-gc-sections" in elf and b"-Wl,-z,norelro" in elf
     args = link(
         *linux, "--gc-sections", "-Crelro-level=partial", "-C", "link-arg=-lm", "--verbose-link",
-        RELARFLAGS="--invalid", RELAR_ENCODED_FLAGS="--no-gc-sections\x1f-Clink-arg=one argument",
+        IMREFLAGS="--invalid", IMRE_ENCODED_FLAGS="--no-gc-sections\x1f-Clink-arg=one argument",
     )
     assert b"-Wl,--gc-sections" in args and b"-Wl,-z,relro,-z,lazy" in args
     assert args[args.index(b"one argument") + 1] == b"-lm"
-    assert b"-Wl,--gc-sections" in link(*linux, RELARFLAGS="--invalid", RELAR_ENCODED_FLAGS="")
+    assert b"-Wl,--gc-sections" in link(*linux, IMREFLAGS="--invalid", IMRE_ENCODED_FLAGS="")
     missing = subprocess.run(
-        [*base, "--gc-sections"], env=clean_env | {"RELARFLAGS": "-C"},
+        [*base, "--gc-sections"], env=clean_env | {"IMREFLAGS": "-C"},
         capture_output=True, timeout=60,
     )
     assert missing.returncode and b"-C requires a value" in missing.stderr
@@ -212,8 +251,8 @@ def check_link_options(directory: Path, compiler: str, runtime: str) -> int:
 
 def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
     help_text = run([compiler, "run", "--help"], cwd=directory, input=b"")
-    require_success(help_text, "relar run --help")
-    assert b"relar run SOURCE.py" in help_text.stdout
+    require_success(help_text, "imre run --help")
+    assert b"imre run SOURCE.py" in help_text.stdout
     script_dir = directory / "scripts"
     script_dir.mkdir()
     source = script_dir / "show args.py"
@@ -221,13 +260,13 @@ def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
         "import os\nfrom pathlib import Path\nfrom sys import argv\n"
         "for arg in argv:\n    print(arg)\n"
         "print(Path('message').read_text(encoding='utf-8'))\n"
-        "print(os.environ.copy()['RELAR_RUN_TEST'])\nprint(input())\n",
+        "print(os.environ.copy()['IMRE_RUN_TEST'])\nprint(input())\n",
         encoding="utf-8",
     )
     (directory / "message").write_text("current working directory", encoding="utf-8")
     scratch = directory / "compiler-temporaries"
     scratch.mkdir()
-    env = {**environment(), "RELAR_RUN_TEST": "inherited environment", "TMPDIR": str(scratch)}
+    env = {**environment(), "IMRE_RUN_TEST": "inherited environment", "TMPDIR": str(scratch)}
     path = "./scripts/show args.py"
     program_args = ["--opt-level", "", "two words", "--", "--help", "--allocator", "jemalloc"]
     expected = [path, *program_args, "current working directory", "inherited environment"]
@@ -250,7 +289,7 @@ def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
                     process.wait(timeout=10)
         expected_code = -signal.SIGKILL if interrupt else 0
         assert process.returncode == expected_code and not error, (process.returncode, error)
-        same_output(out, b"" if interrupt else b"from stdin\n", "relar run stdin")
+        same_output(out, b"" if interrupt else b"from stdin\n", "imre run stdin")
         assert not list(scratch.iterdir()) and not (directory / source.stem).exists()
     rejected = [
         (["--allocator", "other"], b"--allocator expects system or jemalloc"),
@@ -258,7 +297,7 @@ def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
         (["--target", "aarch64-apple-darwin", "--allocator", "jemalloc"], b"requires a Linux target"),
         (["--allocator", "jemalloc", "--target", "aarch64-linux-android"], b"requires a Linux target"),
         (["--allocator", "system", "--runtime", "custom.a"], b"--runtime already selects the allocator"),
-        (["--runtime", "librelar_runtime_jemalloc.a", "--sanitize"], b"requires a system-allocator runtime"),
+        (["--runtime", "libimre_runtime_jemalloc.a", "--sanitize"], b"requires a system-allocator runtime"),
         (["-C", "relro-level=other"], b"relro-level expects full, partial, or off"),
     ]
     for arguments, message in rejected:
@@ -274,6 +313,16 @@ def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
     collision = run([*compiled, "--emit-llvm", path], cwd=directory, input=b"")
     assert collision.returncode and b"distinct paths" in collision.stderr and source.read_bytes() == before
     return 5 + len(rejected)
+
+
+def broken_pipe(command: list[str]) -> subprocess.CompletedProcess[bytes]:
+    reader, writer = os.pipe()
+    os.close(reader)
+    with os.fdopen(writer, "wb", buffering=0) as sink:
+        return subprocess.run(
+            command, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.PIPE,
+            timeout=60, check=False, env=environment(),
+        )
 
 
 def main() -> None:
@@ -296,7 +345,7 @@ def main() -> None:
     assert args.timeout > 0
     compiler, runtime = str(args.compiler.resolve()), str(args.runtime.resolve())
     passed = 0
-    with tempfile.TemporaryDirectory(prefix="relar-io-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-io-") as directory:
         temporary = Path(directory)
         flags = ["--runtime", runtime, "--clang", args.clang, "--opt-level", args.opt_levels[0], *build_flags]
         if args.sanitize:
@@ -326,6 +375,10 @@ def main() -> None:
         reference["terminal_loop"] = terminal_message(
             [args.python, "-I", str(sources["terminal_loop"])], args.timeout
         )
+        large_pipe = broken_pipe([args.python, "-I", str(sources["large"])])
+        assert large_pipe.returncode == 1, (large_pipe.returncode, large_pipe.stderr[-2000:])
+        immediate = large_pipe.stderr.splitlines(keepends=True)[-1]
+        assert immediate.startswith(f"BrokenPipeError: [Errno {errno.EPIPE}] ".encode()), immediate
 
         for level in args.opt_levels:
             binaries = {}
@@ -348,7 +401,7 @@ def main() -> None:
                 passed += 1
 
             for name, category in ERRORS.items():
-                # Merging streams also verifies pending stdout precedes Relar's diagnostic.
+                # Merging streams also verifies pending stdout precedes Imre's diagnostic.
                 result = subprocess.run(
                     [binaries[name]], input=b"", stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT, timeout=60, check=False, env=environment(),
@@ -376,23 +429,42 @@ def main() -> None:
             )
             passed += 1
 
-            # CPython may report status 120 during shutdown. Relar's contract is OSError/1.
-            for name, category in [
-                ("small", b"OSError"),
-                ("large", b"OSError"),
-                ("division_error", b"ZeroDivisionError"),
+            for mode, free in [("write", 0), ("write", 4096), ("flush", 0)]:
+                reference_run = blocked_write([args.python, "-I", str(sources["blocked_write"])], free, mode)
+                native_run = blocked_write([binaries["blocked_write"]], free, mode)
+                assert reference_run.returncode == native_run.returncode == 0
+                assert b"BlockingIOError(" in reference_run.stderr
+                same_output(native_run.stderr, reference_run.stderr, f"blocked {mode} with {free} free")
+                same_output(native_run.stdout, reference_run.stdout, "buffer retained after blocked write")
+                passed += 1
+
+            # A caught print failure on either stream retains the pipe errno.
+            reader, writer = os.pipe()
+            os.close(reader)
+            with os.fdopen(writer, "wb", buffering=0):
+                commands = ([args.python, "-I", str(sources["print_errno"])], [binaries["print_errno"]])
+                reference_run, native_run = [run([*cmd, str(writer)], pass_fds=(writer,)) for cmd in commands]
+                assert reference_run.returncode == native_run.returncode == 0
+                same_output(reference_run.stdout, (str(errno.EPIPE) + "\n").encode() * 2, "reference errno")
+                same_output(native_run.stdout, reference_run.stdout, "print errno")
+                same_output(native_run.stderr, reference_run.stderr, "retained stderr")
+            passed += 1
+
+            # The large print writes immediately. The smaller buffered writes fail
+            # during shutdown, including after an unhandled division error.
+            shutdown = b"Exception ignored while flushing sys.stdout:\nBrokenPipeError:"
+            for name, status, prefix, lines in [
+                ("small", 120, shutdown, 2),
+                ("large", 1, immediate, 1),
+                ("division_error", 120, b"ZeroDivisionError:", 3),
             ]:
-                reader, writer = os.pipe()
-                os.close(reader)
-                with os.fdopen(writer, "wb", buffering=0) as sink:
-                    result = subprocess.run(
-                        [binaries[name]], stdin=subprocess.DEVNULL, stdout=sink,
-                        stderr=subprocess.PIPE, timeout=60, check=False, env=environment(),
-                    )
-                assert result.returncode == 1 and result.stderr.startswith(category + b":"), (
+                result = broken_pipe([binaries[name]])
+                assert result.returncode == status and result.stderr.startswith(prefix), (
                     "broken pipe", name, level, result.returncode, result.stderr[:2000],
                 )
-                assert result.stderr.count(b"\n") == 1 and result.stderr.endswith(b"\n"), (
+                if status == 120:
+                    assert shutdown in result.stderr, (name, level, result.stderr[:2000])
+                assert result.stderr.count(b"\n") == lines and result.stderr.endswith(b"\n"), (
                     "broken pipe", name, level, result.stderr[:2000],
                 )
                 passed += 1

@@ -23,7 +23,7 @@
       "revision": "2db836788546b55cf68969aaadd8539010b4358f",
       "dirty": false
     },
-    "relar_stage": "final_measured_relar",
+    "imre_stage": "final_measured_imre",
     "rust_bigint_stage": "rust_bigint_matched_thin_lto",
     "rust_i64_stage": "rust_checked_i64_matched_thin_lto",
     "binary_input_output_hash_joins_verified": true
@@ -82,10 +82,10 @@
     "DHAT replaces allocator routines and reports requested bytes, allocation blocks, peak live allocations, and lifetimes. These are not allocator-reserved bytes or process RSS.",
     "Profiling runs may overlap independent build work. Instrumented elapsed times are deliberately excluded; clean whole-process timing uses a separate benchmark record.",
     "Inlining moves work from runtime function entries into callers. Fewer named runtime calls alone does not prove less semantic work.",
-    "The selected Relar stages are cumulative, but the decoded-access stage also enables and tunes cross-language ThinLTO; that stage is not a single-change ablation.",
+    "The selected Imre stages are cumulative, but the decoded-access stage also enables and tunes cross-language ThinLTO; that stage is not a single-change ablation.",
     "Rust BigInt preserves arbitrary-precision value semantics; the checked-i64 reference has a narrower integer contract. Both captured workloads fit its range. Rust uses native indices where the algorithm guarantees valid container lengths.",
     "Every run preserves and verifies complete stdout bytes, empty stderr, successful exit, and binary hashes. Full raw traces, logs, output, and build snapshots remain in ignored local evidence directories; this compact file records their hashes.",
-    "Both default-budget and matched-budget Rust ThinLTO controls are retained. The matched controls explicitly use import-instr-limit=1000 and inline-threshold=1000, matching the tuned Relar stages; inherited encoded flags are unset.",
+    "Both default-budget and matched-budget Rust ThinLTO controls are retained. The matched controls explicitly use import-instr-limit=1000 and inline-threshold=1000, matching the tuned Imre stages; inherited encoded flags are unset.",
     "These two 16,384-task workloads characterize this program and environment, not general Python or Rust performance."
   ],
   "stages": [
@@ -127,12 +127,12 @@
           },
           "traces": {
             "callgrind": {
-              "file": "layered-16384.relar.callgrind.trace",
+              "file": "layered-16384.imre.callgrind.trace",
               "sha256": "eb123d65121b1779c611f3976444634a1054fbf78773d444af7f6b40393b6ef1",
               "log_sha256": "9c629058720b0982ad4afdea9d7637222c8801d600699c974b4d96197944ef5f"
             },
             "dhat": {
-              "file": "layered-16384.relar.dhat.trace",
+              "file": "layered-16384.imre.dhat.trace",
               "sha256": "aadd50a6281471fdf2fc59e1d0a231789b96926f380e3d68c7a55d39ee5f5783",
               "log_sha256": "c235ef1b0a8c0e2c793bb6df51a98d97f6eafba332ba7c465ed1e2ee198a8180"
             }
@@ -154,12 +154,12 @@
           },
           "traces": {
             "callgrind": {
-              "file": "wide-16384.relar.callgrind.trace",
+              "file": "wide-16384.imre.callgrind.trace",
               "sha256": "26e0d1769b93b3dd549637259a97cd0c8a50562f2f6f0d93fda3f41ae2b01e55",
               "log_sha256": "0778520f6fce49051989fa17a1d4acb77af9e9df9d35b885fb6fa89d16d2f325"
             },
             "dhat": {
-              "file": "wide-16384.relar.dhat.trace",
+              "file": "wide-16384.imre.dhat.trace",
               "sha256": "df8d0326885c65cc9b6983dde20bcf20c16faece085d6ff73ea9ef32301da2cd",
               "log_sha256": "a811c3223f716c758e676af0801459c801ad793b5c43764e9781aab88b84b50a"
             }
@@ -618,12 +618,12 @@
           },
           "traces": {
             "callgrind": {
-              "file": "layered-16384.relar_final.callgrind.trace",
+              "file": "layered-16384.imre_final.callgrind.trace",
               "sha256": "9c9a483a139c88cb1fed94f0989e899f575aa849936d746a4abbfb59b472bfba",
               "log_sha256": "7db377522ddb296db0c8e87676b7fca82b96d813b3ce0190c09ad9860a3d353c"
             },
             "dhat": {
-              "file": "layered-16384.relar_final.dhat.trace",
+              "file": "layered-16384.imre_final.dhat.trace",
               "sha256": "f9a96bf3ee95ce98f418d3f39d382aed1f86fd29ebb188cdc6302a3023476237",
               "log_sha256": "5dce1dd0297638a8a3cfeac83c3c9c346058f2e1559d53da17cd455992462352"
             }
@@ -645,12 +645,12 @@
           },
           "traces": {
             "callgrind": {
-              "file": "wide-16384.relar_final.callgrind.trace",
+              "file": "wide-16384.imre_final.callgrind.trace",
               "sha256": "67312294666ef17c95a7f9621b6156f85c689ef1936ba899a5d348ff886de5e6",
               "log_sha256": "dc5284bef51c5fa13886f4b6ab98ac2cf6adabd83a73187b621b64d7480ac025"
             },
             "dhat": {
-              "file": "wide-16384.relar_final.dhat.trace",
+              "file": "wide-16384.imre_final.dhat.trace",
               "sha256": "8b3b79331b876d2f6ae90dff96b5c7ed4a9cc7fe1993d23a362ed940c4ea89d8",
               "log_sha256": "15d71de1312981803fbf5c12b3ed58e8af4b4db850e8fda95f03a8500788a65d"
             }
@@ -659,8 +659,8 @@
       }
     },
     {
-      "id": "final_measured_relar",
-      "description": "Exact clean-worktree Relar binary used in the final matched-budget five-way timing comparison",
+      "id": "final_measured_imre",
+      "description": "Exact clean-worktree Imre binary used in the final matched-budget five-way timing comparison",
       "thin_lto": true,
       "llvm_optimization_budgets": {
         "import_instruction_limit": 1000,
@@ -704,12 +704,12 @@
           },
           "traces": {
             "callgrind": {
-              "file": "layered-16384.relar_final.callgrind.trace",
+              "file": "layered-16384.imre_final.callgrind.trace",
               "sha256": "e30a66c6383c7865ff162e75fc7efcec864977080ff40e9e9299767a8b8ebc5b",
               "log_sha256": "7e9b202757645a6a3edaa99042591ed50e1f8b5f3b37fd63cbfcaf7fd0ed745b"
             },
             "dhat": {
-              "file": "layered-16384.relar_final.dhat.trace",
+              "file": "layered-16384.imre_final.dhat.trace",
               "sha256": "bc676f86b34463f08259532c5ea2fbf356f41f918fa1e6850a2d71fe3ea3fa65",
               "log_sha256": "cb3f648997cfa3c0a35ee98ce50122d1ab48c78e4a91537f5b8ec1e8f6eb01bc"
             }
@@ -731,12 +731,12 @@
           },
           "traces": {
             "callgrind": {
-              "file": "wide-16384.relar_final.callgrind.trace",
+              "file": "wide-16384.imre_final.callgrind.trace",
               "sha256": "7fa54309145565e8ce1f8cb2d4f119a04a205ef58248dfbcbfbdc1e6c8a00d4d",
               "log_sha256": "404916c85025fcb5683254be720f99be0c2f1d83e6deca030a7a3f659301dd76"
             },
             "dhat": {
-              "file": "wide-16384.relar_final.dhat.trace",
+              "file": "wide-16384.imre_final.dhat.trace",
               "sha256": "9f9a0d76cbcd16b428aedb3bb28d52169e4ac0b632a17c2673e69fb296c0455f",
               "log_sha256": "46e68f43f3b51fd8b14c94a6deb840f1837ca6b70498ea3293caa058d6778a0c"
             }
@@ -924,7 +924,7 @@
     },
     {
       "id": "rust_bigint_matched_thin_lto",
-      "description": "Rust BigInt reference with ThinLTO import and inline budgets matched to Relar",
+      "description": "Rust BigInt reference with ThinLTO import and inline budgets matched to Imre",
       "thin_lto": true,
       "llvm_optimization_budgets": {
         "import_instruction_limit": 1000,
@@ -1016,7 +1016,7 @@
     },
     {
       "id": "rust_checked_i64_matched_thin_lto",
-      "description": "Rust checked-i64 reference with ThinLTO import and inline budgets matched to Relar",
+      "description": "Rust checked-i64 reference with ThinLTO import and inline budgets matched to Imre",
       "thin_lto": true,
       "llvm_optimization_budgets": {
         "import_instruction_limit": 1000,
@@ -1153,17 +1153,17 @@
     },
     "other_functions": [
       {
-        "name": "relar_str_split_whitespace",
+        "name": "imre_str_split_whitespace",
         "self_instructions": 7978154,
         "inclusive_instructions": 16904713
       },
       {
-        "name": "relar_runtime::output_bytes",
+        "name": "imre_runtime::output_bytes",
         "self_instructions": 5161959,
         "inclusive_instructions": 6487784
       },
       {
-        "name": "relar_print_int",
+        "name": "imre_print_int",
         "self_instructions": 3315242,
         "inclusive_instructions": 8549919
       }

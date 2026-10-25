@@ -2,8 +2,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Self
 
 import class_alias_helpers as cls
-from class_alias_helpers import identity as __relar_parameter_0
-from class_alias_helpers import key as __relar_parameter_2
+from class_alias_helpers import identity as __imre_parameter_0
+from class_alias_helpers import key as __imre_parameter_2
 
 
 @dataclass
@@ -60,6 +60,6 @@ class Names:
 Item.exercise()
 names = Names(cls=12, len=13)
 print(names)
-print(__relar_parameter_0(names.cls))
-print(__relar_parameter_2(names.len))
+print(__imre_parameter_0(names.cls))
+print(__imre_parameter_2(names.len))
 print(cls.identity(14))
