@@ -1,4 +1,5 @@
 //! POSIX executable lookup shares the caller's credentials and current working directory.
+mod archives;
 mod copy;
 mod rmtree;
 

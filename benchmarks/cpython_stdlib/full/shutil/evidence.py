@@ -11,6 +11,7 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path[:0] = [str(HERE), str(STDLIB)]
 import copyfile
+import archive_ops
 import native_copy
 import native_rmtree
 import tree_ops
@@ -85,11 +86,17 @@ def run_level(args, module, reference, level, directory):
     move_work = directory / "move"
     move_work.mkdir()
     executions.update(move_ops.executors(module, tools, move_work, with_roles=True))
+    archive_work = directory / "archives"
+    archive_work.mkdir()
+    archive_blockers = {}
+    executions.update(archive_ops.executors(module, tools, archive_work, with_roles=True,
+                                           blockers=archive_blockers))
     preflight = {}
     for cls, operation, blockers in (
         (module.TestCopy, "shutil metadata", native_copy.MOCK_CASES),
         (module.TestRmTree, "shutil.rmtree", native_rmtree.BLOCKERS),
         (module.TestCopyTree, "shutil.copytree", tree_ops.BLOCKERS),
+        (module.TestArchives, "shutil archive registry", archive_blockers),
     ):
         for name, reason in blockers.items():
             test_id = cls(name).id()
