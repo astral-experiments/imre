@@ -151,8 +151,14 @@ impl Checker<'_> {
     /// Class arguments are static builtin/nominal classes or tuples of them;
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
-        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::SimpleNamespace)) {
-            return Ok(vec![InstanceType::SimpleNamespace]);
+        match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => {
+                return Ok(vec![InstanceType::ForwardRef]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::SimpleNamespace)) => {
+                return Ok(vec![InstanceType::SimpleNamespace]);
+            }
+            _ => {}
         }
         if let ast::Expr::Tuple(tuple) = expression {
             let mut result = Vec::new();
@@ -246,8 +252,23 @@ impl Checker<'_> {
             ));
         };
         let value = self.expr(value)?;
+        let classes = match self.instance_types(classes) {
+            Ok(classes) => classes,
+            Err(diagnostic) => {
+                if let Ok(target) = self.expr(classes)
+                    && matches!(target.ty, Type::ForwardRef(_))
+                {
+                    return Ok(Self::class_check_error(
+                        value,
+                        target,
+                        "isinstance() arg 2 must be a type, a tuple of types, or a union",
+                    ));
+                }
+                return Err(diagnostic);
+            }
+        };
         if matches!(value.ty, Type::Document(_)) {
-            let op = match self.instance_types(classes)?.as_slice() {
+            let op = match classes.as_slice() {
                 [InstanceType::Dict] => ir::DocumentOp::IsMap,
                 [InstanceType::List] => ir::DocumentOp::IsList,
                 [InstanceType::Exact(Type::Str)] => ir::DocumentOp::IsStr,
@@ -262,10 +283,7 @@ impl Checker<'_> {
             return Ok(documents::op(op, Type::Bool, vec![value]));
         }
         if matches!(value.ty, Type::JsonRoot | Type::JsonValue)
-            && matches!(
-                self.instance_types(classes)?.as_slice(),
-                [InstanceType::Exact(Type::Int)]
-            )
+            && matches!(classes.as_slice(), [InstanceType::Exact(Type::Int)])
         {
             return Ok(Expr {
                 ty: Type::Bool,
@@ -282,11 +300,62 @@ impl Checker<'_> {
                 "isinstance on readonly JSON is unsupported; select into an exact type",
             ));
         }
-        let classes = self.instance_types(classes)?;
         Ok(Expr {
             ty: Type::Bool,
             kind: ExprKind::Builtin(Builtin::IsInstance(classes), vec![value]),
         })
+    }
+
+    /// Class checks evaluate both operands before reporting an invalid class.
+    fn class_check_error(first: Expr, second: Expr, message: &str) -> Expr {
+        let exception = Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("TypeError").unwrap(),
+                message: Some(Box::new(unpacking::string(message))),
+            },
+        };
+        Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Builtin(Builtin::RaiseException, vec![first, second, exception]),
+        }
+    }
+
+    pub(super) fn issubclass(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.reject_builtin_keywords(call)?;
+        let [first, second] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "issubclass requires two positional operands",
+            ));
+        };
+        let first = self.expr(first)?;
+        let second = self.expr(second)?;
+        match (first.ty, second.ty) {
+            (Type::BuiltinClass, Type::BuiltinClass) => Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::IsBuiltinSubclass, vec![first, second]),
+            }),
+            (Type::BuiltinClass, Type::ForwardRef(_)) => Ok(Self::class_check_error(
+                first,
+                second,
+                "issubclass() arg 2 must be a class, a tuple of classes, or a union",
+            )),
+            (
+                Type::Bool | Type::Int | Type::Float | Type::Str | Type::None | Type::ForwardRef(_),
+                Type::BuiltinClass | Type::ForwardRef(_),
+            ) => Ok(Self::class_check_error(
+                first,
+                second,
+                "issubclass() arg 1 must be a class",
+            )),
+            _ => Err(error(
+                self.source,
+                call,
+                "issubclass requires supported native class objects",
+            )),
+        }
     }
 
     fn instance_members(&self, ty: Type) -> Vec<Type> {
