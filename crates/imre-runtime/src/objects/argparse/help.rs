@@ -8,7 +8,7 @@ use icu_properties::props::{EnumeratedProperty, GeneralCategory, GeneralCategory
 
 use super::super::python_whitespace;
 use super::exceptions::{Error, Kind as ExceptionKind};
-use super::{ArgumentGroup, Kind, OptionSpec, Parser, Subcommands};
+use super::{ArgumentGroup, OptionSpec, Parser, Subcommands};
 
 /// Parse the positive decimal width accepted by shutil.get_terminal_size().
 fn positive_columns(value: &str) -> Option<usize> {
@@ -103,7 +103,14 @@ impl OptionSpec {
             (false, false) => "32",
         };
         if summary {
-            if self.kind == Kind::Bool {
+            if !self.takes_value() {
+                if self.action == super::Action::BooleanOptional {
+                    return paint(
+                        color,
+                        option_color(&self.flag, false),
+                        &self.flags().collect::<Vec<_>>().join(" | "),
+                    );
+                }
                 return paint(color, option_color(&self.flag, false), &self.flag);
             }
             return if color {
@@ -121,7 +128,7 @@ impl OptionSpec {
             .map(|flag| paint(color, option_color(flag, true), flag))
             .collect::<Vec<_>>()
             .join(", ");
-        if self.kind != Kind::Bool {
+        if self.takes_value() {
             label.push(' ');
             label.push_str(&paint(color, "1;33", &metavar));
         }
@@ -426,16 +433,15 @@ impl Parser {
     }
 
     fn description(&self, text: &str, width: usize, indent: usize) -> String {
-        let text = if text.contains("%(prog)") {
-            expand(text, &self.prog, None)
-        } else {
-            text.to_owned()
-        };
+        let expanded = text
+            .contains("%(prog)")
+            .then(|| expand(text, &self.prog, None));
+        let text = expanded.as_deref().unwrap_or(text);
         let prefix = " ".repeat(indent);
         if self.raw {
-            let mut offsets = super::super::LineOffsets::new(&text);
+            let mut offsets = super::super::LineOffsets::new(text);
             let mut result = String::new();
-            while let Some(line) = offsets.next(&text) {
+            while let Some(line) = offsets.next(text) {
                 result.push_str(&prefix);
                 result.push_str(&text[line.start..offsets.start]);
             }
@@ -444,7 +450,7 @@ impl Parser {
             // _format_text subtracts the current indent before textwrap.fill;
             // textwrap then counts its initial/subsequent indent in that width.
             let width = width.saturating_sub(indent).max(11);
-            wrap(&text, width.saturating_sub(indent).max(1))
+            wrap(text, width.saturating_sub(indent).max(1))
                 .into_iter()
                 .map(|line| format!("{prefix}{line}"))
                 .collect::<Vec<_>>()
@@ -673,7 +679,7 @@ fn expand(template: &str, prog: &str, option: Option<&OptionSpec>) -> String {
                     }
                 }
                 ("nargs", Some(option)) => {
-                    if option.kind == Kind::Bool {
+                    if !option.takes_value() {
                         "0".into()
                     } else {
                         option.nargs.spelling()

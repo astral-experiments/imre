@@ -15,6 +15,7 @@ mod buffered;
 mod gzip;
 mod path_text;
 mod seekable;
+mod text_memory;
 use seekable::Memory;
 pub(super) use seekable::disk_offset;
 
@@ -34,6 +35,7 @@ enum FileKind {
     BinaryRead,
     GzipBinaryRead,
     Memory,
+    TextMemory,
     Member,
     BinaryWrite,
 }
@@ -42,6 +44,7 @@ enum Stream {
     Read(Input),
     Write(Output),
     Memory(Memory),
+    TextMemory(text_memory::TextMemory),
     Member(Box<super::zipfile::Member>),
 }
 
@@ -52,7 +55,7 @@ impl Stream {
         let (file, flushed) = match self {
             Self::Read(input) => (input.into_file(), Ok(())),
             Self::Write(writer) => writer.finish(),
-            Self::Memory(_) | Self::Member(_) => return Ok(()),
+            Self::Memory(_) | Self::TextMemory(_) | Self::Member(_) => return Ok(()),
         };
         close_file(file).and(flushed)
     }
@@ -129,6 +132,7 @@ impl FileState {
         let stream = if read {
             Stream::Read(Input::pipe(file, !text, capacity))
         } else {
+            crate::initialize_io();
             Stream::Write(Output::pipe(file, capacity, text && bufsize == 1))
         };
         let kind = if text {
@@ -153,10 +157,16 @@ impl FileState {
     }
 
     pub(super) fn read(&mut self) -> Result<Str> {
+        if self.kind == FileKind::TextMemory {
+            return self.text_memory()?.read(None, false);
+        }
         self.input()?.read_text()
     }
 
     pub(super) fn readline(&mut self) -> Result<Str> {
+        if self.kind == FileKind::TextMemory {
+            return self.text_memory()?.read(None, true);
+        }
         self.input()?.text_line()
     }
 
@@ -257,15 +267,23 @@ impl FileState {
     }
 
     pub(super) fn write(&mut self, text: &str) -> Result<()> {
+        if self.kind == FileKind::TextMemory {
+            return self.text_memory()?.write(text);
+        }
         self.write_bytes(text.as_bytes())
     }
 
     pub(super) fn flush(&mut self) -> Result<()> {
+        if self.kind == FileKind::TextMemory {
+            return Ok(());
+        }
         if self.kind == FileKind::BinaryWrite && self.stream.is_none() {
             return Err(Error::new(Kind::ValueError, "flush of closed file"));
         }
         match self.stream()? {
-            Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) => Ok(()),
+            Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) | Stream::TextMemory(_) => {
+                Ok(())
+            }
             Stream::Write(writer) => writer.flush().map_err(os_error),
         }
     }
@@ -343,11 +361,11 @@ fn os_error_kind(kind: io::ErrorKind) -> Kind {
 }
 
 /// Format a POSIX errno without a filename, as in OSError(errno, strerror).
-pub(super) fn errno_error(error: io::Error) -> Error {
+pub(crate) fn errno_error(error: io::Error) -> Error {
     errno_with_filename(error, None)
 }
 
-fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
+pub(super) fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
     errno_with_filenames(
         error,
         path.map(|s| super::exceptions::Filename::Str(Rc::new(Str::from(s)))),
@@ -431,7 +449,7 @@ pub(super) fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*c
 fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
     let (file, metadata) = open_file(path, mode)?;
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
-    let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
+    let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
     let fd = file.as_raw_fd();
     let stream = match mode {
         0 | 4 => {
@@ -781,11 +799,58 @@ mod tests {
 
     use super::super::exceptions::{
         imre_error_pending, imre_error_set, imre_error_take, imre_exception_matches,
-        imre_exception_new,
+        imre_exception_message, imre_exception_new,
     };
     use super::super::{imre_object_release, imre_seq_append, imre_seq_new};
 
     struct Directory(PathBuf);
+
+    #[test]
+    fn unlink_uses_a_directory_descriptor_and_removes_only_the_named_link() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let directory = Directory::new();
+        let handle = File::open(&directory.0).unwrap();
+        let target = directory.0.join("preserved");
+        std::fs::write(&target, b"untouched").unwrap();
+        let fd = Int::small(i64::from(handle.as_raw_fd())).unwrap();
+        for name in ["é-link".as_bytes().to_vec(), b"raw-\xff-link".to_vec()] {
+            let link = directory.0.join(OsStr::from_bytes(&name));
+            let setup = std::os::unix::fs::symlink(&target, &link);
+            // APFS rejects non-UTF-8 directory entries with EILSEQ at creation.
+            // Compare unlink's error with the same filesystem rather than
+            // assuming that looking up such an entry also returns EILSEQ.
+            let expected_errno = setup.err().map(|error| {
+                assert_eq!(name, b"raw-\xff-link");
+                assert_eq!(error.raw_os_error(), Some(libc::EILSEQ));
+                std::fs::remove_file(&link)
+                    .unwrap_err()
+                    .raw_os_error()
+                    .unwrap()
+            });
+            // SAFETY: the bytes and descriptor stay rooted across unlinkat.
+            unsafe {
+                super::super::os::imre_os_unlink(std::ptr::from_ref(&name).cast(), 1, fd.0, 0)
+            };
+            if let Some(errno) = expected_errno {
+                assert_eq!(imre_error_pending(), 1);
+                // SAFETY: take transfers the exception owner; message returns its own string.
+                let message = unsafe {
+                    let error = Rc::from_raw(imre_error_take());
+                    Rc::from_raw(imre_exception_message(Rc::as_ptr(&error)))
+                };
+                assert!(message.starts_with(&format!("[Errno {errno}] ")));
+                assert!(message.ends_with(": b'raw-\\xff-link'"));
+            } else {
+                assert_eq!(imre_error_pending(), 0);
+                assert_eq!(
+                    link.symlink_metadata().unwrap_err().kind(),
+                    io::ErrorKind::NotFound
+                );
+            }
+        }
+        assert_eq!(std::fs::read(target).unwrap(), b"untouched");
+    }
 
     impl Directory {
         fn new() -> Self {

@@ -81,31 +81,38 @@ impl Emitter<'_, '_> {
         }
     }
 
-    pub(super) fn tuple(&mut self, ty: Type, values: &[Expr]) -> Value {
-        let cache = if values.iter().all(immutable_literal) {
+    pub(super) fn tuple(&mut self, ty: Type, values: &[Expr], named_root: Option<&str>) -> Value {
+        let root = if let Some(name) = named_root {
+            // Imports and default arguments can read the same module object in
+            // different codegen units. Define and clear its root exactly once.
+            let root = self.output.global_ref(name.to_owned());
+            let roots = self.tuple_literals.entry(self.output.entry).or_default();
+            if !roots.contains(&root) {
+                roots.push(root.clone());
+            }
+            Some(root)
+        } else if values.iter().all(immutable_literal) {
             let unit = self.output.current;
             let roots = self.tuple_literals.entry(unit).or_default();
             let root = self
                 .output
                 .global_ref(format!("tuple_literal_{unit}_{}", roots.len()));
             roots.push(root.clone());
+            Some(root)
+        } else {
+            None
+        };
+        let cache = root.map(|root| {
             let prior = self.instruction(format!("load ptr, ptr @{root}"));
             let missing = self.instruction(format!("icmp eq ptr {prior}, null"));
             let build = self.label();
             let ready = self.label();
             self.branch(&missing, &build, &ready);
             self.start(&build);
-            Some((root, ready))
-        } else {
-            None
-        };
+            (root, ready)
+        });
 
-        let object = self.record(ty);
-        for (field, value) in values.iter().enumerate() {
-            let value = self.operand(value);
-            self.set_field(&object, field, &value.value);
-            self.release_operand(&value);
-        }
+        let object = self.record_from_fields(ty, values);
         let Some((root, ready)) = cache else {
             return object;
         };
@@ -122,6 +129,17 @@ impl Emitter<'_, '_> {
         };
         self.retain(&value);
         value
+    }
+
+    /// Construct a new owner, even when all field values are literals.
+    pub(super) fn record_from_fields(&mut self, ty: Type, values: &[Expr]) -> Value {
+        let object = self.record(ty);
+        for (field, value) in values.iter().enumerate() {
+            let value = self.operand(value);
+            self.set_field(&object, field, &value.value);
+            self.release_operand(&value);
+        }
+        object
     }
 
     /// Main releases the literal roots after locals/globals on either exit.
