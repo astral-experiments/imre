@@ -1119,7 +1119,8 @@ fn signature(
                 && sign_parameters::only_compares_zero(function, parameter.name().as_str()),
         });
     }
-    let inert = annotations::inert_body(function);
+    // A .pyi describes the linked C function. Its ellipsis is not an executable body.
+    let inert = graph.modules[module].archive.is_none() && annotations::inert_body(function);
     if inert && let Some(ast::Expr::Name(n)) = function.returns.as_deref() {
         graph.deferred_name(module, n.range());
     }
