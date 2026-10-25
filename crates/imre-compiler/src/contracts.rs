@@ -72,7 +72,8 @@ impl Builtin {
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
                 match operation {
-                    TextOperation::Split(_)
+                    TextOperation::Lower
+                    | TextOperation::Split(_)
                     | TextOperation::Partition
                     | TextOperation::Unquote
                     | TextOperation::ShlexSplit => true,
@@ -105,6 +106,8 @@ impl Builtin {
                     | PathOperation::Match { .. }
                     | PathOperation::Resolve
                     | PathOperation::WriteText
+                    | PathOperation::WriteUnion { .. }
+                    | PathOperation::WriteTypeError
                     | PathOperation::WriteBytes
                     | PathOperation::Mkdir
                     | PathOperation::Unlink
@@ -155,6 +158,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
                 matches!(
                     operation,
@@ -173,11 +177,22 @@ impl Builtin {
                 | ProcessOperation::Await
                 | ProcessOperation::RunLoop
                 | ProcessOperation::JoinGroup
+                | ProcessOperation::GeneratorNext
+                | ProcessOperation::GeneratorYield
                 | ProcessOperation::Acquire => Contract::new(true, Unknown),
                 ProcessOperation::Executable
                 | ProcessOperation::CheckOutput
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
+                | ProcessOperation::Popen { .. }
+                | ProcessOperation::PopenPid
+                | ProcessOperation::PopenPipe(_)
+                | ProcessOperation::PopenArgs
+                | ProcessOperation::PopenStatus { .. }
+                | ProcessOperation::PopenExit
+                | ProcessOperation::PopenCommunicate { .. }
+                | ProcessOperation::PopenWait
+                | ProcessOperation::PopenSignal
                 | ProcessOperation::AsyncSpawn { .. }
                 | ProcessOperation::AsyncStatus { wait: false }
                 | ProcessOperation::Coroutine { .. }
@@ -187,6 +202,7 @@ impl Builtin {
                 | ProcessOperation::ContextEnter
                 | ProcessOperation::ContextExit
                 | ProcessOperation::ContextThrow
+                | ProcessOperation::GeneratorTake
                 | ProcessOperation::ContextYield
                 | ProcessOperation::CreateTask
                 | ProcessOperation::NewLoop
@@ -205,6 +221,7 @@ impl Builtin {
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Which
+                | ProcessOperation::CopyFile
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)
@@ -227,6 +244,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::BytesGet
+            | Self::Chr
             | Self::Decode
             | Self::HashNew
             | Self::DecodeSplitLines
@@ -242,6 +260,7 @@ impl Builtin {
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
             | Self::JsonLoads
+            | Self::JsonErrorField(_)
             | Self::HashRecord
             | Self::JsonGet { .. }
             | Self::JsonGetReceiver
@@ -287,6 +306,7 @@ impl Builtin {
             | Self::ExceptionCause
             | Self::ExceptionSuppressContext
             | Self::FloatFormat { .. }
+            | Self::HexFormat { .. }
             | Self::GlobalGet(_)
             | Self::IntBounded { .. }
             | Self::IntSignAsFloat
@@ -334,6 +354,8 @@ impl Builtin {
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
             | Self::DictDelete
+            | Self::DictPop
+            | Self::DictTryPop(_)
             | Self::DictGatherBytesInt
             | Self::DictGatherStrInt
             | Self::FileReadline
@@ -368,6 +390,7 @@ impl Builtin {
             | Self::SysPlatform
             | Self::OsName
             | Self::SysArgv
+            | Self::FileFileno
             | Self::TextClose
             | Self::TextEnter
             | Self::TextFlush
@@ -375,7 +398,11 @@ impl Builtin {
             | Self::TextRead
             | Self::TextWrite
             | Self::TomlKeys => Contract::new(true, Unknown),
-            Self::Repeat | Self::CursorLengthHint => Contract::new(true, PreservesLists),
+            Self::Repeat
+            | Self::CursorLengthHint
+            | Self::Progression { .. }
+            | Self::Islice
+            | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
             | Self::DefaultListDict
             | Self::CounterNew
@@ -602,6 +629,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || matches!(
             name,
             "int_floordiv"
+                | "imre_chr"
                 | "imre_json_index"
                 | "imre_exception_message"
                 | "imre_exception_repr"
@@ -634,6 +662,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_deletions"
                 | "imre_log_file_should_roll"
                 | "imre_log_file_roll"
+                | "imre_logrecord_message"
                 | "imre_log_config"
                 | "imre_log_config_named"
                 | "imre_log_check_level"
@@ -678,6 +707,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_path_read_bytes"
                 | "imre_path_read_text"
                 | "imre_path_write_text"
+                | "imre_path_read_text_options"
+                | "imre_path_write_text_options"
+                | "imre_path_write_type_error"
+                | "imre_path_write_bytes_union"
+                | "imre_path_write_text_union"
                 | "imre_path_write_bytes"
                 | "imre_path_mkdir"
                 | "imre_path_unlink"
@@ -721,6 +755,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_list_slice"
                 | "imre_list_slice_sum"
                 | "imre_str_get"
+                | "imre_str_lower"
                 | "imre_str_slice"
                 | "imre_str_int_list"
                 | "imre_seq_get"
@@ -735,6 +770,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
                 | "imre_dict_delete"
+                | "imre_dict_pop"
                 | "imre_cursor_length_hint"
                 | "imre_mapping_iter_next"
                 | "imre_exception_raise"

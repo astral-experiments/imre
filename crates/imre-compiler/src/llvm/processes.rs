@@ -110,6 +110,32 @@ impl Emitter<'_, '_> {
                 self.checked_line("call void @imre_context_yield()");
                 none()
             }
+            ProcessOperation::GeneratorNext | ProcessOperation::GeneratorYield => {
+                let byte = if matches!(operation, ProcessOperation::GeneratorNext) {
+                    self.checked_instruction(format!(
+                        "call i32 @imre_generator_next(ptr {})",
+                        args[0].value.operand
+                    ))
+                } else {
+                    let word = self.word(&args[0].value);
+                    let kind = representation_kind(args[0].value.ty, &self.module.types);
+                    self.checked_instruction(format!(
+                        "call i32 @imre_generator_yield(i64 {word}, i32 {kind})"
+                    ))
+                };
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
+                    small_integer: false,
+                }
+            }
+            ProcessOperation::GeneratorTake => {
+                let word = self.instruction(format!(
+                    "call i64 @imre_generator_take(ptr {})",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
             ProcessOperation::ContextThrow => {
                 let byte = self.checked_instruction(format!(
                     "call i32 @imre_context_throw(ptr {}, ptr {})",
@@ -239,6 +265,81 @@ impl Emitter<'_, '_> {
                 self.checked_line(instruction);
                 none()
             }
+            ProcessOperation::Popen { streams } => {
+                let cwd =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
+                let env =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[3].value.operand));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_popen_pipes(ptr {}, ptr {cwd}, ptr {env}, i32 {streams}, i64 {}, i1 {})",
+                    args[0].value.operand, args[1].value.operand, args[9].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::PopenPipe(index) => {
+                if returns == Type::None {
+                    return none();
+                }
+                let operand = self.instruction(format!(
+                    "call ptr @imre_popen_pipe(ptr {}, i32 {index})",
+                    args[0].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::PopenArgs => self.call("imre_popen_args", returns, &[&args[0].value]),
+            ProcessOperation::PopenPid => self.call("imre_popen_pid", returns, &[&args[0].value]),
+            ProcessOperation::PopenStatus { poll } => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_popen_status(ptr {}, i1 {})",
+                    args[0].value.operand,
+                    u8::from(poll)
+                ));
+                self.unpack_word(word, returns)
+            }
+            ProcessOperation::PopenCommunicate { text } => {
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(returns)));
+                let input =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
+                let kind = if args[2].value.ty == Type::Int { 2 } else { 7 };
+                let operand = self.checked_instruction(format!("call ptr @imre_popen_communicate(ptr {}, ptr {input}, i1 {}, i32 {kind}, i64 {}, ptr @{layout})", args[0].value.operand, u8::from(text), args[2].value.operand));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::PopenWait => {
+                let kind = if args[1].value.ty == Type::Int { 2 } else { 7 };
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_popen_wait(ptr {}, i32 {kind}, i64 {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            ProcessOperation::PopenExit => {
+                self.checked_line(format!(
+                    "call void @imre_popen_exit(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
+            ProcessOperation::PopenSignal => {
+                self.checked_line(format!(
+                    "call void @imre_popen_signal(ptr {}, i64 {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                none()
+            }
             ProcessOperation::AsyncSpawn { stdout, stderr } => {
                 let cwd =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
@@ -342,6 +443,30 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
+            ProcessOperation::CopyFile => {
+                let tag = |ty| match ty {
+                    Type::Str => 0,
+                    Type::Bytes => 1,
+                    Type::Path => 2,
+                    _ => unreachable!(),
+                };
+                let [src, dst, follow] = args else {
+                    unreachable!()
+                };
+                let follow = self.instruction(format!("zext i1 {} to i32", follow.value.operand));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_shutil_copyfile(ptr {}, i32 {}, ptr {}, i32 {}, i32 {follow})",
+                    src.value.operand,
+                    tag(src.value.ty),
+                    dst.value.operand,
+                    tag(dst.value.ty)
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
             ProcessOperation::Which => {
                 let path =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));

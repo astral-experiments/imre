@@ -97,12 +97,14 @@ impl Types {
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
+            | Type::Popen(..)
             | Type::CompletedProcess(_)
             | Type::EventLoop
             | Type::TaskGroup
             | Type::GeneratorContext
             | Type::Semaphore
             | Type::Document(_)
+            | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
@@ -423,7 +425,9 @@ impl Types {
             | Type::GeneratorContext
             | Type::DirectoryContext(_)
             | Type::Semaphore
+            | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
@@ -653,6 +657,7 @@ impl Types {
                 | Type::TextIO
                 | Type::BinaryIO
                 | Type::ZipFile
+                | Type::Popen(..)
                 | Type::AsyncProcess(_)
                 | Type::DirectoryContext(_)
                 | Type::GeneratorContext

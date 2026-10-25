@@ -22,7 +22,9 @@ use super::words::{OwnedWord, WordKind};
 use super::{Bytes, Int, Object, Storage, Str, acquire_rc, fail, object};
 
 mod asynchronous;
+mod popen;
 pub(super) use asynchronous::AsyncProcess;
+pub(super) use popen::Popen;
 
 #[cfg(target_os = "linux")]
 unsafe extern "C" {
@@ -92,6 +94,29 @@ impl ProcessError {
 enum Deadline {
     Integer(Int),
     Float(f64),
+}
+
+impl Deadline {
+    fn seconds(&self) -> Result<f64> {
+        match self {
+            Self::Integer(seconds) => crate::floats::int_to_float(seconds),
+            Self::Float(seconds) => Ok(*seconds),
+        }
+    }
+
+    /// # Safety
+    /// A nonzero word is a rooted integer (2) or a nullable float pointer (7).
+    unsafe fn from_word(kind: u32, word: usize) -> Option<Self> {
+        // SAFETY: the caller supplies the representation selected by the kind.
+        unsafe {
+            match kind {
+                0 => None,
+                2 => Some(Self::Integer(Int::clone(&Int::borrow(word)))),
+                7 => (word as *const f64).as_ref().copied().map(Self::Float),
+                _ => fail("SystemError", "invalid process deadline kind"),
+            }
+        }
+    }
 }
 
 /// A deadline failure owns the original argv and undecoded pipe snapshots.
@@ -406,6 +431,7 @@ struct Launch {
 impl Launch {
     /// Prepares native launch data after validating nonempty argv and env names.
     fn new(argv: Vec<CString>, env: Option<StringPairs>) -> Result<Self> {
+        popen::cleanup();
         let program = &argv[0];
         let search = if program.as_bytes().contains(&b'/') {
             None
@@ -437,7 +463,7 @@ impl Launch {
     /// Call only from Command::pre_exec after stdio and cwd setup. Every referenced
     /// buffer was allocated in the parent; only async-signal-safe libc operations
     /// and allocation-free OS-error construction are allowed until exec or _exit.
-    unsafe fn exec_child(&mut self) -> io::Result<()> {
+    unsafe fn exec_child(&mut self, close_fds: bool) -> io::Result<()> {
         for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
             // SAFETY: restore_signals resets dispositions Python ignores; signal
             // is async-signal-safe and both arguments are valid signal constants.
@@ -446,7 +472,10 @@ impl Launch {
             }
         }
         // SAFETY: this is the forked child after Command's stdio setup.
-        unsafe { self.descriptors.apply()? };
+        if close_fds {
+            // SAFETY: the forked child owns its descriptor table.
+            unsafe { self.descriptors.apply()? };
+        }
         let mut saved_error = None;
         let mut last_error = libc::ENOENT;
         let mut attempt = |executable| {
@@ -497,7 +526,7 @@ impl Launch {
         let mut command = Command::new(OsStr::from_bytes(self.argv.strings[0].as_bytes()));
         let stderr = (streams >> 4) & 15;
         command
-            .stdin(Stdio::inherit())
+            .stdin(output((streams >> 12) & 15)?)
             .stdout(output(streams & 15)?)
             .stderr(output(stderr)?);
         if let Some(cwd) = cwd {
@@ -511,7 +540,7 @@ impl Launch {
                 if stderr == 5 && libc::dup2(libc::STDOUT_FILENO, libc::STDERR_FILENO) < 0 {
                     return Err(io::Error::last_os_error());
                 }
-                self.exec_child()
+                self.exec_child(streams & (1 << 17) == 0)
             })
         };
         command.spawn()
@@ -576,32 +605,7 @@ enum Captured {
     TimedOut(Option<Vec<u8>>, Option<Vec<u8>>),
 }
 
-/// Matches POSIX communicate: poll fairly, snapshot before post-deadline reads,
-/// then kill/reap the direct child without an unbounded post-timeout pipe drain.
-fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
-    let started = Instant::now();
-    let mut child = ChildGuard {
-        child,
-        reaped: false,
-    };
-    let timeout = match deadline {
-        Deadline::Integer(seconds) => crate::floats::int_to_float(seconds)?,
-        Deadline::Float(seconds) => *seconds,
-    };
-    let mut stdout = child.child.stdout.take();
-    let mut stderr = child.child.stderr.take();
-    let fds = [
-        stdout.as_ref().map_or(-1, AsRawFd::as_raw_fd),
-        stderr.as_ref().map_or(-1, AsRawFd::as_raw_fd),
-    ];
-    if fds == [-1, -1] {
-        // With no selector CPython simply waits, even for NaN, +inf or large
-        // finite deadlines that poll() would have rejected converting to ms.
-        return wait_timeout(&mut child, started, timeout, [Vec::new(), Vec::new()]);
-    }
-    for fd in fds.into_iter().filter(|&fd| fd >= 0) {
-        nonblocking(fd).map_err(os_error)?;
-    }
+fn poll_milliseconds(timeout: f64) -> Result<i32> {
     if timeout.is_nan() {
         return Err(Error::new(
             Kind::ValueError,
@@ -616,7 +620,7 @@ fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
     }
     // Python's poll first converts milliseconds to its signed nanosecond clock,
     // then bounds the millisecond argument to the platform's signed C int.
-    let milliseconds = ((timeout - started.elapsed().as_secs_f64()) * 1000.0).ceil();
+    let milliseconds = (timeout * 1000.0).ceil();
     if milliseconds >= 9_223_372_036_855.0 {
         return Err(Error::new(
             Kind::OverflowError,
@@ -626,6 +630,33 @@ fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
     if milliseconds > f64::from(i32::MAX) {
         return Err(Error::new(Kind::OverflowError, "timeout is too large"));
     }
+    Ok(milliseconds as i32)
+}
+
+/// Matches POSIX communicate: poll fairly, snapshot before post-deadline reads,
+/// then kill/reap the direct child without an unbounded post-timeout pipe drain.
+fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
+    let started = Instant::now();
+    let mut child = ChildGuard {
+        child,
+        reaped: false,
+    };
+    let timeout = deadline.seconds()?;
+    let mut stdout = child.child.stdout.take();
+    let mut stderr = child.child.stderr.take();
+    let fds = [
+        stdout.as_ref().map_or(-1, AsRawFd::as_raw_fd),
+        stderr.as_ref().map_or(-1, AsRawFd::as_raw_fd),
+    ];
+    if fds == [-1, -1] {
+        // With no selector CPython simply waits, even for NaN, +inf or large
+        // finite deadlines that poll() would have rejected converting to ms.
+        return wait_timeout(&mut child, started, timeout, [Vec::new(), Vec::new()]);
+    }
+    for fd in fds.into_iter().filter(|&fd| fd >= 0) {
+        nonblocking(fd).map_err(os_error)?;
+    }
+    poll_milliseconds(timeout - started.elapsed().as_secs_f64())?;
     let duration = if timeout > 0.0 {
         Duration::from_secs_f64(timeout)
     } else {
@@ -1241,15 +1272,7 @@ pub unsafe extern "C" fn imre_subprocess_run_modes(
     }
     // SAFETY: the caller supplies either None, a rooted integer, or a nullable float.
     unsafe {
-        let timeout = match deadline_kind {
-            0 => None,
-            2 => Some(Deadline::Integer(Int::clone(&Int::borrow(deadline)))),
-            7 => (deadline as *const f64)
-                .as_ref()
-                .copied()
-                .map(Deadline::Float),
-            _ => fail("SystemError", "invalid process deadline kind"),
-        };
+        let timeout = Deadline::from_word(deadline_kind, deadline);
         run_process(args, cwd, env, check, streams, timeout, descriptor)
     }
 }
