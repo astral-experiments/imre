@@ -1,12 +1,34 @@
 """Logging classes compiled into the native program."""
 
+import logging
 import os.path
+import sys
 from logging import Formatter, LogRecord, getLevelNamesMapping
-from imre._logging import _Level, _Lock, _lookup_handler, _rename_handler
+from imre._logging import _Level, _Lock, _lookup_handler, _print_active_exception, _rename_handler
 from pathlib import Path
 from typing import TextIO
 
 _default_formatter = Formatter()
+
+
+def _handle_error(record: LogRecord) -> None:
+    if not logging.raiseExceptions:
+        return
+    try:
+        sys.stderr.write("--- Logging error ---\n")
+        _print_active_exception()
+        sys.stderr.write("Call stack:\n")
+        sys.stderr.write(f"Logged from file {record.filename}, line {record.lineno}\n")
+        details = Formatter("Message: %(msg)r\nArguments: %(args)s")
+        try:
+            sys.stderr.write(details.formatMessage(record) + "\n")
+        except RecursionError:
+            raise
+        except Exception:
+            sys.stderr.write("Unable to print the message and arguments - possible formatting error.\n"
+                             "Use the traceback above to help find the error.\n")
+    except OSError:
+        pass
 
 
 class Filter:
@@ -98,6 +120,9 @@ class Handler:
     def emit(self, record: LogRecord | None) -> None:
         raise NotImplementedError("emit must be implemented by Handler subclasses")
 
+    def handleError(self, record: LogRecord) -> None:
+        _handle_error(record)
+
     def flush(self) -> None:
         pass
 
@@ -181,8 +206,20 @@ class FileHandler:
                 return
             stream = self._open()
             self.stream = stream
-        stream.write(self.format(record) + self.terminator)
-        self.flush()
+        try:
+            message = self.format(record)
+            stream = self.stream
+            if stream is None:
+                raise AttributeError("'NoneType' object has no attribute 'write'")
+            stream.write(message + self.terminator)
+            self.flush()
+        except RecursionError:
+            raise
+        except Exception:
+            self.handleError(record)
+
+    def handleError(self, record: LogRecord) -> None:
+        _handle_error(record)
 
     def handle(self, record: LogRecord) -> LogRecord:
         self.emit(record)
