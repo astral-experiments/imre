@@ -25,17 +25,17 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-The replay of [`c0a1a2e`](https://github.com/astral-sh/imre/commit/c0a1a2ed0fc7dfc0410b2718dc8ca22837601754)
+The replay of [`c09024d`](https://github.com/astral-sh/imre/commit/c09024d7e062d1dc681b9ed01434abfb2693d43c)
 includes logger hierarchy and handler propagation, the level registry, ordinary
 and timed file handlers, records, formatters, filters and configuration.
 Both levels have the same counts:
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 13 |
+| Imre | Imre | Imre | CPython hooks and native child | 14 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 35 |
-| Blocked before execution | | | | 217 |
+| Blocked before execution | | | | 216 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -44,7 +44,8 @@ rollover with an explicit time, record representation, formatter precision,
 an empty name filter, both buffering formatters, and [FileHandler](files.md)
 delayed creation and emission after closing a file opened in write mode. The
 [CP1251 StreamHandler method](stream-delivery.md) compares the native writer’s
-bytes, including the newline, under its original host fixture.
+bytes, including the newline, under its original host fixture. The stream replacement
+method checks the actual sys.stderr, the previous stream, and the unchanged-stream return.
 Four bodies verify native stderr with the original
 CPython output helper. The 35 host-driven methods exercise named handler registration, the registry, timed
 files, record flags, [formatters](formatters.md), or [configuration](config.md).
