@@ -1,0 +1,18 @@
+{
+  "compiler_commit": "f79324ecff27a56cb46df4cdd25478aafca480af",
+  "tree": "43a1824f719d0c8fcef86cc6f776322eee906259",
+  "parents": [
+    "8d878cbec8480f01c21f97fdec631f3ed4e8a924",
+    "737d2cbb064774a9a998fd89c2d4cb95118b13fd"
+  ],
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "binary_sha256": {
+    "imre": "1490c53a4d83ffcd8cc07152771c240a460bfc41d7b6a8cd63da2aba1007513f",
+    "libimre_runtime.a": "4cd30c24a575ee8c16039148ded285651e82a5a7bb8b0d18299a55e3fd9cbeab"
+  },
+  "reports": {
+    "evidence-linux.json": "34dc291d0344ee5a295bec96f5f96bfec293ac8e2221804b4fc9009836f6467c",
+    "evidence-free-threading-linux.json": "61c51886d9c6dc31f9bd3eee2a920ddfcfa86e806f6f8599004bb686416daddc"
+  },
+  "description": "Unchanged primary and free-threaded suites on the indicated compiler, with native body and fixture ownership recorded separately."
+}

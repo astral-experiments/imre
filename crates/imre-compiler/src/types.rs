@@ -32,6 +32,8 @@ enum Shape {
     NamedTuple(TupleOrigin, Vec<Type>),
     PartialFrame(Vec<Type>),
     LenFrame(Vec<Type>),
+    /// Only the class-name prefix is visible. The concrete record owns the argument.
+    UnreadArgument,
     VarTuple(Type),
     /// Display segments are fixed fields or repetitions of an item of known type.
     DisplayTuple(Vec<(Type, bool)>),
@@ -194,6 +196,7 @@ impl Types {
                         | Shape::NamedTuple(..)
                         | Shape::PartialFrame(_)
                         | Shape::LenFrame(_)
+                        | Shape::UnreadArgument
                 )
             ),
             Type::ForwardRef(id) => {
@@ -312,6 +315,7 @@ impl Types {
             let children: Vec<Type> = match shape {
                 Shape::StringLiterals(_) => Vec::new(),
                 Shape::LenFrame(prefix) => prefix.clone(),
+                Shape::UnreadArgument => vec![Type::Str],
                 Shape::DisplayTuple(parts) => parts.iter().map(|&(ty, _)| ty).collect(),
                 Shape::VarTuple(ty)
                 | Shape::Cursor(ty)
@@ -539,6 +543,7 @@ impl Types {
             | Type::Socket
             | Type::None => true,
             Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
+            Type::Tuple(_) if self.is_unread_argument(ty) => false,
             Type::Tuple(_) => self
                 .fields(ty)
                 .unwrap()
@@ -889,8 +894,29 @@ impl Types {
         matches!(ty, Type::Tuple(id) if matches!(&self.0.borrow().shapes[id], Shape::LenFrame(prefix) if prefix.len() == 3))
     }
 
+    /// Return only Python sequence fields; private callable frames expose ABI prefixes.
+    pub(crate) fn len_tuple_fields(&self, ty: Type) -> Option<Vec<Type>> {
+        let Type::Tuple(id) = ty else { return None };
+        match &self.0.borrow().shapes[id] {
+            Shape::Tuple(fields)
+            | Shape::NamedTuple(
+                TupleOrigin::StructSequence(..) | TupleOrigin::LibraryNamedTuple(..),
+                fields,
+            ) => Some(fields.clone()),
+            _ => None,
+        }
+    }
+
     pub(crate) fn tuple(&self, elements: Vec<Type>) -> Type {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
+    }
+
+    pub(crate) fn unread_argument(&self) -> Type {
+        Type::Tuple(self.intern(Shape::UnreadArgument))
+    }
+
+    pub(crate) fn is_unread_argument(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::UnreadArgument))
     }
 
     pub(crate) fn module_spec(&self, fields: Vec<Type>) -> Type {
@@ -1375,6 +1401,7 @@ impl Types {
         };
         match &self.0.borrow().shapes[id] {
             Shape::LenFrame(prefix) => Some(prefix.clone()),
+            Shape::UnreadArgument => Some(vec![Type::Str]),
             Shape::Tuple(fields) | Shape::NamedTuple(_, fields) | Shape::PartialFrame(fields) => {
                 Some(fields.clone())
             }
@@ -1412,6 +1439,7 @@ impl Types {
             .enumerate()
             .filter_map(|(id, shape)| match shape {
                 Shape::LenFrame(prefix) => Some((Type::Tuple(id), prefix.clone())),
+                Shape::UnreadArgument => Some((Type::Tuple(id), vec![Type::Str])),
                 Shape::Tuple(fields)
                 | Shape::NamedTuple(_, fields)
                 | Shape::PartialFrame(fields) => Some((Type::Tuple(id), fields.clone())),
@@ -1459,6 +1487,8 @@ impl Types {
                 continue;
             }
             match ty {
+                // The opaque payload may own an observable resource through a container.
+                Type::Tuple(_) if self.is_unread_argument(ty) => return true,
                 Type::Cursor(_)
                 | Type::TextIO
                 | Type::StringIO
@@ -1611,6 +1641,7 @@ impl TypeDescription<'_> {
                     "len cache key"
                 });
             }
+            Shape::UnreadArgument => return self.write_str("object"),
             Shape::ModuleSpec(_) => return self.write_str("importlib.machinery.ModuleSpec"),
             Shape::DeclaredCache(callable, _) => return self.write_type(*callable),
             Shape::ContextValue(value) => {

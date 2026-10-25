@@ -503,7 +503,7 @@ fn normalize_len_key(types: &Types, value: Expr) -> Expr {
         Type::StrLiteral(_) => literals::view(value, Type::Str),
         Type::Tuple(_) => {
             let fields: Vec<_> = types
-                .fields(value.ty)
+                .len_tuple_fields(value.ty)
                 .unwrap()
                 .into_iter()
                 .enumerate()
@@ -539,13 +539,9 @@ fn len_argument_class(types: &Types, ty: Type) -> Option<(&'static str, Option<&
         Type::ListInt | Type::List(_) => ("list", Some("list")),
         Type::Dict(_) => ("dict", Some("dict")),
         Type::Set(_) => ("set", Some("set")),
-        Type::Tuple(_)
-            if !types.is_partial_frame(ty)
-                && !types.is_len_argument(ty)
-                && types.namedtuple_definition(ty).is_none() =>
-        {
+        Type::Tuple(_) => {
             let mut invalid = None;
-            for child in types.fields(ty)? {
+            for child in types.len_tuple_fields(ty)? {
                 let (_, child_error) = len_argument_class(types, child)?;
                 invalid = invalid.or(child_error);
             }

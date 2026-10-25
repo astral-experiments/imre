@@ -97,6 +97,23 @@ impl<'a> Visitor<'a> for References<'_> {
         }
         if let ast::Expr::Call(call) = expr
             && self.graph.resolve(self.module, &call.func)
+                == Some(Binding::Intrinsic(Intrinsic::CountElements))
+            && call.arguments.args.len() == 2
+            && call.arguments.keywords.is_empty()
+        {
+            for method in ["get", "__setitem__"] {
+                self.found.attributes.insert(method.to_owned());
+                self.found.instance_attributes.insert(method.to_owned());
+            }
+        }
+        if matches!(expr, ast::Expr::Subscript(s) if s.ctx == ast::ExprContext::Store) {
+            self.found.attributes.insert("__setitem__".to_owned());
+            self.found
+                .instance_attributes
+                .insert("__setitem__".to_owned());
+        }
+        if let ast::Expr::Call(call) = expr
+            && self.graph.resolve(self.module, &call.func)
                 == Some(Binding::Intrinsic(Intrinsic::ShallowCopy))
         {
             self.found.attributes.insert("__copy__".to_owned());
