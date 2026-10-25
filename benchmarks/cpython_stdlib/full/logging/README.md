@@ -25,23 +25,23 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-This replay of `40ae4d9` includes logger hierarchy, the level registry, ordinary
-and timed file handlers, records, single and batch formatters, filters and configuration.
+The [replay of `f3c66db`](https://github.com/astral-sh/imre/actions/runs/40175425797)
+includes logger hierarchy and handler propagation, the level registry, timed
+file handlers, records, single and batch formatters, filters and configuration.
 Both levels have the same counts:
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 11 |
+| Imre | Imre | Imre | CPython hooks and native child | 10 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 34 |
-| Blocked before execution | | | | 220 |
+| Blocked before execution | | | | 221 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
-identity, immediate child membership, level-name mapping independence, daily
+identity, immediate child membership, stopped handler propagation, level-name mapping independence, daily
 rollover with an explicit time, record representation, formatter precision,
-an empty name filter, both buffering formatters, and [FileHandler](files.md)
-delayed creation and emission after closing a file opened in write mode.
+an empty name filter, and the default and custom buffering formatters.
 Four bodies verify native stderr with the original
 CPython output helper. The 34 host-driven methods exercise the registry, timed
 files, record flags, [formatters](formatters.md), or [configuration](config.md).

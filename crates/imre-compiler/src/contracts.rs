@@ -65,6 +65,7 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::Linecache(..) => Contract::new(true, Unknown),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
@@ -118,6 +119,7 @@ impl Builtin {
                     | PathOperation::JoinObject
                     | PathOperation::Parent
                     | PathOperation::IsRelativeTo
+                    | PathOperation::AsPosix
                     | PathOperation::ReadText
                     | PathOperation::ReadBytes
                     | PathOperation::Absolute
@@ -152,7 +154,6 @@ impl Builtin {
                     | PathOperation::Root
                     | PathOperation::Anchor
                     | PathOperation::CountPart
-                    | PathOperation::AsPosix
                     | PathOperation::Text
                     | PathOperation::Name
                     | PathOperation::Stem
@@ -276,6 +277,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::BytesGet
+            | Self::WrapperAttributes(_)
             | Self::Chr
             | Self::IntegerPower
             | Self::ModularPower
@@ -369,6 +371,7 @@ impl Builtin {
             | Self::CacheNew
             | Self::CacheTable
             | Self::CacheStat(_)
+            | Self::CacheParameter(_)
             | Self::CacheClear
             | Self::CallableContext
             | Self::ModuleCache(_)
@@ -449,6 +452,9 @@ impl Builtin {
             | Self::SysPlatform
             | Self::OsName
             | Self::SysOrigArgv
+            | Self::DocCaptureStart
+            | Self::DocCaptureTake
+            | Self::DocAscii
             | Self::SysArgv
             | Self::FileFileno
             | Self::TextClose
@@ -551,8 +557,15 @@ impl Builtin {
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
+            Self::WrapperAttributes(fields) => {
+                args.is_empty() && result == types.tuple(vec![Type::Str; fields.names().len()])
+            }
             Self::CallableContext => {
                 matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result))
+            }
+            Self::CacheParameter(_) => {
+                matches!(args, [wrapper] if types.cached_function(wrapper.ty).is_some())
+                    && result == Type::Document(crate::ir::DocumentShape::Any)
             }
             Self::CacheNew | Self::ModuleCache(_) => {
                 args.is_empty() && result.cache_table().is_some()
@@ -815,6 +828,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_input"
                 | "imre_sys_argv"
                 | "imre_sys_orig_argv"
+                | "imre_path_as_posix"
                 | "imre_path_join"
                 | "imre_path_join_object"
                 | "imre_path_parent"

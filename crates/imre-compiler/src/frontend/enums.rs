@@ -163,16 +163,31 @@ impl Checker<'_> {
                 },
             });
         }
+        // Python has exactly two bool singletons. Restrict this to exact bools:
+        // False and the integer zero can compare equal without being identical.
+        if left.ty == Type::Bool && right.ty == Type::Bool {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
+        let wrapper_attributes = matches!((left.ty, right.ty), (Type::Tuple(_), Type::Tuple(_)))
+            && [&left, &right].iter().any(|value| {
+                matches!(
+                    value.kind,
+                    ExprKind::Builtin(Builtin::WrapperAttributes(_), _)
+                )
+            });
         // Namespace owners and their backing dictionaries are distinct rooted
         // objects. Optional storage preserves their pointer words and None tag.
-        if types
+        let namespace = types
             .iter()
             .any(|ty| matches!(ty, Type::SimpleNamespace(_)))
             && types
                 .iter()
-                .all(|ty| matches!(ty, Type::SimpleNamespace(_) | Type::Dict(_) | Type::None))
-        {
+                .all(|ty| matches!(ty, Type::SimpleNamespace(_) | Type::Dict(_) | Type::None));
+        if wrapper_attributes || namespace {
             return Ok(Self::identity_result(
                 vec![left, right],
                 op == ast::CmpOp::IsNot,

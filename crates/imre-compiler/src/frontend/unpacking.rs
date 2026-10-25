@@ -244,6 +244,17 @@ impl Checker<'_> {
                     )));
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::Logger && attribute.attr.as_str() == "propagate" {
+                    let value = self.coerce(value, Type::Bool, target)?;
+                    // The RHS precedes evaluation of the assignment target.
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(
+                            Builtin::Logging(ir::LogOperation::SetPropagate),
+                            vec![value, receiver],
+                        ),
+                    }));
+                }
                 if receiver.ty == Type::LogFormatter {
                     return self.formatter_set(receiver, attribute, value);
                 }
@@ -273,6 +284,9 @@ impl Checker<'_> {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::ZipMinReadSize, vec![value, receiver]),
                     }));
+                }
+                if let Some(class) = self.writable_property(receiver.ty, attribute) {
+                    return self.set_property(class, attribute, receiver, value);
                 }
                 let (receiver, field, ty) = self.writable_field_value(attribute, receiver)?;
                 let value = self.coerce(value, ty, target)?;

@@ -26,6 +26,7 @@ mod counter;
 mod csv;
 mod dataclass_values;
 mod dispatch;
+mod doctest;
 mod documents;
 mod enums;
 mod expansions;
@@ -41,6 +42,7 @@ mod inspect;
 mod iterables;
 mod itertools;
 mod json;
+mod linecache;
 mod literals;
 mod local_functions;
 mod logging;
@@ -59,6 +61,7 @@ mod posixpath;
 mod powers;
 mod processes;
 mod projected_equality;
+mod properties;
 mod record_inputs;
 mod records;
 mod regex;
@@ -99,6 +102,7 @@ struct ClassInfo {
     declarations: Classes,
     fields: Vec<Vec<Type>>,
     methods: Vec<HashMap<String, Signature>>,
+    setters: Vec<HashMap<String, Signature>>,
     keyword_copies: HashSet<usize>,
     cached: HashMap<usize, function_caches::Policy>,
     cached_properties: cached_properties::Slots,
@@ -289,6 +293,7 @@ impl ClassInfo {
         Ok(Self {
             parsers,
             methods: vec![HashMap::new(); fields.len()],
+            setters: vec![HashMap::new(); fields.len()],
             keyword_copies: HashSet::new(),
             cached: HashMap::new(),
             cached_properties,
@@ -584,6 +589,7 @@ pub(crate) fn lower_with_owners(
                     .map_err(|error| format!("{}:{error}", module.path.display()))?;
             }
         }
+        let mut instance_signatures = HashMap::<_, Signature>::new();
         for (index, method) in class.methods.iter().enumerate() {
             let module_id = class.method_origins[index].module;
             let module = &graph.modules[module_id];
@@ -591,6 +597,25 @@ pub(crate) fn lower_with_owners(
                 class: class_id,
                 index,
             };
+            let origin = (class.method_origins[index], method.range());
+            let kind = class.method_kinds[index];
+            // property(get, set) retains the original functions. Both spellings
+            // must infer one signature even if only the property is used.
+            if matches!(
+                kind,
+                crate::classes::MethodKind::Property | crate::classes::MethodKind::PropertySetter
+            ) && let Some(original) = instance_signatures.get(&origin)
+            {
+                let mut alias = original.clone();
+                alias.method = Some(context);
+                let table = if kind == crate::classes::MethodKind::PropertySetter {
+                    &mut classes.setters[class_id]
+                } else {
+                    &mut classes.methods[class_id]
+                };
+                table.insert(method.name.to_string(), alias);
+                continue;
+            }
             let mut method =
                 records::executable_method(method, context, &classes.declarations, graph, &types)?;
             let keyword_copy =
@@ -641,7 +666,15 @@ pub(crate) fn lower_with_owners(
             if keyword_copy {
                 classes.keyword_copies.insert(signature.id);
             }
-            classes.methods[class_id].insert(method.name.to_string(), signature.clone());
+            if kind == crate::classes::MethodKind::Instance {
+                instance_signatures.insert(origin, signature.clone());
+            }
+            let table = if class.method_kinds[index] == crate::classes::MethodKind::PropertySetter {
+                &mut classes.setters[class_id]
+            } else {
+                &mut classes.methods[class_id]
+            };
+            table.insert(method.name.to_string(), signature.clone());
             if contexts::decorated(&class.methods[index], graph, module_id) {
                 if !contexts::single_yield(&method) {
                     return Err(module.error(&method, "a context manager requires one bare yield on each successful path and an optional finally suite"));
@@ -758,6 +791,8 @@ pub(crate) fn lower_with_owners(
                 &globals,
             );
             checker.returns = signature.returns;
+            checker.interactive_names =
+                module.is_doctest_case() && definition.name.as_str() == "_run_case";
             checker.asynchronous = signature.asynchronous;
             checker.method_context(signature.method);
             checker.generator_item = classes.producer_items.get(&signature.id).copied();
@@ -1045,7 +1080,9 @@ fn signature(
         .filter(|context| {
             matches!(
                 context.kind(classes),
-                crate::classes::MethodKind::Instance | crate::classes::MethodKind::Property
+                crate::classes::MethodKind::Instance
+                    | crate::classes::MethodKind::Property
+                    | crate::classes::MethodKind::PropertySetter
             )
         })
         .map(|context| classes.instance(context.class));
@@ -1081,6 +1118,16 @@ fn signature(
             matches!(value, ast::Expr::Subscript(subscript) if graph.resolve(module, &subscript.value) == Some(Binding::Intrinsic(Intrinsic::Sequence))));
         let empty_sequence = sequence
             && matches!(parameter.default.as_deref(), Some(ast::Expr::Tuple(tuple)) if tuple.elts.is_empty());
+        let wrapper_default =
+            parameter
+                .default
+                .as_deref()
+                .and_then(|value| match graph.resolve(module, value) {
+                    Some(Binding::Intrinsic(Intrinsic::WrapperAttributes(fields))) => {
+                        Some(functools::wrapper_attributes(fields, types))
+                    }
+                    _ => None,
+                });
         let ty = if let Some(receiver) = receiver
             && index == 0
         {
@@ -1136,6 +1183,8 @@ fn signature(
                     .map(|value| {
                         if inspect::is_sentinel(graph, module, value) {
                             Ok(Type::PlainObject)
+                        } else if let Some(default) = &wrapper_default {
+                            Ok(default.ty)
                         } else {
                             calls::scalar_literal(value, source).map(|value| value.ty)
                         }
@@ -1165,6 +1214,15 @@ fn signature(
                     })
                 } else if ty == Type::PlainObject && inspect::is_sentinel(graph, module, value) {
                     Ok(inspect::sentinel())
+                } else if let Some(default) = wrapper_default {
+                    if default.ty != ty {
+                        return Err(error(
+                            source,
+                            value,
+                            "wrapper attribute default requires its exact tuple type",
+                        ));
+                    }
+                    Ok(default)
                 } else {
                     calls::scalar_default(value, ty, types, source)
                 }
@@ -1732,6 +1790,8 @@ enum Iteration {
 }
 
 struct Checker<'a> {
+    /// Doctest prompts share an exec-style namespace until the case ends.
+    interactive_names: bool,
     /// A later local assignment shadows builtin iter throughout a function.
     local_iter: bool,
     context_method: bool,
@@ -1793,6 +1853,7 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
+            interactive_names: false,
             local_iter: false,
             zip_sum_rhs: None,
             asynchronous: false,
@@ -1916,12 +1977,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Resolves a fixed field without evaluating its receiver more than once.
-    fn field(&mut self, attribute: &ast::ExprAttribute) -> Result<(Expr, usize, Type), String> {
-        let receiver = self.expr(&attribute.value)?;
-        self.writable_field_value(attribute, receiver)
-    }
-
     fn writable_field_value(
         &self,
         attribute: &ast::ExprAttribute,
@@ -1997,6 +2052,12 @@ impl<'a> Checker<'a> {
         }
         if value.ty == expected {
             return Ok(value);
+        }
+        if self.types.cache_signature(value.ty) == Some(expected) {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            });
         }
         if expected == Type::StringIterable
             && (self.types.element(value.ty) == Some(Type::Str)
@@ -3331,7 +3392,9 @@ impl<'a> Checker<'a> {
         if self.block_depth == 0 && !self.module_scope {
             self.local_iter = narrowing::assigned_names(statements).contains("iter");
             self.nullable_assignments = assignments::nullable_assignments(self, statements);
-            let mut names: Vec<_> = unbound_locals::candidates(statements).into_iter().collect();
+            let mut names: Vec<_> = unbound_locals::candidates(statements, self.interactive_names)
+                .into_iter()
+                .collect();
             names.sort_unstable();
             for name in names {
                 // Arguments enter already bound; deletion and nonordinary stores were excluded.
@@ -3517,7 +3580,30 @@ impl<'a> Checker<'a> {
                     self.expect(element, result, statement)?;
                     Some(Statement::AugmentItem(list, index, op, value))
                 } else if let ast::Expr::Attribute(target) = &*assign.target {
-                    let (receiver, field, ty) = self.field(target)?;
+                    let receiver = self.expr(&target.value)?;
+                    if let Some(class) = self.writable_property(receiver.ty, target) {
+                        let slot = self.hidden(receiver.ty);
+                        let old =
+                            self.class_attribute(target, class, Some(self.local(slot)), None)?;
+                        let rhs = self.expr(&assign.value)?;
+                        let combined = self.binary_expr(assign.op, old, rhs, statement)?;
+                        if self.types.element(combined.ty).is_some() {
+                            return Err(error(
+                                self.source,
+                                target,
+                                "in-place list operations are unsupported",
+                            ));
+                        }
+                        let put = self.set_property(class, target, self.local(slot), combined)?;
+                        return Ok((
+                            vec![Statement::Scope {
+                                body: vec![Statement::Assign(slot, receiver), put],
+                                clear: vec![slot],
+                            }],
+                            true,
+                        ));
+                    }
+                    let (receiver, field, ty) = self.writable_field_value(target, receiver)?;
                     if !matches!(ty, Type::Int | Type::Float) {
                         return Err(error(
                             self.source,
@@ -4617,6 +4703,12 @@ impl<'a> Checker<'a> {
                 &format!("no native implementation for {symbol}"),
             ));
         }
+        if let Some(target @ (Binding::Module(_) | Binding::IntrinsicModule(_))) =
+            self.resolve(expression)
+            && let Some(module) = self.module_docs(target, expression)?
+        {
+            return Ok(module);
+        }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level)
             | Intrinsic::IntConstant(level)
@@ -4713,7 +4805,13 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::HashAvailable, vec![]),
                     });
                 }
+                Intrinsic::Linecache(ir::LinecacheOperation::Cache) => {
+                    return Ok(self.linecache_mapping());
+                }
                 Intrinsic::InspectSentinel => return Ok(inspect::sentinel()),
+                Intrinsic::WrapperAttributes(fields) => {
+                    return Ok(functools::wrapper_attributes(fields, self.types));
+                }
                 Intrinsic::OsDevnull => {
                     return Ok(Expr {
                         ty: Type::Str,
@@ -5791,6 +5889,9 @@ impl<'a> Checker<'a> {
         if let Some(value) = self.cache_control(call, receiver.as_ref())? {
             return Ok(value);
         }
+        if let Some(suite) = self.doctest_suite(call)? {
+            return Ok(suite);
+        }
         if let Some(value) = self.sys_call(call)? {
             return Ok(value);
         }
@@ -6186,6 +6287,11 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
                 return self.root_log(level, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::Linecache(op)))
+                if op != ir::LinecacheOperation::Cache =>
+            {
+                return self.linecache_call(op, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::InspectIsMethodDescriptor)) => {
                 return self.is_method_descriptor(call);
             }
@@ -6243,7 +6349,7 @@ impl<'a> Checker<'a> {
                 return self.system_path_call(intrinsic, call);
             }
             Some(Binding::Intrinsic(Intrinsic::Dedent)) => {
-                return self.text_function(call, "text", ir::TextOperation::Dedent);
+                return self.dedent_call(call);
             }
             Some(Binding::Intrinsic(Intrinsic::UrlsafeB64encode)) => {
                 let args = self.arguments(
