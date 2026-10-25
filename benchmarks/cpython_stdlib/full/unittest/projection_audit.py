@@ -229,6 +229,8 @@ def method_metadata(case, files):
 def try_case(args, root, source, locations, opt, reachable):
     with tempfile.TemporaryDirectory(dir=root, prefix="probe_") as probe:
         work = Path(probe)
+        # The compiler resolves the entry as a module relative to the pinned root.
+        (work / "__init__.py").write_bytes(b"")
         (work / "test").symlink_to(root / "test", target_is_directory=True)
         entry = work / "candidate.py"
         entry.write_bytes(source)
@@ -261,6 +263,11 @@ def try_case(args, root, source, locations, opt, reachable):
                 .replace(str(work), "<case>")
                 .replace(str(root), "<pinned>")
             )
+            if (
+                ("cannot resolve first-party module" in message and work.name in message)
+                or ("resolves outside" in message and "first-party" in message)
+            ):
+                raise RuntimeError(f"invalid projection staging: {message}")
             lines = [
                 s
                 for s in message.splitlines()
