@@ -63,7 +63,7 @@ impl Checker<'_> {
             }
             _ => op(
                 Op::Lookup,
-                Type::ModuleMember,
+                Type::ObjectValue,
                 vec![owner, unpacking::string(name)],
             ),
         }
@@ -85,10 +85,10 @@ impl Checker<'_> {
         {
             let key = self.coerce(key.clone(), Type::Str, &call.arguments.args[1])?;
             let default =
-                self.coerce(default.clone(), Type::ModuleMember, &call.arguments.args[2])?;
+                self.coerce(default.clone(), Type::ObjectValue, &call.arguments.args[2])?;
             return Ok(op(
                 Op::DefaultLookup,
-                Type::ModuleMember,
+                Type::ObjectValue,
                 vec![owner, key, default],
             ));
         }
@@ -107,7 +107,7 @@ impl Checker<'_> {
         let key = self.coerce(key.clone(), Type::Str, &call.arguments.args[1])?;
         Ok(match name {
             "hasattr" => op(Op::Has, Type::Bool, vec![owner, key]),
-            "getattr" => op(Op::Lookup, Type::ModuleMember, vec![owner, key]),
+            "getattr" => op(Op::Lookup, Type::ObjectValue, vec![owner, key]),
             _ => return Err(error(self.source, call, "vars takes exactly one module")),
         })
     }

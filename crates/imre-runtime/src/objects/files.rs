@@ -364,7 +364,7 @@ pub(crate) fn errno_error(error: io::Error) -> Error {
     errno_with_filename(error, None)
 }
 
-fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
+pub(super) fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
     errno_with_filenames(
         error,
         path.map(|s| super::exceptions::Filename::Str(Rc::new(Str::from(s)))),
