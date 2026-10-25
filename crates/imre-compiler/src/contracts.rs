@@ -273,6 +273,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::BytesGet
+            | Self::WrapperAttributes(_)
             | Self::Chr
             | Self::IntegerPower
             | Self::ModularPower
@@ -544,6 +545,9 @@ impl Builtin {
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
+            Self::WrapperAttributes(fields) => {
+                args.is_empty() && result == types.tuple(vec![Type::Str; fields.names().len()])
+            }
             Self::CallableContext => {
                 matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result))
             }

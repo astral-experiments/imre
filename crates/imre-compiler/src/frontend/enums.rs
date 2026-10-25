@@ -164,6 +164,19 @@ impl Checker<'_> {
             });
         }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
+        if matches!((left.ty, right.ty), (Type::Tuple(_), Type::Tuple(_)))
+            && [&left, &right].iter().any(|value| {
+                matches!(
+                    value.kind,
+                    ExprKind::Builtin(Builtin::WrapperAttributes(_), _)
+                )
+            })
+        {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         if types == [Type::BuiltinClass; 2] {
             return Ok(Expr {
                 ty: Type::Bool,

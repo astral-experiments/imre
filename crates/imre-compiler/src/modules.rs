@@ -9,7 +9,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::analysis::{CheckedDiagnostic, Session};
-use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation};
+use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation, WrapperAttributes};
 use crate::watch::FileSystem;
 
 mod declarations;
@@ -155,6 +155,7 @@ pub(crate) enum Intrinsic {
     InspectGetattrStatic,
     InspectIsMethodDescriptor,
     InspectSentinel,
+    WrapperAttributes(WrapperAttributes),
     FunctionCache,
     LruCache,
     CachedProperty,
@@ -448,6 +449,12 @@ impl IntrinsicModule {
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
             (Self::Typing, "NewType") => Intrinsic::NewType,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
+            (Self::Functools, "WRAPPER_ASSIGNMENTS") => {
+                Intrinsic::WrapperAttributes(WrapperAttributes::Assigned)
+            }
+            (Self::Functools, "WRAPPER_UPDATES") => {
+                Intrinsic::WrapperAttributes(WrapperAttributes::Updated)
+            }
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
             (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
                 Intrinsic::Fnmatch(FnmatchOperation::Match {
