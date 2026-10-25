@@ -52,6 +52,31 @@ fn marker(node: &ast::StmtClassDef) -> bool {
     })
 }
 
+/// The native record store cannot call a descriptor inherited from a builtin base.
+pub(super) fn inherited_descriptor(name: &str, mro: &[u32]) -> bool {
+    let inherits =
+        |base| crate::frontend::exception_kind(base).is_some_and(|kind| mro.contains(&kind));
+    match name {
+        "args"
+        | "__cause__"
+        | "__context__"
+        | "__traceback__"
+        | "__suppress_context__"
+        | "__dict__"
+        | "__class__"
+        | "__weakref__" => true,
+        "value" => inherits("StopIteration"),
+        "name" => inherits("NameError") || inherits("AttributeError") || inherits("ImportError"),
+        "obj" => inherits("AttributeError"),
+        "errno" | "strerror" | "filename" | "filename2" | "characters_written" => {
+            inherits("OSError")
+        }
+        "msg" | "path" | "name_from" => inherits("ImportError"),
+        "encoding" | "object" | "start" | "end" | "reason" => inherits("UnicodeEncodeError"),
+        _ => false,
+    }
+}
+
 fn builtin_mro(kind: u32) -> Vec<u32> {
     let parent = match kind {
         0 => return vec![0],

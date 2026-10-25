@@ -33,17 +33,23 @@ fn inspect<T>(owner: &Object, read: impl FnOnce(&Storage) -> T) -> T {
 pub unsafe extern "C" fn imre_codec_writer_class(info: *const Object) -> *const Object {
     // SAFETY: the compiler accepts only an entry returned by the registry.
     let codec = unsafe { codec(info) };
-    CLASSES.with_borrow_mut(|classes| {
-        let class = classes.entry(codec.index()).or_insert_with(|| {
-            ObjectOwner::new(Object(StorageCell::new(Storage::CodecWriterClass(
-                WriterClass {
-                    codec,
-                    encoding: RefCell::default(),
-                },
-            ))))
-        });
-        ObjectOwner::into_raw(class.clone())
-    })
+    let result = CLASSES.with_borrow_mut(|classes| {
+        let index = codec.index();
+        if let Some(class) = classes.get(&index) {
+            return Ok(class.clone());
+        }
+        classes.try_reserve(1).map_err(|_| Error::memory_error())?;
+        let class = ObjectOwner::try_new(Object(StorageCell::new(Storage::CodecWriterClass(
+            WriterClass {
+                codec,
+                encoding: RefCell::default(),
+            },
+        ))))
+        .map_err(|_| Error::memory_error())?;
+        classes.insert(index, class.clone());
+        Ok(class)
+    });
+    finish(result.map(ObjectOwner::into_raw), std::ptr::null())
 }
 
 /// # Safety
@@ -62,15 +68,19 @@ pub unsafe extern "C" fn imre_codec_writer_new(
             StrOwner::acquire_word(errors as usize),
         )
     };
-    ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
-        Storage::CodecWriter(Box::new(Writer {
-            class,
-            stream,
-            errors: RefCell::new(errors),
-            encoding: RefCell::default(),
-            first: Cell::new(true),
-        })),
-    ))))
+    let result = allocator_api2::boxed::Box::try_new(Writer {
+        class,
+        stream,
+        errors: RefCell::new(errors),
+        encoding: RefCell::default(),
+        first: Cell::new(true),
+    })
+    .map_err(|_| Error::memory_error())
+    .and_then(|writer| {
+        ObjectOwner::try_new(Object(StorageCell::new(Storage::CodecWriter(writer))))
+            .map_err(|_| Error::memory_error())
+    });
+    finish(result.map(ObjectOwner::into_raw), std::ptr::null())
 }
 
 impl Writer {

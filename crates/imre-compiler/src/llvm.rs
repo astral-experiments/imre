@@ -127,6 +127,7 @@ impl Type {
             | Self::ContextVar(_)
             | Self::ContextToken(_)
             | Self::CsvReader
+            | Self::Patch(_)
             | Self::RegexPattern
             | Self::JsonRoot
             | Self::JsonValue
@@ -217,6 +218,7 @@ impl Type {
             | Self::ContextVar(_)
             | Self::ContextToken(_)
             | Self::CsvReader
+            | Self::Patch(_)
             | Self::RegexPattern
             | Self::JsonRoot
             | Self::JsonValue
@@ -349,12 +351,36 @@ fn emit_program(
     let effects = effects::analyze(module, &callable_targets);
     let inline_dispatch = string_enums::inline_dispatch(module, &effects);
     let mut extension_modules = std::collections::BTreeSet::new();
+    let mut function_link_types = HashSet::new();
+    let mut declared_caches = HashSet::new();
     for function in module.functions.iter().chain([&module.entry]) {
         crate::ir::walk_expressions(&function.body, &mut |expr| {
             if let ExprKind::Builtin(Builtin::ExtensionImport(name), _) = &expr.kind {
                 extension_modules.insert(name.clone());
             }
+            if let ExprKind::Builtin(
+                Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet,
+                args,
+            ) = &expr.kind
+            {
+                function_link_types.insert(args[0].ty);
+            }
+            if let ExprKind::Builtin(Builtin::ModuleCache(id), _) = &expr.kind {
+                declared_caches.insert(*id);
+            }
         });
+    }
+    if function_link_types.iter().any(|&ty| {
+        let targets = callable_targets.get(ty);
+        module.types.dispatcher(ty).is_some()
+            || targets.is_empty()
+            || targets.iter().any(|target| {
+                target.bound
+                    || declared_caches.contains(&target.function)
+                    || module.types.cache_adapter(target.function).is_some()
+            })
+    }) {
+        return Err("Imre: wrapper links require a callable signature with only known, unbound native functions".to_owned());
     }
     let (uses_sys_argv, uses_orig_argv, uses_linecache, uses_cache_paths) = module.startup_usage();
     let mut emitter = Emitter {
@@ -367,6 +393,7 @@ fn emit_program(
         uses_string_interning: false,
         tuple_literals: BTreeMap::new(),
         static_functions: BTreeSet::new(),
+        function_link_types,
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
@@ -489,7 +516,13 @@ fn emit_program(
     }
     record_layouts(module, emitter.output);
     json::schemas(module, emitter.output);
-    callables::adapters(module, sanitize, &emitter.resource_types, emitter.output);
+    callables::adapters(
+        module,
+        sanitize,
+        &emitter.resource_types,
+        !emitter.function_link_types.is_empty(),
+        emitter.output,
+    );
     asyncio::adapters(module, sanitize, &emitter.resource_types, emitter.output);
     emitter.output.common().push_str(&integer_helpers());
     emitter
@@ -565,6 +598,7 @@ struct Emitter<'a, 'module> {
     uses_string_interning: bool,
     tuple_literals: BTreeMap<usize, Vec<String>>,
     static_functions: BTreeSet<String>,
+    function_link_types: HashSet<Type>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
     bytes_literals: BTreeMap<Vec<u8>, usize>,
     integer_literals: BTreeMap<Vec<u8>, usize>,
@@ -869,6 +903,7 @@ impl Emitter<'_, '_> {
             | Type::ContextVar(_)
             | Type::ContextToken(_)
             | Type::CsvReader
+            | Type::Patch(_)
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -3643,6 +3678,7 @@ impl Emitter<'_, '_> {
                 | Type::LogFormatter
                 | Type::LogRecord
                 | Type::Logger
+                | Type::Patch(_)
                 | Type::RegexPattern
                 | Type::JsonRoot
                 | Type::JsonValue
@@ -4056,14 +4092,23 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::StringListContains | Builtin::StructListContains => {
-                let helper = if matches!(builtin, Builtin::StructListContains) {
+            Builtin::IntListContains
+            | Builtin::StringListContains
+            | Builtin::StructListContains => {
+                let helper = if matches!(builtin, Builtin::IntListContains) {
+                    "imre_int_list_contains"
+                } else if matches!(builtin, Builtin::StructListContains) {
                     "imre_struct_list_contains"
                 } else {
                     "imre_str_list_contains"
                 };
+                let needle_ty = if matches!(builtin, Builtin::IntListContains) {
+                    "i64"
+                } else {
+                    "ptr"
+                };
                 let byte = self.instruction(format!(
-                    "call i32 @{helper}(ptr {}, ptr {})",
+                    "call i32 @{helper}({needle_ty} {}, ptr {})",
                     args[0].value.operand, args[1].value.operand
                 ));
                 Value {
@@ -4073,6 +4118,21 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::Text(operation) => self.text_builtin(*operation, &args, returns),
+            Builtin::Patch(operation) => self.call(
+                match operation {
+                    crate::ir::PatchOperation::Len => "imre_patch_len",
+                    crate::ir::PatchOperation::Parse => "imre_patch_parse",
+                    crate::ir::PatchOperation::Files => "imre_patch_files",
+                    crate::ir::PatchOperation::ModifiedFiles => "imre_patch_modified_files",
+                    crate::ir::PatchOperation::ModifiedCount => "imre_patch_modified_count",
+                    crate::ir::PatchOperation::Hunks => "imre_patch_hunks",
+                    crate::ir::PatchOperation::Path => "imre_patch_path",
+                    crate::ir::PatchOperation::SourceStart => "imre_patch_source_start",
+                    crate::ir::PatchOperation::HunkText => "imre_patch_hunk_text",
+                },
+                returns,
+                &[&args[0].value],
+            ),
             Builtin::RegexCompile { source, spelling } => {
                 // Distinct Python spellings may compile to the same engine pattern.
                 // A non-UTF-8 prefix separates this record from legacy UTF-8 literals.
@@ -4247,6 +4307,9 @@ impl Emitter<'_, '_> {
                     LevelName => "imre_log_level_name",
                     LevelForName => "imre_log_level_for_name",
                     CheckLevel => "imre_log_check_level",
+                    InvalidLevel => "imre_log_invalid_level",
+                    Disable => "imre_log_disable",
+                    EnabledCache => "imre_log_enabled_cache",
                     Names => "imre_log_names",
                     Numbers => "imre_log_numbers",
                     NamesCopy => "imre_log_names_copy",
@@ -5413,6 +5476,14 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::InspectSentinel => self.call("imre_inspect_sentinel", returns, &[]),
+            Builtin::FunctionWrappedSet => self.call(
+                "imre_function_set_wrapped",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::FunctionWrappedGet => {
+                self.call("imre_function_get_wrapped", returns, &[&args[0].value])
+            }
             Builtin::WrapperAttributes(fields) => {
                 let names = fields
                     .names()
@@ -6393,6 +6464,7 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::OrderedDict => self.call("imre_ordered_dict", returns, &[&args[0].value]),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
             Builtin::ChainMapNew => self.call("imre_chainmap_new", returns, &[&args[0].value]),
             Builtin::ChainMapMaps => self.call("imre_chainmap_maps", returns, &[&args[0].value]),
@@ -6493,6 +6565,9 @@ impl Emitter<'_, '_> {
                     )),
                     small_integer: false,
                 }
+            }
+            Builtin::CounterElements => {
+                self.call("imre_counter_elements", returns, &[&args[0].value])
             }
             Builtin::CounterTotal => self.call("imre_counter_total", returns, &[&args[0].value]),
             Builtin::CounterMostCommon => {
@@ -6838,6 +6913,11 @@ impl Emitter<'_, '_> {
             Builtin::DecodeSplitLines => {
                 self.call("imre_bytes_decode_splitlines", returns, &[&args[0].value])
             }
+            Builtin::JoinedSplitLines => self.call(
+                "imre_splitlines_joined_tail",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::SplitLines => self.call("imre_str_splitlines", returns, &[&args[0].value]),
             Builtin::Ndiff => self.call(
                 "imre_ndiff_deferred",
@@ -6863,7 +6943,7 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("inttoptr i64 {} to ptr", args[3].value.operand));
                 Value {
                     ty: returns,
-                    operand: self.instruction(format!(
+                    operand: self.checked_instruction(format!(
                         "call ptr @imre_str_list_filter(ptr {}, ptr {}, ptr {second}, ptr {exclude}, i32 {strip})",
                         args[0].value.operand, args[1].value.operand
                     )),
@@ -7014,6 +7094,7 @@ impl Emitter<'_, '_> {
                     | Type::ContextVar(_)
                     | Type::ContextToken(_)
                     | Type::CsvReader
+                    | Type::Patch(_)
                     | Type::RegexPattern
                     | Type::JsonRoot
                     | Type::JsonValue
@@ -7305,6 +7386,7 @@ impl Emitter<'_, '_> {
             | Type::ContextVar(_)
             | Type::ContextToken(_)
             | Type::CsvReader
+            | Type::Patch(_)
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -7409,6 +7491,7 @@ impl Emitter<'_, '_> {
             | Type::ContextVar(_)
             | Type::ContextToken(_)
             | Type::CsvReader
+            | Type::Patch(_)
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -8033,6 +8116,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ContextVar(_)
         | Type::ContextToken(_)
         | Type::CsvReader
+        | Type::Patch(_)
         | Type::RegexPattern
         | Type::JsonRoot
         | Type::JsonValue
@@ -8232,6 +8316,7 @@ declare i64 @imre_popen_identity(ptr)
 declare ptr @imre_popen_args(ptr)
 declare ptr @imre_popen_control(ptr)
 declare i64 @imre_child_status(ptr, i1 zeroext)
+declare void @imre_child_set_status(ptr, i64)
 declare ptr @imre_popen_communicate(ptr, ptr, i1 zeroext, i32, i64, ptr)
 declare i64 @imre_child_wait(ptr, i32, i64, ptr)
 declare void @imre_popen_exit(ptr)
@@ -8459,10 +8544,14 @@ declare ptr @imre_inspect_str_descriptor(i32)
 @imre_socket_so_rcvbuf = external constant i64
 @imre_socket_so_linger = external constant i64
 @imre_socket_msg_peek = external constant i64
+@imre_socket_shut_rd = external constant i64
+@imre_socket_shut_wr = external constant i64
+@imre_socket_shut_rdwr = external constant i64
 @imre_socket_default_backlog = external constant i64
 declare ptr @imre_socket_new(i64, i64, i64)
 declare void @imre_socket_bind(ptr, ptr)
 declare void @imre_socket_listen(ptr, i64)
+declare void @imre_socket_shutdown(ptr, i64)
 declare ptr @imre_socket_accept(ptr, ptr, ptr)
 declare void @imre_socket_connect(ptr, ptr)
 declare ptr @imre_socket_sockname(ptr, ptr)
@@ -8603,6 +8692,7 @@ declare void @imre_record_error_init()
 declare void @imre_stdio_init()
 declare i64 @imre_tuple_index(i64, i64)
 declare ptr @imre_record_try_new(ptr)
+declare ptr @imre_record_class_factory(ptr, ptr, ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
 declare ptr @imre_json_loads(ptr)
@@ -8631,6 +8721,8 @@ declare ptr @imre_json_dumps(i64, ptr, i64, i32, i32, i32, i32, i64, ptr)
 declare i32 @imre_json_dump(i64, ptr, i64, i32, i32, i32, i32, i64, ptr, ptr)
 declare ptr @imre_record_try_cached_result(ptr)
 declare void @imre_record_retain(ptr)
+declare ptr @imre_function_set_wrapped(ptr, ptr)
+declare ptr @imre_function_get_wrapped(ptr)
 declare void @imre_record_release(ptr)
 declare i32 @imre_record_equal(ptr, ptr) nounwind
 declare i32 @imre_forward_ref_equal(ptr, ptr) nounwind
@@ -8750,6 +8842,7 @@ declare i64 @imre_namespace_get(ptr, ptr)
 declare void @imre_namespace_delete(ptr, ptr)
 declare ptr @imre_dict_copy(ptr)
 declare ptr @imre_dict_fromkeys_target(ptr, ptr)
+declare ptr @imre_ordered_dict(ptr)
 declare i64 @imre_deep_copy(i64, i32)
 declare ptr @imre_record_shallow_copy(ptr)
 declare ptr @imre_default_list_dict_new(i32, i32)
@@ -8778,6 +8871,7 @@ declare void @imre_dict_update(ptr, ptr)
 declare ptr @imre_counter_math(ptr, ptr, i32, i32)
 declare i64 @imre_dict_sum_values(ptr, i64)
 declare i64 @imre_counter_total(ptr)
+declare ptr @imre_counter_elements(ptr)
 declare ptr @imre_counter_most_common(ptr, i64, ptr)
 declare i32 @imre_counter_subset(ptr, ptr, i32)
 declare ptr @imre_key_union(ptr, ptr)
@@ -8836,6 +8930,7 @@ declare ptr @imre_str_splitlines(ptr)
 declare ptr @imre_str_splitlines_options(ptr, i32)
 declare i32 @imre_str_isspace(ptr)
 declare i32 @imre_str_isalnum(ptr)
+declare ptr @imre_splitlines_joined_tail(ptr, ptr)
 declare ptr @imre_str_splitlines_iter(ptr)
 declare ptr @imre_ndiff_deferred(ptr, ptr)
 declare ptr @imre_str_list_copy(ptr)
@@ -8930,6 +9025,15 @@ declare i32 @imre_sys_is_interned(ptr)
 declare ptr @imre_regex_compile(ptr, i64)
 declare ptr @imre_regex_spelling(ptr)
 declare ptr @imre_unittest_compile_pattern(ptr)
+declare i64 @imre_patch_len(ptr)
+declare ptr @imre_patch_parse(ptr)
+declare ptr @imre_patch_files(ptr)
+declare ptr @imre_patch_modified_files(ptr)
+declare i64 @imre_patch_modified_count(ptr)
+declare ptr @imre_patch_hunks(ptr)
+declare ptr @imre_patch_path(ptr)
+declare i64 @imre_patch_source_start(ptr)
+declare ptr @imre_patch_hunk_text(ptr)
 declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_match(ptr, ptr)
@@ -9012,6 +9116,9 @@ declare void @imre_log_add_level(i64, ptr)
 declare ptr @imre_log_level_name(i64)
 declare i64 @imre_log_level_for_name(ptr)
 declare i64 @imre_log_check_level(ptr)
+declare i64 @imre_log_invalid_level(ptr)
+declare void @imre_log_disable(i64)
+declare ptr @imre_log_enabled_cache(ptr)
 declare ptr @imre_log_names()
 declare ptr @imre_log_numbers()
 declare ptr @imre_log_names_copy()
@@ -9079,6 +9186,7 @@ declare i32 @imre_str_truthy(ptr)
 declare i32 @imre_bytes_truthy(ptr)
 declare i32 @imre_str_contains(ptr, ptr)
 declare i32 @imre_str_list_contains(ptr, ptr)
+declare i32 @imre_int_list_contains(i64, ptr)
 declare void @imre_str_enum_table(ptr, i64)
 declare i64 @imre_enum_lookup(ptr, i64, i64)
 declare ptr @imre_enum_string(i64)

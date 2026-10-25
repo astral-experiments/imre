@@ -10,6 +10,7 @@ use super::{Object, fail, words::WordKind};
 pub(super) mod strings;
 pub(super) mod tuples;
 pub(super) mod weak;
+mod wrappers;
 
 // Keep the first queue block available even when destruction cannot allocate.
 type ReleaseQueue = RefCell<smallvec::SmallVec<[Release; 4]>>;
@@ -38,9 +39,9 @@ pub struct RecordDescriptor {
     pub semantics: *const RecordSemantics,
 }
 
-/// Generated behavior is shared by a class, never carried by individual fields.
-/// `kind` is zero for a class and one for a tuple; flags select generated equality
-/// and representation. All strings are immutable UTF-8 byte slices.
+/// Kinds are zero for a class, one for a tuple, and two for a Python function
+/// that owns a wrapper link. Flags select generated equality and representation.
+/// All strings are immutable UTF-8 byte slices.
 #[repr(C)]
 pub struct RecordSemantics {
     pub kind: u32,
@@ -355,6 +356,35 @@ pub unsafe extern "C" fn imre_record_try_new(descriptor: *const RecordDescriptor
     record
 }
 
+/// Returns an owned reference to a module's unique class constructor.
+///
+/// # Safety
+/// The executing module exclusively owns the zero-initialized slot. The layout
+/// describes an unbound callable (adapter, null context); all three addresses
+/// remain live until the entry releases its globals.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_record_class_factory(
+    slot: *mut *mut usize,
+    layout: *const RecordDescriptor,
+    adapter: *const (),
+) -> *mut usize {
+    // SAFETY: the caller owns the slot and the descriptor's zeroed callable
+    // payload. The slot adopts the initial owner; the caller receives another.
+    unsafe {
+        let mut class = *slot;
+        if class.is_null() {
+            class = imre_record_try_new(layout);
+            if class.is_null() {
+                return class;
+            }
+            class.write(adapter as usize);
+            *slot = class;
+        }
+        imre_record_retain(class);
+        class
+    }
+}
+
 /// Shallow-copies a plain class instance without evaluating Python code.
 ///
 /// # Safety
@@ -578,6 +608,11 @@ unsafe fn release_record_owner(payload: *const usize, pending: &ReleaseQueue) {
     }
     header.references.set(count - 1);
     if count != 1 {
+        if count == 2 && wrappers::is_function(header.descriptor()) {
+            // SAFETY: the remaining owner roots this marked function. Every
+            // traversed edge independently owns its target on this thread.
+            unsafe { wrappers::release_unowned_cycle(payload) };
+        }
         return;
     }
     header.drop_weak_anchor();

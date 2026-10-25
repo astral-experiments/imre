@@ -3,7 +3,7 @@
 
 use crate::StrOwner;
 use std::fs::{File, OpenOptions};
-use std::io::{self, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
 
@@ -14,7 +14,6 @@ use super::{
 mod buffered;
 mod gzip;
 mod path_text;
-pub(super) use path_text::Codec;
 mod seekable;
 mod text_memory;
 use seekable::Memory;
@@ -599,7 +598,24 @@ pub(super) fn read_path_text(path: &str) -> Result<Str> {
 }
 
 pub(super) fn read_path_bytes(path: &str) -> Result<Bytes> {
-    with_path_file(path, 0, true, |state| state.input()?.read_bytes(None))
+    let path = super::text::try_owned_string(path)?;
+    let (mut file, metadata) = open_file(&path, 0)?;
+    let mut bytes = Vec::new();
+    // Path.read_bytes owns the descriptor until close and consumes it to EOF.
+    // A regular file can fill the result directly without allocating a second
+    // buffered-reader window (128 KiB even for an empty input).
+    let result = if metadata.is_file() {
+        file.read_to_end(&mut bytes)
+            .map(|_| bytes)
+            .map_err(os_error)
+    } else {
+        let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
+        let mut input = Input::new(file, false, true, capacity);
+        let result = input.read_bytes(None);
+        file = input.into_file();
+        result
+    };
+    close_file(file).map_err(os_error).and(result)
 }
 
 pub(super) fn write_path_bytes(path: &str, bytes: &[u8]) -> Result<usize> {

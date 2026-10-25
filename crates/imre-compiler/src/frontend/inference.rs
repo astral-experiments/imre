@@ -271,7 +271,7 @@ impl Inference {
             return Type::None;
         }
         let expected = types.optional(payload);
-        self.widen_keyword(id, index, expected);
+        self.widen_parameter(id, index, expected);
         expected
     }
 
@@ -281,7 +281,7 @@ impl Inference {
         self.widened.set(true);
     }
 
-    fn widen_keyword(&self, id: usize, index: usize, ty: Type) {
+    fn widen_parameter(&self, id: usize, index: usize, ty: Type) {
         let mut pending = self.pending.borrow_mut();
         pending[id].params[index] = Some(ty);
         for function in &mut *pending {
@@ -635,11 +635,11 @@ impl Checker<'_> {
                             && checker.types.payload(ty).is_none()
                         {
                             let expected = checker.types.optional(ty);
-                            inference.widen_keyword(signature.id, index, expected);
+                            inference.widen_parameter(signature.id, index, expected);
                             return checker.coerce(supplied, expected, node);
                         }
                         if checker.types.payload(supplied.ty) == Some(ty) {
-                            inference.widen_keyword(signature.id, index, supplied.ty);
+                            inference.widen_parameter(signature.id, index, supplied.ty);
                             return Ok(supplied);
                         }
                         return checker.direct_value(supplied, node, ty, parameter.sign_only);

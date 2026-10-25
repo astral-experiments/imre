@@ -382,3 +382,46 @@ fn sorted_rows_reuse_only_live_ordered_sources_and_detach_on_write() {
         assert_eq!(rows(&copy), ["+ a", "+ b", "- c", "- c"]);
     }
 }
+
+#[test]
+fn split_ranges_preserve_unicode_lines_filters_and_independent_mutation() {
+    use crate::objects::{imre_seq_get_index, imre_str_splitlines, stdlib::imre_str_join};
+
+    let source = StrOwner::new(Str::new(
+        "+🦀hello\u{2028}+++excluded\r\n-β\u{85}plain\n".repeat(64),
+    ));
+    // SAFETY: the input, separator and lists root every handle; each owned
+    // result is taken exactly once and no storage borrow spans a mutation.
+    unsafe {
+        let split = crate::ObjectOwner::from_raw(imre_str_splitlines(StrOwner::as_ptr(&source)));
+        let copy =
+            crate::ObjectOwner::from_raw(imre_str_list_copy(crate::ObjectOwner::as_ptr(&split)));
+        let added = filter_rows(&split, "+", None, Some("+++"), 2);
+        let separator = Str::new("|");
+        let joined = StrOwner::from_raw(imre_str_join(
+            &separator,
+            crate::ObjectOwner::as_ptr(&added),
+        ));
+        assert_eq!(joined.as_str(), vec!["hello"; 64].join("|"));
+        assert_eq!(
+            imre_seq_len(crate::ObjectOwner::as_ptr(&split)),
+            2 * 256 + 1
+        );
+        let original = StrOwner::from_raw(
+            imre_seq_get_index(crate::ObjectOwner::as_ptr(&copy), 0) as *const Str
+        );
+        assert_eq!(original.as_str(), "+🦀hello");
+        let extra = StrOwner::new(Str::new("detached"));
+        imre_seq_append(
+            crate::ObjectOwner::as_ptr(&split),
+            StrOwner::as_ptr(&extra) as usize,
+            3,
+        );
+        assert_eq!(
+            imre_seq_len(crate::ObjectOwner::as_ptr(&split)),
+            2 * 257 + 1
+        );
+        assert_eq!(imre_seq_len(crate::ObjectOwner::as_ptr(&copy)), 2 * 256 + 1);
+        assert_eq!(imre_seq_len(crate::ObjectOwner::as_ptr(&added)), 2 * 64 + 1);
+    }
+}
