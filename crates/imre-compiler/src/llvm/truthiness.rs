@@ -103,6 +103,13 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
+                Type::ChainMap(_) => {
+                    let byte = self.instruction(format!(
+                        "call i32 @imre_chainmap_truth(ptr {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i32 {byte}, 0"))
+                }
                 Type::List(_) => {
                     let length = self
                         .instruction(format!("call i32 @sequence_header(ptr {})", value.operand));

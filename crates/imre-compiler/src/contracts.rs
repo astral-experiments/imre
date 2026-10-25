@@ -78,7 +78,11 @@ impl Builtin {
             Self::MappingObjectGet => Contract::new(true, PreservesOwners),
             Self::BoxValue | Self::ExceptionTupleView => Contract::new(false, PreservesOwners),
             Self::ExceptionFieldRepr => Contract::new(true, PreservesOwners),
-            Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
+            Self::ExceptionRepr
+            | Self::ExceptionMessage
+            | Self::Logging(crate::ir::LogOperation::PrintActiveException) => {
+                Contract::new(true, Unknown)
+            }
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {
                 Contract::new(false, PreservesLists)
             }
@@ -117,6 +121,9 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::DictContains | Self::DictGetDefault | Self::DictTryGet(_) | Self::SetContains => {
+                Contract::new(true, PreservesLists)
+            }
             Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
@@ -311,6 +318,7 @@ impl Builtin {
             | Self::SplitLines
             | Self::FreezeStrings
             | Self::SetAdd
+            | Self::SetDiscard
             | Self::CounterUpdate
             | Self::KeySet
             | Self::KeyUnion
@@ -329,6 +337,7 @@ impl Builtin {
             | Self::RecordCopy
             | Self::JsonDecode(_)
             | Self::CsvReader { .. }
+            | Self::FormatCursor { .. }
             | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads
@@ -364,11 +373,8 @@ impl Builtin {
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::Bool
-            | Self::DictContains
-            | Self::DictGetDefault
             | Self::EnumLookup(_)
             | Self::DictSumValues
-            | Self::DictTryGet(_)
             | Self::Encode
             | Self::CsvLineNumber
             | Self::Sha256Hex
@@ -418,7 +424,6 @@ impl Builtin {
             | Self::RegexSearch
             | Self::RegexMatchStart
             | Self::SequenceGetInBounds
-            | Self::SetContains
             | Self::Split
             | Self::StringListFilter(_)
             | Self::StringListNonempty
@@ -485,6 +490,11 @@ impl Builtin {
             | Self::Print
             | Self::SortRestore
             | Self::StderrLine
+            | Self::BuiltinsLast
+            | Self::BuiltinsHasLast
+            | Self::BuiltinsSetLast
+            | Self::BuiltinsDeleteLast
+            | Self::SysDisplayHook
             | Self::SysStreamWrite { .. }
             | Self::SysStreamFlush { .. }
             | Self::RaiseException
@@ -522,6 +532,9 @@ impl Builtin {
             | Self::DequeMaxlen
             | Self::DequeIter { .. }
             | Self::CounterNew
+            | Self::ChainMapNew
+            | Self::ChainMapMaps
+            | Self::ChainMapSetMaps
             | Self::CounterTotal
             | Self::DictAsBase
             | Self::DictClear
@@ -535,7 +548,6 @@ impl Builtin {
             | Self::ListDistinct
             | Self::ListExtendUnhinted
             | Self::DequeClear
-            | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
             | Self::SplitLinesIter
@@ -862,6 +874,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_translate"
                 | "imre_mapping_object_get"
                 | "imre_exception_field_repr"
+                | "imre_system_exit_code_equal"
                 | "imre_system_exit_code_text"
                 | "imre_exception_field_index"
                 | "imre_exception_field_len"
@@ -882,6 +895,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_bool"
                 | "imre_print_none"
                 | "imre_input"
+                | "imre_builtins_last"
+                | "imre_builtins_del_last"
+                | "imre_sys_displayhook"
                 | "imre_sys_argv"
                 | "imre_sys_orig_argv"
                 | "imre_path_as_posix"

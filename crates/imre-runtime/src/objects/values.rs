@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
+use super::exceptions::Error;
 use super::records::descriptor;
 use super::words::{NULLABLE, WordKind};
 use super::{Bytes, Int, List, Object, Storage, Str, fail, object};
@@ -185,6 +186,13 @@ unsafe fn integer_equal(left: usize, right: usize) -> bool {
 /// Each word is rooted and uses `kind`. All descendant ownership graphs are
 /// acyclic and remain immutable throughout this nonreentrant traversal.
 pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
+    // SAFETY: both words remain rooted under the shared descriptor.
+    unsafe { try_equal(left, right, kind) }.unwrap_or_else(|error| error.returning(false))
+}
+
+/// # Safety
+/// The words must remain rooted and match the same concrete or nullable kind.
+pub(super) unsafe fn try_equal(left: usize, right: usize, kind: WordKind) -> Result<bool, Error> {
     let mut pending = Vec::new();
     let mut current = (left, right, kind, 0);
     loop {
@@ -225,10 +233,10 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
             }
         };
         match step {
-            Comparison::Done(false) => return false,
+            Comparison::Done(false) => return Ok(false),
             Comparison::Done(true) => match pending.pop() {
                 Some(next) => current = next,
-                None => return true,
+                None => return Ok(true),
             },
             Comparison::Child {
                 left: child_left,
@@ -237,6 +245,7 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
                 resume,
             } => {
                 if let Some(position) = resume {
+                    pending.try_reserve(1).map_err(|_| Error::allocation())?;
                     pending.push((left, right, kind, position));
                 }
                 current = (child_left, child_right, child_kind, 0);
@@ -448,6 +457,26 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         }
                         Storage::Dictionary(mapping) => {
                             format_entry(owner, mapping.repr_entry(output, position), &mut pending)
+                        }
+                        Storage::ChainMap(maps) => {
+                            if position == 0 {
+                                if pending.iter().any(|task| matches!(task, ReprTask::Object(active, _) if *active == owner)) {
+                                    output.push_str("...");
+                                    return None;
+                                }
+                                output.push_str("ChainMap(");
+                            }
+                            let mapping = maps.0.with(|s| s.sequence().values.get(position).copied());
+                            if let Some(mapping) = mapping {
+                                if position != 0 {
+                                    output.push_str(", ");
+                                }
+                                pending.push(ReprTask::Object(owner, position + 1));
+                                Some(ReprTask::Object(mapping as *const Object, 0))
+                            } else {
+                                output.push(')');
+                                None
+                            }
                         }
                         Storage::SimpleNamespace(dict) => dict
                             .0

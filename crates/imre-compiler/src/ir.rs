@@ -27,6 +27,8 @@ pub(crate) enum Type {
     Class(usize),
     List(usize),
     Dict(usize),
+    /// A ChainMap owner, parameterized by the exact dictionary shape of its maps.
+    ChainMap(usize),
     Set(usize),
     Deque(usize),
     /// The immutable top-level string keys of a private TOML document.
@@ -181,6 +183,7 @@ impl std::fmt::Display for Type {
             Self::Cursor(id) => return write!(f, "iterator#{id}"),
             Self::List(id) => return write!(f, "list#{id}"),
             Self::Dict(id) => return write!(f, "dict#{id}"),
+            Self::ChainMap(id) => return write!(f, "ChainMap#{id}"),
             Self::Set(id) => return write!(f, "set#{id}"),
             Self::Deque(id) => return write!(f, "deque#{id}"),
             Self::Tuple(id) => return write!(f, "tuple#{id}"),
@@ -261,6 +264,7 @@ impl std::fmt::Display for Type {
             | Self::Cursor(_)
             | Self::List(_)
             | Self::Dict(_)
+            | Self::ChainMap(_)
             | Self::Set(_)
             | Self::Deque(_)
             | Self::Tuple(_)
@@ -331,6 +335,20 @@ pub(crate) enum JsonDefault {
 }
 
 impl Module {
+    /// Only programs that can own a display value need to clear the namespace at shutdown.
+    pub(crate) fn uses_builtins_last(&self) -> bool {
+        let mut used = false;
+        for function in self.functions.iter().chain([&self.entry]) {
+            walk_expressions(&function.body, &mut |value| {
+                used |= matches!(
+                    value.kind,
+                    ExprKind::Builtin(Builtin::BuiltinsSetLast | Builtin::SysDisplayHook, _)
+                );
+            });
+        }
+        used
+    }
+
     /// Capture arguments, the original invocation, and source search paths only
     /// for modules that use them; a bare import needs no runtime state.
     pub(crate) fn startup_usage(&self) -> (bool, bool, bool) {
@@ -601,6 +619,11 @@ pub(crate) enum Builtin {
     TupleBufferPush,
     TupleBufferFinish,
     Cycle,
+    SysDisplayHook,
+    BuiltinsLast,
+    BuiltinsHasLast,
+    BuiltinsSetLast,
+    BuiltinsDeleteLast,
     DirectoryContextView,
     TextStreamView,
     Document(DocumentOp),
@@ -874,6 +897,9 @@ pub(crate) enum Builtin {
     },
     /// Retags a namespace after its immutable command field selects a child layout.
     RecordView,
+    FormatCursor {
+        split: bool,
+    },
     ExactRecord(usize),
     CsvReader {
         delimiter: char,
@@ -995,6 +1021,9 @@ pub(crate) enum Builtin {
         reverse: bool,
     },
     CounterNew,
+    ChainMapNew,
+    ChainMapMaps,
+    ChainMapSetMaps,
     CounterTotal,
     CounterMostCommon,
     CounterUpdate,
@@ -1359,6 +1388,7 @@ pub(crate) enum LogOperation {
     Get,
     HandlerRename,
     HandlerLookup,
+    PrintActiveException,
     AddLevel,
     LevelName,
     LevelForName,
