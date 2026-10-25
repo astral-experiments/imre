@@ -199,23 +199,27 @@ pub(super) fn process_error_view(
                 args,
             ) => {
                 timed = true;
-                let Type::Popen(capture, _) = args[0].ty else {
+                let Type::Popen(capture, _, cmd) = args[0].ty else {
                     unreachable!()
                 };
-                (capture, types.list(Type::Str))
+                (capture, types.command_type(cmd))
             }
             ExprKind::Builtin(
                 Builtin::Process(ProcessOperation::PopenWait | ProcessOperation::Call { .. }),
-                _,
+                args,
             ) => {
                 timed = true;
+                let command = match args[0].ty {
+                    Type::Popen(_, _, id) => types.command_type(id),
+                    ty => ty,
+                };
                 (
                     ProcessCapture {
                         stdout: false,
                         stderr: false,
                         text: false,
                     },
-                    types.list(Type::Str),
+                    command,
                 )
             }
             ExprKind::Builtin(Builtin::Process(ProcessOperation::CheckReturnCode), args) => {
@@ -322,7 +326,7 @@ fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: boo
         graph: &'a SourceGraph,
         module: ModuleId,
         stdout: bool,
-        check_output: bool,
+        variable_command: bool,
         types: &'a Types,
         timeout: bool,
         found: Vec<Type>,
@@ -333,9 +337,16 @@ fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: boo
                 let ty = match self.graph.resolve(self.module, &call.func) {
                     Some(Binding::Intrinsic(
                         Intrinsic::SubprocessCall | Intrinsic::SubprocessCheckCall,
-                    )) => Some(Type::None),
+                    )) => {
+                        self.variable_command = true; // the command may have a non-list layout
+                        Some(Type::None)
+                    }
+                    Some(Binding::Intrinsic(Intrinsic::Popen)) => {
+                        self.variable_command = true;
+                        None
+                    }
                     Some(Binding::Intrinsic(Intrinsic::CheckOutput)) => {
-                        self.check_output = true;
+                        self.variable_command = true;
                         Some(if self.stdout { Type::Str } else { Type::None })
                     }
                     Some(Binding::Intrinsic(Intrinsic::SubprocessRun)) => {
@@ -366,7 +377,7 @@ fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: boo
         graph,
         module: graph.entry,
         stdout: field != 3,
-        check_output: false,
+        variable_command: false,
         types,
         timeout,
         found: Vec::new(),
@@ -376,8 +387,8 @@ fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: boo
         visitor.visit_body(&module.parsed.syntax().body);
     }
     if field == 0 {
-        // A check_output invocation may retain an argv with Path or union elements.
-        (!visitor.check_output).then(|| types.list(Type::Str))
+        // Popen and checked launches may retain a tuple, path or other command object.
+        (!visitor.variable_command).then(|| types.list(Type::Str))
     } else {
         Some(types.union(&visitor.found).unwrap_or(Type::Str))
     }
@@ -681,6 +692,97 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Which), returns, args))
     }
 
+    /// Keep the caller's argument object; only the OS launch converts each entry to bytes.
+    fn command_argument(&mut self, arg: &ast::Expr) -> Result<Expr, String> {
+        let scalar = |ty| {
+            matches!(
+                ty,
+                Type::Str | Type::StrLiteral(_) | Type::Bytes | Type::Path | Type::PurePath(_)
+            )
+        };
+        let value = if let ast::Expr::List(display) = arg {
+            let items = display
+                .elts
+                .iter()
+                .map(|item| self.expr(item))
+                .collect::<Result<Vec<_>, _>>()?;
+            let kinds = items
+                .iter()
+                .map(|e| {
+                    if matches!(e.ty, Type::StrLiteral(_)) {
+                        Type::Str
+                    } else {
+                        e.ty
+                    }
+                })
+                .collect::<Vec<_>>();
+            let ty = if kinds.is_empty() {
+                Some(Type::Str)
+            } else {
+                self.types.union(&kinds)
+            }
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    arg,
+                    "command list elements need a representable str, bytes or Path union",
+                )
+            })?;
+            let items = items
+                .into_iter()
+                .zip(&display.elts)
+                .map(|(value, source)| self.coerce(value, ty, source))
+                .collect::<Result<_, _>>()?;
+            Expr {
+                ty: self.types.list(ty),
+                kind: ExprKind::List(items),
+            }
+        } else {
+            self.expr(arg)?
+        };
+        let element = |ty| {
+            scalar(ty)
+                || self
+                    .types
+                    .members(ty)
+                    .is_some_and(|members| members.into_iter().all(scalar))
+        };
+        if scalar(value.ty)
+            || self.types.element(value.ty).is_some_and(element)
+            || self
+                .types
+                .fields(value.ty)
+                .is_some_and(|fields| fields.into_iter().all(element))
+        {
+            Ok(value)
+        } else {
+            Err(error(
+                self.source,
+                arg,
+                "command requires str, bytes, Path, or a list or tuple of these",
+            ))
+        }
+    }
+
+    /// Keep the original bytes or path owner until the native launch. An absent
+    /// path has a null word; every present value has its own exact storage kind.
+    fn optional_exec_path(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        let value = self.expr(expression)?;
+        let ty = self.types.payload(value.ty).unwrap_or(value.ty);
+        let ty = match ty {
+            Type::None | Type::StrLiteral(_) => Type::Str,
+            Type::Str | Type::Bytes | Type::Path | Type::PurePath(_) => ty,
+            _ => {
+                return Err(error(
+                    self.source,
+                    expression,
+                    "an executable or cwd requires str, bytes, Path or None",
+                ));
+            }
+        };
+        self.coerce(value, self.types.optional(ty), expression)
+    }
+
     /// call and check_call accept the same Popen arguments with an extra wait deadline.
     pub(super) fn popen(
         &mut self,
@@ -727,6 +829,8 @@ impl Checker<'_> {
             ("text", Type::Bool, Some(boolean(false))),
             ("encoding", Type::Bool, Some(boolean(false))),
             ("close_fds", Type::Bool, Some(boolean(true))),
+            ("executable", directory, Some(absent(directory))),
+            ("shell", Type::Bool, Some(boolean(false))),
         ]
         .into_iter()
         .enumerate()
@@ -754,10 +858,12 @@ impl Checker<'_> {
         }
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
             match index {
+                0 => checker.command_argument(arg),
                 1 if matches!(arg, ast::Expr::NoneLiteral(_)) => Ok(default_bufsize()),
-                2 => checker.optional_path_argument(arg),
+                2 | 10 => checker.optional_exec_path(arg),
                 4..=8 => Ok(boolean(false)), // effect-free literals checked by stream_plan
-                10 => checker.deadline_value(arg),
+                11 => checker.condition(arg),
+                12 => checker.deadline_value(arg),
                 _ => checker.expr_expected(arg, params[index].ty),
             }
         })?;
@@ -765,7 +871,11 @@ impl Checker<'_> {
             Some(check) => (ProcessOperation::Call { streams, check }, Type::Int),
             None => (
                 ProcessOperation::Popen { streams },
-                Type::Popen(capture, stdin == 1),
+                Type::Popen(
+                    capture,
+                    stdin == 1,
+                    self.types.process_args(args.values[args.order[0]].ty),
+                ),
             ),
         };
         Ok(self.ordered_builtin(Builtin::Process(op), ty, args))
@@ -776,7 +886,7 @@ impl Checker<'_> {
         receiver: Expr,
         attr: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
-        let Type::Popen(capture, stdin) = receiver.ty else {
+        let Type::Popen(capture, stdin, cmd) = receiver.ty else {
             unreachable!()
         };
         let (op, ty) = match attr.attr.as_str() {
@@ -797,7 +907,7 @@ impl Checker<'_> {
                     },
                 )
             }
-            "args" => (ProcessOperation::PopenArgs, self.types.list(Type::Str)),
+            "args" => (ProcessOperation::PopenArgs, self.types.command_type(cmd)),
             "pid" => (ProcessOperation::PopenPid, Type::Int),
             "returncode" => (
                 ProcessOperation::PopenStatus { poll: false },
@@ -821,7 +931,7 @@ impl Checker<'_> {
                 self.types.optional(Type::Int),
             ),
             "communicate" => {
-                let Type::Popen(capture, _) = args[0].ty else {
+                let Type::Popen(capture, ..) = args[0].ty else {
                     unreachable!()
                 };
                 let input = self
@@ -1222,7 +1332,30 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
     ) -> Result<Option<Expr>, String> {
         let (field, ty) = match attribute.attr.as_str() {
-            "cmd" => (0, self.types.list(Type::Str)),
+            "cmd" => {
+                // The narrowed exception local may be wrapped in a view.
+                let local = attribute
+                    .value
+                    .as_name_expr()
+                    .and_then(|name| self.names.get(name.id.as_str()))
+                    .and_then(|slot| {
+                        self.captured_process_errors
+                            .iter()
+                            .rev()
+                            .find(|capture| capture.slot == *slot)
+                    })
+                    .and_then(|capture| capture.argv);
+                let ty = local
+                    .or_else(|| error_field_type(self.graph, self.types, 0, true))
+                    .ok_or_else(|| {
+                        error(
+                            self.source,
+                            attribute,
+                            "the original timeout command has no single known type",
+                        )
+                    })?;
+                (0, ty)
+            }
             "timeout" => (
                 1,
                 timeout_field_type(self.graph).ok_or_else(|| {

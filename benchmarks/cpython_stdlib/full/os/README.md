@@ -19,3 +19,78 @@ done
 ```
 
 A user namespace mapping only the caller's UID/GID can cause `ChownFileTests.test_chown_gid` and `test_chown_without_permission` to get `EINVAL` for unmapped IDs. The recorded OS run used the normal devbox user's IDs; neither test was skipped.
+
+## Descriptor execution
+
+[Linux results](descriptors-linux.json) report 15 distinct methods at both `-O0` and `-O3`:
+
+| Suite | Native body, assertions and OS operations; CPython fixtures | Host body and assertions; native OS operations |
+| --- | ---: | ---: |
+| `test_os` | 9 | 3 |
+| `test_posix` | 1 | 2 |
+
+The [shared runner](../../SUITE_RUNNER.md) runs each original module and instance fixture. In particular, `FileTests` removes its test file, `PosixTester` creates one and installs warning filters, and both modules have teardown hooks. The native child inherits this working directory and uses the same test filename. It registers descriptors for reverse-order cleanup and closes them in a `finally` block; the adapter accepts only `os.close` registrations. The invalid-descriptor fixture opens and closes a real descriptor inside Imre. Every row names the CPython hooks; none is counted as an entirely native fixture.
+
+For the five host-driven methods, compiled Imre code shares the host process's descriptor table with upstream `fcntl` and file objects. The host supplies an independent check; the operations under test execute in Imre. The older `native_os.py` getcwd/fspath results are separate.
+
+Run `native_descriptors.py` and `host_descriptors.py` here with the pinned reference interpreter. Both accept `--imre`, `--runtime`, `--clang`, `--opt-level 0|3`, `--result`, and an optional `--cpython-source`. Each run uses temporary fixtures. Host-driven calls expose only explicitly routed operations. An absent bridge operation fails the test.
+
+## Environment and path values
+
+[Five unique OS IDs](values-linux.json) were run at `-O0` and `-O3` with [the shared fixture runner](../../SUITE_RUNNER.md). The complete unchanged bodies for `TestPEP519.test_return_bytes`, `test_return_string` and `EnvironTests.test_items` run native OS operations and assertions under CPython's hooks. The latter inherits the real environment set up by upstream. `MiscTests.test_getcwd` is host-driven; its [shared assertion prerequisite](https://github.com/astral-sh/imre/pull/508#issuecomment-6392091565) is tracked separately. The long-path method uses native `getcwd` and host `mkdir`, `chdir` and path joining, so its result is mixed.
+
+Run `value_cases.py` with the release interpreter and `--imre`, `--runtime`, `--clang`, `--opt-level 0|3`, `--result`, and optionally `--cpython-source`. This evidence supersedes the execution modes for the four IDs in the older `native_os.py` gate. They count once.
+
+## Versioned occurrence reports
+
+Each Linux reference has a matching pair of [v1 reports](../../NATIVE_EVIDENCE.md).
+Each occurrence appears once per optimization level under its original class.
+The repeated optimization levels and the companion suites are not additional
+primary OS tests.
+
+| Suite | Occurrences per level | Source and outcomes | O0 / O3 execution evidence |
+| --- | ---: | --- | --- |
+| test_os | 375 | [reference](reference-os-linux.json) | [evidence](evidence-os-linux.json) |
+| test_posix | 179 | [reference](reference-posix-linux.json) | [evidence](evidence-posix-linux.json) |
+| test_genericpath | 25 | [reference](reference-genericpath-linux.json) | [evidence](evidence-genericpath-linux.json) |
+
+Run `python3 benchmarks/cpython_stdlib/full/os/coverage.py` to validate all
+three pairs without building Imre. Pass `--result FILE` to export all rows.
+Use release CPython to regenerate with `evidence.py --cpython-source SOURCE`.
+The generator repeats exact discovery in a temporary directory, verifies the
+release blobs and complete native method hashes, and checks both optimization
+levels. The 91 reference skips retain their original conditions, fixtures,
+source lines and reasons. Five private-only _fspath methods remain reference-only;
+no reviewed exclusion is claimed. The older artifacts retain method hashes,
+native calls and host setup details for auditing. A supplemental configuration
+does not replace a canonical skip.
+
+[Method preflight](method-preflight-linux.json) records a separate native build
+at each level for every other reference-passing public occurrence: 295 OS, 143
+POSIX and 25 genericpath. Each build takes the complete verified definition, its
+actual imported names, and the shared native TestCase fixture. Eight generated
+invalid-descriptor methods receive the operation name from their original closure.
+Two outer methods now compile: the unchanged subprocess requests for
+`os.setregid(-1, -1)` and `os.setreuid(-1, -1)`. The [child runner](credential_children.py)
+executes both methods and verifies each child’s exact `-c` source. The [OS calls](credential-children-linux.json)
+still run in CPython after Imre rejects the inner program. These are host operations.
+For the remaining methods, the first compiler diagnostic, source line, method hash, Imre revision and
+compiler binary hash are recorded. No process or filesystem operation in an
+unreviewed test is executed during these builds.
+
+For example, `EnvironTests.test_ior_operator_invalid_dicts` reaches
+`with self.assertRaises(TypeError)` at test_os.py:1377; the [unittest context
+work](https://github.com/astral-sh/imre/pull/587#issuecomment-6392803799) covers
+that fixture requirement. Other first errors belong to upstream case helpers,
+such as `WalkTests.walk`, or to a product import such as `posix`. A compiler
+diagnostic describes the first failed build step, not the result of running the
+method. The [canonical rollup](../native_report.py) counts 13 native bodies with
+host fixtures, six host-driven native operations, one mixed body, two host operations, 461 blockers,
+five private reference-only cases, and 91 upstream skips at each level.
+
+To refresh these diagnostics, run `method_preflight.py` twice with the same
+`--imre`, `--runtime`, `--clang` and `--cpython-source`, once with each
+`--opt-level 0|3` and a distinct `--result`. Pass both files to
+`evidence.py --method-results O0.json O3.json --compiler-commit FULL_SHA`.
+CI independently reruns the 22 exercised methods at both levels and
+compares their results with the denominator reports.

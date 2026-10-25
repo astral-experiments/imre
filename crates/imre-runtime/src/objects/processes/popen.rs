@@ -39,7 +39,7 @@ fn returncode(status: ExitStatus) -> i32 {
 }
 
 pub(in crate::objects) struct Popen {
-    args: Rc<Object>,
+    args: OwnedWord,
     child: Option<Child>,
     status: Option<i32>,
     pipes: Pipes,
@@ -142,6 +142,49 @@ unsafe fn with_process<T>(handle: *const Object, work: impl FnOnce(&mut Popen) -
     }
 }
 
+/// Borrowed launch settings, filled by the compiler in parameter order after
+/// evaluating all Python expressions. All referenced values are rooted by the caller.
+#[repr(C)]
+pub struct LaunchConfig {
+    args: *const (),
+    pub(super) cwd: *const (),
+    pub(super) env: *const Object,
+    pub(super) executable: *const (),
+    bufsize: usize,
+    arg_kind: u32,
+    pub(super) cwd_kind: u32,
+    pub(super) executable_kind: u32,
+    streams: u32,
+    close_fds: bool,
+    pub(super) shell: bool,
+}
+
+impl LaunchConfig {
+    pub(super) fn basic(
+        args: *const (),
+        arg_kind: u32,
+        cwd: *const Str,
+        env: *const Object,
+        streams: u32,
+        bufsize: usize,
+        close_fds: bool,
+    ) -> Self {
+        Self {
+            args,
+            arg_kind,
+            cwd: cwd.cast(),
+            cwd_kind: 3,
+            env,
+            streams,
+            bufsize,
+            close_fds,
+            executable: std::ptr::null(),
+            executable_kind: 3,
+            shell: false,
+        }
+    }
+}
+
 /// # Safety
 /// Args, optional cwd, and optional environment are rooted through spawn.
 #[unsafe(no_mangle)]
@@ -166,8 +209,33 @@ pub unsafe extern "C" fn imre_popen_pipes(
     bufsize: usize,
     close_fds: bool,
 ) -> *const Object {
-    // SAFETY: generated callers root the launch and buffer arguments until spawn completes.
-    let result = unsafe { spawn(args, cwd, env, streams, bufsize, close_fds) }.map(|child| {
+    // SAFETY: the original entry point accepts only list[str].
+    unsafe { imre_popen_command(args.cast(), 5, cwd, env, streams, bufsize, close_fds) }
+}
+
+/// # Safety
+/// The command pointer is rooted with exactly the supplied representation kind.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_popen_command(
+    args: *const (),
+    arg_kind: u32,
+    cwd: *const Str,
+    env: *const Object,
+    streams: u32,
+    bufsize: usize,
+    close_fds: bool,
+) -> *const Object {
+    let config = LaunchConfig::basic(args, arg_kind, cwd, env, streams, bufsize, close_fds);
+    // SAFETY: callers root every borrowed launch argument.
+    unsafe { imre_popen_config(&config) }
+}
+
+/// # Safety
+/// The settings and the owners of every argument must live through spawn.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_popen_config(config: *const LaunchConfig) -> *const Object {
+    // SAFETY: the compiler supplies the exact settings layout and rooted owners.
+    let result = unsafe { spawn(&*config) }.map(|child| {
         Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Popen(Box::new(
             child,
         ))))))
@@ -179,16 +247,11 @@ pub unsafe extern "C" fn imre_popen_pipes(
 ///
 /// # Safety
 /// The caller roots the argv, optional directory/environment and buffer size.
-unsafe fn spawn(
-    args: *const Object,
-    cwd: *const Str,
-    env: *const Object,
-    streams: u32,
-    bufsize: usize,
-    close_fds: bool,
-) -> Result<Popen> {
+unsafe fn spawn(config: &LaunchConfig) -> Result<Popen> {
+    // SAFETY: settings describe the rooted command, path and integer representations.
+    let args = unsafe { WordKind::new(config.arg_kind).acquire(config.args as usize) };
     // SAFETY: the buffer size is a rooted canonical integer.
-    let bufsize = (unsafe { Int::borrow(bufsize) })
+    let bufsize = (unsafe { Int::borrow(config.bufsize) })
         .as_small()
         .and_then(|n| i32::try_from(n).ok())
         .ok_or_else(|| {
@@ -197,7 +260,7 @@ unsafe fn spawn(
                 "Python int too large to convert to C int",
             )
         })?;
-    let streams = streams | (u32::from(!close_fds) << 17);
+    let streams = config.streams | (u32::from(!config.close_fds) << 17);
     if streams & 15 == 5 {
         return Err(Error::new(
             Kind::ValueError,
@@ -205,7 +268,7 @@ unsafe fn spawn(
         ));
     }
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
-    unsafe { prepare_process(args, cwd, env) }
+    unsafe { prepare_command(&args, config) }
         .and_then(|(launch, cwd)| launch.spawn(cwd.as_ref(), streams).map_err(os_error))
         .map(|mut child| {
             let text = streams & (1 << 16) != 0;
@@ -217,8 +280,7 @@ unsafe fn spawn(
             ];
             Popen {
                 pipes,
-                // SAFETY: the original argv stays rooted while we acquire it.
-                args: unsafe { acquire_rc(args as usize) },
+                args,
                 child: Some(child),
                 status: None,
                 communication: Default::default(),
@@ -243,8 +305,54 @@ pub unsafe extern "C" fn imre_subprocess_call(
     word: usize,
     check: bool,
 ) -> usize {
-    // SAFETY: caller guarantees the exact native representations and owners.
-    let result = unsafe { spawn(args, cwd, env, streams, bufsize, close_fds) }.and_then(|mut p| {
+    // SAFETY: the original call entry point accepts an exact list[str].
+    unsafe {
+        imre_call_command(
+            args.cast(),
+            5,
+            cwd,
+            env,
+            streams,
+            bufsize,
+            close_fds,
+            kind,
+            word,
+            check,
+        )
+    }
+}
+
+/// # Safety
+/// The command pointer has the given representation; all launch and deadline arguments are rooted.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_call_command(
+    args: *const (),
+    arg_kind: u32,
+    cwd: *const Str,
+    env: *const Object,
+    streams: u32,
+    bufsize: usize,
+    close_fds: bool,
+    kind: u32,
+    word: usize,
+    check: bool,
+) -> usize {
+    let config = LaunchConfig::basic(args, arg_kind, cwd, env, streams, bufsize, close_fds);
+    // SAFETY: the legacy settings and deadline have the supplied representations.
+    unsafe { imre_call_config(&config, kind, word, check) }
+}
+
+/// # Safety
+/// The rooted settings and deadline word must match the compiler's layouts.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_call_config(
+    config: *const LaunchConfig,
+    kind: u32,
+    word: usize,
+    check: bool,
+) -> usize {
+    // SAFETY: the settings and the values to which they point are rooted.
+    let result = unsafe { spawn(&*config) }.and_then(|mut p| {
         // SAFETY: the deadline kind was selected for this rooted word by the compiler.
         let timeout = unsafe { Deadline::from_word(kind, word) };
         let waited = p.wait(timeout.as_ref());
@@ -310,9 +418,9 @@ pub unsafe extern "C" fn imre_popen_pid(handle: *const Object) -> usize {
 /// # Safety
 /// The caller roots this Popen; the returned reference owns its original argv.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_popen_args(handle: *const Object) -> *const Object {
-    // SAFETY: the handle owns the list throughout the reference acquisition.
-    unsafe { with_process(handle, |p| Rc::into_raw(p.args.clone())) }
+pub unsafe extern "C" fn imre_popen_args(handle: *const Object) -> *const () {
+    // SAFETY: the handle owns this exact command throughout the reference acquisition.
+    unsafe { with_process(handle, |p| p.args.clone().into_word() as *const ()) }
 }
 
 /// # Safety

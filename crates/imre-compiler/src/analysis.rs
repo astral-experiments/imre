@@ -3,8 +3,10 @@
 #[cfg(test)]
 mod incremental_tests;
 mod inferred_shapes;
+mod tuple_displays;
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -49,6 +51,7 @@ struct Database {
 pub(crate) struct Session {
     db: Database,
     files: Vec<File>,
+    tuple_spreads: Vec<HashMap<TextSize, usize>>,
     rules: Arc<RuleSelection>,
     root: PathBuf,
     extension_roots: Vec<PathBuf>,
@@ -114,6 +117,16 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
+        // Popen tests and programs pass shell=0/1. Preserve all of typeshed's
+        // overloads while admitting the integer truth values CPython accepts.
+        let subprocess = vendored
+            .read_to_string("stdlib/subprocess.pyi")
+            .map_err(|error| error.to_string())?
+            .replace("shell: bool =", "shell: bool | int =");
+        system
+            .fs()
+            .write_file_all(SystemPathBuf::from(root).join("subprocess.pyi"), subprocess)
+            .map_err(|error| error.to_string())?;
         // CPython's POSIX which() accepts a byte search path independently of
         // the command's type. The cross-platform typeshed overloads omit it.
         system
@@ -171,6 +184,7 @@ impl Session {
         Ok(Self {
             db,
             files: Vec::new(),
+            tuple_spreads: Vec::new(),
             rules: Arc::new(rules),
             root: PathBuf::from(root),
             extension_roots: extension_roots.to_vec(),
@@ -199,25 +213,33 @@ impl Session {
         if let Some(error) = limits.error {
             return Err(format!("{path}: {error}"));
         }
-        // ty materializes every field of a starred tuple display before lowering.
-        // Imre supports starred assignment targets and list displays.
-        if parsed
+        let spreads = if parsed
             .tokens()
             .iter()
             .any(|token| token.kind() == TokenKind::Star)
-            && ruff_python_ast::helpers::any_over_body(&parsed.syntax().body, |expr| {
-                matches!(expr, Expr::Tuple(tuple) if tuple.ctx == ruff_python_ast::ExprContext::Load
-                    && tuple.elts.iter().any(|elt| matches!(elt, Expr::Starred(_))))
-            })
         {
-            return Err(format!(
-                "{path}: Imre: starred elements in tuple displays are unsupported"
-            ));
-        }
+            tuple_displays::check(&parsed.syntax().body).map_err(|(node, reason)| {
+                format!("{path}:{}", crate::frontend::error(source, node, reason))
+            })?
+        } else {
+            HashMap::new()
+        };
         inferred_shapes::check(&parsed.syntax().body, parsed.tokens().len())
             .map_err(|error| format!("{path}: {error}"))?;
         self.files.push(file);
+        self.tuple_spreads.push(spreads);
         Ok(parsed)
+    }
+
+    /// Width proved before ty expands the display's field types.
+    pub(crate) fn tuple_spread_width(&self, module: usize, start: TextSize) -> Option<usize> {
+        self.tuple_spreads.get(module)?.get(&start).copied()
+    }
+
+    /// Only modules with statically proved starred tuple fields can need the
+    /// corresponding exact list-subscript diagnostic site.
+    pub(crate) fn has_tuple_spreads(&self, module: usize) -> bool {
+        !self.tuple_spreads[module].is_empty()
     }
 
     fn write_file(&self, path: &str, source: &str) -> Result<File, String> {
@@ -371,7 +393,7 @@ impl Session {
     pub(crate) fn check_scopes(
         &mut self,
         skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedOverload>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
@@ -382,7 +404,7 @@ impl Session {
     fn errors(
         &self,
         skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedOverload>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         let errors: Vec<_> = self
             .files
@@ -413,22 +435,27 @@ struct CheckedFile<'db> {
     #[returns(copy)]
     file: File,
     skipped: Vec<TextRange>,
-    overloads: Vec<CheckedOverload>,
+    overloads: Vec<CheckedDiagnostic>,
 }
 
-/// The frontend validates context-manager decorators and the exact calls
-/// it lowers with a signature different from typeshed's overloads.
+/// Only exclude the exact ty diagnostic already checked by native lowering.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum CheckedOverload {
+pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
     Call(TextRange),
+    Keyword(TextRange),
+    TupleListRead(TextRange),
 }
 
-impl CheckedOverload {
-    fn covers(self, range: TextRange) -> bool {
+impl CheckedDiagnostic {
+    fn covers(self, diagnostic: &str, range: TextRange) -> bool {
         match self {
-            Self::Decorator(decorator) => decorator.contains_range(range),
-            Self::Call(call) => call == range,
+            Self::Decorator(decorator) => {
+                diagnostic == "no-matching-overload" && decorator.contains_range(range)
+            }
+            Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
+            Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
+            Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
         }
     }
 }
@@ -455,8 +482,13 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
-                            || (diagnostic.id().as_str() == "no-matching-overload"
-                                && overloads.iter().any(|scope| scope.covers(range)))
+                            || (matches!(
+                                diagnostic.id().as_str(),
+                                "too-many-positional-arguments" | "missing-argument"
+                            ) && native_partial_call(db, file, range, diagnostic.id().as_str()))
+                            || overloads
+                                .iter()
+                                .any(|scope| scope.covers(diagnostic.id().as_str(), range))
                     })
         })
         .map(|diagnostic| {
@@ -468,6 +500,48 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                 .to_string()
         })
         .collect()
+}
+
+/// ty 0.0.14 counts functools.Placeholder as an occupied parameter. Imre has
+/// already checked the exact open slots before requesting these diagnostics.
+/// The zero-argument constructor also has a native runtime TypeError. Match
+/// only the diagnosed invocation; unrelated binding errors remain diagnostics.
+fn native_partial_call(db: &dyn Db, file: File, range: TextRange, rule: &str) -> bool {
+    use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+    use ty_python_semantic::types::{KnownClass, KnownInstanceType, ProgramEnvironment, Type};
+    let file = db.program_file(file);
+    let parsed = ruff_db::parsed::parsed_module(db, file.python_file(db)).load(db);
+    let root = AnyNodeRef::from(parsed.syntax());
+    if !root.range().contains_range(range) {
+        return false;
+    }
+    let nodes = covering_node(root, range);
+    let Some(call) = nodes.ancestors().find_map(|node| match node {
+        AnyNodeRef::ExprCall(call) => Some(call),
+        _ => None,
+    }) else {
+        return false;
+    };
+    let Some(callee) = call.func.inferred_type(&SemanticModel::new(db, file)) else {
+        return false;
+    };
+    match (rule, callee) {
+        (
+            "too-many-positional-arguments",
+            Type::KnownInstance(KnownInstanceType::FunctoolsPartial(_)),
+        ) => call.arguments.args.iter().any(|arg| arg.range() == range),
+        ("missing-argument", Type::ClassLiteral(_))
+            if call.arguments.args.is_empty() && call.range() == range =>
+        {
+            let env = ProgramEnvironment::from_file(file);
+            callee.is_assignable_to(
+                db,
+                &env,
+                KnownClass::FunctoolsPartial.to_subclass_of(db, &env),
+            )
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -503,6 +577,7 @@ impl CachedSession {
     }
 
     fn update(&mut self, fresh: &Session, inputs: &crate::SourceInputs) -> Result<(), String> {
+        self.session.tuple_spreads.clone_from(&fresh.tuple_spreads);
         for (index, (old, new)) in self.inputs.files.iter_mut().zip(&inputs.files).enumerate() {
             if old.2 == new.2 {
                 continue;
@@ -571,7 +646,7 @@ impl AnalysisCache {
         fresh: &mut Session,
         inputs: &crate::SourceInputs,
         skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedOverload>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         if let Some(cached) = &mut self.diagnostics
             && cached.same_files(fresh, inputs)

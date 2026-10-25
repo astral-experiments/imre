@@ -164,10 +164,21 @@ impl Checker<'_> {
             || types.iter().all(|ty| {
                 matches!(
                     ty,
-                    Type::Exception | Type::TimeoutExpired | Type::NamedException(_) | Type::None
+                    Type::Exception
+                        | Type::ImportException
+                        | Type::TimeoutExpired
+                        | Type::NamedException(_)
+                        | Type::None
+                )
+            })
+            || types.iter().all(|ty| {
+                matches!(
+                    ty,
+                    Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_)
                 )
             })
             || types == [Type::LogRecord; 2]
+            || types.iter().all(|ty| matches!(ty, Type::Cursor(_)))
             || types == [Type::Logger; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
@@ -176,7 +187,7 @@ impl Checker<'_> {
             return Err(error(
                 self.source,
                 node,
-                "identity comparisons require None, exceptions, enum members, loggers, or hash objects",
+                "identity comparisons require supported stable object identities",
             ));
         }
         Ok(Self::identity_result(

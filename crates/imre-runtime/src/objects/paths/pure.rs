@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use super::{Error, Kind, Object, Result, Storage, StorageCell, Str, object};
 use crate::objects::exceptions::string_repr;
+use crate::objects::text::lowercase;
 
 pub(in crate::objects) struct PurePath {
     pub(super) windows: bool,
@@ -54,20 +55,29 @@ fn win_split(s: &str) -> (&str, &str, &str) {
     ("", "", s)
 }
 
+/// Normalize a Windows path comparison key with the same Unicode data as `str.lower()`.
+fn windows_lower(source: &str) -> Str {
+    lowercase(source).expect("failed to allocate lowercase Windows path")
+}
+
 fn win_join(raw: &[Rc<Str>]) -> String {
-    let (mut drive, mut root, mut tail) = (String::new(), "", String::new());
+    let (mut drive, mut root, mut tail) = ("", "", String::new());
     for part in raw {
         let input = part.replace('/', "\\");
         let (d, r, t) = win_split(&input);
-        if !r.is_empty() || (!d.is_empty() && d.to_lowercase() != drive.to_lowercase()) {
+        // ntpath.join compares the original drive spellings, including separators.
+        let d = &part[..d.len()];
+        if !r.is_empty()
+            || (!d.is_empty() && d != drive && windows_lower(d) != windows_lower(drive))
+        {
             if !d.is_empty() || drive.is_empty() {
-                drive = d.to_owned();
+                drive = d;
             }
             root = if r.is_empty() { "" } else { "\\" };
             tail = t.to_owned();
         } else {
             if !d.is_empty() {
-                drive = d.to_owned();
+                drive = d;
             }
             if !tail.is_empty() && !tail.ends_with('\\') {
                 tail.push('\\');
@@ -75,12 +85,13 @@ fn win_join(raw: &[Rc<Str>]) -> String {
             tail.push_str(t);
         }
     }
-    if !tail.is_empty() && root.is_empty() && !drive.is_empty() && !drive.ends_with([':', '\\']) {
-        drive.push('\\');
+    let mut path = drive.replace('/', "\\");
+    if !tail.is_empty() && root.is_empty() && !path.is_empty() && !path.ends_with([':', '\\']) {
+        path.push('\\');
     }
-    drive.push_str(root);
-    drive.push_str(&tail);
-    drive
+    path.push_str(root);
+    path.push_str(&tail);
+    path
 }
 
 impl PurePath {
@@ -118,7 +129,7 @@ impl PurePath {
             let mut fields = drive.split(sep);
             let host = fields.nth(2).unwrap_or_default();
             match fields.count() {
-                1 if !matches!(host, "" | "." | "?") => root = "\\",
+                1 if !matches!(host, "" | "." | "?" | "?.") => root = "\\",
                 3 => root = "\\",
                 _ => {}
             }
@@ -190,6 +201,12 @@ impl PurePath {
         self.tail.last().map_or("", |s| s.as_str())
     }
 
+    pub(super) fn count_part(&self, part: &str) -> usize {
+        let anchor =
+            part.strip_prefix(self.drive.as_str()) == Some(self.root.as_str()) && !part.is_empty();
+        usize::from(anchor) + self.tail.iter().filter(|s| s.as_str() == part).count()
+    }
+
     pub(super) fn is_absolute(&self) -> bool {
         if self.windows {
             self.text.starts_with(r"\\") || (!self.root.is_empty() && !self.drive.is_empty())
@@ -248,7 +265,7 @@ impl PurePath {
 impl Storage {
     pub(in crate::objects) fn path_key(&self) -> &str {
         match self {
-            Self::PurePath(p) if p.windows => p.folded.get_or_init(|| p.text.to_lowercase()),
+            Self::PurePath(p) if p.windows => p.folded.get_or_init(|| windows_lower(&p.text)),
             _ => self.path(),
         }
     }

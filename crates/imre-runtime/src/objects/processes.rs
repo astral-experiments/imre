@@ -19,8 +19,9 @@ use super::files::{decode_utf8_text, os_error};
 use super::mappings::{StringPairs, imre_dict_contains, imre_dict_new};
 use super::records::{RecordDescriptor, imre_record_new};
 use super::words::{OwnedWord, WordKind};
-use super::{Bytes, Int, Object, Storage, Str, acquire_rc, fail, object};
+use super::{Bytes, Int, Object, Storage, Str, fail, object};
 
+mod argv;
 mod asynchronous;
 mod popen;
 pub(super) use asynchronous::AsyncProcess;
@@ -35,7 +36,7 @@ unsafe extern "C" {
 /// Its sealed string and path elements cannot point back to the exception.
 #[derive(Clone)]
 pub(super) struct ProcessError {
-    cmd: Rc<Object>,
+    cmd: OwnedWord,
     returncode: i32,
     stdout: OwnedWord,
     stderr: OwnedWord,
@@ -44,7 +45,7 @@ pub(super) struct ProcessError {
 impl ProcessError {
     pub(super) fn field(&self, field: u32, tagged: bool) -> usize {
         match field {
-            0 => Rc::into_raw(self.cmd.clone()) as usize,
+            0 => self.cmd.clone().into_word(),
             1 => exit_word(self.returncode),
             2..=4 => {
                 let output = if field == 3 {
@@ -65,11 +66,7 @@ impl ProcessError {
     }
 
     pub(super) fn message(&self) -> Str {
-        let mut cmd = String::new();
-        // SAFETY: this owner roots the original acyclic argv list during repr.
-        unsafe {
-            super::values::write_repr(&mut cmd, Rc::as_ptr(&self.cmd) as usize, WordKind::new(5));
-        }
+        let cmd = argv::display(&self.cmd);
         if self.returncode < 0 {
             let signal = -self.returncode;
             if let Some(name) = signal_name(signal) {
@@ -123,7 +120,7 @@ impl Deadline {
 /// Empty streams distinguish an observed EOF from no data observed before expiry.
 #[derive(Clone)]
 pub(super) struct TimeoutError {
-    cmd: Rc<Object>,
+    cmd: OwnedWord,
     timeout: Deadline,
     stdout: Option<Rc<Bytes>>,
     stderr: Option<Rc<Bytes>>,
@@ -133,7 +130,7 @@ impl TimeoutError {
     /// The compiler proves the numeric field's exact kind at every read.
     pub(super) fn field(&self, field: u32) -> usize {
         match field {
-            0 => Rc::into_raw(self.cmd.clone()) as usize,
+            0 => self.cmd.clone().into_word(),
             1 => match &self.timeout {
                 Deadline::Integer(seconds) => seconds.clone().into_raw(),
                 Deadline::Float(seconds) => seconds.to_bits() as usize,
@@ -152,11 +149,7 @@ impl TimeoutError {
 
     /// Formatting observes later mutations of the same rooted argv list.
     pub(super) fn message(&self) -> Str {
-        let mut cmd = String::new();
-        // SAFETY: this owner roots an exact acyclic list[str] during repr.
-        unsafe {
-            super::values::write_repr(&mut cmd, Rc::as_ptr(&self.cmd) as usize, WordKind::new(5));
-        }
+        let cmd = argv::display(&self.cmd);
         let seconds = match &self.timeout {
             Deadline::Integer(seconds) => Str::from(seconds.big().to_string()),
             Deadline::Float(seconds) => crate::floats::render(*seconds),
@@ -423,6 +416,7 @@ impl PathSearch {
 
 struct Launch {
     argv: CStrings,
+    executable: Option<CString>,
     env: Option<CStrings>,
     search: Option<PathSearch>,
     descriptors: Descriptors,
@@ -431,8 +425,16 @@ struct Launch {
 impl Launch {
     /// Prepares native launch data after validating nonempty argv and env names.
     fn new(argv: Vec<CString>, env: Option<StringPairs>) -> Result<Self> {
+        Self::with_executable(argv, env, None)
+    }
+
+    fn with_executable(
+        argv: Vec<CString>,
+        env: Option<StringPairs>,
+        executable: Option<CString>,
+    ) -> Result<Self> {
         popen::cleanup();
-        let program = &argv[0];
+        let program = executable.as_ref().unwrap_or_else(|| &argv[0]);
         let search = if program.as_bytes().contains(&b'/') {
             None
         } else {
@@ -450,6 +452,7 @@ impl Launch {
         let env = env.map(CStrings::from_environment).transpose()?;
         Ok(Self {
             argv: CStrings::new(argv)?,
+            executable,
             env,
             search,
             descriptors: Descriptors::prepare().map_err(os_error)?,
@@ -499,7 +502,10 @@ impl Launch {
                 saved_error = Some(last_error);
             }
         };
-        let program = &self.argv.strings[0];
+        let program = self
+            .executable
+            .as_ref()
+            .unwrap_or_else(|| &self.argv.strings[0]);
         if let Some(search) = &mut self.search {
             search.visit(program, attempt);
         } else {
@@ -523,7 +529,11 @@ impl Launch {
                 _ => fail("SystemError", "invalid subprocess stream mode"),
             })
         }
-        let mut command = Command::new(OsStr::from_bytes(self.argv.strings[0].as_bytes()));
+        let program = self
+            .executable
+            .as_ref()
+            .unwrap_or_else(|| &self.argv.strings[0]);
+        let mut command = Command::new(OsStr::from_bytes(program.as_bytes()));
         let stderr = (streams >> 4) & 15;
         command
             .stdin(output((streams >> 12) & 15)?)
@@ -1104,29 +1114,9 @@ unsafe fn native_argv(args: *const Object) -> Result<Vec<CString>> {
 /// The caller roots an exact list of strings, Paths, or their closed union.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *const Str {
-    // SAFETY: inspect only the exact runtime representations admitted by this call.
-    let argv = unsafe {
-        object(args).0.with(|storage| -> Result<Vec<CString>> {
-            let list = storage.sequence();
-            copy_argv(&list.values, |word| {
-                let (word, ty) = if list.kind.raw() == 9 {
-                    super::unions::member(word)
-                } else {
-                    (word, list.kind)
-                };
-                match ty.raw() {
-                    3 => cstring((&*(word as *const Str)).as_bytes()),
-                    5 => object(word as *const Object)
-                        .0
-                        .with(|storage| match storage {
-                            Storage::Path { .. } => cstring(storage.path().as_bytes()),
-                            _ => fail("SystemError", "expected a subprocess Path argument"),
-                        }),
-                    _ => fail("SystemError", "invalid subprocess argument kind"),
-                }
-            })
-        })
-    };
+    // SAFETY: the caller roots the exact list for the duration of this operation.
+    let cmd = unsafe { WordKind::new(5).acquire(args as usize) };
+    let argv = argv::copy(&cmd);
     let run = argv.and_then(|argv| {
         if argv.is_empty() {
             return Err(Error::new(Kind::IndexError, "list index out of range"));
@@ -1140,7 +1130,7 @@ pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *c
         Ok((status, stdout)) => {
             raise_process(ProcessError {
                 // SAFETY: the exception acquires the original rooted argv.
-                cmd: unsafe { acquire_rc(args as usize) },
+                cmd: unsafe { WordKind::new(5).acquire(args as usize) },
                 returncode: status
                     .code()
                     .unwrap_or_else(|| -status.signal().unwrap_or(0)),
@@ -1187,7 +1177,7 @@ pub unsafe extern "C" fn imre_subprocess_to_stderr(args: *const Object, check: u
     match run() {
         Ok(status) if check != 0 && !status.success() => raise_process(ProcessError {
             // SAFETY: the original list remains rooted while acquiring our owner.
-            cmd: unsafe { acquire_rc(args as usize) },
+            cmd: unsafe { WordKind::new(5).acquire(args as usize) },
             returncode: status
                 .code()
                 .unwrap_or_else(|| -status.signal().unwrap_or(0)),
@@ -1205,20 +1195,40 @@ unsafe fn prepare_process(
     cwd: *const Str,
     env: *const Object,
 ) -> Result<(Launch, Option<CString>)> {
+    // SAFETY: existing run and asynchronous ABIs accept an exact list.
+    let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, 0, 0, true);
+    // SAFETY: the legacy arguments have their original word representations.
+    unsafe { prepare_command(&WordKind::new(5).acquire(args as usize), &config) }
+}
+
+/// # Safety
+/// The exact optional directory and environment stay rooted across conversion.
+unsafe fn prepare_command(
+    cmd: &OwnedWord,
+    config: &popen::LaunchConfig,
+) -> Result<(Launch, Option<CString>)> {
     // SAFETY: the caller roots the exact argv, optional directory and environment.
     unsafe {
         // Python selects args[0], validates every environment name, then
         // converts native strings. Preserve that order for mixed failures.
-        if object(args)
-            .0
-            .with(|storage| storage.sequence().values.is_empty())
+        if config.shell
+            && cmd.kind.raw() == 5
+            && object(cmd.word as *const Object)
+                .0
+                .with(|s| matches!(s, Storage::Path { .. } | Storage::PurePath(_)))
         {
+            return Err(Error::new(
+                Kind::TypeError,
+                "path-like args is not allowed when shell is true",
+            ));
+        }
+        if !config.shell && config.executable.is_null() && argv::empty(cmd) {
             return Err(Error::new(Kind::IndexError, "list index out of range"));
         }
-        let env = if env.is_null() {
+        let env = if config.env.is_null() {
             None
         } else {
-            Some(object(env).0.with(|storage| {
+            Some(object(config.env).0.with(|storage| {
                 let Storage::Dictionary(mapping) = storage else {
                     fail("SystemError", "expected an environment dictionary");
                 };
@@ -1234,11 +1244,23 @@ unsafe fn prepare_process(
                 "illegal environment variable name",
             ));
         }
-        let argv = native_argv(args)?;
-        let cwd = (!cwd.is_null())
-            .then(|| cstring((&*cwd).as_bytes()))
-            .transpose()?;
-        Ok((Launch::new(argv, env)?, cwd))
+        let executable = argv::optional_path(config.executable, config.executable_kind)?;
+        let mut argv = argv::copy(cmd)?;
+        if config.shell {
+            let default = if cfg!(target_os = "android") {
+                c"/system/bin/sh"
+            } else {
+                c"/bin/sh"
+            };
+            let shell = executable
+                .as_deref()
+                .filter(|p| !p.to_bytes().is_empty())
+                .unwrap_or(default);
+            argv.try_reserve(2).map_err(|_| Error::allocation())?;
+            argv.splice(..0, [shell.to_owned(), c"-c".to_owned()]);
+        }
+        let cwd = argv::optional_path(config.cwd, config.cwd_kind)?;
+        Ok((Launch::with_executable(argv, env, executable)?, cwd))
     }
 }
 
@@ -1322,7 +1344,7 @@ unsafe fn run_process(
         Ok(Captured::TimedOut(stdout, stderr)) => {
             raise_timeout(TimeoutError {
                 // SAFETY: the original argv stays rooted across launch and capture.
-                cmd: unsafe { acquire_rc(args as usize) },
+                cmd: unsafe { WordKind::new(5).acquire(args as usize) },
                 timeout: timeout.expect("only a deadline produces a timeout"),
                 stdout: stdout.map(Rc::new),
                 stderr: stderr.map(Rc::new),
@@ -1350,7 +1372,7 @@ unsafe fn run_process(
     };
     // SAFETY: the caller retains the original list through this operation. Keeping
     // that exact owner preserves CompletedProcess.args and CalledProcessError.cmd.
-    let args = unsafe { acquire_rc(args as usize) };
+    let args = unsafe { WordKind::new(5).acquire(args as usize) };
     if check != 0 && returncode != 0 {
         raise_process(ProcessError {
             cmd: args,
@@ -1364,7 +1386,9 @@ unsafe fn run_process(
     // remains; typed stores preserve reference provenance and transfer each owner.
     unsafe {
         let result = imre_record_new(descriptor);
-        result.cast::<*const Object>().write(Rc::into_raw(args));
+        result
+            .cast::<*const ()>()
+            .write(args.into_word() as *const ());
         result.add(1).write(exit_word(returncode));
         for (index, stream) in [stdout, stderr].into_iter().enumerate() {
             let field = result.add(index + 2);
@@ -1401,7 +1425,7 @@ pub unsafe extern "C" fn imre_subprocess_check(record: *const usize) {
             kind.acquire(kind.read_record_field(record.add(index)))
         };
         ProcessError {
-            cmd: acquire_rc(record.cast::<*const Object>().read() as usize),
+            cmd: acquire_stream(0),
             returncode,
             stdout: acquire_stream(2),
             stderr: acquire_stream(3),

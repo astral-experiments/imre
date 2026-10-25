@@ -25,18 +25,7 @@ fn positive_columns(value: &str) -> Option<usize> {
             count += 1;
         }
     }
-    // Beyond the minimum threshold, CPython's decimal conversion guard can
-    // reject a width even when it consists almost entirely of leading zeroes.
-    if count > 640 {
-        let limit = std::env::var("PYTHONINTMAXSTRDIGITS")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(4300);
-        if limit != 0 && count > limit {
-            return None;
-        }
-    }
-    (width > 0).then_some(width)
+    (width > 0 && super::decimal_digits_allowed(count)).then_some(width)
 }
 
 pub(super) fn width() -> usize {
@@ -86,21 +75,18 @@ fn paint(enabled: bool, code: &str, text: &str) -> String {
 
 impl OptionSpec {
     fn dest(&self) -> String {
-        self.flags()
-            .find_map(|s| s.strip_prefix("--"))
-            .unwrap_or_else(|| self.flag.trim_start_matches('-'))
-            .replace('-', "_")
+        self.dest.clone()
     }
 
     fn label(&self, summary: bool, color: bool) -> String {
-        let mut metavar = if self.choices.is_empty() {
+        let mut metavar = if !self.has_choices {
             if self.positional() {
                 self.dest()
             } else {
                 self.dest().to_uppercase()
             }
         } else {
-            format!("{{{}}}", self.choices.join(","))
+            format!("{{{}}}", self.choices_text(",", false))
         };
         if self.positional() {
             if summary {
@@ -109,7 +95,7 @@ impl OptionSpec {
             return paint(color, if summary { "32" } else { "1;32" }, &metavar);
         }
         metavar = self.nargs.label(&metavar);
-        let option_color = |flag: &str, bold: bool| match (flag.starts_with("--"), bold) {
+        let option_color = |flag: &str, bold: bool| match (flag.chars().count() > 2, bold) {
             (true, true) => "1;36",
             (true, false) => "36",
             (false, true) => "1;32",
@@ -401,11 +387,10 @@ impl Parser {
 
     pub(super) fn usage(&self, width: usize) -> String {
         let color = color_enabled();
-        let short = format!("[{}]", paint(color, "32", "-h"));
-        let mut parts = vec![
-            (len(&self.prog), paint(color, "1;35", &self.prog)),
-            (4, short),
-        ];
+        let mut parts = vec![(len(&self.prog), paint(color, "1;35", &self.prog))];
+        if let Some([short, _]) = &self.help_flags {
+            parts.push((len(short) + 2, format!("[{}]", paint(color, "32", short))));
+        }
         for option in self.options.iter().filter(|o| !o.positional()) {
             let length = len(&option.label(true, false));
             let styled = option.label(true, color);
@@ -428,7 +413,9 @@ impl Parser {
         let prefix = "usage: ".len();
         let mut text = paint(color, "1;34", "usage: ");
         let width_of = |parts: &[(usize, String)]| parts.iter().map(|(n, _)| n + 1).sum::<usize>();
-        if prefix + width_of(&parts) + width_of(&positional) - 1 <= width {
+        if (parts.len() == 1 && positional.is_empty())
+            || prefix + width_of(&parts) + width_of(&positional) - 1 <= width
+        {
             text.push_str(
                 &parts
                     .iter()
@@ -438,6 +425,9 @@ impl Parser {
                     .join(" "),
             );
         } else {
+            if parts.len() == 1 {
+                parts.append(&mut positional);
+            }
             let short_prog = (prefix + len(&self.prog)) * 4 <= 3 * width;
             let indent = if short_prog {
                 prefix + len(&self.prog) + 1
@@ -475,15 +465,18 @@ impl Parser {
             }
         }
         let color = color_enabled();
-        let mut rows = vec![(
-            "-h, --help".to_owned(),
-            format!(
-                "{}, {}",
-                paint(color, "1;32", "-h"),
-                paint(color, "1;36", "--help")
-            ),
-            "show this help message and exit".to_owned(),
-        )];
+        let mut rows = Vec::new();
+        if let Some([short, long]) = &self.help_flags {
+            rows.push((
+                format!("{short}, {long}"),
+                format!(
+                    "{}, {}",
+                    paint(color, "1;32", short),
+                    paint(color, "1;36", long)
+                ),
+                "show this help message and exit".to_owned(),
+            ));
+        }
         let mut positionals = Vec::new();
         let mut grouped = vec![Vec::new(); self.groups.len()];
         for option in &self.options {
@@ -506,7 +499,7 @@ impl Parser {
             .chain(grouped.iter().flatten())
             .map(|(label, _, _)| len(label))
             .max()
-            .unwrap();
+            .unwrap_or(0);
         if let Some(commands) = &self.subcommands {
             max_header = max_header.max(len(&commands.metavar()));
             for child in &commands.choices {
@@ -554,7 +547,9 @@ impl Parser {
                 }
             }
         }
-        writeln!(output, "\n{}", paint(color, "1;34", "options:")).unwrap();
+        if !rows.is_empty() {
+            writeln!(output, "\n{}", paint(color, "1;34", "options:")).unwrap();
+        }
         for (label, styled, help) in rows {
             help_row(&mut output, width, position, 2, &label, &styled, &help);
         }
@@ -608,10 +603,10 @@ fn expand(template: &str, prog: &str, option: Option<&OptionSpec>) -> String {
                 ("default", Some(option)) => option.default.as_deref().unwrap_or("None").to_owned(),
                 ("const", Some(option)) => option.constant.as_deref().unwrap_or("None").to_owned(),
                 ("choices", Some(option)) => {
-                    if option.choices.is_empty() {
+                    if !option.has_choices {
                         "None".into()
                     } else {
-                        option.choices.join(", ")
+                        option.choices_text(", ", false)
                     }
                 }
                 ("required", Some(option)) => {

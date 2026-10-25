@@ -5,6 +5,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Write};
 
 use crate::ir::Type;
+use crate::modules::DefinitionId;
+use std::rc::Rc;
 
 const MAX_DESCRIPTION_BYTES: usize = 1024;
 
@@ -18,9 +20,12 @@ enum Shape {
     Counter(Type),
     Set(Type),
     Tuple(Vec<Type>),
+    NamedTuple(DefinitionId, Vec<Type>),
+    PartialFrame(Vec<Type>),
     Callable(Vec<Type>, Type),
     Awaitable(Type),
     DirectoryContext(Type),
+    ProcessArgs(Type),
     Optional(Type),
     Union(Vec<Type>),
 }
@@ -33,9 +38,15 @@ pub(crate) struct NamedException {
     pub ancestors: Vec<u32>,
 }
 
+pub(crate) struct NamedTuple {
+    pub(crate) name: String,
+    pub(crate) fields: Vec<String>,
+}
+
 #[derive(Default)]
 struct Storage {
     shapes: Vec<Shape>,
+    named_tuples: HashMap<DefinitionId, Rc<NamedTuple>>,
     exceptions: Vec<NamedException>,
     ids: HashMap<Shape, usize>,
     hashable_records: HashSet<usize>,
@@ -66,7 +77,10 @@ impl Types {
                 Some(Shape::Dict(..) | Shape::DefaultListDict(..) | Shape::Counter(_))
             ),
             Type::Set(id) => matches!(storage.shapes.get(id), Some(Shape::Set(_))),
-            Type::Tuple(id) => matches!(storage.shapes.get(id), Some(Shape::Tuple(_))),
+            Type::Tuple(id) => matches!(
+                storage.shapes.get(id),
+                Some(Shape::Tuple(_) | Shape::NamedTuple(..) | Shape::PartialFrame(_))
+            ),
             Type::Callable(id) => matches!(storage.shapes.get(id), Some(Shape::Callable(..))),
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
@@ -80,6 +94,7 @@ impl Types {
                 matches!(storage.shapes.get(id), Some(Shape::DirectoryContext(_)))
             }
             Type::AsyncProcess(bits) => bits <= 3,
+            Type::Popen(_, _, id) => matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_))),
             Type::Int
             | Type::Float
             | Type::Bool
@@ -91,19 +106,20 @@ impl Types {
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
-            | Type::ExitCode
+            | Type::ExceptionField
+            | Type::ImportException
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
-            | Type::Popen(..)
             | Type::CompletedProcess(_)
             | Type::EventLoop
             | Type::TaskGroup
             | Type::GeneratorContext
             | Type::Semaphore
             | Type::Document(_)
+            | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
@@ -111,6 +127,7 @@ impl Types {
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::JsonRoot
@@ -137,9 +154,13 @@ impl Types {
                 | Shape::Counter(ty)
                 | Shape::Awaitable(ty)
                 | Shape::DirectoryContext(ty)
+                | Shape::ProcessArgs(ty)
                 | Shape::Optional(ty) => vec![*ty],
                 Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => vec![*key, *value],
-                Shape::Tuple(fields) | Shape::Union(fields) => fields.clone(),
+                Shape::Tuple(fields)
+                | Shape::NamedTuple(_, fields)
+                | Shape::PartialFrame(fields)
+                | Shape::Union(fields) => fields.clone(),
                 Shape::Callable(params, returns) => {
                     params.iter().copied().chain([*returns]).collect()
                 }
@@ -157,6 +178,7 @@ impl Types {
                 | Type::Coroutine(child_id)
                 | Type::Task(child_id)
                 | Type::DirectoryContext(child_id)
+                | Type::Popen(_, _, child_id)
                 | Type::Union(child_id) = child
                     && child_id >= id
                 {
@@ -256,6 +278,7 @@ impl Types {
                 | Type::StrEnum(_)
                 | Type::Enum(_)
                 | Type::Bytes
+                | Type::Logger
                 | Type::Path
                 | Type::PurePath(_)
         ) || matches!(ty, Type::Tuple(_) | Type::Class(_)) && self.immutable_key_field(ty)
@@ -275,6 +298,7 @@ impl Types {
             | Type::Bytes
             | Type::Path
             | Type::PurePath(_)
+            | Type::Logger
             | Type::None => true,
             Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
             Type::Tuple(_) => self
@@ -384,9 +408,9 @@ impl Types {
         Some(if nullable { self.optional(ty) } else { ty })
     }
 
-    /// A dynamic logging name resolves to an integer or to its fallback string.
-    /// Narrow this result before using it as either concrete type.
-    pub(crate) fn logging_level_result(&self) -> Type {
+    /// A closed builtin result that can be either a string or an integer.
+    /// Narrow the result before using it as either concrete type.
+    pub(crate) fn string_or_int(&self) -> Type {
         Type::Union(self.intern(Shape::Union(vec![Type::Str, Type::Int])))
     }
 
@@ -412,6 +436,7 @@ impl Types {
             | Type::Cursor(_)
             | Type::ByteOutput
             | Type::Exception
+            | Type::ImportException
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::Path
@@ -427,6 +452,7 @@ impl Types {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
@@ -434,6 +460,7 @@ impl Types {
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::BinaryIO => Some(true),
@@ -493,6 +520,51 @@ impl Types {
 
     pub(crate) fn tuple(&self, elements: Vec<Type>) -> Type {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
+    }
+
+    pub(crate) fn declare_namedtuple(&self, definition: DefinitionId, declaration: NamedTuple) {
+        self.0
+            .borrow_mut()
+            .named_tuples
+            .insert(definition, Rc::new(declaration));
+    }
+
+    pub(crate) fn namedtuple(&self, definition: DefinitionId) -> Option<Rc<NamedTuple>> {
+        self.0.borrow().named_tuples.get(&definition).cloned()
+    }
+
+    pub(crate) fn namedtuple_layout(&self, definition: DefinitionId, fields: Vec<Type>) -> Type {
+        Type::Tuple(self.intern(Shape::NamedTuple(definition, fields)))
+    }
+
+    pub(crate) fn namedtuple_definition(&self, ty: Type) -> Option<DefinitionId> {
+        let Type::Tuple(id) = ty else {
+            return None;
+        };
+        match self.0.borrow().shapes[id] {
+            Shape::NamedTuple(definition, _) => Some(definition),
+            _ => None,
+        }
+    }
+
+    /// Immutable private storage for the callable and arguments retained by partial.
+    pub(crate) fn partial_frame(&self, fields: Vec<Type>) -> Type {
+        Type::Tuple(self.intern(Shape::PartialFrame(fields)))
+    }
+
+    pub(crate) fn is_partial_frame(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::PartialFrame(_)))
+    }
+
+    pub(crate) fn process_args(&self, command: Type) -> usize {
+        self.intern(Shape::ProcessArgs(command))
+    }
+
+    pub(crate) fn command_type(&self, id: usize) -> Type {
+        let Shape::ProcessArgs(command) = self.0.borrow().shapes[id] else {
+            unreachable!("Popen carries its original command type")
+        };
+        command
     }
 
     pub(crate) fn directory_context(&self, result: Type) -> Type {
@@ -598,7 +670,9 @@ impl Types {
             return None;
         };
         match &self.0.borrow().shapes[id] {
-            Shape::Tuple(fields) => Some(fields.clone()),
+            Shape::Tuple(fields) | Shape::NamedTuple(_, fields) | Shape::PartialFrame(fields) => {
+                Some(fields.clone())
+            }
             _ => unreachable!("tuple type identity has a tuple shape"),
         }
     }
@@ -611,7 +685,9 @@ impl Types {
             .iter()
             .enumerate()
             .filter_map(|(id, shape)| match shape {
-                Shape::Tuple(fields) => Some((Type::Tuple(id), fields.clone())),
+                Shape::Tuple(fields)
+                | Shape::NamedTuple(_, fields)
+                | Shape::PartialFrame(fields) => Some((Type::Tuple(id), fields.clone())),
                 _ => None,
             })
             .collect()
@@ -656,6 +732,7 @@ impl Types {
                 Type::Cursor(_)
                 | Type::TextIO
                 | Type::BinaryIO
+                | Type::CsvReader
                 | Type::ZipFile
                 | Type::Popen(..)
                 | Type::AsyncProcess(_)
@@ -789,7 +866,7 @@ impl TypeDescription<'_> {
                 })?;
                 self.write_type(*element)?;
             }
-            Shape::Tuple(fields) => {
+            Shape::Tuple(fields) | Shape::NamedTuple(_, fields) | Shape::PartialFrame(fields) => {
                 self.write_str("tuple[")?;
                 self.write_types(fields, ", ")?;
             }
@@ -807,7 +884,7 @@ impl TypeDescription<'_> {
                 self.write_str(", ")?;
                 self.write_type(*value)?;
             }
-            Shape::DirectoryContext(_) | Shape::Awaitable(_) => {
+            Shape::DirectoryContext(_) | Shape::ProcessArgs(_) | Shape::Awaitable(_) => {
                 unreachable!("handled by the nominal type spelling")
             }
             Shape::Optional(element) => {
