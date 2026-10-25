@@ -1202,6 +1202,10 @@ A function returning `Sequence[T]` can return an exact `list[T]`.
 
 Counter equality and multiset inclusion (`<`, `<=`, `>`, `>=`) compare the counts for every key of either counter. An absent key contributes zero.
 
+`Counter.elements()` returns an iterator over the stored keys in insertion
+order. Each positive integer count repeats its key; a change to a later entry
+is visible when the iterator reaches it.
+
 `mapping.clear()` removes every entry in place and returns `None`. Aliases see
 the empty dictionary; a `Counter` still returns zero for a missing key, and a
 `defaultdict` keeps its factory. `dict.clear(mapping)` and the inherited class

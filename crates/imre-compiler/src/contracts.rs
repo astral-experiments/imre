@@ -613,6 +613,7 @@ impl Builtin {
             | Self::ChainMapNew
             | Self::ChainMapMaps
             | Self::ChainMapSetMaps
+            | Self::CounterElements
             | Self::CounterTotal
             | Self::DictAsBase
             | Self::DictClear
