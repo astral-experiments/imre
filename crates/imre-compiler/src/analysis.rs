@@ -72,6 +72,10 @@ impl Session {
         let intrinsic = SystemPathBuf::from(root).join("imre");
         for (name, stub) in [
             (
+                "_imre_doctest",
+                "def capture_start() -> None: ...\ndef capture_take() -> str: ...\ndef display(value: object, /) -> None: ...\ndef ascii_output(text: str, /) -> str: ...\ndef execute(test: object, debug: bool, /) -> None: ...\n",
+            ),
+            (
                 "hashlib",
                 // The bundled OpenSSL stub still names the input `string`. CPython
                 // 3.14 calls it `data`; the native constructor takes exact bytes.
@@ -514,6 +518,7 @@ pub(crate) enum CheckedDiagnostic {
     TupleListRead(TextRange),
     MissingArgument(TextRange),
     BuiltinImport(TextRange),
+    ExcessArgument(TextRange),
 }
 
 impl CheckedDiagnostic {
@@ -525,6 +530,7 @@ impl CheckedDiagnostic {
             Self::TupleListRead(range) => (range, 3),
             Self::MissingArgument(range) => (range, 4),
             Self::BuiltinImport(range) => (range, 5),
+            Self::ExcessArgument(range) => (range, 6),
         };
         (range.start(), range.end(), kind)
     }
@@ -539,6 +545,9 @@ impl CheckedDiagnostic {
             Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
             Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
+            Self::ExcessArgument(arg) => {
+                diagnostic == "too-many-positional-arguments" && arg == range
+            }
         }
     }
 }

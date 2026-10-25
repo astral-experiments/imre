@@ -22,8 +22,10 @@ mod hashlib;
 mod inspect;
 mod itertools;
 mod json;
+mod linecache;
 mod logging;
 mod mappings;
+mod namespaces;
 mod os;
 mod paths;
 pub(crate) mod posixpath;
@@ -42,6 +44,8 @@ mod warnings;
 mod words;
 mod zipfile;
 
+pub(crate) use files::errno_error;
+
 use super::{
     Bytes, Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish,
     index,
@@ -49,6 +53,19 @@ use super::{
 use num_traits::ToPrimitive;
 use std::rc::Rc;
 use words::{OwnedWord, Words};
+
+// All C ints fit in the immediate representation. Heap integers cannot fit.
+fn c_int(word: usize) -> exceptions::Result<libc::c_int> {
+    (word & 1 != 0)
+        .then_some((word as i64) >> 1)
+        .and_then(|n| libc::c_int::try_from(n).ok())
+        .ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "Python int too large to convert to C int",
+            )
+        })
+}
 
 /// An opaque allocation for runtime-managed containers and resource state.
 #[repr(transparent)]
@@ -58,9 +75,9 @@ enum Storage {
     Plain,
     StrDescriptor(u32),
     Sequence(Words),
-    Dictionary(Box<mappings::Mapping>),
+    Dictionary(mappings::TableOwner<mappings::Mapping>),
     FunctionCache(Box<mappings::FunctionCache>),
-    Set(Box<mappings::Set>),
+    Set(mappings::TableOwner<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
     Repeat(itertools::Repeat),
@@ -68,6 +85,7 @@ enum Storage {
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
+    SimpleNamespace(Rc<Object>),
     Sha256(Box<sha2::Sha256>),
     CsvReader(Box<csv::Reader>),
     Exception(exceptions::Exception),
@@ -88,6 +106,7 @@ enum Storage {
         text: paths::PathText,
         name: std::cell::OnceCell<Rc<Str>>,
     },
+    PathInfo(Box<paths::Info>),
     PurePath(Box<paths::PurePath>),
     PathIterator(Box<paths::PathIterator>),
     RegexPattern(Box<regexes::Pattern>),
@@ -372,6 +391,34 @@ pub unsafe extern "C" fn imre_seq_append(value: *const Object, word: usize, kind
         exceptions::sequence_allocation_failed();
     }
     i32::from(appended)
+}
+
+/// Publish an empty typed list before releasing the elements of the old buffer.
+///
+/// # Safety
+/// The caller keeps the mutable list rooted for the duration of the operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_seq_clear(value: *const Object) {
+    // SAFETY: only the detached buffer escapes; no element destructor runs under the borrow.
+    let previous = unsafe {
+        object(value).0.with_mut(|storage| {
+            let Storage::Sequence(words) = storage else {
+                unreachable!("a typed list owns sequence storage")
+            };
+            if words.is_sorting_empty() {
+                return None;
+            }
+            // A deferred diff is a list of strings. Clearing it discards its plan
+            // without materializing values that no observer can access.
+            let kind = if words.plan().is_some() {
+                3
+            } else {
+                words.kind.raw()
+            };
+            Some(std::mem::replace(words, Words::new(kind)))
+        })
+    };
+    drop(previous);
 }
 
 /// # Safety
@@ -1131,10 +1178,48 @@ pub unsafe extern "C" fn imre_str_splitlines_iter(value: *const Str) -> *const O
 /// `value` must be rooted. Returns an owned string sequence or null on error.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_splitlines(value: *const Str) -> *const Object {
+    // SAFETY: the receiver stays rooted through the default collector.
+    unsafe { split_string_lines::<false>(value) }
+}
+
+/// Splits at the same boundaries as the no-argument and fused paths. The
+/// caller truth-tests the flag before entering the collector.
+///
+/// # Safety
+/// The immutable receiver stays rooted throughout the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_splitlines_options(
+    value: *const Str,
+    keep: u32,
+) -> *const Object {
+    // SAFETY: both paths use the same rooted source and return a fresh list.
+    unsafe {
+        if keep == 0 {
+            imre_str_splitlines(value)
+        } else {
+            split_string_lines::<true>(value)
+        }
+    }
+}
+
+/// Reuse the collector and its ownership logic for either boundary policy.
+/// The caller roots `value` until the list owns every returned slice.
+unsafe fn split_string_lines<const KEEP: bool>(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { std::mem::ManuallyDrop::new(Rc::from_raw(value)) };
     finish(
-        split_lines(&value, |range| owned_line(&value, range)),
+        split_lines(&value, |mut range| {
+            // The shared scanner has already found the boundary. Its first
+            // scalar supplies the width; only CRLF has two scalars. This
+            // branch disappears from the legacy no-argument specialization.
+            if KEEP && let Some(ending) = value[range.end..].chars().next() {
+                range.end += ending.len_utf8();
+                if ending == '\r' && value.as_bytes().get(range.end) == Some(&b'\n') {
+                    range.end += 1;
+                }
+            }
+            owned_line(&value, range)
+        }),
         std::ptr::null(),
     )
 }

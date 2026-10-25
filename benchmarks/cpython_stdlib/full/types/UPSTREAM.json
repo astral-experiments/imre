@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_types",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/types.py": "fa6324fb434db576d9702d3eba969c423fdac9fd",
+    "Lib/test/test_types.py": "bf10dc2e31701f7189728b5092c168812a2b9ce9",
+    "Objects/namespaceobject.c": "f39f1b35ebb6fd936a112df5f9c5da0fe9748e7f"
+  }
+}

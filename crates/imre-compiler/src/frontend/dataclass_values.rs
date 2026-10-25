@@ -48,6 +48,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::RegexMatch
         | Type::ExceptionField
         | Type::TextIO
+        | Type::StringIO
         | Type::BinaryIO
         | Type::Iterator
         | Type::Callable(_) => false,

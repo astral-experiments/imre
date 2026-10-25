@@ -276,6 +276,10 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        if attribute.attr.as_str() == "hasHandlers" {
+            let args = self.arguments(call, &[], Some(logger))?;
+            return Ok(self.ordered_builtin(Builtin::Logging(Log::HasHandlers), Type::Bool, args));
+        }
         if attribute.attr.as_str() == "getChildren" {
             let args = self.arguments(call, &[], Some(logger))?;
             return Ok(self.ordered_builtin(

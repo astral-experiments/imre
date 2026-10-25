@@ -44,6 +44,14 @@ impl Deref for ObjectFields {
 }
 
 impl ObjectFields {
+    /// A later occurrence replaces this value in the decoded dictionary.
+    pub(super) fn is_shadowed(&self, index: usize) -> bool {
+        let key = &self.entries[index].0;
+        self.entries[index + 1..]
+            .iter()
+            .any(|(name, _)| name == key)
+    }
+
     pub(super) fn with_entries(&self, entries: Vec<(Str, usize)>) -> Self {
         Self {
             entries,
