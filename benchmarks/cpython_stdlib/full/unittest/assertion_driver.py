@@ -13,6 +13,9 @@ try:
         case.assertTrue(argv[5] == "True", msg)
     elif operation == "assertFalse":
         case.assertFalse(argv[5] == "True", msg)
+    elif operation == "assertRaises":
+        with case.assertRaises(TypeError, msg=msg):
+            pass
     else:
         first = int(argv[5])
         second = int(argv[6])

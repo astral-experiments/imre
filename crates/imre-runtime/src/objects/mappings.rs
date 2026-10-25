@@ -47,22 +47,37 @@ impl Hash for IntKey {
     }
 }
 
-/// A key roots the first inserted immutable path, and hashes its normalized
-/// POSIX spelling without allocating or accessing the filesystem.
+/// Path keys compare by spelling; logger keys compare by object identity.
+/// Rooting the first inserted object keeps both its spelling and address valid.
 #[derive(Clone)]
-struct PathKey(Rc<Object>);
+struct ObjectKey(Rc<Object>);
 
-impl PartialEq for PathKey {
+impl PartialEq for ObjectKey {
     fn eq(&self, other: &Self) -> bool {
-        // SAFETY: both keys root exact immutable path objects.
-        unsafe { super::paths::imre_path_equal(Rc::as_ptr(&self.0), Rc::as_ptr(&other.0)) != 0 }
+        if Rc::ptr_eq(&self.0, &other.0) {
+            return true;
+        }
+        // SAFETY: both owners root their objects; neither comparison runs callbacks.
+        unsafe {
+            self.0.0.with(|left| {
+                other.0.0.with(|right| match (left, right) {
+                    (Storage::Logger(_), _) | (_, Storage::Logger(_)) => false,
+                    (left, right) => left.path_equal(right),
+                })
+            })
+        }
     }
 }
-impl Eq for PathKey {}
-impl Hash for PathKey {
+impl Eq for ObjectKey {}
+impl Hash for ObjectKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // SAFETY: the key roots immutable path storage for this nonreentrant hash.
-        unsafe { self.0.0.with(|path| path.path_key().hash(state)) };
+        // SAFETY: the key roots this object throughout the nonreentrant hash.
+        unsafe {
+            self.0.0.with(|key| match key {
+                Storage::Logger(_) => Rc::as_ptr(&self.0).hash(state),
+                path => path.path_key().hash(state),
+            })
+        };
     }
 }
 
@@ -140,7 +155,7 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) {
                     0 | 1 | 10 => word.hash(state),
                     2 => IntKey::borrow(word).hash(state),
                     3 => (&*(word as *const Str)).hash(state),
-                    5 => PathKey::borrow(word).hash(state),
+                    5 => ObjectKey::borrow(word).hash(state),
                     6 => {
                         if index + 1 < layout.length {
                             pending.push((value, index + 1));
@@ -232,17 +247,17 @@ impl ScalarKey for Rc<Bytes> {
     }
 }
 
-impl ScalarKey for PathKey {
+impl ScalarKey for ObjectKey {
     const KIND: u32 = 5;
     fn word(&self) -> usize {
         Rc::as_ptr(&self.0) as usize
     }
     unsafe fn borrow(word: usize) -> ManuallyDrop<Self> {
-        // SAFETY: the caller roots an exact path; the borrowed Rc is never dropped.
+        // SAFETY: the caller roots the exact object; the borrowed Rc is never dropped.
         ManuallyDrop::new(Self(unsafe { Rc::from_raw(word as *const Object) }))
     }
     unsafe fn from_owned(word: usize) -> Self {
-        // SAFETY: the caller transfers one independently acquired path owner.
+        // SAFETY: the caller transfers one independently acquired object owner.
         Self(unsafe { Rc::from_raw(word as *const Object) })
     }
     fn into_word(self) -> usize {
@@ -277,10 +292,15 @@ struct Entry<K, V> {
     key: K,
     value: V,
 }
+enum Cursors {
+    Iterators(Vec<Weak<Cell<usize>>>),
+    Oldest(usize),
+}
+
 struct Table<K, V> {
     index: HashTable<usize>,
     entries: Vec<Option<Entry<K, V>>>,
-    iterators: Vec<Weak<Cell<usize>>>,
+    cursors: Cursors,
 }
 
 // Every live entry needs at least eight bytes, including key-only set entries.
@@ -293,7 +313,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         Self {
             index: HashTable::new(),
             entries: Vec::new(),
-            iterators: Vec::new(),
+            cursors: Cursors::Iterators(Vec::new()),
         }
     }
 
@@ -364,13 +384,17 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         }
         // Each cursor points just past the last entry it examined. After
         // compaction only the occupied slots in that prefix remain before it.
-        self.iterators.retain(|iterator| {
-            let Some(position) = iterator.upgrade() else {
-                return false;
-            };
-            position.set(self.entries[..position.get()].iter().flatten().count());
-            true
-        });
+        match &mut self.cursors {
+            Cursors::Iterators(iterators) => iterators.retain(|iterator| {
+                let Some(position) = iterator.upgrade() else {
+                    return false;
+                };
+                position.set(self.entries[..position.get()].iter().flatten().count());
+                true
+            }),
+            // Eviction leaves only empty slots before the private cache cursor.
+            Cursors::Oldest(position) => *position = 0,
+        }
         self.entries.retain(Option::is_some);
         self.index.clear();
         let entries = &self.entries;
@@ -394,11 +418,26 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     }
 
     fn iterator_position(&mut self) -> Rc<Cell<usize>> {
-        self.iterators
-            .retain(|iterator| iterator.strong_count() != 0);
+        let Cursors::Iterators(iterators) = &mut self.cursors else {
+            unreachable!("function cache tables are private");
+        };
+        iterators.retain(|iterator| iterator.strong_count() != 0);
         let position = Rc::new(Cell::new(0));
-        self.iterators.push(Rc::downgrade(&position));
+        iterators.push(Rc::downgrade(&position));
         position
+    }
+
+    fn eviction_key(&mut self) -> OwnedWord {
+        let start = match &self.cursors {
+            Cursors::Iterators(iterators) => {
+                debug_assert!(iterators.is_empty());
+                0
+            }
+            Cursors::Oldest(position) => *position,
+        };
+        let (next, key, _) = self.next(start).expect("nonempty bounded cache");
+        self.cursors = Cursors::Oldest(next);
+        key
     }
 
     unsafe fn lookup(&self, word: usize) -> Option<&Entry<K, V>> {
@@ -491,7 +530,7 @@ enum Tables<V> {
     Int(Table<IntKey, V>),
     Enum(Table<usize, V>),
     Str(Table<Rc<Str>, V>),
-    Path(Table<PathKey, V>),
+    Object(Table<ObjectKey, V>),
     Bytes(Table<Rc<Bytes>, V>),
     Tuple(Table<TupleKey, V>),
 }
@@ -502,7 +541,7 @@ macro_rules! table {
             Tables::Int($table) => $body,
             Tables::Enum($table) => $body,
             Tables::Str($table) => $body,
-            Tables::Path($table) => $body,
+            Tables::Object($table) => $body,
             Tables::Bytes($table) => $body,
             Tables::Tuple($table) => $body,
         }
@@ -531,7 +570,7 @@ impl<V: Copy> Tables<V> {
             2 => Self::Int(Table::new()),
             10 => Self::Enum(Table::new()),
             3 => Self::Str(Table::new()),
-            5 => Self::Path(Table::new()),
+            5 => Self::Object(Table::new()),
             6 => Self::Tuple(Table::new()),
             8 => Self::Bytes(Table::new()),
             _ => fail("SystemError", "unsupported immutable mapping key kind"),
@@ -542,7 +581,7 @@ impl<V: Copy> Tables<V> {
             Self::Int(_) => 2,
             Self::Enum(_) => 10,
             Self::Str(_) => 3,
-            Self::Path(_) => 5,
+            Self::Object(_) => 5,
             Self::Bytes(_) => 8,
             Self::Tuple(_) => 6,
         }
@@ -552,7 +591,7 @@ impl<V: Copy> Tables<V> {
             (Self::Int(table), Tables::Int(result)) => table.copy_keys(result),
             (Self::Enum(table), Tables::Enum(result)) => table.copy_keys(result),
             (Self::Str(table), Tables::Str(result)) => table.copy_keys(result),
-            (Self::Path(table), Tables::Path(result)) => table.copy_keys(result),
+            (Self::Object(table), Tables::Object(result)) => table.copy_keys(result),
             (Self::Bytes(table), Tables::Bytes(result)) => table.copy_keys(result),
             (Self::Tuple(table), Tables::Tuple(result)) => table.copy_keys(result),
             _ => unreachable!("key union requires the same key kind"),
@@ -1165,7 +1204,6 @@ impl Storage {
 
 struct FunctionCache {
     table: Rc<Object>,
-    oldest: Option<Rc<Cell<usize>>>,
     hits: usize,
     misses: usize,
 }
@@ -1186,7 +1224,6 @@ pub extern "C" fn imre_function_cache(id: usize, key: u32, value: u32) -> *const
                 .or_insert_with(|| FunctionCache {
                     // SAFETY: imre_dict_new returns an independent strong owner.
                     table: unsafe { Rc::from_raw(imre_dict_new(key, value)) },
-                    oldest: None,
                     hits: 0,
                     misses: 0,
                 })
@@ -1264,11 +1301,7 @@ pub unsafe extern "C" fn imre_function_cache_insert(
 
                 // Reserve and insert first: an allocation error must not evict the oldest entry.
                 let table = &mut mapping.tables;
-                let cursor = cache
-                    .oldest
-                    .get_or_insert_with(|| table.iterator_position());
-                let (next, oldest, _) = table.next(cursor.get()).expect("nonempty bounded cache");
-                cursor.set(next);
+                let oldest = table!(table, table => table.eviction_key());
                 let (key, word) = table.remove(oldest.word).unwrap();
                 mapping.update_ascii_int(key.word, 0);
                 Ok(Some((key, OwnedWord::from_owned(word, mapping.value_kind))))
@@ -2082,14 +2115,21 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
                 Ok(None)
             }
             Storage::Repeat(iterator) => Ok(iterator.next().map(|value| (value, None))),
+            Storage::PathIterator(iterator) => iterator.next().map(|path| {
+                // A non-null path transfers its owner to the caller of pull().
+                (!path.is_null())
+                    .then(|| (OwnedWord::from_owned(path as usize, WordKind::new(5)), None))
+            }),
             Storage::StringIterator(iterator) => Ok(iterator.next()),
             Storage::RegexIterator(iterator) => Ok(iterator.next()),
             Storage::LineIterator(iterator) => Ok(iterator.next()),
             Storage::BytesIterator(iterator) => Ok(iterator.next()),
-            _ => storage.mapping_iterator_mut().next(),
+            _ => storage
+                .mapping_iterator_mut()
+                .next()
+                .map_err(|error| Error::new(Kind::RuntimeError, error.message())),
         })
-    }
-    .map_err(|error| Error::new(Kind::RuntimeError, error.message()))?;
+    }?;
     match adapter {
         Some(adapter) => adapter.next().map(|item| item.map(|item| (item, None))),
         None => Ok(next),
@@ -2194,6 +2234,22 @@ mod tests {
         assert_eq!(table.position(HASHER.hash_one(7_usize), &7), Some(0));
         assert!(table.insert(8, ()).is_ok());
         assert_eq!(table.index.len(), 2);
+    }
+
+    #[test]
+    fn cache_eviction_keeps_lru_order_across_compaction() {
+        let mut table = Table::<usize, ()>::new();
+        for key in 0..2 {
+            assert!(table.insert_absent(HASHER.hash_one(key), key, ()).is_ok());
+        }
+        for key in 2..256 {
+            // SAFETY: enum tags are immediate scalar keys.
+            assert!(matches!(unsafe { table.promote(0) }, Ok(true)));
+            assert!(table.insert_absent(HASHER.hash_one(key), key, ()).is_ok());
+            let oldest = table.eviction_key();
+            assert_eq!(oldest.word, key - 1);
+            assert!(table.remove(&oldest.word).is_some());
+        }
     }
 
     #[test]

@@ -140,6 +140,7 @@ impl View {
                 }
             }
             Node::Float(f) => out.push_str(&crate::floats::render(*f)),
+            Node::ConstantNan => out.push_str("nan"),
             Node::String(s) => out.push_str(&quoted(s)),
             Node::Datetime(date) => out.push_str(date),
             Node::Array(items) => {
@@ -195,6 +196,7 @@ mod tests {
             &mut nodes,
             raw,
             Source {
+                refused: &std::cell::Cell::new(false),
                 text: json,
                 original: None,
                 shared: None,

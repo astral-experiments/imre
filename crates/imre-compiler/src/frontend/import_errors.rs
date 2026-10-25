@@ -22,7 +22,12 @@ impl Checker<'_> {
             .is_some_and(|items| items.into_iter().all(|item| self.boxable_value(item)))
     }
 
-    pub(super) fn import_error(&mut self, call: &ast::ExprCall, kind: u32) -> Result<Expr, String> {
+    pub(super) fn import_error(
+        &mut self,
+        call: &ast::ExprCall,
+        kind: u32,
+        mut receiver: Option<Expr>,
+    ) -> Result<Expr, String> {
         // Typeshed omits name_from and treats unknown keywords as static errors;
         // our resolved builtin supplies the CPython constructor or its exact TypeError.
         self.graph.checked_keywords(
@@ -30,6 +35,7 @@ impl Checker<'_> {
             call.arguments.keywords.iter().map(Ranged::range),
         );
         let mut fields = [None; 3];
+        let mut rejected_reset = None;
         for (index, kw) in call.arguments.keywords.iter().enumerate() {
             let Some(key) = &kw.arg else {
                 return Err(error(
@@ -43,11 +49,15 @@ impl Checker<'_> {
                 "path" => 1,
                 "name_from" => 2,
                 _ => {
-                    return self.sys_type_error(
-                        call,
-                        Type::ImportException,
-                        format!("ImportError() got an unexpected keyword argument '{key}'"),
-                    );
+                    if rejected_reset.is_none() {
+                        let message =
+                            format!("ImportError() got an unexpected keyword argument '{key}'");
+                        let Some(target) = receiver.take() else {
+                            return self.sys_type_error(call, Type::ImportException, message);
+                        };
+                        rejected_reset = Some((target, message));
+                    }
+                    continue;
                 }
             };
             fields[slot] = Some(index + 1);
@@ -69,13 +79,39 @@ impl Checker<'_> {
             .iter()
             .map(&mut value)
             .collect::<Result<Vec<_>, _>>()?;
+        if let Some((target, message)) = rejected_reset {
+            let mut operands = vec![target, self.import_args_tuple(args)];
+            for kw in &call.arguments.keywords {
+                operands.push(self.expr(&kw.value)?);
+            }
+            operands.push(unpacking::string(message));
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(Builtin::ImportErrorRejectReset, operands),
+            });
+        }
         let kwargs = call
             .arguments
             .keywords
             .iter()
             .map(|kw| value(&kw.value))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(self.import_error_value(kind, args, kwargs, fields))
+        let new = self.import_error_value(kind, args, kwargs, fields);
+        Ok(match receiver {
+            Some(old) => Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(Builtin::ImportErrorReset, vec![old, new]),
+            },
+            None => new,
+        })
+    }
+
+    /// Retain the positional tuple independently of the import-specific fields.
+    fn import_args_tuple(&self, args: Vec<Expr>) -> Expr {
+        Expr {
+            ty: self.types.tuple(args.iter().map(|arg| arg.ty).collect()),
+            kind: ExprKind::Tuple(args),
+        }
     }
 
     pub(super) fn import_error_value(
@@ -85,11 +121,7 @@ impl Checker<'_> {
         kwargs: Vec<Expr>,
         fields: [Option<usize>; 3],
     ) -> Expr {
-        let ty = self.types.tuple(args.iter().map(|arg| arg.ty).collect());
-        let mut values = vec![Expr {
-            ty,
-            kind: ExprKind::Tuple(args),
-        }];
+        let mut values = vec![self.import_args_tuple(args)];
         values.extend(kwargs);
         Expr {
             ty: Type::ImportException,

@@ -20,6 +20,8 @@ jobs:
   macos-arm64:
     runs-on: ${{ github.repository == 'astral-sh/imre' && 'namespace-profile-macos-15' || 'macos-15' }}
     timeout-minutes: 45
+    env:
+      IMRE_REAL_WHEEL: .cpython-wheel-reference/Lib/ensurepip/_bundled/pip-26.1.1-py3-none-any.whl
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -32,6 +34,8 @@ jobs:
           python3 benchmarks/cpython_stdlib/full/native_report.py
           python3 benchmarks/cpython_stdlib/full/test_native_report.py
       - run: cargo test --workspace --release --locked
+      - name: Compare string core on Apple Silicon
+        run: python3 benchmarks/cpython_stdlib/full/string/native_core.py --imre target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
       - name: Build and install a Imre extension wheel
         run: |
           python3 -m pip install "wheel==0.45.1" "packaging==25.0"
@@ -45,8 +49,13 @@ jobs:
             --suites differential io files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
 
-      - name: Compare string core on Apple Silicon
-        run: python3 benchmarks/cpython_stdlib/full/string/native_core.py --imre target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
+      - name: Get the real pip wheel shipped by the pinned CPython
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: python/cpython
+          ref: 5607950ef232dad16d75c0cf53101d9649d89115
+          path: .cpython-wheel-reference
+          sparse-checkout: Lib/ensurepip/_bundled
       - name: Check pinned PyPA RECORD fixtures with reference CPython
         run: python3 tests/wheel_record.py --reference-only
       - name: Compare uv's upstream wheel checker with CPython
@@ -83,6 +92,11 @@ jobs:
         run: rustup show
       - name: Install LLVM 18 and the CRC32C build tools
         run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 cmake
+      - name: Verify and assemble the vendored CPython suite fixtures
+        run: |
+          python3 benchmarks/cpython_stdlib/full/test_stage_tests.py
+          python3 benchmarks/cpython_stdlib/full/stage_tests.py "$RUNNER_TEMP/imre-cpython-fixtures"
+          python3 -B benchmarks/cpython_stdlib/full/discover_staged.py "$RUNNER_TEMP/imre-cpython-fixtures"
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
@@ -153,6 +167,7 @@ jobs:
           python3 benchmarks/cpython_stdlib/native_paths.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --result "$RUNNER_TEMP/cpython-paths.json"
           for level in 0 3; do
             python3 benchmarks/cpython_stdlib/full/pathlib/native_lexical.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$level" --result "$RUNNER_TEMP/cpython-path-lexical-O$level.json"
+            python3 benchmarks/cpython_stdlib/full/pathlib/native_traversal.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$level" --result "$RUNNER_TEMP/cpython-path-traversal-O$level.json"
           done
           python3 benchmarks/cpython_stdlib/native_shutil.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil.json"
           python3 benchmarks/cpython_stdlib/full/shutil/native_copy.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-copy.json"
@@ -167,7 +182,9 @@ jobs:
         run: |
           for opt in 0 3; do
             python3 benchmarks/cpython_stdlib/full/logging/native_records.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-records-O$opt.json"
+            python3 benchmarks/cpython_stdlib/full/logging/native_hierarchy.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-children-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/native_formatters.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-formatters-O$opt.json"
+            python3 benchmarks/cpython_stdlib/full/logging/native_filters.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-filters-O$opt.json"
           done
       - name: Build and install a Imre extension wheel
         run: |
@@ -183,8 +200,6 @@ jobs:
           for suite in build_cache module_objects link_cache build_output; do
             env -i HOME="$RUNNER_TEMP" PATH=/usr/bin:/bin python3 "tests/$suite.py" --compiler target/release/imre
           done
-      - name: Run original string core methods in native Imre
-        run: python3 benchmarks/cpython_stdlib/full/string/native_core.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Run complete upstream shallow-copy methods in native Imre
         run: |
           python3 benchmarks/cpython_stdlib/full/copy/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/copy-native.json"
@@ -232,6 +247,8 @@ jobs:
         run: |
           python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-ordinary --suites differential imports classes text containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
+      - name: Run original string core methods in native Imre
+        run: python3 benchmarks/cpython_stdlib/full/string/native_core.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Validate guarded list lengths on bounded heaps
         run: |
           python3 tests/validate_list_length.py --compiler target/release/imre \
