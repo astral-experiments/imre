@@ -61,7 +61,11 @@ impl Type {
             | Self::List(_)
             | Self::Dict(_)
             | Self::Set(_)
+            | Self::Deque(_)
             | Self::StringKeys
+            | Self::NativeModule
+            | Self::ModuleNamespace
+            | Self::ModuleMember
             | Self::Iterator
             | Self::Cursor(_)
             | Self::ByteOutput
@@ -97,6 +101,7 @@ impl Type {
             | Self::PathInfo
             | Self::CodecInfo
             | Self::Sha256
+            | Self::JsonDecoder
             | Self::ZipFile
             | Self::ZipInfo
             | Self::CsvReader
@@ -126,7 +131,11 @@ impl Type {
             | Self::List(_)
             | Self::Dict(_)
             | Self::Set(_)
+            | Self::Deque(_)
             | Self::StringKeys
+            | Self::NativeModule
+            | Self::ModuleNamespace
+            | Self::ModuleMember
             | Self::Iterator
             | Self::Cursor(_)
             | Self::ByteOutput
@@ -162,6 +171,7 @@ impl Type {
             | Self::PathInfo
             | Self::CodecInfo
             | Self::Sha256
+            | Self::JsonDecoder
             | Self::ZipFile
             | Self::ZipInfo
             | Self::CsvReader
@@ -727,6 +737,7 @@ impl Emitter<'_, '_> {
             Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
+            | Type::Deque(_)
             | Type::StringKeys
             | Type::Iterator
             | Type::Cursor(_)
@@ -750,6 +761,9 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
+            | Type::ModuleMember
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
@@ -762,6 +776,7 @@ impl Emitter<'_, '_> {
             | Type::PathInfo
             | Type::CodecInfo
             | Type::Sha256
+            | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
@@ -3301,6 +3316,7 @@ impl Emitter<'_, '_> {
                 | Type::List(_)
                 | Type::Dict(_)
                 | Type::Set(_)
+                | Type::Deque(_)
                 | Type::SimpleNamespace(_) => {
                     let operation = if left.ty.is_path() {
                         "path"
@@ -3382,6 +3398,7 @@ impl Emitter<'_, '_> {
                 | Type::PathInfo
                 | Type::CodecInfo
                 | Type::Sha256
+                | Type::JsonDecoder
                 | Type::ZipFile
                 | Type::ZipInfo
                 | Type::CsvReader
@@ -3416,6 +3433,9 @@ impl Emitter<'_, '_> {
                 | Type::Semaphore
                 | Type::Popen(..)
                 | Type::AsyncProcess(_)
+                | Type::NativeModule
+                | Type::ModuleNamespace
+                | Type::ModuleMember
                 | Type::LogFormatter
                 | Type::LogRecord
                 | Type::Logger
@@ -4095,11 +4115,17 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
-            Builtin::WarningFilter(category) => {
+            Builtin::WarningFilter { category, invalid } => {
+                let append = self.instruction(format!("zext i1 {} to i32", args[6].value.operand));
                 self.checked_line(format!(
-                    "call void @imre_warning_simplefilter(ptr {}, i32 {category})",
-                    args[0].value.operand
+                    "call void @imre_warning_filter(ptr {}, ptr {}, ptr {}, ptr {}, ptr {}, i64 {}, i32 {append}, i32 {category}, i32 {invalid})",
+                    args[0].value.operand, args[1].value.operand, args[2].value.operand,
+                    args[3].value.operand, args[4].value.operand, args[5].value.operand
                 ));
+                none()
+            }
+            Builtin::WarningReset => {
+                self.void_call("imre_warning_reset", &[]);
                 none()
             }
             Builtin::TimeSleep => {
@@ -4252,6 +4278,15 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::JsonDecoderNew => self.call("imre_json_decoder_new", returns, &[]),
+            Builtin::JsonDecoderMemo => {
+                self.call("imre_json_decoder_memo", returns, &[&args[0].value])
+            }
+            Builtin::JsonDecoderDecode => self.call(
+                "imre_json_decoder_decode",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::JsonSelect(path) => self.json_select(path, returns, &args),
             Builtin::JsonIndex => self.call(
                 "imre_json_index",
@@ -4838,18 +4873,41 @@ impl Emitter<'_, '_> {
             Builtin::Sha256Copy => self.call("imre_sha256_copy", Type::Sha256, &[&args[0].value]),
             Builtin::StringIo(operation) => {
                 use crate::ir::StringIoOperation as Op;
-                let symbol = match operation {
-                    Op::New => "imre_string_io",
-                    Op::Value => "imre_string_io_value",
-                    Op::Read => "imre_string_io_read",
-                    Op::Seek => "imre_string_io_seek",
-                    Op::Position => "imre_string_io_position",
+                let call = |this: &mut Self, symbol| {
+                    this.call(
+                        symbol,
+                        returns,
+                        &args.iter().map(|a| &a.value).collect::<Vec<_>>(),
+                    )
                 };
-                self.call(
-                    symbol,
-                    returns,
-                    &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
-                )
+                match operation {
+                    Op::Newlines => {
+                        let mut layout = |n| {
+                            self.output.global_ref(format!(
+                                "layout_{}",
+                                record_name(self.module.types.tuple(vec![Type::Str; n]))
+                            ))
+                        };
+                        let pair = layout(2);
+                        let triple = layout(3);
+                        let file = &args[0].value.operand;
+                        let operand = self.checked_instruction(format!(
+                            "call i64 @imre_string_io_newlines(ptr {file}, ptr @{pair}, ptr @{triple})"
+                        ));
+                        Value {
+                            ty: returns,
+                            operand,
+                            small_integer: false,
+                        }
+                    }
+                    Op::Capability => call(self, "imre_string_io_capable"),
+                    Op::Readlines => call(self, "imre_string_io_readlines"),
+                    Op::New => call(self, "imre_string_io"),
+                    Op::Value => call(self, "imre_string_io_value"),
+                    Op::Read => call(self, "imre_string_io_read"),
+                    Op::Seek => call(self, "imre_string_io_seek"),
+                    Op::Position => call(self, "imre_string_io_position"),
+                }
             }
             Builtin::BytesIo => self.call("imre_bytes_io", returns, &[&args[0].value]),
             Builtin::BinarySeek => self.call(
@@ -5224,6 +5282,7 @@ impl Emitter<'_, '_> {
                             Type::ListInt => "imre_list_len",
                             Type::List(_) => "imre_seq_len_fast",
                             Type::Dict(_) => "imre_dict_len",
+                            Type::Deque(_) => "imre_deque_len",
                             Type::Set(_) | Type::StringKeys => "imre_set_len",
                             _ => unreachable!("len input was checked"),
                         },
@@ -5547,6 +5606,56 @@ impl Emitter<'_, '_> {
                 &[&args[0].value, &args[1].value],
             ),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
+            Builtin::DequeNew => {
+                let element = self.module.types.deque_element(returns).unwrap();
+                let limit = self.word(&args[0].value);
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_deque_new(i32 {}, i64 {limit})",
+                        representation_kind(element, &self.module.types)
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::DequeAppend { left, extending } => {
+                let word = self.word(&args[1].value);
+                self.checked_line(format!(
+                    "call void @imre_deque_append(ptr {}, i64 {word}, i32 {}, i32 {})",
+                    args[0].value.operand,
+                    u8::from(*left),
+                    u8::from(*extending)
+                ));
+                none()
+            }
+            Builtin::DequeExtendSource => self.call(
+                "imre_deque_extend_source",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::DequeCopy => self.call("imre_deque_copy", returns, &[&args[0].value]),
+            Builtin::DequePop { left } => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_deque_pop(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u8::from(*left)
+                ));
+                self.unpack_word(word, returns)
+            }
+            Builtin::DequeClear => {
+                self.void_call("imre_deque_clear", &[&args[0].value]);
+                none()
+            }
+            Builtin::DequeMaxlen => self.call("imre_deque_maxlen", returns, &[&args[0].value]),
+            Builtin::DequeIter { reverse } => Value {
+                ty: Type::Iterator,
+                operand: self.instruction(format!(
+                    "call ptr @imre_deque_iter(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u8::from(*reverse)
+                )),
+                small_integer: false,
+            },
             Builtin::CounterNew => {
                 let (key, _) = self.module.types.mapping(returns).unwrap();
                 Value {
@@ -5702,6 +5811,100 @@ impl Emitter<'_, '_> {
                 }
                 value
             }
+            Builtin::FreezeStrings => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @imre_frozenset_strings(ptr {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::Errno(op) => {
+                use crate::ir::ErrnoOperation as Op;
+                let call = match op {
+                    Op::BoxValue => {
+                        let value = &args[0].value;
+                        let kind = representation_kind(value.ty, &self.module.types);
+                        let word = self.word(value);
+                        format!("call ptr @imre_module_value(i32 {kind}, i64 {word})")
+                    }
+                    Op::Module => "call ptr @imre_errno_module()".to_string(),
+                    Op::Namespace | Op::Keys | Op::Errorcode => {
+                        let f = match op {
+                            Op::Namespace => "namespace",
+                            Op::Keys => "keys",
+                            _ => "errorcode",
+                        };
+                        format!("call ptr @imre_errno_{f}(ptr {})", args[0].value.operand)
+                    }
+                    Op::Number | Op::Text | Op::Has => {
+                        let (ty, f) = match op {
+                            Op::Number => ("i64", "number"),
+                            Op::Text => ("ptr", "text"),
+                            _ => ("i32", "has"),
+                        };
+                        format!(
+                            "call {ty} @imre_errno_{f}(ptr {}, ptr {})",
+                            args[0].value.operand, args[1].value.operand
+                        )
+                    }
+                    Op::DefaultLookup => format!(
+                        "call ptr @imre_errno_lookup_default(ptr {}, ptr {}, ptr {})",
+                        args[0].value.operand, args[1].value.operand, args[2].value.operand
+                    ),
+                    Op::Lookup | Op::Items => format!(
+                        "call ptr @imre_errno_lookup(ptr {}, ptr {}, i32 {})",
+                        args[0].value.operand,
+                        args[1].value.operand,
+                        u32::from(matches!(op, Op::Items))
+                    ),
+                    Op::ItemRepr | Op::ItemText => format!(
+                        "call ptr @imre_errno_member_text(ptr {}, i32 {})",
+                        args[0].value.operand,
+                        u32::from(matches!(op, Op::ItemRepr))
+                    ),
+                    Op::MemberContains => format!(
+                        "call i32 @imre_errno_member_contains(ptr {}, ptr {})",
+                        args[0].value.operand, args[1].value.operand
+                    ),
+                    Op::ItemEq => {
+                        let i = usize::from(args[0].value.ty != Type::ModuleMember);
+                        let other = &args[1 - i].value;
+                        let kind = if other.ty == Type::ModuleMember {
+                            16
+                        } else {
+                            representation_kind(other.ty, &self.module.types)
+                        };
+                        let word = self.word(other);
+                        format!(
+                            "call i32 @imre_errno_member_equal(ptr {}, i32 {kind}, i64 {word})",
+                            args[i].value.operand
+                        )
+                    }
+                };
+                let raw = if matches!(
+                    op,
+                    Op::Module
+                        | Op::Number
+                        | Op::Lookup
+                        | Op::DefaultLookup
+                        | Op::Items
+                        | Op::MemberContains
+                ) {
+                    self.checked_instruction(call)
+                } else {
+                    self.instruction(call)
+                };
+                Value {
+                    ty: returns,
+                    operand: if returns == Type::Bool {
+                        self.instruction(format!("icmp ne i32 {raw}, 0"))
+                    } else {
+                        raw
+                    },
+                    small_integer: false,
+                }
+            }
             Builtin::DictContains | Builtin::SetContains => {
                 let key = self.key_word(&args[0].value);
                 let family = if matches!(builtin, Builtin::SetContains) {
@@ -5844,6 +6047,13 @@ impl Emitter<'_, '_> {
             Builtin::IsNone => Value {
                 ty: Type::Bool,
                 operand: match args[0].value.ty {
+                    Type::ModuleMember => {
+                        let kind = self.instruction(format!(
+                            "call i32 @imre_module_value_kind(ptr {})",
+                            args[0].value.operand
+                        ));
+                        self.instruction(format!("icmp eq i32 {kind}, 0"))
+                    }
                     Type::JsonRoot | Type::JsonValue => {
                         let bit = self.instruction(format!(
                             "call i32 @imre_json_null(ptr {})",
@@ -5901,6 +6111,7 @@ impl Emitter<'_, '_> {
                     | Type::List(_)
                     | Type::Dict(_)
                     | Type::Set(_)
+                    | Type::Deque(_)
                     | Type::StringKeys
                     | Type::Iterator
                     | Type::Cursor(_)
@@ -5924,6 +6135,9 @@ impl Emitter<'_, '_> {
                     | Type::Semaphore
                     | Type::Popen(..)
                     | Type::AsyncProcess(_)
+                    | Type::NativeModule
+                    | Type::ModuleNamespace
+                    | Type::ModuleMember
                     | Type::LogFormatter
                     | Type::LogRecord
                     | Type::Logger
@@ -5936,6 +6150,7 @@ impl Emitter<'_, '_> {
                     | Type::PathInfo
                     | Type::CodecInfo
                     | Type::Sha256
+                    | Type::JsonDecoder
                     | Type::ZipFile
                     | Type::ZipInfo
                     | Type::CsvReader
@@ -6153,6 +6368,7 @@ impl Emitter<'_, '_> {
             | Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
+            | Type::Deque(_)
             | Type::StringKeys
             | Type::Iterator
             | Type::Cursor(_)
@@ -6177,6 +6393,9 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
+            | Type::ModuleMember
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
@@ -6189,6 +6408,7 @@ impl Emitter<'_, '_> {
             | Type::PathInfo
             | Type::CodecInfo
             | Type::Sha256
+            | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
@@ -6232,6 +6452,7 @@ impl Emitter<'_, '_> {
             | Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
+            | Type::Deque(_)
             | Type::StringKeys
             | Type::Iterator
             | Type::Cursor(_)
@@ -6256,6 +6477,9 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
+            | Type::ModuleMember
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
@@ -6268,6 +6492,7 @@ impl Emitter<'_, '_> {
             | Type::PathInfo
             | Type::CodecInfo
             | Type::Sha256
+            | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
@@ -6825,6 +7050,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::List(_)
         | Type::Dict(_)
         | Type::Set(_)
+        | Type::Deque(_)
         | Type::StringKeys
         | Type::Iterator
         | Type::Cursor(_)
@@ -6848,6 +7074,9 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Semaphore
         | Type::Popen(..)
         | Type::AsyncProcess(_)
+        | Type::NativeModule
+        | Type::ModuleNamespace
+        | Type::ModuleMember
         | Type::LogFormatter
         | Type::LogRecord
         | Type::Logger
@@ -6860,6 +7089,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::PathInfo
         | Type::CodecInfo
         | Type::Sha256
+        | Type::JsonDecoder
         | Type::ZipFile
         | Type::ZipInfo
         | Type::CsvReader
@@ -7012,7 +7242,8 @@ declare void @imre_async_loop_signal(ptr, i64, ptr)
 declare void @imre_async_loop_close(ptr)
 declare i32 @imre_async_cancel(ptr)
 declare double @imre_wall_time()
-declare void @imre_warning_simplefilter(ptr, i32)
+declare void @imre_warning_filter(ptr, ptr, ptr, ptr, ptr, i64, i32, i32, i32)
+declare void @imre_warning_reset()
 declare void @imre_time_sleep(double)
 declare ptr @imre_str_percent_int(ptr,i64)
 declare ptr @imre_str_percent_text(ptr,ptr)
@@ -7157,6 +7388,8 @@ declare i64 @imre_path_write_bytes(ptr, ptr)
 declare void @imre_path_mkdir(ptr, i64, i32, i32)
 declare void @imre_path_unlink(ptr, i32)
 declare void @imre_path_rmdir(ptr)
+declare ptr @imre_path_readlink(ptr)
+declare void @imre_path_link(ptr, i64, i32, i32)
 declare ptr @imre_path_replace(ptr, ptr)
 declare ptr @imre_tempdir_new(ptr, ptr, ptr)
 declare void @imre_tempdir_cleanup(ptr)
@@ -7230,6 +7463,9 @@ declare ptr @imre_sha256_hexdigest(ptr)
 declare ptr @imre_sha256_copy(ptr)
 declare ptr @imre_bytes_io(ptr)
 declare ptr @imre_string_io(i64, i64)
+declare i64 @imre_string_io_newlines(ptr, ptr, ptr)
+declare i1 @imre_string_io_capable(ptr)
+declare ptr @imre_string_io_readlines(ptr, i64)
 declare ptr @imre_string_io_value(ptr)
 declare ptr @imre_string_io_read(ptr, i64, i1)
 declare i64 @imre_string_io_seek(ptr, i64, i64)
@@ -7302,6 +7538,9 @@ declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
 declare ptr @imre_json_loads(ptr)
+declare ptr @imre_json_decoder_new()
+declare ptr @imre_json_decoder_memo(ptr)
+declare ptr @imre_json_decoder_decode(ptr, ptr)
 declare ptr @imre_json_loads_bytes(ptr)
 declare i64 @imre_json_error_field(ptr, i32)
 declare ptr @imre_json_index(ptr, i64)
@@ -7405,6 +7644,15 @@ declare ptr @imre_dict_fromkeys_target(ptr, ptr)
 declare i64 @imre_deep_copy(i64, i32)
 declare ptr @imre_record_shallow_copy(ptr)
 declare ptr @imre_default_list_dict_new(i32, i32)
+declare ptr @imre_deque_new(i32, i64)
+declare void @imre_deque_append(ptr, i64, i32, i32)
+declare ptr @imre_deque_extend_source(ptr, ptr)
+declare ptr @imre_deque_copy(ptr)
+declare i64 @imre_deque_pop(ptr, i32)
+declare void @imre_deque_clear(ptr)
+declare i64 @imre_deque_len(ptr)
+declare i64 @imre_deque_maxlen(ptr)
+declare ptr @imre_deque_iter(ptr, i32)
 declare ptr @imre_counter_new(i32)
 declare void @imre_counter_update(ptr, ptr)
 declare ptr @imre_counter_math(ptr, ptr, i32, i32)
@@ -7509,6 +7757,23 @@ declare ptr @imre_sys_argv()
 declare ptr @imre_sys_orig_argv()
 declare { i64, i64 } @imre_seq_layout_with_orig_argv()
 declare ptr @imre_sys_platform()
+declare ptr @imre_frozenset_strings(ptr)
+declare i32 @imre_str_is_upper(ptr)
+declare ptr @imre_module_value(i32, i64)
+declare i32 @imre_module_value_truth(ptr)
+declare i32 @imre_module_value_kind(ptr)
+declare ptr @imre_errno_module()
+declare ptr @imre_errno_namespace(ptr)
+declare ptr @imre_errno_keys(ptr)
+declare ptr @imre_errno_errorcode(ptr)
+declare i64 @imre_errno_number(ptr,ptr)
+declare ptr @imre_errno_text(ptr,ptr)
+declare i32 @imre_errno_has(ptr,ptr)
+declare ptr @imre_errno_lookup(ptr,ptr,i32)
+declare ptr @imre_errno_lookup_default(ptr,ptr,ptr)
+declare ptr @imre_errno_member_text(ptr,i32)
+declare i32 @imre_errno_member_contains(ptr,ptr)
+declare i32 @imre_errno_member_equal(ptr,i32,i64)
 declare ptr @imre_os_name()
 declare void @imre_doctest_capture_start()
 declare ptr @imre_doctest_capture_take()
