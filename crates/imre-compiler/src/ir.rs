@@ -95,6 +95,8 @@ pub(crate) enum Type {
     StrDescriptor(StrDescriptor),
     /// A live namespace wrapper; the interned shape describes its string-keyed backing dict.
     SimpleNamespace(usize),
+    /// A POSIX IPv4 stream socket with shared descriptor ownership.
+    Socket,
     Sha256,
     JsonDecoder,
     /// An open or closed ZIP archive retains its ordered central directory.
@@ -145,6 +147,26 @@ impl ProcessCapture {
 pub(crate) enum PathFlavor {
     Posix,
     Windows,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SocketOp {
+    Constant(&'static str),
+    New,
+    Bind,
+    Listen,
+    Accept,
+    Connect,
+    SockName,
+    Recv,
+    Send,
+    SendAll,
+    Close,
+    Fileno,
+    SetBlocking,
+    GetBlocking,
+    SetSockOpt,
+    GetSockOpt,
 }
 
 impl Type {
@@ -240,6 +262,7 @@ impl std::fmt::Display for Type {
             Self::PlainObject => "object",
             Self::StrDescriptor(_) => "method_descriptor",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
+            Self::Socket => "socket.socket",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
@@ -817,6 +840,7 @@ pub(crate) enum Builtin {
     Decode,
     DecodeAscii,
     UrlsafeB64encode,
+    Socket(SocketOp),
     Sha256Hex,
     Sha256New,
     HashNew,

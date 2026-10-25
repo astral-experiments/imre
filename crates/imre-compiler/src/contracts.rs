@@ -123,6 +123,15 @@ impl Builtin {
             Self::DictContains | Self::DictGetDefault | Self::DictTryGet(_) | Self::SetContains => {
                 Contract::new(true, PreservesLists)
             }
+            Self::Socket(op) => Contract::new(
+                !matches!(
+                    op,
+                    crate::ir::SocketOp::Constant(_)
+                        | crate::ir::SocketOp::Fileno
+                        | crate::ir::SocketOp::GetBlocking
+                ),
+                PreservesLists,
+            ),
             Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
@@ -793,7 +802,9 @@ pub(crate) const LIST_COPY_INDEX: RuntimeCall<StatusOrError, 3> = RuntimeCall {
 /// arithmetic, ownership operations, lookup-with-default, lengths and hashing
 /// remain infallible; allocation failure and invalid ABI use are fatal.
 pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
-    name.starts_with("fn_")
+    (name.starts_with("imre_socket_")
+        && !matches!(name, "imre_socket_fileno" | "imre_socket_getblocking"))
+        || name.starts_with("fn_")
         || matches!(
             name,
             "int_floordiv"

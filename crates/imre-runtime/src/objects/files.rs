@@ -350,6 +350,13 @@ pub(super) fn os_error(error: io::Error) -> Error {
 
 fn os_error_kind(kind: io::ErrorKind) -> Kind {
     match kind {
+        io::ErrorKind::WouldBlock => Kind::BlockingIOError,
+        io::ErrorKind::BrokenPipe => Kind::BrokenPipeError,
+        io::ErrorKind::ConnectionAborted => Kind::ConnectionAbortedError,
+        io::ErrorKind::ConnectionRefused => Kind::ConnectionRefusedError,
+        io::ErrorKind::ConnectionReset => Kind::ConnectionResetError,
+        io::ErrorKind::Interrupted => Kind::InterruptedError,
+        io::ErrorKind::TimedOut => Kind::TimeoutError,
         io::ErrorKind::AlreadyExists => Kind::FileExistsError,
         io::ErrorKind::NotFound => Kind::FileNotFoundError,
         io::ErrorKind::PermissionDenied => Kind::PermissionError,
@@ -393,7 +400,12 @@ fn with_errno_description(error: io::Error, build: impl FnOnce(Kind, i32, &str) 
     }
     // SAFETY: the successful call initialized a terminated string.
     let description = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
-    build(os_error_kind(error.kind()), errno, &description)
+    let kind = match errno {
+        libc::EINPROGRESS | libc::EALREADY => Kind::BlockingIOError,
+        libc::ESHUTDOWN => Kind::BrokenPipeError,
+        _ => os_error_kind(error.kind()),
+    };
+    build(kind, errno, &description)
 }
 
 /// Opens a UTF-8 text stream in read, write, append, or exclusive-create mode.
