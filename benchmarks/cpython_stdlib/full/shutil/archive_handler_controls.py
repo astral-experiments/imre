@@ -9,6 +9,7 @@ import tarfile
 import tempfile
 
 SOURCE = '''import csv
+import io
 import shutil
 import tarfile
 from pathlib import Path
@@ -76,9 +77,32 @@ def check() -> None:
 check()
 '''
 
+FASTCOPY = '''
+with io.BytesIO(b"source") as memory, open("file", "rb") as disk:
+    try:
+        shutil._fastcopy_sendfile(memory, disk)
+    except (shutil.ReadError, shutil.RegistryError, tarfile.TarError, csv.Error, UnicodeEncodeError, OSError):
+        raise AssertionError("unrelated family caught the descriptor fallback")
+    except shutil._GiveupOnFastCopy as error:
+        print(repr(error))
+try:
+    shutil.unpack_archive("damaged.tar", "dest")
+except shutil._GiveupOnFastCopy:
+    raise AssertionError("fast-copy fallback caught an unreadable archive")
+except shutil.ReadError:
+    print("read error versus fallback")
+try:
+    shutil.unpack_archive("escape.tar", "dest", filter="data")
+except (shutil._GiveupOnFastCopy, shutil.RegistryError):
+    raise AssertionError("unrelated family caught the outside-destination error")
+except tarfile.OutsideDestinationError:
+    print("tar member versus fallback")
+'''
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--oracle-only', action='store_true', help='run the crossed handlers with this CPython only')
+    parser.add_argument('--with-fastcopy', action='store_true', help='also check the native descriptor fallback on a combined head')
     for arg in ('imre', 'runtime', 'clang'):
         parser.add_argument('--'+arg, type=lambda p: Path(p).resolve())
     args = parser.parse_args()
@@ -87,7 +111,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         source = root/'crossed.py'
-        source.write_text(SOURCE)
+        source.write_text(SOURCE + (FASTCOPY if args.with_fastcopy else ''))
         (root/'file').write_bytes(b'keep')
         (root/'dest').mkdir()
         (root/'damaged.tar').write_bytes(b'not a tar file')
@@ -103,16 +127,20 @@ def main():
             assert not list((root/'dest').iterdir())
             return completed.stdout, completed.stderr
         expected = run([sys.executable,'-IB',source])
-        assert expected == (b'csv\nencoding\nsame file\nfilesystem FIFO\narchive\narchive OS base\nfilter\narchive FIFO\nformat conflict\nregistry Exception base\n',b'')
+        expected_text = b'csv\nencoding\nsame file\nfilesystem FIFO\narchive\narchive OS base\nfilter\narchive FIFO\nformat conflict\nregistry Exception base\n'
+        if args.with_fastcopy:
+            expected_text += b"_GiveupOnFastCopy(UnsupportedOperation('fileno'))\nread error versus fallback\ntar member versus fallback\n"
+        assert expected == (expected_text, b'')
+        count = 13 if args.with_fastcopy else 10
         if args.oracle_only:
-            print('CPython: ten crossed handlers matched the expected classes and preserved the fixture')
+            print(f'CPython: {count} crossed handlers matched the expected classes and preserved the fixture')
             return
         for level in ('0','3'):
             binary=root/'check'
             subprocess.run([args.imre,'build',source,'--no-cache','--opt-level',level,'--runtime',args.runtime,
                             '--clang',args.clang,'-o',binary],cwd=root,check=True)
             assert run([binary]) == expected
-            print(f'-O{level}: ten crossed CSV, Unicode, copying, archive registry and tar handlers matched CPython')
+            print(f'-O{level}: {count} crossed exception handlers matched CPython')
 
 if __name__ == '__main__':
     main()
