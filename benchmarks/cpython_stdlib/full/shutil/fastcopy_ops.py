@@ -2,6 +2,7 @@
 import argparse
 import array
 import ast
+from collections import Counter
 from contextlib import chdir, ExitStack
 import errno
 import io
@@ -18,8 +19,12 @@ from unittest.mock import Mock, patch
 HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path.insert(0, str(STDLIB))
+from suite_evidence import roles
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
 from suite_native import Toolchain, run_in_fixtures
+
+BLOCKERS = dict.fromkeys(('test_unhandled_exception', 'test_blocksize_arg'),
+    'original os syscall mock raises ZeroDivisionError; a POSIX errno cannot carry an arbitrary Python exception through the native copyfile loop')
 
 DRIVER = '''import shutil
 import sys
@@ -38,13 +43,13 @@ def run() -> None:
         if sys.argv[1] == "public":
             shutil.copyfile(sys.argv[5], sys.argv[6])
         elif sys.argv[1] == "memory-src":
-            with io.BytesIO() as a, open("/imre-shutil-fixture/destination-fd","wb") as b:
+            with io.BytesIO() as a, open(sys.argv[6],"wb") as b:
                 zero(a,b)
         elif sys.argv[1] == "memory-dst":
-            with open("/imre-shutil-fixture/source-fd","rb") as c, io.BytesIO() as d:
+            with open(sys.argv[5],"rb") as c, io.BytesIO() as d:
                 zero(c,d)
         else:
-            with open("/imre-shutil-fixture/source-fd","rb") as e, open("/imre-shutil-fixture/destination-fd","wb") as f:
+            with open(sys.argv[5],"rb") as e, open(sys.argv[6],"wb") as f:
                 zero(e,f)
         print("ok")
         print("None")
@@ -55,9 +60,17 @@ def run() -> None:
     except FileNotFoundError as err:
         print("FileNotFoundError")
         print(repr(err))
+        print(repr(err.errno))
+        print(repr(err.strerror))
+        print(repr(err.filename))
+        print(repr(err.filename2))
     except OSError as err:
         print("OSError")
         print(repr(err))
+        print(repr(err.errno))
+        print(repr(err.strerror))
+        print(repr(err.filename))
+        print(repr(err.filename2))
         suppressed = err.__suppress_context__
     print(shutil._USE_CP_SENDFILE)
     print(suppressed)
@@ -120,39 +133,41 @@ def shell(exe, argv, env, fds, original_os, summary):
     return out.splitlines()
 
 
-def run_level(main, tools, work, shim):
+def executors(main, tools, work, *, with_roles=False):
+    shim=work/'syscalls.so'
+    subprocess.run([tools.clang,'-shared','-fPIC','-Wall','-Werror',HERE/'fastcopy_mock.c',HERE/'stream_fds.c','-o',shim],check=True)
     exe = tools.build(DRIVER.encode(), work)
     def execute(case, original):
         name = case._testMethodName
-        if name in ("test_unhandled_exception", "test_blocksize_arg"):
-            return {"status":"blocked", "reason":"original os syscall mock raises ZeroDivisionError; a POSIX errno cannot carry an arbitrary Python exception through the native copyfile loop"}
-        if name in ("test_non_existent_src", "test_exception_on_second_call"):
-            field = 'filename' if name == 'test_non_existent_src' else 'errno'
-            return {"status":"blocked", "reason":f"original handler reads OSError.{field}; this head cannot transport that native field without the shared structured OS error projection"}
+        if name in BLOCKERS:
+            return {"status":"blocked", "reason":BLOCKERS[name]}
         summary = {"native_operations":[], "syscalls":[], "mock_callbacks":0, "fallback_reads":0,
-                   "host_stream_copy":0,"flag_changes":0}
+                   "host_stream_copy":0,"flag_changes":0, "structured_errors":[]}
         lib = main.shutil
         if isinstance(case, main.TestZeroCopySendfile):
             method = 'sendfile'
         else:
             method = 'range'
+        private = '_fastcopy_sendfile' if method == 'sendfile' else '_fastcopy_copy_file_range'
         def invoke(mode, srcpath, dstpath, rfd=None, wfd=None):
-            summary["native_operations"].append("copyfile" if mode=="public" else "_fastcopy_"+method)
+            summary["native_operations"].append("copyfile" if mode=="public" else private)
             env = dict(os.environ, LD_PRELOAD=str(shim))
             if srcpath is not None:
                 env["SHUTIL_FAST_SOURCE"] = os.fspath(srcpath)
             if rfd is not None:
                 env["SHUTIL_FIXTURE_SRC"] = str(rfd)
+                env["SHUTIL_FIXTURE_SRC_PATH"] = os.fspath(srcpath)
             if wfd is not None:
                 env["SHUTIL_FIXTURE_DST"] = str(wfd)
+                env["SHUTIL_FIXTURE_DST_PATH"] = os.fspath(dstpath)
             if isinstance(main.os.fstat, Mock):
                 env['SHUTIL_FAST_FSTAT'] = '1'
             if isinstance(lib.copyfileobj,Mock) and mode=='public':
                 env['SHUTIL_FAST_GUARD_READ'] = '1'
             argv=[mode,method,str(int(lib._USE_CP_COPY_FILE_RANGE)),str(int(lib._USE_CP_SENDFILE)),srcpath or '',dstpath or '']
             out=shell(exe,argv,env,tuple({f for f in (rfd,wfd) if f is not None}),main.os,summary)
-            assert len(out)==4,out
-            status, payload, sendfile, suppressed = out
+            status, payload, *fields, sendfile, suppressed = out
+            assert len(fields) == (4 if status in ("FileNotFoundError", "OSError") else 0), out
             next_flag = {"True":True,"False":False}[sendfile]
             if lib._USE_CP_SENDFILE != next_flag:
                 lib._USE_CP_SENDFILE = next_flag
@@ -174,7 +189,13 @@ def run_level(main, tools, work, shim):
             # Preserve arguments originating in the native exception, never input paths.
             cls = {'FileNotFoundError':FileNotFoundError, 'OSError':OSError, 'PermissionError':PermissionError,
                    'IsADirectoryError':IsADirectoryError}[parsed.func.id]
-            raised=cls(*(ast.literal_eval(a) for a in parsed.args))
+            number, message, first, second = map(ast.literal_eval, fields)
+            raised=(cls(number, message, first, None, second) if second is not None else
+                    cls(number, message, first) if first is not None else cls(number, message))
+            assert repr(raised) == payload and raised.args == tuple(ast.literal_eval(a) for a in parsed.args)
+            summary["structured_errors"].append({"class":parsed.func.id, "errno":number,
+                "filename_is_input":first is not None and first==srcpath,
+                "filename2_is_output":second is not None and second==dstpath})
             raised.__suppress_context__={'True':True,'False':False}[suppressed]
             if raised.errno==errno.ENOSPC:
                 assert raised.__suppress_context__
@@ -195,7 +216,7 @@ def run_level(main, tools, work, shim):
         previous=lib._USE_CP_SENDFILE
         try:
             with ExitStack() as stack:
-                stack.enter_context(patch.object(lib,"_fastcopy_sendfile" if method=="sendfile" else "_fastcopy_copy_file_range",direct))
+                stack.enter_context(patch.object(lib,private,direct))
                 stack.enter_context(patch.object(lib,"copyfile",public))
                 if name.startswith('test_non_regular_file_'):
                     stack.enter_context(patch.object(lib,'copyfileobj',copy_stream))
@@ -204,12 +225,31 @@ def run_level(main, tools, work, shim):
             lib._USE_CP_SENDFILE=previous
         assert summary['native_operations']
         if name=='test_regular_copy':
-            assert summary['native_operations']==['_fastcopy_'+method,'copyfile']
+            assert summary['native_operations']==[private,'copyfile']
             assert any(f['syscall']==('sendfile' if method=='sendfile' else 'copy_file_range') for f in summary['syscalls'])
+        expected = {'test_non_existent_src': ('FileNotFoundError', errno.ENOENT, False),
+                    'test_filesystem_full': ('OSError', errno.ENOSPC, True),
+                    'test_exception_on_second_call': ('OSError', errno.EBADF, True)}
+        if name in expected:
+            cls, number, two_paths = expected[name]
+            assert summary['structured_errors'] == [{'class': cls, 'errno': number,
+                'filename_is_input': True, 'filename2_is_output': two_paths}], summary['structured_errors']
         mixed = summary['host_stream_copy'] or summary['mock_callbacks']
+        if with_roles:
+            counts = dict(Counter(summary['native_operations']))
+            return {'roles':roles(body='cpython', assertions='cpython', operation='mixed' if mixed else 'imre', fixture='cpython'),
+                    'evidence':dict(operation=', '.join('shutil.'+op for op in counts),
+                                    calls_by_operation=counts, native_calls=sum(counts.values()), opt_level=tools.level,
+                                    fixture='original CPython zero-copy setup, real files, assertions and cleanup; any host syscall mocks and stream copies are counted separately', **summary)}
         return {"status":"mixed" if mixed else "host_driven_native", **summary}
     suite=load_suite('test.test_shutil')
-    selected={c.id():execute for c in cases(suite) if isinstance(c,(main.TestZeroCopySendfile,main.TestZeroCopyCopyFileRange))}
+    return {c.id():execute for c in cases(suite) if isinstance(c,(main.TestZeroCopySendfile,main.TestZeroCopyCopyFileRange))
+            and (not with_roles or c._testMethodName not in BLOCKERS)}
+
+
+def run_level(main, tools, work):
+    suite=load_suite('test.test_shutil')
+    selected=executors(main, tools, work)
     good,fail,skip=run_in_fixtures(suite,selected)
     rows={n:v[0] for n,v in good.items() if v}
     rows.update({n:{"status":"failed","reason":reason} for n,reason in fail})
@@ -236,12 +276,10 @@ def main():
         root=Path(tmp)
         from test import test_shutil
         assert Path(test_shutil.__file__).resolve()==tests/'test_shutil.py'
-        shim=root/'syscalls.so'
-        subprocess.run([args.clang,'-shared','-fPIC','-Wall','-Werror',HERE/'fastcopy_mock.c',HERE/'stream_fds.c','-o',shim],check=True)
         for level in (0,3):
             work=root/str(level)
             work.mkdir()
-            levels[level]=run_level(test_shutil,Toolchain(args.imre,args.runtime,args.clang,level),work,shim)
+            levels[level]=run_level(test_shutil,Toolchain(args.imre,args.runtime,args.clang,level),work)
     args.result.write_text(json.dumps({'cpython_commit':manifest['commit'],'optimization_levels':levels},indent=2)+'\n')
     return int(any(row['status']=='failed' for rows in levels.values() for row in rows.values()))
 

@@ -5,9 +5,11 @@ import subprocess
 import sys
 import tempfile
 
-SRC = '''import io
+SRC = '''import csv
+import io
 import shutil
 import sys
+from pathlib import Path
 src = sys.argv[1]
 dst = sys.argv[2]
 method = sys.argv[3]
@@ -24,8 +26,47 @@ elif method == 'memory':
     with io.BytesIO(b"abc") as a, open(dst, "wb") as d:
         try:
             shutil._fastcopy_sendfile(a, d)
+        except csv.Error:
+            raise AssertionError('fallback caught by csv.Error')
+        except UnicodeEncodeError:
+            raise AssertionError('fallback caught by UnicodeEncodeError')
+        except shutil.Error:
+            raise AssertionError('fallback caught by shutil.Error')
+        except OSError:
+            raise AssertionError('fallback caught by OSError')
         except shutil._GiveupOnFastCopy as err:
             print(str(err))
+            print(repr(err))
+elif method == 'handlers':
+    reader = csv.reader(['"unterminated'], strict=True)
+    try:
+        next(reader)
+    except shutil._GiveupOnFastCopy:
+        raise AssertionError('CSV error caught by fast-copy fallback')
+    except csv.Error:
+        print('csv')
+    try:
+        shutil.copyfile(src, src)
+    except shutil._GiveupOnFastCopy:
+        raise AssertionError('same file caught by fast-copy fallback')
+    except shutil.SameFileError:
+        print('same file')
+    try:
+        Path('codec').write_text('é', encoding='ascii')
+    except shutil._GiveupOnFastCopy:
+        raise AssertionError('codec error caught by fast-copy fallback')
+    except UnicodeEncodeError:
+        print('codec')
+    with io.BytesIO(b'input') as memory, open(dst, 'wb') as dest:
+        try:
+            shutil._fastcopy_copy_file_range(memory, dest)
+        except csv.Error:
+            raise AssertionError('fallback caught by csv.Error')
+        except NameError:
+            raise AssertionError('fallback caught by NameError')
+        except OSError:
+            raise AssertionError('fallback caught by OSError')
+        except Exception as err:
             print(repr(err))
 elif method == 'same':
     with open(src, "rb") as a:
@@ -57,7 +98,7 @@ with tempfile.TemporaryDirectory() as tmp:
     script.write_text(SRC)
     def run(cmd):
         results={}
-        for method, size, pos in [('flags',31,0),('memory',31,0),('same',31,0),('range',0,0),('sendfile',0,0),('range',113,13),('sendfile',113,13)]:
+        for method, size, pos in [('flags',31,0),('memory',31,0),('same',31,0),('range',0,0),('sendfile',0,0),('range',113,13),('sendfile',113,13),('handlers',31,0)]:
             original=bytes(range(size))
             (root/'source').write_bytes(original)
             (root/'dest').write_bytes(b'target')
@@ -67,10 +108,11 @@ with tempfile.TemporaryDirectory() as tmp:
             results[(method,size,pos)]=(proc.stdout,proc.stderr,(root/'dest').read_bytes())
         return results
     oracle=run([sys.executable,'-B',script])
+    assert oracle['handlers',31,0][0] == b"csv\nsame file\ncodec\n_GiveupOnFastCopy(UnsupportedOperation('fileno'))\n"
     for level in ('0','3'):
         program=root/'fast'
         subprocess.run([args.imre,'build',script,'--no-cache','--opt-level',level,'--runtime',args.runtime,'--clang',args.clang,'-o',program],check=True)
         results=run([program])
         for k in oracle:
             assert results[k]==oracle[k],(k,results[k],oracle[k])
-        print('O'+level, len(oracle),'real offset, fallback and original-exception controls matched')
+        print('O'+level, len(oracle),'transfer, offset, fallback and crossed exception controls matched')

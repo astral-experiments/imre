@@ -64,17 +64,39 @@ ssize_t copy_file_range(int in, off64_t *in_off, int out, off64_t *out_off, size
     }
 }
 
-int fstat(int fd, struct stat *stat) {
-    int ret = syscall(SYS_fstat, fd, stat);
-    if (!ret && getenv("SHUTIL_FAST_FSTAT") && fixture_source(fd)) {
+static int fixture_size(int fd, int64_t *size) {
+    if (getenv("SHUTIL_FAST_FSTAT") && fixture_source(fd)) {
         int64_t n;
         switch (request(2, &fd, 1, -1, 0, &n)) {
-        case 1: stat->st_size = n; break;
+        case 1: *size = n; break;
         case 2: return -1;
         }
     }
+    return 0;
+}
+
+int fstat(int fd, struct stat *stat) {
+    int ret = syscall(SYS_fstat, fd, stat);
+    if (!ret) {
+        int64_t size = stat->st_size;
+        ret = fixture_size(fd, &size);
+        if (!ret) stat->st_size = size;
+    }
     return ret;
 }
+
+#ifdef __GLIBC__
+/* The pinned CPython calls fstat64; Imre calls fstat. Preserve each libc ABI. */
+int fstat64(int fd, struct stat64 *stat) {
+    int ret = fstatat64(fd, "", stat, AT_EMPTY_PATH);
+    if (!ret) {
+        int64_t size = stat->st_size;
+        ret = fixture_size(fd, &size);
+        if (!ret) stat->st_size = size;
+    }
+    return ret;
+}
+#endif
 
 ssize_t read(int fd, void *buffer, size_t size) {
     static int observed = 0;

@@ -11,8 +11,12 @@
 
 static int adapter(int dirfd, const char *path, int flags, mode_t mode) {
     const char *fd = NULL;
-    if (!strcmp(path, "/imre-shutil-fixture/source-fd")) fd = getenv("SHUTIL_FIXTURE_SRC");
-    if (!strcmp(path, "/imre-shutil-fixture/destination-fd")) fd = getenv("SHUTIL_FIXTURE_DST");
+    const char *src = getenv("SHUTIL_FIXTURE_SRC_PATH");
+    const char *dst = getenv("SHUTIL_FIXTURE_DST_PATH");
+    if ((flags & O_ACCMODE) == O_RDONLY && !strcmp(path, src ? src : "/imre-shutil-fixture/source-fd"))
+        fd = getenv("SHUTIL_FIXTURE_SRC");
+    if ((flags & O_ACCMODE) != O_RDONLY && !strcmp(path, dst ? dst : "/imre-shutil-fixture/destination-fd"))
+        fd = getenv("SHUTIL_FIXTURE_DST");
     if (fd) return fcntl(atoi(fd), F_DUPFD_CLOEXEC, 0);
     return (int)syscall(SYS_openat, dirfd, path, flags, mode);
 }

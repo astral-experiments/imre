@@ -5,7 +5,7 @@
       "test.test_shutil.TestZeroCopyCopyFileRange.test_big_chunk": {
         "status": "mixed",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [
           {
@@ -30,7 +30,8 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_blocksize_arg": {
         "status": "blocked",
@@ -39,7 +40,7 @@
       "test.test_shutil.TestZeroCopyCopyFileRange.test_cant_get_size": {
         "status": "mixed",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [
           {
@@ -65,12 +66,13 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_empty_file": {
         "status": "host_driven_native",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [
           {
@@ -83,12 +85,13 @@
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_exception_on_first_call": {
         "status": "mixed",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [
           {
@@ -102,16 +105,46 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_exception_on_second_call": {
-        "status": "blocked",
-        "reason": "original handler reads OSError.errno; this head cannot transport that native field without the shared structured OS error projection"
+        "status": "mixed",
+        "native_operations": [
+          "_fastcopy_copy_file_range"
+        ],
+        "syscalls": [
+          {
+            "syscall": "copy_file_range",
+            "offset": 0,
+            "size": 10485760,
+            "mock": true
+          },
+          {
+            "syscall": "copy_file_range",
+            "offset": 10485760,
+            "size": 10485760,
+            "mock": true,
+            "errno": 9
+          }
+        ],
+        "mock_callbacks": 2,
+        "fallback_reads": 0,
+        "host_stream_copy": 0,
+        "flag_changes": 0,
+        "structured_errors": [
+          {
+            "class": "OSError",
+            "errno": 9,
+            "filename_is_input": true,
+            "filename2_is_output": true
+          }
+        ]
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_filesystem_full": {
         "status": "mixed",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [
           {
@@ -126,38 +159,63 @@
         "fallback_reads": 0,
         "host_stream_copy": 0,
         "flag_changes": 0,
+        "structured_errors": [
+          {
+            "class": "OSError",
+            "errno": 28,
+            "filename_is_input": true,
+            "filename2_is_output": true
+          }
+        ],
         "ENOSPC_from_None": true
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_non_existent_src": {
-        "status": "blocked",
-        "reason": "original handler reads OSError.filename; this head cannot transport that native field without the shared structured OS error projection"
+        "status": "host_driven_native",
+        "native_operations": [
+          "copyfile"
+        ],
+        "syscalls": [],
+        "mock_callbacks": 0,
+        "fallback_reads": 0,
+        "host_stream_copy": 0,
+        "flag_changes": 0,
+        "structured_errors": [
+          {
+            "class": "FileNotFoundError",
+            "errno": 2,
+            "filename_is_input": true,
+            "filename2_is_output": false
+          }
+        ]
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_non_regular_file_dst": {
         "status": "mixed",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [],
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 1,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_non_regular_file_src": {
         "status": "mixed",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [],
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 1,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_regular_copy": {
         "status": "host_driven_native",
         "native_operations": [
-          "_fastcopy_range",
+          "_fastcopy_copy_file_range",
           "copyfile"
         ],
         "syscalls": [
@@ -189,12 +247,13 @@
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_same_file": {
         "status": "host_driven_native",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [
           {
@@ -207,12 +266,13 @@
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_small_chunks": {
         "status": "mixed",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [
           {
@@ -243,7 +303,8 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_unhandled_exception": {
         "status": "blocked",
@@ -277,7 +338,8 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_blocksize_arg": {
         "status": "blocked",
@@ -312,7 +374,8 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_empty_file": {
         "status": "host_driven_native",
@@ -330,7 +393,8 @@
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_exception_on_first_call": {
         "status": "mixed",
@@ -349,11 +413,41 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_exception_on_second_call": {
-        "status": "blocked",
-        "reason": "original handler reads OSError.errno; this head cannot transport that native field without the shared structured OS error projection"
+        "status": "mixed",
+        "native_operations": [
+          "_fastcopy_sendfile"
+        ],
+        "syscalls": [
+          {
+            "syscall": "sendfile",
+            "offset": 0,
+            "size": 10485760,
+            "mock": true
+          },
+          {
+            "syscall": "sendfile",
+            "offset": 10485760,
+            "size": 10485760,
+            "mock": true,
+            "errno": 9
+          }
+        ],
+        "mock_callbacks": 2,
+        "fallback_reads": 0,
+        "host_stream_copy": 0,
+        "flag_changes": 0,
+        "structured_errors": [
+          {
+            "class": "OSError",
+            "errno": 9,
+            "filename_is_input": true,
+            "filename2_is_output": true
+          }
+        ]
       },
       "test.test_shutil.TestZeroCopySendfile.test_file2file_not_supported": {
         "status": "mixed",
@@ -373,7 +467,8 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 1
+        "flag_changes": 1,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_filesystem_full": {
         "status": "mixed",
@@ -393,11 +488,34 @@
         "fallback_reads": 0,
         "host_stream_copy": 0,
         "flag_changes": 0,
+        "structured_errors": [
+          {
+            "class": "OSError",
+            "errno": 28,
+            "filename_is_input": true,
+            "filename2_is_output": true
+          }
+        ],
         "ENOSPC_from_None": true
       },
       "test.test_shutil.TestZeroCopySendfile.test_non_existent_src": {
-        "status": "blocked",
-        "reason": "original handler reads OSError.filename; this head cannot transport that native field without the shared structured OS error projection"
+        "status": "host_driven_native",
+        "native_operations": [
+          "copyfile"
+        ],
+        "syscalls": [],
+        "mock_callbacks": 0,
+        "fallback_reads": 0,
+        "host_stream_copy": 0,
+        "flag_changes": 0,
+        "structured_errors": [
+          {
+            "class": "FileNotFoundError",
+            "errno": 2,
+            "filename_is_input": true,
+            "filename2_is_output": false
+          }
+        ]
       },
       "test.test_shutil.TestZeroCopySendfile.test_non_regular_file_dst": {
         "status": "mixed",
@@ -408,7 +526,8 @@
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 1,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_non_regular_file_src": {
         "status": "mixed",
@@ -419,7 +538,8 @@
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 1,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_regular_copy": {
         "status": "host_driven_native",
@@ -456,7 +576,8 @@
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_same_file": {
         "status": "host_driven_native",
@@ -474,7 +595,8 @@
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_small_chunks": {
         "status": "mixed",
@@ -510,7 +632,8 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_unhandled_exception": {
         "status": "blocked",
@@ -521,7 +644,7 @@
       "test.test_shutil.TestZeroCopyCopyFileRange.test_big_chunk": {
         "status": "mixed",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [
           {
@@ -546,7 +669,8 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_blocksize_arg": {
         "status": "blocked",
@@ -555,7 +679,7 @@
       "test.test_shutil.TestZeroCopyCopyFileRange.test_cant_get_size": {
         "status": "mixed",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [
           {
@@ -581,12 +705,13 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_empty_file": {
         "status": "host_driven_native",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [
           {
@@ -599,12 +724,13 @@
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_exception_on_first_call": {
         "status": "mixed",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [
           {
@@ -618,16 +744,46 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_exception_on_second_call": {
-        "status": "blocked",
-        "reason": "original handler reads OSError.errno; this head cannot transport that native field without the shared structured OS error projection"
+        "status": "mixed",
+        "native_operations": [
+          "_fastcopy_copy_file_range"
+        ],
+        "syscalls": [
+          {
+            "syscall": "copy_file_range",
+            "offset": 0,
+            "size": 10485760,
+            "mock": true
+          },
+          {
+            "syscall": "copy_file_range",
+            "offset": 10485760,
+            "size": 10485760,
+            "mock": true,
+            "errno": 9
+          }
+        ],
+        "mock_callbacks": 2,
+        "fallback_reads": 0,
+        "host_stream_copy": 0,
+        "flag_changes": 0,
+        "structured_errors": [
+          {
+            "class": "OSError",
+            "errno": 9,
+            "filename_is_input": true,
+            "filename2_is_output": true
+          }
+        ]
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_filesystem_full": {
         "status": "mixed",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [
           {
@@ -642,38 +798,63 @@
         "fallback_reads": 0,
         "host_stream_copy": 0,
         "flag_changes": 0,
+        "structured_errors": [
+          {
+            "class": "OSError",
+            "errno": 28,
+            "filename_is_input": true,
+            "filename2_is_output": true
+          }
+        ],
         "ENOSPC_from_None": true
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_non_existent_src": {
-        "status": "blocked",
-        "reason": "original handler reads OSError.filename; this head cannot transport that native field without the shared structured OS error projection"
+        "status": "host_driven_native",
+        "native_operations": [
+          "copyfile"
+        ],
+        "syscalls": [],
+        "mock_callbacks": 0,
+        "fallback_reads": 0,
+        "host_stream_copy": 0,
+        "flag_changes": 0,
+        "structured_errors": [
+          {
+            "class": "FileNotFoundError",
+            "errno": 2,
+            "filename_is_input": true,
+            "filename2_is_output": false
+          }
+        ]
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_non_regular_file_dst": {
         "status": "mixed",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [],
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 1,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_non_regular_file_src": {
         "status": "mixed",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [],
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 1,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_regular_copy": {
         "status": "host_driven_native",
         "native_operations": [
-          "_fastcopy_range",
+          "_fastcopy_copy_file_range",
           "copyfile"
         ],
         "syscalls": [
@@ -705,12 +886,13 @@
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_same_file": {
         "status": "host_driven_native",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [
           {
@@ -723,12 +905,13 @@
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_small_chunks": {
         "status": "mixed",
         "native_operations": [
-          "_fastcopy_range"
+          "_fastcopy_copy_file_range"
         ],
         "syscalls": [
           {
@@ -759,7 +942,8 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopyCopyFileRange.test_unhandled_exception": {
         "status": "blocked",
@@ -793,7 +977,8 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_blocksize_arg": {
         "status": "blocked",
@@ -828,7 +1013,8 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_empty_file": {
         "status": "host_driven_native",
@@ -846,7 +1032,8 @@
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_exception_on_first_call": {
         "status": "mixed",
@@ -865,11 +1052,41 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_exception_on_second_call": {
-        "status": "blocked",
-        "reason": "original handler reads OSError.errno; this head cannot transport that native field without the shared structured OS error projection"
+        "status": "mixed",
+        "native_operations": [
+          "_fastcopy_sendfile"
+        ],
+        "syscalls": [
+          {
+            "syscall": "sendfile",
+            "offset": 0,
+            "size": 10485760,
+            "mock": true
+          },
+          {
+            "syscall": "sendfile",
+            "offset": 10485760,
+            "size": 10485760,
+            "mock": true,
+            "errno": 9
+          }
+        ],
+        "mock_callbacks": 2,
+        "fallback_reads": 0,
+        "host_stream_copy": 0,
+        "flag_changes": 0,
+        "structured_errors": [
+          {
+            "class": "OSError",
+            "errno": 9,
+            "filename_is_input": true,
+            "filename2_is_output": true
+          }
+        ]
       },
       "test.test_shutil.TestZeroCopySendfile.test_file2file_not_supported": {
         "status": "mixed",
@@ -889,7 +1106,8 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 1
+        "flag_changes": 1,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_filesystem_full": {
         "status": "mixed",
@@ -909,11 +1127,34 @@
         "fallback_reads": 0,
         "host_stream_copy": 0,
         "flag_changes": 0,
+        "structured_errors": [
+          {
+            "class": "OSError",
+            "errno": 28,
+            "filename_is_input": true,
+            "filename2_is_output": true
+          }
+        ],
         "ENOSPC_from_None": true
       },
       "test.test_shutil.TestZeroCopySendfile.test_non_existent_src": {
-        "status": "blocked",
-        "reason": "original handler reads OSError.filename; this head cannot transport that native field without the shared structured OS error projection"
+        "status": "host_driven_native",
+        "native_operations": [
+          "copyfile"
+        ],
+        "syscalls": [],
+        "mock_callbacks": 0,
+        "fallback_reads": 0,
+        "host_stream_copy": 0,
+        "flag_changes": 0,
+        "structured_errors": [
+          {
+            "class": "FileNotFoundError",
+            "errno": 2,
+            "filename_is_input": true,
+            "filename2_is_output": false
+          }
+        ]
       },
       "test.test_shutil.TestZeroCopySendfile.test_non_regular_file_dst": {
         "status": "mixed",
@@ -924,7 +1165,8 @@
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 1,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_non_regular_file_src": {
         "status": "mixed",
@@ -935,7 +1177,8 @@
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 1,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_regular_copy": {
         "status": "host_driven_native",
@@ -972,7 +1215,8 @@
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_same_file": {
         "status": "host_driven_native",
@@ -990,7 +1234,8 @@
         "mock_callbacks": 0,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_small_chunks": {
         "status": "mixed",
@@ -1026,7 +1271,8 @@
         "mock_callbacks": 1,
         "fallback_reads": 0,
         "host_stream_copy": 0,
-        "flag_changes": 0
+        "flag_changes": 0,
+        "structured_errors": []
       },
       "test.test_shutil.TestZeroCopySendfile.test_unhandled_exception": {
         "status": "blocked",
