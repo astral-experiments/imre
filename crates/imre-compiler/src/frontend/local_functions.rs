@@ -18,13 +18,15 @@ pub(super) struct Function {
 struct Site {
     range: TextRange,
     value_read: bool,
+    cmp_input: bool,
     later_writes: HashSet<String>,
 }
 
 impl Site {
-    fn new(function: &ast::StmtFunctionDef, following: &[ast::Stmt]) -> Self {
+    fn new(function: &ast::StmtFunctionDef, following: &[ast::Stmt], cmp_input: bool) -> Self {
         Self {
             range: function.range,
+            cmp_input: cmp_input && cmp_keys::can_specialize(function),
             value_read: reads_function_value(following, function.name.as_str()),
             later_writes: if function.is_async {
                 narrowing::assigned_names(following)
@@ -36,8 +38,17 @@ impl Site {
 }
 
 #[derive(Clone)]
+struct Comparator {
+    definition: Rc<ast::StmtFunctionDef>,
+    instances: HashMap<(Type, Type), Function>,
+}
+
+#[derive(Clone)]
 pub(super) struct Binding {
     sites: VecDeque<Site>,
+    active_comparator: Option<u32>,
+    // Factories made before a new def keep using the original comparator.
+    comparators: HashMap<u32, Comparator>,
     pub(super) overload_stub: bool,
     function: Option<Function>,
     pub(super) generic: Option<Rc<ast::StmtFunctionDef>>,
@@ -215,6 +226,18 @@ impl Checker<'_> {
         stmts: &[ast::Stmt],
         include_classes: bool,
     ) -> Result<(), String> {
+        let has_candidate = stmts
+            .iter()
+            .filter_map(ast::Stmt::as_function_def_stmt)
+            .any(cmp_keys::can_specialize);
+        let cmp_inputs = if has_candidate {
+            cmp_keys::local_comparators(stmts, |callee| {
+                self.resolve(callee)
+                    == Some(crate::modules::Binding::Intrinsic(Intrinsic::CmpToKey))
+            })
+        } else {
+            HashSet::new()
+        };
         let mut suite_functions = HashSet::new();
         for (index, statement) in stmts.iter().enumerate() {
             let name = match statement {
@@ -226,9 +249,11 @@ impl Checker<'_> {
                 && !suite_functions.insert(name)
             {
                 let binding = self.local_functions.get_mut(name).unwrap();
-                binding
-                    .sites
-                    .push_back(Site::new(function, &stmts[index + 1..]));
+                binding.sites.push_back(Site::new(
+                    function,
+                    &stmts[index + 1..],
+                    cmp_inputs.contains(name),
+                ));
                 continue;
             }
             if reserved(name)
@@ -261,7 +286,13 @@ impl Checker<'_> {
             self.local_functions.insert(
                 name.to_owned(),
                 Binding {
-                    sites: VecDeque::from([Site::new(function, &stmts[index + 1..])]),
+                    sites: VecDeque::from([Site::new(
+                        function,
+                        &stmts[index + 1..],
+                        cmp_inputs.contains(name),
+                    )]),
+                    active_comparator: None,
+                    comparators: HashMap::new(),
                     overload_stub: false,
                     function: None,
                     generic: None,
@@ -308,6 +339,39 @@ impl Checker<'_> {
         } else {
             definition
         };
+        {
+            let old = self.local_functions.get_mut(name).unwrap();
+            old.function = None;
+            old.active_comparator = None;
+            old.generic = None;
+            old.instances.clear();
+            old.value_slot = None;
+            old.overload_stub = overload;
+            old.later_writes = site.later_writes;
+        }
+        if site.cmp_input {
+            if comprehensions::function_reads(definition)
+                .iter()
+                .any(|n| self.names.contains_key(n) || self.local_functions.contains_key(n))
+            {
+                return Err(error(
+                    self.source,
+                    definition,
+                    "deferred local comparators must be noncapturing",
+                ));
+            }
+            let offset = u32::from(definition.range.start());
+            let binding = self.local_functions.get_mut(name).unwrap();
+            binding.active_comparator = Some(offset);
+            binding.comparators.insert(
+                offset,
+                Comparator {
+                    definition: Rc::new(definition.clone()),
+                    instances: HashMap::new(),
+                },
+            );
+            return Ok(None);
+        }
         let boxed = callback_parameter(definition);
         if !boxed
             && definition
@@ -320,15 +384,6 @@ impl Checker<'_> {
                 definition,
                 "local functions require annotated parameters and return types",
             ));
-        }
-        {
-            let old = self.local_functions.get_mut(name).unwrap();
-            old.function = None;
-            old.generic = None;
-            old.instances.clear();
-            old.value_slot = None;
-            old.overload_stub = overload;
-            old.later_writes = site.later_writes;
         }
         let wraps = match definition.decorator_list.as_slice() {
             [decorator] => decorator.expression.as_call_expr().filter(|call| {
@@ -423,6 +478,75 @@ impl Checker<'_> {
         binding.function = Some(function);
         binding.value_slot = object.as_ref().map(|(slot, _)| *slot);
         Ok(object.map(|(slot, value)| Statement::Assign(slot, value)))
+    }
+
+    pub(super) fn deferred_comparator(&self, argument: &ast::Expr) -> Option<(usize, u32)> {
+        Some((
+            self.module,
+            self.local_function_binding(argument)?.active_comparator?,
+        ))
+    }
+
+    /// Compile the original function for the two objects that will be compared.
+    pub(super) fn specialize_comparator(
+        &mut self,
+        site: (usize, u32),
+        left: Type,
+        right: Type,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let (name, comparator) = self
+            .local_functions
+            .iter()
+            .find_map(|(name, binding)| binding.comparators.get(&site.1).map(|c| (name.clone(), c)))
+            .filter(|_| site.0 == self.module)
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    node,
+                    "deferred comparator used outside its defining scope",
+                )
+            })?;
+        let key = (left, right);
+        if let Some(function) = comparator.instances.get(&key) {
+            return function.callback(self.types, self.source, node);
+        }
+        let definition = Rc::clone(&comparator.definition);
+        let params = definition
+            .parameters
+            .iter_non_variadic_params()
+            .zip([left, right])
+            .enumerate()
+            .map(|(i, (p, ty))| Parameter {
+                name: p.name().to_string(),
+                ty,
+                kind: if i < definition.parameters.posonlyargs.len() {
+                    ParameterKind::PositionalOnly
+                } else {
+                    ParameterKind::PositionalOrKeyword
+                },
+                default: None,
+                sign_only: false,
+            })
+            .collect();
+        let signature = Signature {
+            id: 0,
+            asynchronous: false,
+            method: None,
+            returns: Type::None,
+            params,
+        };
+        let function = self.lift_local(&definition, signature)?;
+        let value = function.callback(self.types, self.source, node)?;
+        self.local_functions
+            .get_mut(&name)
+            .unwrap()
+            .comparators
+            .get_mut(&site.1)
+            .unwrap()
+            .instances
+            .insert(key, function);
+        Ok(value)
     }
 
     fn generic_awaitable_wrapper(&self, definition: &ast::StmtFunctionDef) -> bool {

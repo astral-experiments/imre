@@ -822,6 +822,9 @@ pub(crate) enum Builtin {
     },
     StrEnumName,
     ClassNameView,
+    ClassNamePart {
+        module: bool,
+    },
     NewForwardRef,
     ForwardRefField(usize),
     BoxAnnotation(usize),
@@ -1867,6 +1870,10 @@ pub(crate) enum ProcessOperation {
         poll: bool,
     },
     PopenSetStatus,
+    PopenSetPoll {
+        returns_none: bool,
+    },
+    PopenDeletePoll,
     PopenWait,
     PopenCommunicate {
         text: bool,

@@ -4080,6 +4080,15 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::ClassNamePart { module } => Value {
+                ty: returns,
+                operand: self.instruction(format!(
+                    "call ptr @imre_class_name_part(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(*module)
+                )),
+                small_integer: false,
+            },
             Builtin::StaticFunction(_)
             | Builtin::AnnotationMember(_)
             | Builtin::BoxAnnotation(_)
@@ -8432,6 +8441,10 @@ declare i64 @imre_popen_identity(ptr)
 declare ptr @imre_popen_args(ptr)
 declare ptr @imre_popen_control(ptr)
 declare i64 @imre_child_status(ptr, i1 zeroext)
+declare i64 @imre_popen_status(ptr, i1 zeroext)
+declare void @imre_popen_set_poll(ptr, ptr, i1 zeroext)
+declare void @imre_popen_del_poll(ptr)
+declare zeroext i1 @imre_popen_signal_override(ptr, i64)
 declare void @imre_child_set_status(ptr, i64)
 declare ptr @imre_popen_communicate(ptr, ptr, i1 zeroext, i32, i64, ptr)
 declare i64 @imre_child_wait(ptr, i32, i64, ptr)
@@ -9324,6 +9337,7 @@ declare void @imre_str_enum_table(ptr, i64)
 declare i64 @imre_enum_lookup(ptr, i64, i64)
 declare ptr @imre_enum_string(i64)
 declare i32 @imre_str_equal(ptr, ptr)
+declare ptr @imre_class_name_part(ptr, i32)
 declare i32 @imre_optional_int_equal(i64, i64)
 declare i32 @imre_optional_str_equal(i64, i64)
 declare i64 @imre_int_parse(ptr)

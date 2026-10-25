@@ -9,6 +9,7 @@ use std::cell::RefCell;
 mod active;
 mod communicate;
 mod control;
+mod poll;
 mod selector;
 
 pub(super) use active::cleanup;
@@ -27,7 +28,11 @@ pub(super) struct ChildPipes {
 
 impl ChildPipes {
     /// Open all pipe handles before allocating their Python stream buffers.
-    fn open(modes: [u32; 3], descriptors: [RawFd; 3]) -> Result<(Self, [Option<OwnedFd>; 3])> {
+    fn open(
+        modes: [u32; 3],
+        descriptors: [RawFd; 3],
+        pipe_capacity: Option<u32>,
+    ) -> Result<(Self, [Option<OwnedFd>; 3])> {
         let mut child = Self::default();
         let mut parents = [None, None, None];
         if modes.iter().any(|mode| matches!(mode, 1 | 2)) {
@@ -39,7 +44,7 @@ impl ChildPipes {
         }
         for (i, mode) in modes.into_iter().enumerate() {
             if mode == 1 {
-                let (read, write) = io::pipe().map_err(errno_error)?;
+                let (read, write) = super::pipe_size::open(pipe_capacity).map_err(errno_error)?;
                 let (read, write): (OwnedFd, OwnedFd) = (read.into(), write.into());
                 let (parent, other) = if i == 0 { (write, read) } else { (read, write) };
                 parents[i] = Some(parent);
@@ -77,6 +82,7 @@ impl Default for Redirects {
 
 pub(in crate::objects) struct Popen {
     args: OwnedWord,
+    poll_override: Option<poll::Override>,
     control: Arc<ChildControl>,
     pipes: Pipes,
     communication: communicate::Communication,
@@ -189,11 +195,20 @@ struct PassFdsConfig {
     kind: u32,
 }
 
+/// Bit 21 appends the original pipesize word and its exact representation.
+#[repr(C)]
+struct SizedPipeConfig {
+    pass: PassFdsConfig,
+    size: usize,
+    kind: u32,
+}
+
 #[derive(Default)]
 struct LaunchExtras {
     redirects: [usize; 3],
     child: Option<(usize, usize, bool)>,
     keep: Option<(usize, u32)>,
+    pipe_size: Option<(usize, u32)>,
 }
 
 impl LaunchConfig {
@@ -210,6 +225,11 @@ impl LaunchConfig {
         // SAFETY: the launch prefix is present for all three ABI layouts.
         let streams = unsafe { (*config).streams };
         if streams & (1 << 18) != 0 {
+            let pipe_size = (streams & (1 << 21) != 0).then(|| {
+                // SAFETY: bit 21 promises the complete sized pipe trailer.
+                let full = unsafe { &*config.cast::<SizedPipeConfig>() };
+                (full.size, full.kind)
+            });
             let keep = (streams & (1 << 19) != 0).then(|| {
                 // SAFETY: bit 19 promises the complete pass_fds trailer.
                 let full = unsafe { &*config.cast::<PassFdsConfig>() };
@@ -221,6 +241,7 @@ impl LaunchConfig {
                 redirects: config.redirect.words,
                 child: Some((config.group, config.mask, config.new_session)),
                 keep,
+                pipe_size,
             }
         } else if Self::has_redirects(streams) {
             LaunchExtras {
@@ -228,6 +249,7 @@ impl LaunchConfig {
                 redirects: unsafe { (*config.cast::<RedirectConfig>()).words },
                 child: None,
                 keep: None,
+                pipe_size: None,
             }
         } else {
             LaunchExtras::default()
@@ -324,12 +346,16 @@ pub unsafe extern "C" fn imre_popen_config(config: *const LaunchConfig) -> *cons
 }
 
 /// Check only on a validation failure: a successful launch creates its own handles.
-fn check_handles(modes: &[u32], fork_error_pipe: bool) -> io::Result<()> {
+fn check_handles(
+    modes: &[u32],
+    fork_error_pipe: bool,
+    pipe_capacity: Option<u32>,
+) -> io::Result<()> {
     let mut pipes = [const { None }; 3];
     let mut devnull = None;
     for (pipe, mode) in pipes.iter_mut().zip(modes) {
         match mode {
-            1 => *pipe = Some(io::pipe()?),
+            1 => *pipe = Some(super::pipe_size::open(pipe_capacity)?),
             2 if devnull.is_none() => {
                 devnull = Some(
                     fs::OpenOptions::new()
@@ -352,10 +378,9 @@ fn check_handles(modes: &[u32], fork_error_pipe: bool) -> io::Result<()> {
 }
 
 pub(super) fn error_after_handles(modes: &[u32], fork_error_pipe: bool, error: Error) -> Error {
-    match check_handles(modes, fork_error_pipe) {
-        Ok(()) => error,
-        Err(io) => errno_error(io),
-    }
+    check_handles(modes, fork_error_pipe, None)
+        .err()
+        .map_or(error, errno_error)
 }
 
 /// Create a native child with independently owned pipe ends and the original argv owner.
@@ -375,6 +400,13 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
             "STDOUT can only be used for stderr",
         ));
     }
+    let pipe_capacity = match extras.pipe_size {
+        Some((word, kind)) => {
+            // SAFETY: the launch argument stays rooted until spawn returns.
+            unsafe { super::pipe_size::capacity(word, WordKind::new(kind)) }?
+        }
+        None => None,
+    };
     if !config.close_fds
         && let Some((word, kind)) = extras.keep
         // SAFETY: the launch trailer retains the original collection.
@@ -406,11 +438,15 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
                     .0
                     .with(|s| s.file().fileno())
             }
-            .map_err(|e| error_after_handles(&modes[..i], false, e))?,
+            .map_err(|error| {
+                check_handles(&modes[..i], false, pipe_capacity)
+                    .err()
+                    .map_or(error, errno_error)
+            })?,
             _ => -1,
         };
     }
-    let (prepared, parents) = ChildPipes::open(modes, descriptors)?;
+    let (prepared, parents) = ChildPipes::open(modes, descriptors, pipe_capacity)?;
     // Python opens the parent-side pipe wrappers after it collects the file handles.
     let bufsize = if modes.contains(&1) {
         // SAFETY: the caller roots the buffer-size integer.
@@ -492,6 +528,7 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
         control: Arc::new(ChildControl::new(child)),
         communication: Default::default(),
         finalized: false,
+        poll_override: None,
     })
 }
 
@@ -710,23 +747,26 @@ pub unsafe extern "C" fn imre_child_wait(
 }
 
 /// # Safety
+/// The caller roots the integer until conversion; conversion can raise OverflowError.
+unsafe fn signal_number(signal: usize) -> Result<i32> {
+    // SAFETY: the caller supplied a rooted Python integer.
+    unsafe { Int::borrow(signal) }
+        .as_small()
+        .and_then(|n| i32::try_from(n).ok())
+        .ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "Python int too large to convert to C int",
+            )
+        })
+}
+
+/// # Safety
 /// The control stays rooted, and the signal integer belongs to the caller thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_child_signal(control: *const ChildControl, signal: usize) {
     // SAFETY: no language state from the Popen owner is accessed while signaling.
-    let result = unsafe {
-        (*control).signal(|| {
-            Int::borrow(signal)
-                .as_small()
-                .and_then(|n| i32::try_from(n).ok())
-                .ok_or_else(|| {
-                    Error::new(
-                        Kind::OverflowError,
-                        "Python int too large to convert to C int",
-                    )
-                })
-        })
-    };
+    let result = unsafe { (*control).signal(|| signal_number(signal)) };
     finish(result, ());
 }
 
@@ -734,8 +774,13 @@ pub unsafe extern "C" fn imre_child_signal(control: *const ChildControl, signal:
 /// Legacy entry point: the caller roots this Popen on its owner thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_popen_status(handle: *const Object, poll: bool) -> usize {
-    // SAFETY: the handle stays rooted throughout the control call.
-    unsafe { imre_child_status(imre_popen_control(handle), poll) }
+    // SAFETY: clone the callable under the borrow, then invoke it after releasing the borrow.
+    unsafe {
+        if poll && let Some(callback) = with_process(handle, |p| p.poll_override.clone()) {
+            return callback.invoke();
+        }
+        imre_child_status(imre_popen_control(handle), poll)
+    }
 }
 
 /// # Safety
@@ -750,8 +795,12 @@ pub unsafe extern "C" fn imre_popen_wait(handle: *const Object, kind: u32, word:
 /// Legacy entry point: the handle and signal integer stay rooted on this thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_popen_signal(handle: *const Object, signal: usize) {
-    // SAFETY: the handle stays rooted throughout the control call.
-    unsafe { imre_child_signal(imre_popen_control(handle), signal) }
+    // SAFETY: the handle and signal stay rooted across the optional user callback.
+    unsafe {
+        if !poll::imre_popen_signal_override(handle, signal) {
+            imre_child_signal(imre_popen_control(handle), signal);
+        }
+    }
 }
 
 /// # Safety

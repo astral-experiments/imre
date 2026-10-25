@@ -1,9 +1,9 @@
 //! Iterative operations on documents emitted in postorder by the deep JSON decoder.
-use super::{Error, Kind, Node, View};
+use super::{Error, Kind, Node, View, copy_entries, copy_text};
 
 /// Copy an immutable subtree without walking it recursively. Children precede
 /// their parent in encounter order, including when a subtree was copied before.
-pub(super) fn copy(view: &View, root: usize, output: &mut Vec<Node>) -> usize {
+pub(super) fn copy(view: &View, root: usize, output: &mut Vec<Node>) -> Result<usize, Error> {
     let mut first = root;
     loop {
         let child = match &view.nodes[first] {
@@ -16,23 +16,24 @@ pub(super) fn copy(view: &View, root: usize, output: &mut Vec<Node>) -> usize {
             None => break,
         }
     }
+    output
+        .try_reserve(root - first + 1)
+        .map_err(|_| Error::allocation())?;
     let start = output.len();
     let shift = |i: usize| start + (i - first);
     for node in &view.nodes[first..=root] {
         output.push(match node {
-            Node::Array(items) => Node::Array(items.iter().map(|&i| shift(i)).collect()),
-            Node::Object(fields) => Node::Object(
-                fields.with_entries(
-                    fields
-                        .iter()
-                        .map(|(key, i)| (key.clone(), shift(*i)))
-                        .collect(),
-                ),
-            ),
+            Node::Array(items) => Node::Array(copy_entries(items, |&i| Ok(shift(i)))?),
+            Node::Object(fields) => {
+                Node::Object(fields.with_entries(copy_entries(fields, |(key, i)| {
+                    Ok((copy_text(key)?, shift(*i)))
+                })?))
+            }
+            Node::Datetime(text) => Node::Datetime(copy_text(text)?),
             _ => node.clone(),
         });
     }
-    shift(root)
+    Ok(shift(root))
 }
 
 /// Compare a child at a time; a wide array needs only one pending frame.
