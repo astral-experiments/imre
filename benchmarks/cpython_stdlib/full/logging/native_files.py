@@ -18,7 +18,6 @@ SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
 FILE_FIXTURE = """import logging
 import os
 import unittest
-from typing import TextIO
 
 class NativeCase(unittest.TestCase):
     fn: str
@@ -27,11 +26,11 @@ class NativeCase(unittest.TestCase):
         super().__init__()
         self.fn = FILENAME
 
-    def assertIsNone(self, value: TextIO | None) -> None:
+    def assertIsNone(self, value) -> None:
         if value is not None:
             raise AssertionError("stream is open")
 
-    def assertIsNotNone(self, value: TextIO | None) -> None:
+    def assertIsNotNone(self, value) -> None:
         if value is None:
             raise AssertionError("stream is missing")
 """

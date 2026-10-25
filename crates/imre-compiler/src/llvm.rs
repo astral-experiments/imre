@@ -3976,6 +3976,7 @@ impl Emitter<'_, '_> {
                     RemoveHandler => "imre_log_remove_handler",
                     WriteStream => "imre_text_output_write",
                     FlushStream => "imre_text_output_flush",
+                    StreamFile => "imre_text_output_file",
                     AddLevel => "imre_log_add_level",
                     LevelName => "imre_log_level_name",
                     LevelForName => "imre_log_level_for_name",
@@ -7774,6 +7775,7 @@ declare void @imre_log_add_handler(ptr, ptr)
 declare void @imre_log_remove_handler(ptr, ptr)
 declare i64 @imre_text_output_write(ptr, ptr)
 declare void @imre_text_output_flush(ptr)
+declare ptr @imre_text_output_file(ptr)
 declare ptr @imre_log_name(ptr)
 declare i64 @imre_log_parent(ptr)
 declare ptr @imre_log_root(ptr)

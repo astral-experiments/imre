@@ -78,6 +78,16 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        if matches!(attribute.attr.as_str(), "close" | "fileno") {
+            let file = operation(Log::StreamFile, Type::TextIO, vec![stream]);
+            let args = self.arguments(call, &[], Some(file))?;
+            let (builtin, ty) = if attribute.attr.as_str() == "close" {
+                (Builtin::TextClose, Type::None)
+            } else {
+                (Builtin::FileFileno, Type::Int)
+            };
+            return Ok(self.ordered_builtin(builtin, ty, args));
+        }
         let (op, ty, params) = match attribute.attr.as_str() {
             "write" => (
                 Log::WriteStream,
@@ -89,7 +99,7 @@ impl Checker<'_> {
                 return Err(error(
                     self.source,
                     attribute,
-                    "writable text stream supports write and flush",
+                    "writable text stream supports write, flush, close and fileno",
                 ));
             }
         };

@@ -16,3 +16,13 @@ The differential in `file_values.py` checks UTF-8 output, delayed opening,
 stream identity, both text and Path filenames, a changed terminator, and
 append-mode reopening. It adds no test IDs. Other encodings and custom
 path-like objects still need support from the native stream and path APIs.
+
+`FileHandler` inherits `StreamHandler`. A logger can attach a file handler,
+apply its level and filters, and remove that same handler. Closing releases
+the current stream and unregisters the handler name. Replacing the stream
+does not close the previous one.
+
+`tests/fixtures/files/logging_file_delivery.py` also compares 25 observations
+with CPython at both levels: accepted and filtered record identities, UTF-8
+bytes, stream replacement, `fileno`, delayed close without creating a file,
+and close delegation through a CP1251 writer. It contributes zero test IDs.

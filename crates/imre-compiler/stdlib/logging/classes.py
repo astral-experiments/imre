@@ -239,16 +239,12 @@ def _open_logfile(filename: str, mode: str, encoding: str) -> TextIO:
     raise NotImplementedError("FileHandler stream mode: " + mode)
 
 
-class FileHandler:
+class FileHandler(StreamHandler):
     baseFilename: str
     mode: str
     encoding: str
     errors: str | None
     delay: bool
-    stream: TextIO | None
-    terminator: str
-    formatter: Formatter | None
-    _closed: bool
 
     def __init__(self, filename: str | Path, mode: str = "a", encoding: str | None = None,
                  delay: bool = False, errors: str | None = None) -> None:
@@ -259,53 +255,32 @@ class FileHandler:
         self.encoding = codec
         self.errors = errors
         self.delay = delay
-        self.terminator = "\n"
-        self.formatter = None
-        self._closed = False
-        self.stream = None if delay else _open_logfile(path, mode, codec)
+        stream = None if delay else _open_logfile(path, mode, codec)
+        super().__init__(stream)
+        self.stream = stream
 
     def _open(self) -> TextIO:
         return _open_logfile(self.baseFilename, self.mode, self.encoding)
 
-    def format(self, record: LogRecord) -> str:
-        formatter = self.formatter
-        if formatter is None:
-            return _default_formatter.format(record)
-        return formatter.format(record)
-
-    def setFormatter(self, fmt: Formatter | None) -> None:
-        self.formatter = fmt
-
-    def flush(self) -> None:
-        stream = self.stream
-        if stream is not None:
-            stream.flush()
-
-    def emit(self, record: LogRecord) -> None:
-        stream = self.stream
-        if stream is None:
+    def emit(self, record: LogRecord | None) -> None:
+        if self.stream is None:
             if self.mode == "w" and self._closed:
                 return
-            stream = self._open()
-            self.stream = stream
-        stream.write(self.format(record) + self.terminator)
-        self.flush()
-
-    def handle(self, record: LogRecord) -> LogRecord:
-        self.emit(record)
-        return record
+            self.stream = self._open()
+        StreamHandler.emit(self, record)
 
     def close(self) -> None:
-        try:
-            stream = self.stream
-            if stream is not None:
-                try:
-                    stream.flush()
-                finally:
-                    self.stream = None
-                    stream.close()
-        finally:
-            self._closed = True
+        with self.lock:
+            try:
+                stream = self.stream
+                if stream is not None:
+                    try:
+                        self.flush()
+                    finally:
+                        self.stream = None
+                        stream.close()
+            finally:
+                StreamHandler.close(self)
 
 
 class NullHandler(Handler):
