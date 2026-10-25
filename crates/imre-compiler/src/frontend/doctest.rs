@@ -8,7 +8,7 @@ use crate::modules::doctest::{sealed, source_docstrings};
 impl Checker<'_> {
     pub(super) fn doctest_suite(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::DocExecute)) {
-            let def = self.graph.doctest_runner.ok_or_else(|| {
+            let def = self.graph.doctest_runner().ok_or_else(|| {
                 error(
                     self.source,
                     call,

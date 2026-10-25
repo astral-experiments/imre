@@ -215,7 +215,12 @@ impl Session {
     }
 
     /// Parses a normalized source once; semantic checks wait until every import is present.
-    pub(crate) fn add(&mut self, path: &Path, source: &str) -> Result<ParsedModuleRef, String> {
+    pub(crate) fn add(
+        &mut self,
+        path: &Path,
+        source: &str,
+        kind: crate::SourceKind,
+    ) -> Result<ParsedModuleRef, String> {
         let path = path.to_str().ok_or("module paths must be valid UTF-8")?;
         check_source_complexity(source).map_err(|error| format!("{path}: {error}"))?;
         let file = self.write_file(path, source)?;
@@ -224,7 +229,12 @@ impl Session {
             return Err(format!("{path}: {error}"));
         }
         check_handler_count(parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
-        check_indentation(source, parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
+        // The parser has already checked Python indentation; file inputs additionally
+        // enforce Imre's source-file policy. -c accepts legal tab-indented blocks.
+        if kind == crate::SourceKind::File {
+            check_indentation(source, parsed.tokens())
+                .map_err(|error| format!("{path}: {error}"))?;
+        }
         let mut limits = SuiteLimits {
             tokens: parsed.tokens(),
             scope_start: TextSize::default(),
@@ -1053,7 +1063,11 @@ mod diagnostic_mode_tests {
         let root = Path::new("/project");
         let mut session = Session::new(root, &[]).unwrap();
         session
-            .add(&root.join("main.py"), "def f(x: int) -> None:\n    x()\n")
+            .add(
+                &root.join("main.py"),
+                "def f(x: int) -> None:\n    x()\n",
+                crate::SourceKind::File,
+            )
             .unwrap();
         let file = session.files[0];
         assert!(

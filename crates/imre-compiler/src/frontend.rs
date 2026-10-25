@@ -379,6 +379,7 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "UnicodeEncodeError" => return Some(38),
         "NameError" => return Some(39),
         "UnboundLocalError" => return Some(40),
+        "RecursionError" => return Some(43),
         _ => {}
     }
     if name == "ImportError" {
@@ -745,7 +746,7 @@ pub(crate) fn lower_with_owners(
             );
             checker.returns = signature.returns;
             checker.interactive_names =
-                module.doctest_case && definition.name.as_str() == "_run_case";
+                module.is_doctest_case() && definition.name.as_str() == "_run_case";
             checker.asynchronous = signature.asynchronous;
             checker.method_context(signature.method);
             checker.generator_item = classes.producer_items.get(&signature.id).copied();
@@ -4653,12 +4654,24 @@ impl<'a> Checker<'a> {
             });
         }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
+            if let Some((flags, executable)) = &self.graph.command_startup {
+                match symbol {
+                    Intrinsic::SysExecutable => return Ok(unpacking::string(executable.clone())),
+                    Intrinsic::SysDontWriteBytecode => {
+                        return Ok(Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Bool(flags.dont_write_bytecode),
+                        });
+                    }
+                    _ => {}
+                }
+            }
             match symbol {
-                Intrinsic::OpenFlag(name) => {
+                Intrinsic::DescriptorConstant(name) => {
                     return Ok(Expr {
                         ty: Type::Int,
                         kind: ExprKind::Builtin(
-                            Builtin::Process(ir::ProcessOperation::OpenFlag(name)),
+                            Builtin::Process(ir::ProcessOperation::DescriptorConstant(name)),
                             vec![],
                         ),
                     });
@@ -4735,6 +4748,25 @@ impl<'a> Checker<'a> {
                 } else {
                     (Type::None, ExprKind::None)
                 }
+            }
+            ast::Expr::Name(name)
+                if name.id == "__file__"
+                    && self.module == self.graph.entry
+                    && self.graph.command_startup.is_some() =>
+            {
+                let exception = Expr {
+                    ty: Type::Exception,
+                    kind: ExprKind::Exception {
+                        kind: exception_kind("NameError").unwrap(),
+                        message: Some(Box::new(unpacking::string(
+                            "name '__file__' is not defined",
+                        ))),
+                    },
+                };
+                (
+                    Type::Str,
+                    ExprKind::Builtin(Builtin::RaiseException, vec![exception]),
+                )
             }
             ast::Expr::Name(name) if name.id == "__file__" => (
                 Type::Str,
@@ -5344,6 +5376,9 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if let Some(flag) = self.command_flag(attribute)? {
+                    return Ok(flag);
+                }
                 if let Some(Binding::Definition(definition)) = self.resolve(&attribute.value)
                     && let Some(declaration) = self.types.namedtuple(definition)
                 {

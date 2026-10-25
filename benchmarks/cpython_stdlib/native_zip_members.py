@@ -73,6 +73,15 @@ with ZipFile(path) as disk:
     check(disk)
 with open(sys.argv[1], "rb") as file:
     with ZipFile(file) as wrapped:
+        for entry in wrapped.infolist()[:2]:
+            with wrapped.open(entry) as member:
+                print(repr((member.seek(2), file.tell())))
+                print(repr(member.read()))
+                print(repr((member.seek(0), file.tell())))
+        with wrapped.open("lines") as lines:
+            lines.MIN_READ_SIZE = 1
+            print(repr(lines.readline()))
+            print(repr((lines.seek(-1, 1), file.tell())))
         check(wrapped)
     print(file.seek(0))
     print(repr(file.read(4)))
@@ -227,6 +236,7 @@ def main():
             writer.writestr("duplicate", b"first-stored", compress_type=zipfile.ZIP_STORED)
             writer.writestr("duplicate", b"second-deflated", compress_type=zipfile.ZIP_DEFLATED)
             writer.writestr("subdir/", b"")
+            writer.writestr("lines", b"abc\nxy\nz")
         for cmd in ([sys.executable, control], [binary]):
             result = subprocess.run([*cmd, fixture], capture_output=True, timeout=30)
             if len(cmd) == 2:

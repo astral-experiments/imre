@@ -4,6 +4,30 @@ use super::*;
 use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 use std::fmt::Write;
 
+const CASE_PREFIX: &str = "_imre_compiled_doctest_";
+const RUNNER_MODULE: &str = "_imre_compiled_doctests";
+
+impl SourceModule {
+    /// Only loader-created example modules may use interactive variable binding.
+    pub(crate) fn is_doctest_case(&self) -> bool {
+        self.bundled && self.name.starts_with(CASE_PREFIX)
+    }
+}
+
+impl SourceGraph {
+    /// Resolve the generated dispatcher from the same module used by native calls.
+    pub(crate) fn doctest_runner(&self) -> Option<DefinitionId> {
+        let module = self
+            .modules
+            .iter()
+            .find(|module| module.is_bundled(RUNNER_MODULE))?;
+        match module.bindings.get("_execute") {
+            Some(Binding::Definition(id)) => Some(*id),
+            _ => None,
+        }
+    }
+}
+
 pub(crate) fn source_docstrings(
     name: &str,
     body: &[ast::Stmt],
@@ -425,31 +449,24 @@ fn case_program(
 }
 
 impl Loader<'_> {
-    fn add_doctest_module(
-        &mut self,
-        name: String,
-        source: &str,
-        case: bool,
-    ) -> Result<ModuleId, String> {
+    fn add_doctest_module(&mut self, name: String, source: &str) -> Result<(), String> {
         let path = self.root.join(format!("{name}.py"));
         if self.by_name.contains_key(&name) || self.fs.exists(&path) {
             return Err(format!("private doctest module {name} is shadowed"));
         }
         let id = self.add(path.clone(), path, name, false, source)?;
         self.modules[id].bundled = true;
-        self.modules[id].doctest_case = case;
-        self.scan(id)?;
-        Ok(id)
+        self.scan(id)
     }
 
-    pub(super) fn doctest_program(&mut self) -> Result<Option<DefinitionId>, String> {
+    pub(super) fn doctest_program(&mut self) -> Result<(), String> {
         let Some(suite) = self
             .by_name
             .get("doctest")
             .and_then(|id| self.modules[*id].bindings.get("DocTestSuite"))
             .copied()
         else {
-            return Ok(None);
+            return Ok(());
         };
         let Binding::Definition(suite) = suite else {
             unreachable!()
@@ -499,9 +516,9 @@ impl Loader<'_> {
         let mut source = String::from("from doctest import DocTest\n");
         let mut body = String::from("\ndef _execute(test: DocTest, debug: bool) -> None:\n");
         for (i, (name, (prompts, context))) in cases.into_iter().enumerate() {
-            let module = format!("_imre_compiled_doctest_{i}");
+            let module = format!("{CASE_PREFIX}{i}");
             let program = case_program(&name, &prompts, context, &self.modules)?;
-            self.add_doctest_module(module.clone(), &program, true)
+            self.add_doctest_module(module.clone(), &program)
                 .map_err(|err| format!("doctest {name}: {err}"))?;
             writeln!(source, "from {module} import _run_case as _case_{i}").unwrap();
             writeln!(
@@ -513,10 +530,6 @@ impl Loader<'_> {
         }
         body.push_str("    raise ValueError(\"no native doctest compiled for \" + test.name)\n");
         source.push_str(&body);
-        let id = self.add_doctest_module("_imre_compiled_doctests".into(), &source, false)?;
-        let Binding::Definition(def) = self.modules[id].bindings["_execute"] else {
-            unreachable!()
-        };
-        Ok(Some(def))
+        self.add_doctest_module(RUNNER_MODULE.into(), &source)
     }
 }

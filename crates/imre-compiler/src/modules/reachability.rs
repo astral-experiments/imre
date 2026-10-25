@@ -98,7 +98,7 @@ impl<'a> Visitor<'a> for References<'_> {
         }
         match self.graph.resolve(self.module, expr) {
             Some(Binding::Intrinsic(Intrinsic::DocExecute)) => {
-                if let Some(runner) = self.graph.doctest_runner {
+                if let Some(runner) = self.graph.doctest_runner() {
                     self.found.definitions.insert(runner);
                 }
             }
