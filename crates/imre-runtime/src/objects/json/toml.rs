@@ -165,8 +165,13 @@ fn convert(
             let owner = unsafe { OwnedWord::from_owned(pointer as usize, schema.storage()) };
             for (index, field) in fields.iter().enumerate() {
                 let value = if let Some(value) = values.get(field.name()) {
-                    convert(value.get_ref(), field.schema(), allocation)
-                        .map_err(|error| format!("field {:?}: {error}", field.name()))?
+                    convert(value.get_ref(), field.schema(), allocation).map_err(|error| {
+                        if allocation.is_some() {
+                            error
+                        } else {
+                            format!("field {:?}: {error}", field.name())
+                        }
+                    })?
                 } else {
                     field
                         .missing::<serde_json::Error>(allocation)
