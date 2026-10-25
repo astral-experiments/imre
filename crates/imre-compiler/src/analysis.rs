@@ -1091,6 +1091,41 @@ mod diagnostic_mode_tests {
     use super::*;
 
     #[test]
+    fn a_proved_builtin_import_keeps_the_adjacent_ty_error() {
+        let root = Path::new("/project");
+        let mut session = Session::new(root, &[]).unwrap();
+        session
+            .add(
+                &root.join("main.py"),
+                "import _opcode, missing_peer\n",
+                crate::SourceKind::File,
+            )
+            .unwrap();
+        let builtin = TextRange::new(7.into(), 14.into());
+        let peer = TextRange::new(16.into(), 28.into());
+        let proof = CheckedDiagnostic::BuiltinImport;
+        let without_proofs = session.check_scopes(None, &[]).unwrap_err();
+        let adjacent = session
+            .check_scopes(None, &[vec![proof(builtin)]])
+            .unwrap_err();
+        let builtin_only = session
+            .check_scopes(None, &[vec![proof(peer)]])
+            .unwrap_err();
+        assert_ne!(adjacent, builtin_only);
+        assert_ne!(without_proofs, adjacent);
+        session
+            .check_scopes(None, &[vec![proof(builtin), proof(peer)]])
+            .unwrap();
+        // Even a range enclosing both aliases cannot justify either import.
+        assert_eq!(
+            session
+                .check_scopes(None, &[vec![proof(builtin.cover(peer))]])
+                .unwrap_err(),
+            without_proofs,
+        );
+    }
+
+    #[test]
     fn enabling_diagnostics_invalidates_quiet_checks() {
         let root = Path::new("/project");
         let mut session = Session::new(root, &[]).unwrap();
