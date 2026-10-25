@@ -102,10 +102,19 @@ class Native:
             raise RuntimeError(f"unexpected native result {tag!r}")
         return payload
 
-    def loads(self, document):
-        if isinstance(document, bytes):
-            return unpack_native_repr(self.invoke("loads", "bytes", document))
-        return unpack_native_repr(self.invoke("loads", "str", document.encode()))
+    def loads(self, document, *, strict=True, parse_int=None, parse_constant=None):
+        if strict is False and parse_int is None and parse_constant is None:
+            method = "strict"
+        elif strict is True and parse_int is float and parse_constant is None:
+            method = "parse-int-float"
+        elif strict is True and parse_int is None and parse_constant is str.upper:
+            method = "parse-constant-upper"
+        elif strict is True and parse_int is None and parse_constant is None:
+            method = "loads"
+        else:
+            raise RuntimeError("the bridge cannot transport this callback")
+        shape, data = ("bytes", document) if isinstance(document, bytes) else ("str", document.encode())
+        return unpack_native_repr(self.invoke(method, shape, data))
 
     def load(self, fp):
         return unpack_native_repr(self.invoke("load", "file", fp.read().encode()))

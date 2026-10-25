@@ -35,9 +35,13 @@ impl<'a> Cursor<'a> {
     }
 
     pub(super) fn scalar(&mut self) -> Result<&'a str, Failure> {
+        self.scalar_with_strictness(true)
+    }
+
+    pub(super) fn scalar_with_strictness(&mut self, strict: bool) -> Result<&'a str, Failure> {
         let start = self.pos;
         if self.peek() == Some(b'"') {
-            self.string()?;
+            self.string(strict)?;
         } else {
             static ATOM: LazyLock<Regex> = LazyLock::new(|| {
                 Regex::new(r"^(?:-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null|NaN|-?Infinity)").unwrap()
@@ -50,14 +54,14 @@ impl<'a> Cursor<'a> {
         Ok(&self.source[start..self.pos])
     }
 
-    fn string(&mut self) -> Result<(), Failure> {
+    fn string(&mut self, strict: bool) -> Result<(), Failure> {
         let start = self.pos;
         self.pos += 1;
         while let Some(byte) = self.peek() {
             self.pos += 1;
             match byte {
                 b'"' => return Ok(()),
-                0..=31 => return Err((self.pos - 1, "Invalid control character at")),
+                0..=31 if strict => return Err((self.pos - 1, "Invalid control character at")),
                 b'\\' => match self.peek() {
                     Some(b'u') => {
                         let end = self.pos + 5;
@@ -97,7 +101,7 @@ impl<'a> Cursor<'a> {
                         "Expecting property name enclosed in double quotes",
                     ));
                 }
-                self.string()?;
+                self.string(true)?;
                 self.space();
                 if self.peek() != Some(b':') {
                     return Err((self.pos, "Expecting ':' delimiter"));

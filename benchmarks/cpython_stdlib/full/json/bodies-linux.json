@@ -884,6 +884,55 @@
           ]
         }
       }
+    },
+    "test.test_json.test_decode.TestDecode.test_parse_constant": {
+      "source_assertions": 3,
+      "fixture_ids": [
+        "test.test_json.test_decode.TestCDecode.test_parse_constant",
+        "test.test_json.test_decode.TestPyDecode.test_parse_constant"
+      ],
+      "levels": {
+        "0": {
+          "test.test_json.test_decode.TestCDecode.test_parse_constant": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "1f143288eefd861da501e7055c5e0113a28927d15d4ca756273ed7ef69b140fc"
+            }
+          ],
+          "test.test_json.test_decode.TestPyDecode.test_parse_constant": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "1f143288eefd861da501e7055c5e0113a28927d15d4ca756273ed7ef69b140fc"
+            }
+          ]
+        },
+        "3": {
+          "test.test_json.test_decode.TestCDecode.test_parse_constant": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "1f143288eefd861da501e7055c5e0113a28927d15d4ca756273ed7ef69b140fc"
+            }
+          ],
+          "test.test_json.test_decode.TestPyDecode.test_parse_constant": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "1f143288eefd861da501e7055c5e0113a28927d15d4ca756273ed7ef69b140fc"
+            }
+          ]
+        }
+      }
     }
   }
 }

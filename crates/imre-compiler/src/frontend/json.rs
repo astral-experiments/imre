@@ -209,7 +209,6 @@ impl Checker<'_> {
     }
 
     pub(super) fn json_loads(&mut self, call: &ast::ExprCall, file: bool) -> Result<Expr, String> {
-        self.reject_builtin_keywords(call)?;
         let [text] = call.arguments.args.as_ref() else {
             return Err(error(
                 self.source,
@@ -222,6 +221,16 @@ impl Checker<'_> {
             ));
         };
         let value = self.expr(text)?;
+        let mut body = Vec::new();
+        let mut clear = Vec::new();
+        let value = if call.arguments.keywords.is_empty() {
+            value
+        } else {
+            let slot = self.hidden(value.ty);
+            body.push(Statement::Assign(slot, value));
+            clear.push(slot);
+            self.local(slot)
+        };
         let text = if file && value.ty == Type::BinaryIO {
             Expr {
                 ty: Type::Bytes,
@@ -238,10 +247,119 @@ impl Checker<'_> {
         } else {
             self.coerce(value, Type::Str, text)?
         };
+        if call.arguments.keywords.is_empty() {
+            return Ok(Expr {
+                ty: Type::JsonRoot,
+                kind: ExprKind::Builtin(Builtin::JsonLoads, vec![text]),
+            });
+        }
+        let none = Expr {
+            ty: Type::None,
+            kind: ExprKind::None,
+        };
+        let mut modes = [0; 3];
+        let mut hooks = [none.clone(), none.clone(), none];
+        let mut strict = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Bool(true),
+        };
+        let mut seen = HashSet::new();
+        for kw in &call.arguments.keywords {
+            let name = kw.arg.as_ref().map(|n| n.as_str());
+            if !seen.insert(name) {
+                return Err(error(self.source, kw, "repeated JSON decoding option"));
+            }
+            let index = match name {
+                Some("parse_int") => 0,
+                Some("parse_float") => 1,
+                Some("parse_constant") => 2,
+                Some("strict") => {
+                    let value = self.condition(&kw.value)?;
+                    let slot = self.hidden(Type::Bool);
+                    body.push(Statement::Assign(slot, value));
+                    clear.push(slot);
+                    strict = self.local(slot);
+                    continue;
+                }
+                _ => return Err(error(self.source, kw, "unsupported JSON decoding option")),
+            };
+            let (mode, callback) = self.json_number_hook(&kw.value)?;
+            modes[index] = mode;
+            if let Some(callback) = callback {
+                let slot = self.hidden(callback.ty);
+                body.push(Statement::Assign(slot, callback));
+                clear.push(slot);
+                hooks[index] = self.local(slot);
+            }
+        }
+        let mut args = vec![text, strict];
+        args.extend(hooks);
         Ok(Expr {
             ty: Type::JsonRoot,
-            kind: ExprKind::Builtin(Builtin::JsonLoads, vec![text]),
+            kind: ExprKind::Scope {
+                body,
+                clear,
+                value: Box::new(Expr {
+                    ty: Type::JsonRoot,
+                    kind: ExprKind::Builtin(Builtin::JsonLoadsHooked(modes), args),
+                }),
+            },
         })
+    }
+
+    /// Number hooks receive the unmodified ASCII token, including its exponent spelling.
+    fn json_number_hook(&mut self, node: &ast::Expr) -> Result<(u8, Option<Expr>), String> {
+        if matches!(node, ast::Expr::NoneLiteral(_)) {
+            return Ok((0, None));
+        }
+        let builtin = |this: &Self, value: &ast::Expr| {
+            this.static_schema_name(value) && this.resolve(value).is_none()
+        };
+        match node {
+            ast::Expr::Name(name) if builtin(self, node) => {
+                if let Some(mode) = match name.id.as_str() {
+                    "float" => Some(1),
+                    "str" => Some(2),
+                    "int" => Some(4),
+                    _ => None,
+                } {
+                    return Ok((mode, None));
+                }
+            }
+            ast::Expr::Attribute(a) if is_name(&a.value, "str") && builtin(self, &a.value) => {
+                if a.attr.as_str() == "upper" {
+                    return Ok((3, None));
+                }
+                if a.attr.as_str() == "lower" {
+                    return Ok((5, None));
+                }
+            }
+            _ => {}
+        }
+        let value = match node {
+            ast::Expr::Lambda(lambda) => self.lambda_value(lambda, Some(vec![Type::Str]), None)?,
+            _ => self.expr(node)?,
+        };
+        let invalid = || {
+            error(
+                self.source,
+                node,
+                "JSON number hooks require a callable from str to a JSON scalar",
+            )
+        };
+        let (parameters, result) = self.types.signature(value.ty).ok_or_else(invalid)?;
+        if parameters != [Type::Str] {
+            return Err(invalid());
+        }
+        let mode = match result {
+            Type::Int => 6,
+            Type::Float => 7,
+            Type::Str | Type::StrLiteral(_) => 8,
+            Type::Bool => 9,
+            Type::None => 10,
+            _ => return Err(invalid()),
+        };
+        Ok((mode, Some(value)))
     }
 
     /// TOML shares concrete field layouts and defaults, but its document root

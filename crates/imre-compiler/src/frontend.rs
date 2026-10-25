@@ -1025,10 +1025,10 @@ pub(crate) fn lower_with_owners(
     let callable_targets = callables::targets(&functions, &entry, &types)?;
     for (function, calls) in functions.iter().zip(&mut call_graph) {
         ir::walk_expressions(&function.body, &mut |value| {
-            if let Some(signature) = callables::invoked_signature(value)
-                && let Some(targets) = callable_targets.get(&signature)
-            {
-                calls.extend(targets);
+            for signature in callables::invoked_signatures(value) {
+                if let Some(targets) = callable_targets.get(&signature) {
+                    calls.extend(targets);
+                }
             }
         });
     }

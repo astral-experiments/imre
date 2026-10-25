@@ -8,6 +8,7 @@ mod deep;
 mod deep_values;
 pub(in crate::objects) mod document;
 mod elements;
+mod hooks;
 mod keys;
 mod values;
 mod writer;

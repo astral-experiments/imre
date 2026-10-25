@@ -23,6 +23,16 @@ def run() -> None:
         return
     with open("input.bin", "rb") as binary:
         data = binary.read()
+    if method == "strict" or method == "parse-int-float" or method == "parse-constant-upper":
+        if method == "strict":
+            loaded = json.loads(data, strict=False) if shape == "bytes" else json.loads(data.decode(), strict=False)
+        elif method == "parse-int-float":
+            loaded = json.loads(data, parse_int=float) if shape == "bytes" else json.loads(data.decode(), parse_int=float)
+        else:
+            loaded = json.loads(data, parse_constant=str.upper) if shape == "bytes" else json.loads(data.decode(), parse_constant=str.upper)
+        print("OK")
+        print(repr(loaded))
+        return
     if method == "loads":
         loaded = json.loads(data) if shape == "bytes" else json.loads(data.decode())
         print("OK")

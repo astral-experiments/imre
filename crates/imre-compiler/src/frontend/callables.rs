@@ -60,15 +60,25 @@ pub(super) fn validate_storage(function: &ir::Function, types: &Types) -> Result
 }
 
 /// Synchronous or cold indirect calls both have a closed possible target set.
-pub(super) fn invoked_signature(value: &Expr) -> Option<Type> {
-    match &value.kind {
+pub(super) fn invoked_signatures(value: &Expr) -> impl Iterator<Item = Type> {
+    let direct = match &value.kind {
         ExprKind::Invoke { callable, .. } => Some(callable.ty),
         ExprKind::Builtin(
             Builtin::Process(ir::ProcessOperation::IndirectCoroutine { signature, .. }),
             _,
         ) => Some(*signature),
         _ => None,
-    }
+    };
+    let hooks: &[Expr] = match &value.kind {
+        ExprKind::Builtin(Builtin::JsonLoadsHooked(_), args) => &args[2..],
+        _ => &[],
+    };
+    direct.into_iter().chain(
+        hooks
+            .iter()
+            .map(|a| a.ty)
+            .filter(|ty| matches!(ty, Type::Callable(_))),
+    )
 }
 
 /// Creation does not call a function. Every compatible constructed target is

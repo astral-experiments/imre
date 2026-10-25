@@ -261,7 +261,7 @@ impl Builtin {
                 | ProcessOperation::TimeoutField(_) => Contract::new(true, PreservesLists),
             },
             Self::RegexCapture { known, .. } => Contract::new(!known, PreservesLists),
-            Self::Document(_) => Contract::new(true, Unknown),
+            Self::Document(_) | Self::JsonLoadsHooked(_) => Contract::new(true, Unknown),
             Self::Bytes => Contract::new(
                 args.first().is_none_or(|arg| arg.ty != Type::Bytes),
                 PreservesLists,

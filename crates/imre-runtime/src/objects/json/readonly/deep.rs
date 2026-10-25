@@ -1,5 +1,6 @@
 //! Decode deeply nested standard JSON without recursing on the Rust stack.
 //! Frames contain arena indices, so errors and discarded results unwind iteratively too.
+use std::fmt::Write as _;
 use std::rc::Rc;
 
 use super::super::syntax::{self, Cursor, Failure};
@@ -25,7 +26,7 @@ impl Frame {
         }
     }
 
-    fn key(&mut self, cursor: &mut Cursor<'_>) -> Result<(), Problem> {
+    fn key(&mut self, cursor: &mut Cursor<'_>, strict: bool) -> Result<(), Problem> {
         if let Self::Object { key, .. } = self {
             if cursor.peek() != Some(b'"') {
                 return Err((
@@ -35,7 +36,11 @@ impl Frame {
                     .into());
             }
             let start = cursor.pos;
-            *key = Some(string(cursor.scalar()?, start)?);
+            *key = Some(string(
+                cursor.scalar_with_strictness(strict)?,
+                start,
+                strict,
+            )?);
             cursor.space();
             if cursor.peek() != Some(b':') {
                 return Err((cursor.pos, "Expecting ':' delimiter").into());
@@ -65,6 +70,7 @@ enum Problem {
     String(usize, serde_json::Error),
     Exhausted,
     Memory,
+    CallbackRaised,
 }
 
 impl From<Failure> for Problem {
@@ -79,13 +85,40 @@ fn push<T>(items: &mut Vec<T>, value: T) -> Result<(), Problem> {
     Ok(())
 }
 
-fn string(token: &str, start: usize) -> Result<Str, Problem> {
+fn string(token: &str, start: usize, strict: bool) -> Result<Str, Problem> {
+    let mut escaped = String::new();
+    let token = if !strict && token.bytes().any(|c| c < 32) {
+        // The token is already validated. Escape literal control characters for
+        // serde without changing the cursor or diagnostic offsets in the source.
+        let controls = token.bytes().filter(|&c| c < 32).count();
+        let capacity = controls
+            .checked_mul(5)
+            .and_then(|n| token.len().checked_add(n))
+            .ok_or(Problem::Memory)?;
+        escaped
+            .try_reserve_exact(capacity)
+            .map_err(|_| Problem::Memory)?;
+        for c in token.chars() {
+            if c < ' ' {
+                write!(escaped, "\\u{:04x}", u32::from(c)).unwrap();
+            } else {
+                escaped.push(c);
+            }
+        }
+        &escaped
+    } else {
+        token
+    };
     serde_json::from_str::<String>(token)
         .map(Str::from)
         .map_err(|e| Problem::String(start, e))
 }
 
-fn parse(text: &str) -> Result<(Vec<Node>, usize), Problem> {
+fn parse(
+    text: &str,
+    strict: bool,
+    mut convert: impl FnMut(&str) -> Option<Node>,
+) -> Result<(Vec<Node>, usize), Problem> {
     let mut cursor = Cursor {
         source: text,
         pos: 0,
@@ -111,7 +144,7 @@ fn parse(text: &str) -> Result<(Vec<Node>, usize), Problem> {
                     }
                 };
                 if cursor.peek() != Some(frame.close()) {
-                    frame.key(&mut cursor)?;
+                    frame.key(&mut cursor, strict)?;
                     push(&mut frames, frame)?;
                     continue;
                 }
@@ -120,12 +153,14 @@ fn parse(text: &str) -> Result<(Vec<Node>, usize), Problem> {
             }
             _ => {
                 let start = cursor.pos;
-                match cursor.scalar()? {
+                match cursor.scalar_with_strictness(strict)? {
                     "true" => Node::Bool(true),
                     "false" => Node::Bool(false),
                     "null" => Node::Null,
-                    token if token.starts_with('"') => Node::String(Rc::new(string(token, start)?)),
-                    token => number(token),
+                    token if token.starts_with('"') => {
+                        Node::String(Rc::new(string(token, start, strict)?))
+                    }
+                    token => convert(token).ok_or(Problem::CallbackRaised)?,
                 }
             }
         };
@@ -156,7 +191,7 @@ fn parse(text: &str) -> Result<(Vec<Node>, usize), Problem> {
                         };
                         return Err((comma, message).into());
                     }
-                    frame.key(&mut cursor)?;
+                    frame.key(&mut cursor, strict)?;
                     break;
                 }
                 _ => return Err((cursor.pos, "Expecting ',' delimiter").into()),
@@ -165,16 +200,14 @@ fn parse(text: &str) -> Result<(Vec<Node>, usize), Problem> {
     }
 }
 
-pub(super) fn loads(
-    text: &str,
-    owner: impl FnOnce() -> Option<Rc<Str>>,
-) -> Result<*const Object, Error> {
-    let (mut nodes, index) = parse(text).map_err(|problem| {
-        let (at, message) = match problem {
+impl Problem {
+    fn error(self, text: &str, owner: impl FnOnce() -> Option<Rc<Str>>) -> Error {
+        let (at, message) = match self {
             Problem::Exhausted => {
                 return Error::new(Kind::RecursionError, "maximum recursion depth exceeded");
             }
             Problem::Memory => return Error::allocation(),
+            Problem::CallbackRaised => unreachable!("the callback already installed its exception"),
             Problem::Syntax((at, message)) => (at, std::borrow::Cow::Borrowed(message)),
             Problem::String(start, error) => {
                 let message = error.to_string();
@@ -188,7 +221,35 @@ pub(super) fn loads(
             }
         };
         owner().map_or_else(Error::allocation, |doc| syntax::at_error(doc, at, &message))
-    })?;
+    }
+}
+
+pub(super) fn loads(
+    text: &str,
+    owner: impl FnOnce() -> Option<Rc<Str>>,
+) -> Result<*const Object, Error> {
+    let arena =
+        parse(text, true, |raw| Some(number(raw))).map_err(|problem| problem.error(text, owner))?;
+    document(arena)
+}
+
+/// Run number conversions in source order; a callback's pending exception
+/// survives the destruction of the partially built arena.
+pub(super) fn loads_with_numbers(
+    text: &str,
+    strict: bool,
+    owner: impl FnOnce() -> Option<Rc<Str>>,
+    convert: impl FnMut(&str) -> Option<Node>,
+) -> *const Object {
+    let result = match parse(text, strict, convert) {
+        Ok(arena) => document(arena),
+        Err(Problem::CallbackRaised) => return std::ptr::null(),
+        Err(problem) => Err(problem.error(text, owner)),
+    };
+    crate::finish(result, std::ptr::null())
+}
+
+fn document((mut nodes, index): (Vec<Node>, usize)) -> Result<*const Object, Error> {
     // A standard root list, unlike its nested views, may be mutated by its caller.
     if let Node::Array(children) = &mut nodes[index] {
         let children = std::mem::take(children);

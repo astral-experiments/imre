@@ -96,6 +96,22 @@ def compiled(tools, directory, fixture_ids, *, provenance=False):
                                  prepare(path, owner, "test_parse") + ASSERT_EQUAL, **options)
         yield source, ids, 1, callback
 
+    # Leave the original parse_constant=str.upper calls in the method. Their
+    # decoded results are strings, so bind the fixture assertion to that type.
+    owner, method = "TestDecode", "test_parse_constant"
+    source = f"test.test_json.test_decode.{owner}.{method}"
+    ids = fixture_ids[source]
+    path = BENCH / "upstream/Lib/test/test_json/test_decode.py"
+    work = directory / source
+    work.mkdir()
+    assertion = """    def assertEqual(self, first: str, second: str) -> None:
+        if first != second:
+            raise AssertionError("unequal strings")
+"""
+    options = {"operation": ("imre", "json.loads(parse_constant=str.upper)")} if provenance else {}
+    callback = native_method(tools, work, path, owner, ids[0], prepare(path, owner, method) + assertion, **options)
+    yield source, ids, 3, callback
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

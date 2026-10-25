@@ -2,10 +2,10 @@
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
   "execution": "host unittest, native JSON calls",
   "sha256": {
-    "imre": "ee3c5c3212deaf3e2c0a177d01af4f9966470e68c24ef9b91a70d84730b5f73b",
-    "runtime": "afbddc093b5746e80e3010d08ddcb833fdc69bfa8ee728e9673a752c276e62f4",
+    "imre": "e3f4c0fc96b3c8833a408dc63f1c0e93cef44040a800b376451b635116fbac51",
+    "runtime": "de75ba3b502f54211cf01e221a0b7c541c7ab62a069533734f689cc8f5b968ef",
     "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
-    "driver": "1158b7869c657942e04afd67e84c0a25a88bd3f4ddec021b519d60fe55b055a6"
+    "driver": "e588a1bcf7678f78d11bae73931a1a52d2f91417f0c98f1af54fcb3f49238675"
   },
   "levels": {
     "0": {
@@ -37,6 +37,11 @@
           "native_calls": 1,
           "status": "pass"
         },
+        "test.test_json.test_decode.TestCDecode.test_float": {
+          "source": "test.test_json.test_decode.TestDecode.test_float",
+          "native_calls": 1,
+          "status": "pass"
+        },
         "test.test_json.test_decode.TestCDecode.test_invalid_escape": {
           "source": "test.test_json.test_decode.TestDecode.test_invalid_escape",
           "native_calls": 1,
@@ -44,6 +49,11 @@
         },
         "test.test_json.test_decode.TestCDecode.test_nonascii_digits_rejected": {
           "source": "test.test_json.test_decode.TestDecode.test_nonascii_digits_rejected",
+          "native_calls": 3,
+          "status": "pass"
+        },
+        "test.test_json.test_decode.TestCDecode.test_parse_constant": {
+          "source": "test.test_json.test_decode.TestDecode.test_parse_constant",
           "native_calls": 3,
           "status": "pass"
         },
@@ -77,6 +87,11 @@
           "native_calls": 1,
           "status": "pass"
         },
+        "test.test_json.test_decode.TestPyDecode.test_float": {
+          "source": "test.test_json.test_decode.TestDecode.test_float",
+          "native_calls": 1,
+          "status": "pass"
+        },
         "test.test_json.test_decode.TestPyDecode.test_invalid_escape": {
           "source": "test.test_json.test_decode.TestDecode.test_invalid_escape",
           "native_calls": 1,
@@ -84,6 +99,11 @@
         },
         "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected": {
           "source": "test.test_json.test_decode.TestDecode.test_nonascii_digits_rejected",
+          "native_calls": 3,
+          "status": "pass"
+        },
+        "test.test_json.test_decode.TestPyDecode.test_parse_constant": {
+          "source": "test.test_json.test_decode.TestDecode.test_parse_constant",
           "native_calls": 3,
           "status": "pass"
         },
@@ -212,6 +232,11 @@
           "native_calls": 4,
           "status": "pass"
         },
+        "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode": {
+          "source": "test.test_json.test_unicode.TestUnicode.test_ascii_non_printable_decode",
+          "native_calls": 35,
+          "status": "pass"
+        },
         "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode": {
           "source": "test.test_json.test_unicode.TestUnicode.test_ascii_non_printable_encode",
           "native_calls": 2,
@@ -262,9 +287,19 @@
           "native_calls": 1,
           "status": "pass"
         },
+        "test.test_json.test_unicode.TestCUnicode.test_escaped_decode": {
+          "source": "test.test_json.test_unicode.TestUnicode.test_escaped_decode",
+          "native_calls": 498,
+          "status": "pass"
+        },
         "test.test_json.test_unicode.TestCUnicode.test_unicode_preservation": {
           "source": "test.test_json.test_unicode.TestUnicode.test_unicode_preservation",
           "native_calls": 3,
+          "status": "pass"
+        },
+        "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_decode": {
+          "source": "test.test_json.test_unicode.TestUnicode.test_ascii_non_printable_decode",
+          "native_calls": 35,
           "status": "pass"
         },
         "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode": {
@@ -315,6 +350,11 @@
         "test.test_json.test_unicode.TestPyUnicode.test_encoding7": {
           "source": "test.test_json.test_unicode.TestUnicode.test_encoding7",
           "native_calls": 1,
+          "status": "pass"
+        },
+        "test.test_json.test_unicode.TestPyUnicode.test_escaped_decode": {
+          "source": "test.test_json.test_unicode.TestUnicode.test_escaped_decode",
+          "native_calls": 498,
           "status": "pass"
         },
         "test.test_json.test_unicode.TestPyUnicode.test_unicode_preservation": {
@@ -353,6 +393,11 @@
           "native_calls": 1,
           "status": "pass"
         },
+        "test.test_json.test_decode.TestCDecode.test_float": {
+          "source": "test.test_json.test_decode.TestDecode.test_float",
+          "native_calls": 1,
+          "status": "pass"
+        },
         "test.test_json.test_decode.TestCDecode.test_invalid_escape": {
           "source": "test.test_json.test_decode.TestDecode.test_invalid_escape",
           "native_calls": 1,
@@ -360,6 +405,11 @@
         },
         "test.test_json.test_decode.TestCDecode.test_nonascii_digits_rejected": {
           "source": "test.test_json.test_decode.TestDecode.test_nonascii_digits_rejected",
+          "native_calls": 3,
+          "status": "pass"
+        },
+        "test.test_json.test_decode.TestCDecode.test_parse_constant": {
+          "source": "test.test_json.test_decode.TestDecode.test_parse_constant",
           "native_calls": 3,
           "status": "pass"
         },
@@ -393,6 +443,11 @@
           "native_calls": 1,
           "status": "pass"
         },
+        "test.test_json.test_decode.TestPyDecode.test_float": {
+          "source": "test.test_json.test_decode.TestDecode.test_float",
+          "native_calls": 1,
+          "status": "pass"
+        },
         "test.test_json.test_decode.TestPyDecode.test_invalid_escape": {
           "source": "test.test_json.test_decode.TestDecode.test_invalid_escape",
           "native_calls": 1,
@@ -400,6 +455,11 @@
         },
         "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected": {
           "source": "test.test_json.test_decode.TestDecode.test_nonascii_digits_rejected",
+          "native_calls": 3,
+          "status": "pass"
+        },
+        "test.test_json.test_decode.TestPyDecode.test_parse_constant": {
+          "source": "test.test_json.test_decode.TestDecode.test_parse_constant",
           "native_calls": 3,
           "status": "pass"
         },
@@ -528,6 +588,11 @@
           "native_calls": 4,
           "status": "pass"
         },
+        "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode": {
+          "source": "test.test_json.test_unicode.TestUnicode.test_ascii_non_printable_decode",
+          "native_calls": 35,
+          "status": "pass"
+        },
         "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode": {
           "source": "test.test_json.test_unicode.TestUnicode.test_ascii_non_printable_encode",
           "native_calls": 2,
@@ -578,9 +643,19 @@
           "native_calls": 1,
           "status": "pass"
         },
+        "test.test_json.test_unicode.TestCUnicode.test_escaped_decode": {
+          "source": "test.test_json.test_unicode.TestUnicode.test_escaped_decode",
+          "native_calls": 498,
+          "status": "pass"
+        },
         "test.test_json.test_unicode.TestCUnicode.test_unicode_preservation": {
           "source": "test.test_json.test_unicode.TestUnicode.test_unicode_preservation",
           "native_calls": 3,
+          "status": "pass"
+        },
+        "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_decode": {
+          "source": "test.test_json.test_unicode.TestUnicode.test_ascii_non_printable_decode",
+          "native_calls": 35,
           "status": "pass"
         },
         "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode": {
@@ -631,6 +706,11 @@
         "test.test_json.test_unicode.TestPyUnicode.test_encoding7": {
           "source": "test.test_json.test_unicode.TestUnicode.test_encoding7",
           "native_calls": 1,
+          "status": "pass"
+        },
+        "test.test_json.test_unicode.TestPyUnicode.test_escaped_decode": {
+          "source": "test.test_json.test_unicode.TestUnicode.test_escaped_decode",
+          "native_calls": 498,
           "status": "pass"
         },
         "test.test_json.test_unicode.TestPyUnicode.test_unicode_preservation": {

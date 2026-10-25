@@ -285,13 +285,12 @@ fn collect(
             initializer: id, ..
         } => calls.push(*id),
         ExprKind::Callable { function, .. } => references.push(*function),
-        _ if callables::invoked_signature(value).is_some() => {
-            if let Some(targets) =
-                callables::invoked_signature(value).and_then(|ty| targets.get(&ty))
-            {
-                calls.extend(targets);
+        _ => {
+            for signature in callables::invoked_signatures(value) {
+                if let Some(found) = targets.get(&signature) {
+                    calls.extend(found);
+                }
             }
         }
-        _ => {}
     });
 }

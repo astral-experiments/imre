@@ -216,7 +216,11 @@ deep input and raises `RecursionError` above 50,000 open containers. CPython's a
 and pure decoder reach different limits depending on the platform and recursion context.
 The explicit typed schema decoder and the encoder retain their 128-container limit. Strings use
 Unicode scalar values. Integers retain their exact precision. The standard
-reader also recognizes `NaN`, `Infinity`, and `-Infinity`.
+reader also recognizes `NaN`, `Infinity`, and `-Infinity`. The `strict=False`
+option permits unescaped control characters inside strings. Numeric hooks
+(`parse_int`, `parse_float`, `parse_constant`) receive the original token
+as a string. Exact native functions, bound methods and noncapturing lambdas
+can return an integer, float, string, boolean, or `None`.
 
 `json.JSONDecoder()` and `json.decoder.JSONDecoder()` create a reusable decoder.
 Its `decode(s)` method accepts Unicode text; `memo` returns the same dictionary
@@ -233,7 +237,7 @@ or `None`), `ensure_ascii`, `allow_nan`, `sort_keys`, and `separators`.
 Separators are unpacked as the item separator and key separator; sorting
 compares dictionary keys before converting them to JSON strings.
 Defaults match Python's separators, escaping and nonfinite number spellings.
-Dynamic hooks, arbitrary mapping keys, and general `Any` remain outside this
+Object and encoder hooks, arbitrary mapping keys, and general `Any` remain outside this
 boundary.
 
 An array selected into `list[dict[str, Any]]` exposes read-only row views that

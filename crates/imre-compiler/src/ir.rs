@@ -843,6 +843,8 @@ pub(crate) enum Builtin {
     JsonDecoderNew,
     JsonDecoderMemo,
     JsonDecoderDecode,
+    /// Modes for parse_int, parse_float and parse_constant; callable records are operands.
+    JsonLoadsHooked([u8; 3]),
     JsonEmptyObject,
     ModuleCache(usize),
     /// Capture and access an individual wrapper's independently owned cache.

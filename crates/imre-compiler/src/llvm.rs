@@ -4191,6 +4191,25 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::JsonLoadsHooked(modes) => {
+                let packed = u32::from_le_bytes([modes[0], modes[1], modes[2], 0]);
+                let binary = u32::from(args[0].value.ty == Type::Bytes);
+                let strict = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                let hooks = args[2..]
+                    .iter()
+                    .map(|a| {
+                        if a.value.ty == Type::None {
+                            "ptr null".into()
+                        } else {
+                            format!("ptr {}", a.value.operand)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Value { ty: returns, operand: self.checked_instruction(format!(
+                    "call ptr @imre_json_loads_hooked(ptr {}, i32 {binary}, i32 {strict}, i32 {packed}, {hooks})",
+                    args[0].value.operand)), small_integer: false }
+            }
             Builtin::JsonSelect(path) => self.json_select(path, returns, &args),
             Builtin::JsonIndex => self.call(
                 "imre_json_index",
@@ -7134,6 +7153,7 @@ declare ptr @imre_json_decoder_new()
 declare ptr @imre_json_decoder_memo(ptr)
 declare ptr @imre_json_decoder_decode(ptr, ptr)
 declare ptr @imre_json_loads_bytes(ptr)
+declare ptr @imre_json_loads_hooked(ptr, i32, i32, i32, ptr, ptr, ptr)
 declare i64 @imre_json_error_field(ptr, i32)
 declare ptr @imre_json_index(ptr, i64)
 declare ptr @imre_json_iter(ptr)

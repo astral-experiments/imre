@@ -26,6 +26,10 @@ def counts():
                     for method, count in ERROR_METHODS.items()})
     methods.update({
         "test.test_json.test_decode.TestDecode.test_decoder_optimizations": 1,
+        "test.test_json.test_decode.TestDecode.test_float": 1,
+        "test.test_json.test_decode.TestDecode.test_parse_constant": 3,
+        "test.test_json.test_unicode.TestUnicode.test_ascii_non_printable_decode": 35,
+        "test.test_json.test_unicode.TestUnicode.test_escaped_decode": 498,
         "test.test_json.test_fail.TestFail.test_failures": 34,
         "test.test_json.test_fail.TestFail.test_truncated_input": 17,
         "test.test_json.test_fail.TestFail.test_unexpected_data": 23,
