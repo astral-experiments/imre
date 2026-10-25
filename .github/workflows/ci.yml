@@ -52,6 +52,7 @@ jobs:
                        "tests/fixtures/text/line_methods.py",
                        "tests/fixtures/module_values/wrapper_attributes/main.py",
                        "benchmarks/cpython_stdlib/full/logging/hierarchy_values.py",
+                       "benchmarks/cpython_stdlib/full/logging/handler_values.py",
                        "tests/fixtures/classes/constant_strings.py",
                        "tests/fixtures/files/string_io.py",
                        "tests/fixtures/primitives/clear_record_buffer.py",
@@ -108,6 +109,7 @@ jobs:
                     tests/fixtures/paths/walking.py tests/fixtures/processes/file_redirects.py tests/fixtures/text/line_methods.py
                     benchmarks/cpython_stdlib/full/types/namespaces.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py
                     tests/fixtures/module_values/wrapper_attributes benchmarks/cpython_stdlib/full/logging/hierarchy_values.py
+                    benchmarks/cpython_stdlib/full/logging/handler_values.py
                     tests/fixtures/classes/constant_strings.py tests/fixtures/classes/_constant_strings.py tests/fixtures/files/string_io.py
                     tests/fixtures/primitives/clear_record_buffer.py tests/fixtures/containers/dict_fromkeys.py tests/fixtures/classes/initializer_hook.py
                     tests/fixtures/classes/fixed_lineage.py tests/fixtures/text/ord.py benchmarks/cpython_stdlib/full/sys/version_info.py
