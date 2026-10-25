@@ -90,6 +90,7 @@ mod regex;
 mod sequences;
 mod shutil;
 mod sign_parameters;
+mod single_dispatch;
 mod socket;
 mod sorted_rows;
 mod stdlib;
@@ -6399,6 +6400,11 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if attribute.attr.as_str() == "__wrapped__"
+                    && let Some(layout) = self.types.dispatcher(receiver.ty)
+                {
+                    return Ok(single_dispatch::original(receiver, layout));
+                }
                 if self.types.has_reflected_functions()
                     && matches!(receiver.ty, Type::FunctionRef | Type::Callable(_))
                     && let Some(index) = typing::attribute_index(attribute.attr.as_str())
@@ -7328,6 +7334,9 @@ impl<'a> Checker<'a> {
                 return self.typed_expr(value);
             }
             Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
+            Some(Binding::Intrinsic(Intrinsic::SingleDispatch)) => {
+                return self.single_dispatch(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
@@ -7779,6 +7788,9 @@ impl<'a> Checker<'a> {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            if let Some(layout) = self.types.dispatcher(receiver.ty) {
+                return self.single_dispatch_method(call, attribute, receiver, layout);
+            }
             if receiver.ty == Type::ModuleNamespace
                 && attribute.attr.as_str() == "keys"
                 && call.arguments.is_empty()

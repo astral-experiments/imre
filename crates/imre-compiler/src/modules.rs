@@ -199,6 +199,7 @@ pub(crate) enum Intrinsic {
     FunctionCache,
     CacheInfo,
     LruCache,
+    SingleDispatch,
     CachedProperty,
     NewType,
     Partial,
@@ -613,6 +614,7 @@ impl IntrinsicModule {
                 Intrinsic::WrapperAttributes(WrapperAttributes::Updated)
             }
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
+            (Self::Functools, "singledispatch") => Intrinsic::SingleDispatch,
             (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
                 Intrinsic::Fnmatch(FnmatchOperation::Match {
                     normcase: name == "fnmatch",

@@ -242,6 +242,7 @@ pub(super) fn validate_functions(
         ir::walk_expressions(&function.body, &mut |e| match &e.kind {
             ExprKind::Callable { function, receiver } => {
                 let good = receiver.is_none()
+                    && types.dispatcher(e.ty).is_none()
                     && types.function_site(*function).is_some()
                     && types.cache_adapter(*function).is_none();
                 *signatures.entry(e.ty).or_insert(true) &= good;

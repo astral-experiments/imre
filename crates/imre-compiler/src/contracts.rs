@@ -692,7 +692,8 @@ impl Builtin {
                 args.is_empty() && result == types.tuple(vec![Type::Str; fields.names().len()])
             }
             Self::CallableContext => {
-                matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result))
+                matches!(args, [callable] if types.cached_function(callable.ty).map(|c| c.frame)
+                    .or_else(|| types.dispatcher(callable.ty).map(|d| d.frame)) == Some(result))
             }
             Self::CacheParameter(_) => {
                 matches!(args, [wrapper] if types.cached_function(wrapper.ty).is_some())
