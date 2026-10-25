@@ -24,7 +24,9 @@ while (( SECONDS < deadline )); do
     git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main" "+refs/heads/$branch:refs/remotes/origin/$branch"
     new_base=$(git rev-parse refs/remotes/origin/main)
     new_head=$(git rev-parse "refs/remotes/origin/$branch")
-    GH_TOKEN="$checks_token" gh pr view 829 --repo "$GITHUB_REPOSITORY" --json headRefOid,state,statusCheckRollup > "$out/pr-checks.json"
+    GH_TOKEN="$checks_token" gh api "repos/$GITHUB_REPOSITORY/pulls/829" --jq '{headRefOid:.head.sha,state:(if .merged then "MERGED" else (.state|ascii_upcase) end)}' > "$out/pr-state.json"
+    GH_TOKEN="$checks_token" gh api "repos/$GITHUB_REPOSITORY/commits/$new_head/check-runs?per_page=100" --jq '[.check_runs[]|{name,status:(.status|ascii_upcase),conclusion:((.conclusion//"")|ascii_upcase)}]' > "$out/head-checks.json"
+    jq -s '.[0] + {statusCheckRollup:.[1]}' "$out/pr-state.json" "$out/head-checks.json" > "$out/pr-checks.json"
     if [[ $(jq -r .state "$out/pr-checks.json") != OPEN ]]; then
         jq -e '.state=="MERGED"' "$out/pr-checks.json" >/dev/null
         exit 0
