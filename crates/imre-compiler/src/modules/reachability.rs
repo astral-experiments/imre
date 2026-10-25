@@ -97,7 +97,15 @@ impl<'a> Visitor<'a> for References<'_> {
         {
             self.found.root_unittest(self.graph, id.module);
         }
-        if let ast::Expr::Attribute(attr) = expr {
+        // Literal text has its exact builtin class, even if a source class defines
+        // the same method name. The call visitor still follows its arguments and
+        // implicit callbacks, such as the __index__ used by str.expandtabs.
+        if let ast::Expr::Attribute(attr) = expr
+            && !matches!(
+                attr.value.as_ref(),
+                ast::Expr::StringLiteral(_) | ast::Expr::BytesLiteral(_)
+            )
+        {
             let name = attr.attr.to_string();
             if matches!(
                 name.as_str(),
@@ -769,6 +777,37 @@ run()
         let source = "from pathlib import Path\nclass Local:\n    def __init__(self) -> None:\n        pass\n    def exists(self):\n        return globals()\nlocal = Local()\nprint(Path('.').exists())\n";
         reachable(source).unwrap();
         assert!(reachable(&source.replace("Path('.').exists()", "local.exists()")).is_err());
+    }
+
+    #[test]
+    fn literal_text_methods_do_not_root_unrelated_source_methods() {
+        let source = r#"
+class Token:
+    def strip(self, *args):
+        return args
+    def decode(self, *args):
+        return args
+    def expandtabs(self, *args):
+        return args
+    def __index__(self) -> int:
+        return 3
+    def clean(self):
+        return " padded ".strip() + b"!".decode() + "x\ty".expandtabs(self)
+print(Token().clean())
+"#;
+        reachable(source).unwrap();
+        for (before, after) in [
+            (r#"" padded ".strip()"#, "self.strip()"),
+            (r#"b"!".decode()"#, "self.decode()"),
+            (r#""x\ty".expandtabs(self)"#, "self.expandtabs()"),
+            (r#"" padded ".strip()"#, r#"" padded ".strip(self.strip())"#),
+        ] {
+            assert!(
+                reachable(&source.replace(before, after))
+                    .unwrap_err()
+                    .contains("variadic parameters")
+            );
+        }
     }
 
     #[test]
