@@ -22,6 +22,8 @@ enum Shape {
     Tuple(Vec<Type>),
     NamedTuple(DefinitionId, Vec<Type>),
     PartialFrame(Vec<Type>),
+    /// Only the class-name prefix is visible. The concrete record owns the argument.
+    UnreadArgument,
     Callable(Vec<Type>, Type),
     DeclaredCache(Type, usize),
     CachedCallable(CachedFunction),
@@ -126,7 +128,12 @@ impl Types {
             Type::Set(id) => matches!(storage.shapes.get(id), Some(Shape::Set(_))),
             Type::Tuple(id) => matches!(
                 storage.shapes.get(id),
-                Some(Shape::Tuple(_) | Shape::NamedTuple(..) | Shape::PartialFrame(_))
+                Some(
+                    Shape::Tuple(_)
+                        | Shape::NamedTuple(..)
+                        | Shape::PartialFrame(_)
+                        | Shape::UnreadArgument
+                )
             ),
             Type::ForwardRef(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::Tuple(fields)) if fields.len() == 5)
@@ -215,6 +222,7 @@ impl Types {
         for (id, shape) in storage.shapes.iter().enumerate() {
             let children: Vec<Type> = match shape {
                 Shape::StringLiterals(_) => Vec::new(),
+                Shape::UnreadArgument => vec![Type::Str],
                 Shape::Cursor(ty)
                 | Shape::List(ty)
                 | Shape::Set(ty)
@@ -387,6 +395,7 @@ impl Types {
             | Type::Logger
             | Type::None => true,
             Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
+            Type::Tuple(_) if self.is_unread_argument(ty) => false,
             Type::Tuple(_) => self
                 .fields(ty)
                 .unwrap()
@@ -627,6 +636,14 @@ impl Types {
 
     pub(crate) fn tuple(&self, elements: Vec<Type>) -> Type {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
+    }
+
+    pub(crate) fn unread_argument(&self) -> Type {
+        Type::Tuple(self.intern(Shape::UnreadArgument))
+    }
+
+    pub(crate) fn is_unread_argument(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::UnreadArgument))
     }
 
     pub(crate) fn declare_namedtuple(&self, definition: DefinitionId, declaration: NamedTuple) {
@@ -874,6 +891,7 @@ impl Types {
             return None;
         };
         match &self.0.borrow().shapes[id] {
+            Shape::UnreadArgument => Some(vec![Type::Str]),
             Shape::Tuple(fields) | Shape::NamedTuple(_, fields) | Shape::PartialFrame(fields) => {
                 Some(fields.clone())
             }
@@ -889,6 +907,7 @@ impl Types {
             .iter()
             .enumerate()
             .filter_map(|(id, shape)| match shape {
+                Shape::UnreadArgument => Some((Type::Tuple(id), vec![Type::Str])),
                 Shape::Tuple(fields)
                 | Shape::NamedTuple(_, fields)
                 | Shape::PartialFrame(fields) => Some((Type::Tuple(id), fields.clone())),
@@ -934,6 +953,8 @@ impl Types {
                 continue;
             }
             match ty {
+                // The opaque payload may own an observable resource through a container.
+                Type::Tuple(_) if self.is_unread_argument(ty) => return true,
                 Type::Cursor(_)
                 | Type::TextIO
                 | Type::BinaryIO
@@ -1057,6 +1078,7 @@ impl TypeDescription<'_> {
                     write!(self, "{value:?}")?;
                 }
             }
+            Shape::UnreadArgument => return self.write_str("object"),
             Shape::DeclaredCache(callable, _) => return self.write_type(*callable),
             Shape::CachedCallable(c) => return self.write_type(c.callable),
             Shape::DispatchCallable(d) => return self.write_type(d.callable),
