@@ -92,6 +92,7 @@ impl Type {
             | Self::PlainObject
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
+            | Self::PathInfo
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -153,6 +154,7 @@ impl Type {
             | Self::PlainObject
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
+            | Self::PathInfo
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -746,6 +748,7 @@ impl Emitter<'_, '_> {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
+            | Type::PathInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -3346,6 +3349,7 @@ impl Emitter<'_, '_> {
                 | Type::TimedFileHandler
                 | Type::StrDescriptor(_)
                 | Type::PlainObject
+                | Type::PathInfo
                 | Type::Sha256
                 | Type::ZipFile
                 | Type::ZipInfo
@@ -5773,6 +5777,7 @@ impl Emitter<'_, '_> {
                     | Type::StrDescriptor(_)
                     | Type::PlainObject
                     | Type::SimpleNamespace(_)
+                    | Type::PathInfo
                     | Type::Sha256
                     | Type::ZipFile
                     | Type::ZipInfo
@@ -6022,6 +6027,7 @@ impl Emitter<'_, '_> {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
+            | Type::PathInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -6097,6 +6103,7 @@ impl Emitter<'_, '_> {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
+            | Type::PathInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -6685,6 +6692,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::StrDescriptor(_)
         | Type::PlainObject
         | Type::SimpleNamespace(_)
+        | Type::PathInfo
         | Type::Sha256
         | Type::ZipFile
         | Type::ZipInfo
@@ -6955,8 +6963,9 @@ declare void @imre_directory_context_exit(ptr)
 declare ptr @imre_union_path_text(i64)
 declare ptr @imre_sysconfig_scripts()
 declare i32 @imre_path_text_exists(ptr)
-declare i32 @imre_path_exists(ptr)
-declare i32 @imre_path_is_file(ptr)
+declare ptr @imre_path_info(ptr)
+declare ptr @imre_path_info_repr(ptr)
+declare i32 @imre_path_query(ptr, i32, i32)
 declare i32 @imre_path_match(ptr, ptr, i64, i32)
 declare i32 @imre_fnmatch(ptr, ptr, i32, i32)
 declare ptr @imre_fnmatch_filter(ptr, ptr, i32, i32)
@@ -6968,7 +6977,6 @@ declare ptr @imre_pure_path_new(i32)
 declare ptr @imre_path_join_object(ptr, ptr)
 declare ptr @imre_path_prefix(ptr, i32)
 declare ptr @imre_path_as_posix(ptr)
-declare i32 @imre_path_is_dir(ptr)
 declare i32 @imre_path_equal(ptr, ptr)
 declare ptr @imre_path_read_bytes(ptr)
 declare ptr @imre_path_read_text(ptr)
