@@ -23,6 +23,36 @@ debug build; the NT event log test requires Windows modules. None of the local
 TCP, UDP, Unix socket, IPv6, syslog, SMTP, or HTTP/TLS tests was excluded.
 Every reference outcome retains its original ID and skip reason.
 
+[Linux native evidence](evidence-linux.json) records all 272 occurrences at
+each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
+The first run uses main `7630556`, which includes the level registry and timed
+file handler. The counts below are identical at both levels:
+
+| Body | Assertions | Logging operations | Fixture | Occurrences |
+| --- | --- | --- | --- | ---: |
+| Imre | Imre | Imre | CPython hooks and native child | 3 |
+| Imre | CPython output check | Imre | CPython hooks and native child | 4 |
+| CPython | CPython | Imre | CPython | 22 |
+| Blocked before execution | | | | 240 |
+| Unchanged reference skip | | | | 3 |
+
+No occurrence is fully native. The three native assertion cases are root
+logger identity, level-name mapping independence, and daily rollover with an
+explicit time. The four output cases verify emitted native stderr with the
+original CPython helper. The 22 host-driven methods call a persistent native
+process for the registry or file handler; setup and registered cleanup stay
+with their test. The report keeps original method locations, individual
+compiler or adapter blockers, and the three pinned skip conditions. It
+does not treat a compiled source or a passing CPython reference as a native pass.
+
+```sh
+/path/to/pinned/python -I -B benchmarks/cpython_stdlib/full/logging/evidence.py \
+  --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
+  --result /tmp/logging-evidence.json
+python3 benchmarks/cpython_stdlib/suite_evidence.py \
+  benchmarks/cpython_stdlib/full/logging/reference-linux.json /tmp/logging-evidence.json
+```
+
 Reference execution does not count as Imre coverage. The existing
 [native runner](../../native_logging.py) compiles whole methods in fresh
 executables: three hierarchy tests delegate output comparison to the upstream
