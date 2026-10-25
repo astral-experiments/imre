@@ -21,11 +21,28 @@ tuple, str, bytes, list, bytearray and deque, then calls the upstream helper to
 validate the abstract length, subscription, assignment, deletion and insertion
 methods. Resolving the import alone does not pass that routine.
 
-With native array class identity and sequence registration, the compiler gets
-past the array import in both the original import and runner entry points,
-with and without reachability filtering. All four checks then stop on
-[`import doctest` at line 6](upstream/Lib/test/test_collections.py#L6).
-They execute zero tests. The primary module has just one doctest call:
+On [the tested array tree](array/7ae08a4f0d74/source.json), the separate
+[registration fixture](array/7ae08a4f0d74/array-four-modes.json) matched all 532
+CPython observations at O0 and O3 with both ordinary and reachable-only compilation.
+The complete `test_MutableSequence` was still blocked importing `collections.deque`
+in its fixture at [O0](array/7ae08a4f0d74/abc-O0.json) and [O3](array/7ae08a4f0d74/abc-O3.json).
+All 24 original ABC methods remain blocked on this tree. The
+[full per-occurrence reports](array/7ae08a4f0d74/evidence-linux.json) preserve
+659 at each level: 7 native bodies with host fixtures, 13 host-driven native
+operations, 4 without a collections operation, 3 reference skips and 632 blocked.
+
+The [four original collections startup checks](array/7ae08a4f0d74/startup.json)
+now reach [`import pickle` at line 9](upstream/Lib/test/test_collections.py#L9)
+and execute zero tests. In the primary suite four original methods use pickle:
+[`TestChainMap.test_basics`](upstream/Lib/test/test_collections.py#L127) checks a round trip with
+distinct component maps; [`TestNamedTuple.test_pickle`](upstream/Lib/test/test_collections.py#L568)
+looks up `loads` and `dumps` dynamically and checks both the fields and the bytes;
+[`test_field_descriptor`](upstream/Lib/test/test_collections.py#L687) restores field descriptors
+into a different tuple class; [`TestCounter.test_copying`](upstream/Lib/test/test_collections.py#L2228)
+checks distinct, equal Counter results. The pinned interpreter's highest protocol is 5.
+The namedtuple instance test also uses protocol -1.
+
+The primary module has just one doctest call:
 [`tests.addTest(doctest.DocTestSuite(collections))`](upstream/Lib/test/test_collections.py#L2416),
 which contributes 15 occurrences. The deque companion calls
 [`doctest.DocTestSuite()`](upstream/Lib/test/test_deque.py#L1033) without an
