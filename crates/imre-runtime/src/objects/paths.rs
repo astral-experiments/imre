@@ -17,7 +17,9 @@ mod components;
 mod matching;
 mod pure;
 mod traversal;
+mod walking;
 pub(super) use pure::PurePath;
+pub(super) use walking::Walker;
 
 #[derive(Clone)]
 pub(super) enum PathText {
@@ -915,19 +917,29 @@ enum IterationState {
     Exhausted,
 }
 
-/// Takes the complete name snapshot and closes the directory handle before any
-/// Path can escape, matching CPython's scandir-based iterator acquisition.
-fn snapshot(root: &str, suppress_errors: bool) -> Result<Vec<OsString>> {
+fn check_directory_path(root: &str) -> Result<()> {
     if root.contains('\0') {
-        return Err(Error::new(Kind::ValueError, "embedded null byte"));
+        return Err(Error::new(
+            Kind::ValueError,
+            "scandir: embedded null character in path",
+        ));
     }
-    let entries = fs::read_dir(root)
-        .and_then(|entries| {
-            entries
-                .map(|entry| entry.map(|entry| entry.file_name()))
-                .collect()
-        })
-        .map_err(files::os_error);
+    Ok(())
+}
+
+/// Snapshot directory entries and close their descriptor before yielding to callers.
+fn directory_entries<T>(
+    root: &str,
+    mut visit: impl FnMut(fs::DirEntry) -> T,
+) -> io::Result<Vec<T>> {
+    fs::read_dir(root)?
+        .map(|entry| entry.map(&mut visit))
+        .collect()
+}
+
+fn snapshot(root: &str, suppress_errors: bool) -> Result<Vec<OsString>> {
+    check_directory_path(root)?;
+    let entries = directory_entries(root, |entry| entry.file_name()).map_err(files::os_error);
     if suppress_errors {
         Ok(entries.unwrap_or_default())
     } else {
