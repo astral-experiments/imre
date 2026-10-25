@@ -309,6 +309,10 @@ The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as 
 
 ## Native text operations
 
+String `%` formatting accepts an exact integer, a string, or a fixed tuple of
+integers and strings as positional operands. The entire tuple is evaluated before
+formatting begins. Width and precision arguments (`*`) consume tuple items in order.
+
 `str.lower()` uses Unicode 16 full lowercase mappings, including expanding characters and contextual Greek final sigma. `str.capitalize()` titlecases the first code point and lowercases the remainder in the original string context.
 
 The bundled `string` module exports its nine ASCII character sets in CPython order (`ascii_letters`, `ascii_lowercase`, `ascii_uppercase`, `digits`, `hexdigits`, `octdigits`, `punctuation`, `printable`, `whitespace`). `string.capwords(s, sep=None)` accepts native strings, collapses Python whitespace by default, and preserves empty fields with an explicit separator. `Formatter`, `Template`, `string.templatelib`, and arbitrary module reflection are outside this subset.

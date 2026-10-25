@@ -179,7 +179,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::TimeSleep | Self::PercentScalar => Contract::new(true, PreservesLists),
+            Self::TimeSleep | Self::PercentFormat => Contract::new(true, PreservesLists),
             Self::Formatter(_) => Contract::new(true, PreservesLists),
             Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
@@ -773,6 +773,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_time_sleep"
                 | "imre_str_percent_int"
                 | "imre_str_percent_text"
+                | "imre_str_percent_tuple"
                 | "imre_formatter_format"
                 | "imre_formatter_time"
                 | "imre_formatter_message"

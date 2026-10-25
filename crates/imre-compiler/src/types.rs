@@ -646,6 +646,13 @@ impl Types {
         matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::UnreadArgument))
     }
 
+    /// The percent formatter reads positional operands from an exact tuple's descriptor.
+    pub(crate) fn percent_tuple(&self, ty: Type) -> bool {
+        let Type::Tuple(id) = ty else { return false };
+        matches!(&self.0.borrow().shapes[id], Shape::Tuple(fields)
+            if fields.iter().all(|ty| matches!(ty, Type::Int | Type::Str | Type::StrLiteral(_))))
+    }
+
     pub(crate) fn declare_namedtuple(&self, definition: DefinitionId, declaration: NamedTuple) {
         self.0
             .borrow_mut()
