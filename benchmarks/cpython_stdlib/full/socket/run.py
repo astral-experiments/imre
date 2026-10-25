@@ -1,0 +1,126 @@
+"""Run selected original test_socket methods and their companion senders over TCP."""
+import argparse
+import ast
+from contextlib import ExitStack, contextmanager
+import json
+from pathlib import Path
+import select
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = Path(__file__).resolve().parent
+sys.path[:0] = [str(HERE), str(HERE.parent.parent)]
+from option_fixture import OPTIONS, observe_options
+from socket_evidence import report
+from suite_evidence import write_reports
+from suite_inventory import verify_files, verify_interpreter_tests
+from suite_native import Toolchain, method_bytes
+
+UP = HERE / "upstream/Lib/test/test_socket.py"
+TCP = ("testRecv", "testOverFlowRecv", "testSendAll")
+BACKLOG = "test_listen_backlog"
+TIMEOUT = 15
+NATIVE_BYTES_EQUALITY = b'''    def assertEqual(self, actual: bytes, expected: bytes) -> None:
+        if actual != expected:
+            raise AssertionError("received bytes differ")
+'''
+
+
+def source():
+    bodies = {name: method_bytes(UP, "BasicTCPTest", name) for method in TCP
+              for name in (method, "_" + method)}
+    bodies[BACKLOG] = method_bytes(UP, "GeneralModuleTests", BACKLOG)
+    # Use the original MSG expression and socket_helper's actual HOST constant.
+    from test.test_socket import HOST
+    data = UP.read_bytes()
+    msg, = [node for node in ast.parse(data).body if isinstance(node, ast.Assign)
+            and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "MSG"]
+    globals_ = f"HOST = {HOST!r}\n".encode() + data.splitlines(keepends=True)[msg.lineno - 1]
+    template = (HERE / "tcp_fixture.py.in").read_bytes()
+    return (template.replace(b"# UPSTREAM_GLOBALS", globals_)
+            .replace(b"# UPSTREAM_TCP_METHODS", b"\n".join(bodies[n] for n in bodies if n != BACKLOG))
+            .replace(b"# UPSTREAM_BACKLOG", bodies[BACKLOG])), bodies
+
+
+@contextmanager
+def receiver(command):
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        assert select.select([process.stdout], [], [], TIMEOUT)[0], "listener did not report its port"
+        line = process.stdout.readline()
+        assert line, process.communicate(timeout=TIMEOUT)
+        yield process, str(int(line))
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=TIMEOUT)
+
+
+def observe(command):
+    from test import test_socket as upstream
+    with ExitStack() as fixture:
+        upstream.setUpModule()
+        fixture.callback(unittest.doModuleCleanups)
+        observe_bodies(command)
+    observe_options(command)
+
+
+def observe_bodies(command):
+    def run(*args):
+        p = subprocess.run([*command, *args], timeout=TIMEOUT, capture_output=True)
+        assert (p.returncode, p.stdout, p.stderr) == (0, b"", b""), (args, p)
+    run("backlog")
+    for method in TCP:
+        for sender in ("sender", "wrong"):
+            with receiver([*command, "receiver", method]) as (server, port):
+                run(sender, method, port)
+                out, err = server.communicate(timeout=TIMEOUT)
+                if sender == "wrong":
+                    assert server.returncode != 0 and b"AssertionError" in err, (method, out, err)
+                else:
+                    assert (server.returncode, out, err) == (0, b"", b""), (method, out, err)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--compiler", required=True, type=Path)
+    parser.add_argument("--runtime", required=True, type=Path)
+    parser.add_argument("--clang", default="clang")
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args()
+    manifest = json.loads((HERE / "UPSTREAM.json").read_text())
+    if sys.version_info[:3] != (3, 14, 5) or sys.implementation.name != "cpython":
+        parser.error("run with test-enabled CPython 3.14.5")
+    verify_files(HERE / "upstream", manifest["files"])
+    verify_interpreter_tests(manifest)
+    entry, bodies = source()
+    for method in OPTIONS:
+        bodies[method] = method_bytes(UP, "GeneralModuleTests", method)
+    reference = json.loads((HERE / "reference-linux.json").read_text())
+    if (reference["platform"], reference["cpython_commit"]) != (sys.platform, manifest["commit"]):
+        parser.error("reference evidence requires the same platform and source revision")
+    reports = []
+    clang = Path(shutil.which(args.clang) or args.clang)
+    with tempfile.TemporaryDirectory() as temp:
+        work = Path(temp)
+        script = work / "oracle.py"
+        # Stock CPython uses its own TestCase.assertEqual for these bytes.
+        script.write_bytes(entry.replace(b"# NATIVE_BYTES_EQUALITY", b""))
+        native = entry.replace(b"# NATIVE_BYTES_EQUALITY", NATIVE_BYTES_EQUALITY)
+        observe([sys.executable, "-E", script])
+        print("CPython: four original bodies, two host-driven options; five negative controls rejected", flush=True)
+        for level in (0, 3):
+            binary = Toolchain(args.compiler, args.runtime, clang, level).build(native, work)
+            observe([binary])
+            reports.append(report(reference, UP, bodies, TCP, BACKLOG, OPTIONS, level))
+            print(f"O{level}: four original bodies, two host-driven options; five negative controls rejected", flush=True)
+
+    if args.output:
+        write_reports(args.output, reports, reference)
+
+
+if __name__ == "__main__":
+    main()

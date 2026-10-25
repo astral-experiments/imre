@@ -1,0 +1,81 @@
+import socket
+import sys
+import unittest
+
+# UPSTREAM_GLOBALS
+
+
+class NativeCase(unittest.TestCase):
+    def __init__(self, sock: socket.socket) -> None:
+        super().__init__()
+        self.cli_conn = sock
+        self.serv_conn = sock
+
+# NATIVE_BYTES_EQUALITY
+
+# UPSTREAM_TCP_METHODS
+
+
+class GeneralModuleTests(unittest.TestCase):
+# UPSTREAM_BACKLOG
+
+
+def options() -> None:
+    with socket.socket(int(sys.argv[2]), int(sys.argv[3])) as endpoint:
+        print("open")
+        sys.stdout.flush()
+        while True:
+            operation = input()
+            if operation == "close":
+                return
+            level = int(input())
+            option = int(input())
+            if operation == "get":
+                print(endpoint.getsockopt(level, option))
+            elif operation == "set":
+                endpoint.setsockopt(level, option, int(input()))
+                print("ok")
+            else:
+                raise ValueError(operation)
+            sys.stdout.flush()
+
+
+def main() -> None:
+    role = sys.argv[1]
+    if role == "options":
+        options()
+        return
+    if role == "backlog":
+        GeneralModuleTests().test_listen_backlog()
+        return
+    method = sys.argv[2]
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as endpoint:
+        if role == "receiver":
+            endpoint.bind((HOST, 0))
+            endpoint.listen()
+            print(endpoint.getsockname()[1])
+            sys.stdout.flush()
+            conn, addr = endpoint.accept()
+            with conn:
+                case = NativeCase(conn)
+                if method == "testRecv":
+                    case.testRecv()
+                elif method == "testOverFlowRecv":
+                    case.testOverFlowRecv()
+                else:
+                    case.testSendAll()
+        else:
+            endpoint.connect((HOST, int(sys.argv[3])))
+            if role == "wrong":
+                endpoint.sendall(b'wrong')
+                return
+            case = NativeCase(endpoint)
+            if method == "testRecv":
+                case._testRecv()
+            elif method == "testOverFlowRecv":
+                case._testOverFlowRecv()
+            else:
+                case._testSendAll()
+
+
+main()

@@ -237,6 +237,13 @@ jobs:
         env:
           PYTHONPATH: .cpython-stdlib-reference/Lib
         run: python3 tests/posix_readiness.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --host-original
+      - name: Run original CPython TCP methods and socket option controls
+        env:
+          PYTHONPATH: .cpython-stdlib-reference/Lib
+        run: |
+          dir=benchmarks/cpython_stdlib/full/socket
+          python3 "$dir/run.py" --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18 --output "$RUNNER_TEMP/socket-evidence.json"
+          cmp "$dir/evidence-linux.json" "$RUNNER_TEMP/socket-evidence.json"
       - name: Check native string line boundaries and Unicode predicates against CPython
         env:
           PYTHONPATH: .cpython-stdlib-reference/Lib
