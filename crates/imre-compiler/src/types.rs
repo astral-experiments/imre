@@ -35,6 +35,14 @@ pub(crate) struct CachedFunction {
     pub table: Type,
     pub capacity: i64,
     pub typed: bool,
+    pub annotations: Option<AnnotationOrigin>,
+}
+
+/// A cache delegates annotation evaluation to the captured declaration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(crate) enum AnnotationOrigin {
+    Module(crate::modules::DefinitionId),
+    Local(usize),
 }
 
 #[derive(Clone)]

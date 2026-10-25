@@ -1343,6 +1343,7 @@ fn annotation_with_aliases(
     match expression {
         ast::Expr::Name(name) => match name.id.as_str() {
             "int" => Ok(Type::Int),
+            "type" => Ok(Type::BuiltinClass),
             "float" => Ok(Type::Float),
             "bool" => Ok(Type::Bool),
             "str" => Ok(Type::Str),
@@ -5012,9 +5013,14 @@ impl<'a> Checker<'a> {
                     let tuple_list = self.types.element(ty).is_some_and(|item| {
                         matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
                     });
+                    // Ordinary dictionaries compare their entries independently of insertion order.
+                    // Only enable value kinds whose Python equality has no user callbacks or boxed NaN identity.
+                    let scalar_dict = self.types.mapping(ty).is_some_and(|(_, value)| {
+                        matches!(value, Type::None | Type::Bool | Type::Int | Type::Str | Type::Bytes | Type::BuiltinClass)
+                    });
                     if matches!(ty, Type::ListInt | Type::List(_)) && !tuple_list
                         || matches!(ty, Type::StringKeys | Type::Optional(_) | Type::Union(_))
-                        || matches!(ty, Type::Dict(_)) && !self.types.is_counter(ty)
+                        || matches!(ty, Type::Dict(_)) && !self.types.is_counter(ty) && !scalar_dict
                         || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
                     {
                         return Err(error(
