@@ -1,6 +1,7 @@
 //! Walk held directory descriptors. Snapshot names, unlink leaves, then visit
 //! subdirectories in reverse enumeration order and remove their parents last.
 
+use crate::StrOwner;
 use std::ffi::{CString, OsStr};
 use std::fs::File;
 use std::io;
@@ -11,11 +12,13 @@ use std::rc::Rc;
 
 use super::super::exceptions::{Error, Filename, Kind, replace_pending, swap_active, take_pending};
 use super::super::files::{close_file, errno_with_filenames};
-use super::super::tempdirs::scan_entries;
-use super::super::{Object, Str, acquire_rc, paths};
+use super::super::tempdirs::scan_names;
+use super::super::{Object, Str, paths};
 use super::Int;
 use num_traits::ToPrimitive;
-use rustix::fs::{AtFlags, CWD, Dir, Mode, OFlags, fstat, openat, statat, unlinkat};
+use rustix::fs::{
+    AtFlags, CWD, Dir, FileType, Mode, OFlags, Stat, fstat, openat, statat, unlinkat,
+};
 
 fn path_error(filename: Filename, error: io::Error) -> Error {
     errno_with_filenames(error, Some(filename), None)
@@ -49,8 +52,13 @@ struct Entry {
     root: bool,
 }
 
+/// The two stat fields used by os.path.samestat on the held descriptor.
+fn identity(stat: &Stat) -> (rustix::fs::Dev, u64) {
+    (stat.st_dev, stat.st_ino)
+}
+
 enum Step {
-    Visit(Entry),
+    Visit(Entry, Option<(rustix::fs::Dev, u64)>),
     Close(Rc<OwnedFd>, PathBuf),
     Rmdir(Entry),
 }
@@ -59,7 +67,7 @@ struct Walk<'a, F> {
     stack: Vec<Step>,
     onexc: F,
     root: &'a Path,
-    root_object: Option<Rc<Object>>,
+    root_object: Option<crate::ObjectOwner>,
     default_handler: bool,
 }
 
@@ -78,7 +86,7 @@ where
         if path.as_os_str() == self.root.as_os_str()
             && let Some(original) = &self.root_object
         {
-            return Filename::Path(Rc::clone(original));
+            return Filename::Path(crate::ObjectOwner::clone(original));
         }
         filename(path)
     }
@@ -108,8 +116,8 @@ where
     }
 
     fn step(&mut self, step: Step) -> std::result::Result<(), E> {
-        let entry = match step {
-            Step::Visit(entry) => entry,
+        let (entry, cached_identity) = match step {
+            Step::Visit(entry, cached_identity) => (entry, cached_identity),
             Step::Close(fd, path) => return self.close(fd, &path),
             Step::Rmdir(entry) => {
                 return match unlinkat(
@@ -123,7 +131,13 @@ where
             }
         };
         let parent = parent_fd(&entry.parent);
-        let original = match statat(parent, entry.name.as_c_str(), AtFlags::SYMLINK_NOFOLLOW) {
+        let original = match cached_identity.map_or_else(
+            || {
+                statat(parent, entry.name.as_c_str(), AtFlags::SYMLINK_NOFOLLOW)
+                    .map(|st| identity(&st))
+            },
+            Ok,
+        ) {
             Ok(st) => st,
             Err(e) => return self.io_error(Operation::Lstat, &entry.path, e.into(), !entry.root),
         };
@@ -140,9 +154,7 @@ where
         let path = entry.path.clone();
         let root = entry.root;
         let checked = fstat(&*fd);
-        let same = checked
-            .as_ref()
-            .is_ok_and(|st| st.st_dev == original.st_dev && st.st_ino == original.st_ino);
+        let same = checked.as_ref().is_ok_and(|st| identity(st) == original);
         if same {
             self.stack.push(Step::Rmdir(entry));
         }
@@ -162,22 +174,34 @@ where
         let entries = fd
             .try_clone()
             .and_then(|scan| Ok(Dir::new(scan)?))
-            .and_then(|scan| scan_entries(&fd, scan));
+            .and_then(|scan| scan_names(scan).collect::<io::Result<Vec<_>>>());
         let entries = match entries {
             Ok(entries) => entries,
             Err(e) => return self.io_error(Operation::ScanDir, &path, e, !root),
         };
-        for entry in entries {
-            let basename = Path::new(OsStr::from_bytes(entry.name.to_bytes()));
+        for (name, kind) in entries {
+            let basename = Path::new(OsStr::from_bytes(name.to_bytes()));
             let full = path.join(basename);
-            if entry.directory {
-                self.stack.push(Step::Visit(Entry {
-                    parent: Some(Rc::clone(&fd)),
-                    name: entry.name,
-                    path: full,
-                    root: false,
-                }));
-            } else if let Err(e) = unlinkat(&*fd, entry.name.as_c_str(), AtFlags::empty()) {
+            // DirEntry.is_dir() caches its stat when the directory omits d_type.
+            let cached_identity = if kind == FileType::Unknown {
+                statat(&*fd, name.as_c_str(), AtFlags::SYMLINK_NOFOLLOW)
+                    .ok()
+                    .filter(|st| FileType::from_raw_mode(st.st_mode) == FileType::Directory)
+                    .map(|st| identity(&st))
+            } else {
+                None
+            };
+            if kind == FileType::Directory || cached_identity.is_some() {
+                self.stack.push(Step::Visit(
+                    Entry {
+                        parent: Some(Rc::clone(&fd)),
+                        name,
+                        path: full,
+                        root: false,
+                    },
+                    cached_identity,
+                ));
+            } else if let Err(e) = unlinkat(&*fd, name.as_c_str(), AtFlags::empty()) {
                 if e == rustix::io::Errno::NOENT {
                     continue;
                 }
@@ -213,9 +237,19 @@ where
     }
 }
 
+fn checked_name(bytes: &[u8]) -> Result<CString, Error> {
+    CString::new(bytes).map_err(|_| Error::new(Kind::ValueError, "embedded null byte"))
+}
+
+/// Remove the copied source of a move using rmtree's default error handler.
+pub(super) fn remove_root(path: &Path, original: Option<crate::ObjectOwner>) -> Result<(), Error> {
+    let name = checked_name(path.as_os_str().as_bytes())?;
+    remove_with(path, original, name, None, true, |_, _, error| Err(error))
+}
+
 fn remove_with<E: From<Error>>(
     path: &Path,
-    root_object: Option<Rc<Object>>,
+    root_object: Option<crate::ObjectOwner>,
     name: CString,
     dirfd: Option<i32>,
     default_handler: bool,
@@ -248,13 +282,13 @@ fn remove_with<E: From<Error>>(
         path: path.to_owned(),
         root: true,
     };
-    walk.stack.push(Step::Visit(root));
+    walk.stack.push(Step::Visit(root, None));
     walk.run()
 }
 
 enum WalkError {
     Os(Error),
-    Raised(Rc<Object>),
+    Raised(crate::ObjectOwner),
 }
 
 impl From<Error> for WalkError {
@@ -291,18 +325,20 @@ pub unsafe extern "C" fn imre_shutil_rmtree(
             .into());
         }
         // SAFETY: tag 3 identifies a live path object that an exception can retain.
-        let original = (tag == 3).then(|| unsafe { acquire_rc::<Object>(path as usize) });
+        let original =
+            (tag == 3).then(|| unsafe { crate::ObjectOwner::acquire_word(path as usize) });
         let spelling;
         let bytes = if let Some(original) = &original {
             // SAFETY: original roots the path, and imre_path_text transfers one owner.
-            spelling = unsafe { Rc::from_raw(paths::imre_path_text(Rc::as_ptr(original))) };
+            spelling = unsafe {
+                StrOwner::from_raw(paths::imre_path_text(crate::ObjectOwner::as_ptr(original)))
+            };
             spelling.as_bytes()
         } else {
             // SAFETY: the remaining tags name a rooted str or bytes.
             unsafe { super::spelling(path, tag) }
         };
-        let name =
-            CString::new(bytes).map_err(|_| Error::new(Kind::ValueError, "embedded null byte"))?;
+        let name = checked_name(bytes)?;
         let path = Path::new(OsStr::from_bytes(bytes));
         if fd_kind == 2 {
             return Err(Error::new(
@@ -340,14 +376,21 @@ pub unsafe extern "C" fn imre_shutil_rmtree(
                     Ok(())
                 };
             };
-            let path = Rc::new(paths::path_utf8(path.as_os_str().to_owned())?);
+            let path = StrOwner::new(paths::path_utf8(path.as_os_str().to_owned())?);
             error.raise();
             let exc = take_pending().expect("the walk just raised this error");
-            let mut previous = Some(Rc::clone(&exc));
+            let mut previous = Some(crate::ObjectOwner::clone(&exc));
             swap_active(&mut previous);
             // SAFETY: this synchronous call borrows its three owners. The active
             // exception lets a native handler inspect it or use a bare raise.
-            unsafe { handler(context, op as u32, Rc::as_ptr(&path), Rc::as_ptr(&exc)) };
+            unsafe {
+                handler(
+                    context,
+                    op as u32,
+                    StrOwner::as_ptr(&path),
+                    crate::ObjectOwner::as_ptr(&exc),
+                )
+            };
             swap_active(&mut previous);
             match take_pending() {
                 Some(raised) => Err(WalkError::Raised(raised)),

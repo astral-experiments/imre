@@ -38,14 +38,14 @@ unsafe fn combine(a: usize, b: usize, op: u32) -> Int {
 /// Read both inputs in insertion order, emitting only positive result counts.
 unsafe fn fresh(left: &Mapping, right: &Mapping, op: u32) -> Result<*const Object, Error> {
     // SAFETY: the constructor transfers its fresh strong reference.
-    let result = unsafe { Rc::from_raw(imre_counter_new(left.tables.key_kind())) };
+    let result = unsafe { crate::ObjectOwner::from_raw(imre_counter_new(left.tables.key_kind())) };
     let zero = Int::small(0).unwrap().0;
     let append = |key, a, b| {
         // SAFETY: immutable input tables root the borrowed words; result is fresh.
         unsafe {
             let count = combine(a, b, op);
             if crate::imre_int_compare(count.0, zero) > 0 {
-                dict_set(Rc::as_ptr(&result), key, count.0)?;
+                dict_set(crate::ObjectOwner::as_ptr(&result), key, count.0)?;
             }
         }
         Ok::<(), Error>(())
@@ -68,7 +68,7 @@ unsafe fn fresh(left: &Mapping, right: &Mapping, op: u32) -> Result<*const Objec
             Ok::<(), Error>(())
         })?;
     }
-    Ok(Rc::into_raw(result))
+    Ok(crate::ObjectOwner::into_raw(result))
 }
 
 /// Mutate the existing table so aliases and active dictionary cursors survive.
@@ -118,7 +118,7 @@ unsafe fn inplace(
                 imre_dict_delete(left, key.word);
             }
         }
-        Rc::increment_strong_count(left);
+        crate::ObjectOwner::increment_strong_count(left);
     }
     Ok(left)
 }
