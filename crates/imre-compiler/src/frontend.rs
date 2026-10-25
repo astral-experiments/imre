@@ -5295,10 +5295,11 @@ impl<'a> Checker<'a> {
                             "regex objects do not support value comparisons in Imre",
                         ));
                     }
-                    let tuple_list = self.types.element(ty).is_some_and(|item| {
-                        matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
+                    let comparable_list = self.types.element(ty).is_some_and(|item| {
+                        item == Type::Str
+                            || matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
                     });
-                    if matches!(ty, Type::ListInt | Type::List(_)) && !tuple_list
+                    if matches!(ty, Type::ListInt | Type::List(_)) && !comparable_list
                         || matches!(ty, Type::StringKeys | Type::Optional(_) | Type::Union(_))
                         || matches!(ty, Type::Dict(_)) && !self.types.is_counter(ty)
                         || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
