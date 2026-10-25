@@ -69,6 +69,10 @@ impl Session {
         let intrinsic = SystemPathBuf::from(root).join("imre");
         for (name, stub) in [
             (
+                "_imre_doctest",
+                "def capture_start() -> None: ...\ndef capture_take() -> str: ...\ndef display(value: object, /) -> None: ...\ndef ascii_output(text: str, /) -> str: ...\ndef execute(test: object, debug: bool, /) -> None: ...\n",
+            ),
+            (
                 "hashlib",
                 // The bundled OpenSSL stub still names the input `string`. CPython
                 // 3.14 calls it `data`; the native constructor takes exact bytes.

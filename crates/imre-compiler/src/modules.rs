@@ -13,6 +13,7 @@ use crate::ir::PosixPathOperation;
 use crate::watch::FileSystem;
 
 mod declarations;
+pub(crate) mod doctest;
 mod empty_keywords;
 mod entry_profile;
 mod os;
@@ -180,6 +181,7 @@ pub(crate) enum Intrinsic {
     DocCaptureTake,
     DocDisplay,
     DocAscii,
+    DocExecute,
     Final,
     Argv,
     OrigArgv,
@@ -370,6 +372,7 @@ impl IntrinsicModule {
             (Self::DoctestRuntime, "capture_take") => Intrinsic::DocCaptureTake,
             (Self::DoctestRuntime, "display") => Intrinsic::DocDisplay,
             (Self::DoctestRuntime, "ascii_output") => Intrinsic::DocAscii,
+            (Self::DoctestRuntime, "execute") => Intrinsic::DocExecute,
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
             (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
@@ -607,6 +610,7 @@ impl SourceModule {
 }
 
 pub(crate) struct SourceGraph {
+    pub(crate) doctest_runner: Option<DefinitionId>,
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
     checked_keywords: std::cell::RefCell<Vec<Vec<TextRange>>>,
@@ -1130,9 +1134,11 @@ impl<'a> Loader<'a> {
                 }
             }
         }
+        let doctest_runner = self.doctest_program()?;
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
         let mut graph = SourceGraph {
+            doctest_runner,
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             checked_keywords: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),

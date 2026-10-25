@@ -4,60 +4,26 @@
 use super::*;
 use crate::modules::IntrinsicModule;
 
-fn source_docstrings(
-    name: &str,
-    body: &[ast::Stmt],
-    classes: bool,
-    out: &mut Vec<(String, String)>,
-) {
-    if let Some(ast::Stmt::Expr(stmt)) = body.first()
-        && let ast::Expr::StringLiteral(doc) = stmt.value.as_ref()
-    {
-        out.push((name.to_owned(), doc.value.to_str().to_owned()));
-    }
-    if classes {
-        for stmt in body {
-            match stmt {
-                ast::Stmt::FunctionDef(function) => {
-                    source_docstrings(
-                        &format!("{name}.{}", function.name),
-                        &function.body,
-                        false,
-                        out,
-                    );
-                }
-                ast::Stmt::ClassDef(class) => {
-                    source_docstrings(&format!("{name}.{}", class.name), &class.body, true, out);
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
-/// Sealed namespaces carry the original documentation of their example-bearing
-/// definitions. The audit compares these strings with CPython's actual finder.
-fn sealed(name: IntrinsicModule) -> Option<(&'static str, &'static str)> {
-    Some(match name {
-        IntrinsicModule::Itertools => (
-            "itertools.batched",
-            include_str!("../../stdlib/docstrings/itertools.batched.txt"),
-        ),
-        IntrinsicModule::Json => ("json", include_str!("../../stdlib/docstrings/json.txt")),
-        IntrinsicModule::JsonEncoder => (
-            "json.encoder.JSONEncoder.encode",
-            include_str!("../../stdlib/docstrings/json.encoder.JSONEncoder.encode.txt"),
-        ),
-        IntrinsicModule::JsonDecoder => (
-            "json.decoder",
-            include_str!("../../stdlib/docstrings/json.decoder.txt"),
-        ),
-        _ => return None,
-    })
-}
+use crate::modules::doctest::{sealed, source_docstrings};
 
 impl Checker<'_> {
     pub(super) fn doctest_suite(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::DocExecute)) {
+            let def = self.graph.doctest_runner.ok_or_else(|| {
+                error(
+                    self.source,
+                    call,
+                    "doctest execution requires a compiled documentation suite",
+                )
+            })?;
+            let sig = self.functions[&def].clone();
+            let args = self.arguments(call, &sig.params, None)?;
+            self.calls.insert(sig.id);
+            return Ok(Some(Expr {
+                ty: sig.returns,
+                kind: ExprKind::Call(sig.id, args),
+            }));
+        }
         if let Some(Binding::Intrinsic(
             op @ (Intrinsic::DocCaptureStart
             | Intrinsic::DocCaptureTake

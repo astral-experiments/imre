@@ -45,6 +45,11 @@ impl<'a> Visitor<'a> for References<'_> {
         {
             self.found.value_reads.insert(id);
         }
+        if self.graph.resolve(self.module, expr) == Some(Binding::Intrinsic(Intrinsic::DocExecute))
+            && let Some(runner) = self.graph.doctest_runner
+        {
+            self.found.definitions.insert(runner);
+        }
         if let Some(Binding::Definition(id)) = self.graph.resolve_type(self.module, expr) {
             self.found.definitions.insert(id);
         }

@@ -1,7 +1,8 @@
 """Discover interactive examples and compare their output in native programs."""
 
 from collections.abc import Iterator
-from _imre_doctest import ascii_output
+from _imre_doctest import ascii_output, execute
+import unittest
 
 
 class Example:
@@ -173,10 +174,66 @@ class DocTest:
         self.examples = examples
 
 
-class DocTestCase:
+class DocTestFailure(Exception):
+    pass
+
+
+class UnexpectedException(Exception):
+    pass
+
+
+def _checked_example(test: DocTest, index: int, source: str) -> Example:
+    example = test.examples[index]
+    if example.source != source:
+        raise ValueError("doctest source changed after native compilation: " + test.name)
+    return example
+
+
+def _optionflags(example: Example) -> int:
+    flags = 0
+    for flag in example.options:
+        if example.options[flag]:
+            flags |= flag
+    return flags
+
+
+def _check_example(test: DocTest, example: Example, got: str, error: str,
+                   failures: list[str], debug: bool) -> None:
+    checker = OutputChecker()
+    flags = _optionflags(example)
+    want = example.want
+    if error:
+        expected = example.exc_msg
+        if expected is not None:
+            if checker.check_output(expected, error, flags):
+                return
+            if flags & 32 and expected.partition(":")[0].strip() == error.partition(":")[0].strip():
+                return
+        got = error
+    elif checker.check_output(want, got, flags):
+        return
+    message = (f"{test.name}, line {example.lineno + 1}\nFailed example:\n{example.source}"
+               f"Expected:\n{want}Got:\n{got}")
+    if debug:
+        if error and example.exc_msg is None:
+            raise UnexpectedException(message)
+        raise DocTestFailure(message)
+    failures.append(message)
+
+
+def _exception_line(error: Exception) -> str:
+    name = repr(error).partition("(")[0]
+    message = str(error)
+    if message:
+        return name + ": " + message + "\n"
+    return name + "\n"
+
+
+class DocTestCase(unittest.TestCase):
     _dt_test: DocTest
 
     def __init__(self, test: DocTest) -> None:
+        super().__init__()
         self._dt_test = test
 
     def id(self) -> str:
@@ -184,6 +241,12 @@ class DocTestCase:
 
     def countTestCases(self) -> int:
         return 1
+
+    def runTest(self) -> None:
+        execute(self._dt_test, False)
+
+    def debug(self) -> None:
+        execute(self._dt_test, True)
 
 
 class _DocTestSuite:
@@ -197,6 +260,10 @@ class _DocTestSuite:
 
     def countTestCases(self) -> int:
         return len(self._tests)
+
+    def debug(self) -> None:
+        for case in self._tests:
+            case.debug()
 
 
 class _ModuleDocs:
