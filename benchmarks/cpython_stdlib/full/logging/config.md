@@ -19,9 +19,8 @@ Latin-1 INI paths. Constructing configured handlers, filters, formatters and
 custom factories remains open. These are module implementation gaps, not
 transport or platform exclusions.
 
-With main `daacc86`, the build repair in [#623](https://github.com/astral-sh/imre/pull/623),
-bounded tuple displays in [#588](https://github.com/astral-sh/imre/pull/588)
-and these configuration bindings together, all four untouched entries (import
+With repaired main `00f91c4`, bounded tuple displays in [#588](https://github.com/astral-sh/imre/pull/588)
+and these configuration bindings together (integration `8eccc50`), all four untouched entries (import
 and suite runner, full and reachable-only) pass the logging imports and stop
 at `Lib/test/test_logging.py:26:1: import codecs`. The one upstream use is
 `codecs.getwriter('cp1251')` at line 2306, in the Cyrillic StreamHandler test.
