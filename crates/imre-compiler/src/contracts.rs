@@ -89,6 +89,7 @@ impl Builtin {
                     | TextOperation::Capitalize
                     | TextOperation::Split(_)
                     | TextOperation::Partition
+                    | TextOperation::Translate
                     | TextOperation::Unquote
                     | TextOperation::ShlexSplit
                     | TextOperation::ShlexQuote => true,
@@ -181,7 +182,9 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::TimeSleep | Self::PercentScalar => Contract::new(true, PreservesLists),
+            Self::TimeSleep | Self::PercentScalar | Self::WarningFilter(_) => {
+                Contract::new(true, PreservesLists)
+            }
             Self::Formatter(_) => Contract::new(true, PreservesLists),
             Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
@@ -306,6 +309,7 @@ impl Builtin {
             | Self::NamespaceDict
             | Self::NamespaceGet
             | Self::DictCopy
+            | Self::DictFromKeysTarget
             | Self::DeepCopy
             | Self::RecordCopy
             | Self::JsonDecode(_)
@@ -369,6 +373,7 @@ impl Builtin {
             | Self::IntBounded { .. }
             | Self::IntSignAsFloat
             | Self::IsInstance(_)
+            | Self::IsBuiltinSubclass
             | Self::IsNone
             | Self::JsonIsInt
             | Self::Len
@@ -385,6 +390,7 @@ impl Builtin {
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum
             | Self::DirectoryContextView
+            | Self::TextStreamView
             | Self::LiteralStringView
             | Self::RStrip
             | Self::RegexCompile(_)
@@ -399,6 +405,8 @@ impl Builtin {
             | Self::NominalIdentity
             | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
+            | Self::ForwardRefField(_)
+            | Self::NewForwardRef
             | Self::ClassNameView
             | Self::StrEnumName
             | Self::StrEnumValue
@@ -428,6 +436,7 @@ impl Builtin {
             | Self::FileReadline
             | Self::GzipOpen
             | Self::BytesIo
+            | Self::StringIo(_)
             | Self::BinarySeek
             | Self::BinaryTell
             | Self::ZipOpenFile
@@ -814,6 +823,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_decode_splitlines"
                 | "imre_str_splitlines"
                 | "imre_str_splitlines_options"
+                | "imre_str_translate"
                 | "imre_exception_field_index"
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
@@ -869,6 +879,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_text_flush"
                 | "imre_text_close"
                 | "imre_bytes_io"
+                | "imre_string_io"
+                | "imre_string_io_value"
+                | "imre_string_io_read"
+                | "imre_string_io_seek"
+                | "imre_string_io_position"
                 | "imre_binary_seek"
                 | "imre_binary_tell"
                 | "imre_zip_open_file"
@@ -909,6 +924,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_list_copy"
                 | "imre_record_shallow_copy"
                 | "imre_dict_copy"
+                | "imre_dict_fromkeys_target"
                 | "imre_dict_get"
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"

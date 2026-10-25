@@ -9,6 +9,8 @@ pub(crate) enum Type {
     Bool,
     /// A builtin class object. Its name is interned; the handle is never a Python string.
     BuiltinClass,
+    /// An immutable annotation reference with a known layout for its owner.
+    ForwardRef(usize),
     Str,
     /// A closed domain of strings with ordinary string storage and ownership.
     StrLiteral(usize),
@@ -52,6 +54,7 @@ pub(crate) enum Type {
     TimeoutExpired,
     /// A sealed UTF-8 text stream; aliases share its open/closed state.
     TextIO,
+    StringIO,
     /// A sealed byte stream; aliases share its open/closed state.
     BinaryIO,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
@@ -182,6 +185,7 @@ impl std::fmt::Display for Type {
             Self::Float => "float",
             Self::Bool => "bool",
             Self::BuiltinClass => "type",
+            Self::ForwardRef(_) => "annotationlib.ForwardRef",
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
@@ -196,6 +200,7 @@ impl std::fmt::Display for Type {
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
             Self::StringIterable => "Iterable[str]",
             Self::TextIO => "typing.TextIO",
+            Self::StringIO => "io.StringIO",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
             Self::PathInfo => "pathlib.types.PathInfo",
@@ -576,6 +581,7 @@ pub(crate) enum Builtin {
     Tee,
     Cycle,
     DirectoryContextView,
+    TextStreamView,
     Document(DocumentOp),
     /// Runs the static archive's module initializer in ordinary import order.
     ExtensionImport(String),
@@ -592,6 +598,8 @@ pub(crate) enum Builtin {
     },
     StrEnumName,
     ClassNameView,
+    NewForwardRef,
+    ForwardRefField(usize),
     StrEnumValue,
     EnumLookup(usize),
     EnumString,
@@ -633,6 +641,7 @@ pub(crate) enum Builtin {
     RaiseException,
     WallTime,
     TimeSleep,
+    WarningFilter(u32),
     PercentScalar,
     Logging(LogOperation),
     Timed(TimedOperation),
@@ -770,6 +779,7 @@ pub(crate) enum Builtin {
     },
     Sha256Copy,
     BytesIo,
+    StringIo(StringIoOperation),
     BinarySeek,
     BinaryTell,
     ZipOpenFile,
@@ -800,6 +810,7 @@ pub(crate) enum Builtin {
     /// Projects a member proved by local control flow, acquiring its own owner.
     UnionProject,
     IsInstance(Vec<InstanceType>),
+    IsBuiltinSubclass,
     Split,
     SplitLines,
     DecodeSplitLines,
@@ -914,6 +925,7 @@ pub(crate) enum Builtin {
     FileFileno,
     DictGet,
     DictCopy,
+    DictFromKeysTarget,
     NamespaceWrap,
     NamespaceDict,
     NamespaceGet,
@@ -990,6 +1002,16 @@ impl Builtin {
 }
 
 pub(crate) const TUPLE_PROBE_ARITY: std::ops::RangeInclusive<usize> = 1..=16;
+
+/// Operations specific to Unicode text held in native memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StringIoOperation {
+    New,
+    Value,
+    Read,
+    Seek,
+    Position,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum DocumentShape {
@@ -1087,6 +1109,7 @@ pub(crate) enum TextOperation {
     EndsWith,
     Find,
     Partition,
+    Translate,
     Unquote,
     Dedent,
     ShlexSplit,
@@ -1426,6 +1449,7 @@ pub(crate) enum ProcessOperation {
 #[derive(Clone, Copy)]
 pub(crate) enum InstanceType {
     Exact(Type),
+    ForwardRef,
     SimpleNamespace,
     StrEnum,
     List,
@@ -1444,6 +1468,7 @@ impl InstanceType {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
             }
             Self::Exact(expected) => expected == ty,
+            Self::ForwardRef => matches!(ty, Type::ForwardRef(_)),
             Self::StrEnum => matches!(ty, Type::StrEnum(_)),
             Self::List => matches!(ty, Type::ListInt | Type::List(_)),
             Self::Dict => matches!(ty, Type::Dict(_)),
