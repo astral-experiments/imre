@@ -20,7 +20,7 @@ def main():
         os.mkfifo(pipe)
         expected = subprocess.run([sys.executable, "-IB", source, file, pipe], cwd=tmp,
                                   check=True, capture_output=True, timeout=30)
-        assert expected.stdout == b"csv\nsame file\nshutil base\nspecial file\nOS base\n"
+        assert expected.stdout == b"csv\nsame file\nshutil base\nspecial file\nOS base\nCSV versus codec\ncodec versus CSV\n"
         for level in ("0", "3"):
             exe = work / "mixed-handlers"
             subprocess.run([args.imre, "build", source, "--no-cache", "--opt-level", level,
@@ -30,7 +30,7 @@ def main():
                                     timeout=30)
             assert (actual.stdout, actual.stderr) == (expected.stdout, expected.stderr)
             assert file.read_text() == "unchanged"
-            print(f"-O{level}: five crossed exception handlers matched CPython")
+            print(f"-O{level}: seven crossed exception handlers matched CPython")
 
 
 if __name__ == "__main__":

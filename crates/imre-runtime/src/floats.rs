@@ -167,7 +167,7 @@ fn decimal_digit(value: char) -> Option<u8> {
 /// conversion. Rust alone also accepts forms outside Python's grammar. Underscores
 /// may separate digits only, including in the exponent; Unicode decimal digits
 /// and surrounding Unicode whitespace are normalized before validation.
-fn parse(source: &str) -> Option<f64> {
+pub(crate) fn parse(source: &str) -> Option<f64> {
     let source = source.trim();
     let mut normalized = if source.is_ascii() {
         Cow::Borrowed(source)
