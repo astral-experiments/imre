@@ -82,13 +82,30 @@ impl Emitter<'_, '_> {
     }
 
     pub(super) fn tuple(&mut self, ty: Type, values: &[Expr]) -> Value {
+        self.tuple_with_root(ty, values, None)
+    }
+
+    /// A sys struct sequence has one owner across every function and codegen unit.
+    pub(super) fn tuple_with_root(
+        &mut self,
+        ty: Type,
+        values: &[Expr],
+        singleton: Option<&str>,
+    ) -> Value {
         let cache = if values.iter().all(immutable_literal) {
-            let unit = self.output.current;
+            let unit = if singleton.is_some() {
+                self.output.entry
+            } else {
+                self.output.current
+            };
             let roots = self.tuple_literals.entry(unit).or_default();
-            let root = self
-                .output
-                .global_ref(format!("tuple_literal_{unit}_{}", roots.len()));
-            roots.push(root.clone());
+            let name = singleton
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("tuple_literal_{unit}_{}", roots.len()));
+            let root = self.output.global_ref(name);
+            if singleton.is_none() || !roots.contains(&root) {
+                roots.push(root.clone());
+            }
             let prior = self.instruction(format!("load ptr, ptr @{root}"));
             let missing = self.instruction(format!("icmp eq ptr {prior}, null"));
             let build = self.label();
