@@ -56,6 +56,43 @@ fn required(name: &str, ty: Type) -> Parameter {
 }
 
 impl Checker<'_> {
+    /// Bind the private weak registry to the public fixed Handler record type.
+    pub(super) fn named_handler(
+        &mut self,
+        symbol: Intrinsic,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let source = &self.graph.modules[self.module];
+        let Some(Binding::Definition(def)) = source.bindings.get("Handler") else {
+            return Err(error(
+                self.source,
+                call,
+                "missing logging.Handler definition",
+            ));
+        };
+        let handler = Type::Class(self.classes.declarations.ids[def]);
+        let optional_name = self.types.optional(Type::Str);
+        let (op, result, params) = match symbol {
+            Intrinsic::HandlerRename => (
+                Log::HandlerRename,
+                Type::None,
+                vec![
+                    required("handler", handler),
+                    required("old", optional_name),
+                    required("new", optional_name),
+                ],
+            ),
+            Intrinsic::HandlerLookup => (
+                Log::HandlerLookup,
+                self.types.optional(handler),
+                vec![required("name", Type::Str)],
+            ),
+            _ => unreachable!(),
+        };
+        let args = self.arguments(call, &params, None)?;
+        Ok(self.ordered_builtin(Builtin::Logging(op), result, args))
+    }
+
     /// A configuration literal can contain differently typed values. Give each
     /// nested map and list its ordered, mutable document layout at construction.
     pub(super) fn logging_dictionary_config(
