@@ -4,8 +4,8 @@ import hashlib
 from collections import Counter
 from contextlib import contextmanager
 import json
-import shutil
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -110,13 +110,17 @@ def run(args, level, root):
     lang = Toolchain(args.imre, args.runtime, args.clang, level, args.reachable_only)
     verify_source_modules(lang, root)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
-    for name in ["truth_protocol", "equality_protocol", "boolean_equality", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
+    for name in ["truth_protocol", "equality_protocol", "boolean_equality", "mock_protocol", "mock_reset", "mock_globals", "callable_protocol", "bound_assertions",
                  "callable_binding", "context_regex", "loader_names", *("context_" + family for family in families)]:
         control = root / name
-        control.mkdir()
+        if (HERE / name).is_dir():
+            shutil.copytree(HERE / name, control)
+            program = control / "case.py"
+        else:
+            control.mkdir()
+            program = HERE / (name + ".py")
         if name == "loader_names":
             shutil.copytree(HERE / "upstream/Lib/test/test_unittest/namespace_test_pkg/bar", control / "bar")
-        program = HERE / (name + ".py")
         native = lang.build(program.read_bytes(), control)
         oracle = subprocess.run([sys.executable, "-E", "-B", control / "case.py"], cwd=control,
                                 capture_output=True, timeout=30, check=True)
