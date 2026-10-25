@@ -1220,7 +1220,7 @@ unsafe fn spawn_list(
     let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, streams, 0, true);
     // SAFETY: the original configuration remains rooted while spawn reports any error.
     unsafe {
-        launch_error::spawn(&cmd, &config, streams, [-1; 3], || {
+        launch_error::spawn(&cmd, &config, streams, [-1; 3], false, |_| {
             Ok(ChildAttributes::default())
         })
     }
@@ -1308,6 +1308,14 @@ unsafe fn prepare_process(
     Ok((launch, cwd))
 }
 
+/// Conversion error shared by POSIX launch arguments that take a C int.
+fn c_int_overflow() -> Error {
+    Error::new(
+        Kind::OverflowError,
+        "Python int too large to convert to C int",
+    )
+}
+
 /// # Safety
 /// The exact optional directory and environment stay rooted across conversion.
 unsafe fn prepare_command(
@@ -1330,7 +1338,7 @@ unsafe fn prepare_command(
                 "path-like args is not allowed when shell is true",
             ));
         }
-        if !config.shell && config.executable.is_null() && argv::empty(cmd) {
+        if !config.shell && config.executable.is_null() && argv::first(cmd).is_none() {
             return Err(Error::new(Kind::IndexError, "list index out of range"));
         }
         let env = if config.env.is_null() {

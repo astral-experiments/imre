@@ -96,3 +96,18 @@ assertion, as does `test.test_fnmatch.FilterTestCase.test_filter` with its
 original imports. All three use native bodies, assertions and module operations
 with the original CPython lifecycle around the native process: record
 `fixture="mixed"` and `native-body-host-fixture`.
+
+### Stored assertions and exception callbacks
+
+Use the same `testcase_fixture()` for methods that save `self.assertEqual`,
+`self.assertListEqual`, or `self.assertRaises`. A saved assertion retains its
+original case, including later changes to that case's message settings.
+`assertRaises` accepts a bound method or a known function, forwards positional
+and keyword arguments, and checks the exception from the invocation. An error
+while evaluating an argument still escapes the assertion.
+
+For example, the original `TestTemplate.test_invalid_placeholders` saves
+`raises = self.assertRaises` then repeatedly invokes `raises(ValueError,
+s.substitute, ...)`. Its source prefix is `"from string import Template\n" +
+testcase_fixture()`. Pass `operation=("imre", "string.Template.substitute")` to
+`native_method`; the original class and module lifecycle remain host-assisted.

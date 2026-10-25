@@ -74,3 +74,22 @@ try:
     subprocess.Popen(["bad\x00program"], pass_fds=(-1,))
 except ValueError as error:
     print(str(error))
+
+# Only the fork path iterates an explicit None, before C narrows child settings.
+for program in ["/bin/true", "true"]:
+    try:
+        print(subprocess.call([program], pass_fds=None, close_fds=False))
+    except TypeError as error:
+        print(str(error))
+try:
+    subprocess.call(["/bin/true"], pass_fds=None, umask=2**65)
+except TypeError as error:
+    print(str(error))
+try:
+    subprocess.call(["/bin/true"], pass_fds=(1,), umask=-(2**90))
+except OverflowError as error:
+    print(str(error))
+try:
+    print(subprocess.call(["/bin/true"], pass_fds=(), umask=-(2**90), close_fds=False))
+except OverflowError as error:
+    print(str(error))
