@@ -9,9 +9,11 @@ use super::{Object, fail, words::WordKind};
 pub(super) mod strings;
 
 enum Release {
+    Fields(*const usize, usize),
     Record(*const usize),
     Object(Rc<Object>),
     Sequence(WordKind, Vec<usize>),
+    Table(Box<dyn super::mappings::ReleaseEntries>, usize),
 }
 
 thread_local! {
@@ -80,6 +82,60 @@ const _: () = assert!(size_of::<Header>() == 16 && align_of::<Header>() == 8);
 pub(super) unsafe fn descriptor<'a>(payload: *const usize) -> &'a RecordDescriptor {
     // SAFETY: the immutable descriptor belongs to the live allocation's header.
     unsafe { (*payload.cast::<Header>().sub(1)).descriptor() }
+}
+
+/// Copy the inner cached callable's public policy, as update_wrapper does.
+/// Capacity used for lookup and eviction belongs to the new wrapper's table.
+///
+/// # Safety
+/// The destination is a newly allocated four-word cache callable; source is
+/// null or a rooted native callable (two ordinary words or four cache words).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_callable_copy_cache_policy(
+    destination: *mut usize,
+    source: *const usize,
+    capacity: i64,
+    typed: u32,
+) {
+    // SAFETY: all four fields exist on a cache callable. Its two public
+    // policy fields are plain words and do not own references.
+    unsafe {
+        debug_assert_eq!(descriptor(destination).length, 4);
+        if !source.is_null() && descriptor(source).length == 4 {
+            destination.add(2).write(*source.add(2));
+            destination.add(3).write(*source.add(3));
+        } else {
+            destination.add(2).write(capacity as usize);
+            destination.add(3).write(typed as usize);
+        }
+    }
+}
+
+/// Read a cached callable's public maxsize or typed flag as a dictionary value.
+///
+/// # Safety
+/// The owner roots a four-word cache callable. Its last two words contain
+/// an immutable signed capacity and a boolean, in that order.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_callable_cache_parameter(
+    wrapper: *const usize,
+    typed: u32,
+) -> *const Object {
+    use super::json::readonly::document::Value;
+    // SAFETY: generated code verified the wrapper layout.
+    let value = unsafe {
+        if typed != 0 {
+            Value::Bool(*wrapper.add(3) != 0)
+        } else {
+            let size = *wrapper.add(2) as i64;
+            if size < 0 {
+                Value::Null
+            } else {
+                Value::Integer(crate::Int::from_usize(size as usize))
+            }
+        }
+    };
+    Rc::into_raw(value.object())
 }
 
 /// Checks the declared identity of a record, including across codegen units.
@@ -397,6 +453,10 @@ pub(super) fn release_sequence_words(kind: WordKind, values: Vec<usize>) {
     release(Release::Sequence(kind, values));
 }
 
+pub(super) fn release_table(table: Box<dyn super::mappings::ReleaseEntries>) {
+    release(Release::Table(table, 0));
+}
+
 fn release(owner: Release) {
     PENDING_RELEASES.with(|slot| {
         // SAFETY: a non-null pointer belongs to the enclosing release on this
@@ -418,8 +478,17 @@ fn release(owner: Release) {
             let siblings = pending.borrow().len();
             match current {
                 // SAFETY: each entry transfers one live owner of this record.
-                Release::Record(record) => unsafe { release_record_owner(record) },
+                Release::Record(record) => unsafe { release_record_owner(record, &pending) },
+                // SAFETY: an unfinished frame owns the standalone allocation and remaining fields.
+                Release::Fields(record, next) => unsafe {
+                    release_standalone_fields(record, descriptor(record), next, &pending);
+                },
                 Release::Object(object) => drop(object),
+                Release::Table(mut table, mut next) => {
+                    if table.release_next(&mut next) {
+                        pending.borrow_mut().push(Release::Table(table, next));
+                    }
+                }
                 Release::Sequence(kind, mut values) => {
                     if let Some(word) = values.pop() {
                         // SAFETY: the sequence transferred this independently owned word.
@@ -444,7 +513,7 @@ fn release(owner: Release) {
 
 /// # Safety
 /// The caller transfers one live record owner on its execution thread.
-unsafe fn release_record_owner(payload: *const usize) {
+unsafe fn release_record_owner(payload: *const usize, pending: &RefCell<Vec<Release>>) {
     // SAFETY: the payload follows its live header, and this thread owns access.
     let header = unsafe { &*payload.cast::<Header>().sub(1) };
     let count = header.references.get();
@@ -461,29 +530,51 @@ unsafe fn release_record_owner(payload: *const usize) {
         // SAFETY: no live owner can reach this record now. Other records in
         // the block, and an active cursor, keep their own storage alive.
         unsafe {
-            release_fields::<true>(payload, descriptor);
+            release_fields::<true>(payload, descriptor, 0..descriptor.length);
             Rc::decrement_strong_count(block);
         }
     } else {
-        // SAFETY: the standalone constructor already checked this exact layout,
-        // and the immutable descriptor cannot change during the record's lifetime.
-        unsafe {
-            release_fields::<false>(payload, descriptor);
-            let size = size_of::<Header>() + descriptor.allocated_words() * size_of::<usize>();
-            let layout = Layout::from_size_align_unchecked(size, align_of::<Header>());
-            dealloc(payload.cast::<Header>().sub(1).cast_mut().cast(), layout);
-        }
+        // SAFETY: the final owner transfers this standalone allocation and all its fields.
+        unsafe { release_standalone_fields(payload, descriptor, 0, pending) };
     }
 }
 
-/// # Safety
+unsafe fn release_standalone_fields(
+    payload: *const usize,
+    descriptor: &RecordDescriptor,
+    mut next: usize,
+    pending: &RefCell<Vec<Release>>,
+) {
+    let siblings = pending.borrow().len();
+    while next < descriptor.length {
+        let end = (next + 32).min(descriptor.length);
+        // SAFETY: this frame owns the untouched fields starting at next.
+        unsafe { release_fields::<false>(payload, descriptor, next..end) };
+        next = end;
+        if next < descriptor.length && pending.borrow().len() > siblings {
+            pending.borrow_mut().push(Release::Fields(payload, next));
+            return;
+        }
+    }
+    // SAFETY: every field has transferred its owner and the constructor used this layout.
+    unsafe {
+        let size = size_of::<Header>() + descriptor.allocated_words() * size_of::<usize>();
+        let layout = Layout::from_size_align_unchecked(size, align_of::<Header>());
+        dealloc(payload.cast::<Header>().sub(1).cast_mut().cast(), layout);
+    }
+}
+
 /// The caller transfers the final record's fields with their original descriptor.
-unsafe fn release_fields<const PACKED: bool>(payload: *const usize, descriptor: &RecordDescriptor) {
+unsafe fn release_fields<const PACKED: bool>(
+    payload: *const usize,
+    descriptor: &RecordDescriptor,
+    fields: std::ops::Range<usize>,
+) {
     // Dataclass fields release in definition order. Tuples release their last
     // element first. Both kinds use the same native record layout.
     // SAFETY: semantic metadata, when present, lives as long as the descriptor.
     let is_tuple = unsafe { descriptor.semantics.as_ref() }.is_some_and(|value| value.kind == 1);
-    for field in 0..descriptor.length {
+    for field in fields {
         let index = if is_tuple {
             descriptor.length - 1 - field
         } else {
@@ -699,6 +790,29 @@ mod tests {
             drop(saved);
         }
         assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn wide_record_releases_every_initialized_field() {
+        let kinds = [5; 65];
+        let layout = RecordDescriptor {
+            length: kinds.len(),
+            kinds: kinds.as_ptr(),
+            semantics: std::ptr::null(),
+        };
+        let leaf = crate::objects::Words::new(2).into_object();
+        let weak = Rc::downgrade(&leaf);
+        // SAFETY: the descriptor outlives the record and populated fields retain a live object.
+        unsafe {
+            let row = imre_record_try_new(&layout);
+            assert!(!row.is_null());
+            for field in (0..kinds.len()).step_by(2) {
+                replace(row, field, Rc::as_ptr(&leaf) as usize, 5);
+            }
+            drop(leaf);
+            imre_record_release(row);
+        }
+        assert_eq!(weak.strong_count(), 0);
     }
 
     #[test]

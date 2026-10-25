@@ -2,6 +2,10 @@
 
 The [four original Linux occurrences](wait-races-linux.json) preserve the
 unchanged CPython test bodies, assertions, and fixture hooks at O0 and O3.
+The replay uses the verified Linux archive from the [prospective build](https://github.com/astral-sh/imre/actions/runs/40179519955)
+for [the merged wait implementation](https://github.com/astral-sh/imre/pull/771).
+The three passing operations and the stopped-status failure occupy their original
+four slots in each 353-occurrence report.
 
 | Original method | Native observation |
 | --- | --- |

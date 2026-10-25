@@ -286,7 +286,7 @@ impl Emitter<'_, '_> {
                         &self.module.types,
                     )
                 };
-                let fields = [
+                let mut fields = vec![
                     ("ptr", args[0].value.operand.clone()),
                     ("ptr", cwd),
                     ("ptr", env),
@@ -299,7 +299,24 @@ impl Emitter<'_, '_> {
                     ("i1", args[9].value.operand.clone()),
                     ("i1", args[11].value.operand.clone()),
                 ];
-                let layout = "{ptr, ptr, ptr, ptr, i64, i32, i32, i32, i32, i1, i1}";
+                // The original configuration remains the prefix. Only borrowed
+                // streams need the three-word trailer in runtime RedirectConfig.
+                let layout = if [12, 0, 4]
+                    .into_iter()
+                    .any(|shift| matches!((streams >> shift) & 15, 6 | 7))
+                {
+                    for (index, shift) in [(4, 12), (5, 0), (6, 4)] {
+                        let word = if matches!((streams >> shift) & 15, 6 | 7) {
+                            self.word(&args[index].value)
+                        } else {
+                            "0".to_owned()
+                        };
+                        fields.push(("i64", word));
+                    }
+                    "{ptr, ptr, ptr, ptr, i64, i32, i32, i32, i32, i1, i1, i64, i64, i64}"
+                } else {
+                    "{ptr, ptr, ptr, ptr, i64, i32, i32, i32, i32, i1, i1}"
+                };
                 let config = self.entry_alloca(layout);
                 let mut aggregate = "poison".to_owned();
                 for (i, (ty, value)) in fields.iter().enumerate() {
@@ -493,6 +510,7 @@ impl Emitter<'_, '_> {
                 let (ptr, tag) = match path.value.ty {
                     Type::None => ("null", 2),
                     Type::Bytes => (path.value.operand.as_str(), 1),
+                    Type::Path | Type::PurePath(_) => (path.value.operand.as_str(), 3),
                     _ => (path.value.operand.as_str(), 0),
                 };
                 let (fd, fd_kind) = match fd.value.ty {
@@ -503,6 +521,90 @@ impl Emitter<'_, '_> {
                 let ignore = self.instruction(format!("zext i1 {} to i32", ignore.value.operand));
                 self.checked_line(format!("call void @imre_shutil_rmtree(ptr {ptr}, i32 {tag}, i32 {ignore}, i64 {fd}, i32 {fd_kind}, ptr null, ptr null, ptr null, ptr null)"));
                 none()
+            }
+            ProcessOperation::IgnorePatterns => {
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_shutil_ignore_patterns_call(ptr {}, ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand, args[2].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::TreeErrorArgs => {
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(returns)));
+                let ptr = self.checked_instruction(format!(
+                    "call ptr @imre_shutil_tree_error_args(ptr {}, ptr @{layout})",
+                    args[0].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand: ptr,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::CopyTree(issue) => {
+                let [src, dst, links, ignore, stat, dangling, existing] = args else {
+                    unreachable!()
+                };
+                let tag = |ty| match ty {
+                    Type::Str => 0,
+                    Type::Bytes => 1,
+                    Type::Path => 2,
+                    _ => unreachable!(),
+                };
+                let (stat, target, context, repr) = if stat.value.ty == Type::Bool {
+                    (
+                        self.instruction(format!("zext i1 {} to i32", stat.value.operand)),
+                        "null".into(),
+                        "null".into(),
+                        0,
+                    )
+                } else {
+                    let (_, result) = self.module.types.signature(stat.value.ty).unwrap();
+                    let target = self.instruction(format!("load ptr, ptr {}", stat.value.operand));
+                    let slot = self.instruction(format!(
+                        "getelementptr %callable, ptr {}, i32 0, i32 1",
+                        stat.value.operand
+                    ));
+                    let context = self.instruction(format!("load ptr, ptr {slot}"));
+                    (
+                        "0".into(),
+                        target,
+                        context,
+                        representation_kind(result, &self.module.types),
+                    )
+                };
+                let [links, dangling, existing] = [links, dangling, existing]
+                    .map(|arg| self.instruction(format!("zext i1 {} to i32", arg.value.operand)));
+                let (ignore_target, ignore_context, ignore_set) = if ignore.value.ty == Type::None {
+                    ("null".into(), "null".into(), 0)
+                } else {
+                    let (_, ret) = self.module.types.signature(ignore.value.ty).unwrap();
+                    let target =
+                        self.instruction(format!("load ptr, ptr {}", ignore.value.operand));
+                    let slot = self.instruction(format!(
+                        "getelementptr %callable, ptr {}, i32 0, i32 1",
+                        ignore.value.operand
+                    ));
+                    let context = self.instruction(format!("load ptr, ptr {slot}"));
+                    (
+                        target,
+                        context,
+                        u32::from(self.module.types.set_element(ret).is_some()),
+                    )
+                };
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(issue)));
+                let operand = self.checked_instruction(format!(
+                    "call i64 @imre_shutil_copytree(ptr {}, i32 {}, ptr {}, i32 {}, i32 {links}, i32 {stat}, i32 {dangling}, i32 {existing}, ptr @{layout}, ptr {target}, ptr {context}, i32 {repr}, ptr {ignore_target}, ptr {ignore_context}, i32 {ignore_set})",
+                    src.value.operand, tag(src.value.ty), dst.value.operand, tag(dst.value.ty)));
+                self.unpack_word(operand, returns)
             }
             ProcessOperation::Copy(op) => {
                 let tag = |ty| match ty {

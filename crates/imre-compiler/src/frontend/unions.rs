@@ -4,6 +4,49 @@ use super::*;
 use crate::ir::InstanceType;
 
 impl Checker<'_> {
+    /// Store a protocol operand once, then provide the test and exact values for
+    /// its two possible layouts. The caller assigns the operand to the returned slot.
+    pub(super) fn protocol_alternatives(&mut self, ty: Type) -> Option<(usize, Expr, Expr, Expr)> {
+        if self.types.payload(ty).is_none() && self.types.members(ty).is_none() {
+            return None;
+        }
+        let slot = self.hidden(ty);
+        let (test, first, second) = if let Some(payload) = self.types.payload(ty) {
+            (
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::IsNone, vec![self.local(slot)]),
+                },
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                },
+                Expr {
+                    ty: payload,
+                    kind: ExprKind::Unwrap(Box::new(self.local(slot))),
+                },
+            )
+        } else {
+            let members = self.types.members(ty).unwrap();
+            let project = |ty| Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::UnionProject, vec![self.local(slot)]),
+            };
+            (
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(
+                        Builtin::IsInstance(vec![ir::InstanceType::Exact(members[0])]),
+                        vec![self.local(slot)],
+                    ),
+                },
+                project(members[0]),
+                project(members[1]),
+            )
+        };
+        Some((slot, test, first, second))
+    }
+
     /// Reads a proved member through explicit ownership-preserving projection.
     /// Optional members keep zero intact until a separate non-None proof exists.
     pub(super) fn read_local(&self, slot: usize) -> Expr {
@@ -80,9 +123,37 @@ impl Checker<'_> {
         Expr { ty, kind }
     }
 
+    /// Compare numeric values without changing the stored member used by repr or identity.
+    pub(super) fn numeric_union_comparison(&self, values: Vec<Expr>) -> Vec<Expr> {
+        if !values.iter().any(|v| self.types.is_bool_or_int(v.ty))
+            || !values
+                .iter()
+                .all(|v| matches!(v.ty, Type::Int | Type::Bool) || self.types.is_bool_or_int(v.ty))
+        {
+            return values;
+        }
+        values
+            .into_iter()
+            .map(|value| {
+                let cast = match value.ty {
+                    Type::Int => return value,
+                    Type::Bool => Builtin::Int,
+                    _ => Builtin::UnionProject,
+                };
+                Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(cast, vec![value]),
+                }
+            })
+            .collect()
+    }
+
     /// Class arguments are static builtin/nominal classes or tuples of them;
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::SimpleNamespace)) {
+            return Ok(vec![InstanceType::SimpleNamespace]);
+        }
         if let ast::Expr::Tuple(tuple) = expression {
             let mut result = Vec::new();
             for value in &tuple.elts {

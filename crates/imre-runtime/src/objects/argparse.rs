@@ -41,10 +41,22 @@ enum Kind {
     Str,
     Path,
     Bool,
+    Class,
+}
+
+#[derive(Deserialize, Copy, Clone, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum Action {
+    Store,
+    StoreConst,
+    StoreTrue,
+    StoreFalse,
+    Count,
 }
 
 #[derive(Deserialize)]
 struct OptionSpec {
+    action: Action,
     flag: String,
     dest: String,
     positional: bool,
@@ -437,7 +449,7 @@ impl Parser {
                             break;
                         }
                         if let Some((slot, option)) = option
-                            && option.kind != Kind::Bool
+                            && option.takes_value()
                         {
                             take = Some((
                                 slot,
@@ -465,8 +477,12 @@ impl Parser {
                                 ),
                             ));
                         }
-                        if let Some((slot, _)) = option {
-                            values[slot] = Some(Bound::Bool(true));
+                        if let Some((slot, option)) = option {
+                            values[slot] = Some(
+                                option
+                                    .flag_value(values[slot].take())
+                                    .map_err(|e| Stop::Error(self, e))?,
+                            );
                         } else {
                             clustered_help = true;
                         }
@@ -484,7 +500,7 @@ impl Parser {
             };
             let option = &self.options[slot];
             let taken = if let Some(value) = explicit {
-                if option.kind == Kind::Bool {
+                if !option.takes_value() {
                     return Err(Stop::Error(
                         self,
                         format!(
@@ -505,8 +521,13 @@ impl Parser {
                     ));
                 }
                 vec![value]
-            } else if option.kind == Kind::Bool {
-                Vec::new()
+            } else if !option.takes_value() {
+                values[slot] = Some(
+                    option
+                        .flag_value(values[slot].take())
+                        .map_err(|e| Stop::Error(self, e))?,
+                );
+                continue;
             } else {
                 let start = index;
                 let (min, max) = option.nargs.bounds();
@@ -596,6 +617,10 @@ impl Parser {
 }
 
 impl OptionSpec {
+    fn takes_value(&self) -> bool {
+        self.action == Action::Store
+    }
+
     fn flags(&self) -> impl Iterator<Item = &str> {
         std::iter::once(self.flag.as_str()).chain(self.aliases.iter().map(String::as_str))
     }
@@ -680,10 +705,12 @@ pub unsafe extern "C" fn imre_argparse_text(
 /// The compiler roots the inputs. `layout` and each descriptor in `children`
 /// match the inferred fields for that parser. The child table contains one
 /// descriptor per declared subcommand in order, or is null for a flat parser.
+/// For parse_known_args, `pair_layout` describes (namespace, list[str]); otherwise it is null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_argparse_parse(
     layout: *const RecordDescriptor,
     children: *const *const RecordDescriptor,
+    pair_layout: *const RecordDescriptor,
     schema: *const Str,
     description: *const Str,
     argv: *const Object,
@@ -711,7 +738,7 @@ pub unsafe extern "C" fn imre_argparse_parse(
         .map(|value| value.as_str())
         .collect::<Vec<_>>();
     let parsed = match parser.parse(&args).and_then(|parsed| {
-        if parsed.extras.is_empty() {
+        if !pair_layout.is_null() || parsed.extras.is_empty() {
             Ok(parsed)
         } else {
             Err(Stop::Error(
@@ -781,6 +808,21 @@ pub unsafe extern "C" fn imre_argparse_parse(
                 _ => dest.write(word),
             }
         }
-        result
+        if pair_layout.is_null() {
+            return result;
+        }
+        let mut extras = Words::new(3);
+        extras.values.extend(
+            parsed
+                .extras
+                .iter()
+                .map(|value| Rc::into_raw(Rc::new(Str::new(value))) as usize),
+        );
+        let pair = imre_record_new(pair_layout);
+        pair.cast::<*mut usize>().write(result);
+        pair.add(1)
+            .cast::<*const Object>()
+            .write(Rc::into_raw(extras.into_object()));
+        pair
     }
 }

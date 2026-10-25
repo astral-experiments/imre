@@ -192,6 +192,19 @@ impl<'a> Flags<'a> {
     }
 }
 
+/// A class constant must resolve to the builtin in the builder's lexical scope.
+fn builtin_constant<'a>(
+    value: &'a ast::Expr,
+    module: &SourceModule,
+    locals: &HashSet<String>,
+) -> Option<&'a str> {
+    let name = value.as_name_expr()?.id.as_str();
+    (annotations::is_builtin_type(name)
+        && !module.bindings.contains_key(name)
+        && !locals.contains(name))
+    .then_some(name)
+}
+
 fn option(
     call: &ast::ExprCall,
     graph: &SourceGraph,
@@ -199,6 +212,7 @@ fn option(
     types: &Types,
     classes: &Classes,
     flags: &Flags,
+    locals: &HashSet<String>,
 ) -> Result<OptionField, String> {
     let module = &graph.modules[id];
     let Some((flag, rest)) = call.arguments.args.split_first() else {
@@ -315,20 +329,66 @@ fn option(
         };
         required = value.value;
     }
-    if let Some(&action) = kw.get("action") {
-        match literal(action, module)? {
-            "store" => {}
-            "store_true"
-                if !positional
-                    && !kw.contains_key("type")
-                    && !kw.contains_key("nargs")
-                    && !kw.contains_key("const")
-                    && !kw.contains_key("choices") =>
+    let action = kw
+        .get("action")
+        .map(|expr| literal(expr, module))
+        .transpose()?
+        .unwrap_or("store");
+    if action != "store"
+        && (positional
+            || kw.contains_key("type")
+            || kw.contains_key("nargs")
+            || kw.contains_key("choices")
+            || action != "store_const" && kw.contains_key("const"))
+    {
+        return Err(module.error(call, "unsupported argparse action or action keywords"));
+    }
+    match action {
+        "store" => {}
+        "store_true" | "store_false" => element = Type::Bool,
+        "count" => {
+            if let Some(value) = kw.get("default")
+                && !matches!(value, ast::Expr::NoneLiteral(_))
+                && numeric_literal(value, Type::Int).is_none()
             {
-                element = Type::Bool
+                return Err(
+                    module.error(call, "argparse count requires an integer or None default")
+                );
             }
-            _ => return Err(module.error(action, "unsupported argparse action or action keywords")),
+            element = Type::Int;
         }
+        "store_const" => {
+            let invalid = || {
+                module.error(
+                    call,
+                    "argparse store_const requires representable literal values",
+                )
+            };
+            let kind = |key| {
+                Ok(match kw.get(key).copied() {
+                    None | Some(ast::Expr::NoneLiteral(_)) => None,
+                    Some(ast::Expr::StringLiteral(_)) => Some(Type::Str),
+                    Some(ast::Expr::BooleanLiteral(_)) => Some(Type::Bool),
+                    Some(v) if builtin_constant(v, module, locals).is_some() => {
+                        Some(Type::BuiltinClass)
+                    }
+                    Some(v) if numeric_literal(v, Type::Int).is_some() => Some(Type::Int),
+                    Some(v) if numeric_literal(v, Type::Float).is_some() => Some(Type::Float),
+                    _ => return Err(invalid()),
+                })
+            };
+            element = match (kind("const")?, kind("default")?) {
+                (None, None) => Type::Str,
+                (Some(ty), None) | (None, Some(ty)) => ty,
+                (Some(left), Some(right)) if left == right => left,
+                // The string field below also supports integer constants and defaults.
+                (Some(Type::Int), Some(Type::Str)) | (Some(Type::Str), Some(Type::Int)) => {
+                    Type::Str
+                }
+                _ => return Err(invalid()),
+            };
+        }
+        _ => return Err(module.error(call, "unsupported argparse action")),
     }
     // argparse converts strings but preserves an integer supplied as a default
     // or constant, even when the action would read a string from argv.
@@ -349,12 +409,20 @@ fn option(
     let int_constant = kw.get("const").is_some_and(|v| mixed_integer(v));
     let constant_number;
     let constant = match kw.get("const").copied() {
-        None if element == Type::Bool => Some("True"),
+        None if action == "store_true" => Some("True"),
+        None if action == "store_false" => Some("False"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
-        Some(value) if nargs == "optional" && value.is_string_literal_expr() => {
+        Some(value) if element == Type::BuiltinClass => builtin_constant(value, module, locals),
+        Some(ast::Expr::BooleanLiteral(value)) if action == "store_const" => {
+            Some(if value.value { "True" } else { "False" })
+        }
+        Some(value)
+            if (nargs == "optional" || action == "store_const")
+                && value.is_string_literal_expr() =>
+        {
             Some(literal(value, module)?)
         }
-        Some(value) if nargs == "optional" => {
+        Some(value) if nargs == "optional" || action == "store_const" => {
             constant_number = stored_number(value).ok_or_else(|| {
                 module.error(
                     value,
@@ -432,8 +500,10 @@ fn option(
     let enum_default_text;
     let default_number;
     let default = match kw.get("default").copied() {
-        None if element == Type::Bool => Some("False"),
+        None if action == "store_true" => Some("False"),
+        None if action == "store_false" => Some("True"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
+        Some(value) if element == Type::BuiltinClass => builtin_constant(value, module, locals),
         Some(expr @ ast::Expr::StringLiteral(_))
             if element == Type::Str
                 || !many && matches!(element, Type::Path | Type::Int | Type::Float) =>
@@ -515,6 +585,7 @@ fn option(
         Type::Float => "float",
         Type::Path => "path",
         Type::Bool => "bool",
+        Type::BuiltinClass => "class",
         _ => unreachable!(),
     };
     let converter = kw
@@ -525,7 +596,7 @@ fn option(
             .is_some_and(|v| numeric_literal(v, ty).is_some())
     };
     let optional = (!required && default.is_none() && !(positional && nargs == "zero_or_more"))
-        || (!positional && nargs == "optional" && constant.is_none());
+        || ((!positional && nargs == "optional" || action == "store_const") && constant.is_none());
     let list_default = many && !required && default.is_some();
     let ty = if many {
         let list = types.list(element);
@@ -557,7 +628,7 @@ fn option(
         name: dest.clone(),
         annotation: flag.clone(),
         ty: if optional { types.optional(ty) } else { ty },
-        option: json!({ "flag": flag_name, "dest": dest, "positional": positional, "aliases": aliases, "enum_default": enum_default.map(|(_, tag)| tag), "kind": kind, "nargs": nargs, "constant": constant, "list_default":list_default, "required": required,
+        option: json!({ "flag": flag_name, "dest": dest, "positional": positional, "aliases": aliases, "action": action, "enum_default": enum_default.map(|(_, tag)| tag), "kind": kind, "nargs": nargs, "constant": constant, "list_default":list_default, "required": required,
             "choices": choices, "range":range, "has_choices": kw.contains_key("choices"), "int_default": int_default || element == Type::Int && numeric_kw("default", element),
             "int_constant": int_constant || element == Type::Int && numeric_kw("const", element),
             "float_default": element == Type::Float && numeric_kw("default", element),
@@ -762,7 +833,12 @@ impl<'ast> Visitor<'ast> for Uses<'_> {
             && names(&attr.value, self.builder)
             && matches!(
                 attr.attr.as_str(),
-                "parse_args" | "format_help" | "format_usage" | "print_help" | "print_usage"
+                "parse_args"
+                    | "parse_known_args"
+                    | "format_help"
+                    | "format_usage"
+                    | "print_help"
+                    | "print_usage"
             )
         {
             self.operations.push(call.start());
@@ -927,6 +1003,13 @@ impl Parsers {
                         };
                     register(name, &builders)?;
                     builders.push(builder.to_owned());
+                    let mut locals = crate::narrowing::assigned_names(&function.body);
+                    locals.extend(
+                        function
+                            .parameters
+                            .iter_non_variadic_params()
+                            .map(|p| p.name().to_string()),
+                    );
                     let read_options =
                         |builder: &str,
                          flags: &Flags,
@@ -960,7 +1043,7 @@ impl Parsers {
                                     break;
                                 }
                                 let mut field =
-                                    option(add, graph, module_id, types, classes, flags)?;
+                                    option(add, graph, module_id, types, classes, flags, &locals)?;
                                 if let Some(group) = group {
                                     field.option["group"] = json!(group);
                                 }
@@ -1262,7 +1345,7 @@ impl Checker<'_> {
             kind: ExprKind::Str(parser.schema.clone()),
         };
         let method = call.func.as_attribute_expr().unwrap().attr.as_str();
-        if method != "parse_args" {
+        if !matches!(method, "parse_args" | "parse_known_args") {
             let print = method.starts_with("print");
             let file = match (
                 call.arguments.args.as_ref(),
@@ -1318,7 +1401,7 @@ impl Checker<'_> {
                 return Err(error(
                     self.source,
                     call,
-                    "argparse parse_args accepts one argument list",
+                    &format!("argparse {method} accepts one argument list"),
                 ));
             }
         };
@@ -1341,10 +1424,16 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
             },
         };
+        let namespace = Type::Class(parser.class);
         Ok(Some(Expr {
-            ty: Type::Class(parser.class),
+            ty: if method == "parse_known_args" {
+                self.types.tuple(vec![namespace, argv_type])
+            } else {
+                namespace
+            },
             kind: ExprKind::Builtin(
                 Builtin::ParseArgs {
+                    namespace: parser.class,
                     children: parser.children.clone(),
                     process_argv: explicit.is_none(),
                 },
@@ -1371,21 +1460,26 @@ impl Checker<'_> {
         }
     }
 
-    pub(super) fn enter_namespace_guards(&mut self, test: &ast::Expr, body: &[ast::Stmt]) {
+    pub(super) fn enter_namespace_guards(
+        &mut self,
+        test: &ast::Expr,
+        truth: bool,
+        body: &[ast::Stmt],
+    ) {
         if let ast::Expr::BoolOp(value) = test
-            && value.op == ast::BoolOp::And
+            && (value.op == ast::BoolOp::And && truth || value.op == ast::BoolOp::Or && !truth)
         {
             // A later operand may rebind the receiver even if the body does not.
             let mut reassigned = false;
             for operand in value.values.iter().rev() {
-                if !reassigned && let Some(guard) = self.namespace_guard(operand, body) {
+                if !reassigned && let Some(guard) = self.namespace_guard(operand, truth, body) {
                     self.namespace_guards.push(guard);
                 }
                 if !matches!(operand, ast::Expr::Attribute(attr) if attr.value.is_name_expr()) {
                     reassigned = true
                 }
             }
-        } else if let Some(guard) = self.namespace_guard(test, body) {
+        } else if let Some(guard) = self.namespace_guard(test, truth, body) {
             self.namespace_guards.push(guard);
         }
     }
@@ -1394,11 +1488,26 @@ impl Checker<'_> {
     /// receiver keeps the same binding, even when another alias survives calls.
     pub(super) fn namespace_guard(
         &self,
-        test: &ast::Expr,
+        mut test: &ast::Expr,
+        mut truth: bool,
         body: &[ast::Stmt],
     ) -> Option<(usize, usize)> {
-        let ast::Expr::Attribute(attr) = test else {
-            return None;
+        while let ast::Expr::UnaryOp(unary) = test
+            && unary.op == ast::UnaryOp::Not
+        {
+            truth = !truth;
+            test = &unary.operand;
+        }
+        let attr = match test {
+            ast::Expr::Attribute(attr) if truth => attr,
+            ast::Expr::Compare(compare) => {
+                let (operand, present) = narrowing::none_identity(compare, truth)?;
+                if !present {
+                    return None;
+                }
+                operand.as_attribute_expr()?
+            }
+            _ => return None,
         };
         let name = attr.value.as_name_expr()?.id.as_str();
         let slot = *self.names.get(name)?;

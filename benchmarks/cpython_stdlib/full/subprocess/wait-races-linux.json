@@ -1,18 +1,26 @@
 {
-  "imre_revision": "a5dcb087c252d2a60194d20736eb0ed2f27e7f2d",
-  "tested_tree": "1d351deef732d91bce96a8ac65d9bc2a4c2dbd15",
+  "schema": "imre.subprocess.wait-races/v1",
+  "imre_revision": "1268f4f81daa8be0a5550c2542c1432c80ccf125",
+  "tested_tree": "ea25317cdff8490d3f9b9047e592e54fdaec4b5e",
+  "hosted": {
+    "run": 40179519955,
+    "job": 121127368875,
+    "artifact": 12593947003,
+    "archive_sha256": "944bbd829313e8d95b82f2affd5d77783436545fa6caaedb681c86db605f6684",
+    "product_merge": "eca8b9df47ba0be2515c94f069784f6512a2f94f"
+  },
   "reports": [
     {
       "opt_level": 0,
       "threadsafe": {
         "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
         "opt_level": 0,
-        "actor_sha256": "874f1707391fe6f6205ae10a73d4ebd4c21bf27efa02670f5a1ebbf4356bcfe6",
-        "llvm_ir_sha256": "e323f4b845fcbceef5d2653dcc98d8cbc523ffc27a3762a134030e23e890f774",
+        "actor_sha256": "b015fdfb99a09a8e742cb54af542dc4448661cdd2d4f50bef28a7af4c679fd06",
+        "llvm_ir_sha256": "49bd3511d8843f7ac3894b315e6d58823197b938a9384b81de5c2907962906bb",
         "fixture_threads_sha256": "8c36ec94d1234d783fd360b1a2e7f9cf96d91b19a0351eae9282dc8a02635c25",
         "toolchain": {
-          "imre": "b37c0e1e833af34d66616374c216d6062c86c82b6a2c843631e990a8b08c27c1",
-          "runtime": "080c90e7ff9e28108b08004e5ca53d5f21894bf3d462b158cf687c2ec3fdbbd2",
+          "imre": "02978d09210450bedcd83e907e762a5adf8aeaf38c4082f421c2ce20ee45bb94",
+          "runtime": "f65d194a1ded52e61fea1191a44f276c6f528e6c63cdd954694bc38f21bea4b1",
           "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
         },
         "rows": {
@@ -115,15 +123,15 @@
       "external": {
         "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
         "opt_level": 0,
-        "actor_sha256": "b54d225e8c2fb7ecd79f5602f8f240ddbf46774cd44efdfa6734bfd8c339cc24",
+        "actor_sha256": "6d6b101242f165d894751c1962ab4dd975f17097cc9fd12e7ef4d7f355143310",
         "fixture_waitpid_sha256": "eebcf1dac0243d76f1f22e176f3a56d68a7d1cc5de34523114fb60217464cd2b",
         "positive_live_child": {
           "kernel_kill": "SIGTERM",
           "wait_status": -15
         },
         "toolchain": {
-          "imre": "b37c0e1e833af34d66616374c216d6062c86c82b6a2c843631e990a8b08c27c1",
-          "runtime": "080c90e7ff9e28108b08004e5ca53d5f21894bf3d462b158cf687c2ec3fdbbd2",
+          "imre": "02978d09210450bedcd83e907e762a5adf8aeaf38c4082f421c2ce20ee45bb94",
+          "runtime": "f65d194a1ded52e61fea1191a44f276c6f528e6c63cdd954694bc38f21bea4b1",
           "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
         },
         "rows": {
@@ -177,12 +185,12 @@
       "threadsafe": {
         "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
         "opt_level": 3,
-        "actor_sha256": "8486995b8323f50e38a181c095310f430e0dc4822306b0ce1d4395fa01813aa9",
-        "llvm_ir_sha256": "e323f4b845fcbceef5d2653dcc98d8cbc523ffc27a3762a134030e23e890f774",
+        "actor_sha256": "cc98f7bfd255402175c880c7e66c7342dd026413bd44dac263b96882002bcec3",
+        "llvm_ir_sha256": "49bd3511d8843f7ac3894b315e6d58823197b938a9384b81de5c2907962906bb",
         "fixture_threads_sha256": "8c36ec94d1234d783fd360b1a2e7f9cf96d91b19a0351eae9282dc8a02635c25",
         "toolchain": {
-          "imre": "b37c0e1e833af34d66616374c216d6062c86c82b6a2c843631e990a8b08c27c1",
-          "runtime": "080c90e7ff9e28108b08004e5ca53d5f21894bf3d462b158cf687c2ec3fdbbd2",
+          "imre": "02978d09210450bedcd83e907e762a5adf8aeaf38c4082f421c2ce20ee45bb94",
+          "runtime": "f65d194a1ded52e61fea1191a44f276c6f528e6c63cdd954694bc38f21bea4b1",
           "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
         },
         "rows": {
@@ -285,15 +293,15 @@
       "external": {
         "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
         "opt_level": 3,
-        "actor_sha256": "a70472a128235efb2ad10b0310d9395e8c3291d81d3b185691036466d063a117",
+        "actor_sha256": "3c1d53cd516226343cf0f0321b76df9fe93fff455a3735dec99a06961c1fda9c",
         "fixture_waitpid_sha256": "eebcf1dac0243d76f1f22e176f3a56d68a7d1cc5de34523114fb60217464cd2b",
         "positive_live_child": {
           "kernel_kill": "SIGTERM",
           "wait_status": -15
         },
         "toolchain": {
-          "imre": "b37c0e1e833af34d66616374c216d6062c86c82b6a2c843631e990a8b08c27c1",
-          "runtime": "080c90e7ff9e28108b08004e5ca53d5f21894bf3d462b158cf687c2ec3fdbbd2",
+          "imre": "02978d09210450bedcd83e907e762a5adf8aeaf38c4082f421c2ce20ee45bb94",
+          "runtime": "f65d194a1ded52e61fea1191a44f276c6f528e6c63cdd954694bc38f21bea4b1",
           "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
         },
         "rows": {
