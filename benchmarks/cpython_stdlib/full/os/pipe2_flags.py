@@ -45,6 +45,8 @@ show(os.pipe2(os.O_NONBLOCK))
 show(posix.pipe2(os.O_CLOEXEC))
 show(os.pipe2(os.O_CLOEXEC | os.O_NONBLOCK))
 show(posix.pipe2(Indexed()))
+show(os.pipe2(*(0,)))
+show(posix.pipe2(*(Indexed(),)))
 for flags in (-1, 1, 2147483647, 2147483648, -2147483649, 1 << 100):
     try:
         show(os.pipe2(flags))
@@ -81,6 +83,22 @@ except TypeError as err:
     print(str(err))
 try:
     show(os.pipe2(flags=evaluated(3)))
+except TypeError as err:
+    print("TypeError")
+    print(str(err))
+try:
+    show(posix.pipe2(*(evaluated(4), evaluated(5))))
+except TypeError as err:
+    print("TypeError")
+    print(str(err))
+noargs = ()
+try:
+    show(os.pipe2(*noargs))
+except TypeError as err:
+    print("TypeError")
+    print(str(err))
+try:
+    os.getuid(*(evaluated(6),))
 except TypeError as err:
     print("TypeError")
     print(str(err))

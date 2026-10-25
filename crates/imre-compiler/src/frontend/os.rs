@@ -15,12 +15,17 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let mut scope = calls::ArgumentScope::default();
         let mut supplied = Vec::new();
+        let mut excess = Vec::new();
         for arg in &call.arguments.args {
+            let before = supplied.len();
             if let ast::Expr::Starred(spread) = arg {
                 supplied.extend(scope.spread(self, spread)?);
             } else {
                 let value = self.expr(arg)?;
                 supplied.push(scope.hold(self, value));
+            }
+            if supplied.len() > size && supplied.len() > before {
+                excess.push(arg.range());
             }
         }
         for keyword in &call.arguments.keywords {
@@ -48,12 +53,12 @@ impl Checker<'_> {
         };
         if let Some(message) = message {
             // Mark only the bad binding sites; errors inside evaluated operands remain visible.
-            if call.arguments.args.len() < size {
+            if count < size {
                 self.graph
                     .checked_missing_argument(self.module, call.range());
             }
-            for arg in call.arguments.args.iter().skip(size) {
-                self.graph.checked_excess_argument(self.module, arg.range());
+            for range in excess {
+                self.graph.checked_excess_argument(self.module, range);
             }
             for keyword in &call.arguments.keywords {
                 self.graph
