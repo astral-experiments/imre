@@ -39,8 +39,13 @@ class NativeCase(unittest.TestCase):
 
 def run_case(toolchain, directory, case, original):
     fixture = FIXTURE.replace("FILENAME", repr(case.fn)).replace("MESSAGE_NUM", str(case.message_num))
-    helpers = [("BaseTest", "next_message"), ("BaseFileTest", "next_rec"), ("BaseFileTest", "assertLogFile")]
-    if case._testMethodName == "test_max_bytes_delay":
+    method = case._testMethodName
+    helpers = []
+    if method not in {"test_should_not_rollover", "test_max_bytes", "test_max_bytes_delay"}:
+        helpers.extend((("BaseTest", "next_message"), ("BaseFileTest", "next_rec")))
+    if method not in {"test_should_not_rollover", "test_should_rollover"}:
+        helpers.append(("BaseFileTest", "assertLogFile"))
+    if method == "test_max_bytes_delay":
         helpers.append((OWNER, "test_max_bytes"))
     for owner, name in helpers:
         fixture += "\n" + method_bytes(SOURCE, owner, name).decode()
