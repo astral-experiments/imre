@@ -121,3 +121,10 @@ for prefix in ["a", "é𐐨"]:
     print(len(dense))
     print(dense[:5])
     print(dense[-5:])
+
+# CPython returns the original object when substitution leaves one whole match
+# or literal untouched; constructing an empty result must retain the input too.
+for original in ["", "é", "$missing", "keep $missing", "$$"]:
+    print(Template(original).safe_substitute() is original)
+for original in ["", "é"]:
+    print(Template(original).substitute() is original)

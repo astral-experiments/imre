@@ -53,6 +53,8 @@ class Template:
 
     def _render(self, mapping: Mapping[str, object] | None, keywords: dict[str, object], safe: bool) -> str:
         source = self.template
+        if not source:
+            return source
         pieces: list[str] = []
         for match in _template_tokens.finditer(source):
             literal = match.group("literal")
