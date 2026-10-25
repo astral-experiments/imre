@@ -4746,6 +4746,44 @@ impl Emitter<'_, '_> {
             Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
             Builtin::Chr => self.call("imre_chr", Type::Str, &[&args[0].value]),
+            Builtin::Random(op) => {
+                use crate::ir::RandomOperation::*;
+                let values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
+                match op {
+                    Float => self.call("imre_random_float", Type::Float, &[]),
+                    Bits => self.call("imre_random_bits", Type::Int, &values),
+                    ChoiceIndex => self.call("imre_random_choice_index", Type::Int, &values),
+                    Seed => {
+                        let (symbol, params) = match values[0].ty {
+                            Type::None => ("imre_random_seed_none", &[][..]),
+                            Type::Int => ("imre_random_seed_int", &values[..1]),
+                            Type::Str => ("imre_random_seed_str", &values[..1]),
+                            Type::Bytes => ("imre_random_seed_bytes", &values[..1]),
+                            _ => unreachable!("checked random seed"),
+                        };
+                        self.void_call(symbol, params);
+                        none()
+                    }
+                    Randrange | Randint | ChoiceRange | RandrangeOne => {
+                        let mode = match op {
+                            Randrange => 0,
+                            Randint => 1,
+                            ChoiceRange => 2,
+                            RandrangeOne => 3,
+                            _ => unreachable!(),
+                        };
+                        let operand = self.checked_instruction(format!(
+                            "call i64 @imre_random_progression(i64 {}, i64 {}, i64 {}, i32 {mode})",
+                            values[0].operand, values[1].operand, values[2].operand
+                        ));
+                        self.owned(Value {
+                            ty: Type::Int,
+                            operand,
+                            small_integer: false,
+                        })
+                    }
+                }
+            }
             Builtin::Ord => {
                 let value = &args[0].value;
                 let kind = representation_kind(value.ty, &self.module.types);
@@ -8697,6 +8735,14 @@ declare i32 @imre_optional_str_equal(i64, i64)
 declare i64 @imre_int_parse(ptr)
 declare ptr @imre_input()
 declare ptr @imre_chr(i64)
+declare void @imre_random_seed_none()
+declare void @imre_random_seed_int(i64)
+declare void @imre_random_seed_str(ptr)
+declare void @imre_random_seed_bytes(ptr)
+declare double @imre_random_float()
+declare i64 @imre_random_bits(i64)
+declare i64 @imre_random_choice_index(i64)
+declare i64 @imre_random_progression(i64, i64, i64, i32)
 declare i64 @imre_ord(i64, i32)
 declare i64 @imre_int_pow(i64, i64)
 declare double @imre_int_negative_pow(i64, i64)

@@ -81,6 +81,7 @@ mod powers;
 mod processes;
 mod projected_equality;
 mod properties;
+mod random;
 mod readiness;
 mod record_inputs;
 mod records;
@@ -7280,6 +7281,8 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::SubprocessList2Cmdline)) => {
                 return self.subprocess_list2cmdline(call);
             }
+            Some(Binding::Intrinsic(Intrinsic::Random(op))) => return self.random_call(op, call),
+            Some(Binding::Intrinsic(Intrinsic::RandomChoice)) => return self.random_choice(call),
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
             Some(Binding::Intrinsic(Intrinsic::CopyTree)) => return self.shutil_copytree(call),

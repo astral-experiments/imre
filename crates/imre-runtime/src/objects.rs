@@ -41,6 +41,7 @@ mod os;
 mod paths;
 pub(crate) mod posixpath;
 mod processes;
+mod random;
 mod readiness;
 pub(crate) mod records;
 mod regexes;
