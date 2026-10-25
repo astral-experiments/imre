@@ -171,6 +171,8 @@ impl Checker<'_> {
                         | Type::None
                 )
             })
+            || types == [Type::Str; 2]
+            || types == [Type::Bytes; 2]
             || types == [Type::LogRecord; 2]
             || types == [Type::Logger; 2]
             || types == [Type::TimedFileHandler; 2]
@@ -180,7 +182,7 @@ impl Checker<'_> {
             return Err(error(
                 self.source,
                 node,
-                "identity comparisons require None, exceptions, enum members, loggers, or hash objects",
+                "identity comparison requires supported objects with a shared identity representation",
             ));
         }
         Ok(Self::identity_result(

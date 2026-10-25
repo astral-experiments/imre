@@ -263,6 +263,7 @@ pub(crate) enum Intrinsic {
     Fd(crate::ir::FdOperation),
     OpenFlag(&'static str),
     FsPath,
+    PosixNormcase,
     PosixPath(PosixPathOperation),
     Unquote,
 }
@@ -523,6 +524,7 @@ impl IntrinsicModule {
             (Self::Os, "getenv") => Intrinsic::GetEnv,
             (Self::Os, "getcwd") => Intrinsic::GetCwd,
             (Self::Os, "fspath") => Intrinsic::FsPath,
+            (Self::PosixPath, "normcase") => Intrinsic::PosixNormcase,
             (Self::Os, "devnull") => Intrinsic::OsDevnull,
             (Self::PosixPath, "exists") => Intrinsic::OsPathExists,
             (Self::PosixPath, "commonpath") => Intrinsic::PosixPath(PosixPathOperation::Commonpath),

@@ -26,6 +26,7 @@ mod documents;
 mod enums;
 mod expansions;
 mod fixed_tuples;
+mod fspath;
 mod function_caches;
 mod functools;
 mod hashlib;
@@ -98,6 +99,20 @@ impl ClassInfo {
     fn new(graph: &SourceGraph, types: &Types) -> Result<Self, String> {
         let mut declarations = Classes::collect(graph)?;
         types.set_exception_declarations(declarations.exception_declarations.clone());
+        types.set_pathlike_records(
+            declarations
+                .definitions
+                .iter()
+                .enumerate()
+                .filter_map(|(id, class)| {
+                    class
+                        .methods
+                        .iter()
+                        .any(|method| method.name.as_str() == "__fspath__")
+                        .then_some(id)
+                })
+                .collect(),
+        );
         types.set_custom_truth(
             declarations
                 .definitions
@@ -5731,12 +5746,8 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::CopyFile)) => return self.shutil_copyfile(call),
-            Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
-                self.reject_builtin_keywords(call)?;
-                let [path] = call.arguments.args.as_ref() else {
-                    return Err(error(self.source, call, "os.fspath requires one path"));
-                };
-                return self.fspath_argument(path);
+            Some(Binding::Intrinsic(symbol @ (Intrinsic::FsPath | Intrinsic::PosixNormcase))) => {
+                return self.public_fspath(call, symbol == Intrinsic::PosixNormcase);
             }
             Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return self.log_formatter(call),
             Some(Binding::Intrinsic(Intrinsic::MakeLogRecord)) => {
