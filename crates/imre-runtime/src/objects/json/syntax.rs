@@ -130,29 +130,33 @@ pub(super) fn decode_error(text: &str, fallback: serde_json::Error) -> Error {
         source: text,
         pos: 0,
     };
-    let issue = if text.starts_with('\u{feff}') {
-        Some((0, "Unexpected UTF-8 BOM (decode using utf-8-sig)"))
-    } else if let Err(failure) = cursor.value() {
+    let issue = if let Err(failure) = cursor.value() {
         Some(failure)
     } else {
         cursor.space();
         (cursor.pos < text.len()).then_some((cursor.pos, "Extra data"))
     };
-    let message = if let Some((at, message)) = issue {
-        let prefix = &text[..at];
-        let line = 1 + memchr::memchr_iter(b'\n', prefix.as_bytes()).count();
-        let column = 1 + prefix
-            .rsplit('\n')
-            .next()
-            .unwrap_or_default()
-            .chars()
-            .count();
+    match issue {
+        Some((at, message)) => error_at(text, at, message),
+        None => Error::new(Kind::JsonDecodeError, fallback.to_string()),
+    }
+}
+
+#[cold]
+pub(super) fn error_at(text: &str, at: usize, message: &str) -> Error {
+    let prefix = &text[..at];
+    let line = 1 + memchr::memchr_iter(b'\n', prefix.as_bytes()).count();
+    let column = 1 + prefix
+        .rsplit('\n')
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .count();
+    Error::new(
+        Kind::JsonDecodeError,
         format!(
             "{message}: line {line} column {column} (char {})",
             prefix.chars().count()
-        )
-    } else {
-        fallback.to_string()
-    };
-    Error::new(Kind::JsonDecodeError, message)
+        ),
+    )
 }

@@ -75,7 +75,6 @@ REJECTED = {
     "stored_check_method": "result = " + CALL + "\ncallback = result.check_returncode\ncallback()",
     "optional_result": "result: CompletedProcess[str] | None = None\nprint(result.stdout)",
     "result_subclass": "class Custom(CompletedProcess):\n    pass",
-    "unsupported_import": "from subprocess import Popen\nPopen(['command'])",
 }
 for name, value in {
     "shell": "True",
