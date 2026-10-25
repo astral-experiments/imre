@@ -58,10 +58,13 @@ compares complete failure messages, including first differing and extra list
 elements, Unicode, truncation, custom messages, and a subclass's failure class.
 It adds no upstream IDs.
 
-At each of O0 and O3: 0 fully native passes, 15 native bodies with host
-fixtures, 9 host-driven native operations (36 calls), 9 compile blockers,
-1,055 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
+At each of O0 and O3: 8 fully native passes, 8 native bodies with host
+fixtures, 9 host-driven native operations (36 calls), 10 compile blockers,
+1,053 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
 all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
+
+The [native loader example](NATIVE_LOADER.md) exercises the same original
+constructor with native default fixtures and identifies the seven blocked methods.
 
 Three additional complete equality methods are attempted at each level.
 `testAssertMultiLineEqualTruncates` constructs a TestCase with a method name;
@@ -106,8 +109,8 @@ exercise repeated child lookup, call counts, and positive and negative assertion
 `test_ordered_call_signature` uses the inherited string assertion to verify the
 representation of the recorded call, including keyword order. The [mock control](mock_protocol.py) checks
 call order, keyword order, nested return values, exception side effects, and complete
-failure text. Both the original method and the recording and assertion code execute
-in the native binary; the runner applies the original host fixture lifecycle.
+failure text. The original method, recording, assertions, and default fixture
+lifecycle execute in the native binary. CPython supplies discovery and the reference.
 
 `import unittest.mock`, `from unittest import mock`, and
 `from unittest.mock import Mock` expose the same native implementation.
@@ -125,13 +128,22 @@ tree can keep an exception instance as its `side_effect`.
 `test_assert_called_once_with` exercise the callable form of
 `TestCase.assertRaises` on real Mock methods. The last also calls a lambda
 that reads its local mock after a reset. These three complete methods use
-the same host fixture runner as the four above.
+the same [native default fixture entry](../../SUITE_RUNNER.md#running-a-method-with-native-default-fixtures)
+as the four above. Each receipt includes its verbose case ID, one-test summary,
+source blob, and complete method hash.
 
-Four additional original Mock methods have measured compile blockers. One
+Five additional original Mock methods have measured compile blockers. One
 reaches `TestCase.assertNotIn`. The three reset methods need constructor
 arguments (`parent` or `return_value`) or assign a mock as its own return value.
+`test_assert_called_exception_message` also reaches positional `str.format` at
+upstream `testmock.py:533`.
 The evidence records retain their original CPython passes, exact source lines,
 method hashes, and each native diagnostic. These are ordinary blockers.
 
 The subprocess and shutil owners retain their original suite evidence:
 an imported mock or an assertion control does not verify their product operations.
+
+The [default-fixture audit](DEFAULT_FIXTURE_AUDIT.md) records what happens when
+the shared entry attempts every original occurrence with the full CPython test
+package available. Each record identifies the native outcome or the first
+fixture or compiler blocker for that entry.
