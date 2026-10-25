@@ -61,21 +61,23 @@ fn windows_lower(source: &str) -> Str {
 }
 
 fn win_join(raw: &[Rc<Str>]) -> String {
-    let (mut drive, mut root, mut tail) = (String::new(), "", String::new());
+    let (mut drive, mut root, mut tail) = ("", "", String::new());
     for part in raw {
         let input = part.replace('/', "\\");
         let (d, r, t) = win_split(&input);
+        // ntpath.join compares the original drive spellings, including separators.
+        let d = &part[..d.len()];
         if !r.is_empty()
-            || (!d.is_empty() && d != drive && windows_lower(d) != windows_lower(&drive))
+            || (!d.is_empty() && d != drive && windows_lower(d) != windows_lower(drive))
         {
             if !d.is_empty() || drive.is_empty() {
-                drive = d.to_owned();
+                drive = d;
             }
             root = if r.is_empty() { "" } else { "\\" };
             tail = t.to_owned();
         } else {
             if !d.is_empty() {
-                drive = d.to_owned();
+                drive = d;
             }
             if !tail.is_empty() && !tail.ends_with('\\') {
                 tail.push('\\');
@@ -83,12 +85,13 @@ fn win_join(raw: &[Rc<Str>]) -> String {
             tail.push_str(t);
         }
     }
-    if !tail.is_empty() && root.is_empty() && !drive.is_empty() && !drive.ends_with([':', '\\']) {
-        drive.push('\\');
+    let mut path = drive.replace('/', "\\");
+    if !tail.is_empty() && root.is_empty() && !path.is_empty() && !path.ends_with([':', '\\']) {
+        path.push('\\');
     }
-    drive.push_str(root);
-    drive.push_str(&tail);
-    drive
+    path.push_str(root);
+    path.push_str(&tail);
+    path
 }
 
 impl PurePath {
@@ -126,7 +129,7 @@ impl PurePath {
             let mut fields = drive.split(sep);
             let host = fields.nth(2).unwrap_or_default();
             match fields.count() {
-                1 if !matches!(host, "" | "." | "?") => root = "\\",
+                1 if !matches!(host, "" | "." | "?" | "?.") => root = "\\",
                 3 => root = "\\",
                 _ => {}
             }

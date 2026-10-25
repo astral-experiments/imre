@@ -25,6 +25,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         Type::Exception
         | Type::NamedException(_)
         | Type::StringKeys
+        | Type::ImportException
         | Type::TimeoutExpired
         | Type::EventLoop
         | Type::Coroutine(_)
@@ -42,7 +43,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::Sha256
         | Type::RegexPattern
         | Type::RegexMatch
-        | Type::ExitCode
+        | Type::ExceptionField
         | Type::TextIO
         | Type::BinaryIO
         | Type::Iterator

@@ -1,0 +1,654 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "denominator": 223,
+  "fixture_dependent_ids": 56,
+  "reference_pass": 45,
+  "reference_skip": 11,
+  "sites": [
+    {
+      "line": 4,
+      "phase": "module import",
+      "source": "import unittest.mock",
+      "ids": []
+    },
+    {
+      "line": 53,
+      "phase": "module setup",
+      "source": "unittest.mock.patch('os.chdir', side_effect=AssertionError(\"shouldn't call os.chdir()\"))",
+      "ids": []
+    },
+    {
+      "line": 962,
+      "phase": "method decorator",
+      "source": "unittest.mock.patch('os.chmod')",
+      "ids": [
+        "test.test_shutil.TestCopyTree.test_copytree_winerror"
+      ]
+    },
+    {
+      "line": 972,
+      "phase": "mock attribute",
+      "source": "mock_patch.side_effect",
+      "ids": [
+        "test.test_shutil.TestCopyTree.test_copytree_winerror"
+      ]
+    },
+    {
+      "line": 1643,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_make_tarfile"
+      ]
+    },
+    {
+      "line": 1657,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_make_tarfile"
+      ]
+    },
+    {
+      "line": 1670,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_make_tarfile"
+      ]
+    },
+    {
+      "line": 1687,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_make_tarfile_without_rootdir"
+      ]
+    },
+    {
+      "line": 1699,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_make_tarfile_without_rootdir"
+      ]
+    },
+    {
+      "line": 1713,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_make_tarfile_with_explicit_curdir"
+      ]
+    },
+    {
+      "line": 1731,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_tarfile_vs_tar"
+      ]
+    },
+    {
+      "line": 1760,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_tarfile_vs_tar"
+      ]
+    },
+    {
+      "line": 1766,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_tarfile_vs_tar"
+      ]
+    },
+    {
+      "line": 1776,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_make_zipfile"
+      ]
+    },
+    {
+      "line": 1789,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_make_zipfile"
+      ]
+    },
+    {
+      "line": 1801,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_make_zipfile"
+      ]
+    },
+    {
+      "line": 1818,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_make_zipfile_without_rootdir"
+      ]
+    },
+    {
+      "line": 1831,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_make_zipfile_without_rootdir"
+      ]
+    },
+    {
+      "line": 1846,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_make_zipfile_with_explicit_curdir"
+      ]
+    },
+    {
+      "line": 1864,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_zipfile_vs_zip"
+      ]
+    },
+    {
+      "line": 1891,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_unzip_zipfile"
+      ]
+    },
+    {
+      "line": 1953,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_tarfile_root_owner"
+      ]
+    },
+    {
+      "line": 1979,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_make_archive_cwd_default"
+      ]
+    },
+    {
+      "line": 2021,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_make_archive_cwd_supports_root_dir"
+      ]
+    },
+    {
+      "line": 2031,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_make_tarfile_in_curdir"
+      ]
+    },
+    {
+      "line": 2040,
+      "phase": "reused module patch",
+      "source": "with no_chdir (os.chdir)",
+      "ids": [
+        "test.test_shutil.TestArchives.test_make_zipfile_in_curdir"
+      ]
+    },
+    {
+      "line": 2440,
+      "phase": "body",
+      "source": "unittest.mock.patch('shutil._win_path_needs_curdir', return_value=True)",
+      "ids": [
+        "test.test_shutil.TestWhich.test_cwd_win32",
+        "test.test_shutil.TestWhichBytes.test_cwd_win32"
+      ]
+    },
+    {
+      "line": 2444,
+      "phase": "body",
+      "source": "unittest.mock.patch('shutil._win_path_needs_curdir', return_value=False)",
+      "ids": [
+        "test.test_shutil.TestWhich.test_cwd_win32",
+        "test.test_shutil.TestWhichBytes.test_cwd_win32"
+      ]
+    },
+    {
+      "line": 2454,
+      "phase": "body",
+      "source": "unittest.mock.patch('shutil._win_path_needs_curdir', return_value=True)",
+      "ids": [
+        "test.test_shutil.TestWhich.test_cwd_win32_added_before_all_other_path",
+        "test.test_shutil.TestWhichBytes.test_cwd_win32_added_before_all_other_path"
+      ]
+    },
+    {
+      "line": 2500,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.confstr', return_value=self.dir, create=True)",
+      "ids": [
+        "test.test_shutil.TestWhich.test_environ_path_empty",
+        "test.test_shutil.TestWhichBytes.test_environ_path_empty"
+      ]
+    },
+    {
+      "line": 2515,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.confstr', return_value=self.dir, create=True)",
+      "ids": [
+        "test.test_shutil.TestWhich.test_environ_path_cwd",
+        "test.test_shutil.TestWhichBytes.test_environ_path_cwd"
+      ]
+    },
+    {
+      "line": 2531,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.confstr', side_effect=ValueError, create=True)",
+      "ids": [
+        "test.test_shutil.TestWhich.test_environ_path_missing",
+        "test.test_shutil.TestWhichBytes.test_environ_path_missing"
+      ]
+    },
+    {
+      "line": 2538,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.confstr', return_value=self.dir, create=True)",
+      "ids": [
+        "test.test_shutil.TestWhich.test_environ_path_missing",
+        "test.test_shutil.TestWhichBytes.test_environ_path_missing"
+      ]
+    },
+    {
+      "line": 2646,
+      "phase": "body",
+      "source": "unittest.mock.patch('_winapi.NeedCurrentDirectoryForExePath', return_value=True)",
+      "ids": [
+        "test.test_shutil.TestWhich.test_win_path_needs_curdir",
+        "test.test_shutil.TestWhichBytes.test_win_path_needs_curdir"
+      ]
+    },
+    {
+      "line": 2648,
+      "phase": "mock assertion",
+      "source": "need_curdir_mock.assert_called_once_with('dontcare')",
+      "ids": [
+        "test.test_shutil.TestWhich.test_win_path_needs_curdir",
+        "test.test_shutil.TestWhichBytes.test_win_path_needs_curdir"
+      ]
+    },
+    {
+      "line": 2653,
+      "phase": "body",
+      "source": "unittest.mock.patch('_winapi.NeedCurrentDirectoryForExePath', return_value=False)",
+      "ids": [
+        "test.test_shutil.TestWhich.test_win_path_needs_curdir",
+        "test.test_shutil.TestWhichBytes.test_win_path_needs_curdir"
+      ]
+    },
+    {
+      "line": 2655,
+      "phase": "mock assertion",
+      "source": "need_curdir_mock.assert_called_once_with('dontcare')",
+      "ids": [
+        "test.test_shutil.TestWhich.test_win_path_needs_curdir",
+        "test.test_shutil.TestWhichBytes.test_win_path_needs_curdir"
+      ]
+    },
+    {
+      "line": 3180,
+      "phase": "body",
+      "source": "unittest.mock.patch('shutil._copyfileobj_readinto')",
+      "ids": [
+        "test.test_shutil.TestCopyFileObj.test_win_impl"
+      ]
+    },
+    {
+      "line": 3182,
+      "phase": "mock attribute",
+      "source": "m.called",
+      "ids": [
+        "test.test_shutil.TestCopyFileObj.test_win_impl"
+      ]
+    },
+    {
+      "line": 3185,
+      "phase": "mock attribute",
+      "source": "m.call_args",
+      "ids": [
+        "test.test_shutil.TestCopyFileObj.test_win_impl"
+      ]
+    },
+    {
+      "line": 3193,
+      "phase": "body",
+      "source": "unittest.mock.patch('shutil._copyfileobj_readinto')",
+      "ids": [
+        "test.test_shutil.TestCopyFileObj.test_win_impl"
+      ]
+    },
+    {
+      "line": 3195,
+      "phase": "mock attribute",
+      "source": "m.call_args",
+      "ids": [
+        "test.test_shutil.TestCopyFileObj.test_win_impl"
+      ]
+    },
+    {
+      "line": 3202,
+      "phase": "body",
+      "source": "unittest.mock.patch('shutil._copyfileobj_readinto')",
+      "ids": [
+        "test.test_shutil.TestCopyFileObj.test_win_impl"
+      ]
+    },
+    {
+      "line": 3204,
+      "phase": "mock attribute",
+      "source": "m.called",
+      "ids": [
+        "test.test_shutil.TestCopyFileObj.test_win_impl"
+      ]
+    },
+    {
+      "line": 3251,
+      "phase": "body",
+      "source": "unittest.mock.patch('shutil.copyfileobj')",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_regular_copy",
+        "test.test_shutil.TestZeroCopyMACOS.test_regular_copy",
+        "test.test_shutil.TestZeroCopySendfile.test_regular_copy"
+      ]
+    },
+    {
+      "line": 3253,
+      "phase": "mock attribute",
+      "source": "m.called",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_regular_copy",
+        "test.test_shutil.TestZeroCopyMACOS.test_regular_copy",
+        "test.test_shutil.TestZeroCopySendfile.test_regular_copy"
+      ]
+    },
+    {
+      "line": 3283,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.copy_file_range', side_effect=ZeroDivisionError)",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_unhandled_exception"
+      ]
+    },
+    {
+      "line": 3283,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.sendfile', side_effect=ZeroDivisionError)",
+      "ids": [
+        "test.test_shutil.TestZeroCopySendfile.test_unhandled_exception"
+      ]
+    },
+    {
+      "line": 3283,
+      "phase": "body",
+      "source": "unittest.mock.patch('posix._fcopyfile', side_effect=ZeroDivisionError)",
+      "ids": [
+        "test.test_shutil.TestZeroCopyMACOS.test_unhandled_exception"
+      ]
+    },
+    {
+      "line": 3292,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.copy_file_range', side_effect=OSError(errno.EINVAL, 'yo'))",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_exception_on_first_call"
+      ]
+    },
+    {
+      "line": 3292,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.sendfile', side_effect=OSError(errno.EINVAL, 'yo'))",
+      "ids": [
+        "test.test_shutil.TestZeroCopySendfile.test_exception_on_first_call"
+      ]
+    },
+    {
+      "line": 3292,
+      "phase": "body",
+      "source": "unittest.mock.patch('posix._fcopyfile', side_effect=OSError(errno.EINVAL, 'yo'))",
+      "ids": [
+        "test.test_shutil.TestZeroCopyMACOS.test_exception_on_first_call"
+      ]
+    },
+    {
+      "line": 3301,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.copy_file_range', side_effect=OSError(errno.ENOSPC, 'yo'))",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_filesystem_full"
+      ]
+    },
+    {
+      "line": 3301,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.sendfile', side_effect=OSError(errno.ENOSPC, 'yo'))",
+      "ids": [
+        "test.test_shutil.TestZeroCopySendfile.test_filesystem_full"
+      ]
+    },
+    {
+      "line": 3301,
+      "phase": "body",
+      "source": "unittest.mock.patch('posix._fcopyfile', side_effect=OSError(errno.ENOSPC, 'yo'))",
+      "ids": [
+        "test.test_shutil.TestZeroCopyMACOS.test_filesystem_full"
+      ]
+    },
+    {
+      "line": 3338,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.copy_file_range', create=True, side_effect=syscall)",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_exception_on_second_call"
+      ]
+    },
+    {
+      "line": 3338,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.sendfile', create=True, side_effect=syscall)",
+      "ids": [
+        "test.test_shutil.TestZeroCopySendfile.test_exception_on_second_call"
+      ]
+    },
+    {
+      "line": 3350,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.fstat', side_effect=OSError)",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_cant_get_size",
+        "test.test_shutil.TestZeroCopySendfile.test_cant_get_size"
+      ]
+    },
+    {
+      "line": 3353,
+      "phase": "mock attribute",
+      "source": "m.called",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_cant_get_size",
+        "test.test_shutil.TestZeroCopySendfile.test_cant_get_size"
+      ]
+    },
+    {
+      "line": 3361,
+      "phase": "body",
+      "source": "unittest.mock.Mock()",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_small_chunks",
+        "test.test_shutil.TestZeroCopySendfile.test_small_chunks"
+      ]
+    },
+    {
+      "line": 3362,
+      "phase": "mock attribute",
+      "source": "mock.st_size",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_small_chunks",
+        "test.test_shutil.TestZeroCopySendfile.test_small_chunks"
+      ]
+    },
+    {
+      "line": 3363,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.fstat', return_value=mock)",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_small_chunks",
+        "test.test_shutil.TestZeroCopySendfile.test_small_chunks"
+      ]
+    },
+    {
+      "line": 3366,
+      "phase": "mock attribute",
+      "source": "m.called",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_small_chunks",
+        "test.test_shutil.TestZeroCopySendfile.test_small_chunks"
+      ]
+    },
+    {
+      "line": 3374,
+      "phase": "body",
+      "source": "unittest.mock.Mock()",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_big_chunk",
+        "test.test_shutil.TestZeroCopySendfile.test_big_chunk"
+      ]
+    },
+    {
+      "line": 3375,
+      "phase": "mock attribute",
+      "source": "mock.st_size",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_big_chunk",
+        "test.test_shutil.TestZeroCopySendfile.test_big_chunk"
+      ]
+    },
+    {
+      "line": 3376,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.fstat', return_value=mock)",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_big_chunk",
+        "test.test_shutil.TestZeroCopySendfile.test_big_chunk"
+      ]
+    },
+    {
+      "line": 3379,
+      "phase": "mock attribute",
+      "source": "m.called",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_big_chunk",
+        "test.test_shutil.TestZeroCopySendfile.test_big_chunk"
+      ]
+    },
+    {
+      "line": 3383,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.copy_file_range', side_effect=ZeroDivisionError)",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_blocksize_arg"
+      ]
+    },
+    {
+      "line": 3383,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.sendfile', side_effect=ZeroDivisionError)",
+      "ids": [
+        "test.test_shutil.TestZeroCopySendfile.test_blocksize_arg"
+      ]
+    },
+    {
+      "line": 3387,
+      "phase": "mock attribute",
+      "source": "m.call_args",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_blocksize_arg",
+        "test.test_shutil.TestZeroCopySendfile.test_blocksize_arg"
+      ]
+    },
+    {
+      "line": 3397,
+      "phase": "mock attribute",
+      "source": "m.call_args",
+      "ids": [
+        "test.test_shutil.TestZeroCopyCopyFileRange.test_blocksize_arg",
+        "test.test_shutil.TestZeroCopySendfile.test_blocksize_arg"
+      ]
+    },
+    {
+      "line": 3402,
+      "phase": "class decorator",
+      "source": "unittest.mock.patch.object(shutil, '_USE_CP_COPY_FILE_RANGE', False)",
+      "ids": [
+        "test.test_shutil.TestZeroCopySendfile.test_big_chunk",
+        "test.test_shutil.TestZeroCopySendfile.test_blocksize_arg",
+        "test.test_shutil.TestZeroCopySendfile.test_cant_get_size",
+        "test.test_shutil.TestZeroCopySendfile.test_empty_file",
+        "test.test_shutil.TestZeroCopySendfile.test_exception_on_first_call",
+        "test.test_shutil.TestZeroCopySendfile.test_exception_on_second_call",
+        "test.test_shutil.TestZeroCopySendfile.test_file2file_not_supported",
+        "test.test_shutil.TestZeroCopySendfile.test_filesystem_full",
+        "test.test_shutil.TestZeroCopySendfile.test_non_existent_src",
+        "test.test_shutil.TestZeroCopySendfile.test_non_regular_file_dst",
+        "test.test_shutil.TestZeroCopySendfile.test_non_regular_file_src",
+        "test.test_shutil.TestZeroCopySendfile.test_regular_copy",
+        "test.test_shutil.TestZeroCopySendfile.test_same_file",
+        "test.test_shutil.TestZeroCopySendfile.test_small_chunks",
+        "test.test_shutil.TestZeroCopySendfile.test_unhandled_exception"
+      ]
+    },
+    {
+      "line": 3416,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.sendfile', side_effect=OSError(errno.ENOTSOCK, 'yo'))",
+      "ids": [
+        "test.test_shutil.TestZeroCopySendfile.test_file2file_not_supported"
+      ]
+    },
+    {
+      "line": 3422,
+      "phase": "mock attribute",
+      "source": "m.called",
+      "ids": [
+        "test.test_shutil.TestZeroCopySendfile.test_file2file_not_supported"
+      ]
+    },
+    {
+      "line": 3425,
+      "phase": "body",
+      "source": "unittest.mock.patch('os.sendfile')",
+      "ids": [
+        "test.test_shutil.TestZeroCopySendfile.test_file2file_not_supported"
+      ]
+    },
+    {
+      "line": 3427,
+      "phase": "mock attribute",
+      "source": "m.called",
+      "ids": [
+        "test.test_shutil.TestZeroCopySendfile.test_file2file_not_supported"
+      ]
+    }
+  ]
+}
