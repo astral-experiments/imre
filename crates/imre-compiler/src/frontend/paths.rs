@@ -40,40 +40,6 @@ pub(super) fn file_open_mode(mode: &str) -> Option<(Type, Builtin)> {
 }
 
 impl Checker<'_> {
-    /// Accept the original filesystem spelling and bind the directory descriptor by keyword.
-    pub(super) fn os_unlink(&mut self, call: &ast::ExprCall, remove: bool) -> Result<Expr, String> {
-        let fd = self.types.optional(Type::Int);
-        let params = [
-            parameter("path", Type::Str, None),
-            Parameter {
-                kind: ParameterKind::KeywordOnly,
-                ..parameter(
-                    "dir_fd",
-                    fd,
-                    Some(Expr {
-                        ty: fd,
-                        kind: ExprKind::Absent(Box::new(Expr {
-                            ty: Type::None,
-                            kind: ExprKind::None,
-                        })),
-                    }),
-                )
-            },
-        ];
-        let args = self.arguments_with(call, &params, None, |checker, index, expression| {
-            if index == 0 {
-                checker.fspath_argument(expression)
-            } else {
-                checker.expr_expected(expression, fd)
-            }
-        })?;
-        Ok(self.ordered_builtin(
-            Builtin::Process(ir::ProcessOperation::Unlink { remove }),
-            Type::None,
-            args,
-        ))
-    }
-
     /// Path-like values are exactly strings or native paths; no user protocol runs.
     pub(super) fn path_argument(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         let value = self.expr(expression)?;

@@ -1061,6 +1061,8 @@ pub(crate) enum LogOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
     Open,
+    Unlink,
+    Remove,
     Pipe,
     Dup2,
     Close,
@@ -1157,9 +1159,6 @@ pub(crate) enum ProcessOperation {
     OpenFlag(&'static str),
     Which,
     CopyFile,
-    Unlink {
-        remove: bool,
-    },
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,

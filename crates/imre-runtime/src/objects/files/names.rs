@@ -1,9 +1,8 @@
 //! Preserve the original spelling and byte encoding of POSIX path arguments.
-use super::super::exceptions::{Error, Kind, finish, push_string_repr};
-use super::super::{Bytes, Int, Str, bytes, paths};
+use super::super::exceptions::{Error, push_string_repr};
+use super::super::{Bytes, Str, bytes, paths};
 use super::errno_with_paths;
-use num_traits::ToPrimitive;
-use std::ffi::{CString, OsStr};
+use std::ffi::OsStr;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -64,47 +63,4 @@ impl<'a> Name<'a> {
             out.push_str(&self.repr(false));
         })
     }
-}
-
-/// Remove the entry itself, using the raw spelling even for trailing slashes.
-/// Validate the path before converting the optional directory descriptor.
-///
-/// # Safety
-/// The caller roots the path for its static tag and the optional integer word.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_os_unlink(value: *const (), tag: u32, fd: usize, remove: u32) {
-    // SAFETY: the path's owner stays live through the syscall and error rendering.
-    let name = unsafe { Name::from_handle(value, tag) };
-    let result = (|| {
-        let path = CString::new(name.path().as_os_str().as_bytes()).map_err(|_| {
-            let function = if remove == 0 { "unlink" } else { "remove" };
-            Error::new(
-                Kind::ValueError,
-                format!("{function}: embedded null character in path"),
-            )
-        })?;
-        let dir_fd = if fd == 0 {
-            libc::AT_FDCWD
-        } else {
-            // SAFETY: a nonzero optional integer has the native tagged-int ABI.
-            let integer = unsafe { Int::borrow(fd) };
-            let n = integer.big();
-            n.to_i32().ok_or_else(|| {
-                Error::new(
-                    Kind::OverflowError,
-                    if n.sign() == num_bigint::Sign::Minus {
-                        "fd is less than minimum"
-                    } else {
-                        "fd is greater than maximum"
-                    },
-                )
-            })?
-        };
-        // SAFETY: the zero-terminated path is owned until unlinkat returns.
-        if unsafe { libc::unlinkat(dir_fd, path.as_ptr(), 0) } == -1 {
-            return Err(name.error(io::Error::last_os_error()));
-        }
-        Ok(())
-    })();
-    finish(result, ());
 }

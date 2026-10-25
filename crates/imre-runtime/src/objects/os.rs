@@ -1,11 +1,13 @@
 //! POSIX descriptors are integers in the program's descriptor table. A call
 //! can observe a closed number or a number subsequently reused by the kernel.
 
+use super::Int;
 use super::exceptions::{Error, Kind, Result, finish};
-use super::files::errno_error;
-use super::{Bytes, Int, Str};
+use super::files::{errno_error, names::Name};
+use num_traits::ToPrimitive;
 use std::ffi::CString;
 use std::io;
+use std::os::unix::ffi::OsStrExt;
 
 macro_rules! open_flags {
     ($($name:ident = $flag:ident),* $(,)?) => {$(
@@ -33,25 +35,16 @@ pub unsafe extern "C" fn imre_os_open(
     dir_fd: usize,
 ) -> usize {
     // SAFETY: the caller's representation tag describes this rooted path.
-    let path: &[u8] = unsafe {
-        if bytes == 0 {
-            (&*path.cast::<Str>()).as_bytes()
-        } else {
-            &*path.cast::<Bytes>()
-        }
-    };
+    let path = unsafe { Name::from_handle(path, bytes) };
     finish(
         (|| {
-            let name = CString::new(path).map_err(|_| {
+            let name = CString::new(path.path().as_os_str().as_bytes()).map_err(|_| {
                 Error::new(Kind::ValueError, "open: embedded null character in path")
             })?;
             let flags = c_int(flags)? | libc::O_CLOEXEC;
             let mode = c_int(mode)?;
-            let dir_fd = if dir_fd == 0 {
-                libc::AT_FDCWD
-            } else {
-                c_int(dir_fd)?
-            };
+            // SAFETY: dir_fd is a rooted optional integer according to the ABI.
+            let dir_fd = unsafe { directory_fd(dir_fd) }?;
             loop {
                 // SAFETY: the path is terminated and the variadic mode is promoted to int.
                 let fd = unsafe { libc::openat(dir_fd, name.as_ptr(), flags, mode) };
@@ -60,17 +53,7 @@ pub unsafe extern "C" fn imre_os_open(
                 }
                 let error = io::Error::last_os_error();
                 if error.kind() != io::ErrorKind::Interrupted {
-                    return Err(super::files::errno_with_paths(error, |message| {
-                        message.push_str(": ");
-                        if bytes == 0 {
-                            super::exceptions::push_string_repr(
-                                std::str::from_utf8(path).expect("Str is UTF-8"),
-                                message,
-                            );
-                        } else {
-                            super::bytes::write_repr(message, path);
-                        }
-                    }));
+                    return Err(path.error(error));
                 }
             }
         })(),
@@ -79,6 +62,55 @@ pub unsafe extern "C" fn imre_os_open(
 }
 
 // All C ints fit in the immediate representation. Heap integers cannot fit.
+/// Remove the entry itself, using the raw spelling even for trailing slashes.
+/// Validate the path before converting the optional directory descriptor.
+///
+/// # Safety
+/// The caller roots the path for its static tag and the optional integer word.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_os_unlink(value: *const (), tag: u32, fd: usize, remove: u32) {
+    // SAFETY: the path's owner stays live through the syscall and error rendering.
+    let name = unsafe { Name::from_handle(value, tag) };
+    let result = (|| {
+        let path = CString::new(name.path().as_os_str().as_bytes()).map_err(|_| {
+            let function = if remove == 0 { "unlink" } else { "remove" };
+            Error::new(
+                Kind::ValueError,
+                format!("{function}: embedded null character in path"),
+            )
+        })?;
+        // SAFETY: fd is a rooted optional integer.
+        let dir_fd = unsafe { directory_fd(fd) }?;
+        // SAFETY: the zero-terminated path is owned until unlinkat returns.
+        if unsafe { libc::unlinkat(dir_fd, path.as_ptr(), 0) } == -1 {
+            return Err(name.error(io::Error::last_os_error()));
+        }
+        Ok(())
+    })();
+    finish(result, ());
+}
+
+/// Convert a rooted optional directory descriptor after validating the path.
+unsafe fn directory_fd(fd: usize) -> Result<libc::c_int> {
+    Ok(if fd == 0 {
+        libc::AT_FDCWD
+    } else {
+        // SAFETY: a nonzero optional integer has the native tagged-int ABI.
+        let integer = unsafe { Int::borrow(fd) };
+        let n = integer.big();
+        n.to_i32().ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                if n.sign() == num_bigint::Sign::Minus {
+                    "fd is less than minimum"
+                } else {
+                    "fd is greater than maximum"
+                },
+            )
+        })?
+    })
+}
+
 fn c_int(word: usize) -> Result<libc::c_int> {
     (word & 1 != 0)
         .then_some((word as i64) >> 1)

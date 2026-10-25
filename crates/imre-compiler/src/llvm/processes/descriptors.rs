@@ -37,6 +37,17 @@ impl Emitter<'_, '_> {
                     small_integer: true,
                 };
             }
+            FdOperation::Unlink | FdOperation::Remove => {
+                let [path, fd] = args else { unreachable!() };
+                let bytes = u32::from(path.value.ty == Type::Bytes);
+                self.checked_line(format!(
+                    "call void @imre_os_unlink(ptr {}, i32 {bytes}, i64 {}, i32 {})",
+                    path.value.operand,
+                    fd.value.operand,
+                    u32::from(op == FdOperation::Remove)
+                ));
+                return none();
+            }
             FdOperation::Pipe => {
                 let tuple = self.record(returns);
                 self.checked_line(format!("call void @imre_os_pipe(ptr {})", tuple.operand));

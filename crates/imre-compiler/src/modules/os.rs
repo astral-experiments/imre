@@ -6,6 +6,8 @@ pub(super) fn descriptor(name: &str) -> Option<Intrinsic> {
     Some(match name {
         "close" => Intrinsic::Fd(FdOperation::Close),
         "open" => Intrinsic::Fd(FdOperation::Open),
+        "unlink" => Intrinsic::Fd(FdOperation::Unlink),
+        "remove" => Intrinsic::Fd(FdOperation::Remove),
         "O_RDONLY" => Intrinsic::OpenFlag("rdonly"),
         "O_WRONLY" => Intrinsic::OpenFlag("wronly"),
         "O_RDWR" => Intrinsic::OpenFlag("rdwr"),

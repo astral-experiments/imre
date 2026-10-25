@@ -9,8 +9,8 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         use FdOperation::*;
 
-        if op == Open {
-            return self.os_open(call);
+        if matches!(op, Open | Unlink | Remove) {
+            return self.os_path_at(call, op);
         }
         let param = |name: &str| Parameter {
             name: name.into(),
@@ -57,7 +57,7 @@ impl Checker<'_> {
             }
         })?;
         let returns = match op {
-            Close | SetBlocking | SetInheritable => Type::None,
+            Close | SetBlocking | SetInheritable | Unlink | Remove => Type::None,
             Open | Dup | Dup2 => Type::Int,
             Pipe => self.types.tuple(vec![Type::Int, Type::Int]),
             Isatty | GetBlocking | GetInheritable => Type::Bool,
@@ -65,39 +65,44 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Fd(op)), returns, args))
     }
 
-    fn os_open(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+    fn os_path_at(&mut self, call: &ast::ExprCall, op: FdOperation) -> Result<Expr, String> {
         let dir_fd = self.types.optional(Type::Int);
-        let params = [
-            ("path", Type::Str, None),
-            ("flags", Type::Int, None),
-            (
-                "mode",
-                Type::Int,
-                Some(Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Int("511".into()),
-                }),
-            ),
-            (
-                "dir_fd",
-                dir_fd,
-                Some(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                }),
-            ),
-        ]
-        .map(|(name, ty, default)| Parameter {
-            name: name.into(),
-            ty,
-            default,
-            sign_only: false,
-            kind: if name == "dir_fd" {
-                ParameterKind::KeywordOnly
-            } else {
-                ParameterKind::PositionalOrKeyword
-            },
-        });
+        let mut params = vec![("path", Type::Str, None)];
+        if op == FdOperation::Open {
+            params.extend([
+                ("flags", Type::Int, None),
+                (
+                    "mode",
+                    Type::Int,
+                    Some(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Int("511".into()),
+                    }),
+                ),
+            ]);
+        }
+        params.push((
+            "dir_fd",
+            dir_fd,
+            Some(Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            }),
+        ));
+        let params: Vec<_> = params
+            .into_iter()
+            .map(|(name, ty, default)| Parameter {
+                name: name.into(),
+                ty,
+                default,
+                sign_only: false,
+                kind: if name == "dir_fd" {
+                    ParameterKind::KeywordOnly
+                } else {
+                    ParameterKind::PositionalOrKeyword
+                },
+            })
+            .collect();
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
             if index == 0 {
                 checker.fspath_argument(arg)
@@ -106,8 +111,12 @@ impl Checker<'_> {
             }
         })?;
         Ok(self.ordered_builtin(
-            Builtin::Process(ProcessOperation::Fd(FdOperation::Open)),
-            Type::Int,
+            Builtin::Process(ProcessOperation::Fd(op)),
+            if op == FdOperation::Open {
+                Type::Int
+            } else {
+                Type::None
+            },
             args,
         ))
     }

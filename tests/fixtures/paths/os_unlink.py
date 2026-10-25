@@ -16,6 +16,12 @@ def filename() -> bytes:
 os.remove(Path("file-link"))
 print(Path("input.txt").exists())
 os.unlink(b"dangling-link", dir_fd=None)
+base_fd = os.open("tree", os.O_RDONLY)
+try:
+    os.unlink(path="a.json", dir_fd=base_fd)
+    print(Path("tree/a.json").exists())
+finally:
+    os.close(base_fd)
 try:
     os.unlink(dir_fd=descriptor(), path=filename())
 except OSError as error:

@@ -772,7 +772,7 @@ mod tests {
         std::os::unix::fs::symlink(&target, &link).unwrap();
         let fd = Int::small(i64::from(handle.as_raw_fd())).unwrap();
         // SAFETY: the bytes and descriptor stay rooted across unlinkat.
-        unsafe { names::imre_os_unlink(std::ptr::from_ref(&name).cast(), 1, fd.0, 0) };
+        unsafe { super::super::os::imre_os_unlink(std::ptr::from_ref(&name).cast(), 1, fd.0, 0) };
         assert_eq!(imre_error_pending(), 0);
         assert_eq!(
             link.symlink_metadata().unwrap_err().kind(),
