@@ -4640,6 +4640,17 @@ impl Emitter<'_, '_> {
                 &[&args[0].value, &args[1].value, &args[2].value],
             ),
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
+            Builtin::OptionalStrConcat => {
+                let left = self.word(&args[0].value);
+                let right = self.word(&args[1].value);
+                Value {
+                    ty: Type::Str,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_optional_str_concat(i64 {left}, i64 {right})"
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
             Builtin::SysVersionInfo { implementation } => {
                 let root = if *implementation {
@@ -7964,6 +7975,7 @@ declare void @imre_set_add(ptr, i64)
 declare void @imre_set_discard(ptr, i64)
 declare ptr @imre_set_iter(ptr)
 declare i32 @imre_mapping_iter_next(ptr, ptr, ptr)
+declare ptr @imre_optional_str_concat(i64, i64)
 declare ptr @imre_str_concat(ptr, ptr)
 declare ptr @imre_str_repeat(ptr, i64)
 declare ptr @imre_str_concat_parts(ptr, i64)

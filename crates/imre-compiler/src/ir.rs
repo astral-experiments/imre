@@ -876,6 +876,7 @@ pub(crate) enum Builtin {
     StringListNonempty,
     RStrip,
     SysArgv,
+    OptionalStrConcat,
     SysOrigArgv,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
