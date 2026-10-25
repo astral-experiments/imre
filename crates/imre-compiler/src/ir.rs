@@ -925,6 +925,7 @@ pub(crate) enum Builtin {
     FileFileno,
     DictGet,
     DictCopy,
+    DictFromKeysTarget,
     ModuleParentPrefix,
     ModuleCacheFromOrigin,
     NamespaceWrap,
