@@ -18,15 +18,17 @@ use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object}
 struct Entry {
     handle: Rc<Object>,
     level: Int,
+    creation_order: usize,
 }
 
 impl Entry {
-    fn new(name: &str, level: i64) -> Self {
+    fn new(name: &str, level: i64, creation_order: usize) -> Self {
         Self {
             handle: Rc::new(Object(StorageCell::new(Storage::Logger(Rc::new(
                 Str::from(name),
             ))))),
             level: Int::small(level).unwrap(),
+            creation_order,
         }
     }
 }
@@ -40,7 +42,7 @@ struct Registry {
 impl Registry {
     fn new() -> Self {
         Self {
-            entries: HashMap::from([("root".into(), Entry::new("root", 30))]),
+            entries: HashMap::from([("root".into(), Entry::new("root", 30, 0))]),
             format: None,
             datefmt: None,
         }
@@ -59,7 +61,13 @@ impl Registry {
                 break;
             }
             let parent = &name[..i];
-            if self.entries.contains_key(parent) {
+            // _fixupChildren keeps an existing parent whose name starts with
+            // the new ancestor's name. A child of "root" can predate "r",
+            // "ro", or "roo" without becoming its child when it is created.
+            if let Some(entry) = self.entries.get(parent)
+                && (!"root".starts_with(parent)
+                    || entry.creation_order < self.entries[name].creation_order)
+            {
                 return Some(parent);
             }
             // Manager._fixupParents searches for the preceding dot before i - 1.
@@ -223,7 +231,7 @@ pub unsafe extern "C" fn imre_log_get(word: usize) -> *const Object {
         if let Some(entry) = logs.entries.get(name) {
             return Rc::into_raw(entry.handle.clone());
         }
-        let entry = Entry::new(name, 0);
+        let entry = Entry::new(name, 0, logs.entries.len());
         let result = Rc::into_raw(entry.handle.clone());
         logs.entries.insert(name.into(), entry);
         result
