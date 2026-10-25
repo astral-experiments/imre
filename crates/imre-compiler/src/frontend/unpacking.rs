@@ -216,7 +216,16 @@ impl Checker<'_> {
                 Ok(Statement::SetItem(receiver, index, value))
             }
             ast::Expr::Attribute(attribute) => {
-                let (receiver, field, ty) = self.field(attribute)?;
+                let receiver = self.expr(&attribute.value)?;
+                if attribute.attr.as_str() == "MIN_READ_SIZE" && receiver.ty == Type::BinaryIO {
+                    let value = self.coerce(value, Type::Int, target)?;
+                    // Assignment evaluates the RHS before the receiver.
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::ZipMinReadSize, vec![value, receiver]),
+                    }));
+                }
+                let (receiver, field, ty) = self.writable_field_value(attribute, receiver)?;
                 let value = self.coerce(value, ty, target)?;
                 Ok(Statement::SetField(receiver, field, value))
             }

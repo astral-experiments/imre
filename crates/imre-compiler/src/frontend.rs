@@ -1253,6 +1253,8 @@ fn annotation_at(
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
+        Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
+        Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
@@ -1746,6 +1748,14 @@ impl<'a> Checker<'a> {
     /// Resolves a fixed field without evaluating its receiver more than once.
     fn field(&mut self, attribute: &ast::ExprAttribute) -> Result<(Expr, usize, Type), String> {
         let receiver = self.expr(&attribute.value)?;
+        self.writable_field_value(attribute, receiver)
+    }
+
+    fn writable_field_value(
+        &self,
+        attribute: &ast::ExprAttribute,
+        receiver: Expr,
+    ) -> Result<(Expr, usize, Type), String> {
         if let Type::Class(class) = receiver.ty {
             let declaration = &self.classes.declarations.definitions[class];
             if self.classes.parsers.namespace(class) {
@@ -4114,6 +4124,12 @@ impl<'a> Checker<'a> {
         }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
             match symbol {
+                Intrinsic::OsDevnull => {
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str("/dev/null".into()),
+                    });
+                }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::SysExecutable | Intrinsic::SysPlatform => {
                     let operation = match symbol {
@@ -4262,28 +4278,30 @@ impl<'a> Checker<'a> {
                 (ty, ExprKind::Tuple(values))
             }
             ast::Expr::BinOp(binary) => {
-                let (mut left, mut right) =
-                    if matches!(binary.op, ast::Operator::BitOr | ast::Operator::BitAnd) {
-                        let (left, left_key) = self.union_operand(&binary.left)?;
-                        let (right, right_key) = self.union_operand(&binary.right)?;
-                        if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
-                            self.expect(left_key, right_key, binary)?;
-                            return Ok(Expr {
-                                ty: self.types.set(left_key),
-                                kind: ExprKind::Builtin(
-                                    if binary.op == ast::Operator::BitAnd {
-                                        Builtin::KeyIntersection
-                                    } else {
-                                        Builtin::KeyUnion
-                                    },
-                                    vec![left, right],
-                                ),
-                            });
-                        }
-                        (left, right)
-                    } else {
-                        (self.expr(&binary.left)?, self.expr(&binary.right)?)
-                    };
+                let (mut left, mut right) = if matches!(
+                    binary.op,
+                    ast::Operator::BitOr | ast::Operator::BitAnd | ast::Operator::Sub
+                ) {
+                    let (left, left_key) = self.union_operand(&binary.left)?;
+                    let (right, right_key) = self.union_operand(&binary.right)?;
+                    if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
+                        self.expect(left_key, right_key, binary)?;
+                        return Ok(Expr {
+                            ty: self.types.set(left_key),
+                            kind: ExprKind::Builtin(
+                                match binary.op {
+                                    ast::Operator::Sub => Builtin::KeyDifference,
+                                    ast::Operator::BitAnd => Builtin::KeyIntersection,
+                                    _ => Builtin::KeyUnion,
+                                },
+                                vec![left, right],
+                            ),
+                        });
+                    }
+                    (left, right)
+                } else {
+                    (self.expr(&binary.left)?, self.expr(&binary.right)?)
+                };
                 if binary.op == ast::Operator::Add
                     && left.ty == Type::JsonValue
                     && right.ty == Type::JsonValue
@@ -4601,10 +4619,7 @@ impl<'a> Checker<'a> {
                         matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
                     });
                     if matches!(ty, Type::ListInt | Type::List(_)) && !tuple_list
-                        || matches!(
-                            ty,
-                            Type::Set(_) | Type::StringKeys | Type::Optional(_) | Type::Union(_)
-                        )
+                        || matches!(ty, Type::StringKeys | Type::Optional(_) | Type::Union(_))
                         || matches!(ty, Type::Dict(_)) && !self.types.is_counter(ty)
                         || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
                     {
@@ -4797,6 +4812,9 @@ impl<'a> Checker<'a> {
                         }
                         _ => return self.class_attribute(attribute, class, Some(receiver), None),
                     }
+                }
+                if matches!(receiver.ty, Type::ZipFile | Type::ZipInfo) {
+                    return self.zip_attribute(receiver, attribute);
                 }
                 if receiver.ty == Type::Sha256 {
                     return self.sha256_attribute(receiver, attribute);
@@ -5142,6 +5160,23 @@ impl<'a> Checker<'a> {
                 return self.typed_expr(value);
             }
             Some(Binding::Intrinsic(Intrinsic::Sha256)) => return self.sha256_constructor(call),
+            Some(Binding::Intrinsic(Intrinsic::BytesIo)) => {
+                let args = self.arguments(
+                    call,
+                    &[Parameter {
+                        name: "initial_bytes".into(),
+                        ty: Type::Bytes,
+                        kind: ParameterKind::PositionalOrKeyword,
+                        default: Some(Expr {
+                            ty: Type::Bytes,
+                            kind: ExprKind::Bytes(Vec::new()),
+                        }),
+                        sign_only: false,
+                    }],
+                    None,
+                )?;
+                return Ok(self.ordered_builtin(Builtin::BytesIo, Type::BinaryIO, args));
+            }
             Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
@@ -5388,6 +5423,15 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Sha256 {
                 return self.sha256_method(receiver, attribute, call);
             }
+            if receiver.ty == Type::ZipInfo
+                && attribute.attr.as_str() == "is_dir"
+                && call.arguments.is_empty()
+            {
+                return Ok(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::ZipField(ir::ZipField::IsDir), vec![receiver]),
+                });
+            }
             if receiver.ty == Type::ZipFile {
                 return self.zipfile_method(receiver, attribute, call);
             }
@@ -5455,6 +5499,27 @@ impl<'a> Checker<'a> {
             if matches!(receiver.ty, Type::TextIO | Type::BinaryIO) {
                 let binary = receiver.ty == Type::BinaryIO;
                 let data_type = if binary { Type::Bytes } else { Type::Str };
+                if binary
+                    && attribute.attr.as_str() == "seek"
+                    && let [offset, rest @ ..] = call.arguments.args.as_ref()
+                    && rest.len() <= 1
+                {
+                    let offset = self.expr_expected(offset, Type::Int)?;
+                    let whence = match rest {
+                        [whence] => self.expr_expected(whence, Type::Int)?,
+                        _ => Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Int("0".into()),
+                        },
+                    };
+                    return Ok(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(
+                            Builtin::BinarySeek,
+                            vec![receiver, offset, whence],
+                        ),
+                    });
+                }
                 let (builtin, ty) = match (attribute.attr.as_str(), call.arguments.args.len()) {
                     ("read", 0) => (
                         if binary {
@@ -5465,6 +5530,7 @@ impl<'a> Checker<'a> {
                         data_type,
                     ),
                     ("read", 1) if binary => (Builtin::BinaryReadSize, Type::Bytes),
+                    ("tell", 0) if binary => (Builtin::BinaryTell, Type::Int),
                     ("readline", 0) => (Builtin::FileReadline, data_type),
                     ("write", 1) => (
                         if binary {
