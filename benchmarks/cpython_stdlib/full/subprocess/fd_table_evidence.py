@@ -98,7 +98,7 @@ def main():
                     opt_level=level,
                     imre_revision=data["imre_revision"],
                     tested_tree=data["tested_tree"],
-                    source="fd-table-linux.json",
+                    source=a.fd_table.name,
                     operation=DETAILS[method]
                     + "; the native parent reaps each child and keeps every original descriptor and flag",
                     fixture="original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",

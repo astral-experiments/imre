@@ -1,6 +1,6 @@
 # Original POSIX descriptor-table tests
 
-The [three paired occurrences](fd-table-linux.json) run the original CPython
+The [three paired occurrences](fd-table-replay-linux.json) run the original CPython
 methods, assertions, and hooks. The fixture transfers all the original open
 file descriptions into the native parent at the original numbers and restores
 their initial close-on-exec flags. The native Popen launches the original
@@ -18,9 +18,11 @@ wait, the child-only descriptor changes, and the unchanged parent descriptors
 and flags. The native whole-body attempts still stop at importing upstream
 test support. These are host-driven native operations. The different
 `test_pass_fds` requires a RuntimeWarning and is not promoted by this report.
+The [earlier run](fd-table-linux.json) remains available. The repeat records
+the hosted Git tree and release artifact alongside the observed child tables.
 
 Run `fd_table_originals.py --imre ... --runtime ... --clang ... --opt-level
 {0,3} --result ...` with the pinned interpreter and strace. Use
-`fd_table_evidence.py --previous <previous-report> --fd-table fd-table-linux.json
+`fd_table_evidence.py --previous <previous-report> --fd-table fd-table-replay-linux.json
 --result evidence-linux.json` to reapply the observations to the complete
 353-occurrence reports without replacing evidence for other methods.
