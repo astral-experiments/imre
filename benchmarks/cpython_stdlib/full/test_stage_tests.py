@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from discover_staged import early_skips
+from discover_staged import early_skips, suite_names
 from stage_tests import stage, verify_prefix
 
 
@@ -24,6 +24,14 @@ class FixtureChecks(unittest.TestCase):
             (stdlib / "test/support/__init__.py").write_text("# changed upstream helper\n")
             with self.assertRaisesRegex(ValueError, "modified installed fixture"):
                 verify_prefix(stdlib)
+
+    def test_collections_owner_ledger_discovers_all_companion_suites(self):
+        root = Path(__file__).resolve().parent
+        entries = suite_names("collections", "test_collections", [root / "collections/reference-linux.json"])
+        self.assertIn("test.test_collections", entries)
+        self.assertIn("test.test_deque", entries)
+        self.assertIn("test.test_free_threading.test_collections", entries)
+        self.assertNotIn("collections", entries)
 
     def test_import_skip_does_not_mask_reference_passes(self):
         entries = [("test.suite.A.test_a", {"skipped": "GIL enabled"}), ("test.suite.B.test_b", "pass")]

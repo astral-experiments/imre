@@ -22,7 +22,14 @@ def suite_names(mod, default, refs):
     names = []
     for path in refs:
         name = json.loads(path.read_bytes()).get("module")
-        names.extend([name] if name else metadata.get("modules") or [metadata.get("module", "test." + default)])
+        # An aggregate ledger can name the stdlib owner (e.g. collections)
+        # while its manifest assigns several actual test package entries.
+        if name is None or name == mod:
+            names.extend(metadata.get("modules") or [metadata.get("module", "test." + default)])
+        elif name.startswith("test."):
+            names.append(name)
+        else:
+            raise ValueError(f"{path}: expected a test entry point or its owner {mod!r}")
     return list(dict.fromkeys(names))
 
 
