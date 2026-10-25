@@ -20,7 +20,7 @@ assert state.hexdigest() == b"e3069283"
 
 ## Build and install
 
-Run these commands from the Imre checkout with Clang, CMake, and Python
+Run these commands from the Imre checkout with uv, Clang, CMake, and Python
 3.11 or later. Install the native dependency in a temporary prefix. Upstream
 setuptools finds it through `CRC32C_INSTALL_PREFIX`.
 
@@ -36,18 +36,25 @@ cmake -S "$work/core" -B "$work/core-build" -DCMAKE_BUILD_TYPE=Release \
 cmake --build "$work/core-build" --target install
 ```
 
-Build the wheel from that checkout using its original `pyproject.toml` and
-`setup.py`. The Imre executable for this example uses the C++ standard
-library supplied by the host toolchain.
+Build the wheel with stock uv and Google's original `pyproject.toml` and
+`setup.py`. Export the compiler's setuptools adapter and make it available
+to this package through a separate uv configuration. The executable uses the
+C++ standard library supplied by the host toolchain.
 
 ```sh
-python3 -m pip install build
+imre build-target --output-dir "$work/sdk"
+cat > "$work/uv.toml" <<EOF
+[extra-build-dependencies]
+google-crc32c = ["imre-setuptools @ file://$work/sdk/setuptools"]
+EOF
 cxx_lib=stdc++
 if [ "$(uname -s)" = Darwin ]; then cxx_lib=c++; fi
-imre wheel "$work/python-crc32c" --overlay examples/google_crc32c/overlay \
-  --system-library "$cxx_lib" --out-dir "$work/dist"
+IMRE_BUILD_TARGET="$work/sdk/target.json" \
+IMRE_WHEEL_OVERLAY="$PWD/examples/google_crc32c/overlay" \
+IMRE_SYSTEM_LIBRARIES="$cxx_lib" \
+  uv build --wheel --config-file "$work/uv.toml" --out-dir "$work/dist" "$work/python-crc32c"
 python3 -m pip install --no-index --no-deps --no-compile --only-binary=:all: \
-  --implementation im --python-version 3.14 --abi imre1 \
+  --implementation imre --python-version 3.14 --abi imre1 \
   --target "$work/site" "$work"/dist/*.whl
 mkdir "$work/consumer"
 cp examples/google_crc32c/driver.py "$work/consumer/main.py"
@@ -57,6 +64,8 @@ imre build "$work/consumer/main.py" --extension-path "$work/site" --clang "$CC" 
 
 The wheel retains upstream's `Requires-Python: >=3.9` metadata. Pip uses
 Imre's Python 3.14 language target and `imre1` native ABI to select it.
+To build from the published source distribution, pass
+`google_crc32c-1.8.0.tar.gz` as the final argument to the same uv command.
 
 ## Validate and benchmark
 

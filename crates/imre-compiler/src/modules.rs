@@ -2564,7 +2564,7 @@ impl<'a> Loader<'a> {
                 (package, true, None)
             } else {
                 self.inputs.missing.push(package);
-                let archive = base.with_extension("imre.a");
+                let archive = base.with_extension(crate::NATIVE_ARCHIVE_EXTENSION);
                 let installed = self.extension_roots.contains(root);
                 if installed && self.fs.is_file(&archive) {
                     if !self.fs.is_file(&stub) {

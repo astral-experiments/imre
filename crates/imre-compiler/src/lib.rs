@@ -30,6 +30,12 @@ mod watch;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
+/// Python language version used by type checking and native wheel consumers.
+pub const PYTHON_VERSION: ruff_python_ast::PythonVersion = version::LANGUAGE;
+
+/// File extension of installed native archives linked into an application.
+pub const NATIVE_ARCHIVE_EXTENSION: &str = "imre.a";
+
 /// Startup choices made before a native Python command executes.
 #[derive(Clone, Copy)]
 pub struct CommandFlags {
