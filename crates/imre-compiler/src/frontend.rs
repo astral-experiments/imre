@@ -2134,6 +2134,18 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
             });
         }
+        if expected == Type::StringIterable
+            && (self.types.element(value.ty) == Some(Type::Str)
+                || self
+                    .types
+                    .fields(value.ty)
+                    .is_some_and(|fields| fields.iter().all(|t| *t == Type::Str)))
+        {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
+            });
+        }
         if expected == Type::ObjectValue && self.boxable_value(value.ty) {
             return Ok(Expr {
                 ty: expected,
@@ -2159,18 +2171,6 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Present(Box::new(view)),
                 })
             };
-        }
-        if expected == Type::StringIterable
-            && (self.types.element(value.ty) == Some(Type::Str)
-                || self
-                    .types
-                    .fields(value.ty)
-                    .is_some_and(|fields| fields.iter().all(|t| *t == Type::Str)))
-        {
-            return Ok(Expr {
-                ty: expected,
-                kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
-            });
         }
         if let (Some(source), Some(destination)) = (
             self.types.directory_value(value.ty),
