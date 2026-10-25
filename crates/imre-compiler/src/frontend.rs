@@ -2717,6 +2717,9 @@ impl<'a> Checker<'a> {
             return Ok(Iteration::Range(args));
         }
         let (iterable, items) = self.iteration_source(expression)?;
+        if iterable.ty == Type::PathIterator {
+            return Ok(Iteration::Prepared(self.prepare_path_iterator(iterable)));
+        }
         if let Some(prepared) = self.record_iteration(&iterable, expression)? {
             return Ok(Iteration::Prepared(prepared));
         }
@@ -3477,7 +3480,11 @@ impl<'a> Checker<'a> {
                 } else if let ast::Expr::Name(_) = &*assign.target {
                     let left = self.expr(&assign.target)?;
                     let right = self.expr(&assign.value)?;
-                    let value = self.binary_expr(assign.op, left, right, statement)?;
+                    let value = if assign.op == ast::Operator::Div && (left.ty.is_path() || right.ty.is_path()) {
+                        self.path_join(left, right, statement)?
+                    } else {
+                        self.binary_expr(assign.op, left, right, statement)?
+                    };
                     if self.types.element(value.ty).is_some() {
                         return Err(error(
                             self.source,
@@ -6375,6 +6382,39 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if let [iterator] = args.as_slice()
+            && iterator.ty == Type::PathIterator
+        {
+            if name.id == "next" {
+                return Ok(paths::operation(ir::PathOperation::Pull, Type::Path, args));
+            }
+            if name.id == "iter" {
+                return Ok(args.into_iter().next().unwrap());
+            }
+        }
+        if name.id == "next"
+            && let [iterator, default] = args.as_slice()
+            && iterator.ty == Type::PathIterator
+            && default.ty == Type::None
+        {
+            let optional = self.types.optional(Type::Path);
+            let slot = self.hidden(Type::PathIterator);
+            return Ok(Expr {
+                ty: optional,
+                kind: ExprKind::Scope {
+                    body: vec![
+                        Statement::Assign(slot, iterator.clone()),
+                        Statement::Expr(default.clone()),
+                    ],
+                    value: Box::new(paths::operation(
+                        ir::PathOperation::Next,
+                        optional,
+                        vec![self.local(slot)],
+                    )),
+                    clear: vec![slot],
+                },
+            });
+        }
         if name.id == "hash" {
             let [value] = args.as_slice() else {
                 return Err(error(self.source, call, "hash requires one argument"));

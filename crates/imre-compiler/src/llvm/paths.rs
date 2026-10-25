@@ -172,20 +172,23 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            PathOperation::Iterdir | PathOperation::Glob => {
-                let pattern = args.get(1).map_or("null", |arg| arg.value.operand.as_str());
-                let call = format!(
-                    "call ptr @imre_path_iter(ptr {}, ptr {pattern})",
-                    args[0].value.operand
-                );
-                // iterdir scans now; validated glob scans only on its first pull.
-                let operand = if matches!(operation, PathOperation::Iterdir) {
-                    self.checked_instruction(call)
+            PathOperation::Iterdir | PathOperation::Glob { .. } => {
+                let path = &args[0].value.operand;
+                let call = if let PathOperation::Glob { recursive } = operation {
+                    let follow =
+                        self.instruction(format!("zext i1 {} to i32", args[3].value.operand));
+                    format!(
+                        "call ptr @imre_path_glob(ptr {path}, ptr {}, i64 {}, i32 {follow}, i32 {})",
+                        args[1].value.operand,
+                        args[2].value.operand,
+                        u32::from(recursive)
+                    )
                 } else {
-                    self.instruction(call)
+                    format!("call ptr @imre_path_iter(ptr {path}, ptr null)")
                 };
+                let operand = self.checked_instruction(call);
                 self.owned(Value {
-                    ty: Type::Iterator,
+                    ty: Type::PathIterator,
                     operand,
                     small_integer: false,
                 })
@@ -204,6 +207,7 @@ impl Emitter<'_, '_> {
             }
             _ => {
                 let name = match operation {
+                    PathOperation::Pull => "imre_path_next_required",
                     PathOperation::Scripts => "imre_sysconfig_scripts",
                     PathOperation::Absolute => "imre_path_absolute",
                     PathOperation::New => "imre_path_new",

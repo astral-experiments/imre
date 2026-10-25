@@ -114,7 +114,7 @@ pub(super) fn is_pipeline_expression(checker: &Checker<'_>, expression: &ast::Ex
             || matches!(&*call.func, ast::Expr::Name(name)
                 if matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
             || matches!(&*call.func, ast::Expr::Attribute(attribute)
-                if matches!(attribute.attr.as_str(), "iterdir" | "glob")))
+                if matches!(attribute.attr.as_str(), "iterdir" | "glob" | "rglob")))
 }
 
 pub(super) fn integer(value: i64) -> Expr {
@@ -298,13 +298,12 @@ impl Checker<'_> {
             return Ok(Some(Iteration::Prepared(input)));
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
-            && matches!(attribute.attr.as_str(), "iterdir" | "glob")
+            && matches!(attribute.attr.as_str(), "iterdir" | "glob" | "rglob")
             && self.class_reference(&attribute.value).is_none()
         {
             let receiver = self.expr(&attribute.value)?;
             if receiver.ty == Type::Path {
-                let iterator =
-                    self.path_iterator(receiver, call, attribute.attr.as_str() == "glob")?;
+                let iterator = self.path_iterator(receiver, call, attribute.attr.as_str())?;
                 return Ok(Some(Iteration::Prepared(
                     self.prepare_path_iterator(iterator),
                 )));
@@ -690,8 +689,8 @@ impl Checker<'_> {
     /// Method evaluation creates the iterator at Python's observable point.
     /// Runtime iterdir snapshots eagerly; glob waits for the first pull. Private
     /// nullable results own every yielded path until the consumer acquires it.
-    fn prepare_path_iterator(&mut self, expression: Expr) -> Prepared {
-        let iterator = self.hidden(Type::Iterator);
+    pub(super) fn prepare_path_iterator(&mut self, expression: Expr) -> Prepared {
+        let iterator = self.hidden(Type::PathIterator);
         let optional = self.hidden(self.types.optional(Type::Path));
         let value = self.hidden(Type::Path);
         let ready = self.hidden(Type::Bool);

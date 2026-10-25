@@ -157,6 +157,7 @@ impl std::fmt::Display for Type {
             Self::ByteOutput => "private byte output",
             Self::None => "None",
             Self::Iterator => "iterator",
+            Self::PathIterator => "Iterator[Path]",
             Self::Exception | Self::NamedException(_) => "Exception",
             Self::ExitCode => "SystemExit.code",
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
@@ -923,8 +924,11 @@ pub(crate) enum PathOperation {
     ContextExit,
     UnionText,
     Iterdir,
-    Glob,
+    Glob {
+        recursive: bool,
+    },
     Next,
+    Pull,
 }
 
 /// POSIX lexical operations preserve raw str or bytes spellings.

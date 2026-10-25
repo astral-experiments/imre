@@ -89,6 +89,7 @@ impl Types {
             | Type::StringIterable
             | Type::StringKeys
             | Type::Iterator
+            | Type::PathIterator
             | Type::ByteOutput
             | Type::Exception
             | Type::ExitCode

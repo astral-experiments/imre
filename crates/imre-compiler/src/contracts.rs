@@ -117,6 +117,8 @@ impl Builtin {
                     | PathOperation::TemporaryDirectory
                     | PathOperation::CleanupTemporaryDirectory
                     | PathOperation::Iterdir
+                    | PathOperation::Glob { .. }
+                    | PathOperation::Pull
                     | PathOperation::Next => true,
                     PathOperation::ContextNew { .. }
                     | PathOperation::ContextEnter
@@ -139,8 +141,7 @@ impl Builtin {
                     | PathOperation::IsAbsolute
                     | PathOperation::Exists
                     | PathOperation::IsFile
-                    | PathOperation::IsDir
-                    | PathOperation::Glob => false,
+                    | PathOperation::IsDir => false,
                 },
                 PreservesLists,
             ),
@@ -706,6 +707,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_none"
                 | "imre_input"
                 | "imre_sys_argv"
+                | "imre_path_next_required"
                 | "imre_path_read_bytes"
                 | "imre_path_read_text"
                 | "imre_path_write_text"

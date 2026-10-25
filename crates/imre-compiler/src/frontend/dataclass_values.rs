@@ -46,6 +46,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::TextIO
         | Type::BinaryIO
         | Type::Iterator
+        | Type::PathIterator
         | Type::Callable(_) => false,
         Type::Class(_) => true,
         _ => types
