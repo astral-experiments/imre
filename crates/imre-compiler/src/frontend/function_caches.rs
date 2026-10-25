@@ -287,12 +287,23 @@ impl Checker<'_> {
             ));
         };
         self.reject_builtin_keywords(call)?;
-        let callable = if let Some(binding) = self.local_function_binding(source) {
-            binding
-                .target(self.source, source)?
-                .callback(self.types, self.source, source)?
+        let callable = self.expr(source)?;
+        let annotations = if let Some(binding) = self.local_function_binding(source) {
+            let f = binding.target(self.source, source)?;
+            self.helpers
+                .local_annotations
+                .borrow_mut()
+                .entry(f.signature.id)
+                .or_insert_with(|| (self.module, f.definition.clone()));
+            Some(crate::types::AnnotationOrigin::Local(f.signature.id))
+        } else if let Some(Binding::Definition(d)) = self.resolve(source) {
+            self.functions
+                .contains_key(&d)
+                .then_some(crate::types::AnnotationOrigin::Module(d))
         } else {
-            self.expr(source)?
+            self.types
+                .cached_function(callable.ty)
+                .and_then(|layout| layout.annotations)
         };
         let (params, returns) = self.types.signature(callable.ty).ok_or_else(|| {
             error(
@@ -319,6 +330,7 @@ impl Checker<'_> {
             frame,
             table,
             capacity: policy.capacity,
+            annotations,
         };
         let id = self.helpers.reserve();
         self.helpers.finish(
