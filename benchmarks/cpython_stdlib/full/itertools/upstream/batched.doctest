@@ -1,0 +1,6 @@
+    >>> for batch in batched('ABCDEFG', 3):
+    ...     print(batch)
+    ...
+    ('A', 'B', 'C')
+    ('D', 'E', 'F')
+    ('G',)

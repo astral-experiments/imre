@@ -18,7 +18,7 @@ def show(p: PureWindowsPath) -> None:
 
 for parent in ['', '/', '//', '///', 'C:', 'C:/', 'a/b', r'\\host',
                '//host/share', '//host/share/spam', '//?/UNC/server/share',
-               '//./device', '/?/UNC', './c:s', 'é:/', 'Σ:/', '/.']:
+               '//./device', '//?./share', '//.?/share', '/?/UNC', './c:s', 'é:/', 'Σ:/', '/.']:
     for child in ['', '.', '..', 'a.txt', './c:s', 'C:', 'c:leaf', '/tail',
                   'D:leaf', 'd:/root', '//other/share', 'a///b', '//?/C:']:
         p = PureWindowsPath(parent, child)
@@ -27,6 +27,9 @@ for parent in ['', '/', '//', '///', 'C:', 'C:/', 'a/b', r'\\host',
         show(PureWindowsPath('C:/root', p))
         print(str(PurePosixPath(p)))
         print(str(Path(p)))
+
+for share in [r'\\server\share', '//server/share', '//SERVER/SHARE']:
+    print(PureWindowsPath('//server/share/dir', share).as_posix())
 
 print(PurePath('a/b') == Path('a', 'b'))
 print(PureWindowsPath('a/b') == PurePosixPath('a/b'))
@@ -43,3 +46,14 @@ for spelling in ["a/b", "c:/a/b", "//share/path/a", "a\\b"]:
         print(w.full_match(up))
         print(u.match(wp))
         print(u.full_match(wp))
+
+for first, second in [
+    ('\ua7ce', '\ua7cf'),
+    ('A' * 16 + 'Σ', 'a' * 16 + 'ς'),
+    ('ʕΣ', 'ʕς'),
+    ('AΣ\u1acfA', 'aς\u1acfa'),
+]:
+    left, right = PureWindowsPath(first), PureWindowsPath(second)
+    print(left == right)
+    print(right in {left: 1})
+    print(PureWindowsPath('//' + first + '/share/dir', '//' + second + '/share').as_posix())

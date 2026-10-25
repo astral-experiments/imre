@@ -2,7 +2,7 @@
 //! A subscript or shallow spread retains the same nested container owner.
 
 use ::toml::de::{DeTable, DeValue};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use super::{Node, Nodes, View};
@@ -79,38 +79,87 @@ impl Value {
             })
         }
     }
-    fn snapshot(&self, nodes: &mut Vec<Node>) -> usize {
+    fn snapshot(
+        &self,
+        nodes: &mut Vec<Node>,
+        shared: &mut HashMap<(*const Object, usize), usize>,
+        depth: usize,
+    ) -> Result<usize, Error> {
+        if depth >= super::super::MAX_DEPTH && matches!(self, Self::Array(_) | Self::Table(_)) {
+            return Err(Error::new(
+                Kind::ValueError,
+                "document nesting exceeds 128 containers",
+            ));
+        }
+        // Including the depth keeps the nesting check valid along every incoming path.
+        let identity = match self {
+            Self::Array(owner) | Self::Table(owner) => Some((Rc::as_ptr(owner), depth)),
+            _ => None,
+        };
+        if let Some(index) = identity.and_then(|key| shared.get(&key)) {
+            return Ok(*index);
+        }
         let node = match self {
             Self::Null => Node::Null,
             Self::Bool(x) => Node::Bool(*x),
             Self::Integer(x) => Node::Integer(x.clone()),
             Self::Float(x) => Node::Float(*x),
             Self::String(x) => Node::String(x.clone()),
-            Self::Datetime(x) => Node::Datetime(x.clone()),
-            Self::Array(a) => Node::Array(
-                Self::elements(a)
-                    .iter()
-                    .map(|value| Self::read(value).snapshot(nodes))
-                    .collect(),
-            ),
-            Self::Table(t) => Node::Object(
-                Self::items(t)
-                    .iter()
-                    .map(|(key, value)| ((**key).clone(), Self::read(value).snapshot(nodes)))
-                    .collect(),
-            ),
+            Self::Datetime(x) => {
+                Node::Datetime(Str::try_new(x.as_str()).map_err(|_| Error::allocation())?)
+            }
+            Self::Array(owner) => {
+                // SAFETY: the document roots its exact list and every child throughout the snapshot.
+                let children = unsafe {
+                    owner.0.with(|s| {
+                        let words = &s.sequence().values;
+                        let mut children = Vec::new();
+                        children
+                            .try_reserve_exact(words.len())
+                            .map_err(|_| Error::allocation())?;
+                        for &word in words {
+                            let value = Self::read(object(word as *const Object));
+                            children.push(value.snapshot(nodes, shared, depth + 1)?);
+                        }
+                        Ok::<_, Error>(children)
+                    })
+                }?;
+                Node::Array(children)
+            }
+            Self::Table(owner) => {
+                let mut fields = Vec::new();
+                // SAFETY: the source stays rooted and immutable while child indices are collected.
+                unsafe {
+                    owner.0.with(|s| {
+                        for (name, word) in s.dictionary().document_entries() {
+                            fields.try_reserve(1).map_err(|_| Error::allocation())?;
+                            let key =
+                                Str::try_new(name.as_str()).map_err(|_| Error::allocation())?;
+                            let value = Self::read(object(word as *const Object));
+                            fields.push((key, value.snapshot(nodes, shared, depth + 1)?));
+                        }
+                        Ok::<_, Error>(())
+                    })
+                }?;
+                Node::Object(fields)
+            }
         };
+        nodes.try_reserve(1).map_err(|_| Error::allocation())?;
         let index = nodes.len();
         nodes.push(node);
-        index
+        if let Some(key) = identity {
+            shared.try_reserve(1).map_err(|_| Error::allocation())?;
+            shared.insert(key, index);
+        }
+        Ok(index)
     }
-    pub(in crate::objects) fn view(&self) -> View {
+    pub(in crate::objects) fn view(&self) -> Result<View, Error> {
         let mut nodes = Vec::new();
-        let index = self.snapshot(&mut nodes);
-        View {
+        let index = self.snapshot(&mut nodes, &mut HashMap::new(), 0)?;
+        Ok(View {
             nodes: Nodes::Document(Rc::new(nodes)),
             index,
-        }
+        })
     }
     fn from_json(view: &View, index: usize) -> Result<Self, Error> {
         if index == view.index
@@ -249,7 +298,7 @@ impl Value {
             // traversal. Its array and table words are exact document owners.
             unsafe {
                 current.0.with(|storage| {
-                    let visit = |word| {
+                    let mut visit = |word| {
                         let (Self::Array(child) | Self::Table(child)) =
                             Self::read(object(word as *const Object))
                         else {
@@ -268,7 +317,9 @@ impl Value {
                         Storage::Sequence(items) => {
                             items.values.iter().copied().try_for_each(visit)
                         }
-                        Storage::Dictionary(map) => map.document_values().try_for_each(visit),
+                        Storage::Dictionary(map) => {
+                            map.document_entries().try_for_each(|(_, word)| visit(word))
+                        }
                         _ => unreachable!("expected a document container"),
                     }
                 })?;
@@ -329,7 +380,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
             18 => usize::from(matches!(doc(a), Value::String(_))),
             19 => {
                 let mut repr = String::new();
-                doc(a).view().write_repr(&mut repr);
+                doc(a).view()?.write_repr(&mut repr);
                 Rc::into_raw(Rc::new(Str::new(repr))) as usize
             }
             20 => usize::from(doc(a).truth()),
@@ -339,7 +390,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 Value::from_toml(&DeValue::Table(parsed.into_inner()))?.word()
             }
             22 | 27 => {
-                let view = doc(a).view();
+                let view = doc(a).view()?;
                 let mut text = String::new();
                 let result = view.table(view.index, "", false, &mut text);
                 if op == 27 {
@@ -412,7 +463,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                     .map(|s| Ok((s, Value::Null.object()))),
             )?
             .word(),
-            29 => doc(a).view().into_handle() as usize,
+            29 => doc(a).view()?.into_handle() as usize,
             _ => unreachable!("valid document opcode"),
         })
     };
@@ -439,5 +490,66 @@ mod tests {
         drop(root);
         // Release parents before their independently rooted children.
         while owners.pop().is_some() {}
+    }
+
+    #[test]
+    fn shared_children_reuse_the_same_snapshot_node() {
+        let mut value = Value::array(std::iter::empty()).ok().expect("empty array");
+        for _ in 0..22 {
+            let child = value.object();
+            value = Value::array([child.clone(), child].into_iter().map(Ok))
+                .ok()
+                .expect("two children");
+        }
+        let Ok(view) = value.view() else {
+            panic!("shallow shared graph must fit")
+        };
+        let Nodes::Document(nodes) = view.nodes else {
+            unreachable!()
+        };
+        assert_eq!(nodes.len(), 23);
+        for node in &nodes[1..] {
+            assert!(matches!(node, Node::Array(items) if items.len() == 2 && items[0] == items[1]));
+        }
+    }
+
+    #[test]
+    fn a_shorter_cached_path_cannot_hide_excess_depth() {
+        let mut shared = Value::Null;
+        for _ in 0..80 {
+            shared = Value::array(std::iter::once(Ok(shared.object())))
+                .ok()
+                .expect("one child");
+        }
+        let shared = shared.object();
+        let mut long = shared.clone();
+        for _ in 0..60 {
+            long = Value::array(std::iter::once(Ok(long)))
+                .ok()
+                .expect("one child")
+                .object();
+        }
+        let root = Value::array([shared, long].into_iter().map(Ok))
+            .ok()
+            .expect("two children");
+        assert!(root.view().is_err());
+    }
+
+    #[test]
+    fn mutable_snapshot_checks_container_depth() {
+        let mut value = Value::Null;
+        for _ in 0..super::super::super::MAX_DEPTH {
+            value = Value::array(std::iter::once(Ok(value.object())))
+                .ok()
+                .expect("one child");
+        }
+        assert!(value.view().is_ok());
+        let too_deep = Value::table(std::iter::once(Ok((
+            Rc::new(Str::new("child")),
+            value.object(),
+        ))))
+        .ok()
+        .expect("one field");
+        assert!(too_deep.view().is_err());
     }
 }
