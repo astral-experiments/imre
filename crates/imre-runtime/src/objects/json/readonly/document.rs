@@ -2,11 +2,12 @@
 //! A subscript or shallow spread retains the same nested container owner.
 
 use ::toml::de::{DeTable, DeValue};
-use std::{collections::HashMap, rc::Rc};
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use super::{Node, Nodes, View};
 use crate::objects::mappings::{
-    imre_dict_contains, imre_dict_delete, imre_dict_get, imre_dict_new, imre_dict_set,
+    dict_set, imre_dict_contains, imre_dict_delete, imre_dict_get, imre_dict_new,
 };
 use crate::objects::{
     Error, Int, Kind, Object, Storage, StorageCell, Str, Words, acquire_rc, object,
@@ -31,27 +32,36 @@ impl Value {
     fn word(self) -> usize {
         Rc::into_raw(self.object()) as usize
     }
-    fn array(values: impl Iterator<Item = Rc<Object>>) -> Self {
+    fn array(
+        values: impl ExactSizeIterator<Item = Result<Rc<Object>, Error>>,
+    ) -> Result<Self, Error> {
         let mut storage = Words::new(5);
         storage
             .values
-            .extend(values.map(|v| Rc::into_raw(v) as usize));
-        Self::Array(storage.into_object())
+            .try_reserve_exact(values.len())
+            .map_err(|_| Error::allocation())?;
+        for value in values {
+            storage.values.push(Rc::into_raw(value?) as usize);
+        }
+        Ok(Self::Array(storage.into_object()))
     }
-    fn table(pairs: impl Iterator<Item = (Rc<Str>, Rc<Object>)>) -> Self {
+    fn table(
+        pairs: impl Iterator<Item = Result<(Rc<Str>, Rc<Object>), Error>>,
+    ) -> Result<Self, Error> {
         // SAFETY: a fresh string/object dictionary transfers one owner.
         let dict = unsafe { Rc::from_raw(imre_dict_new(3, 5)) };
-        for (key, value) in pairs {
+        for pair in pairs {
+            let (key, value) = pair?;
             // SAFETY: the three owners root the exact mapping, string, and document.
             unsafe {
-                imre_dict_set(
+                dict_set(
                     Rc::as_ptr(&dict),
                     Rc::as_ptr(&key) as usize,
                     Rc::as_ptr(&value) as usize,
-                )
+                )?
             };
         }
-        Self::Table(dict)
+        Ok(Self::Table(dict))
     }
     fn items(source: &Object) -> Vec<(Rc<Str>, Rc<Object>)> {
         // SAFETY: this operation copies all owners before traversing child values.
@@ -121,14 +131,14 @@ impl Value {
                 // SAFETY: the source stays rooted and immutable while child indices are collected.
                 unsafe {
                     owner.0.with(|s| {
-                        s.dictionary().visit_document_pairs(|name, value| {
+                        for (name, word) in s.dictionary().document_entries() {
                             fields.try_reserve(1).map_err(|_| Error::allocation())?;
                             let key =
                                 Str::try_new(name.as_str()).map_err(|_| Error::allocation())?;
-                            fields
-                                .push((key, Self::read(value).snapshot(nodes, shared, depth + 1)?));
-                            Ok(())
-                        })
+                            let value = Self::read(object(word as *const Object));
+                            fields.push((key, value.snapshot(nodes, shared, depth + 1)?));
+                        }
+                        Ok::<_, Error>(())
                     })
                 }?;
                 Node::Object(fields)
@@ -151,27 +161,31 @@ impl Value {
             index,
         })
     }
-    fn from_json(view: &View, index: usize) -> Self {
+    fn from_json(view: &View, index: usize) -> Result<Self, Error> {
         if index == view.index
             && let Some(root) = view.snapshot_root()
         {
             return Self::from_json(&root, root.index);
         }
-        match &view.nodes[index] {
-            Node::Deferred(array) => Self::from_json(array.view(), array.view().index),
+        Ok(match &view.nodes[index] {
+            Node::Deferred(array) => Self::from_json(array.view(), array.view().index)?,
             Node::Null => Self::Null,
             Node::Bool(x) => Self::Bool(*x),
             Node::Integer(x) => Self::Integer(x.clone()),
             Node::Float(x) => Self::Float(*x),
             Node::String(x) => Self::String(x.clone()),
             Node::Datetime(x) => Self::Datetime(x.clone()),
-            Node::Array(a) => {
-                Self::array(a.iter().map(|&index| Self::from_json(view, index).object()))
-            }
+            Node::Array(a) => Self::array(
+                a.iter()
+                    .map(|&index| Self::from_json(view, index).map(Self::object)),
+            )?,
             Node::Object(t) => Self::table(t.iter().map(|(key, index)| {
-                (Rc::new(key.clone()), Self::from_json(view, *index).object())
-            })),
-        }
+                Ok((
+                    Rc::new(key.clone()),
+                    Self::from_json(view, *index)?.object(),
+                ))
+            }))?,
+        })
     }
     fn from_toml(node: &DeValue<'_>) -> Result<Self, Error> {
         Ok(match node {
@@ -216,22 +230,14 @@ impl Value {
             DeValue::Array(values) => Self::array(
                 values
                     .iter()
-                    .map(|v| Self::from_toml(v.get_ref()).map(Self::object))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_iter(),
-            ),
-            DeValue::Table(table) => Self::table(
-                table
-                    .iter()
-                    .map(|(k, v)| {
-                        Ok((
-                            Rc::new(Str::new(k.get_ref())),
-                            Self::from_toml(v.get_ref())?.object(),
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, Error>>()?
-                    .into_iter(),
-            ),
+                    .map(|v| Self::from_toml(v.get_ref()).map(Self::object)),
+            )?,
+            DeValue::Table(table) => Self::table(table.iter().map(|(k, v)| {
+                Ok((
+                    Rc::new(Str::new(k.get_ref())),
+                    Self::from_toml(v.get_ref())?.object(),
+                ))
+            }))?,
         })
     }
     fn read(obj: &Object) -> Self {
@@ -274,21 +280,54 @@ impl Value {
             Self::Table(t) => unsafe { t.0.with(|s| !s.dictionary().is_empty()) },
         }
     }
-    fn reaches(&self, target: &Rc<Object>) -> bool {
-        match self {
-            Self::Array(v) => {
-                Rc::ptr_eq(v, target)
-                    || Self::elements(v)
-                        .iter()
-                        .any(|child| Self::read(child).reaches(target))
+    fn check_acyclic(&self, target: &Rc<Object>) -> Result<(), Error> {
+        let (Self::Array(root) | Self::Table(root)) = self else {
+            return Ok(());
+        };
+        let mut current = root.clone();
+        let mut pending = Vec::new();
+        let mut seen = HashSet::new();
+        loop {
+            if Rc::ptr_eq(&current, target) {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    "cyclic document mutation is unsupported",
+                ));
             }
-            Self::Table(v) => {
-                Rc::ptr_eq(v, target)
-                    || Self::items(v)
-                        .iter()
-                        .any(|(_, child)| Self::read(child).reaches(target))
+            // SAFETY: the source graph roots every child throughout this read-only
+            // traversal. Its array and table words are exact document owners.
+            unsafe {
+                current.0.with(|storage| {
+                    let mut visit = |word| {
+                        let (Self::Array(child) | Self::Table(child)) =
+                            Self::read(object(word as *const Object))
+                        else {
+                            return Ok(());
+                        };
+                        let id = Rc::as_ptr(&child);
+                        if !seen.contains(&id) {
+                            seen.try_reserve(1).map_err(|_| Error::allocation())?;
+                            pending.try_reserve(1).map_err(|_| Error::allocation())?;
+                            seen.insert(id);
+                            pending.push(child);
+                        }
+                        Ok(())
+                    };
+                    match storage {
+                        Storage::Sequence(items) => {
+                            items.values.iter().copied().try_for_each(visit)
+                        }
+                        Storage::Dictionary(map) => {
+                            map.document_entries().try_for_each(|(_, word)| visit(word))
+                        }
+                        _ => unreachable!("expected a document container"),
+                    }
+                })?;
             }
-            _ => false,
+            let Some(next) = pending.pop() else {
+                return Ok(());
+            };
+            current = next;
         }
     }
 }
@@ -305,8 +344,8 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
         let ptr = |v: Rc<Object>| Rc::into_raw(v) as usize;
         Ok(match op {
             0 => Value::Null.word(),
-            1 => Value::table(std::iter::empty()).word(),
-            2 => Value::array(std::iter::empty()).word(),
+            1 => Value::table(std::iter::empty())?.word(),
+            2 => Value::array(std::iter::empty())?.word(),
             3 => Value::String(acquire_rc(a)).word(),
             4 => Value::Bool(a != 0).word(),
             5 => Value::Integer((*Int::borrow(a)).clone()).word(),
@@ -315,8 +354,8 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 let Storage::Json(view) = s else {
                     unreachable!()
                 };
-                Value::from_json(view, view.index).word()
-            }),
+                Value::from_json(view, view.index).map(Value::word)
+            })?,
             8 => Value::Array(acquire_rc(a)).word(),
             9 => Value::Table(acquire_rc(a)).word(),
             10 => ptr(doc(a).map()?),
@@ -371,11 +410,11 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 let target = doc(a).map()?;
                 let source = doc(b).map()?;
                 for (key, val) in Value::items(&source) {
-                    imre_dict_set(
+                    dict_set(
                         Rc::as_ptr(&target),
                         Rc::as_ptr(&key) as usize,
                         Rc::as_ptr(&val) as usize,
-                    );
+                    )?;
                 }
                 ptr(acquire_rc(a))
             }
@@ -392,11 +431,8 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
             25 => {
                 let target = doc(b).list()?;
                 let values = Value::elements(object(a));
-                if values.iter().any(|v| Value::read(v).reaches(&target)) {
-                    return Err(Error::new(
-                        Kind::ValueError,
-                        "cyclic document mutation is unsupported",
-                    ));
+                for value in &values {
+                    Value::read(value).check_acyclic(&target)?;
                 }
                 let old = target.0.with_mut(|s| {
                     let words = s.sequence_mut();
@@ -415,13 +451,8 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
             }
             26 => {
                 let target = doc(b).map()?;
-                if doc(a).reaches(&target) {
-                    return Err(Error::new(
-                        Kind::ValueError,
-                        "cyclic document mutation is unsupported",
-                    ));
-                }
-                imre_dict_set(Rc::as_ptr(&target), c, a);
+                doc(a).check_acyclic(&target)?;
+                dict_set(Rc::as_ptr(&target), c, a)?;
                 0
             }
             28 => Value::table(
@@ -429,8 +460,8 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                     .0
                     .with(|s| s.dictionary().document_null_keys())
                     .into_iter()
-                    .map(|s| (s, Value::Null.object())),
-            )
+                    .map(|s| Ok((s, Value::Null.object()))),
+            )?
             .word(),
             29 => doc(a).view()?.into_handle() as usize,
             _ => unreachable!("valid document opcode"),
@@ -444,11 +475,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cycle_check_traverses_deep_shared_children_once() {
+        let mut owners = vec![Words::new(5).into_object()];
+        for _ in 0..8192 {
+            let child = Value::Array(owners.last().unwrap().clone()).object();
+            let mut parent = Words::new(5);
+            parent.values.push(Rc::into_raw(child.clone()) as usize);
+            parent.values.push(Rc::into_raw(child) as usize);
+            owners.push(parent.into_object());
+        }
+        let root = Value::Array(owners.last().unwrap().clone());
+        assert!(root.check_acyclic(&Words::new(5).into_object()).is_ok());
+        assert!(root.check_acyclic(&owners[0]).is_err());
+        drop(root);
+        // Release parents before their independently rooted children.
+        while owners.pop().is_some() {}
+    }
+
+    #[test]
     fn shared_children_reuse_the_same_snapshot_node() {
-        let mut value = Value::array(std::iter::empty());
+        let mut value = Value::array(std::iter::empty()).ok().expect("empty array");
         for _ in 0..22 {
             let child = value.object();
-            value = Value::array([child.clone(), child].into_iter());
+            value = Value::array([child.clone(), child].into_iter().map(Ok))
+                .ok()
+                .expect("two children");
         }
         let Ok(view) = value.view() else {
             panic!("shallow shared graph must fit")
@@ -466,14 +517,21 @@ mod tests {
     fn a_shorter_cached_path_cannot_hide_excess_depth() {
         let mut shared = Value::Null;
         for _ in 0..80 {
-            shared = Value::array(std::iter::once(shared.object()));
+            shared = Value::array(std::iter::once(Ok(shared.object())))
+                .ok()
+                .expect("one child");
         }
         let shared = shared.object();
         let mut long = shared.clone();
         for _ in 0..60 {
-            long = Value::array(std::iter::once(long)).object();
+            long = Value::array(std::iter::once(Ok(long)))
+                .ok()
+                .expect("one child")
+                .object();
         }
-        let root = Value::array([shared, long].into_iter());
+        let root = Value::array([shared, long].into_iter().map(Ok))
+            .ok()
+            .expect("two children");
         assert!(root.view().is_err());
     }
 
@@ -481,13 +539,17 @@ mod tests {
     fn mutable_snapshot_checks_container_depth() {
         let mut value = Value::Null;
         for _ in 0..super::super::super::MAX_DEPTH {
-            value = Value::array(std::iter::once(value.object()));
+            value = Value::array(std::iter::once(Ok(value.object())))
+                .ok()
+                .expect("one child");
         }
         assert!(value.view().is_ok());
-        let too_deep = Value::table(std::iter::once((
+        let too_deep = Value::table(std::iter::once(Ok((
             Rc::new(Str::new("child")),
             value.object(),
-        )));
+        ))))
+        .ok()
+        .expect("one field");
         assert!(too_deep.view().is_err());
     }
 }

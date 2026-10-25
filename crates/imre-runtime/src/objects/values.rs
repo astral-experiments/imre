@@ -306,9 +306,10 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         false
                     }))
                 }
-                (left @ Storage::Path { .. }, right @ Storage::Path { .. }) => {
-                    Comparison::Done(left.path() == right.path())
-                }
+                (
+                    left @ (Storage::Path { .. } | Storage::PurePath(_)),
+                    right @ (Storage::Path { .. } | Storage::PurePath(_)),
+                ) => Comparison::Done(left.path_equal(right)),
                 _ => Comparison::Done(false),
             })
         })
@@ -391,6 +392,13 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                                 Ok(view) => view.write_repr(output),
                                 Err(error) => error.raise(),
                             }
+                            None
+                        }
+                        Storage::PurePath(path) => {
+                            output.push_str(path.class());
+                            output.push('(');
+                            super::exceptions::push_string_repr(&storage.posix_spelling(), output);
+                            output.push(')');
                             None
                         }
                         path @ Storage::Path { .. } => {
