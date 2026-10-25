@@ -77,6 +77,15 @@ impl Emitter<'_, '_> {
                 Type::Str,
                 &[&args[0].value, &args[1].value, &args[2].value],
             ),
+            Builtin::HexFormat { width, zero, upper } => Value {
+                ty: Type::Str,
+                operand: self.instruction(format!(
+                    "call ptr @imre_int_hex_format(i64 {}, i32 {width}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(*zero) | (u32::from(*upper) << 1)
+                )),
+                small_integer: false,
+            },
             Builtin::FloatFormat {
                 precision,
                 percent,

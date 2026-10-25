@@ -1,11 +1,57 @@
 //! Native text operations preserve Python's Unicode-scalar and error semantics.
 
+mod lowercase;
+pub(super) use lowercase::lowercase;
+
 use num_traits::{Signed, ToPrimitive};
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Int, Object, Str, Words, fail, python_whitespace};
+
+/// # Safety
+/// The integer is rooted. Success transfers an immutable one-character string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_chr(value: usize) -> *const Str {
+    // SAFETY: the caller retains the integer through this conversion.
+    let value = unsafe { Int::borrow(value) }.as_small();
+    let result = match value {
+        Some(0xd800..=0xdfff) => Err(Error::new(
+            Kind::ValueError,
+            "surrogates are outside the native string domain",
+        )),
+        Some(code @ 0..=0x10ffff) => {
+            let c = char::from_u32(code as u32).expect("Unicode scalar");
+            Ok(Rc::into_raw(owned_string(c.encode_utf8(&mut [0; 4]))))
+        }
+        _ => Err(Error::new(
+            Kind::ValueError,
+            "chr() arg not in range(0x110000)",
+        )),
+    };
+    finish(result, std::ptr::null())
+}
+
+/// # Safety
+/// The caller roots the integer and supplies a bounded literal width. BigInt's
+/// formatter pads signed magnitudes, including zeroes after a negative sign.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_hex_format(value: usize, width: u32, flags: u32) -> *const Str {
+    // SAFETY: the native integer owner stays live until formatting completes.
+    let value = unsafe { Int::borrow(value) };
+    let big = value.big();
+    let n = big.as_ref();
+    let width = width as usize;
+    let output = match flags {
+        0 => format!("{n:width$x}"),
+        1 => format!("{n:0width$x}"),
+        2 => format!("{n:width$X}"),
+        3 => format!("{n:0width$X}"),
+        _ => unreachable!("invalid hexadecimal format flags"),
+    };
+    Rc::into_raw(Rc::new(Str::from(output)))
+}
 
 /// Returns Python's substring membership for two exact strings.
 ///
@@ -227,9 +273,8 @@ pub unsafe extern "C" fn imre_str_split(
     )
 }
 
-/// Splits POSIX shell words with Python's default comments=False. Inside double
-/// quotes only another double quote or a backslash loses its preceding escape.
-fn shell_words(source: &str) -> Result<Words> {
+/// Tokenize with the whitespace-splitting lexer used by shlex.split().
+fn shell_words(source: &str, comments: bool, posix: bool) -> Result<Words> {
     let mut parts = Words::new(3);
     let mut word = Str::default();
     let mut quote = None;
@@ -237,12 +282,24 @@ fn shell_words(source: &str) -> Result<Words> {
     let mut chars = source.chars();
     while let Some(c) = chars.next() {
         match c {
-            c if quote == Some(c) => quote = None,
-            '\'' | '"' if quote.is_none() => {
+            c if quote == Some(c) => {
+                quote = None;
+                if !posix {
+                    word.push(c);
+                    parts
+                        .values
+                        .push(Rc::into_raw(Rc::new(std::mem::take(&mut word))) as usize);
+                    started = false;
+                }
+            }
+            '\'' | '"' if quote.is_none() && (posix || !started) => {
                 quote = Some(c);
                 started = true;
+                if !posix {
+                    word.push(c);
+                }
             }
-            '\\' if quote != Some('\'') => {
+            '\\' if posix && quote != Some('\'') => {
                 let escaped = chars
                     .next()
                     .ok_or_else(|| Error::new(Kind::ValueError, "No escaped character"))?;
@@ -251,6 +308,21 @@ fn shell_words(source: &str) -> Result<Words> {
                 }
                 word.push(escaped);
                 started = true;
+            }
+            '#' if comments && quote.is_none() => {
+                // readline() consumes the newline. The legacy lexer stays
+                // inside a current word, so text on the next line can join it.
+                for next in chars.by_ref() {
+                    if next == '\n' {
+                        break;
+                    }
+                }
+                if posix && started {
+                    parts
+                        .values
+                        .push(Rc::into_raw(Rc::new(std::mem::take(&mut word))) as usize);
+                    started = false;
+                }
             }
             ' ' | '\r' | '\n' | '\t' if quote.is_none() => {
                 if started {
@@ -279,19 +351,75 @@ fn shell_words(source: &str) -> Result<Words> {
 /// The caller roots the input string. Success transfers a fresh list of strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_shlex_split(value: *const Str) -> *const Object {
-    // SAFETY: the input is immutable and rooted throughout tokenization.
-    let parts = shell_words(unsafe { &*value });
+    // SAFETY: preserve the original one-argument ABI with Python's defaults.
+    unsafe { imre_shlex_split_options(value, 0, 1) }
+}
+
+/// # Safety
+/// The optional string stays rooted; a null pointer represents Python None.
+/// Success transfers the list and its strings; failure sets a pending error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_shlex_split_options(
+    value: *const Str,
+    comments: u32,
+    posix: u32,
+) -> *const Object {
+    // SAFETY: a nonnull input is a rooted, immutable Str.
+    let parts = unsafe { value.as_ref() }
+        .ok_or_else(|| Error::new(Kind::ValueError, "s argument must not be None"))
+        .and_then(|source| shell_words(source, comments != 0, posix != 0));
     finish(
         parts.map(|parts| Rc::into_raw(parts.into_object())),
         std::ptr::null(),
     )
 }
 
+/// Quotes a POSIX shell word using shlex's ASCII safe set and apostrophe escape.
+///
+/// # Safety
+/// The input string stays rooted for the call. The returned string is owned;
+/// null indicates a pending allocation error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_shlex_quote(value: *const Str) -> *const Str {
+    // SAFETY: the caller roots this immutable string.
+    let source = unsafe { &*value };
+    if source.is_empty() {
+        return Rc::into_raw(owned_string("''"));
+    }
+    if source
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"_@%+=:,./-".contains(&b))
+    {
+        // SAFETY: transfer a new reference to the existing safe string.
+        unsafe { Rc::increment_strong_count(value) };
+        return value;
+    }
+    let capacity = source
+        .matches('\'')
+        .count()
+        .checked_mul(4)
+        .and_then(|extra| source.len().checked_add(extra))
+        .and_then(|n| n.checked_add(2));
+    let result = capacity.and_then(|n| {
+        let mut quoted = Str::try_with_capacity(n).ok()?;
+        quoted.push('\'');
+        for (index, piece) in source.split('\'').enumerate() {
+            if index != 0 {
+                quoted.push_str("'\"'\"'");
+            }
+            quoted.push_str(piece);
+        }
+        quoted.push('\'');
+        Some(quoted)
+    });
+    owned_text(result)
+}
+
 /// Selects the final field of an ephemeral explicit-separator right split.
 ///
 /// # Safety
 /// Both inputs must be nonnull, immutable strings rooted for this call. Returns
-/// an independent owned string, or null with a pending empty-separator error.
+/// an owned string, or null with a pending separator or allocation error.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_rsplit_last(
     value: *const Str,
@@ -305,7 +433,7 @@ pub unsafe extern "C" fn imre_str_rsplit_last(
 ///
 /// # Safety
 /// Both inputs must be nonnull, immutable strings rooted for this call. Returns
-/// an independent owned string, or null with a pending empty-separator error.
+/// an owned string, or null with a pending separator or allocation error.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_unquote_rsplit_last(
     value: *const Str,
@@ -333,9 +461,9 @@ unsafe fn rsplit_last(value: *const Str, separator: *const Str, decode: bool) ->
     };
     let tail = &source[boundary.map_or(0, |index| index + separator.len())..];
     if decode && let Some(first) = memchr::memchr(b'%', tail.as_bytes()) {
-        Rc::into_raw(Rc::new(unquote(tail, first)))
+        owned_text(unquote(tail, first))
     } else if boundary.is_some() {
-        Rc::into_raw(Rc::new(Str::new(tail)))
+        owned_text(Str::try_new(tail).ok())
     } else {
         // SAFETY: the caller's live owner permits acquiring the result reference.
         unsafe { Rc::increment_strong_count(value) };
@@ -504,9 +632,10 @@ fn hexadecimal(byte: u8) -> Option<u8> {
 
 /// Decodes valid percent pairs, retaining malformed escapes and literal '+'.
 /// `first` identifies a percent byte; unchanged spans are copied in one chunk.
-fn unquote(source: &str, first: usize) -> Str {
+fn unquote(source: &str, first: usize) -> Option<Str> {
     let input = source.as_bytes();
-    let mut bytes = Vec::with_capacity(input.len());
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(input.len()).ok()?;
     bytes.extend_from_slice(&input[..first]);
     let mut index = first;
     loop {
@@ -526,22 +655,44 @@ fn unquote(source: &str, first: usize) -> Str {
         bytes.extend_from_slice(&input[index..index + offset]);
         index += offset;
     }
-    let decoded = String::from_utf8(bytes)
-        .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned());
-    Str::from(decoded)
+    match String::from_utf8(bytes) {
+        Ok(decoded) => Some(Str::from(decoded)),
+        Err(error) => {
+            // Each ill-formed sequence contains a decoded three-byte percent escape.
+            // Replacing it with U+FFFD therefore fits in the encoded input length.
+            let mut result = String::new();
+            result.try_reserve_exact(source.len()).ok()?;
+            for chunk in error.as_bytes().utf8_chunks() {
+                result.push_str(chunk.valid());
+                if !chunk.invalid().is_empty() {
+                    result.push('\u{fffd}');
+                }
+            }
+            Some(Str::from(result))
+        }
+    }
+}
+
+fn owned_text(result: Option<Str>) -> *const Str {
+    if let Some(text) = result {
+        Rc::into_raw(Rc::new(text))
+    } else {
+        super::exceptions::sequence_allocation_failed();
+        std::ptr::null()
+    }
 }
 
 /// Decodes percent escapes with UTF-8 replacement while preserving literal '+'.
 ///
 /// # Safety
 /// Input is a rooted scalar string. Returns one owned string reference with the
-/// default urllib.parse.unquote UTF-8/errors='replace' semantics.
+/// default urllib.parse.unquote UTF-8/errors='replace' semantics, or null on allocation failure.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_unquote(value: *const Str) -> *const Str {
     // SAFETY: input remains immutable and rooted throughout the operation.
     let source = unsafe { &*value };
     if let Some(first) = memchr::memchr(b'%', source.as_bytes()) {
-        Rc::into_raw(Rc::new(unquote(source, first)))
+        owned_text(unquote(source, first))
     } else {
         // SAFETY: the unchanged result acquires its own live reference.
         unsafe { Rc::increment_strong_count(value) };

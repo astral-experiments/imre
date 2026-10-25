@@ -120,12 +120,14 @@ impl Initialization {
     pub fn lower(
         mut checker: Checker<'_>,
         available: &mut HashSet<DefinitionId>,
+        range: Range<usize>,
     ) -> Result<Self, String> {
         checker.module_scope = true;
         let module = &checker.graph.modules[checker.module];
         let mut body = Vec::new();
         let mut checkpoints = Vec::new();
-        for (index, statement) in module.parsed.syntax().body.iter().enumerate() {
+        for index in range {
+            let statement = &module.parsed.syntax().body[index];
             if module.type_guards.binary_search(&index).is_ok()
                 || local_functions::type_variable(checker.graph, checker.module, statement)
             {
@@ -135,12 +137,24 @@ impl Initialization {
                 module: checker.module,
                 statement: index,
             };
+            if checker.graph.unused_literal_global(definition) {
+                continue;
+            }
             match statement {
                 ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {
                     available.insert(definition);
                     continue;
                 }
                 ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_) => continue,
+                _ if crate::modules::value_name(statement).is_some_and(|name| {
+                    module.bindings.get(name) == Some(&Binding::Definition(definition))
+                }) =>
+                {
+                    // A statically declared class factory binds a definition, not a
+                    // stored module value. Its source position still controls use.
+                    available.insert(definition);
+                    continue;
+                }
                 _ => {}
             }
             if checker.module == checker.graph.entry

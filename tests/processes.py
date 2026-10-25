@@ -39,13 +39,9 @@ REJECTED = {
     "optional_args": "args: list[str] | None = None\nrun(args, capture_output=True, encoding='utf-8')",
     "expanded_args": "run(*[['command']], capture_output=True, encoding='utf-8')",
     "expanded_kwargs": "run(['command'], capture_output=True, encoding='utf-8', **{'check': True})",
-    "missing_capture": "run(['command'], encoding='utf-8')",
-    "false_capture": "run(['command'], capture_output=False, encoding='utf-8')",
     "dynamic_capture": "capture = True\nrun(['command'], capture_output=capture, encoding='utf-8')",
-    "missing_encoding": "run(['command'], capture_output=True)",
     "other_encoding": "run(['command'], capture_output=True, encoding='latin-1')",
     "dynamic_encoding": "encoding = 'utf-8'\nrun(['command'], capture_output=True, encoding=encoding)",
-    "false_text": "run(['command'], capture_output=True, encoding='utf-8', text=False)",
     "dynamic_text": "text = True\nrun(['command'], capture_output=True, encoding='utf-8', text=text)",
     "wrong_check": "run(['command'], capture_output=True, encoding='utf-8', check=1)",
     "wrong_cwd": "run(['command'], capture_output=True, encoding='utf-8', cwd=b'directory')",
@@ -68,6 +64,7 @@ REJECTED = {
     "string_timeout": "run(['command'], capture_output=True, encoding='utf-8', timeout='1.0')",
     "optional_integer_timeout": "def launch(duration: int | None) -> None:\n    run(['command'], capture_output=True, encoding='utf-8', timeout=duration)",
     "timeout_text_projection": "try:\n    " + CALL + "\nexcept TimeoutExpired as error:\n    text: str = error.stdout",
+    "timed_base_text_projection": "try:\n    run(['command'], capture_output=True, text=True, timeout=1.0, check=True)\nexcept SubprocessError as error:\n    text: str = error.stdout",
     "timeout_returncode": "try:\n    " + CALL + "\nexcept TimeoutExpired as error:\n    print(error.returncode)",
     "write_timeout_field": "try:\n    " + CALL + "\nexcept TimeoutExpired as error:\n    error.timeout = 1.0",
     "failure_annotation": "def code(error: CalledProcessError) -> int:\n    return error.returncode",
@@ -78,7 +75,6 @@ REJECTED = {
     "stored_check_method": "result = " + CALL + "\ncallback = result.check_returncode\ncallback()",
     "optional_result": "result: CompletedProcess[str] | None = None\nprint(result.stdout)",
     "result_subclass": "class Custom(CompletedProcess):\n    pass",
-    "unsupported_import": "from subprocess import Popen\nPopen(['command'])",
 }
 for name, value in {
     "shell": "True",
@@ -145,6 +141,10 @@ def seed(directory: Path, python: str) -> None:
     (directory / "executable-text").write_bytes(b"printf unexpected > fallback.txt\n")
     (directory / "executable-text").chmod(0o755)
     (directory / "directory" / "bin").mkdir(parents=True)
+    for name, status in (("exit-zero", 0), ("exit-one", 1)):
+        helper = directory / "directory" / name
+        helper.write_text(f"#!/bin/sh\nexit {status}\n")
+        helper.chmod(0o755)
     (directory / "directory" / "bin" / "imre-process-child").symlink_to(python)
     (directory / "directory" / "relative-executable").symlink_to(python)
 

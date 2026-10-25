@@ -1,4 +1,6 @@
-"""Package initialization has only static definitions and imports."""
+"""The re-exported child reads metadata already initialized by its parent."""
+
+__all__ = ["adjust"]
 
 from .operations import twice as adjust
 from . import nested

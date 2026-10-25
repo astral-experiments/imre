@@ -2,8 +2,8 @@
 //! final ownership cleanup only closes resources and never changes error state.
 
 use std::fs::OpenOptions;
-use std::io;
-use std::os::fd::IntoRawFd;
+use std::io::{self, Seek, SeekFrom};
+use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 
@@ -13,11 +13,17 @@ use super::{
 };
 mod buffered;
 mod gzip;
+mod path_text;
+mod seekable;
+use seekable::Memory;
+pub(super) use seekable::disk_offset;
 
 use buffered::{Input, Output};
 
 pub(super) struct FileState {
+    fd: Option<RawFd>,
     stream: Option<Stream>,
+    pub(super) name: Option<Rc<Str>>,
     // Preserve access mode after close: binary wrong-direction errors take precedence.
     kind: FileKind,
 }
@@ -27,12 +33,16 @@ enum FileKind {
     Text,
     BinaryRead,
     GzipBinaryRead,
+    Memory,
+    Member,
     BinaryWrite,
 }
 
 enum Stream {
     Read(Input),
     Write(Output),
+    Memory(Memory),
+    Member(Box<super::zipfile::Member>),
 }
 
 impl Stream {
@@ -42,16 +52,20 @@ impl Stream {
         let (file, flushed) = match self {
             Self::Read(input) => (input.into_file(), Ok(())),
             Self::Write(writer) => writer.finish(),
+            Self::Memory(_) | Self::Member(_) => return Ok(()),
         };
-        let descriptor = file.into_raw_fd();
-        // SAFETY: into_raw_fd transfers our unique descriptor owner. Do not
-        // retry close after EINTR: the descriptor may already have been reused.
-        let closed = if unsafe { libc::close(descriptor) } == 0 {
-            Ok(())
-        } else {
-            Err(io::Error::last_os_error())
-        };
-        closed.and(flushed)
+        close_file(file).and(flushed)
+    }
+}
+
+/// Close once, observing delayed I/O errors without retrying a possibly reused descriptor.
+pub(super) fn close_file(file: std::fs::File) -> io::Result<()> {
+    let descriptor = file.into_raw_fd();
+    // SAFETY: into_raw_fd transfers our unique descriptor owner to close.
+    if unsafe { libc::close(descriptor) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
     }
 }
 
@@ -65,14 +79,85 @@ impl Drop for FileState {
 }
 
 impl FileState {
+    pub(super) fn closed(&self) -> bool {
+        self.stream.is_none()
+    }
+
+    pub(super) fn fileno(&self) -> Result<RawFd> {
+        let Some(fd) = self.fd else {
+            return Err(Error::new(Kind::UnsupportedOperation, "fileno"));
+        };
+        if self.closed() {
+            Err(Error::new(Kind::ValueError, "I/O operation on closed file"))
+        } else {
+            Ok(fd)
+        }
+    }
+
+    pub(super) fn close(&mut self) -> io::Result<()> {
+        self.stream.take().map_or(Ok(()), Stream::close)
+    }
+
+    pub(super) fn communicate_stdin(&mut self, input: &[u8], close: bool) -> Result<()> {
+        if self.closed() && input.is_empty() {
+            return Ok(());
+        }
+        let Stream::Write(writer) = self.stream()? else {
+            return Err(Error::new(Kind::UnsupportedOperation, "not writable"));
+        };
+        let flushed = writer.write(input).and_then(|()| writer.flush());
+        let ignore_broken_pipe = |result: io::Result<()>| match result {
+            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+            other => other.map_err(errno_error),
+        };
+        ignore_broken_pipe(flushed)?;
+        if close {
+            ignore_broken_pipe(self.close())?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn pipe(file: std::fs::File, read: bool, text: bool, bufsize: i32) -> Rc<Object> {
+        let fd = file.as_raw_fd();
+        // Popen treats line buffering as a TextIOWrapper option and uses the
+        // default binary buffer underneath. Binary mode also falls back to default.
+        let capacity = if bufsize < 0 || bufsize == 1 {
+            128 * 1024
+        } else {
+            bufsize as usize
+        };
+        let stream = if read {
+            Stream::Read(Input::pipe(file, !text, capacity))
+        } else {
+            Stream::Write(Output::pipe(file, capacity, text && bufsize == 1))
+        };
+        let kind = if text {
+            FileKind::Text
+        } else if read {
+            FileKind::BinaryRead
+        } else {
+            FileKind::BinaryWrite
+        };
+        Rc::new(Object(StorageCell::new(Storage::File(Box::new(Self {
+            fd: Some(fd),
+            name: None,
+            stream: Some(stream),
+            kind,
+        })))))
+    }
+
     fn stream(&mut self) -> Result<&mut Stream> {
         self.stream
             .as_mut()
             .ok_or_else(|| Error::new(Kind::ValueError, "I/O operation on closed file."))
     }
 
-    fn read(&mut self) -> Result<Str> {
+    pub(super) fn read(&mut self) -> Result<Str> {
         self.input()?.read_text()
+    }
+
+    pub(super) fn readline(&mut self) -> Result<Str> {
+        self.input()?.text_line()
     }
 
     fn input(&mut self) -> Result<&mut Input> {
@@ -97,6 +182,19 @@ impl FileState {
     fn read_size(&mut self, value: &Int) -> Result<Bytes> {
         // GzipFile checks its own closed state before forwarding the argument
         // to BufferedReader. A plain BufferedWriter validates a C int first.
+        if self.kind == FileKind::Member {
+            self.check_member("read from closed file.")?;
+            // ZipExtFile is a Python implementation: it accepts any integer, even
+            // values larger than Py_ssize_t. Never reserve the requested size.
+            let limit = if let Some(value) = value.as_small() {
+                usize::try_from(value).ok()
+            } else if value.big().sign() == num_bigint::Sign::Minus {
+                None
+            } else {
+                Some(num_traits::ToPrimitive::to_usize(value.big().as_ref()).unwrap_or(usize::MAX))
+            };
+            return self.read_bytes(limit);
+        }
         if self.kind == FileKind::GzipBinaryRead {
             self.stream()?;
         }
@@ -110,6 +208,9 @@ impl FileState {
             })?;
             return Err(Error::new(Kind::UnsupportedOperation, "read"));
         }
+        if self.kind == FileKind::Memory {
+            return self.read_bytes(usize::try_from(size).ok());
+        }
         if size < -1 {
             return Err(Error::new(
                 Kind::ValueError,
@@ -120,6 +221,16 @@ impl FileState {
     }
 
     pub(super) fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        if self.kind == FileKind::Memory {
+            let Stream::Memory(memory) = self.stream()? else {
+                unreachable!()
+            };
+            return memory.write(bytes);
+        }
+        if self.kind == FileKind::Member {
+            return Err(Error::new(Kind::UnsupportedOperation, "write"));
+        }
+
         if self.kind == FileKind::BinaryRead {
             return Err(Error::new(Kind::UnsupportedOperation, "write"));
         }
@@ -149,12 +260,12 @@ impl FileState {
         self.write_bytes(text.as_bytes())
     }
 
-    fn flush(&mut self) -> Result<()> {
+    pub(super) fn flush(&mut self) -> Result<()> {
         if self.kind == FileKind::BinaryWrite && self.stream.is_none() {
             return Err(Error::new(Kind::ValueError, "flush of closed file"));
         }
         match self.stream()? {
-            Stream::Read(_) => Ok(()),
+            Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) => Ok(()),
             Stream::Write(writer) => writer.flush().map_err(os_error),
         }
     }
@@ -163,13 +274,17 @@ impl FileState {
 /// Decodes a complete text stream strictly before normalizing CRLF and lone CR.
 /// File reads and captured subprocess streams share these text-mode semantics.
 pub(super) fn decode_utf8_text(bytes: Vec<u8>) -> Result<Str> {
+    decode_text(bytes, false)
+}
+
+fn decode_text(bytes: Vec<u8>, preserve_newlines: bool) -> Result<Str> {
     let text = String::from_utf8(bytes).map_err(|error| {
         Error::new(
             Kind::UnicodeDecodeError,
             format!("invalid UTF-8 at byte {}", error.utf8_error().valid_up_to()),
         )
     })?;
-    if !text.contains('\r') {
+    if preserve_newlines || !text.contains('\r') {
         return Ok(Str::from(text));
     }
     let mut normalized = Str::with_capacity(text.len());
@@ -188,7 +303,7 @@ pub(super) fn decode_utf8_text(bytes: Vec<u8>) -> Result<Str> {
 }
 
 impl Storage {
-    fn file(&self) -> &FileState {
+    pub(super) fn file(&self) -> &FileState {
         match self {
             Self::File(file) => file,
             _ => fail("SystemError", "expected a file stream object"),
@@ -210,6 +325,9 @@ pub(super) fn os_error(error: io::Error) -> Error {
     {
         return Error::new(gzip.0, gzip.to_string());
     }
+    if error.kind() == io::ErrorKind::OutOfMemory && error.raw_os_error().is_none() {
+        return Error::allocation();
+    }
     Error::new(os_error_kind(error.kind()), error.to_string())
 }
 
@@ -226,6 +344,37 @@ fn os_error_kind(kind: io::ErrorKind) -> Kind {
 
 /// Format a POSIX errno without a filename, as in OSError(errno, strerror).
 pub(crate) fn errno_error(error: io::Error) -> Error {
+    errno_with_filename(error, None)
+}
+
+fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
+    errno_with_filenames(
+        error,
+        path.map(|s| super::exceptions::Filename::Str(Rc::new(Str::from(s)))),
+        None,
+    )
+}
+
+pub(super) fn errno_with_filenames(
+    error: io::Error,
+    first: Option<super::exceptions::Filename>,
+    second: Option<super::exceptions::Filename>,
+) -> Error {
+    with_errno_description(error, |kind, errno, description| {
+        Error::from_errno(kind, errno, description, first, second)
+    })
+}
+
+/// A caller which supplies a printable suffix retains the same errno and args.
+pub(super) fn errno_with_paths(error: io::Error, paths: impl FnOnce(&mut String)) -> Error {
+    with_errno_description(error, |kind, errno, description| {
+        let mut message = format!("[Errno {errno}] {description}");
+        paths(&mut message);
+        Error::from_errno_message(kind, errno, description, message)
+    })
+}
+
+fn with_errno_description(error: io::Error, build: impl FnOnce(Kind, i32, &str) -> Error) -> Error {
     let Some(errno) = error.raw_os_error() else {
         return os_error(error);
     };
@@ -236,17 +385,14 @@ pub(crate) fn errno_error(error: io::Error) -> Error {
     }
     // SAFETY: the successful call initialized a terminated string.
     let description = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
-    Error::new(
-        os_error_kind(error.kind()),
-        format!("[Errno {errno}] {description}"),
-    )
+    build(os_error_kind(error.kind()), errno, &description)
 }
 
 /// Opens a UTF-8 text stream in read, write, append, or exclusive-create mode.
 /// Returns an owned Object or null with a pending error.
 ///
 /// # Safety
-/// `path` must be a rooted string. `mode` must be compiler-validated as 0 through 3.
+/// `path` must be rooted. Mode 4 reads universal newlines without translating them.
 /// Like other fallible entries, pending state must be clear on entry.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_text_open(path: *const Str, mode: u32) -> *const Object {
@@ -284,7 +430,7 @@ pub unsafe extern "C" fn imre_gzip_open(path: *const Str, binary: u32) -> *const
 }
 
 /// Shares descriptor ownership and buffering while preserving text/binary access errors.
-fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*const Object> {
+pub(super) fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*const Object> {
     let state = open_state(path, mode, binary, gzip)?;
     Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
         Storage::File(Box::new(state)),
@@ -292,12 +438,41 @@ fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*const Object
 }
 
 fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
+    let (file, metadata) = open_file(path, mode)?;
+    // CPython 3.14 bounds the device's preferred block size for buffered I/O.
+    let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
+    let fd = file.as_raw_fd();
+    let stream = match mode {
+        0 | 4 => {
+            let mut input = Input::new(file, gzip, binary, capacity);
+            if mode == 4 {
+                input.preserve_newlines();
+            }
+            Stream::Read(input)
+        }
+        _ => Stream::Write(Output::new(file, capacity, binary)),
+    };
+    Ok(FileState {
+        fd: Some(fd),
+        stream: Some(stream),
+        name: Some(Rc::new(Str::new(path))),
+        kind: match (binary, mode) {
+            (false, _) => FileKind::Text,
+            (true, 0) if gzip => FileKind::GzipBinaryRead,
+            (true, 0) => FileKind::BinaryRead,
+            (true, _) => FileKind::BinaryWrite,
+        },
+    })
+}
+
+/// Open a raw descriptor with the same pathname and directory errors as Python open().
+pub(super) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
     super::super::initialize_io();
     if path.contains('\0') {
         return Err(Error::new(Kind::ValueError, "embedded null byte"));
     }
-    let file = match mode {
-        0 => OpenOptions::new().read(true).open(path),
+    let mut file = match mode {
+        0 | 4 => OpenOptions::new().read(true).open(path),
         1 => OpenOptions::new()
             .write(true)
             .create(true)
@@ -307,26 +482,23 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
         3 => OpenOptions::new().write(true).create_new(true).open(path),
         _ => fail("SystemError", "invalid file mode"),
     }
-    .map_err(os_error)?;
-    let metadata = file.metadata().map_err(os_error)?;
+    .map_err(|error| errno_with_filename(error, Some(path)))?;
+    let metadata = file.metadata().map_err(errno_error)?;
     if metadata.is_dir() {
-        return Err(Error::new(Kind::IsADirectoryError, "is a directory"));
+        return Err(errno_with_filename(
+            io::Error::from_raw_os_error(libc::EISDIR),
+            Some(path),
+        ));
     }
-    // CPython 3.14 bounds the device's preferred block size for buffered I/O.
-    let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
-    let stream = match mode {
-        0 => Stream::Read(Input::new(file, gzip, binary, capacity)),
-        _ => Stream::Write(Output::new(file, capacity, binary)),
-    };
-    Ok(FileState {
-        stream: Some(stream),
-        kind: match (binary, mode) {
-            (false, _) => FileKind::Text,
-            (true, 0) if gzip => FileKind::GzipBinaryRead,
-            (true, 0) => FileKind::BinaryRead,
-            (true, _) => FileKind::BinaryWrite,
-        },
-    })
+    // FileIO starts append streams at EOF before the first write. Pipes may
+    // still be opened for append even though they have no file position.
+    if mode == 2
+        && let Err(error) = file.seek(SeekFrom::End(0))
+        && error.raw_os_error() != Some(libc::ESPIPE)
+    {
+        return Err(errno_error(error));
+    }
+    Ok((file, metadata))
 }
 
 /// A close failure takes precedence over a read or write failure, matching
@@ -344,7 +516,7 @@ fn with_path_file<T>(
 }
 
 pub(super) fn read_path_text(path: &str) -> Result<Str> {
-    with_path_file(path, 0, false, FileState::read)
+    path_text::read(path, None, None, None)
 }
 
 pub(super) fn read_path_bytes(path: &str) -> Result<Bytes> {
@@ -373,7 +545,7 @@ pub unsafe extern "C" fn imre_binary_read(value: *const Object) -> *const Bytes 
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.file_mut().input()?.read_bytes(None))
+            .with_mut(|storage| storage.file_mut().read_bytes(None))
     };
     finish(
         result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
@@ -410,7 +582,7 @@ pub unsafe extern "C" fn imre_binary_readline(value: *const Object) -> *const By
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.file_mut().input()?.binary_line())
+            .with_mut(|storage| storage.file_mut().read_line_bytes())
     };
     finish(
         result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
@@ -479,7 +651,7 @@ pub unsafe extern "C" fn imre_text_readline(value: *const Object) -> *const Str 
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.file_mut().input()?.text_line())
+            .with_mut(|storage| storage.file_mut().readline())
     };
     finish(
         result.map(|text| Rc::into_raw(Rc::new(text))),
@@ -540,7 +712,10 @@ pub unsafe extern "C" fn imre_text_write_parts(
     count: usize,
 ) -> u32 {
     // SAFETY: all fragments remain rooted and immutable through assembly.
-    let text = unsafe { concat_parts(parts, count) };
+    let text = match unsafe { concat_parts(parts, count) } {
+        Ok(text) => text,
+        Err(error) => return error.returning(0),
+    };
     // SAFETY: the file remains rooted; no callback or storage reference escapes.
     // Assembly precedes even the stream-state check, preserving evaluation order.
     let result = unsafe {
@@ -565,6 +740,15 @@ pub unsafe extern "C" fn imre_text_flush(value: *const Object) -> u32 {
     finish(result.map(|()| 1), 0)
 }
 
+/// # Safety
+/// The file stays rooted throughout this descriptor query.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_file_fileno(value: *const Object) -> usize {
+    // SAFETY: only a copied integer escapes the exact file storage.
+    let fd = unsafe { object(value).0.with(|s| s.file().fileno()) };
+    finish(fd.map(|fd| Int::from_usize(fd as usize).into_raw()), 0)
+}
+
 /// Detaches the stream before closing, so all aliases become closed even on error.
 ///
 /// # Safety
@@ -572,14 +756,15 @@ pub unsafe extern "C" fn imre_text_flush(value: *const Object) -> u32 {
 /// (including repeated close), or 0 with a pending error after releasing the fd.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_text_close(value: *const Object) -> u32 {
+    // SAFETY: the caller roots the exact file.
+    finish(close_stream(unsafe { object(value) }).map(|()| 1), 0)
+}
+
+/// Detach the descriptor before closing so all existing stream aliases observe closure.
+pub(super) fn close_stream(file: &Object) -> Result<()> {
     // SAFETY: only an independent stream owner escapes the nonreentrant access.
-    let stream = unsafe {
-        object(value)
-            .0
-            .with_mut(|storage| storage.file_mut().stream.take())
-    };
-    let result = stream.map_or(Ok(()), Stream::close).map_err(os_error);
-    finish(result.map(|()| 1), 0)
+    let stream = unsafe { file.0.with_mut(|storage| storage.file_mut().stream.take()) };
+    stream.map_or(Ok(()), Stream::close).map_err(os_error)
 }
 
 /// # Safety
@@ -662,8 +847,10 @@ mod tests {
         let file = File::from(OwnedFd::from(writer));
         Rc::new(Object(StorageCell::new(Storage::File(Box::new(
             FileState {
+                fd: Some(file.as_raw_fd()),
                 stream: Some(Stream::Write(Output::new(file, 8192, false))),
                 kind: FileKind::Text,
+                name: None,
             },
         )))))
     }
@@ -1021,6 +1208,42 @@ mod tests {
     }
 
     #[test]
+    fn append_open_positions_existing_files_and_accepts_pipes() {
+        use std::ffi::CString;
+        use std::io::Read;
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let directory = Directory::new();
+        let path = directory.0.join("existing");
+        std::fs::write(&path, b"before").unwrap();
+        let Ok((mut writer, _)) = open_file(path.to_str().unwrap(), 2) else {
+            panic!("could not open the existing file for append");
+        };
+        assert_eq!(writer.stream_position().unwrap(), 6);
+        writer.seek(SeekFrom::Start(0)).unwrap();
+        writer.write_all(b"!").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"before!");
+
+        let fifo = directory.0.join("fifo");
+        let name = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        // SAFETY: the terminated path remains live through mkfifo.
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let mut reader = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&fifo)
+            .unwrap();
+        let Ok((mut writer, _)) = open_file(fifo.to_str().unwrap(), 2) else {
+            panic!("could not open the pipe for append");
+        };
+        writer.write_all(b"x").unwrap();
+        let mut byte = [0];
+        reader.read_exact(&mut byte).unwrap();
+        assert_eq!(&byte, b"x");
+    }
+
+    #[test]
     fn open_reports_paths_before_publishing_a_resource() {
         let directory = Directory::new();
         let regular = directory.0.join("regular");
@@ -1044,6 +1267,10 @@ mod tests {
             assert!(unsafe { imre_text_open(&Str::from(path), 0) }.is_null());
             take_error(kind);
         }
+        os_error(io::ErrorKind::OutOfMemory.into()).raise();
+        take_error(Kind::MemoryError);
+        os_error(io::Error::from_raw_os_error(libc::ENOMEM)).raise();
+        take_error(Kind::OSError);
         let denied = os_error(io::Error::from(io::ErrorKind::PermissionDenied));
         denied.raise();
         take_error(Kind::PermissionError);

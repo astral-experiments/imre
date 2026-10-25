@@ -28,6 +28,10 @@ CELL = """class Cell:
 
 
 REJECTED = {
+    "copy_hook_wrong_arity": 'import copy\nclass C:\n    def __copy__(self, extra: int) -> int: return extra\ncopy.copy(C())\n',
+    "inherited_copy_reduction": 'import copy\nclass Base:\n    def __reduce_ex__(self, protocol: int) -> int: return 0\nclass Child(Base): pass\ncopy.copy(Child())\n',
+    "copy_custom_getstate": 'import copy\nclass C:\n    def __getstate__(self) -> int: return 0\ncopy.copy(C())\n',
+    "overridden_static_binding": "import hashlib\nclass Base:\n    make = staticmethod(hashlib.sha256)\nclass Child(Base):\n    def make(self, x: int) -> int:\n        return x\n",
     "literal_unknown_value": 'from typing import Literal\ndef f(s: Literal["a", "b"]) -> str:\n    return s\nf("c")\n',
     "literal_unproven_string": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    return s\n',
     "literal_wider_domain": 'from typing import Literal\ndef f(s: Literal["a", "b"]) -> Literal["a"]:\n    return s\n',
@@ -35,6 +39,11 @@ REJECTED = {
     "literal_mutable_alias": 'from typing import Literal\na: list[Literal["a"]] = ["a"]\nb: list[str] = a\nb.append("b")\n',
     "literal_non_string": 'from typing import Literal\nx: Literal["a", 7] = "a"\n',
     "literal_invalidated_guard": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    if s == "a":\n        s = input()\n        return s\n    return "a"\n',
+    "root_super_wrong_arity": CELL.replace("self.value = value", "super().__init__(value)\n        self.value = value"),
+    "init_alias_partial_self": CELL.replace("self.value = value", "alias = self\n        self.value = value"),
+    "init_rebind_self": CELL.replace("self.value = value", "self = self\n        self.value = value"),
+    "init_assert_unset_field": CELL.replace("self.value = value", "assert self.value\n        self.value = value"),
+    "init_eager_message_escape": CELL.replace("self.value = value", "assert value, self\n        self.value = value"),
     "wrong_field_type": CELL + 'value = Cell(1)\nvalue.value = "wrong"\n',
     "wrong_alias_type": CELL + "value = Cell(1)\nalias = value\nalias.value = True\n",
     "ignored_field_type": CELL + 'value = Cell(1)\nvalue.value = "wrong"  # type: ignore\n',
@@ -71,7 +80,6 @@ REJECTED = {
         + "def escape(value: Cell) -> int:\n    return 0\n",
     "constructor_control_flow": CELL.replace("self.value = value", "if value > 0:\n            self.value = value\n        else:\n            self.value = 0"),
     "constructor_side_effect": CELL.replace("self.value = value", "print(value)\n        self.value = value"),
-    "constructor_local": CELL.replace("self.value = value", "temporary = value\n        self.value = temporary"),
     "constructor_return": CELL.replace("self.value = value", "self.value = value\n        return"),
     "inheritance": CELL + "class Child(Cell):\n    def __init__(self, value: int) -> None:\n        self.value = value\n",
     "metaclass": CELL.replace("class Cell:", "class Cell(metaclass=type):"),
@@ -209,7 +217,7 @@ def main() -> None:
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py"]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "instance_layout.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py"]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)
@@ -219,6 +227,8 @@ def main() -> None:
                 command = [compiler, "build", str(source), "-o", str(executable),
                            "--runtime", runtime, "--clang", clang, "--opt-level", level]
                 command += build_flags
+                if relative == "implicit_copy.py":
+                    command.append("--reachable-only")
                 if args.sanitize:
                     command.append("--sanitize")
                 require_success(run(command, temporary))
@@ -235,6 +245,9 @@ def main() -> None:
             result = run([compiler, "check", str(case / "main.py")], temporary)
             assert result.returncode > 0 and result.stderr, (name, result.stdout, result.stderr)
             assert "panicked" not in result.stderr and "AddressSanitizer" not in result.stderr, (name, result.stderr)
+            if name in {"inherited_copy_reduction", "copy_custom_getstate"}:
+                reachable = run([compiler, "check", str(case / "main.py"), "--reachable-only"], temporary)
+                assert reachable.returncode > 0 and "unsupported reconstruction protocol" in reachable.stderr, (name, reachable.stderr)
             if name in {"direct_field_cycle", "mutual_field_cycle"}:
                 assert "cyclic heap types are unsupported" in result.stderr, (name, result.stderr)
             if name in {"recursive_method", "mutual_method_recursion", "constructor_factory_recursion"}:

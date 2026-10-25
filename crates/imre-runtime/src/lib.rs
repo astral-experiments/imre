@@ -34,6 +34,7 @@
 
 mod extensions;
 mod floats;
+mod integer_power;
 mod integer_text;
 mod objects;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -549,7 +550,21 @@ pub unsafe extern "C" fn imre_int_release(value: usize) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_int_literal(data: *const u8, length: usize) -> usize {
     // SAFETY: the caller owns the compiler-generated literal span.
-    let literal = unsafe { text(data, length) }.replace('_', "");
+    let literal = unsafe { text(data, length) };
+    Int::new(
+        parse_integer_literal(literal)
+            .unwrap_or_else(|| fail("ValueError", "invalid integer literal")),
+    )
+    .into_raw()
+}
+
+/// Parse the spelling of a source integer, including signed literals stored in
+/// an argparse schema. Runtime conversion of a string argument stays decimal.
+fn parse_integer_literal(literal: &str) -> Option<BigInt> {
+    let literal = literal.replace('_', "");
+    let (literal, negative) = literal
+        .strip_prefix('-')
+        .map_or((literal.as_str(), false), |s| (s, true));
     let (digits, radix) = if literal.starts_with("0x") || literal.starts_with("0X") {
         (&literal[2..], 16)
     } else if literal.starts_with("0o") || literal.starts_with("0O") {
@@ -557,13 +572,9 @@ pub unsafe extern "C" fn imre_int_literal(data: *const u8, length: usize) -> usi
     } else if literal.starts_with("0b") || literal.starts_with("0B") {
         (&literal[2..], 2)
     } else {
-        (literal.as_str(), 10)
+        (literal, 10)
     };
-    Int::new(
-        BigInt::parse_bytes(digits.as_bytes(), radix)
-            .unwrap_or_else(|| fail("ValueError", "invalid integer literal")),
-    )
-    .into_raw()
+    BigInt::parse_bytes(digits.as_bytes(), radix).map(|value| if negative { -value } else { value })
 }
 
 /// # Safety
@@ -868,15 +879,25 @@ pub unsafe extern "C" fn imre_optional_str_equal(a: usize, b: usize) -> u32 {
 pub unsafe extern "C" fn imre_int_parse(value: *const Str) -> usize {
     // SAFETY: the caller keeps the immutable string alive.
     let original = unsafe { &*value };
+    finish(
+        parse_decimal_int(original)
+            .map(Int::into_raw)
+            .ok_or_else(|| integer_text::invalid_literal(original)),
+        1,
+    )
+}
+
+/// Parses a decimal integer without setting a pending Python exception. Callers
+/// such as argparse can report conversion failures in their own error context.
+fn parse_decimal_int(original: &str) -> Option<Int> {
     let source = original.trim();
-    let invalid = || integer_text::invalid_literal(original);
     // Rust's signed decimal parser accepts a subset of our grammar. Ordinary
     // small inputs need neither normalization nor temporary BigInt allocations;
     // separators and larger values still take the checked path below.
     if let Ok(value) = source.parse::<i64>()
         && let Some(value) = Int::small(value)
     {
-        return value.into_raw();
+        return Some(value);
     }
     let source = if source.is_ascii() {
         Cow::Borrowed(source)
@@ -885,16 +906,14 @@ pub unsafe extern "C" fn imre_int_parse(value: *const Str) -> usize {
         for character in source.chars() {
             if character.is_ascii() {
                 normalized.push(character);
-            } else if let Some(digit) = integer_text::decimal_digit(character) {
-                normalized.push(char::from(b'0' + digit));
             } else {
-                return invalid().returning(1);
+                normalized.push(char::from(b'0' + integer_text::decimal_digit(character)?));
             }
         }
         if let Ok(value) = normalized.parse::<i64>()
             && let Some(value) = Int::small(value)
         {
-            return value.into_raw();
+            return Some(value);
         }
         Cow::Owned(normalized)
     };
@@ -905,14 +924,9 @@ pub unsafe extern "C" fn imre_int_parse(value: *const Str) -> usize {
         || digits.contains("__")
         || !digits.bytes().all(|c| c.is_ascii_digit() || c == b'_')
     {
-        return invalid().returning(1);
+        return None;
     }
-    finish(
-        BigInt::parse_bytes(source.replace('_', "").as_bytes(), 10)
-            .map(|value| Int::new(value).into_raw())
-            .ok_or_else(invalid),
-        1,
-    )
+    BigInt::parse_bytes(source.replace('_', "").as_bytes(), 10).map(Int::new)
 }
 
 #[unsafe(no_mangle)]
@@ -1471,7 +1485,7 @@ pub unsafe extern "C" fn imre_list_repeat(list: *const List, count: usize) -> *c
             let mut result = Vec::new();
             result
                 .try_reserve_exact(length)
-                .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
+                .map_err(|_| Error::allocation())?;
             if !list.is_empty() {
                 for _ in 0..count {
                     result.extend(list.iter().cloned());

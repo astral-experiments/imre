@@ -75,8 +75,10 @@ for row in json.loads('[null,false,0,0.0,-1,[],[0],{},{"a":0},"","yes"]'):
 # Error positions count Unicode characters. Malformed numbers end at their
 # valid prefix; unterminated strings point back to the opening quote.
 for document in ["", '["🌗",\n falsex]', '["é" 2]', '{"key"\n1}',
-                 r'["bad\q"]', r'["bad\u12xz"]', '["open', '[1e]', '[] extra']:
+                 r'["bad\q"]', r'["bad\u12xz"]', r'["\u0041', '["open', '[1e]', '[] extra']:
     try:
         select(document)
     except json.JSONDecodeError as error:
         print(str(error))
+        print(f"{error.msg}|{error.pos}|{error.lineno}|{error.colno}")
+        print(error.doc == document)

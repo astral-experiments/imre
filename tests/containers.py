@@ -287,6 +287,17 @@ main()
 # Every rejected program must reach the checker. Cycle cases additionally require
 # the ownership-graph diagnostic, rather than an unsupported-annotation rejection.
 REJECTED = {
+    "deepcopy_explicit_memo": "from copy import deepcopy\nx = [1]\nmemo: dict[int, list[int]] = {}\ny = deepcopy(x, memo)\n",
+    "deepcopy_live_resource": "from copy import deepcopy\nwith open('input.txt') as f:\n    x = deepcopy([f])\n",
+    "deepcopy_unproved_cycle": "from copy import deepcopy\nx = []\nx.append(x)\ny = deepcopy(x)\n",
+    "namedtuple_duplicate_field": 'from collections import namedtuple\nPair = namedtuple("Pair", "x x")\n',
+    "namedtuple_private_field": 'from collections import namedtuple\nPair = namedtuple("Pair", "_x")\n',
+    "namedtuple_unchecked_options": 'from collections import namedtuple\nPair = namedtuple("Pair", "x", rename=True)\n',
+    "namedtuple_missing_argument": 'from collections import namedtuple\nPair = namedtuple("Pair", "x y")\nprint(Pair(1))\n',
+    "namedtuple_repeated_argument": 'from collections import namedtuple\nPair = namedtuple("Pair", "x")\nprint(Pair(1, x=2))\n',
+    "namedtuple_readonly_field": 'from collections import namedtuple\nPair = namedtuple("Pair", "x")\np = Pair(1)\np.x = 2\n',
+    "namedtuple_wrong_annotated_class": 'from collections import namedtuple\nA = namedtuple("A", "x")\nB = namedtuple("B", "x")\ndef f() -> A:\n    return B(1)\nprint(f().x)\n',
+
     "counter_wrong_key": "from collections import Counter\nc = Counter[int]()\nc.update(['str'])",
     "counter_wrong_count": "from collections import Counter\nc = Counter({'key': 'not an int'})",
     "counter_wrong_generic": "from collections import Counter\nc = Counter[bytes]()",
@@ -339,7 +350,7 @@ REJECTED = {
     "defaultdict_wrong_value": "from collections import defaultdict\na: defaultdict[str, int] = defaultdict(list)\n",
     "defaultdict_plain_dict": "from collections import defaultdict\na: defaultdict[str, list[int]] = dict()\n",
     "defaultdict_wrong_entry": 'from collections import defaultdict\na: defaultdict[str, list[int]] = defaultdict(list)\na["a"].append("bad")\n',
-    "set_equality": "left = {1}\nright = {1}\nprint(left == right)\n",
+    "set_mixed_equality": 'left = {1}\nright = {"1"}\nprint(left == right)\n',
     "set_subset_comparison": "left = {1}\nright = {1, 2}\nprint(left < right)\n",
     "set_index": "values = {1}\nprint(values[0])\n",
     "set_index_write": "values = {1}\nvalues[0] = 2\n",
@@ -631,20 +642,6 @@ show(Item("x"))
             return 0
         use([1])
     """,
-    "field_narrowing_across_call": ITEM
-    + """
-class Box:
-    item: Item | None
-    def __init__(self, item: Item | None) -> None:
-        self.item = item
-def clear(box: Box) -> None:
-    box.item = None
-def show(box: Box) -> None:
-    if box.item is not None:
-        clear(box)
-        print(box.item.name)
-show(Box(Item("x")))
-""",
     "list_class_cycle": """
         class Node:
             children: list["Node"]

@@ -42,7 +42,10 @@ impl Checker<'_> {
             return literals::view(value, ty);
         }
         if self.types.payload(value.ty).unwrap_or(value.ty) == Type::Exception
-            && ty == Type::TimeoutExpired
+            && matches!(
+                ty,
+                Type::ImportException | Type::TimeoutExpired | Type::NamedException(_)
+            )
         {
             let value = if value.ty == Type::Exception {
                 value
@@ -62,11 +65,13 @@ impl Checker<'_> {
         }
         let source = self.types.payload(value.ty).unwrap_or(value.ty);
         let target = self.types.payload(ty).unwrap_or(ty);
-        let kind = if self
-            .types
-            .members(source)
-            .is_some_and(|members| members.contains(&target))
-        {
+        let kind = if self.types.members(source).is_some_and(|members| {
+            members.contains(&target)
+                || self
+                    .types
+                    .members(target)
+                    .is_some_and(|subset| subset.iter().all(|member| members.contains(member)))
+        }) {
             ExprKind::Builtin(Builtin::UnionProject, vec![value])
         } else {
             debug_assert_eq!(self.types.payload(value.ty), Some(ty));
@@ -101,7 +106,20 @@ impl Checker<'_> {
             self.resolve(expression),
             Some(Binding::Intrinsic(Intrinsic::CompletedProcess))
         ) {
-            return Ok(vec![InstanceType::Exact(Type::CompletedProcess)]);
+            return Ok(vec![InstanceType::Exact(Type::CompletedProcess(
+                crate::ir::ProcessCapture::TEXT,
+            ))]);
+        }
+        if let Some(Binding::Definition(definition)) = self.resolve(expression)
+            && self.types.namedtuple(definition).is_some()
+        {
+            return Ok(self
+                .types
+                .tuples()
+                .into_iter()
+                .filter(|(ty, _)| self.types.namedtuple_definition(*ty) == Some(definition))
+                .map(|(ty, _)| InstanceType::Exact(ty))
+                .collect());
         }
         if let Some(Binding::Definition(definition)) = self.resolve(expression)
             && let Some(&class) = self.classes.declarations.ids.get(&definition)
@@ -208,15 +226,33 @@ impl Checker<'_> {
         members
     }
 
-    /// Exception categories below Exception need a runtime hierarchy test;
-    /// other category checks are exact for every admitted concrete layout.
+    /// Tests for derived records or exception kinds can require runtime inspection.
     /// A stored builtin exception can be either a SystemExit or an Exception.
-    fn instance_member_matches(ty: Type, classes: &[InstanceType]) -> Option<bool> {
-        if ty == Type::ExitCode {
+    fn instance_member_matches(&self, ty: Type, classes: &[InstanceType]) -> Option<bool> {
+        if matches!(ty, Type::ExceptionField | Type::StringIterable) {
             return None;
         }
         let mut unknown = false;
         for &class in classes {
+            if let (Type::Class(base), InstanceType::Exact(Type::Class(derived))) = (ty, class)
+                && self.classes.declarations.definitions[derived]
+                    .bases
+                    .contains(&base)
+            {
+                // A base view can contain either this derived layout or another one.
+                unknown = true;
+            }
+            if let InstanceType::Exception(kind) = class
+                && ty == Type::ImportException
+            {
+                if matches!(kind, 0 | 1 | 41) {
+                    return Some(true);
+                }
+                if kind == 42 || kind >= 256 {
+                    unknown = true;
+                }
+                continue;
+            }
             if let InstanceType::Exception(kind) = class
                 && ty == Type::TimeoutExpired
             {
@@ -226,7 +262,7 @@ impl Checker<'_> {
                 continue;
             }
             if let InstanceType::Exception(kind) = class
-                && ty == Type::Exception
+                && matches!(ty, Type::Exception | Type::NamedException(_))
                 && kind != 0
             {
                 unknown = true;
@@ -244,7 +280,7 @@ impl Checker<'_> {
             ExprKind::Builtin(Builtin::IsInstance(classes), args) => {
                 let mut result = None;
                 for member in self.instance_members(args[0].ty) {
-                    let current = Self::instance_member_matches(member, classes)?;
+                    let current = self.instance_member_matches(member, classes)?;
                     if result.is_some_and(|previous| previous != current) {
                         return None;
                     }
@@ -340,9 +376,12 @@ impl Checker<'_> {
             let mut members = self.instance_members(current);
             for (classes, truth) in &constraints {
                 members.retain(|&ty| {
-                    Self::instance_member_matches(ty, classes)
+                    self.instance_member_matches(ty, classes)
                         .is_none_or(|matches| matches == *truth)
                 });
+                if *truth && !classes.is_empty() && classes.iter().all(|c| matches!(c, InstanceType::Exception(kind) if self.is_import_error(*kind))) {
+                    for member in &mut members { if *member==Type::Exception { *member=Type::ImportException; } }
+                }
                 // A positive exact timeout category test establishes the byte
                 // payload contract even when the value was stored as Exception.
                 if *truth
@@ -364,7 +403,7 @@ impl Checker<'_> {
                 members = self.instance_members(self.locals[slot]);
                 for (classes, truth) in &constraints {
                     members.retain(|&ty| {
-                        Self::instance_member_matches(ty, classes)
+                        self.instance_member_matches(ty, classes)
                             .is_none_or(|matches| matches == *truth)
                     });
                 }

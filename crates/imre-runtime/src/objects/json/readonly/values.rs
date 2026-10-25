@@ -2,19 +2,33 @@
 
 use std::fmt::Write as _;
 
-use super::{Node, View};
+use super::{Node, View, deep_values};
 use crate::objects::exceptions::push_string_repr;
 
 impl View {
+    /// Containers use identity before comparing their elements. Direct equality
+    /// of a floating point NaN is false even for the same operand.
+    pub(super) fn equal_operand(&self, right: &Self) -> bool {
+        let is_nan = |view: &Self| {
+            matches!(&view.nodes[view.index], Node::ConstantNan)
+                || matches!(&view.nodes[view.index], Node::Float(f) if f.is_nan())
+        };
+        !is_nan(self) && !is_nan(right) && self.equal(right)
+    }
+
     pub(in crate::objects) fn equal(&self, right: &Self) -> bool {
         let left_root = self.snapshot_root();
         let right_root = right.snapshot_root();
         let left = left_root.as_ref().unwrap_or(self);
         let right = right_root.as_ref().unwrap_or(right);
-        left.equal_at(left.index, right, right.index)
+        if left.nodes.deep() || right.nodes.deep() {
+            deep_values::equal(left, right)
+        } else {
+            left.equal_at(left.index, right, right.index)
+        }
     }
 
-    fn equal_at(&self, a: usize, other: &Self, b: usize) -> bool {
+    pub(super) fn equal_at(&self, a: usize, other: &Self, b: usize) -> bool {
         if let Node::Deferred(array) = &self.nodes[a] {
             let v = array.view();
             return v.equal_at(v.index, other, b);
@@ -29,7 +43,7 @@ impl View {
             return true;
         }
         match (left, right) {
-            (Node::Null, Node::Null) => true,
+            (Node::Null, Node::Null) | (Node::ConstantNan, Node::ConstantNan) => true,
             (Node::Datetime(a), Node::Datetime(b)) => a == b,
             (Node::String(a), Node::String(b)) => a == b,
             (Node::Float(a), Node::Float(b)) => a == b,
@@ -69,12 +83,14 @@ impl View {
                     crate::objects::words::WordKind::new(5),
                 )
             };
+        } else if self.nodes.deep() {
+            deep_values::write_repr(self, output);
         } else {
             self.write_at(self.index, output);
         }
     }
 
-    fn write_at(&self, i: usize, output: &mut String) {
+    pub(super) fn write_at(&self, i: usize, output: &mut String) {
         let node = &self.nodes[i];
         match node {
             Node::Null => output.push_str("None"),
@@ -88,6 +104,7 @@ impl View {
                 }
             }
             Node::Float(f) => output.push_str(&crate::floats::render(*f)),
+            Node::ConstantNan => output.push_str("nan"),
             Node::String(s) => push_string_repr(s, output),
             Node::Deferred(array) => array.view().write_repr(output),
             Node::Array(items) => {

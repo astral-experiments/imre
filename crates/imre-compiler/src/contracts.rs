@@ -5,7 +5,9 @@
 //! remain the responsibility of the analysis using the contract. In particular,
 //! preserving lists does not imply freedom from I/O, allocation or errors.
 
-use crate::ir::{Binary, Builtin, Expr, PathOperation, ProcessOperation, TextOperation, Type};
+use crate::ir::{
+    Binary, Builtin, Expr, PathOperation, PosixPathOperation, ProcessOperation, TextOperation, Type,
+};
 
 /// Guarantees needed by list specialization and rooted heap borrows.
 #[derive(Clone, Copy)]
@@ -55,30 +57,56 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
+            Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
+            Self::Str
+                if args
+                    .first()
+                    .is_some_and(|e| matches!(e.ty, Type::Exception | Type::NamedException(_))) =>
+            {
+                Contract::new(true, Unknown)
+            }
+            Self::ImportErrorReset => Contract::new(false, Unknown),
+            Self::ImportErrorRejectReset => Contract::new(true, Unknown),
+            Self::ImportErrorNew { .. }
+            | Self::ImportErrorField(_)
+            | Self::ExceptionFieldLen
+            | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
+            Self::ExceptionFieldRepr => Contract::new(false, PreservesOwners),
+            Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
+            Self::ExceptionArgument(_) | Self::NamedException { .. } => {
+                Contract::new(false, PreservesLists)
+            }
             // Even a zero-argument call may mutate a retained native list or reenter Python.
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
                 match operation {
-                    TextOperation::Split(_)
+                    TextOperation::Lower
+                    | TextOperation::Capitalize
+                    | TextOperation::Split(_)
                     | TextOperation::Partition
-                    | TextOperation::ShlexSplit => true,
+                    | TextOperation::Unquote
+                    | TextOperation::ShlexSplit
+                    | TextOperation::ShlexQuote => true,
                     TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
                     | TextOperation::Find
-                    | TextOperation::Unquote
                     | TextOperation::Dedent => false,
                 },
                 PreservesLists,
             ),
             Self::PosixPath(operation) => Contract::new(
-                match operation {
-                    crate::ir::PosixPathOperation::MixedJoin { .. } => true,
-                    crate::ir::PosixPathOperation::Splitext => true, // Tuple allocation is fallible.
-                    _ => false,
-                },
+                matches!(
+                    operation,
+                    PosixPathOperation::MixedJoin { .. }
+                        | PosixPathOperation::Commonpath
+                        | PosixPathOperation::Splitext
+                        | PosixPathOperation::Normpath
+                        | PosixPathOperation::Abspath
+                ),
                 PreservesLists,
             ),
+            Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
                     PathOperation::ContextExit
@@ -86,8 +114,15 @@ impl Builtin {
                     | PathOperation::ReadBytes
                     | PathOperation::Absolute
                     | PathOperation::WithName
+                    | PathOperation::WithStem
+                    | PathOperation::WithSuffix
+                    | PathOperation::Suffixes
+                    | PathOperation::RelativeTo
+                    | PathOperation::Match { .. }
                     | PathOperation::Resolve
                     | PathOperation::WriteText
+                    | PathOperation::WriteUnion { .. }
+                    | PathOperation::WriteTypeError
                     | PathOperation::WriteBytes
                     | PathOperation::Mkdir
                     | PathOperation::Unlink
@@ -96,13 +131,21 @@ impl Builtin {
                     | PathOperation::TemporaryDirectory
                     | PathOperation::CleanupTemporaryDirectory
                     | PathOperation::Iterdir
-                    | PathOperation::Next => true,
+                    | PathOperation::Glob { .. } => true,
                     PathOperation::ContextNew { .. }
                     | PathOperation::ContextEnter
                     | PathOperation::UnionText
                     | PathOperation::Scripts
                     | PathOperation::OsExists
                     | PathOperation::New
+                    | PathOperation::PureNew(_)
+                    | PathOperation::JoinObject
+                    | PathOperation::Drive
+                    | PathOperation::Root
+                    | PathOperation::Anchor
+                    | PathOperation::CountPart
+                    | PathOperation::IsRelativeTo
+                    | PathOperation::AsPosix
                     | PathOperation::Join
                     | PathOperation::Text
                     | PathOperation::Name
@@ -112,12 +155,42 @@ impl Builtin {
                     | PathOperation::IsAbsolute
                     | PathOperation::Exists
                     | PathOperation::IsFile
-                    | PathOperation::IsDir
-                    | PathOperation::Glob => false,
+                    | PathOperation::IsDir => false,
                 },
                 PreservesLists,
             ),
+            Self::Timed(operation) => Contract::new(
+                matches!(
+                    operation,
+                    crate::ir::TimedOperation::New
+                        | crate::ir::TimedOperation::Clock
+                        | crate::ir::TimedOperation::Close
+                        | crate::ir::TimedOperation::Flush
+                        | crate::ir::TimedOperation::ComputeInt
+                        | crate::ir::TimedOperation::ComputeFloat
+                        | crate::ir::TimedOperation::FilesToDelete
+                        | crate::ir::TimedOperation::ShouldRollover
+                        | crate::ir::TimedOperation::DoRollover
+                ),
+                PreservesLists,
+            ),
+            Self::TimeSleep | Self::PercentScalar => Contract::new(true, PreservesLists),
+            Self::Formatter(_) => Contract::new(true, PreservesLists),
+            Self::LogRecord(_) => Contract::new(true, PreservesLists),
+            Self::Logging(operation) => Contract::new(
+                matches!(
+                    operation,
+                    crate::ir::LogOperation::Configure
+                        | crate::ir::LogOperation::ConfigureName
+                        | crate::ir::LogOperation::DictConfig
+                        | crate::ir::LogOperation::DictConfigTyped
+                        | crate::ir::LogOperation::FileConfig
+                        | crate::ir::LogOperation::CheckLevel
+                ),
+                PreservesLists,
+            ),
             Self::Process(operation) => match operation {
+                ProcessOperation::DescriptorConstant(_) => Contract::new(false, PreservesLists),
                 ProcessOperation::RunUntilComplete
                 | ProcessOperation::CloseLoop
                 | ProcessOperation::Gather { .. }
@@ -126,12 +199,23 @@ impl Builtin {
                 | ProcessOperation::Await
                 | ProcessOperation::RunLoop
                 | ProcessOperation::JoinGroup
+                | ProcessOperation::GeneratorNext
+                | ProcessOperation::GeneratorYield
                 | ProcessOperation::Acquire => Contract::new(true, Unknown),
                 ProcessOperation::Executable
-                | ProcessOperation::CheckOutput
+                | ProcessOperation::CheckOutput { .. }
                 | ProcessOperation::RunToStderr
-                | ProcessOperation::Run
-                | ProcessOperation::RunTimeout
+                | ProcessOperation::Run { .. }
+                | ProcessOperation::Popen { .. }
+                | ProcessOperation::Call { .. }
+                | ProcessOperation::PopenPid
+                | ProcessOperation::PopenPipe(_)
+                | ProcessOperation::PopenArgs
+                | ProcessOperation::PopenStatus { .. }
+                | ProcessOperation::PopenExit
+                | ProcessOperation::PopenCommunicate { .. }
+                | ProcessOperation::PopenWait
+                | ProcessOperation::PopenSignal
                 | ProcessOperation::AsyncSpawn { .. }
                 | ProcessOperation::AsyncStatus { wait: false }
                 | ProcessOperation::Coroutine { .. }
@@ -141,6 +225,7 @@ impl Builtin {
                 | ProcessOperation::ContextEnter
                 | ProcessOperation::ContextExit
                 | ProcessOperation::ContextThrow
+                | ProcessOperation::GeneratorTake
                 | ProcessOperation::ContextYield
                 | ProcessOperation::CreateTask
                 | ProcessOperation::NewLoop
@@ -158,7 +243,12 @@ impl Builtin {
                 | ProcessOperation::EnvironCopy
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
+                | ProcessOperation::Fd(_)
+                | ProcessOperation::OsErrorField(_)
+                | ProcessOperation::Strerror
                 | ProcessOperation::Which
+                | ProcessOperation::RmTree
+                | ProcessOperation::Copy(_)
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)
@@ -181,16 +271,38 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::BytesGet
+            | Self::Chr
+            | Self::IntegerPower
+            | Self::ModularPower
+            | Self::NegativeIntegerPower
             | Self::Decode
+            | Self::DecodeAscii
+            | Self::UrlsafeB64encode
+            | Self::HashNew
             | Self::DecodeSplitLines
+            | Self::SplitLines
+            | Self::SetAdd
+            | Self::CounterUpdate
+            | Self::KeySet
+            | Self::KeyUnion
+            | Self::KeyIntersection
+            | Self::KeyDifference
+            | Self::RegexGroupDict
             | Self::DictGet
+            | Self::DictCopy
+            | Self::DeepCopy
+            | Self::RecordCopy
             | Self::JsonDecode(_)
+            | Self::CsvReader { .. }
+            | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads
+            | Self::JsonErrorField(_)
             | Self::HashRecord
             | Self::JsonGet { .. }
             | Self::JsonGetReceiver
             | Self::JsonAdd
+            | Self::JsonEqual
             | Self::JsonAddFields(_, _)
             | Self::JsonDumps(_)
             | Self::JsonDump(_)
@@ -200,10 +312,16 @@ impl Builtin {
             | Self::JsonSelect(_)
             | Self::ListGet
             | Self::ListGetBounded { .. }
+            | Self::FunctionCacheProbe(..)
+            | Self::FunctionCacheInsert(..)
             | Self::ListGetI32
             | Self::ListSliceSum
             | Self::Slice
             | Self::StringFormat
+            | Self::RegexSub(_)
+            | Self::StringIterationList
+            | Self::StringJoin
+            | Self::StringReplace
             | Self::StringGet
             | Self::StringIntList
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
@@ -211,16 +329,23 @@ impl Builtin {
             | Self::Bool
             | Self::DictContains
             | Self::DictGetDefault
-            | Self::CounterUpdate
             | Self::EnumLookup(_)
             | Self::DictSumValues
             | Self::DictTryGet(_)
             | Self::Encode
+            | Self::CsvLineNumber
             | Self::Sha256Hex
+            | Self::Sha256New
+            | Self::HashAvailable
+            | Self::Sha256Update
+            | Self::Sha256Digest { .. }
+            | Self::Sha256Copy
+            | Self::ActiveException
+            | Self::ExceptionRecord
             | Self::ExceptionCause
-            | Self::ExceptionMessage
             | Self::ExceptionSuppressContext
             | Self::FloatFormat { .. }
+            | Self::HexFormat { .. }
             | Self::GlobalGet(_)
             | Self::IntBounded { .. }
             | Self::IntSignAsFloat
@@ -231,6 +356,8 @@ impl Builtin {
             | Self::JsonEmptyObject
             | Self::WallTime
             | Self::FunctionCache(_)
+            | Self::FunctionCacheStat(..)
+            | Self::FunctionCacheClear(_)
             | Self::HashStr
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum
@@ -238,31 +365,24 @@ impl Builtin {
             | Self::LiteralStringView
             | Self::RStrip
             | Self::RegexCompile(_)
-            | Self::GetLogger
-            | Self::LogLevel
-            | Self::LogWrite(_)
             | Self::RegexSearch
-            | Self::RegexGroupDict
             | Self::RegexMatchStart
             | Self::SequenceGetInBounds
             | Self::SetContains
             | Self::Split
-            | Self::SplitLines
-            | Self::Ndiff
             | Self::StringListCopy
             | Self::StringListFilter(_)
-            | Self::StringListSortSuffix(_)
             | Self::StringListNonempty
             | Self::Str
-            | Self::StrEnumIdentity
+            | Self::NominalIdentity
+            | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
+            | Self::ClassNameView
             | Self::StrEnumName
             | Self::StrEnumValue
             | Self::EnumString
-            | Self::StringJoin
             | Self::StringListContains
             | Self::StringContains
-            | Self::StringReplace
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
             Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
@@ -270,27 +390,50 @@ impl Builtin {
             Self::BinaryOpen(_)
             | Self::BinaryRead
             | Self::BinaryReadSize
+            | Self::Ndiff
+            | Self::StringListSortSuffix(_)
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
             | Self::DictDelete
+            | Self::DictPop
+            | Self::DictTryPop(_)
             | Self::DictGatherBytesInt
             | Self::DictGatherStrInt
             | Self::FileReadline
             | Self::GzipOpen
+            | Self::BytesIo
+            | Self::BinarySeek
+            | Self::BinaryTell
+            | Self::ZipOpenFile
+            | Self::ZipGetInfo
+            | Self::ZipInfoList
+            | Self::ZipMember
+            | Self::ZipRead
+            | Self::ZipTest
+            | Self::ZipFilename
+            | Self::ZipMinReadSize
+            | Self::ZipField(_)
+            | Self::ZipOpen
+            | Self::ZipNamelist
+            | Self::ZipClose
             | Self::Input
-            | Self::ParseArgs(_)
+            | Self::ParseArgs { .. }
+            | Self::ArgparseText { .. }
             | Self::Pop
             | Self::Print
             | Self::SortRestore
             | Self::StderrLine
             | Self::SysStreamWrite { .. }
             | Self::SysStreamFlush { .. }
-            | Self::SysExit
+            | Self::RaiseException
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
             | Self::SysPlatform
+            | Self::OsName
+            | Self::SysOrigArgv
             | Self::SysArgv
+            | Self::FileFileno
             | Self::TextClose
             | Self::TextEnter
             | Self::TextFlush
@@ -298,24 +441,26 @@ impl Builtin {
             | Self::TextRead
             | Self::TextWrite
             | Self::TomlKeys => Contract::new(true, Unknown),
+            Self::Repeat
+            | Self::CursorLengthHint
+            | Self::Progression { .. }
+            | Self::Tee
+            | Self::Islice
+            | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
             | Self::DefaultListDict
             | Self::CounterNew
             | Self::CounterTotal
             | Self::DictAsBase
+            | Self::DictClear
             | Self::DictIter(_)
             | Self::ExceptionWithCause
             | Self::GlobalSet(_)
-            | Self::KeyUnion
-            | Self::KeySet
-            | Self::KeyIntersection
             | Self::ExactRecord(_)
             | Self::RecordView
             | Self::ListAllI32
             | Self::ListDistinct
             | Self::ListExtendUnhinted
-            | Self::Repr
-            | Self::SetAdd
             | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
@@ -323,7 +468,9 @@ impl Builtin {
             | Self::StringIter
             | Self::StringReverseIter
             | Self::TextClosed => Contract::new(false, Unknown),
-            Self::SortedRecordRows { .. }
+            Self::CounterMath { .. }
+            | Self::CounterMostCommon
+            | Self::SortedRecordRows { .. }
             | Self::SortedStringKeys
             | Self::TupleCacheNew
             | Self::TupleCacheResult => Contract::new(true, Unknown),
@@ -353,6 +500,7 @@ impl Builtin {
             _ => false,
         };
         let valid = match self {
+            Self::RecordCopy => matches!(result, Type::Class(_)) && signature(&[result], result),
             Self::ListGetI32 => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::ListGetBounded { min, max } | Self::ListGetBoundedInBounds { min, max } => {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
@@ -422,7 +570,7 @@ impl Binary {
     /// Includes checked byte concatenation and conversion of mixed integer/float operands.
     pub(crate) fn may_raise_with_operands(self, left: Type, right: Type) -> bool {
         self.may_raise()
-            || (matches!(self, Self::Concat) && left == Type::Bytes)
+            || (matches!(self, Self::Concat) && matches!(left, Type::Str | Type::Bytes))
             || matches!(
                 (left, right),
                 (Type::Int, Type::Float) | (Type::Float, Type::Int)
@@ -469,6 +617,20 @@ pub(crate) const LIST_BORROW_INDEX: RuntimeCall<BorrowedIntOrError, 2> = Runtime
     params: [INT_LIST, RuntimeParam::NativeIndex],
     result: BorrowedIntOrError,
 };
+pub(crate) const BYTE_OUTPUT_APPEND: RuntimeCall<StatusOrError, 2> = RuntimeCall {
+    symbol: "imre_byte_output_append",
+    params: [RuntimeParam::Value(Type::ByteOutput), TAGGED_INT],
+    result: StatusOrError,
+};
+pub(crate) const BYTE_OUTPUT_APPEND_PAIR: RuntimeCall<StatusOrError, 3> = RuntimeCall {
+    symbol: "imre_byte_output_append_pair",
+    params: [
+        RuntimeParam::Value(Type::ByteOutput),
+        TAGGED_INT,
+        TAGGED_INT,
+    ],
+    result: StatusOrError,
+};
 pub(crate) const LIST_APPEND: RuntimeCall<StatusOrError, 2> = RuntimeCall {
     symbol: "imre_list_append",
     params: [INT_LIST, TAGGED_INT],
@@ -514,7 +676,14 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || matches!(
             name,
             "int_floordiv"
+                | "imre_chr"
+                | "imre_int_pow"
+                | "imre_int_modpow"
+                | "imre_int_negative_pow"
                 | "imre_json_index"
+                | "imre_exception_message"
+                | "imre_import_error_reject_reset"
+                | "imre_exception_repr"
                 | "imre_json_iter"
                 | "imre_json_len"
                 | "imre_json_get_receiver"
@@ -535,8 +704,34 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_subprocess_error_field"
                 | "imre_print_int"
                 | "imre_print_float"
+                | "imre_log_file_new"
+                | "imre_log_clock_new"
+                | "imre_log_file_close"
+                | "imre_log_file_flush"
+                | "imre_log_file_compute_int"
+                | "imre_log_file_compute_float"
+                | "imre_log_file_deletions"
+                | "imre_log_file_should_roll"
+                | "imre_log_file_roll"
+                | "imre_time_sleep"
+                | "imre_str_percent_int"
+                | "imre_str_percent_text"
+                | "imre_formatter_format"
+                | "imre_formatter_time"
+                | "imre_formatter_message"
+                | "imre_logrecord_message"
+                | "imre_log_config"
+                | "imre_log_dict_config"
+                | "imre_log_typed_dict_config"
+                | "imre_log_file_config"
+                | "imre_log_config_named"
+                | "imre_log_check_level"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
+                | "imre_str_unquote"
+                | "imre_string_iterable_list"
+                | "imre_str_join"
+                | "imre_str_replace"
                 | "imre_print_str"
                 | "imre_print_bytes"
                 | "imre_bytes_count"
@@ -545,10 +740,24 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_get"
                 | "imre_bytes_get_index"
                 | "imre_bytes_slice"
+                | "imre_str_concat"
                 | "imre_bytes_concat"
                 | "imre_bytes_repeat"
+                | "imre_counter_update"
+                | "imre_key_union"
+                | "imre_key_intersection"
+                | "imre_key_difference"
+                | "imre_regex_groupdict"
                 | "imre_bytes_decode_splitlines"
+                | "imre_str_splitlines"
+                | "imre_exception_field_index"
+                | "imre_exception_field_len"
                 | "imre_bytes_decode"
+                | "imre_bytes_decode_ascii"
+                | "imre_fnmatch_translate"
+                | "imre_fnmatch_translate_bytes"
+                | "imre_urlsafe_b64encode"
+                | "imre_hash_new"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
                 | "imre_binary_open"
@@ -561,9 +770,15 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_none"
                 | "imre_input"
                 | "imre_sys_argv"
+                | "imre_sys_orig_argv"
                 | "imre_path_read_bytes"
                 | "imre_path_read_text"
                 | "imre_path_write_text"
+                | "imre_path_read_text_options"
+                | "imre_path_write_text_options"
+                | "imre_path_write_type_error"
+                | "imre_path_write_bytes_union"
+                | "imre_path_write_text_union"
                 | "imre_path_write_bytes"
                 | "imre_path_mkdir"
                 | "imre_path_unlink"
@@ -571,6 +786,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_path_replace"
                 | "imre_path_absolute"
                 | "imre_path_with_name"
+                | "imre_path_change_extension"
+                | "imre_path_relative_to"
+                | "imre_path_suffixes"
                 | "imre_path_resolve"
                 | "imre_tempdir_new"
                 | "imre_tempdir_cleanup"
@@ -582,6 +800,19 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_text_write"
                 | "imre_text_flush"
                 | "imre_text_close"
+                | "imre_bytes_io"
+                | "imre_binary_seek"
+                | "imre_binary_tell"
+                | "imre_zip_open_file"
+                | "imre_zip_getinfo"
+                | "imre_zip_infolist"
+                | "imre_zip_member"
+                | "imre_zip_read"
+                | "imre_zip_test"
+                | "imre_zip_min_read_size"
+                | "imre_zip_open"
+                | "imre_zip_namelist"
+                | "imre_zip_close"
                 | "imre_int_parse"
                 | "imre_int_float"
                 | "imre_float_int"
@@ -594,6 +825,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_list_slice"
                 | "imre_list_slice_sum"
                 | "imre_str_get"
+                | "imre_str_lower"
+                | "imre_str_capitalize"
                 | "imre_str_slice"
                 | "imre_str_int_list"
                 | "imre_seq_get"
@@ -604,10 +837,16 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_seq_repeat"
                 | "imre_str_repeat"
                 | "imre_seq_slice"
+                | "imre_record_shallow_copy"
+                | "imre_dict_copy"
                 | "imre_dict_get"
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
+                | "imre_ndiff_deferred"
+                | "imre_str_list_sorted_suffix"
                 | "imre_dict_delete"
+                | "imre_dict_pop"
+                | "imre_cursor_length_hint"
                 | "imre_mapping_iter_next"
                 | "imre_exception_raise"
                 | "imre_exception_reraise"

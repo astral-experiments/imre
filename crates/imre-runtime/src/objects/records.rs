@@ -254,6 +254,33 @@ pub unsafe extern "C" fn imre_record_try_new(descriptor: *const RecordDescriptor
     record
 }
 
+/// Shallow-copies a plain class instance without evaluating Python code.
+///
+/// # Safety
+/// The caller roots a live record throughout the call. Its immutable descriptor
+/// describes all public fields and any cached-property storage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_record_shallow_copy(source: *const usize) -> *mut usize {
+    // SAFETY: the source descriptor outlives these allocations. The allocation
+    // helper reports MemoryError before we acquire any field references.
+    unsafe {
+        let layout = descriptor(source);
+        let copy = imre_record_try_new(layout);
+        if copy.is_null() {
+            return copy;
+        }
+        for i in 0..layout.length {
+            let kind = WordKind::new(layout.kinds.add(i).read());
+            // A cold cached property may carry a zero, uninitialized owner.
+            kind.retain(kind.read_record_field(source.add(i)));
+        }
+        // Byte-copy the original scalar and pointer representations, including
+        // their provenance. Private hash-cache storage starts cold in the copy.
+        std::ptr::copy_nonoverlapping(source, copy, layout.length);
+        copy
+    }
+}
+
 /// Returns a record with zeroed fields, or null on allocation failure.
 ///
 /// # Safety
@@ -354,20 +381,33 @@ unsafe fn cached_result(
 /// The compiler preserves field kinds, acyclic ownership, and descriptor lifetime.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_record_release(payload: *const usize) {
-    if payload.is_null() {
-        return;
+    if !payload.is_null() {
+        release(Release::Record(payload));
     }
+}
+
+/// A container can start an acyclic release traversal without a record root.
+pub(super) fn release_object_word(object: Rc<Object>) {
+    release(Release::Object(object));
+}
+
+fn release(owner: Release) {
     PENDING_RELEASES.with(|slot| {
         // SAFETY: a non-null pointer belongs to the enclosing release on this
         // thread. The C ABI cannot unwind, and the outer call clears the slot
         // before returning. No queue borrow spans a field release.
         if let Some(pending) = unsafe { slot.get().as_ref() } {
-            pending.borrow_mut().push(Release::Record(payload));
+            pending.borrow_mut().push(owner);
+            return;
+        }
+        if let Release::Object(object) = &owner
+            && Rc::strong_count(object) > 1
+        {
             return;
         }
         let pending = RefCell::new(Vec::new());
         slot.set(&pending);
-        let mut current = Release::Record(payload);
+        let mut current = owner;
         loop {
             let siblings = pending.borrow().len();
             match current {
@@ -383,19 +423,6 @@ pub unsafe extern "C" fn imre_record_release(payload: *const usize) {
             current = next;
         }
         slot.set(std::ptr::null());
-    });
-}
-
-/// Defer object drops during a record traversal. The last owner can flush a file
-/// or release further records through a container.
-pub(super) fn release_object_word(object: Rc<Object>) {
-    PENDING_RELEASES.with(|slot| {
-        // SAFETY: the outer record release owns the queue while this slot is set.
-        if let Some(pending) = unsafe { slot.get().as_ref() } {
-            pending.borrow_mut().push(Release::Object(object));
-        } else {
-            drop(object);
-        }
     });
 }
 
@@ -486,6 +513,26 @@ mod tests {
             }
             kind.release(old);
         }
+    }
+
+    #[test]
+    fn deep_object_only_lists_release_every_owner_on_a_small_stack() {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                let mut root = crate::objects::Words::new(5).into_object();
+                let leaf = Rc::downgrade(&root);
+                for _ in 0..20_000 {
+                    let mut parent = crate::objects::Words::new(5);
+                    parent.values.push(Rc::into_raw(root) as usize);
+                    root = parent.into_object();
+                }
+                drop(root);
+                assert!(leaf.upgrade().is_none());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]

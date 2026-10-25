@@ -1,0 +1,188 @@
+"""Run complete pinned unittest methods against native Imre at both optimization levels."""
+import argparse
+import hashlib
+from collections import Counter
+from contextlib import contextmanager
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parents[1]))
+from suite_inventory import load_suite, verify_files, verify_interpreter_tests
+from suite_evidence import roles, write_reports
+from suite_native import NativeCompileError, Toolchain, compile_blocker, method_bytes, native_method, run_evidence, testcase_fixture
+
+PREFIX = "test.test_unittest."
+ASSERTIONS = {
+    "testAssertTrue": "assertTrue", "testAssertFalse": "assertFalse",
+    "testAssertLess": "assertLess", "testAssertLessEqual": "assertLessEqual",
+    "testAssertGreater": "assertGreater", "testAssertGreaterEqual": "assertGreaterEqual",
+    "testNotEqual": "assertNotEqual", "test_baseAssertEqual": "_baseAssertEqual",
+    "testAssertRaises": "assertRaises",
+}
+# These CPython passes still fail at native compilation. Keep their first
+# precise source diagnostic in the report; a different failure stops the gate.
+EQUALITY_BLOCKERS = {
+    "testAssertMultiLineEqualTruncates": (1016, "6:34: Imre: too many positional arguments"),
+    "testAssertEqual_diffThreshold": (1036, "14:9: Imre: unknown class method"),
+    "testAssertEqual_shorten": (1067, "9:9: Imre: unknown class method"),
+}
+
+
+def check_assertion(binary, operation, level):
+    def run(case, original):
+        calls = []
+        def bind(target):
+            def invoke(operands, msg):
+                if type(target.longMessage) is not bool or msg is not None and type(msg) is not str:
+                    raise TypeError("unexpected assertion fixture")
+                invocation = [binary, operation, "long" if target.longMessage else "short",
+                              "absent" if msg is None else "message", msg or "", *map(str, operands)]
+                result = subprocess.run(invocation, capture_output=True, text=True, timeout=30)
+                if result.returncode or result.stderr:
+                    raise RuntimeError(f"native exit {result.returncode}: {result.stderr}")
+                calls.append((target.longMessage, msg is not None))
+                if result.stdout.startswith("failure\n") and result.stdout.endswith("\n"):
+                    raise AssertionError(result.stdout[len("failure\n"):-1])
+                if result.stdout != "success\n":
+                    raise RuntimeError(f"invalid assertion response {result.stdout!r}")
+            @contextmanager
+            def scope(expected, *, msg=None):
+                if expected is not TypeError:
+                    raise TypeError("native context driver expects TypeError")
+                # The unchanged host callback must return normally. Only this
+                # outcome is represented by the native driver's empty protected block.
+                yield
+                invoke((), msg)
+            if operation == "assertRaises":
+                return scope
+            def call(*operands, msg=None):
+                unary = operation in {"assertTrue", "assertFalse"}
+                if len(operands) != (1 if unary else 2) or not all(
+                    type(value) is (bool if unary else int) for value in operands
+                ):
+                    raise TypeError("unexpected native assertion operands")
+                invoke(operands, msg)
+            return call
+        for target in (case.testableTrue, case.testableFalse):
+            setattr(target, operation, bind(target))
+        original()
+        if Counter(calls) != Counter((long, msg) for long in (False, True) for msg in (False, True)):
+            raise AssertionError(f"incomplete native calls: {calls}")
+        return {"roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
+                "evidence": {"operation": f"unittest.TestCase.{operation}", "native_calls": len(calls), "opt_level": level,
+                             "assertions": "upstream unittest helper checks each native failure message",
+                             "fixture": "upstream TestLongMessage setup and lifecycle on CPython"}}
+    return run
+
+
+def run(args, level, root):
+    manifest = json.loads((HERE / "UPSTREAM.json").read_text())
+    reference = json.loads((HERE / "reference-linux.json").read_text())
+    if (reference["module"], reference["cpython_commit"]) != (manifest["module"], manifest["commit"]):
+        raise ValueError("reference does not match the pinned unittest manifest")
+    lang = Toolchain(args.imre, args.runtime, args.clang, level)
+    families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
+    for name in ["equality_protocol", *("context_" + family for family in families)]:
+        control = root / name
+        control.mkdir()
+        program = HERE / (name + ".py")
+        native = lang.build(program.read_bytes(), control)
+        oracle = subprocess.run([sys.executable, "-B", program], capture_output=True, timeout=30, check=True)
+        observed = subprocess.run([native], capture_output=True, timeout=30, check=True)
+        if (observed.stdout, observed.stderr) != (oracle.stdout, oracle.stderr):
+            raise AssertionError(f"{program.name} differs from CPython: {observed!r} != {oracle!r}")
+    driver = root / "assertions"
+    driver.mkdir()
+    executions, blocked, measured_blockers = {}, {}, set()
+    host = {PREFIX + "test_assertions.TestLongMessage." + name: op for name, op in ASSERTIONS.items()}
+    try:
+        binary = lang.build((HERE / "assertion_driver.py").read_bytes(), driver)
+    except NativeCompileError as exc:
+        blocked.update({(name, 1): compile_blocker(exc) for name in host})
+    else:
+        executions.update({name: check_assertion(binary, op, level) for name, op in host.items()})
+    for module, owner, method, operation in (
+        ("test_result", "Test_TestResult", "test_stop", "unittest.TestResult.stop"),
+        ("test_result", "Test_TestResult", "test_startTestRun_stopTestRun", "unittest.TestResult.startTestRun and stopTestRun"),
+        ("test_case", "Test_TestCase", "testAssertRaisesNoExceptionType", "unittest.TestCase.assertRaises"),
+        *(("test_case", "Test_TestCase", method, "unittest.TestCase string equality and failure messages")
+          for method in ("testAssertEqualSingleLine", "testAssertEqualwithEmptyString",
+                         "testAssertEqualMultipleLinesMissingNewlineTerminator",
+                         "testAssertEqualMultipleLinesMismatchedNewlinesTerminators",
+                         "testAssertMultiLineEqual", *EQUALITY_BLOCKERS)),
+    ):
+        path = HERE / f"upstream/Lib/test/test_unittest/{module}.py"
+        case_id = PREFIX + f"{module}.{owner}.{method}"
+        directory = root / method
+        directory.mkdir()
+        fixture = testcase_fixture("bool" if method == "test_stop" else None)
+        try:
+            executions[case_id] = native_method(lang, directory, path, owner, case_id, fixture,
+                                                operation=("imre", operation))
+        except NativeCompileError as exc:
+            observation = compile_blocker(exc)
+            observation["reason"] = str(exc).strip().replace(str(directory) + "/", "<case>/")
+            if method in EQUALITY_BLOCKERS:
+                line, diagnostic = EQUALITY_BLOCKERS[method]
+                if observation["reason"].endswith("<case>/case.py:" + diagnostic):
+                    measured_blockers.add(case_id)
+                observation["evidence"].update(
+                    original_source=f"Lib/test/test_unittest/{module}.py:{line}",
+                    method_sha256=hashlib.sha256(method_bytes(path, owner, method)).hexdigest(),
+                )
+            blocked[case_id, 1] = observation
+    report = run_evidence(load_suite(manifest["module"]), executions, reference, level,
+                          preflight=blocked, exceptions=reference_skips(level))
+    failures = [r for r in report["records"]
+                if (r["outcome"] not in {"pass", "not-run"}
+                    and not (r["outcome"] == "blocked" and r["id"] in measured_blockers))
+                or r["classification"] in {"reference-failure", "reference-disagreement"}]
+    for row in failures:
+        print(row["id"], row.get("reason", row["reference"]), file=sys.stderr)
+    return report, bool(failures)
+
+
+def reference_skips(level):
+    fixture = PREFIX + "test_break.TestBreakSignalIgnored"
+    return {(fixture + "." + method, 1, level): {
+        "kind": "upstream-skip", "fixture_variant": fixture, "platform": "linux",
+        "configuration": "TestBreakSignalIgnored.int_handler = signal.SIG_IGN",
+        "condition": "signal.getsignal(signal.SIGINT) == signal.SIG_IGN",
+        "reason": "test requires SIGINT to not be ignored",
+        "source": f"Lib/test/test_unittest/test_break.py:{line}",
+    } for method, line in (("testSecondInterrupt", 102), ("testHandlerReplacedButCalled", 152))}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    for option in ("imre", "runtime", "clang", "result"):
+        parser.add_argument("--" + option, type=Path, required=True)
+    parser.add_argument("--cpython-source", type=Path)
+    parser.add_argument("--exception-family", action="append", choices=("csv", "import"), default=[],
+                        help="explicitly require a family control (csv and import are checked by default)")
+    args = parser.parse_args()
+    if sys.version_info[:3] != (3, 14, 5):
+        parser.error("run with test-enabled CPython 3.14.5")
+    if args.cpython_source:
+        sys.path.insert(0, str(args.cpython_source.resolve() / "Lib"))
+    manifest = json.loads((HERE / "UPSTREAM.json").read_text())
+    verify_files(HERE / "upstream", manifest["files"])
+    verify_interpreter_tests(manifest)
+    reports = []
+    failed = False
+    for level in (0, 3):
+        with tempfile.TemporaryDirectory() as work:
+            report, bad = run(args, level, Path(work))
+        print(f"-O{level}: {report['counts']}")
+        failed |= bad
+        reports.append(report)
+    write_reports(args.result, reports, json.loads((HERE / "reference-linux.json").read_text()))
+    return int(failed)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

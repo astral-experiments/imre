@@ -98,6 +98,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "base64"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
 name = "bitflags"
 version = "2.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -648,7 +654,9 @@ dependencies = [
  "rpds",
  "ruff_db",
  "ruff_python_ast",
+ "ruff_python_codegen",
  "ruff_python_parser",
+ "ruff_python_stdlib",
  "ruff_text_size",
  "salsa",
  "salsa-macro-rules",
@@ -666,6 +674,7 @@ dependencies = [
 name = "imre-runtime"
 version = "0.1.2"
 dependencies = [
+ "base64",
  "compact_str",
  "corosensei",
  "flate2",
@@ -691,6 +700,7 @@ dependencies = [
  "smallvec",
  "toml",
  "toml_parser",
+ "unicode-case-mapping",
 ]
 
 [[package]]
@@ -2134,6 +2144,12 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+
+[[package]]
+name = "unicode-case-mapping"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e9026503b74f3207a4c04e6bf4ea735daa8edf6c0bbfa044cae597bb947a9db"
 
 [[package]]
 name = "unicode-ident"
