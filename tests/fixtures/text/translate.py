@@ -1,0 +1,93 @@
+"""Plain dictionaries map ordinals lazily; None deletes, a miss preserves."""
+def ints(text: str, table: dict[int, int]) -> None:
+    try: print(repr(text.translate(table)))
+    except ValueError as error: print(error)
+
+
+def names(text: str, table: dict[int, str | None]) -> None:
+    print(repr(text.translate(table)))
+
+
+def mixed(text: str, table: dict[int, int | None]) -> None:
+    print(repr(text.translate(table)))
+
+
+def invalid(text: str, table: dict[int, str | bytes]) -> None:
+    try: print(repr(text.translate(table)))
+    except TypeError as error: print(error)
+
+
+def booleans(text: str, table: dict[int, bool | None]) -> None:
+    print(repr(text.translate(table)))
+
+
+def invalid_float(text: str) -> None:
+    table: dict[int, float] = {97: 0.5}
+    try: print(repr(text.translate(table)))
+    except TypeError as error: print(error)
+
+
+def source(text: str) -> str:
+    print("receiver")
+    return text
+
+
+def make_table() -> dict[int, int]:
+    print("table")
+    return {97: 98}
+
+
+def late() -> int:
+    print("late")
+    raise ValueError("late argument failed")
+
+
+def identity(value: str) -> None:
+    lookup: dict[int, int] = {}
+    print(value.translate(lookup) is value)
+
+
+whitespace = {9: 32, 10: 32, 11: 32, 12: 32, 13: 32, 32: 32}
+for text in ["", " ", "hello", "x\t\r\n\v\f y", "☼\u2028\x85\xa0"]:
+    ints(text, whitespace)
+values: dict[int, str | None] = {97: None, 98: "ñ🌍", 99: ""}
+names("cccaaabbb\0", values)
+values[97] = "<A>"
+names("aab", values)
+mixed("aaabbc", {97: None, 98: 105})
+print(repr("abababc".translate({97: None, 98: 105})))
+print(repr("abababc".translate({97: "", 98: None})))
+print(repr("a".translate({97: None})))
+print(repr("b".translate({98: False})))
+print(repr("b".translate({98: True})))
+print(repr("cab".translate({"a": "z"})))
+print(repr("cab".translate({b"a": "z"})))
+print(repr("cab".translate({(97, 98): "z"})))
+ints("a\0a", {97: 0x10ffff, 0: 128})
+for bad in [-1, 0x110000, 1 << 200, -(1 << 200)]:
+    ints("", {97: bad})
+    ints("zz", {97: bad})
+    ints("za", {97: bad})
+invalid("a", {97: "valid", 98: b"bad"})
+invalid("b", {97: "valid", 98: b"bad"})
+booleans("abcdab", {97: False, 98: True, 99: None})
+invalid_float("")
+invalid_float("zz")
+invalid_float("a")
+for text in ["", "z", "zz", "ÿ", "Ā", "界", "🙂"]:
+    identity(text)
+identity("A".lower())
+identity("Ÿ".lower())
+identity(chr(255))
+print(repr("abc".translate({})))
+try: print("x".translate({}, {}))
+except TypeError as error: print(error)
+print(repr(source("aba").translate(make_table())))
+try: print(source("x").translate())
+except TypeError as error: print(error)
+try: print(source("x").translate(make_table(), make_table()))
+except TypeError as error: print(error)
+try: print(source("x").translate(table=make_table()))
+except TypeError as error: print(error)
+try: print(source("x").translate(make_table(), ignored=late()))
+except ValueError as error: print(error)
