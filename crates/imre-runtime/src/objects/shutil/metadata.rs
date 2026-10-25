@@ -4,7 +4,7 @@
 use super::{Error, Kind};
 use super::{Name, Result};
 use rustix::fs::{AtFlags, CWD, Mode, Timespec, Timestamps, chmodat, utimensat};
-use std::fs::{self, Metadata};
+use std::fs::Metadata;
 use std::os::unix::fs::MetadataExt;
 
 fn follow_links(src: &Name, dst: &Name, follow: bool) -> bool {
@@ -12,13 +12,7 @@ fn follow_links(src: &Name, dst: &Name, follow: bool) -> bool {
 }
 
 fn stat(src: &Name, follow: bool) -> Result<Metadata> {
-    let path = src.checked_path()?;
-    if follow {
-        fs::metadata(path)
-    } else {
-        fs::symlink_metadata(path)
-    }
-    .map_err(|e| src.error(e))
+    crate::objects::os::metadata(src.checked_path()?, follow).map_err(|e| src.error(e))
 }
 
 fn chmod(dst: &Name, st: &Metadata, follow: bool) -> Result<()> {

@@ -4,6 +4,49 @@ use super::*;
 use crate::ir::InstanceType;
 
 impl Checker<'_> {
+    /// Store a protocol operand once, then provide the test and exact values for
+    /// its two possible layouts. The caller assigns the operand to the returned slot.
+    pub(super) fn protocol_alternatives(&mut self, ty: Type) -> Option<(usize, Expr, Expr, Expr)> {
+        if self.types.payload(ty).is_none() && self.types.members(ty).is_none() {
+            return None;
+        }
+        let slot = self.hidden(ty);
+        let (test, first, second) = if let Some(payload) = self.types.payload(ty) {
+            (
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::IsNone, vec![self.local(slot)]),
+                },
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                },
+                Expr {
+                    ty: payload,
+                    kind: ExprKind::Unwrap(Box::new(self.local(slot))),
+                },
+            )
+        } else {
+            let members = self.types.members(ty).unwrap();
+            let project = |ty| Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::UnionProject, vec![self.local(slot)]),
+            };
+            (
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(
+                        Builtin::IsInstance(vec![ir::InstanceType::Exact(members[0])]),
+                        vec![self.local(slot)],
+                    ),
+                },
+                project(members[0]),
+                project(members[1]),
+            )
+        };
+        Some((slot, test, first, second))
+    }
+
     /// Reads a proved member through explicit ownership-preserving projection.
     /// Optional members keep zero intact until a separate non-None proof exists.
     pub(super) fn read_local(&self, slot: usize) -> Expr {
@@ -29,6 +72,14 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::AnnotationMember(layout), vec![value]),
             };
         }
+        if value.ty == Type::ObjectValue
+            && let Type::Class(class) = ty
+        {
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::ObjectRecordProject(class), vec![value]),
+            };
+        }
         if matches!(value.ty, Type::Document(_)) {
             return if ty == Type::Str {
                 documents::op(ir::DocumentOp::AsStr, Type::Str, vec![value])
@@ -39,7 +90,9 @@ impl Checker<'_> {
                 }
             };
         }
-        if matches!((value.ty, ty), (Type::Class(parent), Type::Class(child)) if self.classes.parsers.child_of(child, parent))
+        if matches!((value.ty, ty), (Type::Class(parent), Type::Class(child))
+            if self.classes.parsers.child_of(child, parent)
+                || self.classes.declarations.definitions[child].bases.contains(&parent))
         {
             return Expr {
                 ty,
@@ -89,10 +142,50 @@ impl Checker<'_> {
         Expr { ty, kind }
     }
 
+    /// Compare numeric values without changing the stored member used by repr or identity.
+    pub(super) fn numeric_union_comparison(&self, values: Vec<Expr>) -> Vec<Expr> {
+        if !values.iter().any(|v| self.types.is_bool_or_int(v.ty))
+            || !values
+                .iter()
+                .all(|v| matches!(v.ty, Type::Int | Type::Bool) || self.types.is_bool_or_int(v.ty))
+        {
+            return values;
+        }
+        values
+            .into_iter()
+            .map(|value| {
+                let cast = match value.ty {
+                    Type::Int => return value,
+                    Type::Bool => Builtin::Int,
+                    _ => Builtin::UnionProject,
+                };
+                Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(cast, vec![value]),
+                }
+            })
+            .collect()
+    }
+
     /// Class arguments are static builtin/nominal classes or tuples of them;
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StatResult)) {
+            return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
+        }
         match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::Context)) => {
+                return Ok(vec![InstanceType::Exact(Type::Context)]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ContextVar)) => {
+                return Ok(vec![InstanceType::ContextVar]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ContextToken)) => {
+                return Ok(vec![InstanceType::ContextToken]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ModuleSpec)) => {
+                return Ok(vec![InstanceType::ModuleSpec]);
+            }
             Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => {
                 return Ok(vec![InstanceType::ForwardRef]);
             }
@@ -110,6 +203,25 @@ impl Checker<'_> {
         }
         if let Some(kind) = self.exception_category(expression) {
             return Ok(vec![InstanceType::Exception(kind)]);
+        }
+        if matches!(
+            self.resolve(expression),
+            Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+        ) {
+            let mut classes = vec![InstanceType::Dict];
+            classes.extend(
+                self.classes
+                    .declarations
+                    .definitions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, class)| class.mapping)
+                    .map(|(id, _)| InstanceType::Exact(Type::Class(id))),
+            );
+            return Ok(classes);
+        }
+        if let Some(Binding::Intrinsic(Intrinsic::IoBase(base))) = self.resolve(expression) {
+            return Ok(vec![InstanceType::IoBase(base)]);
         }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StrEnum)) {
             return Ok(vec![InstanceType::StrEnum]);
@@ -315,11 +427,19 @@ impl Checker<'_> {
     /// Tests for derived records or exception kinds can require runtime inspection.
     /// A stored builtin exception can be either a SystemExit or an Exception.
     fn instance_member_matches(&self, ty: Type, classes: &[InstanceType]) -> Option<bool> {
-        if matches!(ty, Type::ExceptionField | Type::StringIterable) {
+        if matches!(ty, Type::ObjectValue | Type::StringIterable) {
             return None;
         }
         let mut unknown = false;
         for &class in classes {
+            if let InstanceType::IoBase(base) = class {
+                match base.matches(ty) {
+                    Some(true) => return Some(true),
+                    Some(false) => {}
+                    None => unknown = true,
+                }
+                continue;
+            }
             if let (Type::Class(base), InstanceType::Exact(Type::Class(derived))) = (ty, class)
                 && self.classes.declarations.definitions[derived]
                     .bases
@@ -373,6 +493,19 @@ impl Checker<'_> {
                     result = Some(current);
                 }
                 result
+            }
+            ExprKind::Compare(values, ops) => {
+                let [left, right] = values.as_slice() else {
+                    return None;
+                };
+                let (ExprKind::Str(left), ExprKind::Str(right)) = (&left.kind, &right.kind) else {
+                    return None;
+                };
+                match ops.as_slice() {
+                    [Compare::Equal] => Some(left == right),
+                    [Compare::NotEqual] => Some(left != right),
+                    _ => None,
+                }
             }
             ExprKind::Not(value) => self.instance_condition(value).map(|value| !value),
             _ => None,
@@ -434,6 +567,23 @@ impl Checker<'_> {
         }
     }
 
+    /// A successful test proves a derived layout only if every matching class
+    /// has that layout. A tuple of siblings cannot expose either's fields.
+    fn tested_subclass(&self, base: usize, classes: &[InstanceType]) -> Option<usize> {
+        let definitions = &self.classes.declarations.definitions;
+        classes.iter().find_map(|class| {
+            let InstanceType::Exact(Type::Class(child)) = *class else {
+                return None;
+            };
+            (definitions[child].bases.contains(&base)
+                && classes.iter().all(|class| {
+                    matches!(*class, InstanceType::Exact(Type::Class(id))
+                    if id == child || definitions[id].bases.contains(&child))
+                }))
+            .then_some(child)
+        })
+    }
+
     pub(super) fn apply_instance_facts(&mut self, test: &ast::Expr, truth: bool) {
         for (name, constraints) in self.instance_facts(test, truth) {
             let Some(&slot) = self.names.get(&name) else {
@@ -444,6 +594,26 @@ impl Checker<'_> {
                 .get(&slot)
                 .copied()
                 .unwrap_or(self.locals[slot]);
+            if current == Type::ObjectValue {
+                for (classes, truth) in &constraints {
+                    if *truth
+                        && let [InstanceType::Exact(Type::Class(class))] = classes.as_slice()
+                        && self.boxed_dataclass(*class)
+                    {
+                        self.narrowed.insert_mut(slot, Type::Class(*class));
+                    }
+                }
+                continue;
+            }
+            if let (Type::Class(_), Type::Class(mut base)) = (self.locals[slot], current) {
+                for (classes, positive) in &constraints {
+                    if *positive && let Some(child) = self.tested_subclass(base, classes) {
+                        base = child;
+                    }
+                }
+                self.narrowed.insert_mut(slot, Type::Class(base));
+                continue;
+            }
             if matches!(current, Type::Document(_)) {
                 for (classes, truth) in &constraints {
                     if !*truth {
