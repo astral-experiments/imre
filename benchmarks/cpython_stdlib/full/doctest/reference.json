@@ -1,0 +1,355 @@
+{
+  "test.test_itertools": {
+    "public_calls": [
+      "DocTestSuite"
+    ],
+    "suite_instances": 137,
+    "constructors": [
+      {
+        "module": "itertools",
+        "ids": [
+          "itertools.batched"
+        ]
+      }
+    ],
+    "doctest_occurrences": [
+      "itertools.batched"
+    ],
+    "reference_examples": {
+      "itertools.batched": [
+        {
+          "source": "for batch in batched('ABCDEFG', 3):\n    print(batch)\n",
+          "want": "('A', 'B', 'C')\n('D', 'E', 'F')\n('G',)\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 7,
+          "indent": 4
+        }
+      ]
+    }
+  },
+  "test.test_json": {
+    "public_calls": [
+      "DocTestSuite"
+    ],
+    "suite_instances": 216,
+    "constructors": [
+      {
+        "module": "json",
+        "ids": [
+          "json"
+        ]
+      },
+      {
+        "module": "json.encoder",
+        "ids": [
+          "json.encoder.JSONEncoder.encode"
+        ]
+      },
+      {
+        "module": "json.decoder",
+        "ids": []
+      },
+      {
+        "module": "json",
+        "ids": [
+          "json"
+        ]
+      },
+      {
+        "module": "json.encoder",
+        "ids": [
+          "json.encoder.JSONEncoder.encode"
+        ]
+      },
+      {
+        "module": "json.decoder",
+        "ids": []
+      }
+    ],
+    "doctest_occurrences": [
+      "json",
+      "json.encoder.JSONEncoder.encode",
+      "json",
+      "json.encoder.JSONEncoder.encode"
+    ],
+    "reference_examples": {
+      "json": [
+        {
+          "source": "import json\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 10,
+          "indent": 4
+        },
+        {
+          "source": "json.dumps(['foo', {'bar': ('baz', None, 1.0, 2)}])\n",
+          "want": "'[\"foo\", {\"bar\": [\"baz\", null, 1.0, 2]}]'\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 11,
+          "indent": 4
+        },
+        {
+          "source": "print(json.dumps(\"\\\"foo\\bar\"))\n",
+          "want": "\"\\\"foo\\bar\"\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 13,
+          "indent": 4
+        },
+        {
+          "source": "print(json.dumps('\\u1234'))\n",
+          "want": "\"\\u1234\"\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 15,
+          "indent": 4
+        },
+        {
+          "source": "print(json.dumps('\\\\'))\n",
+          "want": "\"\\\\\"\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 17,
+          "indent": 4
+        },
+        {
+          "source": "print(json.dumps({\"c\": 0, \"b\": 0, \"a\": 0}, sort_keys=True))\n",
+          "want": "{\"a\": 0, \"b\": 0, \"c\": 0}\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 19,
+          "indent": 4
+        },
+        {
+          "source": "from io import StringIO\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 21,
+          "indent": 4
+        },
+        {
+          "source": "io = StringIO()\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 22,
+          "indent": 4
+        },
+        {
+          "source": "json.dump(['streaming API'], io)\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 23,
+          "indent": 4
+        },
+        {
+          "source": "io.getvalue()\n",
+          "want": "'[\"streaming API\"]'\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 24,
+          "indent": 4
+        },
+        {
+          "source": "import json\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 29,
+          "indent": 4
+        },
+        {
+          "source": "mydict = {'4': 5, '6': 7}\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 30,
+          "indent": 4
+        },
+        {
+          "source": "json.dumps([1,2,3,mydict], separators=(',', ':'))\n",
+          "want": "'[1,2,3,{\"4\":5,\"6\":7}]'\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 31,
+          "indent": 4
+        },
+        {
+          "source": "import json\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 36,
+          "indent": 4
+        },
+        {
+          "source": "print(json.dumps({'4': 5, '6': 7}, sort_keys=True, indent=4))\n",
+          "want": "{\n    \"4\": 5,\n    \"6\": 7\n}\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 37,
+          "indent": 4
+        },
+        {
+          "source": "import json\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 45,
+          "indent": 4
+        },
+        {
+          "source": "obj = ['foo', {'bar': ['baz', None, 1.0, 2]}]\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 46,
+          "indent": 4
+        },
+        {
+          "source": "json.loads('[\"foo\", {\"bar\":[\"baz\", null, 1.0, 2]}]') == obj\n",
+          "want": "True\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 47,
+          "indent": 4
+        },
+        {
+          "source": "json.loads('\"\\\\\"foo\\\\bar\"') == '\"foo\\x08ar'\n",
+          "want": "True\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 49,
+          "indent": 4
+        },
+        {
+          "source": "from io import StringIO\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 51,
+          "indent": 4
+        },
+        {
+          "source": "io = StringIO('[\"streaming API\"]')\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 52,
+          "indent": 4
+        },
+        {
+          "source": "json.load(io)[0] == 'streaming API'\n",
+          "want": "True\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 53,
+          "indent": 4
+        },
+        {
+          "source": "import json\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 58,
+          "indent": 4
+        },
+        {
+          "source": "def as_complex(dct):\n    if '__complex__' in dct:\n        return complex(dct['real'], dct['imag'])\n    return dct\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 59,
+          "indent": 4
+        },
+        {
+          "source": "json.loads('{\"__complex__\": true, \"real\": 1, \"imag\": 2}',\n    object_hook=as_complex)\n",
+          "want": "(1+2j)\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 64,
+          "indent": 4
+        },
+        {
+          "source": "from decimal import Decimal\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 67,
+          "indent": 4
+        },
+        {
+          "source": "json.loads('1.1', parse_float=Decimal) == Decimal('1.1')\n",
+          "want": "True\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 68,
+          "indent": 4
+        },
+        {
+          "source": "import json\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 73,
+          "indent": 4
+        },
+        {
+          "source": "def encode_complex(obj):\n    if isinstance(obj, complex):\n        return [obj.real, obj.imag]\n    raise TypeError(f'Object of type {obj.__class__.__name__} '\n                    f'is not JSON serializable')\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 74,
+          "indent": 4
+        },
+        {
+          "source": "json.dumps(2 + 1j, default=encode_complex)\n",
+          "want": "'[2.0, 1.0]'\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 80,
+          "indent": 4
+        },
+        {
+          "source": "json.JSONEncoder(default=encode_complex).encode(2 + 1j)\n",
+          "want": "'[2.0, 1.0]'\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 82,
+          "indent": 4
+        },
+        {
+          "source": "''.join(json.JSONEncoder(default=encode_complex).iterencode(2 + 1j))\n",
+          "want": "'[2.0, 1.0]'\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 84,
+          "indent": 4
+        }
+      ],
+      "json.encoder.JSONEncoder.encode": [
+        {
+          "source": "from json.encoder import JSONEncoder\n",
+          "want": "",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 2,
+          "indent": 0
+        },
+        {
+          "source": "JSONEncoder().encode({\"foo\": [\"bar\", \"baz\"]})\n",
+          "want": "'{\"foo\": [\"bar\", \"baz\"]}'\n",
+          "exc_msg": null,
+          "options": {},
+          "lineno": 3,
+          "indent": 0
+        }
+      ]
+    }
+  }
+}

@@ -1,6 +1,7 @@
 """Compare exception propagation and cleanup with CPython, including sanitizer runs."""
 
 import argparse
+import ast
 import os
 import subprocess
 import sys
@@ -8,7 +9,25 @@ import tempfile
 from pathlib import Path
 from textwrap import dedent
 
+
+def upstream_support_payloads() -> str:
+    """Run the original CPython exception classes, including their constructors and methods."""
+    tests = Path(__file__).resolve().parent
+    support = tests.parent / "benchmarks/cpython_stdlib/full/shared/upstream/Lib/test/support/__init__.py"
+    source = support.read_text()
+    names = ["Error", "TestFailed", "TestFailedWithDetails", "TestDidNotRun"]
+    classes = [node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name in names]
+    assert [node.name for node in classes] == names
+    fragments = [ast.get_source_segment(source, node) for node in classes]
+    calls = (tests / "fixtures/exceptions/support_payload_calls.py").read_text()
+    return "\n\n".join([*fragments, calls])
+
+
 ACCEPTED = {
+    "upstream_support_payloads": upstream_support_payloads(),
+    "boxed_payload": (Path(__file__).parent / "fixtures/exceptions/boxed_payload.py").read_text(),
+    "inherited_payload": (Path(__file__).parent / "fixtures/exceptions/inherited_payload.py").read_text(),
+    "warning_hierarchy": (Path(__file__).parent / "fixtures/exceptions/warning_hierarchy.py").read_text(),
     "explicit_base": (Path(__file__).parent / "fixtures/exceptions/explicit_base.py").read_text(),
     "import_error": (Path(__file__).parent / "fixtures/exceptions/import_error.py").read_text(),
     "classvar_exception_constructor": """
@@ -887,6 +906,76 @@ except KeyError:
 }
 
 REJECTED = {
+    "separate_payload_layouts": """
+class Left(ValueError):
+    def __init__(self, x: int) -> None:
+        self.x = x
+        super().__init__(x)
+class Right(ValueError):
+    def __init__(self, y: str) -> None:
+        self.y = y
+        super().__init__(y)
+class Both(Left, Right):
+    pass
+""",
+    "exception_binder_adjacent_error": """
+class Basic(Exception):
+    def __init__(self, item, *tail):
+        self.item = item
+        super().__init__(item, *tail)
+def annotated(value: str) -> str:
+    return value
+Basic("original", item=annotated(37))
+""",
+    "exception_recursive_dynamic_list": """
+class E(Exception):
+    def __init__(self, value, *args):
+        self.value = value
+        super().__init__(value, *args)
+
+
+def exercise() -> None:
+    values: list[object] = []
+    error = E(values)
+    values.append(error.value)
+    print(repr(error.value))
+
+
+exercise()
+""",
+    "exception_forwarding_object": """
+class Box:
+    def __init__(self, item: int) -> None:
+        self.item = item
+class Report(Exception):
+    def __init__(self, msg, *args):
+        self.msg = msg
+        super().__init__(msg, *args)
+print(Report(Box(1)))
+""",
+    "exception_mutable_default": """
+class Shared(Exception):
+    def __init__(self, item=[], *tail):
+        self.item = item
+        super().__init__(item, *tail)
+print(Shared())
+""",
+    "exception_shadowed_super": """
+class Report(Exception):
+    def __init__(self, super, *tail):
+        self.value = super
+        super().__init__(super, *tail)
+print(Report("argument"))
+""",
+    "exception_intercepted_field": """
+class Report(Exception):
+    def __setattr__(self, key: str, value: str) -> None:
+        raise TypeError(key)
+    def __init__(self, message, *tail):
+        self.message = message
+        super().__init__(message, *tail)
+print(Report("message"))
+""",
     "explicit_base_missing_inherited_field": """
         class Parent(Exception):
             def __init__(self, text: str):
@@ -1109,6 +1198,12 @@ def main() -> None:
             assert result.returncode > 0 and result.stderr, (name, result)
             if name == "exception_subclass_method":
                 assert "exception payload needs an explicit initializer" in result.stderr, result
+            if name == "separate_payload_layouts":
+                assert "multiple independent exception payload layouts" in result.stderr, result
+            if name == "exception_binder_adjacent_error":
+                assert "str" in result.stderr and "int" in result.stderr, result
+            if name in {"exception_forwarding_object", "exception_recursive_dynamic_list"}:
+                assert "forwarding exception fields require" in result.stderr, result
             passed += 1
         cases = [(name, source, None) for name, source in ACCEPTED.items()]
         cases += [

@@ -1,0 +1,253 @@
+{
+  "schema": "imre.shutil.directory-identity/v1",
+  "platform": "x86_64",
+  "scope": "supplemental real filesystem controls; no original test credit",
+  "optimization_levels": {
+    "0": {
+      "known-stable": {
+        "reference": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 1,
+          "old_preserved": false,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "native": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 1,
+          "old_preserved": false,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "matches": true
+      },
+      "known-exchanged": {
+        "reference": {
+          "output": [
+            "OSError('Cannot call rmtree on a symbolic link')",
+            "'root/victim'"
+          ],
+          "victim_stats": 1,
+          "old_preserved": true,
+          "replacement_preserved": true,
+          "root_exists": true
+        },
+        "native": {
+          "output": [
+            "OSError('Cannot call rmtree on a symbolic link')",
+            "'root/victim'"
+          ],
+          "victim_stats": 1,
+          "old_preserved": true,
+          "replacement_preserved": true,
+          "root_exists": true
+        },
+        "matches": true
+      },
+      "unknown-stable": {
+        "reference": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 1,
+          "old_preserved": false,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "native": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 1,
+          "old_preserved": false,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "matches": true
+      },
+      "unknown-exchanged": {
+        "reference": {
+          "output": [
+            "OSError('Cannot call rmtree on a symbolic link')",
+            "'root/victim'"
+          ],
+          "victim_stats": 1,
+          "old_preserved": true,
+          "replacement_preserved": true,
+          "root_exists": true
+        },
+        "native": {
+          "output": [
+            "OSError('Cannot call rmtree on a symbolic link')",
+            "'root/victim'"
+          ],
+          "victim_stats": 1,
+          "old_preserved": true,
+          "replacement_preserved": true,
+          "root_exists": true
+        },
+        "matches": true
+      }
+    },
+    "3": {
+      "known-stable": {
+        "reference": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 1,
+          "old_preserved": false,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "native": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 1,
+          "old_preserved": false,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "matches": true
+      },
+      "known-exchanged": {
+        "reference": {
+          "output": [
+            "OSError('Cannot call rmtree on a symbolic link')",
+            "'root/victim'"
+          ],
+          "victim_stats": 1,
+          "old_preserved": true,
+          "replacement_preserved": true,
+          "root_exists": true
+        },
+        "native": {
+          "output": [
+            "OSError('Cannot call rmtree on a symbolic link')",
+            "'root/victim'"
+          ],
+          "victim_stats": 1,
+          "old_preserved": true,
+          "replacement_preserved": true,
+          "root_exists": true
+        },
+        "matches": true
+      },
+      "unknown-stable": {
+        "reference": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 1,
+          "old_preserved": false,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "native": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 1,
+          "old_preserved": false,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "matches": true
+      },
+      "unknown-exchanged": {
+        "reference": {
+          "output": [
+            "OSError('Cannot call rmtree on a symbolic link')",
+            "'root/victim'"
+          ],
+          "victim_stats": 1,
+          "old_preserved": true,
+          "replacement_preserved": true,
+          "root_exists": true
+        },
+        "native": {
+          "output": [
+            "OSError('Cannot call rmtree on a symbolic link')",
+            "'root/victim'"
+          ],
+          "victim_stats": 1,
+          "old_preserved": true,
+          "replacement_preserved": true,
+          "root_exists": true
+        },
+        "matches": true
+      }
+    }
+  },
+  "imre_sha256": "7a9c2dbcf346c38d597a62b24b413b7a38852967f51856f5e363c35e1d5c1bc6",
+  "runtime_sha256": "729a95575a5b26bdf103e0b8089ea79d50e18f625eb7d2fa192fa3806545e715",
+  "source_commit": "f81f34979cbc61553c2ab3b820aa7beec320ce01",
+  "source_tree": "6011f9f62d10a1bc2716d034256d39f00de68360",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "workflow_run": "https://github.com/astral-sh/imre/actions/runs/40214243775",
+  "original_suite": {
+    "denominator": 223,
+    "reference": {
+      "pass": 174,
+      "skip": 49
+    },
+    "optimization_levels": {
+      "0": {
+        "occurrence_counts": {
+          "blocked": 75,
+          "host-driven-native-operation": 59,
+          "mixed": 28,
+          "native-body-host-fixture": 12,
+          "reference-skip": 49
+        },
+        "rmtree_originals": {
+          "blocked": 3,
+          "host_driven_native": 8,
+          "mixed": 8,
+          "reference_skip": 5
+        },
+        "blocked_rmtree_originals": {
+          "test.test_shutil.TestRmTree.test_rmtree_does_not_choke_on_failing_lstat": "replaces os.lstat during traversal",
+          "test.test_shutil.TestRmTree.test_rmtree_fails_on_close": "patches os.close and requires the operation to observe the injected close error",
+          "test.test_shutil.TestRmTree.test_rmtree_uses_safe_fd_version_if_available": "replaces os.open with a custom exception-raising function"
+        }
+      },
+      "3": {
+        "occurrence_counts": {
+          "blocked": 75,
+          "host-driven-native-operation": 59,
+          "mixed": 28,
+          "native-body-host-fixture": 12,
+          "reference-skip": 49
+        },
+        "rmtree_originals": {
+          "blocked": 3,
+          "host_driven_native": 8,
+          "mixed": 8,
+          "reference_skip": 5
+        },
+        "blocked_rmtree_originals": {
+          "test.test_shutil.TestRmTree.test_rmtree_does_not_choke_on_failing_lstat": "replaces os.lstat during traversal",
+          "test.test_shutil.TestRmTree.test_rmtree_fails_on_close": "patches os.close and requires the operation to observe the injected close error",
+          "test.test_shutil.TestRmTree.test_rmtree_uses_safe_fd_version_if_available": "replaces os.open with a custom exception-raising function"
+        }
+      }
+    },
+    "reports_sha256": {
+      "evidence-linux.json": "eb2b72de91e1fb659d8f06840ac5ebd424b60c55e1ec8bc70848314408f32c93",
+      "method-attempts-linux.json": "6a28a7fb40b15825aa982f27627422546d52fb672dd6e672e13819c4f845ff76",
+      "reference-linux.json": "9312cef909518e6b5cd7ca38219e6a0a68d28bbb7adb77cd28ff2b10f9ea8775",
+      "rmtree-linux.json": "2572c46064ec16011091f858f0a68713c5c3b3bf9e5bde9664c44bac3d14a43d"
+    }
+  },
+  "supporting_controls": {
+    "runtime_tests_passed": 259,
+    "crossed_exception_handlers_per_level": 7,
+    "failing_symlink_copies_per_level": 8
+  }
+}

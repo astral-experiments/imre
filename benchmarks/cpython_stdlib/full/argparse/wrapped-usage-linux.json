@@ -1,0 +1,86 @@
+{
+  "schema": "argparse-native-usage-control-v1",
+  "compiler": "4aa16ea86ca21be024b520a995e0675fb6f8b762",
+  "tree": "f1d63e4e7b41786e2cc832dee27e90090854f748",
+  "artifacts": {
+    "imre": "f86351a202f2f860ba0356f09849a0a739c38375ad2d4908ca70420cfc56972a",
+    "libimre_runtime.a": "230d51b6f54950701d831560f347a1842e1db50cd469b0c5cdd767be66f3a9c6"
+  },
+  "source": "627e395c49b194f67566bbaa7bba9a567b71edd9",
+  "id": "test.test_argparse.TestHelpUsageNoWhitespaceCrash.test_mutex_groups_with_mixed_optionals_positionals_wrap",
+  "method_sha256": "2529cf1689668beb12ae2dcd7eb5120891b50144b17929148c2aa89aeeddb66e",
+  "modes": {
+    "0": {
+      "native": {
+        "exit": 0,
+        "stdout": "completed test.test_argparse.TestHelpUsageNoWhitespaceCrash.test_mutex_groups_with_mixed_optionals_positionals_wrap\n",
+        "stderr": ""
+      },
+      "reference": {
+        "exit": 0,
+        "stdout": "completed test.test_argparse.TestHelpUsageNoWhitespaceCrash.test_mutex_groups_with_mixed_optionals_positionals_wrap\n",
+        "stderr": ""
+      },
+      "inspected": {
+        "exit": 0,
+        "stdout": "completed test.test_argparse.TestHelpUsageNoWhitespaceCrash.test_mutex_groups_with_mixed_optionals_positionals_wrap\n",
+        "stderr": ""
+      },
+      "columns": "80",
+      "llvm_calls": [
+        "%v1646 = call ptr @imre_argparse_text(ptr %v1644, ptr %v1645, i1 true, i32 0, ptr null)"
+      ],
+      "llvm_sha256": "9efcef57ed87215a559b4d868742312d5b7b40fe5a65eb651f6535c9ba8d0152",
+      "runner": {
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "argparse.ArgumentParser.format_usage",
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "opt_level": 0,
+          "method_sha256": "2529cf1689668beb12ae2dcd7eb5120891b50144b17929148c2aa89aeeddb66e"
+        }
+      }
+    },
+    "3": {
+      "native": {
+        "exit": 0,
+        "stdout": "completed test.test_argparse.TestHelpUsageNoWhitespaceCrash.test_mutex_groups_with_mixed_optionals_positionals_wrap\n",
+        "stderr": ""
+      },
+      "reference": {
+        "exit": 0,
+        "stdout": "completed test.test_argparse.TestHelpUsageNoWhitespaceCrash.test_mutex_groups_with_mixed_optionals_positionals_wrap\n",
+        "stderr": ""
+      },
+      "inspected": {
+        "exit": 0,
+        "stdout": "completed test.test_argparse.TestHelpUsageNoWhitespaceCrash.test_mutex_groups_with_mixed_optionals_positionals_wrap\n",
+        "stderr": ""
+      },
+      "columns": "80",
+      "llvm_calls": [
+        "%v1646 = call ptr @imre_argparse_text(ptr %v1644, ptr %v1645, i1 true, i32 0, ptr null)"
+      ],
+      "llvm_sha256": "9efcef57ed87215a559b4d868742312d5b7b40fe5a65eb651f6535c9ba8d0152",
+      "runner": {
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "argparse.ArgumentParser.format_usage",
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "opt_level": 3,
+          "method_sha256": "2529cf1689668beb12ae2dcd7eb5120891b50144b17929148c2aa89aeeddb66e"
+        }
+      }
+    }
+  }
+}

@@ -39,6 +39,19 @@ python3.14 -B benchmarks/cpython_stdlib/full/argparse/native_methods.py \
   --imre-revision "$(git rev-parse HEAD)" --result /tmp/argparse-methods.json
 ```
 
+## Native usage under the original fixture
+
+The [wrapped usage control](wrapped-usage-linux.json) records the unchanged
+`TestHelpUsageNoWhitespaceCrash.test_mutex_groups_with_mixed_optionals_positionals_wrap`
+on `4aa16ea86ca21be024b520a995e0675fb6f8b762`. The original instance
+setup supplied `COLUMNS=80`; the child constructed the parser and its mutually
+exclusive group, called `format_usage()`, and compared the result with the
+original expected string. At O0 and O3 the emitted IR contains one call to
+`imre_argparse_text` with the usage flag set. The normal native binary, the
+binary built while emitting that IR, and pinned CPython all printed the
+completion marker, exited zero, and wrote nothing to stderr. This verifies
+the native operation and assertion under a CPython fixture.
+
 ## Whole-file startup
 
 The original entry point at main `76d74f9` still hit the pre-parser complexity
@@ -64,6 +77,48 @@ any test executes. Normal compilation stops at the original
 `collections.abc.Mapping` import in `Lib/_colorize.py:4`; reachable-only
 compilation reaches `dataclasses.Field` on the next line. The controls use the
 same pinned files and preserve stderr for both entry points.
+
+The [four controls on main `06d678c`](startup-color-06d678c-linux.json)
+reproduce that split. The [collections owner](https://github.com/astral-sh/imre/pull/642#issuecomment-6396766712)
+reports that on the Mapping branch all four reach `dataclasses.Field`.
+None of these native startup checks executed a test.
+
+After [Mapping support merged](https://github.com/astral-sh/imre/pull/642#issuecomment-6400456745),
+the [startup and theme controls](startup-after-mapping-linux.json) tested
+canonical main and the exact tree merged in
+[#968](https://github.com/astral-sh/imre/pull/968). On each tree, both entry
+points at `-O0` and `-O3`, with and without `--reachable-only`, exited 1
+with empty stdout. All eight diagnostics point to `dataclasses.Field` at
+the original `Lib/_colorize.py:5`. The [hosted run](https://github.com/astral-sh/imre/actions/runs/40212060769)
+also compared the Mapping controls against CPython at both levels. The
+reference runner passed all 1,893 tests; no native whole-file test started.
+
+### What the color theme needs at runtime
+
+The [CPython trace](color-trace-linux.json) separates import, the 1,893 original
+tests, direct Mapping operations, and an explicit annotation query. During
+import the decorators on `Argparse`, `Syntax`, `Traceback` and `Unittest`
+each load `Field` once from the [base annotation](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/_colorize.py#L124).
+The [dataclass decorator](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/dataclasses.py#L1222)
+inspects the generated initializer's signature; annotation resolution reaches
+`ThemeSection.__annotate__` even though its annotation is deferred.
+
+Import creates 41 `dataclasses.Field` objects across the five dataclasses.
+The `Argparse` section holds 13 named fields. `__post_init__` reads their
+names and values, and `no_colors` constructs the corresponding empty strings.
+The direct probe checks Mapping iteration order, length, lookup, and `get`
+on a hit and a miss. After import, the full reference suite made 10,328
+`get_theme` calls with no further load of the `Field` name. All these
+observations ran on CPython.
+
+To reproduce, start a fresh test-enabled CPython 3.14.5 with its original
+`Lib` and `Tools/i18n` available:
+
+```sh
+python3.14 -S -B benchmarks/cpython_stdlib/full/argparse/trace_color.py
+```
+
+### Source-defined parser errors
 
 Separately, 152 source-defined methods in the numeric-head run stop on
 `Exception.__init__(self, message, stdout, stderr)` in the unchanged

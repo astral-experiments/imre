@@ -8,7 +8,7 @@ use icu_properties::props::{EnumeratedProperty, GeneralCategory, GeneralCategory
 
 use super::super::python_whitespace;
 use super::exceptions::{Error, Kind as ExceptionKind};
-use super::{ArgumentGroup, Kind, OptionSpec, Parser, Subcommands};
+use super::{ArgumentGroup, OptionSpec, Parser, Subcommands};
 
 /// Parse the positive decimal width accepted by shutil.get_terminal_size().
 fn positive_columns(value: &str) -> Option<usize> {
@@ -103,7 +103,14 @@ impl OptionSpec {
             (false, false) => "32",
         };
         if summary {
-            if self.kind == Kind::Bool {
+            if !self.takes_value() {
+                if self.action == super::Action::BooleanOptional {
+                    return paint(
+                        color,
+                        option_color(&self.flag, false),
+                        &self.flags().collect::<Vec<_>>().join(" | "),
+                    );
+                }
                 return paint(color, option_color(&self.flag, false), &self.flag);
             }
             return if color {
@@ -121,7 +128,7 @@ impl OptionSpec {
             .map(|flag| paint(color, option_color(flag, true), flag))
             .collect::<Vec<_>>()
             .join(", ");
-        if self.kind != Kind::Bool {
+        if self.takes_value() {
             label.push(' ');
             label.push_str(&paint(color, "1;33", &metavar));
         }
@@ -426,16 +433,15 @@ impl Parser {
     }
 
     fn description(&self, text: &str, width: usize, indent: usize) -> String {
-        let text = if text.contains("%(prog)") {
-            expand(text, &self.prog, None)
-        } else {
-            text.to_owned()
-        };
+        let expanded = text
+            .contains("%(prog)")
+            .then(|| expand(text, &self.prog, None));
+        let text = expanded.as_deref().unwrap_or(text);
         let prefix = " ".repeat(indent);
         if self.raw {
-            let mut offsets = super::super::LineOffsets::new(&text);
+            let mut offsets = super::super::LineOffsets::new(text);
             let mut result = String::new();
-            while let Some(line) = offsets.next(&text) {
+            while let Some(line) = offsets.next(text) {
                 result.push_str(&prefix);
                 result.push_str(&text[line.start..offsets.start]);
             }
@@ -444,7 +450,7 @@ impl Parser {
             // _format_text subtracts the current indent before textwrap.fill;
             // textwrap then counts its initial/subsequent indent in that width.
             let width = width.saturating_sub(indent).max(11);
-            wrap(&text, width.saturating_sub(indent).max(1))
+            wrap(text, width.saturating_sub(indent).max(1))
                 .into_iter()
                 .map(|line| format!("{prefix}{line}"))
                 .collect::<Vec<_>>()
@@ -458,21 +464,8 @@ impl Parser {
         if let Some([short, _]) = &self.help_flags {
             parts.push((len(short) + 2, format!("[{}]", paint(color, "32", short))));
         }
-        for option in self.options.iter().filter(|o| !o.positional()) {
-            let length = len(&option.label(true, false));
-            let styled = option.label(true, color);
-            parts.push(if option.required {
-                (length, styled)
-            } else {
-                (length + 2, format!("[{styled}]"))
-            });
-        }
-        let mut positional: Vec<_> = self
-            .options
-            .iter()
-            .filter(|o| o.positional())
-            .map(|option| (len(&option.label(true, false)), option.label(true, color)))
-            .collect();
+        let mut positional = Vec::new();
+        self.usage_actions(color, &mut parts, &mut positional);
         if let Some(commands) = &self.subcommands {
             let word = format!("{} ...", commands.metavar());
             positional.push((len(&word), paint(color, "32", &word)));
@@ -520,6 +513,90 @@ impl Parser {
         }
         text.push('\n');
         text
+    }
+
+    /// Keep positionals in declaration order, moving a group's options beside its first positional.
+    fn usage_actions(
+        &self,
+        color: bool,
+        optionals: &mut Vec<(usize, String)>,
+        positionals: &mut Vec<(usize, String)>,
+    ) {
+        let mut grouped = vec![Vec::new(); self.mutex_required.len()];
+        for (slot, option) in self.options.iter().enumerate() {
+            if !option.positional()
+                && let Some(id) = option.mutex
+            {
+                grouped[id].push(slot);
+            }
+        }
+        let mut used = vec![false; self.options.len()];
+        for positional in [true, false] {
+            for (slot, option) in self.options.iter().enumerate() {
+                if option.positional() != positional || used[slot] {
+                    continue;
+                }
+                let output = if positional {
+                    &mut *positionals
+                } else {
+                    &mut *optionals
+                };
+                if let Some(id) = option.mutex {
+                    let mut alternatives = std::mem::take(&mut grouped[id]);
+                    if positional {
+                        alternatives.push(slot);
+                    }
+                    for &other in &alternatives {
+                        used[other] = true;
+                    }
+                    self.usage_group(&alternatives, self.mutex_required[id], color, output);
+                } else {
+                    self.usage_group(&[slot], false, color, output);
+                }
+            }
+        }
+    }
+
+    fn usage_group(
+        &self,
+        slots: &[usize],
+        required: bool,
+        color: bool,
+        output: &mut Vec<(usize, String)>,
+    ) {
+        let alternatives = slots.len() > 1;
+        for (index, &slot) in slots.iter().enumerate() {
+            let option = &self.options[slot];
+            let plain = option.label(true, false);
+            let (mut length, mut styled) = if alternatives && option.positional() {
+                let label = plain
+                    .strip_prefix('[')
+                    .and_then(|s| s.strip_suffix(']'))
+                    .unwrap_or(&plain);
+                (len(label), paint(color, "32", label))
+            } else {
+                (len(&plain), option.label(true, color))
+            };
+            if alternatives {
+                if index == 0 {
+                    styled.insert(0, if required { '(' } else { '[' });
+                    length += 1;
+                }
+                let suffix = if index + 1 < slots.len() {
+                    " |"
+                } else if required {
+                    ")"
+                } else {
+                    "]"
+                };
+                styled.push_str(suffix);
+                length += suffix.len();
+            } else if !option.positional() && !option.required && !required {
+                styled = format!("[{styled}]");
+                length += 2;
+            }
+            output.push((length, styled));
+        }
     }
 
     fn open_group(&self, output: &mut String, group: &ArgumentGroup, width: usize, color: bool) {
@@ -673,7 +750,7 @@ fn expand(template: &str, prog: &str, option: Option<&OptionSpec>) -> String {
                     }
                 }
                 ("nargs", Some(option)) => {
-                    if option.kind == Kind::Bool {
+                    if !option.takes_value() {
                         "0".into()
                     } else {
                         option.nargs.spelling()
