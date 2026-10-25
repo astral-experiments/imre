@@ -57,6 +57,7 @@ pub(crate) enum Binding {
 /// Sealed namespaces expose only compiler-known symbols, never module values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IntrinsicModule {
+    Array,
     AnnotationLib,
     AnnotationFormat,
     Declaration(&'static str),
@@ -127,6 +128,8 @@ pub(crate) enum IntrinsicModule {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
+    /// A sealed class whose identity is its fully qualified Python name.
+    NominalClass(&'static str),
     GetAnnotations,
     ForwardRef,
     AnnotationTypeRepr,
@@ -150,7 +153,9 @@ pub(crate) enum Intrinsic {
     HandlerLookup,
     PrintActiveException,
     HandlerLevelType,
-    LevelMap { names: bool },
+    LevelMap {
+        names: bool,
+    },
     LogRecord,
     MakeLogRecord,
     LogFormatter,
@@ -197,7 +202,9 @@ pub(crate) enum Intrinsic {
     IntConstant(i64),
     WallTime,
     TimeSleep,
-    WarningFilter { simple: bool },
+    WarningFilter {
+        simple: bool,
+    },
     WarningReset,
     PatchSet,
     Awaitable,
@@ -231,7 +238,9 @@ pub(crate) enum Intrinsic {
     DocCaptureTake,
     DocDisplay,
     DocAscii,
-    MockCallList { mark: bool },
+    MockCallList {
+        mark: bool,
+    },
     DocExecute,
     Final,
     Argv,
@@ -247,7 +256,9 @@ pub(crate) enum Intrinsic {
     Literal,
     Callable,
     Sequence,
-    Mapping { typing_alias: bool },
+    Mapping {
+        typing_alias: bool,
+    },
     Iterable,
     Iterator,
     UnsupportedOperation,
@@ -365,6 +376,7 @@ impl IntrinsicModule {
 
     fn named(name: &str) -> Option<Self> {
         match name {
+            "array" => Some(Self::Array),
             "annotationlib" => Some(Self::AnnotationLib),
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
@@ -473,6 +485,16 @@ impl IntrinsicModule {
             return Some(Binding::IntrinsicModule(Self::ImreToml));
         }
         let symbol = match (self, name) {
+            (Self::Array, "array") => Intrinsic::NominalClass("array.array"),
+            (Self::CollectionsAbc, "Sequence") => {
+                Intrinsic::NominalClass("collections.abc.Sequence")
+            }
+            (Self::CollectionsAbc, "MutableSequence") => {
+                Intrinsic::NominalClass("collections.abc.MutableSequence")
+            }
+            (Self::CollectionsAbc, "MutableMapping") => {
+                Intrinsic::NominalClass("collections.abc.MutableMapping")
+            }
             (Self::AnnotationLib, "ForwardRef") => Intrinsic::ForwardRef,
             (Self::AnnotationLib, "get_annotations") => Intrinsic::GetAnnotations,
             (Self::AnnotationLib, "type_repr") => Intrinsic::AnnotationTypeRepr,
@@ -643,7 +665,7 @@ impl IntrinsicModule {
             (Self::Typing, "assert_never") => Intrinsic::AssertNever,
             (Self::Typing, "cast") => Intrinsic::Cast,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
-            (Self::Typing | Self::CollectionsAbc, "Sequence") => Intrinsic::Sequence,
+            (Self::Typing, "Sequence") => Intrinsic::Sequence,
             (Self::Typing | Self::CollectionsAbc, "Mapping") => Intrinsic::Mapping {
                 typing_alias: self == Self::Typing,
             },
@@ -1009,6 +1031,12 @@ impl SourceGraph {
     /// The native table is an actual dict, including errno.errorcode (a Mapping in typeshed).
     pub(crate) fn checked_dict_deletion(&self, module: ModuleId, target: TextRange) {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::DictDeletion(target));
+    }
+
+    /// This read checks a local's assignment flag and raises Python's error if unset.
+    pub(crate) fn checked_unbound_local_read(&self, module: ModuleId, read: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::UnboundLocalRead(read));
     }
 
     /// Native construction raises TypeError at this abstract class call.

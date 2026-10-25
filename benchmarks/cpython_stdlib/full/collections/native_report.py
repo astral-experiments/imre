@@ -44,8 +44,14 @@ def add_host_observations(observed, routines, reports):
             execution, = entries
             observation = execution["observation"]
             positions, detail = observation["roles"], observation["evidence"]
-            if positions != roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"):
+            operation = positions.get("operation")
+            if operation not in {"imre", "mixed"} or positions != roles(
+                    body="cpython", assertions="cpython", operation=operation, fixture="cpython"):
                 raise ValueError(f"host operation has unexpected execution locations: {name}")
+            host_calls = detail.get("host_calls", {})
+            if ((operation == "mixed") != bool(host_calls)
+                    or not all(type(n) is int and n > 0 for n in host_calls.values())):
+                raise ValueError(f"mixed operation needs explicit positive host call counts: {name}")
             path, line = routines["routines"][name]["source"].rsplit(":", 1)
             source = (HERE / "upstream" / path).read_bytes()
             node, = [n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.FunctionDef)

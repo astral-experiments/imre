@@ -1164,7 +1164,7 @@ fn signature(
             .unwrap_or(module);
         let source = origin.map_or(source, |id| &graph.modules[id].source);
         let sequence = parameter.annotation().is_some_and(|value|
-            matches!(value, ast::Expr::Subscript(subscript) if graph.resolve(module, &subscript.value) == Some(Binding::Intrinsic(Intrinsic::Sequence))));
+            matches!(value, ast::Expr::Subscript(subscript) if annotations::sequence_annotation(graph.resolve(module, &subscript.value))));
         let empty_sequence = sequence
             && matches!(parameter.default.as_deref(), Some(ast::Expr::Tuple(tuple)) if tuple.elts.is_empty());
         let wrapper_default =
@@ -1200,8 +1200,7 @@ fn signature(
                 })
                 .map(|value| {
                     if let ast::Expr::Subscript(sequence) = value
-                        && graph.resolve(module, &sequence.value)
-                            == Some(Binding::Intrinsic(Intrinsic::Sequence))
+                        && annotations::sequence_annotation(graph.resolve(module, &sequence.value))
                     {
                         sequences::check_reads(
                             function,
@@ -1339,8 +1338,7 @@ fn signature(
         })
         .map(|value| {
             if let ast::Expr::Subscript(subscript) = value
-                && graph.resolve(module, &subscript.value)
-                    == Some(Binding::Intrinsic(Intrinsic::Sequence))
+                && annotations::sequence_annotation(graph.resolve(module, &subscript.value))
             {
                 annotation_in_class(&subscript.slice, graph, module, classes, types, owner)
                     .map(|element| types.list(element))
@@ -2044,7 +2042,10 @@ impl<'a> Checker<'a> {
     /// Reuses a slot only at its original type and prevents rebinding fixed call targets.
     fn declare(&mut self, name: &str, ty: Type, node: &impl Ranged) -> Result<usize, String> {
         if (name != "__doc__" && reserved(name))
-            || self.graph.modules[self.module].bindings.contains_key(name)
+            || (self.graph.modules[self.module].bindings.contains_key(name)
+                && (self.module_scope
+                    || !self.mapping_class_import(name)
+                    || (self.block_depth != 0 && !self.names.contains_key(name))))
             || self.local_functions.contains_key(name)
             || self.class_receiver.as_deref() == Some(name)
         {
@@ -3667,11 +3668,18 @@ impl<'a> Checker<'a> {
         if self.block_depth == 0 && !self.module_scope {
             self.local_iter = narrowing::assigned_names(statements).contains("iter");
             self.nullable_assignments = assignments::nullable_assignments(self, statements);
-            let mut names: Vec<_> = unbound_locals::candidates(statements, self.interactive_names)
+            let mut names: Vec<_> =
+                unbound_locals::candidates(statements, self.interactive_names, &|name| {
+                    self.mapping_class_import(name)
+                })
                 .into_iter()
                 .collect();
             names.sort_unstable();
             for name in names {
+                // A later assignment shadows the imported ABC throughout this function.
+                if self.mapping_class_import(&name) && !self.names.contains_key(&name) {
+                    self.declare(&name, Type::BuiltinClass, &statements[0])?;
+                }
                 // Arguments enter already bound; deletion and nonordinary stores were excluded.
                 if self
                     .names
@@ -4991,6 +4999,9 @@ impl<'a> Checker<'a> {
 
     /// Keep the large general frame off recursive left- and right-hand arithmetic.
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let Some(name) = self.collection_class_name(expression) {
+            return Ok(annotations::class_value(name));
+        }
         if let ast::Expr::Attribute(attr) = expression
             && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) =
                 self.resolve(&attr.value)
@@ -5282,6 +5293,8 @@ impl<'a> Checker<'a> {
                 let slot = self.names.get(name.id.as_str()).copied().ok_or_else(|| error(self.source, expression, "name is not a local value; globals and first-class functions are unsupported"))?;
                 if !self.assigned.contains(&slot) {
                     if let Some(&flag) = self.bound_flags.get(name.id.as_str()) {
+                        self.graph
+                            .checked_unbound_local_read(self.module, expression.range());
                         return Ok(self.checked_bound_read(slot, flag, name.id.as_str()));
                     }
                     return Err(error(
@@ -5994,21 +6007,21 @@ impl<'a> Checker<'a> {
                 if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
                     return Ok(wrapped);
                 }
-                if receiver.ty == Type::BuiltinClass {
-                    match attribute.attr.as_str() {
-                        "__name__" | "__qualname__" => return Ok(annotations::type_name(receiver)),
-                        "__module__" => {
-                            return Ok(Expr {
-                                ty: Type::Str,
-                                kind: ExprKind::Scope {
-                                    body: vec![Statement::Expr(receiver)],
-                                    value: Box::new(unpacking::string("builtins")),
-                                    clear: vec![],
-                                },
-                            });
-                        }
-                        _ => {}
-                    }
+                if receiver.ty == Type::BuiltinClass
+                    && matches!(
+                        attribute.attr.as_str(),
+                        "__name__" | "__qualname__" | "__module__"
+                    )
+                {
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::ClassNamePart {
+                                module: attribute.attr.as_str() == "__module__",
+                            },
+                            vec![receiver],
+                        ),
+                    });
                 }
                 if let Type::StrDescriptor(method) = receiver.ty {
                     return self.descriptor_attribute(receiver, method, attribute);

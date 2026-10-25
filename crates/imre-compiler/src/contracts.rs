@@ -434,6 +434,7 @@ impl Builtin {
             | Self::ForwardRefField(_)
             | Self::NewForwardRef
             | Self::ClassNameView
+            | Self::ClassNamePart { .. }
             | Self::StrEnumName
             | Self::StrEnumValue
             | Self::EnumString
