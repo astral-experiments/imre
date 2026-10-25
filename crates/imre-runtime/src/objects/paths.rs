@@ -525,6 +525,32 @@ pub unsafe extern "C" fn imre_path_with_name(
     finish(result, std::ptr::null())
 }
 
+/// Count exact (case-sensitive) components, including a nonempty anchor.
+///
+/// # Safety
+/// The caller roots the native path and comparison string until the call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_path_count_part(path: *const Object, part: *const Str) -> usize {
+    // SAFETY: both inputs remain rooted, and component comparison cannot call Python.
+    let count = unsafe {
+        object(path).0.with(|storage| {
+            let part = (&*part).as_str();
+            if let Storage::PurePath(p) = storage {
+                return p.count_part(part);
+            }
+            let path = storage.path();
+            let tail = path.trim_start_matches('/');
+            let anchor = &path[..path.len() - tail.len()];
+            usize::from(!anchor.is_empty() && part == anchor)
+                + tail
+                    .split('/')
+                    .filter(|s| !s.is_empty() && *s != "." && *s == part)
+                    .count()
+        })
+    };
+    Int::from_usize(count).into_raw()
+}
+
 /// # Safety
 /// Both arguments are rooted exact Paths; comparison borrows immutable storage.
 #[unsafe(no_mangle)]

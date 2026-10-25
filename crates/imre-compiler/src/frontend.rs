@@ -3480,7 +3480,9 @@ impl<'a> Checker<'a> {
                 } else if let ast::Expr::Name(_) = &*assign.target {
                     let left = self.expr(&assign.target)?;
                     let right = self.expr(&assign.value)?;
-                    let value = if assign.op == ast::Operator::Div && (left.ty.is_path() || right.ty.is_path()) {
+                    let value = if assign.op == ast::Operator::Div
+                        && (left.ty.is_path() || right.ty.is_path())
+                    {
                         self.path_join(left, right, statement)?
                     } else {
                         self.binary_expr(assign.op, left, right, statement)?
@@ -5868,6 +5870,27 @@ impl<'a> Checker<'a> {
             return self.invoke(call, callable);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func {
+            if attribute.attr.as_str() == "count"
+                && let ast::Expr::Attribute(parts) = &*attribute.value
+                && parts.attr.as_str() == "parts"
+                && let Ok(path) = self.expr(&parts.value)
+                && path.ty.is_path()
+            {
+                self.reject_builtin_keywords(call)?;
+                let [component] = call.arguments.args.as_ref() else {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "parts.count expects one component",
+                    ));
+                };
+                let component = self.expr_expected(component, Type::Str)?;
+                return Ok(paths::operation(
+                    ir::PathOperation::CountPart,
+                    Type::Int,
+                    vec![path, component],
+                ));
+            }
             if let Some(class) = self.class_reference(&attribute.value) {
                 if let Some(e) = self.exception_alias_call(call, attribute, class, None)? {
                     return Ok(e);

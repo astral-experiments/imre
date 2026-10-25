@@ -49,6 +49,8 @@ while True:
             print(paths[int(arg(0))] == paths[int(arg(1))])
         elif command == "parent":
             print(intern(paths, lookup, paths[int(arg(0))].parent))
+        elif command == "count_part":
+            print(paths[int(arg(0))].parts.count(arg(1)))
         elif command == "exists":
             print(paths[int(arg(0))].exists())
         elif command == "mkdir":
@@ -87,5 +89,11 @@ while True:
         print("!ValueError " + repr(str(error)))
     except NotImplementedError as error:
         print("!NotImplementedError " + repr(str(error)))
+    except FileNotFoundError as error:
+        print("!FileNotFoundError " + repr(str(error)))
+    except NotADirectoryError as error:
+        print("!NotADirectoryError " + repr(str(error)))
+    except PermissionError as error:
+        print("!PermissionError " + repr(str(error)))
     except OSError as error:
         print("!OSError " + repr(str(error)))

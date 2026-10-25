@@ -131,6 +131,7 @@ impl Builtin {
                     | PathOperation::Drive
                     | PathOperation::Root
                     | PathOperation::Anchor
+                    | PathOperation::CountPart
                     | PathOperation::AsPosix
                     | PathOperation::Join
                     | PathOperation::Text

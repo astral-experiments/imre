@@ -24,17 +24,17 @@ from upstream import verify_upstream
 
 MODULE = BENCHMARK / 'upstream/Lib/test/test_pathlib/test_pathlib.py'
 PREFIX = 'test.test_pathlib.test_pathlib.'
-READ = 'test.test_pathlib.test_read.PathReadTest.test_glob'
+READ = 'test.test_pathlib.test_read.PathReadTest.'
 
 
 class Bridge:
     """Only the native process holds Path values, path-key tables, and cursor positions."""
-    def __init__(self, binary, directory):
+    def __init__(self, binary, directory, cwd):
         self.directory = os.fspath(directory)
-        self.cwd = os.getcwd()
+        self.cwd = cwd
         self.calls = Counter()
         self.host = set()
-        self.process = subprocess.Popen([str(binary), str(directory)], stdin=subprocess.PIPE,
+        self.process = subprocess.Popen([str(binary), str(directory)], cwd=cwd, stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if self.read_line() != 'READY\n':
             raise RuntimeError(self.process.stderr.read())
@@ -46,7 +46,7 @@ class Bridge:
         return self.process.stdout.readline()
 
     def call(self, name, *args):
-        if os.getcwd() != self.cwd:
+        if name in ('glob', 'rglob', 'iterdir', 'next', 'exists', 'mkdir') and os.getcwd() != self.cwd:
             raise RuntimeError('native fixture needs to follow the upstream cwd change')
         for i, value in enumerate(args):
             with open(os.path.join(self.directory, str(i)), 'wb') as out:
@@ -61,14 +61,17 @@ class Bridge:
             raise StopIteration
         if output.startswith('!'):
             kind, message = output[1:].split(' ', 1)
-            raise {'OSError': OSError, 'ValueError': ValueError,
+            raise {'OSError': OSError, 'FileNotFoundError': FileNotFoundError,
+                   'NotADirectoryError': NotADirectoryError, 'PermissionError': PermissionError,
+                   'ValueError': ValueError,
                    'NotImplementedError': NotImplementedError}[kind](ast.literal_eval(message))
         return ast.literal_eval(output)
 
     def close(self):
-        self.process.stdin.write('quit\n')
-        self.process.stdin.close()
-        self.process.wait(timeout=10)
+        if self.process.poll() is None:
+            self.process.stdin.write('quit\n')
+            self.process.stdin.close()
+            self.process.wait(timeout=10)
         extra = self.process.stdout.read() + self.process.stderr.read()
         self.process.stdout.close()
         self.process.stderr.close()
@@ -77,6 +80,13 @@ class Bridge:
 
 
 def facade(bridge):
+    class Parts:
+        def __init__(self, number):
+            self.number = number
+
+        def count(self, value):
+            return bridge.call('count_part', self.number, value)
+
     class Cursor(Iterator):
         def __init__(self, number):
             self.number = number
@@ -133,6 +143,10 @@ def facade(bridge):
             return self.wrap(bridge.call('parent', self.number))
 
         @property
+        def parts(self):
+            return Parts(self.number)
+
+        @property
         def parser(self):
             return type(self).parser
 
@@ -166,6 +180,24 @@ def facade(bridge):
 
 
 def native_body(tools, directory, case, original):
+    if case.id() == READ + 'test_iterdir':
+        fixture = f"""from pathlib import Path
+class Ground:
+    can_symlink: bool
+    def __init__(self) -> None:
+        self.can_symlink = {case.ground.can_symlink!r}
+class NativeCase:
+    ground: Ground
+    root: Path
+    def __init__(self) -> None:
+        self.ground = Ground()
+        self.root = Path({os.fspath(case.root)!r})
+    def assertEqual(self, first: set[Path], second: set[Path]) -> None:
+        if first != second:
+            raise AssertionError("different directory members")
+"""
+        return native_method(tools, directory, MODULE.with_name('test_read.py'),
+                             'ReadTestBase', case.id(), fixture)(case, original)
     # These IDs have the same definition but distinct concrete fixture classes.
     ctor = case.cls.__name__
     source = f"""from pathlib import {ctor}
@@ -183,7 +215,10 @@ class NativeCase:
 
 
 def host_method(binary, directory, case, original):
-    bridge = Bridge(binary, directory)
+    # change_cwd runs in the original test. Start its independent native process
+    # in that same directory; all filesystem requests check the two cwd values.
+    cwd = os.path.join(case.base, 'dirC') if case._testMethodName == 'test_glob_dot' else os.getcwd()
+    bridge = Bridge(binary, directory, cwd)
     cls = facade(bridge)
     saved = {}
     patches = {'cls': cls} if hasattr(case, 'cls') else {}
@@ -228,7 +263,8 @@ def host_method(binary, directory, case, original):
 
 HOST = ('test_glob_empty_pattern', 'test_glob_case_sensitive', 'test_glob_recurse_symlinks_common',
         'test_rglob_recurse_symlinks_common', 'test_rglob_recurse_symlinks_false', 'test_rglob_symlink_loop',
-        'test_glob_pathlike', 'test_rglob_pathlike', 'test_glob_dotdot', 'test_iterdir_symlink')
+        'test_glob_pathlike', 'test_rglob_pathlike', 'test_glob_dotdot', 'test_glob_dot',
+        'test_glob_above_recursion_limit', 'test_rglob_posix', 'test_iterdir_symlink')
 
 
 def main():
@@ -255,10 +291,25 @@ def main():
             directory.mkdir()
             if case.id().endswith('test_glob_many_open_files'):
                 return native_body(tools, directory, case, original)
+            if case.id() == READ + 'test_iterdir':
+                try:
+                    return native_body(tools, directory, case, original)
+                except RuntimeError as exc:
+                    diagnostic = str(exc).strip().split('Imre: ')[-1]
+                    # The untouched method adds a second list of names in place.
+                    # Run the entire routine under its original fixtures and keep
+                    # this failed native-body attempt separate from operations.
+                    if diagnostic != 'arithmetic requires int or float operands':
+                        raise
+                    evidence = host_method(binary, directory, case, original)
+                    evidence['native_body_blocker'] = {
+                        'operation': 'expected += [linkA, linkB, brokenLink, brokenLinkLoop]',
+                        'diagnostic': diagnostic}
+                    return evidence
             return host_method(binary, directory, case, original)
         ids = {PREFIX + cls + '.' + name:run for cls in ('PathTest','PosixPathTest')
                for name in (*HOST, 'test_glob_many_open_files')}
-        ids[READ] = run
+        ids.update({READ + name: run for name in ('test_glob', 'test_iterdir', 'test_iterdir_nodir')})
         evidence, failures, skips = run_in_fixtures(load_suite('test.test_pathlib'), ids)
     report = {'cpython_commit': commit, 'opt_level': args.opt_level, 'evidence': evidence,
               'failures': failures, 'skips': skips}

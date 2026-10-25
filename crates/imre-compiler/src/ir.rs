@@ -885,6 +885,7 @@ pub(crate) enum PathOperation {
     Drive,
     Root,
     Anchor,
+    CountPart,
     AsPosix,
     Join,
     Match {

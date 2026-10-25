@@ -190,6 +190,12 @@ impl PurePath {
         self.tail.last().map_or("", |s| s.as_str())
     }
 
+    pub(super) fn count_part(&self, part: &str) -> usize {
+        let anchor =
+            part.strip_prefix(self.drive.as_str()) == Some(self.root.as_str()) && !part.is_empty();
+        usize::from(anchor) + self.tail.iter().filter(|s| s.as_str() == part).count()
+    }
+
     pub(super) fn is_absolute(&self) -> bool {
         if self.windows {
             self.text.starts_with(r"\\") || (!self.root.is_empty() && !self.drive.is_empty())

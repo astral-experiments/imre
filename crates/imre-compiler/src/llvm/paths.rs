@@ -217,6 +217,7 @@ impl Emitter<'_, '_> {
                     PathOperation::WithName => "imre_path_with_name",
                     PathOperation::Text => "imre_path_text",
                     PathOperation::Name => "imre_path_name",
+                    PathOperation::CountPart => "imre_path_count_part",
                     PathOperation::Stem => "imre_path_stem",
                     PathOperation::Suffix => "imre_path_suffix",
                     PathOperation::Parent => "imre_path_parent",

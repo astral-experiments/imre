@@ -90,7 +90,12 @@ fn glob_matches(
 }
 
 /// Compile once for a filesystem selector that checks many names against the same pattern.
-pub(super) fn glob_regex(pattern: &str, sensitive: bool, recursive: bool, sep: char) -> Result<Regex> {
+pub(super) fn glob_regex(
+    pattern: &str,
+    sensitive: bool,
+    recursive: bool,
+    sep: char,
+) -> Result<Regex> {
     let slash = || Hir::literal([sep as u8]);
     let mut parts = pattern.split(sep).peekable();
     let mut expression = vec![Hir::look(Look::Start)];
