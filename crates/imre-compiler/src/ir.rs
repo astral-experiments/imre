@@ -644,6 +644,9 @@ pub(crate) enum Builtin {
     DocCaptureStart,
     DocCaptureTake,
     DocAscii,
+    MockCallList {
+        mark: bool,
+    },
     SystemExitNew {
         omit_none: bool,
     },
