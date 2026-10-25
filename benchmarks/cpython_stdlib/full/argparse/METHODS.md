@@ -65,6 +65,38 @@ any test executes. Normal compilation stops at the original
 compilation reaches `dataclasses.Field` on the next line. The controls use the
 same pinned files and preserve stderr for both entry points.
 
+The [four controls on main `06d678c`](startup-color-06d678c-linux.json)
+reproduce that split. The [collections owner](https://github.com/astral-sh/imre/pull/642#issuecomment-6396766712)
+reports that on the Mapping branch all four reach `dataclasses.Field`.
+None of these native startup checks executed a test.
+
+### What the color theme needs at runtime
+
+The [CPython trace](color-trace-linux.json) separates import, the 1,893 original
+tests, direct Mapping operations, and an explicit annotation query. During
+import the decorators on `Argparse`, `Syntax`, `Traceback` and `Unittest`
+each load `Field` once from the [base annotation](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/_colorize.py#L124).
+The [dataclass decorator](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/dataclasses.py#L1222)
+inspects the generated initializer's signature; annotation resolution reaches
+`ThemeSection.__annotate__` even though its annotation is deferred.
+
+Import creates 41 `dataclasses.Field` objects across the five dataclasses.
+The `Argparse` section holds 13 named fields. `__post_init__` reads their
+names and values, and `no_colors` constructs the corresponding empty strings.
+The direct probe checks Mapping iteration order, length, lookup, and `get`
+on a hit and a miss. After import, the full reference suite made 10,328
+`get_theme` calls with no further load of the `Field` name. All these
+observations ran on CPython.
+
+To reproduce, start a fresh test-enabled CPython 3.14.5 with its original
+`Lib` and `Tools/i18n` available:
+
+```sh
+python3.14 -S -B benchmarks/cpython_stdlib/full/argparse/trace_color.py
+```
+
+### Source-defined parser errors
+
 Separately, 152 source-defined methods in the numeric-head run stop on
 `Exception.__init__(self, message, stdout, stderr)` in the unchanged
 `ArgumentParserError` fixture. Its separate `error_code` field is not in
