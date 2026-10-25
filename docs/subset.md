@@ -982,6 +982,13 @@ the empty dictionary; a `Counter` still returns zero for a missing key, and a
 `defaultdict` keeps its factory. `dict.clear(mapping)` and the inherited class
 methods `Counter.clear(mapping)` and `defaultdict.clear(mapping)` do the same.
 
+`mapping.copy()` creates a new dictionary with the same insertion order,
+stored values, and missing-key behavior. `mapping.update(other, key=value)`
+evaluates its arguments first, replaces existing values without moving their
+keys, then appends new keys in order. The positional source can be any supported
+dictionary of the same key and value types; keyword entries require string
+keys. A Counter retains its additive update behavior through a dict annotation.
+
 Unary `+` and `-` select positive counts and negated negative counts. Binary `+`, `-`, `|` and `&` return a fresh Counter with positive counts, preserving the surviving left keys followed by new right keys in insertion order. Augmented assignment to a Counter local mutates the existing object, including when the right operand aliases it.
 
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.

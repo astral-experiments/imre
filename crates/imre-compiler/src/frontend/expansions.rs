@@ -3,6 +3,67 @@
 use super::*;
 
 impl Checker<'_> {
+    /// Evaluate the receiver, source, and keyword arguments before updating any entry.
+    pub(super) fn dict_update(
+        &mut self,
+        call: &ast::ExprCall,
+        receiver: Expr,
+        key: Type,
+        value: Type,
+    ) -> Result<Expr, String> {
+        let mapping = self.types.dict(key, value);
+        let mut args = vec![receiver];
+        match call.arguments.args.as_ref() {
+            [] => {}
+            [source] => args.push(self.expr_expected(source, mapping)?),
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "dict.update expects at most one positional mapping",
+                ));
+            }
+        }
+        if !call.arguments.keywords.is_empty() {
+            if key != Type::Str {
+                return Err(error(
+                    self.source,
+                    call,
+                    "dict.update keyword entries require string keys",
+                ));
+            }
+            let mut entries = Vec::new();
+            for kw in &call.arguments.keywords {
+                let Some(name) = &kw.arg else {
+                    return Err(error(
+                        self.source,
+                        kw,
+                        "dict.update keyword unpacking is unsupported",
+                    ));
+                };
+                entries.push((
+                    Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str(name.to_string()),
+                    },
+                    self.expr_expected(&kw.value, value)?,
+                ));
+            }
+            args.push(Expr {
+                ty: mapping,
+                kind: ExprKind::Dict {
+                    key,
+                    value,
+                    entries,
+                },
+            });
+        }
+        Ok(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::DictUpdate, args),
+        })
+    }
+
     /// Capture ordinary fields and expanded elements in source order. Keeping
     /// each reference also preserves identity if a later field mutates it.
     pub(super) fn expanded_tuple(
