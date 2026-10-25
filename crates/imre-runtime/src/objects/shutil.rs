@@ -8,7 +8,6 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStringExt;
-use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
@@ -48,7 +47,7 @@ pub extern "C" fn imre_shutil_confstr_cs_path() -> *const Bytes {
             return std::ptr::null();
         }
         if len <= buffer.len() {
-            return Rc::into_raw(Rc::new(buffer[..len - 1].to_vec()));
+            return crate::BytesOwner::into_raw(crate::BytesOwner::new(buffer[..len - 1].to_vec()));
         }
         if large.try_reserve(len - large.len()).is_err() {
             sequence_allocation_failed();
@@ -62,7 +61,7 @@ pub extern "C" fn imre_shutil_confstr_cs_path() -> *const Bytes {
 /// The POSIX os.defpath attribute is independent of the confstr result.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_shutil_os_defpath() -> *const Bytes {
-    Rc::into_raw(Rc::new(b"/bin:/usr/bin".to_vec()))
+    crate::BytesOwner::into_raw(crate::BytesOwner::new(b"/bin:/usr/bin".to_vec()))
 }
 
 type PathProvider = extern "C" fn() -> *const Bytes;
@@ -75,8 +74,14 @@ fn default_path(
     if let Some(error) = take_pending() {
         // SAFETY: take_pending transfers ownership of the exception through both checks.
         let unavailable = unsafe {
-            imre_exception_matches(Rc::as_ptr(&error), Kind::AttributeError as u32) != 0
-                || imre_exception_matches(Rc::as_ptr(&error), Kind::ValueError as u32) != 0
+            imre_exception_matches(
+                crate::ObjectOwner::as_ptr(&error),
+                Kind::AttributeError as u32,
+            ) != 0
+                || imre_exception_matches(
+                    crate::ObjectOwner::as_ptr(&error),
+                    Kind::ValueError as u32,
+                ) != 0
         };
         if !unavailable {
             replace_pending(Some(error));
@@ -91,7 +96,9 @@ fn default_path(
         Ok(None)
     } else {
         // SAFETY: a present provider result transfers an exact Bytes owner.
-        Ok(Some(Rc::unwrap_or_clone(unsafe { Rc::from_raw(value) })))
+        Ok(Some(crate::BytesOwner::unwrap_or_clone(unsafe {
+            crate::BytesOwner::from_raw(value)
+        })))
     }
 }
 
@@ -242,7 +249,9 @@ pub unsafe extern "C" fn imre_shutil_which(
             "Python int too large to convert to C int",
         )),
         Ok(None) => Ok(std::ptr::null()),
-        Ok(Some(name)) if cmd_bytes != 0 => Ok(Rc::into_raw(Rc::new(name)).cast()),
+        Ok(Some(name)) if cmd_bytes != 0 => {
+            Ok(crate::BytesOwner::into_raw(crate::BytesOwner::new(name)).cast())
+        }
         Ok(Some(name)) => super::paths::path_utf8(OsString::from_vec(name))
             .map(|text| StrOwner::into_raw(StrOwner::new(text)).cast()),
     };

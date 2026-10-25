@@ -764,9 +764,9 @@ pub unsafe extern "C" fn imre_logrecord_new(
     ];
     // SAFETY: the caller roots each value under the matching descriptor until it has been acquired.
     let record = Record::new(fields.map(|(v, k)| unsafe { WordKind::new(k).acquire(v) }));
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::LogRecord(
-        Box::new(record),
-    )))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::LogRecord(Box::new(record)),
+    ))))
 }
 
 /// Accesses a rooted record for the duration of a nonreentrant operation.

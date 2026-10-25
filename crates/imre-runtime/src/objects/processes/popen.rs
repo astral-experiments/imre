@@ -16,7 +16,7 @@ pub(in crate::objects) use active::retain_live_owner;
 use control::ChildControl;
 use std::sync::Arc;
 
-type Pipes = [Option<Rc<Object>>; 3];
+type Pipes = [Option<crate::ObjectOwner>; 3];
 
 pub(in crate::objects) struct Popen {
     args: OwnedWord,
@@ -259,9 +259,9 @@ pub unsafe extern "C" fn imre_popen_command(
 pub unsafe extern "C" fn imre_popen_config(config: *const LaunchConfig) -> *const Object {
     // SAFETY: the compiler supplies the exact settings layout and rooted owners.
     let result = unsafe { spawn(&*config, LaunchConfig::extras(config)) }.map(|child| {
-        Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Popen(Box::new(
-            child,
-        ))))))
+        crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+            Storage::Popen(Box::new(child)),
+        ))))
     });
     finish(result, std::ptr::null())
 }
@@ -535,7 +535,9 @@ pub unsafe extern "C" fn imre_popen_pipe(handle: *const Object, index: u32) -> *
         with_process(handle, |p| {
             p.pipes[index as usize]
                 .as_ref()
-                .map_or(std::ptr::null(), |file| Rc::into_raw(file.clone()))
+                .map_or(std::ptr::null(), |file| {
+                    crate::ObjectOwner::into_raw(file.clone())
+                })
         })
     }
 }

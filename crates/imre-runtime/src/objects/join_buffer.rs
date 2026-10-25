@@ -1,9 +1,9 @@
 //! Builds a private string list's final join as its elements arrive.
 
 use super::{Object, Storage, StorageCell, Str, exceptions, object};
-use crate::StrOwner;
+use crate::{ObjectOwner, StrOwner};
 use smallvec::SmallVec;
-use std::{ptr, rc::Rc};
+use std::ptr;
 
 pub(super) struct JoinBuffer {
     separator: StrOwner,
@@ -57,7 +57,7 @@ impl JoinBuffer {
 
     fn finish(&mut self) -> Option<StrOwner> {
         let Some(prefix) = self.prefix.take() else {
-            return Some(super::text::owned_string(""));
+            return Some(crate::objects::text::owned_string(""));
         };
         if self.rest.is_empty() {
             return Some(prefix);
@@ -84,10 +84,18 @@ impl JoinBuffer {
 pub unsafe extern "C" fn imre_join_buffer_new(separator: *const Str) -> *const Object {
     // SAFETY: the compiler supplies a rooted exact string.
     let separator = unsafe { StrOwner::acquire_word(separator as usize) };
-    let buffer = Box::new(JoinBuffer::new(separator));
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::JoinBuffer(
-        buffer,
-    )))))
+    let buffer = allocator_api2::boxed::Box::try_new(JoinBuffer::new(separator))
+        .ok()
+        .and_then(|buffer| {
+            ObjectOwner::try_new(Object(StorageCell::new(Storage::JoinBuffer(buffer)))).ok()
+        });
+    buffer.map_or_else(
+        || {
+            exceptions::sequence_allocation_failed();
+            ptr::null()
+        },
+        ObjectOwner::into_raw,
+    )
 }
 
 /// Appends one already-evaluated string. Earlier elements are not observable.
@@ -146,7 +154,7 @@ mod tests {
         assert!(buf.push(text.clone()));
         assert!(StrOwner::ptr_eq(&buf.finish().unwrap(), &text));
         let mut buf = JoinBuffer::new(StrOwner::new(Str::new("|")));
-        for part in [&text, &super::text::owned_string(""), &text] {
+        for part in [&text, &crate::objects::text::owned_string(""), &text] {
             assert!(buf.push(part.clone()));
         }
         assert_eq!(text.as_str(), "🐍");
@@ -157,10 +165,10 @@ mod tests {
     fn final_join_can_retry_a_prefix_with_later_empty_and_unicode_strings() {
         let mut buf = JoinBuffer::new(StrOwner::new(Str::new("::")));
         assert!(buf.push(StrOwner::new(Str::new("a"))));
-        assert!(buf.push(super::text::owned_string("")));
+        assert!(buf.push(crate::objects::text::owned_string("")));
         // This is the first part that didn't fit in the speculative prefix.
         buf.rest.push(StrOwner::new(Str::new("雪")));
-        assert!(buf.push(super::text::owned_string("")));
+        assert!(buf.push(crate::objects::text::owned_string("")));
         assert_eq!(buf.finish().unwrap().as_str(), "a::::雪::");
     }
 }

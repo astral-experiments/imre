@@ -875,6 +875,12 @@ An unshadowed builtin class such as `object` or `int` can be a `store_const` val
 
 ## Synchronous subprocesses
 
+`subprocess.getstatusoutput(cmd, *, encoding=None, errors=None)` runs the command
+in the native shell and returns its signed exit status and combined stdout and
+stderr. `getoutput` returns the same text alone. Both normalize CRLF and CR to
+LF and remove one final newline. The default decoder is UTF-8; UTF-8 with BOM,
+ASCII, and Latin-1 use the same codecs as native path text reads.
+
 On POSIX, `shutil.which(cmd, mode=os.F_OK | os.X_OK, path=None)` searches for a non-directory accessible with the requested mode. It returns an owned string, bytes, or `None`. String and native `Path` commands produce string paths, and bytes commands preserve arbitrary filename bytes. The search path accepts strings, bytes, native paths, or `None`. A command containing a directory component is checked directly. A missing `PATH` uses the platform default, an empty search path finds nothing, and empty entries in a nonempty colon-separated path search the current directory. Native string results must be representable as UTF-8. `os.F_OK`, `os.R_OK`, `os.W_OK` and `os.X_OK` are available for mode expressions.
 
 The runtime supports a sealed `subprocess.run` boundary with exact `list[str]` arguments. Output defaults to the inherited descriptors. `capture_output=True` captures both streams. Each `stdout` or `stderr` may also select `subprocess.PIPE`, `subprocess.DEVNULL`, `sys.stdout`, or `sys.stderr`. `stderr=subprocess.STDOUT` follows the child's stdout, including when it is a pipe. Captures return bytes by default. Literal `text=True` or UTF-8 `encoding` decodes captured bytes strictly and normalizes newlines. Inherited, discarded, and redirected fields are `None`. `check` is a boolean expression, defaulting to false. `cwd` accepts a string, native `Path`, or a nullable form of either, and `env` accepts `dict[str, str]` or `None`. Arguments may be positional or named `args`; the other parameters are keyword-only. All supplied expressions evaluate once in source order before launching the child, even when keyword order differs from parameter order.
@@ -1172,13 +1178,14 @@ An empty tuple or a fixed tuple of homogeneous `str`, `bytes`, `int`, or `bool` 
 `collections.deque[T]` stores one concrete element type in a native ring. Its
 constructor accepts an iterable and an optional nonnegative `maxlen`. It supports
 append, pop, and extend at either end, clear, shallow copy, equality, length,
-truth testing, and forward or reverse iteration. A saved append or pop method
-keeps its receiver alive. An unannotated empty deque defaults to integer elements.
+truth testing, and forward or reverse iteration. In-place reversal preserves
+the bound and the positions of active iterators. A saved append, pop, or reverse
+method keeps its receiver alive. An unannotated empty deque defaults to integer elements.
 Calling `d.__init__(iterable, maxlen)` validates the new bound, clears the
 same deque, and consumes the iterable. If iteration raises, items already
 appended remain visible through aliases. Omitting `maxlen` removes the old bound.
 
-`list[T]` has one concrete element type, such as `list[str]`, `list[Counter]`, or `list[list[int]]`. Types are invariant: an existing `list[str]` cannot become `list[str | None]` through assignment or a call. Every append and indexed write checks the exact element type. Repetition preserves element values and shares reference-type elements across positions. Lists of immutable value structs store scalar payloads inline; `list[int]` uses specialized tagged-integer storage. Other lists use owned runtime slots.
+`list[T]` has one concrete element type, such as `list[str]`, `list[Counter]`, or `list[list[int]]`. Types are invariant: an existing `list[str]` cannot become `list[str | None]` through assignment or a call. Every append and indexed write checks the exact element type. Repetition preserves element values and shares reference-type elements across positions. Lists of immutable value structs store scalar payloads inline; `list[int]` uses specialized tagged-integer storage. Other lists use owned runtime slots. Calling `reverse()` reverses either list in place and returns `None`; aliases and active iterators see the new order.
 
 An unquoted `Sequence[T]` parameter from `collections.abc` or `typing` accepts
 an exact `list[T]` or an omitted `()` default. Its body may iterate the
@@ -1595,6 +1602,20 @@ python3 tests/bytes.py --compiler target/release/imre --runtime target/release/l
 ```
 
 A profile can select a named arm of a simple `match`, or exclude the true arm of a named Boolean condition. The executable evaluates the original test. Entering an excluded arm raises a `ValueError` with the required value. A missing function or unmatched selector is a build error.
+
+### Context variables
+
+`contextvars.ContextVar[T]` stores bindings by variable identity. The native
+scheduler copies the current context when scheduling a task and restores it at
+every resume; directly awaiting a cold coroutine shares the caller's context.
+`ContextVar.get`, `set`, `reset`, token context managers, `copy_context`,
+and `Context.run` support nested and exceptional execution.
+
+Contexts support shallow copies, lookup, membership and size. Callback arguments
+in `Context.run` currently need an exact positional signature. Thread startup,
+explicit task `context=`, context iteration and mapping equality remain outside
+the subset. See the [contextvars scope and CPython evidence](../benchmarks/cpython_stdlib/full/contextvars/README.md)
+for value layouts and test roles.
 
 ### Native asyncio subprocesses
 

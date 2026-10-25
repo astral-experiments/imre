@@ -1,6 +1,5 @@
 //! Percent, brace and template formatting over the actual fields of native log records.
 use crate::StrOwner;
-use std::rc::Rc;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -9,9 +8,7 @@ use ruff_python_literal::format::{FormatParseError, FormatPart, FormatString, Fr
 
 use super::super::exceptions::{Result, string_repr};
 use super::super::words::OwnedWord;
-use super::super::{
-    Error, Int, Kind, Object, Storage, StorageCell, Str, acquire_rc, finish, object,
-};
+use super::super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object};
 use super::record::{self, Record, display, string};
 
 static PERCENT: LazyLock<Regex> = LazyLock::new(|| {
@@ -35,7 +32,7 @@ pub(in crate::objects) struct Formatter {
     style: Style,
     fmt: StrOwner,
     date: Option<StrOwner>,
-    defaults: Option<Rc<Object>>,
+    defaults: Option<crate::ObjectOwner>,
     utc: bool,
     default_time: StrOwner,
     default_msec: Option<StrOwner>,
@@ -108,7 +105,7 @@ impl Formatter {
         date: Option<StrOwner>,
         style: &str,
         validate: bool,
-        defaults: Option<Rc<Object>>,
+        defaults: Option<crate::ObjectOwner>,
     ) -> Result<Self> {
         let (style, default) = match style {
             "%" => (Style::Percent, "%(message)s"),
@@ -564,9 +561,9 @@ unsafe fn optional_string(word: usize) -> Option<StrOwner> {
     (word != 0).then(|| unsafe { StrOwner::acquire_word(word) })
 }
 
-unsafe fn optional<T>(word: usize) -> Option<Rc<T>> {
-    // SAFETY: callers supply zero or a rooted allocation of the inferred exact type.
-    (word != 0).then(|| unsafe { acquire_rc(word) })
+unsafe fn optional_object(word: usize) -> Option<crate::ObjectOwner> {
+    // SAFETY: callers supply zero or a rooted native object.
+    (word != 0).then(|| unsafe { crate::ObjectOwner::acquire_word(word) })
 }
 
 fn word(s: Option<StrOwner>) -> usize {
@@ -596,14 +593,14 @@ pub unsafe extern "C" fn imre_formatter_new(
             optional_string(date),
             (&*style).as_str(),
             validate,
-            optional(defaults),
+            optional_object(defaults),
         )
     };
     finish(
         result.map(|f| {
-            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::LogFormatter(
-                Box::new(f),
-            )))))
+            crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+                Storage::LogFormatter(Box::new(f)),
+            ))))
         }),
         std::ptr::null(),
     )

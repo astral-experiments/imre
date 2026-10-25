@@ -267,6 +267,7 @@ impl Builtin {
                 | ProcessOperation::GeneratorNext
                 | ProcessOperation::GeneratorYield
                 | ProcessOperation::Acquire
+                | ProcessOperation::ShellOutput { .. }
                 | ProcessOperation::CheckOutput { .. }
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
@@ -417,6 +418,7 @@ impl Builtin {
             | Self::StringIterationList
             | Self::StringJoin
             | Self::JoinBufferFinish
+            | Self::JoinBufferNew
             | Self::StringReplace
             | Self::StringGet
             | Self::StringIntList
@@ -480,7 +482,6 @@ impl Builtin {
             | Self::RegexMatchStart
             | Self::SequenceGetInBounds
             | Self::Split
-            | Self::JoinBufferNew
             | Self::StringListNonempty
             | Self::Str
             | Self::SourceModule
@@ -540,6 +541,7 @@ impl Builtin {
             | Self::GzipOpen
             | Self::BytesIo
             | Self::StringIo(_)
+            | Self::ContextVar(_)
             | Self::BinarySeek
             | Self::BinaryTell
             | Self::ZipOpenFile
@@ -618,6 +620,7 @@ impl Builtin {
             | Self::DictAsBase
             | Self::DictClear
             | Self::ListClear
+            | Self::ListReverse
             | Self::DictIter(_)
             | Self::GlobalSet(_)
             | Self::ExactRecord(_)
@@ -626,6 +629,7 @@ impl Builtin {
             | Self::ListDistinct
             | Self::ListExtendUnhinted
             | Self::DequeClear
+            | Self::DequeReverse
             | Self::SetIter
             | Self::SortDetach
             | Self::SplitLinesIter
@@ -970,6 +974,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_unquote"
                 | "imre_string_iterable_list"
                 | "imre_str_join"
+                | "imre_join_buffer_new"
                 | "imre_join_buffer_finish"
                 | "imre_str_replace"
                 | "imre_print_str"
