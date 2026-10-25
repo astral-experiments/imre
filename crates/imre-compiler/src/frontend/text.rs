@@ -78,7 +78,12 @@ impl Checker<'_> {
             let value = self.expr(source)?;
             self.shlex_quote_value(value, call)
         } else {
-            self.join_parts(unpacking::string(" "), source, call, true)
+            self.join_parts(
+                unpacking::string(" "),
+                source,
+                call,
+                stdlib::JoinStyle::Shell,
+            )
         }
     }
 
@@ -498,6 +503,7 @@ impl Checker<'_> {
         let optional_string = self.types.optional(Type::Str);
         let (operation, returns, parameters) = match name {
             "lower" => (TextOperation::Lower, Type::Str, vec![]),
+            "upper" => (TextOperation::Upper, Type::Str, vec![]),
             "capitalize" => (TextOperation::Capitalize, Type::Str, vec![]),
             "split" | "rsplit" => (
                 TextOperation::Split(name == "rsplit"),

@@ -16,67 +16,18 @@ impl Checker<'_> {
         } else {
             Type::Int
         };
-        let mut scope = calls::ArgumentScope::default();
-        let mut supplied = Vec::new();
-        for arg in &call.arguments.args {
-            if let ast::Expr::Starred(spread) = arg {
-                supplied.extend(scope.spread(self, spread)?);
-            } else {
-                let value = self.expr(arg)?;
-                supplied.push(scope.hold(self, value));
+        self.posix_positional(call, name, size, returns, |checker, scope, supplied| {
+            let mut args = Vec::new();
+            for value in supplied {
+                let index =
+                    checker.credential_index(value, name.ends_with("gid"), &call.func, None)?;
+                args.push(scope.hold(checker, index));
             }
-        }
-        for keyword in &call.arguments.keywords {
-            if keyword.arg.is_none() {
-                return Err(error(
-                    self.source,
-                    keyword,
-                    "expanded keyword arguments are unsupported",
-                ));
-            }
-            let value = self.expr(&keyword.value)?;
-            scope.hold(self, value);
-        }
-        let count = supplied.len();
-        let message = if !call.arguments.keywords.is_empty() {
-            Some(format!("posix.{name}() takes no keyword arguments"))
-        } else if size == count {
-            None
-        } else {
-            Some(match size {
-                0 => format!("posix.{name}() takes no arguments ({count} given)"),
-                1 => format!("posix.{name}() takes exactly one argument ({count} given)"),
-                _ => format!("{name} expected {size} arguments, got {count}"),
+            Ok(Expr {
+                ty: returns,
+                kind: ExprKind::Builtin(Builtin::Process(ProcessOperation::Credential(name)), args),
             })
-        };
-        if let Some(message) = message {
-            // Mark only the bad binding sites; errors inside evaluated operands remain visible.
-            if call.arguments.args.len() < size {
-                self.graph
-                    .checked_missing_argument(self.module, call.range());
-            }
-            for arg in call.arguments.args.iter().skip(size) {
-                self.graph.checked_excess_argument(self.module, arg.range());
-            }
-            for keyword in &call.arguments.keywords {
-                self.graph
-                    .checked_positional_keyword(self.module, keyword.range());
-            }
-            self.graph.checked_keywords(
-                self.module,
-                call.arguments.keywords.iter().map(Ranged::range),
-            );
-            return Ok(scope.finish(id_error(returns, message)));
-        }
-        let mut args = Vec::new();
-        for value in supplied {
-            let index = self.credential_index(value, name.ends_with("gid"), &call.func, None)?;
-            args.push(scope.hold(self, index));
-        }
-        Ok(scope.finish(Expr {
-            ty: returns,
-            kind: ExprKind::Builtin(Builtin::Process(ProcessOperation::Credential(name)), args),
-        }))
+        })
     }
 
     fn credential_index(
@@ -210,19 +161,5 @@ fn credential_integer(mut value: Expr, group: bool, owner: &str) -> Expr {
 
 fn invalid_id(group: bool, owner: &str) -> Expr {
     let id = if group { "gid" } else { "uid" };
-    id_error(Type::Int, format!("{id} should be integer, not {owner}"))
-}
-
-fn id_error(ty: Type, message: String) -> Expr {
-    let exception = Expr {
-        ty: Type::Exception,
-        kind: ExprKind::Exception {
-            kind: exception_kind("TypeError").unwrap(),
-            message: Some(Box::new(unpacking::string(message))),
-        },
-    };
-    Expr {
-        ty,
-        kind: ExprKind::Builtin(Builtin::RaiseException, vec![exception]),
-    }
+    posix_type_error(Type::Int, format!("{id} should be integer, not {owner}"))
 }
