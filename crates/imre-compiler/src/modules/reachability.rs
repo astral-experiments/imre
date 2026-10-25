@@ -88,6 +88,9 @@ impl<'a> Visitor<'a> for References<'_> {
                 self.found.attributes.extend(
                     [
                         "_baseAssertEqual",
+                        "_assertBoolEqual",
+                        "_assertBoolIntEqual",
+                        "_assertIntBoolEqual",
                         "assertMultiLineEqual",
                         "assertListEqual",
                         "_assertTextListEqual",

@@ -35,7 +35,10 @@ CPython reference executions; they confer no Imre coverage.
 Both optimization levels run the two original `TestResult` methods for stopping
 and run boundaries. Their complete bodies, result objects and checks run in the
 native process. CPython applies the upstream class fixture that disables color
-before launching that process.
+before launching that process. The stopping method uses the standard native
+TestCase assertion. The [boolean equality control](boolean_equality.py) also
+checks Python’s numeric comparison with integers, the original operand spellings
+in failed comparisons, and a subclass’s failure exception and message policy.
 
 The unchanged `Test_TestCase.testAssertRaisesNoExceptionType` exercises five
 invalid calls. Its nested assertions, validation, and catches run in Imre under

@@ -68,6 +68,14 @@ impl Checker<'_> {
             ));
         } else if matches!(ty, Type::Str | Type::StrLiteral(_)) {
             "assertMultiLineEqual"
+        } else if matches!(ty, Type::Bool | Type::Int) {
+            let second = right.map(|arg| self.expr(arg)).transpose()?.map(|e| e.ty);
+            match (ty, second) {
+                (Type::Bool, Some(Type::Bool)) => "_assertBoolEqual",
+                (Type::Bool, Some(Type::Int)) => "_assertBoolIntEqual",
+                (Type::Int, Some(Type::Bool)) => "_assertIntBoolEqual",
+                _ => "_baseAssertEqual",
+            }
         } else {
             "_baseAssertEqual"
         };

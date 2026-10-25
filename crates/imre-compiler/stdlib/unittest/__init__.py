@@ -181,6 +181,18 @@ class TestCase:
         if first != second:
             self.fail(self._formatMessage(msg, f"{first!r} != {second!r}"))
 
+    def _assertBoolEqual(self, first: bool, second: bool, msg: str | None = None) -> None:
+        if first != second:
+            self.fail(self._formatMessage(msg, f"{first!r} != {second!r}"))
+
+    def _assertBoolIntEqual(self, first: bool, second: int, msg: str | None = None) -> None:
+        if int(first) != second:
+            self.fail(self._formatMessage(msg, f"{first!r} != {second!r}"))
+
+    def _assertIntBoolEqual(self, first: int, second: bool, msg: str | None = None) -> None:
+        if first != int(second):
+            self.fail(self._formatMessage(msg, f"{first!r} != {second!r}"))
+
     def _truncateMessage(self, message: str, diff: str) -> str:
         limit = self.maxDiff
         if limit is None or len(diff) <= limit:
