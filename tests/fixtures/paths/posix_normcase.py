@@ -43,6 +43,10 @@ class BrokenPath:
         raise ValueError("from __fspath__")
 
 
+def preserves_spelling(value: str | bytes) -> bool:
+    return posixpath.normcase(value) is value
+
+
 def text_spelling(value: str | TextPath) -> str:
     return os.path.normcase(value)
 
@@ -51,8 +55,15 @@ def optional_spelling(value: str | None) -> str:
     return os.path.normcase(value)  # ty: ignore[no-matching-overload]
 
 
+def spelling_after(seen: list[str], label: str) -> str:
+    seen.append(label)
+    return label
+
+
 spelling = "FoO/./BaR\\../\0ß"
 raw = b"FoO/./BaR\\../\0\xff"
+assert preserves_spelling(spelling)
+assert preserves_spelling(raw)
 text_path = TextPath(spelling)
 assert os.path.normcase(s=text_path) is spelling
 assert text_path.calls == 1
@@ -64,7 +75,9 @@ assert posixpath.normcase(BytePath(raw)) is raw
 assert os.fspath(path=raw) is raw
 assert posixpath.normcase(spelling) is spelling
 assert os.path.normcase(raw) is raw
-assert posixpath.normcase(Path("A/../B")) == "A/../B"
+native_path = Path("A/../B")
+assert posixpath.normcase(native_path) == "A/../B"
+assert posixpath.normcase(native_path) is os.fspath(native_path)
 assert posixpath.normcase(PurePosixPath("A/../B")) == "A/../B"
 assert os.path.normcase("P") != os.path.normcase("p")
 assert os.path.normcase("\\") != os.path.normcase("/")
@@ -91,3 +104,16 @@ except TypeError as exc:
     print(str(exc))
 else:
     raise AssertionError("invalid argument")
+
+calls: list[str] = []
+
+
+try:
+    os.path.normcase(spelling_after(calls, "one"), s=spelling_after(calls, "two"))  # ty: ignore[no-matching-overload]
+except TypeError as exc:
+    print(str(exc))
+else:
+    raise AssertionError("duplicate argument accepted")
+assert len(calls) == 2
+assert calls[0] == "one"
+assert calls[1] == "two"

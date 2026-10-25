@@ -171,8 +171,14 @@ impl Checker<'_> {
                         | Type::None
                 )
             })
-            || types == [Type::Str; 2]
-            || types == [Type::Bytes; 2]
+            || types
+                .iter()
+                .all(|ty| matches!(ty, Type::Str | Type::StrLiteral(_) | Type::Bytes))
+            || (types[0] == types[1]
+                && self
+                    .types
+                    .members(types[0])
+                    .is_some_and(|members| members == [Type::Str, Type::Bytes]))
             || types == [Type::LogRecord; 2]
             || types == [Type::Logger; 2]
             || types == [Type::TimedFileHandler; 2]

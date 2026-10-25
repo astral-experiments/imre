@@ -126,6 +126,11 @@ jobs:
           python3 "$dir/coverage.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --baseline "$dir/evidence-linux.json" --result "$RUNNER_TEMP/itertools-evidence-linux.json"
           python3 benchmarks/cpython_stdlib/suite_evidence.py "$dir/reference-linux.json" "$RUNNER_TEMP/itertools-evidence-linux.json"
           python3 benchmarks/cpython_stdlib/suite_evidence.py "$dir/reference-free-threading-linux.json" "$dir/evidence-free-threading-linux.json"
+      - name: Check POSIX normcase with the original path fixtures
+        run: |
+          for opt in 0 3; do
+            python3 benchmarks/cpython_stdlib/full/os/normcase.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/posix-normcase-O$opt.json"
+          done
       - name: Check subprocess.run with vendored CPython methods
         run: python3 benchmarks/cpython_stdlib/native_subprocess.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Run vendored CPython methods against native Imre

@@ -109,8 +109,14 @@ impl Checker<'_> {
                     project(members[1]),
                 )
             };
-            let left = self.fspath_protocol(first, at, returned_by)?;
-            let right = self.fspath_protocol(second, at, returned_by)?;
+            let mut left = self.fspath_protocol(first, at, returned_by)?;
+            let mut right = self.fspath_protocol(second, at, returned_by)?;
+            // A branch that only raises supplies no Python value to the join.
+            if matches!(left.kind, ExprKind::Builtin(Builtin::RaiseException, _)) {
+                left.ty = right.ty;
+            } else if matches!(right.kind, ExprKind::Builtin(Builtin::RaiseException, _)) {
+                right.ty = left.ty;
+            }
             let ty = self.types.join(left.ty, right.ty).ok_or_else(|| {
                 error(
                     self.source,
