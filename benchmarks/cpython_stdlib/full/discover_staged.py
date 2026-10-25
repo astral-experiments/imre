@@ -15,6 +15,21 @@ sys.path.insert(0, str(HERE.parent))
 from suite_inventory import cases, load_suite
 
 
+def suite_names(mod, default, refs):
+    manifest = HERE / mod / "UPSTREAM.json"
+    metadata = json.loads(manifest.read_bytes()) if manifest.exists() else {}
+    return metadata.get("modules") or [n for p in refs if (n := json.loads(p.read_bytes()).get("module"))] or ["test." + default]
+
+
+def early_skip(suite, reason, mod):
+    key = suite + ".TestDeque.test_copy_race"
+    if suite == "test.test_free_threading.test_collections" and reason == "GIL enabled":
+        ref = json.loads((HERE / mod / f"reference-{sys.platform}.json").read_bytes())
+        if ref["reference"].get(key) == {"skipped": reason}:
+            return key
+    raise ValueError(f"unaccounted import-time skip: {suite}: {reason}")
+
+
 def main():
     primary = tomllib.loads((HERE / "scope.toml").read_text())["wave_one"]
     release = json.loads((HERE.parent / "UPSTREAM.json").read_bytes())
@@ -34,20 +49,15 @@ def main():
     total = skipped = 0
     for mod in modules:
         expected = Counter()
-        names = []
-        for ref in sorted((HERE / mod).glob(f"reference*-{sys.platform}.json")):
+        refs = sorted((HERE / mod).glob(f"reference*-{sys.platform}.json"))
+        for ref in refs:
             results = read_results(ref, release["commit"], sys.platform)
             expected.update(name for name, _ in results)
-            if name := json.loads(ref.read_bytes()).get("module"):
-                names.append(name)
         if not expected:
             raise ValueError(f"no {sys.platform} reference ledger for {mod}")
-        pin = HERE / mod / "UPSTREAM.json"
-        metadata = json.loads(pin.read_bytes()) if pin.exists() else {}
-        suites = metadata.get("modules") or names or ["test." + primary[mod]]
         seen = Counter()
         early = 0
-        for suite in suites:
+        for suite in suite_names(mod, primary[mod], refs):
             try:
                 module = importlib.import_module(suite)
                 if not Path(module.__file__).resolve().is_relative_to(lib / "test"):
@@ -55,12 +65,7 @@ def main():
                 seen.update(case.id() for case in cases(load_suite(suite)))
             except unittest.SkipTest as exc:
                 # On a GIL build this package skips before discovery of its sole method.
-                if suite != "test.test_free_threading.test_collections" or str(exc) != "GIL enabled":
-                    raise
-                key = suite + ".TestDeque.test_copy_race"
-                reference = json.loads((HERE / mod / f"reference-{sys.platform}.json").read_bytes())
-                if reference["reference"].get(key) != {"skipped": str(exc)}:
-                    raise
+                key = early_skip(suite, str(exc), mod)
                 seen[key] += 1
                 early += 1
         if seen != expected:

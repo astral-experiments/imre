@@ -8,9 +8,12 @@ import shutil
 HERE = Path(__file__).resolve().parent
 
 
-def stage(destination):
-    if destination.exists() and any(destination.iterdir()):
-        raise ValueError(f"destination must be empty: {destination}")
+def git_blob(path):
+    data = path.read_bytes()
+    return hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
+
+
+def verified_sources():
     shared = HERE.parent / "UPSTREAM.json"
     pin = json.loads(shared.read_bytes())["commit"]
     # OS originally pinned its three companion suites in separate manifests.
@@ -30,16 +33,39 @@ def stage(destination):
             source = manifest.parent / "upstream" / path
             if not source.is_file():
                 source = shared.parent / "upstream" / path
-            content = source.read_bytes()
-            blob = hashlib.sha1(f"blob {len(content)}\0".encode() + content).hexdigest()
-            if blob != expected or seen.get(path, blob) != blob:
+            if git_blob(source) != expected or (path in seen and seen[path][1] != expected):
                 raise ValueError(f"{manifest}: wrong source blob for {filename}")
-            if path not in seen:
-                target = destination / path
-                target.parent.mkdir(exist_ok=True, parents=True)
-                shutil.copy(source, target)
-                seen[path] = blob
-    return len(seen)
+            seen[path] = source, expected
+    return seen
+
+
+def stage(destination):
+    if destination.exists() and any(destination.iterdir()):
+        raise ValueError(f"destination must be empty: {destination}")
+    sources = verified_sources()
+    for path, (source, _) in sources.items():
+        target = destination / path
+        target.parent.mkdir(exist_ok=True, parents=True)
+        shutil.copy(source, target)
+    return len(sources)
+
+
+def verify_prefix(stdlib):
+    """Reject a host test package, an extra fixture, or a modified staged blob."""
+    stdlib = stdlib.resolve()
+    sources = verified_sources()
+    expected = set()
+    for path, (_, blob) in sources.items():
+        target = (stdlib.joinpath(*path.parts[1:]) if path.parts[0] == "Lib"
+                  else stdlib.parent / path)
+        if not target.is_file() or git_blob(target) != blob:
+            raise ValueError(f"missing or modified installed fixture: {path}")
+        expected.add(target)
+    for root in (stdlib / "test", stdlib.parent / "Tools"):
+        for target in root.rglob("*"):
+            if target.is_file() and "__pycache__" not in target.relative_to(root).parts and target not in expected:
+                raise ValueError(f"unexpected installed fixture: {target}")
+    return len(sources)
 
 
 if __name__ == "__main__":

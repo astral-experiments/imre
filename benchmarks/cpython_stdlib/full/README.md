@@ -22,6 +22,6 @@ Land one reviewable module change or shared prerequisite at a time. Keep upstrea
 
 ## Finding the first compiler error in a whole suite
 
-Run `python3 benchmarks/cpython_stdlib/full/check_suite_startup.py --compiler /path/to/imre --cpython-git /path/to/cpython test.test_argparse`. The CPython Git repository must contain the pinned commit; the command stages its original `Lib/test` from Git objects, including support code and data. Without suite names it checks all wave-one primary suites. List companion suites explicitly, e.g. `test.test_posix test.test_genericpath`.
+Run `python3 benchmarks/cpython_stdlib/full/check_suite_startup.py --compiler /path/to/imre test.test_argparse`. The default checks the vendored fixtures and needs no CPython checkout. To stage all upstream suites, pass `--cpython-git /path/to/cpython`; the repository must contain the pinned commit. Without suite names the command checks all wave-one primary suites. List companion suites explicitly, e.g. `test.test_posix test.test_genericpath`.
 
 Each suite gets two entry points: the import alone and a standard `unittest` loader and runner. Both are checked in ordinary and reachable-only mode. JSON records the diagnostics and the command exits nonzero when a check fails. No tests execute during a check. For a missing private Python helper, add its original source with e.g. `--support-file _colorize.py`. The rest of the standard library still resolves through Imre; staging an entire upstream `Lib` would shadow its native modules.
