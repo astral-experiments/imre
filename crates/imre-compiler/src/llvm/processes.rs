@@ -499,6 +499,7 @@ impl Emitter<'_, '_> {
                 let (ptr, tag) = match path.value.ty {
                     Type::None => ("null", 2),
                     Type::Bytes => (path.value.operand.as_str(), 1),
+                    Type::Path | Type::PurePath(_) => (path.value.operand.as_str(), 3),
                     _ => (path.value.operand.as_str(), 0),
                 };
                 let (fd, fd_kind) = match fd.value.ty {
