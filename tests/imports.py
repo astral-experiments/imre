@@ -21,6 +21,7 @@ REJECTED = {
     "dynamic": ({"main.py": '__import__("helper")\n', "helper.py": HELPER}, "unsupported"),
     "nested": ({"main.py": "def f() -> None:\n    import math\nf()\n"}, "unsupported"),
     "conditional": ({"main.py": "if False:\n    import math\n"}, "unsupported"),
+    "unbound_alias": ({"main.py": "import helper\n", "helper.py": "Pair = tuple[Missing, int]\n"}, "name is not a local value"),
     "unused_bad_type": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return "wrong"\n'}, "helper.py"),
     "unused_unsupported": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return eval("1")\n'}, "unsupported"),
     "inactive_guard": ({"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    eval("1")\n'}, "unsupported"),
@@ -50,6 +51,21 @@ REJECTED = {
 
 ACCEPTED = {
     "cast_mutable": {"main.py": 'from typing import cast as view\ndef fresh() -> list[int]:\n    print("create")\n    return [1]\nvalues = view("list[int]", fresh())\nview("list[int]", values).append(7)\nprint(values[1])\n'},
+    "type_aliases": {
+        "types_used.py": (
+            "from typing import NewType, TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n    import pathlib as p\n    from typing import Literal\n"
+            '    Mode = Literal["read", "write"]\n'
+            'Name = NewType("Name", str)\nPair = tuple[Name, int]\n'
+            'def named(value: Name) -> Pair:\n    return value, 7\n'
+            'def mode(value: "Mode") -> str:\n    return value\n'
+            'def leaf(value: "p.Path") -> str:\n    return value.name\n'
+        ),
+        "main.py": (
+            "from pathlib import Path\nfrom types_used import Name, named, mode, leaf\n"
+            'data = named(Name("alias"))\nprint(data[0])\nprint(data[1])\nprint(mode("read"))\nprint(leaf(Path("one/two")))\n'
+        ),
+    },
     "inferred_signature": {"main.py": IMPORT, "helper.py": "def f(value):\n    return value\n"},
     "library_effect": {"main.py": IMPORT, "helper.py": "print(7)\n" + HELPER},
     "library_state": {"main.py": "from helper import f, values\nprint(f(values[0]))\n", "helper.py": "values = [1]\n" + HELPER},
