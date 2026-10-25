@@ -51,15 +51,17 @@ jobs:
                        "tests/fixtures/paths/walking.py", "tests/fixtures/processes/file_redirects.py",
                        "tests/fixtures/text/line_methods.py",
                        "tests/fixtures/module_values/wrapper_attributes/main.py",
-                       "benchmarks/cpython_stdlib/full/logging/hierarchy_values.py"):
+                       "benchmarks/cpython_stdlib/full/logging/hierarchy_values.py",
+                       "tests/fixtures/classes/constant_strings.py"):
               source = root / name
+              local_imports = name.endswith(("/wrapper_attributes/main.py", "/classes/constant_strings.py"))
               with TemporaryDirectory() as tmp:
                   directory = Path(tmp)
                   ref_dir = directory / "cpython"
                   ref_dir.mkdir()
                   def observed(argv, cwd):
                       env = os.environ.copy()
-                      if name.endswith("/wrapper_attributes/main.py"):
+                      if local_imports:
                           env["PYTHONPATH"] = str(source.parent)
                       p = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, timeout=90)
                       return p.returncode, p.stdout, p.stderr
@@ -70,7 +72,7 @@ jobs:
                       native_dir = directory / ("case-" + level)
                       native_dir.mkdir()
                       subprocess.run([driver, "build", source, "--runtime", runtime, "--clang", "/usr/bin/clang-18",
-                                      *(["--module-root", source.parent] if name.endswith("/wrapper_attributes/main.py") else []),
+                                      *(["--module-root", source.parent] if local_imports else []),
                                       "--quiet", "--opt-level", level, "-o", output], check=True)
                       actual = observed([output], native_dir)
                       assert actual == expected, (name, level, expected, actual)
@@ -91,7 +93,7 @@ jobs:
             echo "Passed: base=$base pr=$pr tree=$tree (-O0 and -O3 stdout, stderr and exit; runtime ownership)." >> "$GITHUB_STEP_SUMMARY"
             git fetch --no-tags origin refs/heads/main
             latest=$(git rev-parse FETCH_HEAD)
-            if git diff --quiet "$base" "$latest" -- crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse tests/fixtures/paths/walking.py tests/fixtures/processes/file_redirects.py tests/fixtures/text/line_methods.py benchmarks/cpython_stdlib/full/types/namespaces.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py tests/fixtures/module_values/wrapper_attributes benchmarks/cpython_stdlib/full/logging/hierarchy_values.py; then
+            if git diff --quiet "$base" "$latest" -- crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse tests/fixtures/paths/walking.py tests/fixtures/processes/file_redirects.py tests/fixtures/text/line_methods.py benchmarks/cpython_stdlib/full/types/namespaces.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py tests/fixtures/module_values/wrapper_attributes benchmarks/cpython_stdlib/full/logging/hierarchy_values.py tests/fixtures/classes/constant_strings.py tests/fixtures/classes/_constant_strings.py; then
               echo "Verified product source through main=$latest; tree=$tree (base=$base, pr=$pr)."
               exit 0
             fi
