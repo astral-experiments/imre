@@ -8,10 +8,13 @@ use super::*;
 use crate::classes::{Class, DataclassOptions, Field};
 use crate::modules::SourceModule;
 
+mod registration;
+
 #[derive(Default)]
 pub(super) struct Parsers {
     declarations: HashSet<(ModuleId, TextSize)>,
     calls: HashMap<(ModuleId, TextSize), Parser>,
+    registration_errors: HashMap<(ModuleId, TextSize), Expr>,
     namespaces: HashSet<usize>,
     /// Child layouts share the complete parent prefix and add their own options.
     commands: HashMap<usize, CommandVariants>,
@@ -329,18 +332,9 @@ fn option(
         };
         required = value.value;
     }
-    let is_boolean_action = |expr: &ast::Expr| {
-        let mut root = expr;
-        while let ast::Expr::Attribute(attr) = root {
-            root = &attr.value;
-        }
-        root.as_name_expr()
-            .is_some_and(|name| !locals.contains(name.id.as_str()))
-            && graph.resolve(id, expr) == Some(Binding::Intrinsic(Intrinsic::BooleanOptionalAction))
-    };
     let action = match kw.get("action").copied() {
         None => "store",
-        Some(expr) if is_boolean_action(expr) => "boolean_optional",
+        Some(expr) if registration::boolean_action(expr, graph, id, locals) => "boolean_optional",
         Some(expr) => {
             let action = literal(expr, module)?;
             if action == "boolean_optional" {
@@ -857,6 +851,7 @@ fn assigned_call<'a>(
 struct Uses<'a> {
     builder: &'a str,
     operations: Vec<TextSize>,
+    registration_errors: &'a HashMap<TextSize, Expr>,
     escaped: bool,
     allow_calls: bool,
 }
@@ -878,6 +873,11 @@ impl<'ast> Visitor<'ast> for Uses<'_> {
             )
         {
             self.operations.push(call.start());
+            self.visit_arguments(&call.arguments);
+        } else if self.allow_calls
+            && let ast::Expr::Call(call) = node
+            && self.registration_errors.contains_key(&call.start())
+        {
             self.visit_arguments(&call.arguments);
         } else {
             self.escaped |= names(node, self.builder);
@@ -1046,6 +1046,14 @@ impl Parsers {
                             .iter_non_variadic_params()
                             .map(|p| p.name().to_string()),
                     );
+                    let registration_errors = registration::failures(
+                        &function.body[start + 1..],
+                        builder,
+                        graph,
+                        module_id,
+                        &locals,
+                        flags.prefixes,
+                    );
                     let read_options =
                         |builder: &str,
                          flags: &Flags,
@@ -1077,6 +1085,10 @@ impl Parsers {
                                 let group = group_names.get(owner);
                                 if owner != builder && group.is_none() {
                                     break;
+                                }
+                                if registration_errors.contains_key(&add.start()) {
+                                    *index += 1;
+                                    continue;
                                 }
                                 let mut field =
                                     option(add, graph, module_id, types, classes, flags, &locals)?;
@@ -1255,6 +1267,7 @@ impl Parsers {
                         let mut uses = Uses {
                             builder: declared,
                             operations: Vec::new(),
+                            registration_errors: &registration_errors,
                             escaped: false,
                             allow_calls: false,
                         };
@@ -1269,7 +1282,7 @@ impl Parsers {
                         }
                         operations.extend(uses.operations);
                     }
-                    if operations.is_empty() {
+                    if operations.is_empty() && registration_errors.is_empty() {
                         return Err(module.error(
                             ctor,
                             "argparse declarations must be followed by a parser operation",
@@ -1317,8 +1330,17 @@ impl Parsers {
                         config
                     });
                     for stmt in &function.body[start..index] {
-                        parsers.declarations.insert((module_id, stmt.start()));
+                        if !matches!(stmt, ast::Stmt::Expr(stmt)
+                            if registration_errors.contains_key(&stmt.value.start()))
+                        {
+                            parsers.declarations.insert((module_id, stmt.start()));
+                        }
                     }
+                    parsers.registration_errors.extend(
+                        registration_errors
+                            .into_iter()
+                            .map(|(pos, error)| ((module_id, pos), error)),
+                    );
                     let options = options
                         .into_iter()
                         .map(|field| field.option)
@@ -1342,6 +1364,14 @@ impl Parsers {
 
 impl Checker<'_> {
     pub(super) fn parse_args(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+        if let Some(error) = self
+            .classes
+            .parsers
+            .registration_errors
+            .get(&(self.module, call.start()))
+        {
+            return registration::at_call(self, call, error.clone()).map(Some);
+        }
         let Some(parser) = self.classes.parsers.calls.get(&(self.module, call.start())) else {
             return Ok(None);
         };
