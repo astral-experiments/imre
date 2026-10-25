@@ -9,6 +9,14 @@ The text suite also compiles three complete CPython `ReTests` methods:
 assertions check capture references and replacement escapes in `re.sub`.
 Run `tests/text.py` with the compiler, runtime, Python oracle and clang paths.
 
+## Native CSV reader tests
+
+`native_csv.py` compiles 18 complete, unchanged reader methods from CPython's
+`TestDialectExcel`. A nineteenth multiline method supplies its original fixture
+from CPython because it assigns a reserved builtin name. A typed file fixture compares every native row and field
+against the original expected values. A second fixture compares errors, physical
+line counts, Unicode, input mutation and incremental consumption with CPython.
+
 ## Native SHA-256 tests
 
 `native_zipfile.py` runs four unchanged constructor error tests from CPython's ZIP suite. CPython owns the file setup and assertions; a native child opens the files and reports the exception. Separate successful opens check directory order, duplicate names and access after close. Pass the same arguments as the JSON runner, optionally with `--opt-level 0` or `3`.
