@@ -383,7 +383,8 @@ def writer(mark: bytes) -> BinaryIO:
 def group(shared: bool) -> Group:
     first = Leaf(writer(b"A"))
     last = first if shared else Leaf(writer(b"D"))
-    return Group(first, writer(b"B"), [Leaf(writer(b"C")), Leaf(writer(b"E"))],
+    nested = [Leaf(writer(b"C")), Leaf(writer(b"E")), Leaf(writer(b"H")), Leaf(writer(b"I"))]
+    return Group(first, writer(b"B"), nested,
                  (Leaf(writer(b"F")), Leaf(writer(b"G"))), last)
 
 def discard(shared: bool) -> None:

@@ -56,7 +56,7 @@ pub(crate) enum Type {
     Path,
     PurePath(PathFlavor),
     /// A sealed process result whose capture modes fix each field’s ownership.
-    CompletedProcess(ProcessCapture),
+    CompletedProcess(ProcessCapture, Option<usize>),
     /// A synchronous child with statically known captured stream types.
     Popen(ProcessCapture, bool, usize),
     /// Async process handle, with bits for the captured stdout and stderr slots.
@@ -174,8 +174,10 @@ impl std::fmt::Display for Type {
             Self::Path => "pathlib.Path",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
-            Self::CompletedProcess(capture) if capture.text => "subprocess.CompletedProcess[str]",
-            Self::CompletedProcess(_) => "subprocess.CompletedProcess[bytes]",
+            Self::CompletedProcess(capture, _) if capture.text => {
+                "subprocess.CompletedProcess[str]"
+            }
+            Self::CompletedProcess(..) => "subprocess.CompletedProcess[bytes]",
             Self::Popen(..) => "subprocess.Popen",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
             Self::Coroutine(_) => "Coroutine",
@@ -524,6 +526,10 @@ pub(crate) enum Builtin {
     LiteralStringView,
     StringListContains,
     StringContains,
+    /// Immutable byte subsequence; operands are evaluated needle first.
+    BytesContains,
+    /// Integer byte membership validates 0..=255 before searching.
+    BytesContainsInt,
     /// Reads an initialized module binding with an independent owned reference.
     GlobalGet(usize),
     /// Publishes one fixed module binding after its initializer succeeds.
@@ -549,7 +555,7 @@ pub(crate) enum Builtin {
     RaiseException,
     WallTime,
     TimeSleep,
-    PercentInteger,
+    PercentScalar,
     Logging(LogOperation),
     Timed(TimedOperation),
     LogRecord(LogRecordOperation),
@@ -860,6 +866,7 @@ pub(crate) enum Builtin {
     /// Arguments are key then dictionary, matching membership evaluation order.
     DictContains,
     DictDelete,
+    DictClear,
     /// False visits keys; true visits key/value pairs without an intermediate tuple.
     DictIter(bool),
     /// Arguments are the element then set, matching membership evaluation order.
@@ -956,6 +963,7 @@ pub(crate) enum TextOperation {
     Unquote,
     Dedent,
     ShlexSplit,
+    ShlexQuote,
 }
 
 /// Native path operations keep their exact result types in the checked IR.
@@ -1131,6 +1139,7 @@ pub(crate) enum LogOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
     Open,
+    Seek,
     Pipe,
     Dup2,
     Close,
@@ -1167,6 +1176,9 @@ pub(crate) enum ProcessOperation {
     },
     Run {
         streams: u32,
+        validation: u32,
+        errors: u8,
+        timed: bool,
     },
     Popen {
         streams: u32,
@@ -1243,8 +1255,9 @@ pub(crate) enum ProcessOperation {
     Fd(FdOperation),
     OsErrorField(u32),
     Strerror,
-    OpenFlag(&'static str),
+    DescriptorConstant(&'static str),
     Which,
+    RmTree,
     Copy(CopyOperation),
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
@@ -1271,7 +1284,7 @@ pub(crate) enum InstanceType {
 impl InstanceType {
     pub(crate) fn accepts(self, ty: Type) -> bool {
         match self {
-            Self::Exact(Type::CompletedProcess(_)) => matches!(ty, Type::CompletedProcess(_)),
+            Self::Exact(Type::CompletedProcess(..)) => matches!(ty, Type::CompletedProcess(..)),
             Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool),
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))

@@ -45,6 +45,49 @@ pub unsafe extern "C" fn imre_check_output_config(
     validation: u32,
     errors: u32,
 ) -> *const () {
+    // SAFETY: the legacy API supplies the same rooted parameters; a null
+    // descriptor asks for the stdout object instead of a CompletedProcess.
+    unsafe {
+        imre_run_config(
+            config,
+            deadline_kind,
+            deadline,
+            input,
+            validation,
+            errors,
+            true,
+            std::ptr::null(),
+        )
+    }
+}
+
+/// Run a native command and return either an exact CompletedProcess or checked stdout.
+///
+/// # Safety
+/// Launch fields, the deadline and input must remain rooted and have the stated
+/// types. A present result descriptor has the original command's exact layout.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_run_config(
+    config: *const LaunchConfig,
+    deadline_kind: u32,
+    deadline: usize,
+    input: usize,
+    validation: u32,
+    errors: u32,
+    check: bool,
+    descriptor: *const RecordDescriptor,
+) -> *const () {
+    // SAFETY: the caller roots this immutable configuration throughout launch.
+    let mut config = unsafe { *config };
+    let mut validation = validation;
+    if !descriptor.is_null() && input != 0 {
+        // run(input=None) inherits stdin; a present value, even empty, demands a pipe.
+        if (config.streams >> 12) & 15 != 0 {
+            validation = 3;
+        } else {
+            config.streams |= 1 << 12;
+        }
+    }
     let invalid = match validation {
         0 => None,
         1 => Some("stdout argument not allowed, it will be overridden."),
@@ -59,13 +102,11 @@ pub unsafe extern "C" fn imre_check_output_config(
     }
     // SAFETY: the caller roots the configuration and its typed launch fields;
     // the timeout representation and input type were selected at the same call site.
-    let (config, timeout, input, process) = unsafe {
-        let config = &*config;
+    let (timeout, input, process) = unsafe {
         (
-            config,
             Deadline::from_word(deadline_kind, deadline),
             input_bytes(input as *const (), config.streams & (1 << 16) != 0),
-            spawn(config),
+            spawn(&config),
         )
     };
     let kind = if config.streams & (1 << 16) != 0 {
@@ -101,7 +142,8 @@ pub unsafe extern "C" fn imre_check_output_config(
         killed?;
         match exchange? {
             Exchange::Done([stdout, stderr]) => {
-                let stdout = stream(stdout, kind)?;
+                let stdout_kind = if config.streams & 15 == 1 { kind } else { 0 };
+                let stdout = stream(stdout, stdout_kind)?;
                 let stderr_kind = if (config.streams >> 4) & 15 == 1 {
                     kind
                 } else {
@@ -109,7 +151,7 @@ pub unsafe extern "C" fn imre_check_output_config(
                 };
                 let stderr = stream(stderr, stderr_kind)?;
                 let code = p.control.status().expect("communicate reaped the child");
-                if code != 0 {
+                if check && code != 0 {
                     raise_process(ProcessError {
                         cmd: p.args.clone(),
                         returncode: code,
@@ -117,8 +159,14 @@ pub unsafe extern "C" fn imre_check_output_config(
                         stderr,
                     });
                     Ok(std::ptr::null())
-                } else {
+                } else if descriptor.is_null() {
                     Ok(stdout.into_word() as *const ())
+                } else {
+                    // SAFETY: the compiler's descriptor uses this same command and capture layout.
+                    Ok(unsafe {
+                        completed_record(descriptor, p.args.clone(), code, stdout, stderr)
+                    }
+                    .cast())
                 }
             }
             Exchange::Timeout([stdout, stderr]) => {

@@ -16,6 +16,7 @@ mod gzip;
 mod path_text;
 mod seekable;
 use seekable::Memory;
+pub(super) use seekable::disk_offset;
 
 use buffered::{Input, Output};
 

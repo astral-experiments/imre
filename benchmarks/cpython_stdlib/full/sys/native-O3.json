@@ -44,6 +44,17 @@
     "test.test_sys.SysModuleTest.test_ioencoding_nonascii": {
       "status": "upstream-skip",
       "reason": "requires FS encoding to match locale"
+    },
+    "test.test_sys.SysModuleTest.test_orig_argv": {
+      "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython; original child: Imre",
+      "assertions": "CPython",
+      "fixture_execution": "CPython module/class/instance hooks",
+      "calls": [
+        "sys.argv",
+        "sys.orig_argv"
+      ]
     }
   }
 }

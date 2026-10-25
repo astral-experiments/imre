@@ -81,6 +81,7 @@ pub(crate) enum Kind {
     UnboundLocalError = 40,
     ImportError = 41,
     ModuleNotFoundError = 42,
+    RecursionError = 43,
 }
 
 impl Kind {
@@ -137,6 +138,7 @@ impl Kind {
             40 => Self::UnboundLocalError,
             41 => Self::ImportError,
             42 => Self::ModuleNotFoundError,
+            43 => Self::RecursionError,
             _ => return None,
         })
     }
@@ -190,6 +192,7 @@ impl Kind {
             Self::UnboundLocalError => "UnboundLocalError",
             Self::ImportError => "ImportError",
             Self::ModuleNotFoundError => "ModuleNotFoundError",
+            Self::RecursionError => "RecursionError",
         }
     }
 
@@ -229,7 +232,10 @@ impl Kind {
                     Self::SubprocessError | Self::CalledProcessError | Self::TimeoutExpired
                 )
             }
-            Self::RuntimeError => matches!(self, Self::RuntimeError | Self::NotImplementedError),
+            Self::RuntimeError => matches!(
+                self,
+                Self::RuntimeError | Self::NotImplementedError | Self::RecursionError
+            ),
             Self::ShutilError => matches!(self, Self::ShutilError | Self::SameFileError),
             Self::OSError => matches!(
                 self,

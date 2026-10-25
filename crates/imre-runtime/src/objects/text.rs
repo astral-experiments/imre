@@ -273,9 +273,8 @@ pub unsafe extern "C" fn imre_str_split(
     )
 }
 
-/// Splits POSIX shell words with Python's default comments=False. Inside double
-/// quotes only another double quote or a backslash loses its preceding escape.
-fn shell_words(source: &str) -> Result<Words> {
+/// Tokenize with the whitespace-splitting lexer used by shlex.split().
+fn shell_words(source: &str, comments: bool, posix: bool) -> Result<Words> {
     let mut parts = Words::new(3);
     let mut word = Str::default();
     let mut quote = None;
@@ -283,12 +282,24 @@ fn shell_words(source: &str) -> Result<Words> {
     let mut chars = source.chars();
     while let Some(c) = chars.next() {
         match c {
-            c if quote == Some(c) => quote = None,
-            '\'' | '"' if quote.is_none() => {
+            c if quote == Some(c) => {
+                quote = None;
+                if !posix {
+                    word.push(c);
+                    parts
+                        .values
+                        .push(Rc::into_raw(Rc::new(std::mem::take(&mut word))) as usize);
+                    started = false;
+                }
+            }
+            '\'' | '"' if quote.is_none() && (posix || !started) => {
                 quote = Some(c);
                 started = true;
+                if !posix {
+                    word.push(c);
+                }
             }
-            '\\' if quote != Some('\'') => {
+            '\\' if posix && quote != Some('\'') => {
                 let escaped = chars
                     .next()
                     .ok_or_else(|| Error::new(Kind::ValueError, "No escaped character"))?;
@@ -297,6 +308,21 @@ fn shell_words(source: &str) -> Result<Words> {
                 }
                 word.push(escaped);
                 started = true;
+            }
+            '#' if comments && quote.is_none() => {
+                // readline() consumes the newline. The legacy lexer stays
+                // inside a current word, so text on the next line can join it.
+                for next in chars.by_ref() {
+                    if next == '\n' {
+                        break;
+                    }
+                }
+                if posix && started {
+                    parts
+                        .values
+                        .push(Rc::into_raw(Rc::new(std::mem::take(&mut word))) as usize);
+                    started = false;
+                }
             }
             ' ' | '\r' | '\n' | '\t' if quote.is_none() => {
                 if started {
@@ -325,12 +351,68 @@ fn shell_words(source: &str) -> Result<Words> {
 /// The caller roots the input string. Success transfers a fresh list of strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_shlex_split(value: *const Str) -> *const Object {
-    // SAFETY: the input is immutable and rooted throughout tokenization.
-    let parts = shell_words(unsafe { &*value });
+    // SAFETY: preserve the original one-argument ABI with Python's defaults.
+    unsafe { imre_shlex_split_options(value, 0, 1) }
+}
+
+/// # Safety
+/// The optional string stays rooted; a null pointer represents Python None.
+/// Success transfers the list and its strings; failure sets a pending error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_shlex_split_options(
+    value: *const Str,
+    comments: u32,
+    posix: u32,
+) -> *const Object {
+    // SAFETY: a nonnull input is a rooted, immutable Str.
+    let parts = unsafe { value.as_ref() }
+        .ok_or_else(|| Error::new(Kind::ValueError, "s argument must not be None"))
+        .and_then(|source| shell_words(source, comments != 0, posix != 0));
     finish(
         parts.map(|parts| Rc::into_raw(parts.into_object())),
         std::ptr::null(),
     )
+}
+
+/// Quotes a POSIX shell word using shlex's ASCII safe set and apostrophe escape.
+///
+/// # Safety
+/// The input string stays rooted for the call. The returned string is owned;
+/// null indicates a pending allocation error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_shlex_quote(value: *const Str) -> *const Str {
+    // SAFETY: the caller roots this immutable string.
+    let source = unsafe { &*value };
+    if source.is_empty() {
+        return Rc::into_raw(owned_string("''"));
+    }
+    if source
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"_@%+=:,./-".contains(&b))
+    {
+        // SAFETY: transfer a new reference to the existing safe string.
+        unsafe { Rc::increment_strong_count(value) };
+        return value;
+    }
+    let capacity = source
+        .matches('\'')
+        .count()
+        .checked_mul(4)
+        .and_then(|extra| source.len().checked_add(extra))
+        .and_then(|n| n.checked_add(2));
+    let result = capacity.and_then(|n| {
+        let mut quoted = Str::try_with_capacity(n).ok()?;
+        quoted.push('\'');
+        for (index, piece) in source.split('\'').enumerate() {
+            if index != 0 {
+                quoted.push_str("'\"'\"'");
+            }
+            quoted.push_str(piece);
+        }
+        quoted.push('\'');
+        Some(quoted)
+    });
+    owned_text(result)
 }
 
 /// Selects the final field of an ephemeral explicit-separator right split.

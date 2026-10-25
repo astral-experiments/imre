@@ -9,6 +9,7 @@ use std::os::unix::process::ExitStatusExt;
 mod build_cache;
 mod build_output;
 mod cli;
+mod python_command;
 #[cfg(unix)]
 mod run_program;
 
@@ -26,6 +27,7 @@ enum Allocator {
 const JEMALLOC_RUNTIME: &str = "libimre_runtime_jemalloc.a";
 
 const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only] [--entry-profile FILE] [--watch | -w]
+       imre [-I] [-B] [-X utf8[=0|1]] -c CODE [PROGRAM_ARGUMENTS...]
        imre extension-header
        imre build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]
        imre run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]
@@ -84,17 +86,27 @@ fn run() -> Result<ExitCode, String> {
         print!("{}", include_str!("../../imre-runtime/include/Python.h"));
         return Ok(ExitCode::SUCCESS);
     }
-    let execute = command == "run";
-    if command != "build" && command != "check" && !execute {
+    let (build_options, execute) = if command == "build" || command == "check" || command == "run" {
+        if args
+            .peek()
+            .is_some_and(|arg| arg == "--help" || arg == "-h")
+        {
+            println!("{USAGE}");
+            return Ok(ExitCode::SUCCESS);
+        }
+        (BuildOptions::parse(&command, &mut args)?, command == "run")
+    } else if command.as_encoded_bytes().starts_with(b"-") {
+        let invocation = match python_command::parse(command.clone(), &mut args) {
+            Ok(value) => value,
+            Err(message) => {
+                eprintln!("{message}");
+                return Ok(ExitCode::from(2));
+            }
+        };
+        (BuildOptions::for_command(invocation)?, true)
+    } else {
         return Err(USAGE.to_owned());
-    }
-    if args
-        .peek()
-        .is_some_and(|arg| arg == "--help" || arg == "-h")
-    {
-        println!("{USAGE}");
-        return Ok(ExitCode::SUCCESS);
-    }
+    };
     let BuildOptions {
         source_path,
         help,
@@ -113,7 +125,7 @@ fn run() -> Result<ExitCode, String> {
         optimization,
         compile: options,
         link,
-    } = BuildOptions::parse(&command, &mut args)?;
+    } = build_options;
     if help {
         println!("{USAGE}");
         return Ok(ExitCode::SUCCESS);

@@ -51,6 +51,7 @@ struct Storage {
     ids: HashMap<Shape, usize>,
     hashable_records: HashSet<usize>,
     custom_truth: HashSet<usize>,
+    pathlike_records: HashSet<usize>,
     fallible_keys: HashSet<usize>,
     concrete_subclasses: HashMap<usize, Vec<Type>>,
 }
@@ -94,7 +95,9 @@ impl Types {
                 matches!(storage.shapes.get(id), Some(Shape::DirectoryContext(_)))
             }
             Type::AsyncProcess(bits) => bits <= 3,
-            Type::Popen(_, _, id) => matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_))),
+            Type::Popen(_, _, id) | Type::CompletedProcess(_, Some(id)) => {
+                matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_)))
+            }
             Type::Int
             | Type::Float
             | Type::BuiltinClass
@@ -114,7 +117,7 @@ impl Types {
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
-            | Type::CompletedProcess(_)
+            | Type::CompletedProcess(_, None)
             | Type::EventLoop
             | Type::TaskGroup
             | Type::GeneratorContext
@@ -222,6 +225,10 @@ impl Types {
 
     pub(crate) fn set_hashable_records(&self, records: HashSet<usize>) {
         self.0.borrow_mut().hashable_records = records;
+    }
+
+    pub(crate) fn set_pathlike_records(&self, records: HashSet<usize>) {
+        self.0.borrow_mut().pathlike_records = records;
     }
 
     pub(crate) fn set_custom_truth(&self, records: HashSet<usize>) {
@@ -398,6 +405,12 @@ impl Types {
             {
                 Type::Union(self.intern(Shape::Union(vec![Type::Str, *other])))
             }
+            [Type::Str, record @ Type::Class(id)] | [record @ Type::Class(id), Type::Str]
+                if self.0.borrow().pathlike_records.contains(id)
+                    && !self.0.borrow().custom_truth.contains(id) =>
+            {
+                Type::Union(self.intern(Shape::Union(vec![Type::Str, *record])))
+            }
             [record @ Type::Class(id), Type::Exception]
             | [Type::Exception, record @ Type::Class(id)]
                 if !self.0.borrow().custom_truth.contains(id) =>
@@ -453,7 +466,7 @@ impl Types {
             | Type::TextIO
             | Type::Path
             | Type::PurePath(_)
-            | Type::CompletedProcess(_)
+            | Type::CompletedProcess(..)
             | Type::EventLoop
             | Type::Coroutine(_)
             | Type::Task(_)
@@ -577,6 +590,16 @@ impl Types {
             unreachable!("Popen carries its original command type")
         };
         command
+    }
+
+    /// An unqualified CompletedProcess keeps its original list-of-strings ABI.
+    pub(crate) fn completed_command(&self, id: Option<usize>) -> Type {
+        id.map_or_else(|| self.list(Type::Str), |id| self.command_type(id))
+    }
+
+    pub(crate) fn completed(&self, capture: crate::ir::ProcessCapture, command: Type) -> Type {
+        let id = (command != self.list(Type::Str)).then(|| self.process_args(command));
+        Type::CompletedProcess(capture, id)
     }
 
     pub(crate) fn directory_context(&self, result: Type) -> Type {

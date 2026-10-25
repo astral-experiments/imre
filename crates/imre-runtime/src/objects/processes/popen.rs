@@ -91,6 +91,7 @@ unsafe fn with_process<T>(handle: *const Object, work: impl FnOnce(&mut Popen) -
 /// Borrowed launch settings, filled by the compiler in parameter order after
 /// evaluating all Python expressions. All referenced values are rooted by the caller.
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct LaunchConfig {
     args: *const (),
     pub(super) cwd: *const (),
