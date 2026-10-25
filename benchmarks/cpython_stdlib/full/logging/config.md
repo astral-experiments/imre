@@ -25,3 +25,8 @@ and suite runner, full and reachable-only) pass the logging imports and stop
 at `Lib/test/test_logging.py:26:1: import codecs`. The one upstream use is
 `codecs.getwriter('cp1251')` at line 2306, in the Cyrillic StreamHandler test.
 This check executes no test fixture.
+
+After #588 merged, the same four checks on configuration integration `9135966`
+(main `1ee7c84`) reached the same `import codecs`. The native codec registry
+work in [#691](https://github.com/astral-sh/imre/pull/691) tracks the shared
+prerequisite; this test also needs a CP1251 stream writer for the real byte stream.
