@@ -10,8 +10,23 @@ impl Checker<'_> {
         tuple: &ast::ExprTuple,
         expected: Option<&[Type]>,
     ) -> Result<Expr, String> {
-        if tuple.elts.iter().any(|entry| matches!(entry, ast::Expr::Starred(s) if self.graph.session.tuple_spread_width(self.module, s.start()).is_none())) {
-            if expected.is_some() { return Err(error(self.source, tuple, "a tuple display with runtime width cannot guarantee a fixed layout")); }
+        let runtime_width = tuple.elts.iter().any(|entry| {
+            let ast::Expr::Starred(star) = entry else {
+                return false;
+            };
+            self.graph
+                .session
+                .tuple_spread_width(self.module, star.start())
+                .is_none()
+        });
+        if runtime_width {
+            if expected.is_some() {
+                return Err(error(
+                    self.source,
+                    tuple,
+                    "a tuple display with runtime width cannot guarantee a fixed layout",
+                ));
+            }
             return self.runtime_tuple_display(tuple);
         }
         let mut scope = calls::ArgumentScope::default();

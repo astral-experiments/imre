@@ -51,7 +51,7 @@ pub unsafe extern "C" fn imre_tuple_buffer_finish(buffer: *const Object) -> *con
             std::mem::take(items)
         })
     };
-    let result = TupleBuilder::new(items.len()).and_then(|mut tuple| {
+    let result = TupleBuilder::new(items.len()).map(|mut tuple| {
         for item in items {
             tuple.push(item);
         }
@@ -80,16 +80,16 @@ const SEMANTICS: RecordSemantics = RecordSemantics {
     fields: std::ptr::null(),
 };
 
-/// Reserve the native tuple before asking the input for any item. While the
-/// tuple is private only its initialized prefix participates in cleanup.
-pub(in crate::objects) struct TupleBuilder {
+/// Allocate the final field block after the display finishes iterating. Only the
+/// initialized prefix participates in cleanup until all fields are published.
+struct TupleBuilder {
     base: std::ptr::NonNull<Header>,
     allocation: Layout,
     metadata: Option<Rc<TupleLayout>>,
 }
 
 impl TupleBuilder {
-    pub(in crate::objects) fn new(capacity: usize) -> Result<Self, Error> {
+    fn new(capacity: usize) -> Result<Self, Error> {
         let allocation = Layout::array::<usize>(capacity)
             .and_then(|words| Layout::new::<Header>().extend(words))
             .map(|(layout, _)| layout)
@@ -116,11 +116,11 @@ impl TupleBuilder {
         })
     }
 
-    pub(in crate::objects) fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.metadata.as_ref().unwrap().descriptor.length
     }
 
-    pub(in crate::objects) fn push(&mut self, item: OwnedWord) {
+    fn push(&mut self, item: OwnedWord) {
         let i = self.len();
         let meta = Rc::get_mut(self.metadata.as_mut().unwrap()).unwrap();
         assert!(i < (self.allocation.size() - size_of::<Header>()) / size_of::<usize>());
@@ -132,21 +132,8 @@ impl TupleBuilder {
         meta.descriptor.length += 1;
     }
 
-    pub(in crate::objects) fn finish(mut self) -> Result<OwnedWord, Error> {
-        let meta = Rc::get_mut(self.metadata.as_mut().unwrap()).unwrap();
-        let exact = layout(meta.descriptor.length);
-        if exact != self.allocation {
-            // CPython only resizes after a nonempty, non-strict short batch.
-            // On failure the original allocation and its prefix still belong to self.
-            // SAFETY: both layouts use the header alignment and exact is nonempty.
-            let base = unsafe {
-                std::alloc::realloc(self.base.as_ptr().cast(), self.allocation, exact.size())
-            };
-            self.base = std::ptr::NonNull::new(base.cast()).ok_or_else(Error::allocation)?;
-            self.allocation = exact;
-            meta.kinds.shrink_to_fit();
-            meta.descriptor.kinds = meta.kinds.as_ptr();
-        }
+    fn finish(mut self) -> OwnedWord {
+        assert_eq!(self.allocation, layout(self.len()));
         let descriptor = Rc::into_raw(self.metadata.take().unwrap())
             .cast::<RecordDescriptor>()
             .map_addr(|addr| addr | 2);
@@ -157,10 +144,7 @@ impl TupleBuilder {
                 references: Cell::new(1),
                 descriptor,
             });
-            Ok(OwnedWord::from_owned(
-                self.base.as_ptr().add(1) as usize,
-                WordKind::new(6),
-            ))
+            OwnedWord::from_owned(self.base.as_ptr().add(1) as usize, WordKind::new(6))
         }
     }
 }
@@ -218,6 +202,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn discarding_an_unfinished_display_releases_its_captured_values() {
+        let text = Rc::new(crate::Str::from("earlier field"));
+        // SAFETY: the new display owns one reference; text roots the exact
+        // input representation until each successful push retains it.
+        unsafe {
+            let buffer = Rc::from_raw(imre_tuple_buffer_new());
+            for _ in 0..3 {
+                assert_eq!(
+                    imre_tuple_buffer_push(Rc::as_ptr(&buffer), 3, Rc::as_ptr(&text) as usize),
+                    1
+                );
+            }
+            assert_eq!(Rc::strong_count(&text), 4);
+            drop(buffer);
+        }
+        assert_eq!(Rc::strong_count(&text), 1);
+    }
+
+    #[test]
     fn wide_nested_tuple_releases_its_descriptor_after_the_last_field() {
         let text = Rc::new(crate::Str::from("shared"));
         let mut outer = TupleBuilder::new(96).ok().unwrap();
@@ -225,9 +228,9 @@ mod tests {
             let mut child = TupleBuilder::new(1).ok().unwrap();
             // SAFETY: the shared string roots this exact representation.
             child.push(unsafe { WordKind::new(3).acquire(Rc::as_ptr(&text) as usize) });
-            outer.push(child.finish().ok().unwrap());
+            outer.push(child.finish());
         }
-        let tuple = outer.finish().ok().unwrap();
+        let tuple = outer.finish();
         // SAFETY: the published tuple owns its dynamic layout. Acquire a
         // temporary reference to create the observer without consuming its owner.
         let layout = unsafe {

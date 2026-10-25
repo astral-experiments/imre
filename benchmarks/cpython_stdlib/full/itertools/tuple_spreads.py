@@ -1,4 +1,5 @@
 """Exercise the argument display in threading_helper.run_concurrently."""
+from itertools import islice
 from typing import Callable
 
 
@@ -17,7 +18,18 @@ def captures(values: list[int]) -> tuple[int, ...]:
     return (mark(1), *values, mutate(values), *values, mark(2))
 
 
-def call_prefix(func: Callable[[int], int], args: list[int]) -> None:
+def arguments(args: list[int]) -> tuple[int, ...]:
+    return (*args,)
+
+
+def cursor_capture(args: list[int]) -> None:
+    cursor = islice(args, len(args))
+    print(next(cursor, -1))
+    print(repr((0, *cursor, mark(10))))
+    print(next(cursor, -1))
+
+
+def call_prefix(func: Callable[[int], int], args: tuple[int, ...]) -> None:
     packed = (func, *args)
     print(repr((len(packed), packed[0](len(packed)))))
     if args:
@@ -80,9 +92,10 @@ items = [3, 4]
 print(captures(items))
 print(items)
 print(captures([]))
-call_prefix(mark, [3, 4])
-call_prefix(mark, [])
-call_prefix(Worker(40).add, [4])
+call_prefix(mark, arguments([3, 4]))
+call_prefix(mark, ())
+call_prefix(Worker(40).add, (4,))
+cursor_capture([1, 2, 3])
 tail_marker([])
 tail_marker([1, 2])
 midway([1, 2, 3])

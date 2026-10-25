@@ -170,67 +170,102 @@ fn local_widths(function: &ast::StmtFunctionDef, widths: &mut Widths) {
     }
 }
 
-/// Keep recursively doubled, statically known tuple types out of ty's inference.
-/// Widths here are solely a resource bound, never evidence for unrolling a mutable list.
+/// Keep type inference from expanding recursively repeated fixed tuples. A list,
+/// even one initialized from a literal, has no fixed arity in ty.
 fn excessive_inferred_width<'a>(
     body: &'a [Stmt],
     parameters: Option<&'a ast::Parameters>,
 ) -> Option<&'a ast::ExprStarred> {
-    let mut locals: HashMap<&str, usize> = parameters
-        .into_iter()
-        .flat_map(|p| p.iter_non_variadic_params())
-        .filter_map(|p| {
-            let parameter = &p.parameter;
-            Some((
-                parameter.name.as_str(),
-                parameter_width(parameter.annotation.as_deref()?)?,
-            ))
-        })
-        .collect();
-    for stmt in body {
-        let (name, value) = match stmt {
-            Stmt::Assign(a) if let [Expr::Name(n)] = a.targets.as_slice() => {
-                (n.id.as_str(), &*a.value)
-            }
-            Stmt::AnnAssign(a)
-                if let Expr::Name(n) = &*a.target
-                    && let Some(v) = a.value.as_deref() =>
-            {
-                (n.id.as_str(), v)
-            }
-            _ => continue,
-        };
-        let width = if let Expr::Tuple(tuple) = value {
-            let mut width = Some(0usize);
-            for field in &tuple.elts {
-                if let Expr::Starred(star) = field {
-                    let extra = fresh_width(&star.value).or_else(|| match &*star.value {
-                        Expr::Name(n) => locals.get(n.id.as_str()).copied(),
-                        _ => None,
-                    });
-                    width = width
-                        .zip(extra)
-                        .map(|(total, add)| total.saturating_add(add));
-                    if width.is_some_and(|n| n > MAX_FIELDS) {
-                        return Some(star);
+    struct Inferred<'a> {
+        locals: HashMap<&'a str, usize>,
+        too_wide: Option<&'a ast::ExprStarred>,
+    }
+
+    impl<'a> Inferred<'a> {
+        fn width(&mut self, expr: &'a Expr) -> Option<usize> {
+            match expr {
+                Expr::Name(n) => self.locals.get(n.id.as_str()).copied(),
+                Expr::Tuple(tuple) => {
+                    let mut total = tuple
+                        .elts
+                        .iter()
+                        .filter(|e| !matches!(e, Expr::Starred(_)))
+                        .count();
+                    for item in &tuple.elts {
+                        if let Expr::Starred(star) = item {
+                            total = total.saturating_add(self.width(&star.value)?);
+                            if total > MAX_FIELDS {
+                                self.too_wide = Some(star);
+                                return None;
+                            }
+                        }
                     }
-                } else {
-                    width = width.map(|n| n.saturating_add(1));
+                    Some(total)
                 }
+                _ => None,
             }
-            width
-        } else if let Expr::Name(n) = value {
-            locals.get(n.id.as_str()).copied()
-        } else {
-            fresh_width(value)
-        };
-        if let Some(width) = width {
-            locals.insert(name, width);
-        } else {
-            locals.remove(name);
         }
     }
-    None
+    impl<'a> Visitor<'a> for Inferred<'a> {
+        fn visit_stmt(&mut self, stmt: &'a Stmt) {
+            if self.too_wide.is_some() || matches!(stmt, Stmt::FunctionDef(_) | Stmt::ClassDef(_)) {
+                return;
+            }
+            walk_stmt(self, stmt);
+            let (name, value) = match stmt {
+                Stmt::Assign(a) if let [Expr::Name(n)] = a.targets.as_slice() => (n, &*a.value),
+                Stmt::AnnAssign(a)
+                    if let Expr::Name(n) = &*a.target
+                        && let Some(v) = a.value.as_deref() =>
+                {
+                    (n, v)
+                }
+                _ => return,
+            };
+            if let Some(width) = self.width(value) {
+                self.locals.insert(name.id.as_str(), width);
+            } else {
+                self.locals.remove(name.id.as_str());
+            }
+        }
+
+        fn visit_expr(&mut self, expr: &'a Expr) {
+            if self.too_wide.is_none() {
+                if matches!(expr, Expr::Tuple(t) if t.elts.iter().any(|e| matches!(e, Expr::Starred(_))))
+                {
+                    self.width(expr);
+                }
+                walk_expr(self, expr);
+            }
+        }
+
+        fn visit_body(&mut self, body: &'a [Stmt]) {
+            // Keep the widest fixed tuple from either path through a compound statement.
+            let entry = self.locals.clone();
+            for stmt in body {
+                self.visit_stmt(stmt);
+            }
+            for (name, width) in entry {
+                let current = self.locals.entry(name).or_default();
+                *current = (*current).max(width);
+            }
+        }
+    }
+    let mut inferred = Inferred {
+        locals: parameters
+            .into_iter()
+            .flat_map(|p| p.iter_non_variadic_params())
+            .filter_map(|p| {
+                let p = &p.parameter;
+                Some((p.name.as_str(), parameter_width(p.annotation.as_deref()?)?))
+            })
+            .collect(),
+        too_wide: None,
+    };
+    for stmt in body {
+        inferred.visit_stmt(stmt);
+    }
+    inferred.too_wide
 }
 
 #[derive(Default)]
@@ -339,6 +374,31 @@ pub(super) fn check(body: &[Stmt]) -> Result<Widths, (&ast::ExprStarred, &'stati
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bound_fixed_tuple_doubling_inside_an_if_without_bounding_mutable_inputs() {
+        let mut source = String::from(
+            "def f(x: tuple[int], cond: bool) -> None:\n    if cond:\n        a0 = x\n",
+        );
+        for i in 1..=12 {
+            source.push_str(&format!("        a{i} = (*a{}, *a{})\n", i - 1, i - 1));
+        }
+        let parsed = ruff_python_parser::parse_module(&source).unwrap();
+        assert!(
+            super::check(&parsed.syntax().body)
+                .unwrap_err()
+                .1
+                .contains("inferred fields")
+        );
+
+        let source = format!(
+            "def f() -> None:\n    xs = [{}]\n    xs.pop()\n    packed = (*xs, *xs)\n",
+            "1,".repeat(200)
+        );
+        let parsed = ruff_python_parser::parse_module(&source).unwrap();
+        let widths = super::check(&parsed.syntax().body).unwrap();
+        assert!(widths.is_empty(), "a mutated list has no fixed width");
+    }
+
     #[test]
     fn mutable_or_variable_width_sources_do_not_acquire_a_fixed_tuple_layout() {
         for body in [

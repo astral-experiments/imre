@@ -3195,6 +3195,7 @@ impl<'a> Checker<'a> {
         let element = self
             .types
             .element(iterable.ty)
+            .or_else(|| self.types.var_tuple_element(iterable.ty))
             .or(set_element)
             .or_else(|| self.types.deque_element(iterable.ty))
             .or(string.then_some(Type::Str))
@@ -3250,7 +3251,9 @@ impl<'a> Checker<'a> {
                 Expr {
                     ty: element,
                     kind: ExprKind::Builtin(
-                        if matches!(self.locals[captured], Type::List(_)) {
+                        if matches!(self.locals[captured], Type::VarTuple(_)) {
+                            Builtin::TupleIndex
+                        } else if matches!(self.locals[captured], Type::List(_)) {
                             Builtin::SequenceGetInBounds
                         } else {
                             Builtin::ListGet

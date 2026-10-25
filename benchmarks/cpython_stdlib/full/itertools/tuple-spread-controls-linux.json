@@ -8,26 +8,26 @@
     {
       "opt_level": "0",
       "reachable_only": false,
-      "lines": 34,
-      "stdout_sha256": "e7a868a7a7651e5b0631c6384b584e147490f918e6844af9231d36bca5b243eb"
+      "lines": 38,
+      "stdout_sha256": "d7b10f0e01a69932df09d62fc7b14a8c63ec34f2daf7b0454759e70a967f19e1"
     },
     {
       "opt_level": "3",
       "reachable_only": false,
-      "lines": 34,
-      "stdout_sha256": "e7a868a7a7651e5b0631c6384b584e147490f918e6844af9231d36bca5b243eb"
+      "lines": 38,
+      "stdout_sha256": "d7b10f0e01a69932df09d62fc7b14a8c63ec34f2daf7b0454759e70a967f19e1"
     },
     {
       "opt_level": "0",
       "reachable_only": true,
-      "lines": 34,
-      "stdout_sha256": "e7a868a7a7651e5b0631c6384b584e147490f918e6844af9231d36bca5b243eb"
+      "lines": 38,
+      "stdout_sha256": "d7b10f0e01a69932df09d62fc7b14a8c63ec34f2daf7b0454759e70a967f19e1"
     },
     {
       "opt_level": "3",
       "reachable_only": true,
-      "lines": 34,
-      "stdout_sha256": "e7a868a7a7651e5b0631c6384b584e147490f918e6844af9231d36bca5b243eb"
+      "lines": 38,
+      "stdout_sha256": "d7b10f0e01a69932df09d62fc7b14a8c63ec34f2daf7b0454759e70a967f19e1"
     }
   ],
   "reference_stdout": [
@@ -47,6 +47,10 @@
     "(1, 1)",
     "(2, 42)",
     "4",
+    "1",
+    "('field', 10)",
+    "(0, 2, 3, 10)",
+    "-1",
     "('first', 2, 'last')",
     "('first', 4, 'last')",
     "('field', 4)",
@@ -83,7 +87,7 @@
   "source": "vendored and pinned Git Lib/test",
   "whole_suite": {
     "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
-    "compiler_sha256": "7092627365940756f33ac5548a1727b5fb3d434510c994e773e2a4551eecb7aa",
+    "compiler_sha256": "e004fdb0bdd151cfaab9056318ccda37201eb8bb378f5fdddf5454e033396241",
     "operation": "check",
     "tests_executed": 0,
     "source": "git",

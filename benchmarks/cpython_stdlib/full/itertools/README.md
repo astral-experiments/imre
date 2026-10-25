@@ -77,8 +77,8 @@ at line 1. These are compilation checks: **zero upstream methods executed**.
 pinned Git blob and repeats all four checks with the vendored and original
 sources. It separately compares the [native exercise](tuple_spreads.py) with
 CPython at O0 and O3, in ordinary and reachable-only builds. The [Linux
-result](tuple-spread-controls-linux.json) records evaluation order, mutation
+result](tuple-spread-controls-linux.json) records 38 matching lines per build, including mutation
 between spreads, partial iteration on failure, invalid operands, callable
-retention, and a 1,025-element input. It also records how the two checking
+retention, a partially consumed iterator, and a 1,025-element input. It also records how the two checking
 modes treat an unused function. These controls add no occurrence to the 137
 primary or one companion test.
