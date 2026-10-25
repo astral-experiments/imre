@@ -1,0 +1,183 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "operation": "check_suite_startup.py --cpython-git; complete Lib/test, no supplemental stubs",
+  "tests_executed": 0,
+  "runs": [
+    {
+      "revision": "fccfcc7c974fb7d9248ff44f06f8fbd04f508cef",
+      "compiler_sha256": "fdf207a15ccbe36195bb7498d97837b89761b77cca388cf80920e43787112b6a",
+      "role": "before",
+      "exit": 1,
+      "checks": [
+        {
+          "suite": "test.test_annotationlib",
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_annotationlib.py:186:26: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
+          "modes": [
+            "import full",
+            "import reachable",
+            "runner full",
+            "runner reachable"
+          ]
+        },
+        {
+          "suite": "test.test_functools",
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_functools.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\"",
+          "modes": [
+            "import full",
+            "import reachable",
+            "runner full",
+            "runner reachable"
+          ]
+        },
+        {
+          "suite": "test.test_unittest",
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_unittest/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\"",
+          "modes": [
+            "import full",
+            "import reachable",
+            "runner full",
+            "runner reachable"
+          ]
+        },
+        {
+          "suite": "test.test_unittest.test_assertions",
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_unittest/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\"",
+          "modes": [
+            "import full",
+            "import reachable",
+            "runner full",
+            "runner reachable"
+          ]
+        },
+        {
+          "suite": "test.test_pathlib",
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\"",
+          "modes": [
+            "import full",
+            "import reachable",
+            "runner full",
+            "runner reachable"
+          ]
+        },
+        {
+          "suite": "test.test_pathlib.test_pathlib",
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\"",
+          "modes": [
+            "import full",
+            "import reachable",
+            "runner full",
+            "runner reachable"
+          ]
+        },
+        {
+          "suite": "test.test_inspect",
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\"",
+          "modes": [
+            "import full",
+            "import reachable",
+            "runner full",
+            "runner reachable"
+          ]
+        },
+        {
+          "suite": "test.test_inspect.test_inspect",
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\"",
+          "modes": [
+            "import full",
+            "import reachable",
+            "runner full",
+            "runner reachable"
+          ]
+        }
+      ]
+    },
+    {
+      "revision": "f2a022d29443698c7fec19268e127b9257bbe664",
+      "compiler_sha256": "7b294d7dc053d5a0800b8692fb3a104608267512d1bf5ed331b721a75f229b07",
+      "role": "after",
+      "exit": 1,
+      "checks": [
+        {
+          "suite": "test.test_annotationlib",
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_annotationlib.py:186:26: Imre: starred elements in tuple displays require a bounded, unmodified sequence",
+          "modes": [
+            "import full",
+            "import reachable",
+            "runner full",
+            "runner reachable"
+          ]
+        },
+        {
+          "suite": "test.test_functools",
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_functools.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\"",
+          "modes": [
+            "import full",
+            "import reachable",
+            "runner full",
+            "runner reachable"
+          ]
+        },
+        {
+          "suite": "test.test_unittest",
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_unittest/__init__.py:2:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under Lib; external and namespace-package imports are unsupported",
+          "modes": [
+            "import full",
+            "import reachable",
+            "runner full",
+            "runner reachable"
+          ]
+        },
+        {
+          "suite": "test.test_unittest.test_assertions",
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_unittest/__init__.py:2:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under Lib; external and namespace-package imports are unsupported",
+          "modes": [
+            "import full",
+            "import reachable",
+            "runner full",
+            "runner reachable"
+          ]
+        },
+        {
+          "suite": "test.test_pathlib",
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under Lib; external and namespace-package imports are unsupported",
+          "modes": [
+            "import full",
+            "import reachable",
+            "runner full",
+            "runner reachable"
+          ]
+        },
+        {
+          "suite": "test.test_pathlib.test_pathlib",
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under Lib; external and namespace-package imports are unsupported",
+          "modes": [
+            "import full",
+            "import reachable",
+            "runner full",
+            "runner reachable"
+          ]
+        },
+        {
+          "suite": "test.test_inspect",
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under Lib; external and namespace-package imports are unsupported",
+          "modes": [
+            "import full",
+            "import reachable",
+            "runner full",
+            "runner reachable"
+          ]
+        },
+        {
+          "suite": "test.test_inspect.test_inspect",
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_inspect/__init__.py:2:1: Imre: Lib/test/support/__init__.py:11:1: Imre: cannot resolve first-party module \"_opcode\" under Lib; external and namespace-package imports are unsupported",
+          "modes": [
+            "import full",
+            "import reachable",
+            "runner full",
+            "runner reachable"
+          ]
+        }
+      ]
+    }
+  ]
+}

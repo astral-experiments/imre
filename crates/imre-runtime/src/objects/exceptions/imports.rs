@@ -5,33 +5,44 @@ use crate::{Bytes, Int};
 
 #[derive(Clone)]
 pub(super) struct Import {
-    args: OwnedWord,
+    pub(super) args: Positional,
     msg: OwnedWord,
     fields: [OwnedWord; 3],
 }
 
 impl Import {
+    pub(super) fn message(&self) -> Rc<Str> {
+        if self.msg.kind.raw() == 3 {
+            word_text(self.msg.kind, self.msg.word, false)
+        } else {
+            self.args.message()
+        }
+    }
+}
+
+/// The actual immutable argument tuple shared by native exception constructors.
+#[derive(Clone)]
+pub(super) struct Positional(pub(super) OwnedWord);
+
+impl Positional {
     fn len(&self) -> usize {
         // SAFETY: the exception owns the positional tuple.
-        unsafe { records::descriptor(self.args.word as *const usize) }.length
+        unsafe { records::descriptor(self.0.word as *const usize) }.length
     }
 
     fn item(&self, index: usize) -> (WordKind, usize) {
         // SAFETY: callers checked the index against this owned tuple.
-        unsafe { tuple_item(self.args.word, index) }
+        unsafe { tuple_item(self.0.word, index) }
     }
 
     pub(super) fn message(&self) -> Rc<Str> {
-        if self.msg.kind.raw() == 3 {
-            return word_text(self.msg.kind, self.msg.word, false);
-        }
         match self.len() {
             0 => Rc::new(Str::new("")),
             1 => {
                 let (kind, word) = self.item(0);
                 word_text(kind, word, false)
             }
-            _ => word_text(self.args.kind, self.args.word, true),
+            _ => word_text(self.0.kind, self.0.word, true),
         }
     }
 
@@ -72,7 +83,7 @@ unsafe fn tuple_item(tuple: usize, index: usize) -> (WordKind, usize) {
     // SAFETY: the caller roots a tuple and proves index is in its descriptor.
     unsafe {
         let kind = WordKind::new(*records::descriptor(ptr).kinds.add(index));
-        (kind, kind.read_record_field(ptr.add(index)))
+        concrete(kind, kind.read_record_field(ptr.add(index)))
     }
 }
 
@@ -89,7 +100,28 @@ pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rc<Str> {
     Rc::new(result.into())
 }
 
+// A tuple may store an optional scalar in its nullable representation. Views
+// expose the contained Python value, not the slot's storage tag.
+fn concrete(kind: WordKind, word: usize) -> (WordKind, usize) {
+    if kind.raw() & crate::objects::words::NULLABLE == 0 {
+        (kind, word)
+    } else if word == 0 {
+        (WordKind::new(0), 0)
+    } else {
+        let base = kind.raw() & !crate::objects::words::NULLABLE;
+        (WordKind::new(base), if base == 1 { word - 1 } else { word })
+    }
+}
+
+/// # Safety
+/// `tuple` is a live, compiler-described immutable tuple.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_tuple_view(tuple: *const usize) -> *const Object {
+    view(WordKind::new(6), tuple as usize)
+}
+
 fn view(kind: WordKind, word: usize) -> *const Object {
+    let (kind, word) = concrete(kind, word);
     // SAFETY: the borrowed source field is rooted when the view acquires its own value.
     let field = unsafe { kind.acquire(word) };
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ExceptionField(
@@ -121,7 +153,7 @@ pub unsafe extern "C" fn imre_import_error_new(
             (WordKind::new(0), 0)
         };
         let payload = Import {
-            args: WordKind::new(6).acquire(args as usize),
+            args: Positional(WordKind::new(6).acquire(args as usize)),
             msg: msg_kind.acquire(msg),
             fields: [(name_kind, name), (path_kind, path), (from_kind, from)]
                 .map(|(k, w)| WordKind::new(k).acquire(w)),
@@ -153,7 +185,7 @@ pub unsafe extern "C" fn imre_import_error_field(err: *const Object, field: u32)
                 unreachable!("proved import error")
             };
             let (kind, word) = match field {
-                0 => (e.args.kind, e.args.word),
+                0 => (e.args.0.kind, e.args.0.word),
                 1 => (e.msg.kind, e.msg.word),
                 2..=4 => {
                     let x = &e.fields[field as usize - 2];
@@ -203,7 +235,7 @@ pub unsafe extern "C" fn imre_import_error_reject_reset(
             let Payload::Import(import) = &mut exception.payload else {
                 unreachable!()
             };
-            import.args = WordKind::new(6).acquire(args as usize);
+            import.args = Positional(WordKind::new(6).acquire(args as usize));
         });
         Error::new(Kind::TypeError, (&*message).as_str()).raise();
     }
@@ -331,7 +363,10 @@ pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) ->
     let mut pending = smallvec::SmallVec::<[(usize, usize, usize, usize); 4]>::new();
     let mut next = (left, right);
     loop {
-        let ((ka, wa), (kb, wb)) = (numeric(next.0), numeric(next.1));
+        let ((ka, wa), (kb, wb)) = (
+            numeric(concrete(next.0.0, next.0.1)),
+            numeric(concrete(next.1.0, next.1.1)),
+        );
         if ka != kb {
             return false;
         }

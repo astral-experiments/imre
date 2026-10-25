@@ -29,6 +29,8 @@ pub(crate) enum Type {
     Tuple(usize),
     /// An exact positional signature carried by an owned callable record.
     Callable(usize),
+    /// Private state retained by an independently constructed function cache.
+    CacheState(usize),
     Optional(usize),
     /// A closed str/bytes union with one owned tagged-pointer word.
     Union(usize),
@@ -56,7 +58,7 @@ pub(crate) enum Type {
     Path,
     PurePath(PathFlavor),
     /// A sealed process result whose capture modes fix each field’s ownership.
-    CompletedProcess(ProcessCapture),
+    CompletedProcess(ProcessCapture, Option<usize>),
     /// A synchronous child with statically known captured stream types.
     Popen(ProcessCapture, bool, usize),
     /// Async process handle, with bits for the captured stdout and stderr slots.
@@ -79,6 +81,10 @@ pub(crate) enum Type {
     Logger,
     TimedFileHandler,
     ClockTime,
+    /// An exact instance of Python's plain, identity-only object.
+    PlainObject,
+    /// An exact immutable method descriptor on the builtin str class.
+    StrDescriptor(StrDescriptor),
     Sha256,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
@@ -131,6 +137,21 @@ pub(crate) enum PathFlavor {
 }
 
 impl Type {
+    pub(crate) fn cache_state(self) -> Self {
+        let Self::Dict(id) = self else {
+            unreachable!("a function cache has a dictionary layout")
+        };
+        Self::CacheState(id)
+    }
+
+    pub(crate) fn cache_table(self) -> Option<Self> {
+        if let Self::CacheState(id) = self {
+            Some(Self::Dict(id))
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn is_path(self) -> bool {
         matches!(self, Self::Path | Self::PurePath(_))
     }
@@ -165,6 +186,7 @@ impl std::fmt::Display for Type {
             Self::StringKeys => "collections.abc.Set[str]",
             Self::ListInt => "list[int]",
             Self::ByteOutput => "private byte output",
+            Self::CacheState(_) => "private function cache",
             Self::None => "None",
             Self::Iterator => "iterator",
             Self::Exception | Self::NamedException(_) => "Exception",
@@ -177,8 +199,10 @@ impl std::fmt::Display for Type {
             Self::Path => "pathlib.Path",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
-            Self::CompletedProcess(capture) if capture.text => "subprocess.CompletedProcess[str]",
-            Self::CompletedProcess(_) => "subprocess.CompletedProcess[bytes]",
+            Self::CompletedProcess(capture, _) if capture.text => {
+                "subprocess.CompletedProcess[str]"
+            }
+            Self::CompletedProcess(..) => "subprocess.CompletedProcess[bytes]",
             Self::Popen(..) => "subprocess.Popen",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
             Self::Coroutine(_) => "Coroutine",
@@ -197,6 +221,8 @@ impl std::fmt::Display for Type {
             Self::Logger => "logging.Logger",
             Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
             Self::ClockTime => "datetime.time",
+            Self::PlainObject => "object",
+            Self::StrDescriptor(_) => "method_descriptor",
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
@@ -530,6 +556,10 @@ pub(crate) enum Builtin {
     LiteralStringView,
     StringListContains,
     StringContains,
+    /// Immutable byte subsequence; operands are evaluated needle first.
+    BytesContains,
+    /// Integer byte membership validates 0..=255 before searching.
+    BytesContainsInt,
     /// Reads an initialized module binding with an independent owned reference.
     GlobalGet(usize),
     /// Publishes one fixed module binding after its initializer succeeds.
@@ -558,7 +588,7 @@ pub(crate) enum Builtin {
     RaiseException,
     WallTime,
     TimeSleep,
-    PercentInteger,
+    PercentScalar,
     Logging(LogOperation),
     Timed(TimedOperation),
     LogRecord(LogRecordOperation),
@@ -578,6 +608,7 @@ pub(crate) enum Builtin {
     NamedException {
         kind: u32,
         message_field: usize,
+        tuple_args: bool,
         text: Option<usize>,
         repr: Option<usize>,
         dataclass_repr: bool,
@@ -593,6 +624,7 @@ pub(crate) enum Builtin {
     ImportErrorField(u32),
     ImportErrorReset,
     ImportErrorRejectReset,
+    ExceptionTupleView,
     ExceptionFieldRepr,
     ExceptionFieldLen,
     ExceptionFieldIndex,
@@ -683,6 +715,9 @@ pub(crate) enum Builtin {
     Sha256Hex,
     Sha256New,
     HashNew,
+    NewPlainObject,
+    StrDescriptor(StrDescriptor),
+    InspectSentinel,
     HashAvailable,
     Sha256Update,
     Sha256Digest {
@@ -761,11 +796,15 @@ pub(crate) enum Builtin {
     JsonDecode(Type),
     JsonLoads,
     JsonEmptyObject,
-    FunctionCache(usize),
-    FunctionCacheProbe(usize, i64),
-    FunctionCacheInsert(usize, i64),
-    FunctionCacheStat(usize, u32),
-    FunctionCacheClear(usize),
+    ModuleCache(usize),
+    /// Capture and access an individual wrapper's independently owned cache.
+    CacheNew,
+    CacheTable,
+    CacheProbe(i64),
+    CacheInsert(i64),
+    CacheStat(u32),
+    CacheClear,
+    CallableContext,
     HashStr,
     HashRecord,
     /// A dictionary with a read-only JSON receiver and a literal string key.
@@ -948,6 +987,35 @@ pub(crate) enum RegexCapture {
     Absent,
     Start,
     End,
+}
+
+/// These descriptor values call the same native operation as their bound string methods.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[repr(u32)]
+pub(crate) enum StrDescriptor {
+    Lower,
+    Strip,
+    LStrip,
+    RStrip,
+}
+impl StrDescriptor {
+    pub(crate) fn named(name: &str) -> Option<Self> {
+        Some(match name {
+            "lower" => Self::Lower,
+            "strip" => Self::Strip,
+            "lstrip" => Self::LStrip,
+            "rstrip" => Self::RStrip,
+            _ => return None,
+        })
+    }
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Lower => "lower",
+            Self::Strip => "strip",
+            Self::LStrip => "lstrip",
+            Self::RStrip => "rstrip",
+        }
+    }
 }
 
 /// Closed string operations preserve exact argument and storage types.
@@ -1198,6 +1266,9 @@ pub(crate) enum ProcessOperation {
     },
     Run {
         streams: u32,
+        validation: u32,
+        errors: u8,
+        timed: bool,
     },
     Popen {
         streams: u32,
@@ -1303,7 +1374,7 @@ pub(crate) enum InstanceType {
 impl InstanceType {
     pub(crate) fn accepts(self, ty: Type) -> bool {
         match self {
-            Self::Exact(Type::CompletedProcess(_)) => matches!(ty, Type::CompletedProcess(_)),
+            Self::Exact(Type::CompletedProcess(..)) => matches!(ty, Type::CompletedProcess(..)),
             Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool),
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
