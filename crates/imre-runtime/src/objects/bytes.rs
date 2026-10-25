@@ -809,7 +809,7 @@ mod tests {
         let error = unsafe { Rc::from_raw(imre_error_take()) };
         // SAFETY: error roots the exception, and repr transfers a new string owner.
         let repr = unsafe {
-            Rc::from_raw(crate::objects::exceptions::imre_exception_repr(Rc::as_ptr(
+            crate::StrOwner::from_raw(crate::objects::exceptions::imre_exception_repr(Rc::as_ptr(
                 &error,
             )))
         };
