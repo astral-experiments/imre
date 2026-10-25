@@ -38,7 +38,7 @@ real StreamHandler in the root logger’s live list. A second call leaves an
 attached handler alone. With `force=True`, configuration snapshots the old
 list, removes and closes those handlers, then installs the replacements.
 It preserves any caller-supplied formatter. All three styles use the native
-Formatter. Filename and filemode configuration remain outside this change.
+Formatter.
 
 The [focused Linux report](basic-config-streams-linux.json) covers two complete
 CPython 3.14.5 methods at O0 and O3. `BasicConfigTest.test_force` runs all
@@ -57,3 +57,26 @@ python -I -B benchmarks/cpython_stdlib/full/logging/native_basic_config.py \
   --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
   --cpython-source /path/to/cpython --result /tmp/basic-config-streams.json
 ```
+
+## Filename configuration
+
+`basicConfig(filename=...)` installs a real FileHandler. Its default mode appends.
+The native root and handler produce the UTF-8 file, message and newline. An empty
+filename selects a stream; a path to a directory raises the operating system’s
+error. Explicit `None` counts as a supplied option for conflict checks.
+Unknown keywords are evaluated in order and reported after installing the handler
+and level, matching CPython’s observable state.
+
+The [filename report](basic-config-files-linux.json) adds two complete routines:
+
+| Upstream method | Body and assertions | Logging operation |
+| --- | --- | --- |
+| `BasicConfigTest.test_encoding` | CPython | Configure, inspect and close the native file handler; emit UTF-8 through the native root |
+| `BasicConfigTest.test_incompatible` | CPython | Construct a native stream handler, make five configuration calls, and return their real exceptions |
+
+Both retain CPython setup, teardown and cleanup. A native child starts at the
+observed root level, holds its logging state throughout the body, then closes
+its handlers. The report also records the whole-body compiler diagnostics for
+stock unittest’s `assertIsInstance` and first-class `assertRaises`. The direct
+controls add no occurrences. Binary mode and non-UTF-8 file encoding remain
+ordinary implementation failures.
