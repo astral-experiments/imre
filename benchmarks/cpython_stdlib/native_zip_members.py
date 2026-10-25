@@ -4,6 +4,7 @@ import ast
 import io
 import json
 from pathlib import Path
+import struct
 import subprocess
 import sys
 import tempfile
@@ -86,7 +87,9 @@ with io.BytesIO(path.read_bytes()) as mem:
 '''
 
 
-ERRORS = '''import sys
+ERRORS = '''import io
+import sys
+from pathlib import Path
 from zipfile import ZipFile, BadZipFile
 from zlib import error as ZlibError
 
@@ -97,6 +100,12 @@ try:
         elif sys.argv[2] == "closed":
             archive.close()
             archive.read(name="data")
+        elif sys.argv[2] == "disk-seek":
+            print(repr(archive.testzip()))
+        elif sys.argv[2] == "memory-seek":
+            with io.BytesIO(Path(sys.argv[1]).read_bytes()) as buffer:
+                with ZipFile(buffer) as memory:
+                    print(repr(memory.testzip()))
         else:
             with archive.open(mode="r", name="data") as member:
                 print(repr(member.read()))
@@ -108,6 +117,8 @@ except ValueError as error:
     print("ValueError " + str(error))
 except EOFError as error:
     print("EOFError " + str(error))
+except OSError:
+    print("OSError seeking to member header")
 except ZlibError as error:
     print("zlib.error " + str(error))
 '''
@@ -223,15 +234,31 @@ def main():
         corrupt.write_bytes(original[:offset] + b"\x07" + original[offset + 1:])
         truncated = work / "truncated.zip"
         truncated.write_bytes(original[:-10])
+        negative = work / "negative.zip"
+        data = bytearray(original)
+        directory_offset, = struct.unpack_from("<I", data, len(data) - 6)
+        struct.pack_into("<I", data, len(data) - 6, directory_offset + 1)
+        negative.write_bytes(data)
+        far = work / "far.zip"
+        info = zipfile.ZipInfo("data")
+        info.extra = struct.pack("<HHQ", 1, 8, 2**62)
+        with zipfile.ZipFile(far, "w") as writer:
+            writer.writestr(info, b"x")
+        data = bytearray(far.read_bytes())
+        struct.pack_into("<I", data, data.index(b"PK\x01\x02") + 42, 0xffffffff)
+        far.write_bytes(data)
         for file, action, tag in [(good, "missing", "KeyError"), (good, "closed", "ValueError"),
+                                  (negative, "disk-seek", "OSError"), (negative, "memory-seek", "ValueError"),
+                                  (far, "disk-seek", None),  # the filesystem sets its maximum file offset
                                   (truncated, "read", "BadZipFile"), (corrupt, "read", "zlib.error")]:
             def check(command):
                 proc = subprocess.run([*command, file, action], capture_output=True, text=True, timeout=30)
                 assert not proc.returncode and not proc.stderr, proc
                 return proc.stdout
             expected = check([sys.executable, errors])
-            assert expected.startswith(tag + " ") and check([errors_binary]) == expected, (action, expected)
-        report["error_controls"] = ["missing member", "closed archive", "truncated directory", "damaged DEFLATE payload"]
+            assert (tag is None or expected.startswith(tag + " ")) and check([errors_binary]) == expected, (action, expected)
+        report["error_controls"] = ["missing member", "closed archive", "truncated directory", "damaged DEFLATE payload",
+                                    "negative member offset on disk and in BytesIO", "large ZIP64 member offset"]
         report["controls"] = ["stored and deflated duplicates", "independent readers survive parent close",
                               "path, open file and BytesIO", "seek/tell on caller-owned binary inputs"]
     args.result.write_text(json.dumps(report, indent=2) + "\n")
