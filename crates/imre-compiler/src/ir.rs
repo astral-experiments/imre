@@ -579,8 +579,21 @@ pub(crate) enum LinecacheOperation {
     Cache,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RandomOperation {
+    Seed,
+    Float,
+    Bits,
+    ChoiceIndex,
+    Randint,
+    Randrange,
+    RandrangeOne,
+    ChoiceRange,
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    Random(RandomOperation),
     Linecache(LinecacheOperation, Type, bool),
     Repeat,
     WrapperAttributes(WrapperAttributes),
