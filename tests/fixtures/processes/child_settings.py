@@ -5,6 +5,18 @@ from pathlib import Path
 def nullable_group(args: list[str], group: int | None) -> bytes:
     return subprocess.check_output(args, process_group=group)
 
+def report_filename(error: Exception, original: Path) -> None:
+    assert isinstance(error, OSError)
+    name = error.filename
+    if isinstance(name, Path):
+        print(name is original)
+        print(str(name))
+    elif isinstance(name, str):
+        print(False)
+        print(name)
+    else:
+        raise AssertionError("launch error lost the executable filename")
+
 python = sys.argv[1]
 identity = [python, "-c", "import os; print(os.getpid() == os.getsid(0), os.getpid() == os.getpgrp())"]
 print(subprocess.check_output(identity, start_new_session=True))
@@ -25,15 +37,15 @@ for group in [-2, -1, 0]:
     try:
         subprocess.Popen([missing], process_group=group)
     except FileNotFoundError as exc:
-        print(exc.filename is missing, str(exc.filename))
+        report_filename(exc, missing)
 try:
     subprocess.Popen([missing], start_new_session=True)
 except FileNotFoundError as exc:
-    print(exc.filename is missing, str(exc.filename))
+    report_filename(exc, missing)
 try:
     subprocess.Popen([missing], umask=0o053)
 except FileNotFoundError as exc:
-    print(exc.filename is missing, str(exc.filename))
+    report_filename(exc, missing)
 
 with open("parent-before", "wb") as before:
     before.write(b"")
