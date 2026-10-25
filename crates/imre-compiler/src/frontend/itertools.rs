@@ -38,7 +38,7 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Repeat, ty, args))
     }
 
-    fn cursor_source(&mut self, node: &ast::Expr) -> Result<(Expr, Type), String> {
+    fn cursor_source_value(&mut self, node: &ast::Expr) -> Result<Expr, String> {
         if let ast::Expr::Call(call) = node
             && matches!(&*call.func, ast::Expr::Name(name) if name.id == "range")
             && self.resolve(&call.func).is_none()
@@ -63,15 +63,16 @@ impl Checker<'_> {
                     ));
                 }
             };
-            return Ok((
-                Expr {
-                    ty: self.types.cursor(Type::Int),
-                    kind: ExprKind::Builtin(Builtin::Progression { bounded: true }, args),
-                },
-                Type::Int,
-            ));
+            return Ok(Expr {
+                ty: self.types.cursor(Type::Int),
+                kind: ExprKind::Builtin(Builtin::Progression { bounded: true }, args),
+            });
         }
-        let source = self.expr(node)?;
+        self.expr(node)
+    }
+
+    fn cursor_source(&mut self, node: &ast::Expr) -> Result<(Expr, Type), String> {
+        let source = self.cursor_source_value(node)?;
         let element = match source.ty {
             Type::Str => Some(Type::Str),
             Type::Bytes => Some(Type::Int),
@@ -308,8 +309,8 @@ impl Checker<'_> {
 
     pub(super) fn iter_cursor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
-        let (cursor, _) = self.cursor_source(&call.arguments.args[0])?;
-        if self.types.cursor_element(cursor.ty).is_none() {
+        let cursor = self.cursor_source_value(&call.arguments.args[0])?;
+        if cursor.ty != Type::CsvReader && self.types.cursor_element(cursor.ty).is_none() {
             return Err(error(
                 self.source,
                 call,
@@ -328,15 +329,26 @@ impl Checker<'_> {
             return Err(error(self.source, call, "next takes at most one default"));
         }
         let source = self.expr(source)?;
-        let element = self
-            .types
-            .cursor_element(source.ty)
-            .ok_or_else(|| error(self.source, call, "next requires a supported iterator"))?;
-        let iterator = self.hidden(source.ty);
-        let item = self.hidden(element);
-        let ready = self.hidden(Type::Bool);
-        let mut body = vec![Statement::Assign(iterator, source)];
-        let mut clear = vec![iterator, item, ready];
+        let prepared = if source.ty == Type::CsvReader {
+            if rest.is_empty() {
+                return Ok(Expr {
+                    ty: self.types.list(Type::Str),
+                    kind: ExprKind::Builtin(Builtin::CsvNext { required: true }, vec![source]),
+                });
+            }
+            self.prepare_csv_reader(source)
+        } else {
+            let element = self
+                .types
+                .cursor_element(source.ty)
+                .ok_or_else(|| error(self.source, call, "next requires a supported iterator"))?;
+            self.prepare_cursor(source, element)
+        };
+        let item = prepared.value;
+        let element = self.locals[item];
+        let ready = prepared.ready;
+        let mut body = prepared.evaluate;
+        let mut clear = prepared.clear;
         // The default is evaluated before pulling, including on success.
         let default = if let [default] = rest {
             let default = self.expr(default)?;
@@ -347,12 +359,8 @@ impl Checker<'_> {
         } else {
             None
         };
-        body.push(Statement::IterNext {
-            iterator,
-            key: item,
-            value: None,
-            ready,
-        });
+        body.extend(prepared.acquire);
+        body.extend(prepared.next);
         let value = if let Some(default) = default {
             let ty = self.types.join(element, default.ty).ok_or_else(|| {
                 error(
