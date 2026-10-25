@@ -1241,6 +1241,11 @@ Unary `+` and `-` select positive counts and negated negative counts. Binary `+`
 insertion order. Each key and value is shared with the source; inserting or
 deleting an entry in the copy leaves the source dictionary unchanged.
 
+`array.array` is available as a class value: it retains its module, name,
+representation and identity. `issubclass` recognizes its virtual registration
+with `collections.abc.MutableSequence` and `collections.abc.Sequence`, and
+distinguishes both from `collections.abc.MutableMapping`.
+
 `dict.fromkeys(iterable, value)` builds a fresh dictionary in first-key order.
 It evaluates the value once, defaults it to `None`, and shares that object
 among all keys. A bound call uses the receiver's class without copying its
