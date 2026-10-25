@@ -817,6 +817,7 @@ pub(crate) enum Builtin {
     FileFileno,
     DictGet,
     DictCopy,
+    DeepCopy,
     RecordCopy,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
