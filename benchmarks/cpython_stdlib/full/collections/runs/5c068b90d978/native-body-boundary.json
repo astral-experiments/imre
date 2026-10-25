@@ -1,0 +1,22 @@
+{
+  "method_sha256": "a72d5d99a0be431a73e227363eb2cd8505a4d372ab3dffd3198b75a320a04c6f",
+  "method": "test.test_deque.TestBasic.test_reverse",
+  "random_source": "500 exact (53-bit) outputs from CPython random.Random(314005); diagnostic fixture supplies them via a local module.",
+  "input_sha256": "f6f7762904f37c38d4831480eb2c0f44e9c4878cd488c444e29b937fb5478e13",
+  "modes": {
+    "0": {
+      "result": "compile-blocked",
+      "diagnostic": " Compiling <work>/case.py (-O0)\n<work>/case.py:13:13: Imre: unsupported list element type for unittest equality\n",
+      "fixture_lines": 5,
+      "upstream_first_line": 411
+    },
+    "3": {
+      "result": "compile-blocked",
+      "diagnostic": " Compiling <work>/case.py (-O3)\n<work>/case.py:13:13: Imre: unsupported list element type for unittest equality\n",
+      "fixture_lines": 5,
+      "upstream_first_line": 411
+    }
+  },
+  "compiler_revision": "5c068b90d978f4b57fe145984fa0459180a755ed",
+  "source": "Lib/test/test_deque.py:417"
+}

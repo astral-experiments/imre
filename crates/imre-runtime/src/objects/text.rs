@@ -1,11 +1,152 @@
 //! Native text operations preserve Python's Unicode-scalar and error semantics.
 
+use crate::StrOwner;
+mod expandtabs;
+mod lowercase;
+mod translate;
+pub(super) use lowercase::{lowercase, lowercase_chars};
+
 use num_traits::{Signed, ToPrimitive};
+use std::fmt::Write;
 use std::mem::ManuallyDrop;
-use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Int, Object, Str, Words, fail, python_whitespace};
+
+/// Escape Unicode scalars in a Python representation using ASCII backslash replacement.
+///
+/// # Safety
+/// The caller roots the Unicode input for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_ascii_escape(value: *const Str) -> *const Str {
+    // SAFETY: the generated caller owns this immutable string.
+    let text = unsafe { &*value };
+    if text.is_ascii() {
+        // SAFETY: transfer another ownership share to the checked caller.
+        unsafe { StrOwner::increment_strong_count(value) };
+        return value;
+    }
+    finish(
+        ascii_escape(text).and_then(|ascii| crate::checked_owned_str(Str::from(ascii))),
+        std::ptr::null(),
+    )
+}
+
+/// Escape a representation for both builtin ASCII conversion and percent formatting.
+pub(super) fn ascii_escape(text: &str) -> Result<String> {
+    let mut ascii = String::new();
+    let size = text.chars().try_fold(0usize, |len, ch| {
+        len.checked_add(match ch as u32 {
+            0..=127 => 1,
+            128..=255 => 4,
+            256..=65535 => 6,
+            _ => 10,
+        })
+    });
+    if size.is_none_or(|size| ascii.try_reserve_exact(size).is_err()) {
+        return Err(Error::allocation());
+    }
+    for ch in text.chars() {
+        let n = ch as u32;
+        match n {
+            0..=127 => ascii.push(ch),
+            128..=255 => write!(ascii, "\\x{n:02x}").unwrap(),
+            256..=65535 => write!(ascii, "\\u{n:04x}").unwrap(),
+            _ => write!(ascii, "\\U{n:08x}").unwrap(),
+        }
+    }
+    Ok(ascii)
+}
+
+/// # Safety
+/// The integer is rooted. Success transfers an immutable one-character string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_chr(value: usize) -> *const Str {
+    // SAFETY: the caller retains the integer through this conversion.
+    let value = unsafe { Int::borrow(value) }.as_small();
+    let result = match value {
+        Some(0xd800..=0xdfff) => Err(Error::new(
+            Kind::ValueError,
+            "surrogates are outside the native string domain",
+        )),
+        Some(code @ 0..=0x10ffff) => {
+            let c = char::from_u32(code as u32).expect("Unicode scalar");
+            Ok(StrOwner::into_raw(owned_string(c.encode_utf8(&mut [0; 4]))))
+        }
+        _ => Err(Error::new(
+            Kind::ValueError,
+            "chr() arg not in range(0x110000)",
+        )),
+    };
+    finish(result, std::ptr::null())
+}
+
+/// Returns the scalar value of one character or the unsigned value of one byte.
+///
+/// # Safety
+/// The caller roots a concrete string, bytes, or their checked nullable union.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_ord(mut word: usize, mut kind: u32) -> usize {
+    let result = (|| {
+        if word == 0 {
+            return Err(Error::new(
+                Kind::TypeError,
+                "ord() expected string of length 1, but NoneType found",
+            ));
+        }
+        kind &= !super::words::NULLABLE;
+        if kind == 9 {
+            let (payload, member) = super::unions::member(word);
+            word = payload;
+            kind = member.base();
+        }
+        let length = match kind {
+            3 => {
+                // SAFETY: the representation identifies a rooted UTF-8 string.
+                let mut chars = unsafe { &*(word as *const Str) }.chars();
+                match (chars.next(), chars.next()) {
+                    (Some(ch), None) => return Ok(Int::from_usize(ch as usize).into_raw()),
+                    (None, None) => 0,
+                    _ => 2 + chars.count(),
+                }
+            }
+            8 => {
+                // SAFETY: the representation identifies an immutable rooted bytes value.
+                let bytes = unsafe { &*(word as *const crate::Bytes) };
+                if let [byte] = bytes.as_slice() {
+                    return Ok(Int::from_usize(usize::from(*byte)).into_raw());
+                }
+                bytes.len()
+            }
+            _ => unreachable!("ord's checked character layout"),
+        };
+        Err(Error::new(
+            Kind::TypeError,
+            format!("ord() expected a character, but string of length {length} found"),
+        ))
+    })();
+    finish(result, 0)
+}
+
+/// # Safety
+/// The caller roots the integer and supplies a bounded literal width. BigInt's
+/// formatter pads signed magnitudes, including zeroes after a negative sign.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_hex_format(value: usize, width: u32, flags: u32) -> *const Str {
+    // SAFETY: the native integer owner stays live until formatting completes.
+    let value = unsafe { Int::borrow(value) };
+    let big = value.big();
+    let n = big.as_ref();
+    let width = width as usize;
+    let output = match flags {
+        0 => format!("{n:width$x}"),
+        1 => format!("{n:0width$x}"),
+        2 => format!("{n:width$X}"),
+        3 => format!("{n:0width$X}"),
+        _ => unreachable!("invalid hexadecimal format flags"),
+    };
+    StrOwner::into_raw(StrOwner::new(Str::from(output)))
+}
 
 /// Returns Python's substring membership for two exact strings.
 ///
@@ -15,6 +156,72 @@ use super::{Int, Object, Str, Words, fail, python_whitespace};
 pub unsafe extern "C" fn imre_str_contains(needle: *const Str, text: *const Str) -> u32 {
     // SAFETY: the caller roots both immutable strings through the search.
     unsafe { u32::from((&*text).contains((&*needle).as_str())) }
+}
+
+/// CPython 3.14's alphanumeric characters are Unicode 16 letters and numbers.
+pub(super) fn python_alnum(text: &str) -> bool {
+    if text.is_ascii() {
+        return !text.is_empty() && text.bytes().all(|b| b.is_ascii_alphanumeric());
+    }
+    const RANGES: &[(u32, u32)] = include!(concat!(env!("OUT_DIR"), "/unicode_alnum.rs"));
+    text.chars().all(|ch| {
+        let cp = u32::from(ch);
+        let index = RANGES.partition_point(|&(_, end)| end < cp);
+        RANGES.get(index).is_some_and(|&(start, _)| start <= cp)
+    })
+}
+
+/// Tests a native string with Python's alphanumeric predicate.
+///
+/// # Safety
+/// The caller roots the immutable string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isalnum(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive for this call.
+    u32::from(python_alnum(unsafe { &*value }))
+}
+
+/// Tests a nonempty Python string against the shared Unicode whitespace table.
+///
+/// # Safety
+/// The immutable string is rooted for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isspace(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive and no character reference escapes.
+    let value = unsafe { &*value };
+    u32::from(!value.is_empty() && value.chars().all(python_whitespace))
+}
+
+/// Return true when text contains a cased character and every cased character is uppercase.
+///
+/// # Safety
+/// The caller roots an immutable native string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_is_upper(value: *const Str) -> u32 {
+    use icu_properties::{
+        CodePointSetData,
+        props::{Cased, Uppercase},
+    };
+    // SAFETY: the caller supplies a rooted, exact UTF-8 string.
+    let text = unsafe { &*value };
+    let mut seen = false;
+    for c in text.chars() {
+        if c.is_ascii_uppercase() {
+            seen = true;
+        } else if c.is_ascii_lowercase() || c == '\u{295}' {
+            // U+0295 was lowercase in Unicode 16, uncased in newer ICU data.
+            return 0;
+        } else if !c.is_ascii()
+            && CodePointSetData::new::<Cased>().contains(c)
+            && !crate::integer_text::newer_printable(c)
+        {
+            if !CodePointSetData::new::<Uppercase>().contains(c) {
+                return 0;
+            }
+            seen = true;
+        }
+    }
+    u32::from(seen)
 }
 
 /// Removes the common space/tab prefix after the caller has evaluated its text.
@@ -51,44 +258,89 @@ pub unsafe extern "C" fn imre_str_dedent(text: *const Str) -> *const Str {
             result.push_str(&line[margin.len()..]);
         }
     }
-    Rc::into_raw(Rc::new(result))
+    StrOwner::into_raw(StrOwner::new(result))
 }
 
 thread_local! {
-    static SHORT_STRINGS: std::cell::RefCell<[Option<Rc<Str>>; 257]> =
+    static SHORT_STRINGS: std::cell::RefCell<[Option<StrOwner>; 257]> =
         const { std::cell::RefCell::new([const { None }; 257]) };
 }
 
 /// Reuses immutable owners for empty and single Latin-1 strings.
-pub(super) fn owned_string(value: &str) -> Rc<Str> {
-    let index = match value.as_bytes() {
+pub(super) fn owned_string(value: &str) -> StrOwner {
+    let Ok(owner) = owned_string_with(value, |text| {
+        Ok::<_, std::convert::Infallible>(StrOwner::new(Str::new(text)))
+    });
+    owner
+}
+
+pub(super) fn try_owned_string(value: &str) -> Result<StrOwner> {
+    owned_string_with(value, |text| {
+        let text = Str::try_new(text).map_err(|_| Error::allocation())?;
+        StrOwner::try_new(text).map_err(|_| Error::allocation())
+    })
+}
+
+fn owned_string_with<E>(
+    value: &str,
+    new: impl FnOnce(&str) -> std::result::Result<StrOwner, E>,
+) -> std::result::Result<StrOwner, E> {
+    let Some(index) = short_index(value) else {
+        return new(value);
+    };
+    cached_short(value, index, new)
+}
+
+fn short_index(value: &str) -> Option<usize> {
+    Some(match value.as_bytes() {
         [] => 256,
         [byte] => usize::from(*byte),
         // These UTF-8 lead bytes encode U+0080 through U+00FF.
         [0xc2 | 0xc3, _] => value.chars().next().unwrap() as usize,
-        _ => return Rc::new(Str::new(value)),
-    };
+        _ => return None,
+    })
+}
+
+/// Share the same native owner for empty and single Latin-1 values.
+pub(crate) fn short_string(value: &str) -> Option<StrOwner> {
+    let index = short_index(value)?;
+    let Ok(owner) = cached_short(value, index, |text| {
+        Ok::<_, std::convert::Infallible>(StrOwner::new(Str::new(text)))
+    });
+    Some(owner)
+}
+
+fn cached_short<E>(
+    value: &str,
+    index: usize,
+    new: impl FnOnce(&str) -> std::result::Result<StrOwner, E>,
+) -> std::result::Result<StrOwner, E> {
     SHORT_STRINGS.with_borrow_mut(|strings| {
-        Rc::clone(strings[index].get_or_insert_with(|| Rc::new(Str::new(value))))
+        let slot = &mut strings[index];
+        let owner = match slot {
+            Some(owner) => owner,
+            None => slot.insert(new(value)?),
+        };
+        Ok(owner.clone())
     })
 }
 
 /// Appends an owned slice of source, retaining its allocation for a full slice.
-pub(super) fn push_part(parts: &mut Words, source: &Rc<Str>, value: &str) {
+pub(super) fn push_part(parts: &mut Words, source: &StrOwner, value: &str) {
     parts
         .values
         .try_reserve(1)
         .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
     let value = if value.len() == source.len() {
-        Rc::clone(source)
+        StrOwner::clone(source)
     } else {
         owned_string(value)
     };
-    parts.values.push(Rc::into_raw(value) as usize);
+    parts.values.push(StrOwner::into_raw(value) as usize);
 }
 
 /// Whitespace runs count as one split; a zero limit only strips the starting end.
-fn whitespace_parts(source: &Rc<Str>, limit: usize, reverse: bool, parts: &mut Words) {
+fn whitespace_parts(source: &StrOwner, limit: usize, reverse: bool, parts: &mut Words) {
     let mut remaining = source.as_str();
     let mut splits = 0;
     loop {
@@ -126,7 +378,7 @@ fn whitespace_parts(source: &Rc<Str>, limit: usize, reverse: bool, parts: &mut W
 }
 
 /// A one-byte UTF-8 separator is ASCII, so each match is a scalar boundary.
-fn byte_parts(source: &Rc<Str>, separator: u8, limit: usize, reverse: bool, parts: &mut Words) {
+fn byte_parts(source: &StrOwner, separator: u8, limit: usize, reverse: bool, parts: &mut Words) {
     debug_assert!(separator.is_ascii());
     let boundaries = memchr::memchr_iter(separator, source.as_bytes());
     if reverse {
@@ -148,7 +400,7 @@ fn byte_parts(source: &Rc<Str>, separator: u8, limit: usize, reverse: bool, part
 
 /// Converts maxsplit before testing the separator, matching CPython precedence.
 fn split_text(
-    source: &Rc<Str>,
+    source: &StrOwner,
     separator: Option<&str>,
     maxsplit: &Int,
     reverse: bool,
@@ -210,7 +462,7 @@ pub unsafe extern "C" fn imre_str_split(
     // capability without consuming the caller's owner; each part acquires its own.
     let (source, separator, maxsplit) = unsafe {
         (
-            ManuallyDrop::new(Rc::from_raw(value)),
+            ManuallyDrop::new(StrOwner::from_raw(value)),
             separator.as_ref(),
             Int::borrow(maxsplit),
         )
@@ -222,14 +474,13 @@ pub unsafe extern "C" fn imre_str_split(
             &maxsplit,
             reverse != 0,
         )
-        .map(|parts| Rc::into_raw(parts.into_object())),
+        .map(|parts| crate::ObjectOwner::into_raw(parts.into_object())),
         std::ptr::null(),
     )
 }
 
-/// Splits POSIX shell words with Python's default comments=False. Inside double
-/// quotes only another double quote or a backslash loses its preceding escape.
-fn shell_words(source: &str) -> Result<Words> {
+/// Tokenize with the whitespace-splitting lexer used by shlex.split().
+fn shell_words(source: &str, comments: bool, posix: bool) -> Result<Words> {
     let mut parts = Words::new(3);
     let mut word = Str::default();
     let mut quote = None;
@@ -237,12 +488,24 @@ fn shell_words(source: &str) -> Result<Words> {
     let mut chars = source.chars();
     while let Some(c) = chars.next() {
         match c {
-            c if quote == Some(c) => quote = None,
-            '\'' | '"' if quote.is_none() => {
+            c if quote == Some(c) => {
+                quote = None;
+                if !posix {
+                    word.push(c);
+                    parts
+                        .values
+                        .push(StrOwner::into_raw(StrOwner::new(std::mem::take(&mut word))) as usize);
+                    started = false;
+                }
+            }
+            '\'' | '"' if quote.is_none() && (posix || !started) => {
                 quote = Some(c);
                 started = true;
+                if !posix {
+                    word.push(c);
+                }
             }
-            '\\' if quote != Some('\'') => {
+            '\\' if posix && quote != Some('\'') => {
                 let escaped = chars
                     .next()
                     .ok_or_else(|| Error::new(Kind::ValueError, "No escaped character"))?;
@@ -252,11 +515,26 @@ fn shell_words(source: &str) -> Result<Words> {
                 word.push(escaped);
                 started = true;
             }
+            '#' if comments && quote.is_none() => {
+                // readline() consumes the newline. The legacy lexer stays
+                // inside a current word, so text on the next line can join it.
+                for next in chars.by_ref() {
+                    if next == '\n' {
+                        break;
+                    }
+                }
+                if posix && started {
+                    parts
+                        .values
+                        .push(StrOwner::into_raw(StrOwner::new(std::mem::take(&mut word))) as usize);
+                    started = false;
+                }
+            }
             ' ' | '\r' | '\n' | '\t' if quote.is_none() => {
                 if started {
                     parts
                         .values
-                        .push(Rc::into_raw(Rc::new(std::mem::take(&mut word))) as usize);
+                        .push(StrOwner::into_raw(StrOwner::new(std::mem::take(&mut word))) as usize);
                     started = false;
                 }
             }
@@ -270,7 +548,9 @@ fn shell_words(source: &str) -> Result<Words> {
         return Err(Error::new(Kind::ValueError, "No closing quotation"));
     }
     if started {
-        parts.values.push(Rc::into_raw(Rc::new(word)) as usize);
+        parts
+            .values
+            .push(StrOwner::into_raw(StrOwner::new(word)) as usize);
     }
     Ok(parts)
 }
@@ -279,19 +559,75 @@ fn shell_words(source: &str) -> Result<Words> {
 /// The caller roots the input string. Success transfers a fresh list of strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_shlex_split(value: *const Str) -> *const Object {
-    // SAFETY: the input is immutable and rooted throughout tokenization.
-    let parts = shell_words(unsafe { &*value });
+    // SAFETY: preserve the original one-argument ABI with Python's defaults.
+    unsafe { imre_shlex_split_options(value, 0, 1) }
+}
+
+/// # Safety
+/// The optional string stays rooted; a null pointer represents Python None.
+/// Success transfers the list and its strings; failure sets a pending error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_shlex_split_options(
+    value: *const Str,
+    comments: u32,
+    posix: u32,
+) -> *const Object {
+    // SAFETY: a nonnull input is a rooted, immutable Str.
+    let parts = unsafe { value.as_ref() }
+        .ok_or_else(|| Error::new(Kind::ValueError, "s argument must not be None"))
+        .and_then(|source| shell_words(source, comments != 0, posix != 0));
     finish(
-        parts.map(|parts| Rc::into_raw(parts.into_object())),
+        parts.map(|parts| crate::ObjectOwner::into_raw(parts.into_object())),
         std::ptr::null(),
     )
+}
+
+/// Quotes a POSIX shell word using shlex's ASCII safe set and apostrophe escape.
+///
+/// # Safety
+/// The input string stays rooted for the call. The returned string is owned;
+/// null indicates a pending allocation error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_shlex_quote(value: *const Str) -> *const Str {
+    // SAFETY: the caller roots this immutable string.
+    let source = unsafe { &*value };
+    if source.is_empty() {
+        return StrOwner::into_raw(owned_string("''"));
+    }
+    if source
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"_@%+=:,./-".contains(&b))
+    {
+        // SAFETY: transfer a new reference to the existing safe string.
+        unsafe { StrOwner::increment_strong_count(value) };
+        return value;
+    }
+    let capacity = source
+        .matches('\'')
+        .count()
+        .checked_mul(4)
+        .and_then(|extra| source.len().checked_add(extra))
+        .and_then(|n| n.checked_add(2));
+    let result = capacity.and_then(|n| {
+        let mut quoted = Str::try_with_capacity(n).ok()?;
+        quoted.push('\'');
+        for (index, piece) in source.split('\'').enumerate() {
+            if index != 0 {
+                quoted.push_str("'\"'\"'");
+            }
+            quoted.push_str(piece);
+        }
+        quoted.push('\'');
+        Some(quoted)
+    });
+    owned_text(result)
 }
 
 /// Selects the final field of an ephemeral explicit-separator right split.
 ///
 /// # Safety
 /// Both inputs must be nonnull, immutable strings rooted for this call. Returns
-/// an independent owned string, or null with a pending empty-separator error.
+/// an owned string, or null with a pending separator or allocation error.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_rsplit_last(
     value: *const Str,
@@ -305,7 +641,7 @@ pub unsafe extern "C" fn imre_str_rsplit_last(
 ///
 /// # Safety
 /// Both inputs must be nonnull, immutable strings rooted for this call. Returns
-/// an independent owned string, or null with a pending empty-separator error.
+/// an owned string, or null with a pending separator or allocation error.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_unquote_rsplit_last(
     value: *const Str,
@@ -333,12 +669,12 @@ unsafe fn rsplit_last(value: *const Str, separator: *const Str, decode: bool) ->
     };
     let tail = &source[boundary.map_or(0, |index| index + separator.len())..];
     if decode && let Some(first) = memchr::memchr(b'%', tail.as_bytes()) {
-        Rc::into_raw(Rc::new(unquote(tail, first)))
+        owned_text(unquote(tail, first))
     } else if boundary.is_some() {
-        Rc::into_raw(Rc::new(Str::new(tail)))
+        owned_text(Str::try_new(tail).ok())
     } else {
         // SAFETY: the caller's live owner permits acquiring the result reference.
-        unsafe { Rc::increment_strong_count(value) };
+        unsafe { StrOwner::increment_strong_count(value) };
         value
     }
 }
@@ -370,10 +706,10 @@ pub unsafe extern "C" fn imre_str_strip(
     };
     if result.len() == source.len() {
         // SAFETY: the caller's live owner permits acquiring the result reference.
-        unsafe { Rc::increment_strong_count(value) };
+        unsafe { StrOwner::increment_strong_count(value) };
         value
     } else {
-        Rc::into_raw(Rc::new(Str::new(result)))
+        StrOwner::into_raw(StrOwner::new(Str::new(result)))
     }
 }
 
@@ -471,19 +807,21 @@ pub unsafe extern "C" fn imre_str_partition(
     }
     let parts = if let Some(at) = source.find(separator_value.as_str()) {
         // SAFETY: separator is rooted; the tuple acquires an independent owner.
-        unsafe { Rc::increment_strong_count(separator) };
+        unsafe { StrOwner::increment_strong_count(separator) };
         [
-            Rc::into_raw(Rc::new(Str::new(&source[..at]))),
+            StrOwner::into_raw(StrOwner::new(Str::new(&source[..at]))),
             separator,
-            Rc::into_raw(Rc::new(Str::new(&source[at + separator_value.len()..]))),
+            StrOwner::into_raw(StrOwner::new(Str::new(
+                &source[at + separator_value.len()..],
+            ))),
         ]
     } else {
         // SAFETY: an unsuccessful partition retains the complete original string.
-        unsafe { Rc::increment_strong_count(value) };
+        unsafe { StrOwner::increment_strong_count(value) };
         [
             value,
-            Rc::into_raw(Rc::new(Str::new(""))),
-            Rc::into_raw(Rc::new(Str::new(""))),
+            StrOwner::into_raw(StrOwner::new(Str::new(""))),
+            StrOwner::into_raw(StrOwner::new(Str::new(""))),
         ]
     };
     for (index, part) in parts.into_iter().enumerate() {
@@ -504,9 +842,10 @@ fn hexadecimal(byte: u8) -> Option<u8> {
 
 /// Decodes valid percent pairs, retaining malformed escapes and literal '+'.
 /// `first` identifies a percent byte; unchanged spans are copied in one chunk.
-fn unquote(source: &str, first: usize) -> Str {
+fn unquote(source: &str, first: usize) -> Option<Str> {
     let input = source.as_bytes();
-    let mut bytes = Vec::with_capacity(input.len());
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(input.len()).ok()?;
     bytes.extend_from_slice(&input[..first]);
     let mut index = first;
     loop {
@@ -526,25 +865,47 @@ fn unquote(source: &str, first: usize) -> Str {
         bytes.extend_from_slice(&input[index..index + offset]);
         index += offset;
     }
-    let decoded = String::from_utf8(bytes)
-        .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned());
-    Str::from(decoded)
+    match String::from_utf8(bytes) {
+        Ok(decoded) => Some(Str::from(decoded)),
+        Err(error) => {
+            // Each ill-formed sequence contains a decoded three-byte percent escape.
+            // Replacing it with U+FFFD therefore fits in the encoded input length.
+            let mut result = String::new();
+            result.try_reserve_exact(source.len()).ok()?;
+            for chunk in error.as_bytes().utf8_chunks() {
+                result.push_str(chunk.valid());
+                if !chunk.invalid().is_empty() {
+                    result.push('\u{fffd}');
+                }
+            }
+            Some(Str::from(result))
+        }
+    }
+}
+
+fn owned_text(result: Option<Str>) -> *const Str {
+    if let Some(text) = result {
+        StrOwner::into_raw(StrOwner::new(text))
+    } else {
+        super::exceptions::sequence_allocation_failed();
+        std::ptr::null()
+    }
 }
 
 /// Decodes percent escapes with UTF-8 replacement while preserving literal '+'.
 ///
 /// # Safety
 /// Input is a rooted scalar string. Returns one owned string reference with the
-/// default urllib.parse.unquote UTF-8/errors='replace' semantics.
+/// default urllib.parse.unquote UTF-8/errors='replace' semantics, or null on allocation failure.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_unquote(value: *const Str) -> *const Str {
     // SAFETY: input remains immutable and rooted throughout the operation.
     let source = unsafe { &*value };
     if let Some(first) = memchr::memchr(b'%', source.as_bytes()) {
-        Rc::into_raw(Rc::new(unquote(source, first)))
+        owned_text(unquote(source, first))
     } else {
         // SAFETY: the unchanged result acquires its own live reference.
-        unsafe { Rc::increment_strong_count(value) };
+        unsafe { StrOwner::increment_strong_count(value) };
         value
     }
 }
@@ -560,7 +921,7 @@ mod tests {
     /// Copies a native split result into ordinary strings for readable assertions.
     fn parts(source: &str, separator: Option<&str>, maxsplit: i64, reverse: bool) -> Vec<String> {
         let result = split_text(
-            &Rc::new(Str::new(source)),
+            &StrOwner::new(Str::new(source)),
             separator,
             &Int::new(BigInt::from(maxsplit)),
             reverse,
@@ -582,11 +943,24 @@ mod tests {
         // SAFETY: raising creates one pending owner; the message getter returns
         // a second independent owner, both consumed by their Rc wrappers.
         unsafe {
-            let error = Rc::from_raw(imre_error_take());
-            assert_eq!(imre_exception_matches(Rc::as_ptr(&error), kind as u32), 1);
-            let actual = Rc::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+            let error = crate::ObjectOwner::from_raw(imre_error_take());
+            assert_eq!(
+                imre_exception_matches(crate::ObjectOwner::as_ptr(&error), kind as u32),
+                1
+            );
+            let actual =
+                StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)));
             assert_eq!(actual.as_str(), message);
         }
+    }
+
+    #[test]
+    fn refused_short_string_does_not_poison_the_cache() {
+        SHORT_STRINGS.with_borrow_mut(|strings| strings[0xe9] = None);
+        assert!(owned_string_with("é", |_| Err(())).is_err());
+        let owner = try_owned_string("é").ok().unwrap();
+        let cached = owned_string_with("é", |_| Err(())).unwrap();
+        assert!(StrOwner::ptr_eq(&owner, &cached));
     }
 
     #[test]
@@ -599,7 +973,7 @@ mod tests {
         ] {
             let source = Str::from(source);
             // SAFETY: the input lives through the call and the result transfers one owner.
-            let result = unsafe { Rc::from_raw(imre_str_dedent(&source)) };
+            let result = unsafe { StrOwner::from_raw(imre_str_dedent(&source)) };
             assert_eq!(result.as_str(), expected);
         }
     }
@@ -612,7 +986,7 @@ mod tests {
         ] {
             let source = Str::from(text);
             // SAFETY: the source lives through the call and the result transfers one owner.
-            let result = unsafe { Rc::from_raw(imre_str_dedent(&source)) };
+            let result = unsafe { StrOwner::from_raw(imre_str_dedent(&source)) };
             assert_eq!(result.as_str(), expected);
             assert!(!result.is_heap_allocated());
         }
@@ -629,23 +1003,25 @@ mod tests {
 
     #[test]
     fn no_match_split_retains_source_without_consuming_its_caller() {
-        let source = Rc::new(Str::new("an independently owned source without separators"));
-        let separator = Rc::new(Str::new("::"));
+        let source = StrOwner::new(Str::new("an independently owned source without separators"));
+        let separator = StrOwner::new(Str::new("::"));
         // SAFETY: inputs remain rooted; both native getters transfer owned handles.
         unsafe {
-            let parts = Rc::from_raw(imre_str_split(
-                Rc::as_ptr(&source),
-                Rc::as_ptr(&separator),
+            let parts = crate::ObjectOwner::from_raw(imre_str_split(
+                StrOwner::as_ptr(&source),
+                StrOwner::as_ptr(&separator),
                 Int::small(-1).unwrap().0,
                 0,
             ));
-            assert_eq!(Rc::strong_count(&source), 2);
-            let selected =
-                Rc::from_raw(super::super::imre_seq_get_index(Rc::as_ptr(&parts), 0) as *const Str);
-            assert!(Rc::ptr_eq(&source, &selected));
+            assert_eq!(StrOwner::strong_count(&source), 2);
+            let selected = StrOwner::from_raw(super::super::imre_seq_get_index(
+                crate::ObjectOwner::as_ptr(&parts),
+                0,
+            ) as *const Str);
+            assert!(StrOwner::ptr_eq(&source, &selected));
             drop(source);
             drop(parts);
-            assert_eq!(Rc::strong_count(&selected), 1);
+            assert_eq!(StrOwner::strong_count(&selected), 1);
             assert_eq!(
                 selected.as_str(),
                 "an independently owned source without separators"
@@ -655,34 +1031,37 @@ mod tests {
 
     #[test]
     fn rsplit_last_keeps_an_independent_owner_and_reports_empty_separators() {
-        let source = Rc::new(Str::new("an independently owned string without separators"));
-        let separator = Rc::new(Str::new("::"));
+        let source = StrOwner::new(Str::new("an independently owned string without separators"));
+        let separator = StrOwner::new(Str::new("::"));
         // SAFETY: both inputs are rooted; the successful result transfers one owner.
         let result = unsafe {
-            Rc::from_raw(imre_str_rsplit_last(
-                Rc::as_ptr(&source),
-                Rc::as_ptr(&separator),
+            StrOwner::from_raw(imre_str_rsplit_last(
+                StrOwner::as_ptr(&source),
+                StrOwner::as_ptr(&separator),
             ))
         };
-        assert!(Rc::ptr_eq(&source, &result));
+        assert!(StrOwner::ptr_eq(&source, &result));
         drop(source);
-        assert_eq!(Rc::strong_count(&result), 1);
+        assert_eq!(StrOwner::strong_count(&result), 1);
         assert_eq!(
             result.as_str(),
             "an independently owned string without separators"
         );
-        let empty = Rc::new(Str::new(""));
+        let empty = StrOwner::new(Str::new(""));
         // SAFETY: inputs remain rooted; failure returns null and one pending error.
         unsafe {
-            assert!(imre_str_rsplit_last(Rc::as_ptr(&result), Rc::as_ptr(&empty)).is_null());
+            assert!(
+                imre_str_rsplit_last(StrOwner::as_ptr(&result), StrOwner::as_ptr(&empty)).is_null()
+            );
             let error = imre_error_take();
             assert!(!error.is_null());
-            let error = Rc::from_raw(error);
+            let error = crate::ObjectOwner::from_raw(error);
             assert_eq!(
-                imre_exception_matches(Rc::as_ptr(&error), Kind::ValueError as u32),
+                imre_exception_matches(crate::ObjectOwner::as_ptr(&error), Kind::ValueError as u32),
                 1,
             );
-            let message = Rc::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+            let message =
+                StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)));
             assert_eq!(message.as_str(), "empty separator");
         }
     }
@@ -705,7 +1084,7 @@ mod tests {
 
     #[test]
     fn maxsplit_conversion_precedes_empty_separator_validation() {
-        let source = Rc::new(Str::new("x"));
+        let source = StrOwner::new(Str::new("x"));
         let huge = Int::new(BigInt::from(1) << 100_u32);
         let error = split_text(&source, Some(""), &huge, false).err().unwrap();
         check_error(
@@ -761,10 +1140,11 @@ mod tests {
             ("%E9é%80", "�é�"),
             ("%00tail", "\0tail"),
         ] {
-            let original = Rc::new(Str::new(source));
+            let original = StrOwner::new(Str::new(source));
             // SAFETY: the input is rooted; the returned independent owner is
             // consumed by the Rc wrapper, including when the handle is reused.
-            let actual = unsafe { Rc::from_raw(imre_str_unquote(Rc::as_ptr(&original))) };
+            let actual =
+                unsafe { StrOwner::from_raw(imre_str_unquote(StrOwner::as_ptr(&original))) };
             assert_eq!(actual.as_str(), expected, "{source}");
         }
     }

@@ -1,0 +1,10 @@
+{
+  "compiler_revision": "5c068b90d978f4b57fe145984fa0459180a755ed",
+  "tree": "3334b4338f4a1945c2a1740134f44fcdc740f774",
+  "parent": "3fa82d634901308d835e8cb7c8d63fe3541342e5",
+  "binary_sha256": {
+    "imre": "c27a36fc3160947bafa5e469399a6545710116cd0898218a68336d1c5b49aa3b",
+    "libimre_runtime.a": "4f4bcfabe107af06449b556848b5693d934f66b35854ada8feadc77d89be4d50"
+  },
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115"
+}

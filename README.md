@@ -29,6 +29,9 @@ Hello, world!
 Imre compiles a restricted subset of Python into native executables that run
 without a Python installation.
 
+The [standard library support table](docs/stdlib.md) lists the operations and
+CPython test coverage for each module.
+
 For a complete example, Imre can build Ruff’s conformance reporter directly
 from its original Python file. The executable runs two versions of ty against
 a typing checkout and renders their differences. [Run the reporter](examples/conformance_report/README.md#run-directly-from-a-checkout).
@@ -37,9 +40,10 @@ Imre also runs Ruff’s original memory reporter. It compares saved JSON capture
 or runs two versions of ty on flake8, Sphinx, Prefect, and Trio.
 [Run the memory reporter](examples/memory_report/README.md#run-ruffs-original-script).
 
-Imre builds Ruff’s ecosystem checker from its original Python package. It clones
-58 repositories and compares the diagnostics from two Ruff binaries.
-[Run the ecosystem checker](examples/ruff_ecosystem/README.md#run-the-original-check-command).
+Imre builds Ruff’s ecosystem reporter from its original Python package. One
+executable compares two Ruff versions on 58 repositories: `check` reports
+diagnostic changes and `format` renders the Git patches between their outputs.
+[Run the ecosystem reporter](examples/ruff_ecosystem/README.md#run-the-original-commands).
 
 Imre supports:
 
@@ -55,6 +59,8 @@ Imre supports:
 - Read and write UTF-8 files, resolve native `pathlib.Path` values, and scan directories with `iterdir` and bounded `glob`.
 - Stream lines from plain or gzip files and read binary inputs in bounded chunks.
 - Create scoped temporary workspaces and atomically replace completed files.
+- Use IPv4 TCP sockets on POSIX: bind and accept local connections, connect, exchange bytes, duplicate sockets, and control descriptor blocking and inheritance.
+- Serve one blocking TCP request with [socketserver.TCPServer](benchmarks/cpython_stdlib/full/socketserver/README.md) and a Python handler subclass.
 - Run native subprocesses with captured UTF-8 output, deadlines, explicit arguments, working directories, and environment snapshots.
 
 But not:
@@ -88,17 +94,30 @@ Other projects make different trade-offs:
   [mypyc](https://mypyc.readthedocs.io/) use types to optimize code running
   within CPython, so compiled modules can interact with ordinary Python code.
 
+Use [`@imre.struct`](docs/subset.md#immutable-value-structs) for immutable scalar
+records: a `list[Point]` can store the fields of each point inline. The same source
+runs on CPython with Imre’s standard library.
+
 For more, see the [design](docs/design.md) and [supported subset](docs/subset.md).
 
-## Benchmark
+## Benchmarks
 
-Running the same [inventory reconciliation program](examples/inventory_reconciliation/)
-with Imre and CPython, and comparing it with a Rust implementation:
+Imre and CPython 3.14.5 run the same Python programs. The Rust references read the same inputs and produce the same outputs.
 
-| Workload | CPython 3.14.5 (ms) | Imre (ms) | Rust (ms) | Imre speedup vs. CPython |
-| --- | ---: | ---: | ---: | ---: |
-| Repeated requests (64 products in stock) | 77.66 | 26.69 | 23.34 | 2.91× |
-| Distinct requests (16,384 products in stock) | 112.35 | 52.24 | 43.05 | 2.15× |
+<p align="center">
+  <img src="benchmarks/results/runtime-suite.svg" width="100%" alt="Six panels comparing median elapsed time for Rust, Imre and CPython on inventory reconciliation, Base45 decoding, Luhn checksums, telemetry and offline conformance reporting.">
+</p>
+
+Each result is the median of 12 fresh processes pinned to one AMD EPYC Milan CPU. Timings include startup, imports and file I/O.
+
+| Workload | Input per process | Rust (ms) | CPython (ms) | Imre (ms) | CPython / Imre |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Inventory (repeated) | 16,384 requests, 64 SKUs | 25.84 | 80.00 | 33.18 | 2.41× |
+| Inventory (distinct) | 16,384 requests, 16,384 SKUs | 48.02 | 117.84 | 60.54 | 1.95× |
+| Base45 decode | 64 × 16 KiB decoded | 9.17 | 190.52 | 14.51 | 13.13× |
+| Luhn checksum | 65,536 × 16 digits | 5.03 | 152.09 | 13.39 | 11.36× |
+| Telemetry report | 81 × 4,096 aligned pairs | 9.60 | 125.00 | 13.30 | 9.40× |
+| Conformance report | 146 files, two captured ty runs | 25.26 | 258.75 | 34.95 | 7.40× |
 
 ## Installation
 
@@ -171,6 +190,15 @@ For ThinLTO, select the allocator with `--runtime`. [ThinLTO build instructions]
 
 Imre removes unused code when linking executables. Pass `--no-gc-sections` to keep it,
 or `--verbose-link` to see the Clang command. [Link options and environment variables](docs/subset.md#link-options)
+
+## Running CI
+
+CI runs automatically on pull requests. Add the `ci:macos` label to run the Apple Silicon tests
+on a PR and its subsequent pushes, or select **macOS → Run workflow** to run them on a branch.
+Packaging changes build the Linux archives and installer by default;
+runtime and code generation changes also run the full AddressSanitizer suites.
+To run the full release and Linux checks on a branch (including `main`), select **CI → Run workflow** and enable
+`release_artifacts`, `full_asan`, and `full_thinlto`. Each can also be selected independently.
 
 ## Releasing
 

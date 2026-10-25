@@ -1,0 +1,248 @@
+{
+  "base_revision": "6fcf33f02db9cc7131d73503d52f7bb78fd7b5b9",
+  "implementation_revision": "9c43f9d6288fe88f501fcddd18485e75e929ee16",
+  "before": {
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "compiler_sha256": "01d8cb90ce7e59fd68f63fbc01f74744dff5ff6786077978179cc428b5303606",
+    "operation": "check",
+    "tests_executed": 0,
+    "source": "git",
+    "support_files": [],
+    "checks": [
+      {
+        "suite": "test.test_typing",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_typing.py:696:35: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+      },
+      {
+        "suite": "test.test_typing",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_typing.py:696:35: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+      },
+      {
+        "suite": "test.test_typing",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_typing.py:696:35: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+      },
+      {
+        "suite": "test.test_typing",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_typing.py:696:35: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+      },
+      {
+        "suite": "test.test_warnings",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:5:1: Imre: standard-library imports and shadowing are unsupported: \"importlib\""
+      },
+      {
+        "suite": "test.test_warnings",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:12:1: Imre: unsupported sealed standard-library export typing.overload"
+      },
+      {
+        "suite": "test.test_warnings",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:5:1: Imre: standard-library imports and shadowing are unsupported: \"importlib\""
+      },
+      {
+        "suite": "test.test_warnings",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:12:1: Imre: unsupported sealed standard-library export typing.overload"
+      },
+      {
+        "suite": "test.test_inspect",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+      },
+      {
+        "suite": "test.test_inspect",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      },
+      {
+        "suite": "test.test_inspect",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+      },
+      {
+        "suite": "test.test_inspect",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      },
+      {
+        "suite": "test.test_unittest",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+      },
+      {
+        "suite": "test.test_unittest",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      },
+      {
+        "suite": "test.test_unittest",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+      },
+      {
+        "suite": "test.test_unittest",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      }
+    ]
+  },
+  "after": {
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "compiler_sha256": "a8cd6aa4af5ef83106db61f1a37aa61b0a83968831c7173c27839d38379a1ebb",
+    "operation": "check",
+    "tests_executed": 0,
+    "source": "git",
+    "support_files": [],
+    "checks": [
+      {
+        "suite": "test.test_typing",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_typing.py:696:35: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+      },
+      {
+        "suite": "test.test_typing",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_typing.py:696:35: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+      },
+      {
+        "suite": "test.test_typing",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_typing.py:696:35: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+      },
+      {
+        "suite": "test.test_typing",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_typing.py:696:35: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+      },
+      {
+        "suite": "test.test_warnings",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:5:1: Imre: standard-library imports and shadowing are unsupported: \"importlib\""
+      },
+      {
+        "suite": "test.test_warnings",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:15:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+      },
+      {
+        "suite": "test.test_warnings",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:5:1: Imre: standard-library imports and shadowing are unsupported: \"importlib\""
+      },
+      {
+        "suite": "test.test_warnings",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_warnings/__init__.py:15:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+      },
+      {
+        "suite": "test.test_inspect",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+      },
+      {
+        "suite": "test.test_inspect",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      },
+      {
+        "suite": "test.test_inspect",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+      },
+      {
+        "suite": "test.test_inspect",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      },
+      {
+        "suite": "test.test_unittest",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+      },
+      {
+        "suite": "test.test_unittest",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      },
+      {
+        "suite": "test.test_unittest",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+      },
+      {
+        "suite": "test.test_unittest",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      }
+    ]
+  }
+}

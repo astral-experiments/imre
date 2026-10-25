@@ -157,14 +157,12 @@ impl Verifier<'_> {
         let fields = match receiver {
             Type::Class(class) => self.module.class_fields[class].clone(),
             Type::Tuple(_) => self.module.types.fields(receiver).unwrap(),
-            Type::CompletedProcess => {
+            Type::ModuleSpec(id) => self.module.types.module_spec_fields(id),
+            Type::CompletedProcess(capture, cmd) => {
                 return match field {
-                    0 => require(
-                        self.module.types.element(value) == Some(Type::Str),
-                        "process args field must be list[str]",
-                    ),
+                    0 => same(value, self.module.types.completed_command(cmd)),
                     1 => same(value, Type::Int),
-                    2 | 3 => same(value, Type::Str),
+                    2 | 3 => same(value, capture.stream(field == 2)),
                     _ => Err(format!("invalid process field #{field}")),
                 };
             }
@@ -179,7 +177,7 @@ impl Verifier<'_> {
     }
 
     fn item(&self, receiver: Type, index: Type) -> Result<Type, String> {
-        if let Some(element) = self.module.types.element(receiver) {
+        if let Some(element) = self.module.types.indexed_element(receiver) {
             same(index, Type::Int)?;
             Ok(element)
         } else if let Some((key, value)) = self.module.types.mapping(receiver) {
@@ -258,7 +256,13 @@ impl Verifier<'_> {
                 value,
                 ready,
             } => {
-                same(self.local(*iterator)?, Type::Iterator)?;
+                let ty = self.local(*iterator)?;
+                if let Some(element) = self.module.types.cursor_element(ty) {
+                    same(self.local(*key)?, element)?;
+                    require(value.is_none(), "a typed cursor yields one item")?;
+                } else {
+                    same(ty, Type::Iterator)?;
+                }
                 same(self.local(*ready)?, Type::Bool)?;
                 let slots = [*iterator, *key, *ready]
                     .into_iter()
@@ -285,7 +289,10 @@ impl Verifier<'_> {
                 self.block(finalbody)
             }
             Statement::Raise(Some(value)) => require(
-                matches!(value.ty, Type::Exception | Type::TimeoutExpired),
+                matches!(
+                    value.ty,
+                    Type::Exception | Type::ImportException | Type::TimeoutExpired
+                ),
                 "raise needs an exception",
             ),
             Statement::Raise(None)
@@ -310,7 +317,9 @@ impl Verifier<'_> {
                 | Builtin::JsonDumps(ty)
                 | Builtin::JsonDump(ty)
                 | Builtin::TomlDecode(ty)
-                | Builtin::DictTryGet(ty),
+                | Builtin::DictTryGet(ty)
+                | Builtin::ChainMapGet(ty)
+                | Builtin::DictTryPop(ty),
                 _,
             ) => self.ty(*ty),
             ExprKind::Builtin(Builtin::IsInstance(kinds), _) => {
@@ -407,9 +416,13 @@ impl Verifier<'_> {
                 Ok(())
             }
             ExprKind::Tuple(values) => {
-                let fields = types
-                    .fields(value.ty)
-                    .ok_or("tuple expression has non-tuple type")?;
+                let fields = if let Type::ModuleSpec(id) = value.ty {
+                    types.module_spec_fields(id)
+                } else {
+                    types
+                        .fields(value.ty)
+                        .ok_or("tuple expression has non-tuple type")?
+                };
                 require(fields.len() == values.len(), "tuple field count mismatch")?;
                 for (value, field) in values.iter().zip(fields) {
                     same(value.ty, field)?;
@@ -522,6 +535,23 @@ impl Verifier<'_> {
             ExprKind::Field(receiver, field) => self.field(receiver.ty, *field, value.ty),
             ExprKind::Builtin(operation, args) => {
                 match operation {
+                    Builtin::ExceptionRecordFields => {
+                        let Type::Class(id) = value.ty else {
+                            return Err("exception payload construction needs a record".to_owned());
+                        };
+                        let layout = self
+                            .module
+                            .class_fields
+                            .get(id)
+                            .ok_or("unknown exception payload")?;
+                        require(
+                            layout.len() == args.len(),
+                            "exception payload field count differs from its layout",
+                        )?;
+                        for (field, expected) in args.iter().zip(layout) {
+                            same(field.ty, *expected)?;
+                        }
+                    }
                     Builtin::GlobalGet(slot) => {
                         let ty = *self
                             .module
@@ -588,8 +618,10 @@ mod tests {
 
     fn empty() -> Module {
         Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
+            list_builds: Default::default(),
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),

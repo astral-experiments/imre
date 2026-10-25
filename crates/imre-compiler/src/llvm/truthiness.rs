@@ -62,6 +62,11 @@ impl Emitter<'_, '_> {
                     }
                 }
                 Type::Bool => value.operand.clone(),
+                Type::VarTuple(_) => {
+                    let len = self
+                        .instruction(format!("call i64 @imre_tuple_len(ptr {})", value.operand));
+                    self.instruction(format!("icmp ne i64 {len}, 1"))
+                }
                 Type::Int => self.instruction(format!("icmp ne i64 {}, 1", value.operand)),
                 // Unordered-or-not-equal keeps NaN true and both signed zeros false.
                 Type::Float => self.instruction(format!("fcmp une double {}, 0.0", value.operand)),
@@ -77,12 +82,30 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
-                Type::ExitCode => {
+                Type::Context => {
+                    let count = self.instruction(format!(
+                        "call i64 @imre_contextvars_len(ptr {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i64 {count}, 1"))
+                }
+                Type::Calendar(crate::ir::CalendarType::Delta) => self.instruction(format!(
+                    "call i1 @imre_calendar_truth(ptr {})",
+                    value.operand
+                )),
+                Type::ObjectValue => {
                     let bit = self.instruction(format!(
                         "call i32 @imre_system_exit_code_truth(ptr {})",
                         value.operand
                     ));
                     self.instruction(format!("icmp ne i32 {bit}, 0"))
+                }
+                Type::StringIterable => {
+                    let length = self.instruction(format!(
+                        "call i64 @imre_string_iterable_len(i64 {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i64 {length}, 1"))
                 }
                 Type::Union(_) => {
                     let byte = self.instruction(format!(
@@ -91,16 +114,34 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
+                Type::ChainMap(_) => {
+                    let byte = self.instruction(format!(
+                        "call i32 @imre_chainmap_truth(ptr {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i32 {byte}, 0"))
+                }
+                Type::Patch(_) => {
+                    let length = self
+                        .instruction(format!("call i64 @imre_patch_len(ptr {})", value.operand));
+                    self.instruction(format!("icmp ne i64 {length}, 1"))
+                }
                 Type::List(_) => {
                     let length = self
                         .instruction(format!("call i32 @sequence_header(ptr {})", value.operand));
                     self.instruction(format!("icmp ugt i32 {length}, 1"))
                 }
-                Type::ListInt | Type::Dict(_) | Type::Set(_) | Type::StringKeys => {
+                Type::ListInt
+                | Type::Deque(_)
+                | Type::Dict(_)
+                | Type::ReadOnlyObjectMapping
+                | Type::Set(_)
+                | Type::StringKeys => {
                     let family = match value.ty {
                         Type::ListInt => "list",
-                        Type::Dict(_) => "dict",
+                        Type::Dict(_) | Type::ReadOnlyObjectMapping => "dict",
                         Type::Set(_) | Type::StringKeys => "set",
+                        Type::Deque(_) => "deque",
                         _ => unreachable!(),
                     };
                     // These containers have at least one word per entry, so
@@ -181,13 +222,14 @@ impl Emitter<'_, '_> {
         if value.ty == returns {
             return value;
         }
-        if matches!(
-            self.module.types.payload(returns).unwrap_or(returns),
-            Type::Union(_)
-        ) && matches!(
-            self.module.types.payload(value.ty).unwrap_or(value.ty),
-            Type::Str | Type::Bytes
-        ) {
+        let target = self.module.types.payload(returns).unwrap_or(returns);
+        let source = self.module.types.payload(value.ty).unwrap_or(value.ty);
+        if self
+            .module
+            .types
+            .members(target)
+            .is_some_and(|members| members.contains(&source))
+        {
             return self.union_inject(value, returns);
         }
         let selected = self.module.types.truth_branch(value.ty, truth);

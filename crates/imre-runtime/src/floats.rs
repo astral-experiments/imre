@@ -3,15 +3,16 @@
 //! `Rc<f64>`. A nullable pointer preserves every bit pattern without reserving a
 //! NaN payload or conflating signed zero with absence.
 
+use crate::StrOwner;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::rc::Rc;
 
-use icu_properties::props::{EnumeratedProperty, GeneralCategory};
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, Signed, ToPrimitive, Zero};
 
 use super::{Bytes, Error, Int, Kind, Result, Str, finish, output_bytes};
+use crate::integer_text::decimal_digit;
 
 /// Returns a nullable-word owner. Bare float storage never calls this helper.
 #[unsafe(no_mangle)]
@@ -49,7 +50,7 @@ pub unsafe extern "C" fn imre_float_box_release(value: usize) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_float_str(value: f64) -> *const Str {
-    Rc::into_raw(Rc::new(render(value)))
+    StrOwner::into_raw(StrOwner::new(render(value)))
 }
 
 #[unsafe(no_mangle)]
@@ -131,43 +132,31 @@ pub(super) fn int_to_float(value: &Int) -> Result<f64> {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_float_int(value: f64) -> usize {
-    if value.is_nan() {
-        return Error::new(Kind::ValueError, "cannot convert float NaN to integer").returning(1);
-    }
-    if value.is_infinite() {
-        return Error::new(
-            Kind::OverflowError,
-            "cannot convert float infinity to integer",
-        )
-        .returning(1);
-    }
-    Int::new(BigInt::from_f64(value).unwrap()).into_raw()
+    finish(float_to_integer(value).map(|n| Int::new(n).into_raw()), 1)
 }
 
-/// Decimal digit blocks contain consecutive groups of ten characters. ICU's
-/// category check excludes numeric characters such as fractions and superscripts.
-fn decimal_digit(value: char) -> Option<u8> {
-    if value.is_ascii_digit() {
-        return Some(value as u8 - b'0');
+/// Truncate a finite float and preserve Python's distinct NaN and infinity errors.
+pub(super) fn float_to_integer(value: f64) -> Result<BigInt> {
+    if value.is_nan() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "cannot convert float NaN to integer",
+        ));
     }
-    if GeneralCategory::for_char(value) != GeneralCategory::DecimalNumber {
-        return None;
+    if value.is_infinite() {
+        return Err(Error::new(
+            Kind::OverflowError,
+            "cannot convert float infinity to integer",
+        ));
     }
-    let mut start = value as u32;
-    while let Some(previous) = char::from_u32(start - 1) {
-        if GeneralCategory::for_char(previous) != GeneralCategory::DecimalNumber {
-            break;
-        }
-        start -= 1;
-    }
-    Some(((value as u32 - start) % 10) as u8)
+    Ok(BigInt::from_f64(value).unwrap())
 }
 
 /// Validates Python's decimal grammar before Rust performs correctly rounded
 /// conversion. Rust alone also accepts forms outside Python's grammar. Underscores
 /// may separate digits only, including in the exponent; Unicode decimal digits
 /// and surrounding Unicode whitespace are normalized before validation.
-fn parse(source: &str) -> Option<f64> {
+pub(crate) fn parse(source: &str) -> Option<f64> {
     let source = source.trim();
     let mut normalized = if source.is_ascii() {
         Cow::Borrowed(source)

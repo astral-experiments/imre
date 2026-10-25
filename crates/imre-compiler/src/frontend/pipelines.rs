@@ -11,18 +11,42 @@ mod groupby;
 /// successful `next` owns `value`, and its consumer clears that transient owner.
 pub(super) struct Prepared {
     pub evaluate: Vec<Statement>,
-    acquire: Vec<Statement>,
-    next: Vec<Statement>,
+    pub(super) acquire: Vec<Statement>,
+    pub(super) next: Vec<Statement>,
     pub(super) value: usize,
-    ready: usize,
+    pub(super) ready: usize,
     /// An empty tuple has no element type or executable item assignment.
     elementless: bool,
+    /// An eager list alternative of this exact virtual generator call.
+    eager_list: Option<(TextRange, EagerList)>,
     /// Enclosing slots a later pull may replace, after constructor arguments.
     writes: HashSet<usize>,
     pub clear: Vec<usize>,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct EagerList {
+    pub(super) value: usize,
+    pub(super) selected: usize,
+}
+
 impl Prepared {
+    /// An enclosing adapter has its own iteration semantics even if it reuses this state.
+    pub(super) fn eager_list_at(&self, source: &impl Ranged) -> Option<EagerList> {
+        self.eager_list
+            .filter(|(range, _)| *range == source.range())
+            .map(|(_, list)| list)
+    }
+
+    /// Only reads during a pull can observe an exception binding cleared by the consumer.
+    pub(super) fn reads_on_pull(&self, slot: usize) -> bool {
+        let mut reads = false;
+        ir::walk_expressions(&self.next, &mut |expr| {
+            reads |= matches!(expr.kind, ExprKind::Local(read) if read == slot);
+        });
+        reads
+    }
+
     /// Pulls and binds one owned item, or exits the source loop on exhaustion.
     fn bind_next(next: &mut Vec<Statement>, ready: Expr, value: usize, bindings: Vec<Statement>) {
         next.push(Statement::If(
@@ -43,37 +67,28 @@ impl Checker<'_> {
         value: &Expr,
         node: &impl Ranged,
     ) -> Result<Option<Prepared>, String> {
-        let (function, mut args, returns) = match (&value.kind, value.ty) {
-            (ExprKind::Call(id, args), _) if self.classes.generators.contains(id) => {
-                (*id, args.clone(), value.ty)
-            }
-            (_, Type::Class(class))
-                if let Some(method) = self.classes.methods[class].get("__iter__") =>
-            {
-                (
-                    method.id,
-                    ir::CallArgs::positional(vec![value.clone()]),
-                    method.returns,
-                )
-            }
-            _ => return Ok(None),
-        };
-        self.calls.insert(function);
+        if let Some(element) = self.types.cursor_element(value.ty) {
+            return Ok(Some(self.prepare_cursor(value.clone(), element)));
+        }
         let mut evaluate = Vec::new();
         let mut roots = Vec::new();
-        for arg in &mut args.values {
-            let slot = self.hidden(arg.ty);
-            evaluate.push(Statement::Assign(
-                slot,
-                std::mem::replace(arg, self.local(slot)),
-            ));
-            roots.push(slot);
-        }
-        let call = Expr {
-            ty: returns,
-            kind: ExprKind::Call(function, args),
+        let mut eager = None;
+        let call = if self.has_delegated_call(value) {
+            self.capture_delegated_call(value.clone(), &mut evaluate, &mut roots, &mut eager)
+        } else if let Type::Class(class) = value.ty
+            && self.classes.has_record_iterator(class)
+        {
+            let mut receiver = value.clone();
+            evaluate.push(self.capture_generator_operand(&mut receiver, &mut roots));
+            self.record_primitive(receiver, "__iter__", &[], node)?
+        } else {
+            return Ok(None);
         };
         let mut prepared = self.prepare_container(call, false, node, false)?;
+        if let Some(list) = eager {
+            evaluate.insert(0, Statement::Assign(list.selected, boolean(false)));
+            prepared.eager_list = Some((node.range(), list));
+        }
         let started = self.hidden(Type::Bool);
         let mut initialize = std::mem::replace(&mut prepared.evaluate, evaluate);
         initialize.extend(std::mem::replace(
@@ -89,6 +104,87 @@ impl Checker<'_> {
         prepared.clear.extend(roots);
         Ok(Some(prepared))
     }
+
+    /// Identify generator branches in the checked dispatch expression.
+    fn has_delegated_call(&self, value: &Expr) -> bool {
+        match &value.kind {
+            ExprKind::Call(id, _) => self.classes.generators.contains(id),
+            ExprKind::Scope { value, .. } => self.has_delegated_call(value),
+            ExprKind::Conditional(_, yes, no) => {
+                self.has_delegated_call(yes) || self.has_delegated_call(no)
+            }
+            _ => false,
+        }
+    }
+
+    /// Evaluate dispatch and argument binding at construction. The returned expression
+    /// invokes only the selected method, using those captured operands on the first pull.
+    fn capture_delegated_call(
+        &mut self,
+        mut call: Expr,
+        evaluate: &mut Vec<Statement>,
+        roots: &mut Vec<usize>,
+        eager: &mut Option<EagerList>,
+    ) -> Expr {
+        match call.kind {
+            ExprKind::Call(id, ref mut args) if self.classes.generators.contains(&id) => {
+                for arg in &mut args.values {
+                    evaluate.push(self.capture_generator_operand(arg, roots));
+                }
+                self.calls.insert(id);
+                call
+            }
+            ExprKind::Scope {
+                mut body,
+                value,
+                clear,
+            } => {
+                let delayed = self.capture_delegated_call(*value, &mut body, roots, eager);
+                evaluate.push(Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Scope {
+                        body,
+                        value: Box::new(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::None,
+                        }),
+                        clear,
+                    },
+                }));
+                delayed
+            }
+            ExprKind::Conditional(mut test, yes, no) => {
+                evaluate.push(self.capture_generator_operand(&mut test, roots));
+                let mut on_yes = Vec::new();
+                let mut on_no = Vec::new();
+                let yes = self.capture_delegated_call(*yes, &mut on_yes, roots, eager);
+                let no = self.capture_delegated_call(*no, &mut on_no, roots, eager);
+                evaluate.push(Statement::If((*test).clone(), on_yes, on_no));
+                Expr {
+                    ty: call.ty,
+                    kind: ExprKind::Conditional(test, Box::new(yes), Box::new(no)),
+                }
+            }
+            _ => {
+                let list = eager.get_or_insert_with(|| {
+                    let value = self.hidden(call.ty);
+                    let selected = self.hidden(Type::Bool);
+                    roots.extend([value, selected]);
+                    EagerList { value, selected }
+                });
+                evaluate.push(Statement::Assign(list.value, call));
+                evaluate.push(Statement::Assign(list.selected, boolean(true)));
+                self.local(list.value)
+            }
+        }
+    }
+
+    /// Keep one evaluated operand live until the prepared iterator is released.
+    fn capture_generator_operand(&mut self, value: &mut Expr, roots: &mut Vec<usize>) -> Statement {
+        let slot = self.hidden(value.ty);
+        roots.push(slot);
+        Statement::Assign(slot, std::mem::replace(value, self.local(slot)))
+    }
 }
 
 /// These constructors have observable acquisition timing and cannot be passed
@@ -96,11 +192,14 @@ impl Checker<'_> {
 pub(super) fn is_pipeline_expression(checker: &Checker<'_>, expression: &ast::Expr) -> bool {
     matches!(expression, ast::Expr::Generator(_))
         || matches!(expression, ast::Expr::Call(call)
-            if checker.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain))
+            if checker.generator_signature(call).is_some()
+            || checker.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain))
+            || checker.is_builtin_iter(call)
             || matches!(&*call.func, ast::Expr::Name(name)
-                if matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
+                if checker.resolve(&call.func).is_none()
+                    && matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
             || matches!(&*call.func, ast::Expr::Attribute(attribute)
-                if matches!(attribute.attr.as_str(), "iterdir" | "glob")))
+                if matches!(attribute.attr.as_str(), "iterdir" | "glob" | "rglob" | "walk")))
 }
 
 pub(super) fn integer(value: i64) -> Expr {
@@ -138,6 +237,27 @@ fn not(value: Expr) -> Expr {
     }
 }
 
+/// Handle exhaustion only inside the iterator or generator operation being pulled.
+fn catch_stop_iteration(
+    types: &Types,
+    body: Vec<Statement>,
+    on_stop: Vec<Statement>,
+) -> Vec<Statement> {
+    if !crate::effects::may_raise_locally(&body, types) {
+        return body;
+    }
+    vec![Statement::Try {
+        body,
+        handlers: vec![ir::ExceptHandler {
+            kinds: vec![exception_kind("StopIteration").unwrap()],
+            name: None,
+            body: on_stop,
+        }],
+        orelse: Vec::new(),
+        finalbody: Vec::new(),
+    }]
+}
+
 fn raise_value_error(message: String) -> Statement {
     Statement::Raise(Some(Expr {
         ty: Type::Exception,
@@ -166,6 +286,15 @@ fn target_names(target: &ast::Expr, names: &mut HashSet<String>) {
 }
 
 impl Checker<'_> {
+    pub(super) fn is_builtin_iter(&self, call: &ast::ExprCall) -> bool {
+        matches!(&*call.func, ast::Expr::Name(name) if name.id == "iter")
+            && !self.local_iter
+            && !self.names.contains_key("iter")
+            && !self.is_class_receiver(&call.func)
+            && self.local_function_binding(&call.func).is_none()
+            && self.resolve(&call.func).is_none()
+    }
+
     /// Recognizes only sealed constructor syntax at a direct consumer boundary.
     pub(super) fn pipeline_input(
         &mut self,
@@ -180,8 +309,53 @@ impl Checker<'_> {
         let ast::Expr::Call(call) = expression else {
             return Ok(None);
         };
+        if self.is_builtin_iter(call) && call.arguments.args.len() != 1 {
+            return Ok(Some(Iteration::Prepared(self.sentinel_input(call)?)));
+        }
+        if matches!(
+            self.resolve(&call.func),
+            Some(Binding::Intrinsic(
+                Intrinsic::Repeat | Intrinsic::Count | Intrinsic::Islice | Intrinsic::Cycle
+            ))
+        ) {
+            let cursor = self.call(call)?;
+            let element = self.types.cursor_element(cursor.ty).unwrap();
+            return Ok(Some(Iteration::Prepared(
+                self.prepare_cursor(cursor, element),
+            )));
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain)) {
             return Ok(Some(Iteration::Prepared(self.chain_input(call, element)?)));
+        }
+        if let Some((signature, element)) = self.generator_signature(call) {
+            let frame = self.source_call(call, &signature, None, 0)?;
+            let handle = self.hidden(Type::GeneratorContext);
+            let value = self.hidden(element);
+            let ready = self.hidden(Type::Bool);
+            let op = |kind, ty| contexts::op(kind, ty, vec![self.local(handle)]);
+            let next = vec![
+                Statement::Clear(value),
+                Statement::Assign(ready, op(ir::ProcessOperation::GeneratorNext, Type::Bool)),
+                Statement::If(
+                    self.local(ready),
+                    vec![Statement::Assign(
+                        value,
+                        op(ir::ProcessOperation::GeneratorTake, element),
+                    )],
+                    Vec::new(),
+                ),
+            ];
+            return Ok(Some(Iteration::Prepared(Prepared {
+                evaluate: vec![Statement::Assign(handle, frame)],
+                acquire: Vec::new(),
+                next,
+                value,
+                ready,
+                elementless: false,
+                eager_list: None,
+                writes: HashSet::new(),
+                clear: vec![handle, value, ready],
+            })));
         }
         if self.resolve(&call.func).is_some() {
             return Ok(None);
@@ -192,11 +366,8 @@ impl Checker<'_> {
         {
             let raw = self.expr(&attribute.value)?;
             if let Type::Class(class) = raw.ty {
-                return Ok(Some(Iteration::Container {
-                    iterable: self.class_method_call(call, attribute, class, Some(raw))?,
-                    items: false,
-                    start: None,
-                }));
+                let iterable = self.iteration_method_call(call, attribute, class, raw)?;
+                return self.iteration_value(iterable, false, call).map(Some);
             }
             let source = if matches!(raw.ty, Type::Document(_)) {
                 self.document_map(raw)
@@ -231,25 +402,23 @@ impl Checker<'_> {
             return Ok(Some(Iteration::Prepared(input)));
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
-            && matches!(attribute.attr.as_str(), "iterdir" | "glob")
+            && matches!(
+                attribute.attr.as_str(),
+                "iterdir" | "glob" | "rglob" | "walk"
+            )
             && self.class_reference(&attribute.value).is_none()
         {
             let receiver = self.expr(&attribute.value)?;
             if receiver.ty == Type::Path {
-                let iterator =
-                    self.path_iterator(receiver, call, attribute.attr.as_str() == "glob")?;
+                let iterator = self.path_iterator(receiver, call, attribute.attr.as_str())?;
+                let item = self.types.cursor_element(iterator.ty).unwrap();
                 return Ok(Some(Iteration::Prepared(
-                    self.prepare_path_iterator(iterator),
+                    self.prepare_cursor(iterator, item),
                 )));
             }
             if let Type::Class(class) = receiver.ty {
-                // A first-party method with the same spelling returns an ordinary
-                // value. Preserve its length hint and list.extend's alias snapshot.
-                return Ok(Some(Iteration::Container {
-                    iterable: self.class_method_call(call, attribute, class, Some(receiver))?,
-                    items: false,
-                    start: None,
-                }));
+                let iterable = self.iteration_method_call(call, attribute, class, receiver)?;
+                return self.iteration_value(iterable, false, call).map(Some);
             }
             return Err(error(
                 self.source,
@@ -270,8 +439,9 @@ impl Checker<'_> {
                         "reversed requires one positional sequence",
                     ));
                 }
-                let input = self.expansion_input(&call.arguments.args[0], element)?;
-                let mut input = self.prepare_iteration(input, call, true)?;
+                let source = &call.arguments.args[0];
+                let input = self.expansion_input(source, element)?;
+                let mut input = self.prepare_iteration(input, source, true)?;
                 input.evaluate.append(&mut input.acquire);
                 input
             }
@@ -281,7 +451,11 @@ impl Checker<'_> {
                         self.callback_input(call, element, false)?,
                     )));
                 };
-                if !matches!(converter.id.as_str(), "int" | "str") {
+                if !matches!(converter.id.as_str(), "int" | "str" | "ord")
+                    || (converter.id == "ord"
+                        && (self.names.contains_key("ord")
+                            || self.resolve(&call.arguments.args[0]).is_some()))
+                {
                     return Ok(Some(Iteration::Prepared(
                         self.callback_input(call, element, false)?,
                     )));
@@ -290,7 +464,9 @@ impl Checker<'_> {
                 let source = self.expansion_input(source, None)?;
                 let mut input = self.prepare_iteration(source, call, false)?;
                 let item = self.local(input.value);
-                let converted = if converter.id == "int" {
+                let converted = if converter.id == "ord" {
+                    self.ordinal(item, call)?
+                } else if converter.id == "int" {
                     self.consumer_value(item, true, call)?
                 } else {
                     match item.ty {
@@ -298,7 +474,9 @@ impl Checker<'_> {
                             paths::operation(ir::PathOperation::Text, Type::Str, vec![item])
                         }
                         Type::Str => item,
-                        Type::Class(_) | Type::CompletedProcess => self.record_text(item, call)?,
+                        Type::Class(_) | Type::CompletedProcess(..) => {
+                            self.record_text(item, call)?
+                        }
                         Type::Int | Type::Bool | Type::Float | Type::None | Type::Bytes => Expr {
                             ty: Type::Str,
                             kind: ExprKind::Builtin(Builtin::Str, vec![item]),
@@ -408,6 +586,65 @@ impl Checker<'_> {
         Ok(Some(Iteration::Prepared(input)))
     }
 
+    /// A sentinel iterator owns its stop value and latches exhaustion at first match.
+    fn sentinel_input(&mut self, call: &ast::ExprCall) -> Result<Prepared, String> {
+        self.reject_builtin_keywords(call)?;
+        let [ast::Expr::Lambda(lambda), sentinel] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "iter requires a nullary lambda and a sentinel",
+            ));
+        };
+        let sentinel = self.expr(sentinel)?;
+        let item = self.pull_lambda(lambda)?;
+        if !matches!(sentinel.ty, Type::Str | Type::Bytes) || item.ty != sentinel.ty {
+            return Err(error(
+                self.source,
+                call,
+                "iter requires a producer and sentinel of the same exact str or bytes type",
+            ));
+        }
+        let stop = self.hidden(sentinel.ty);
+        let value = self.hidden(item.ty);
+        let ready = self.hidden(Type::Bool);
+        let exhaust = vec![
+            Statement::Assign(ready, boolean(false)),
+            Statement::Clear(stop),
+            Statement::Clear(value),
+        ];
+        // Catch only exhaustion raised by the producer. Construction, the caller's
+        // loop body, and other producer exceptions keep their ordinary handlers.
+        let pull = Statement::Try {
+            body: vec![Statement::Assign(value, item)],
+            handlers: vec![ir::ExceptHandler {
+                kinds: vec![exception_kind("StopIteration").unwrap()],
+                name: None,
+                body: exhaust.clone(),
+            }],
+            orelse: vec![Statement::If(
+                compare(Compare::Equal, self.local(stop), self.local(value)),
+                exhaust,
+                Vec::new(),
+            )],
+            finalbody: Vec::new(),
+        };
+        Ok(Prepared {
+            evaluate: vec![
+                Statement::Assign(stop, sentinel),
+                Statement::Assign(ready, boolean(true)),
+            ],
+            acquire: Vec::new(),
+            next: vec![Statement::If(self.local(ready), vec![pull], Vec::new())],
+            value,
+            ready,
+            elementless: false,
+            eager_list: None,
+            writes: HashSet::new(),
+            clear: vec![stop, value, ready],
+        })
+    }
+
     /// Evaluate chain's arguments at construction, but acquire each iterator
     /// only when its predecessor is exhausted and the consumer wants another item.
     fn chain_input(
@@ -487,6 +724,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: element.is_none(),
+            eager_list: None,
             writes,
             clear,
         })
@@ -531,28 +769,63 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes: HashSet::new(),
             clear: vec![iterator, value, ready],
         })
     }
 
-    /// Method evaluation creates the iterator at Python's observable point.
-    /// Runtime iterdir snapshots eagerly; glob waits for the first pull. Private
-    /// nullable results own every yielded path until the consumer acquires it.
-    fn prepare_path_iterator(&mut self, expression: Expr) -> Prepared {
-        let iterator = self.hidden(Type::Iterator);
-        let optional = self.hidden(self.types.optional(Type::Path));
-        let value = self.hidden(Type::Path);
+    pub(super) fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {
+        let iterator = self.hidden(cursor.ty);
+        let value = self.hidden(element);
+        let ready = self.hidden(Type::Bool);
+        Prepared {
+            evaluate: vec![Statement::Assign(iterator, cursor)],
+            acquire: Vec::new(),
+            next: vec![
+                Statement::Clear(value),
+                Statement::IterNext {
+                    iterator,
+                    key: value,
+                    value: None,
+                    ready,
+                },
+            ],
+            value,
+            ready,
+            elementless: false,
+            eager_list: None,
+            writes: HashSet::new(),
+            clear: vec![iterator, value, ready],
+        }
+    }
+
+    pub(super) fn prepare_csv_reader(&mut self, reader: Expr) -> Prepared {
+        self.prepare_pull_iterator(
+            reader,
+            self.types.list(Type::Str),
+            Builtin::CsvNext { required: false },
+        )
+    }
+
+    fn prepare_pull_iterator(
+        &mut self,
+        expression: Expr,
+        element: Type,
+        operation: Builtin,
+    ) -> Prepared {
+        let iterator = self.hidden(expression.ty);
+        let optional = self.hidden(self.types.optional(element));
+        let value = self.hidden(element);
         let ready = self.hidden(Type::Bool);
         let done = self.hidden(Type::Bool);
         let pull = vec![
             Statement::Assign(
                 optional,
-                paths::operation(
-                    ir::PathOperation::Next,
-                    self.locals[optional],
-                    vec![self.local(iterator)],
-                ),
+                Expr {
+                    ty: self.locals[optional],
+                    kind: ExprKind::Builtin(operation, vec![self.local(iterator)]),
+                },
             ),
             Statement::Assign(
                 ready,
@@ -566,7 +839,7 @@ impl Checker<'_> {
                 vec![Statement::Assign(
                     value,
                     Expr {
-                        ty: Type::Path,
+                        ty: element,
                         kind: ExprKind::Unwrap(Box::new(self.local(optional))),
                     },
                 )],
@@ -591,9 +864,55 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes: HashSet::new(),
             clear: vec![iterator, optional, value, ready, done],
         }
+    }
+
+    /// Consume one prepared iterator into a fresh set and release the partial
+    /// result if evaluating the source or pulling an element raises.
+    pub(super) fn collect_set(
+        &mut self,
+        source: Prepared,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let element = self.locals[source.value];
+        if !self.types.hashable_key(element) {
+            return Err(error(
+                self.source,
+                node,
+                "set() requires hashable iterator elements",
+            ));
+        }
+        let ty = self.types.set(element);
+        let result = self.hidden(ty);
+        let empty = Expr {
+            ty,
+            kind: ExprKind::Set {
+                element,
+                values: Vec::new(),
+            },
+        };
+        let body = self.expand_items_after(
+            Iteration::Prepared(source),
+            node,
+            vec![Statement::Assign(result, empty)],
+            |checker, value| {
+                Ok(vec![Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::SetAdd, vec![checker.local(result), value]),
+                })])
+            },
+        )?;
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(self.local(result)),
+                clear: vec![result],
+            },
+        })
     }
 
     fn may_own_file(&self, ty: Type, opaque_callables: bool) -> bool {
@@ -634,6 +953,23 @@ impl Checker<'_> {
     ) -> Result<Prepared, String> {
         match input {
             Iteration::Prepared(input) if !reverse => Ok(input),
+            Iteration::Prepared(mut input) if let Some(list) = input.eager_list_at(node) => {
+                let mut reverse =
+                    self.prepare_container(self.local(list.value), false, node, true)?;
+                input.evaluate.push(Statement::If(
+                    not(self.local(list.selected)),
+                    vec![Statement::Expr(calls::type_error(
+                        Type::None,
+                        Vec::new(),
+                        "'generator' object is not reversible".into(),
+                    ))],
+                    Vec::new(),
+                ));
+                input.evaluate.append(&mut reverse.evaluate);
+                reverse.evaluate = input.evaluate;
+                reverse.clear.extend(input.clear);
+                Ok(reverse)
+            }
             Iteration::Prepared(_) => Err(error(
                 self.source,
                 node,
@@ -782,6 +1118,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes: HashSet::new(),
             clear: arguments,
         }
@@ -817,6 +1154,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes: HashSet::new(),
             clear: vec![source, value, ready],
         }
@@ -831,7 +1169,15 @@ impl Checker<'_> {
         node: &impl Ranged,
         reverse: bool,
     ) -> Result<Prepared, String> {
-        if !reverse && matches!(iterable.ty, Type::TextIO | Type::BinaryIO) {
+        let iterable = if items {
+            iterable
+        } else {
+            self.json_iteration(iterable)
+        };
+        if !reverse && iterable.ty == Type::CsvReader {
+            return Ok(self.prepare_csv_reader(iterable));
+        }
+        if !reverse && matches!(iterable.ty, Type::TextIO | Type::StringIO | Type::BinaryIO) {
             return Ok(self.prepare_file_lines(iterable));
         }
         let mapping = self.types.mapping(iterable.ty);
@@ -854,6 +1200,7 @@ impl Checker<'_> {
                 value,
                 ready,
                 elementless: true,
+                eager_list: None,
                 writes: HashSet::new(),
                 clear: vec![source, value, ready],
             });
@@ -862,8 +1209,9 @@ impl Checker<'_> {
             let first = fields.first().copied().unwrap_or(Type::None);
             fields.iter().all(|ty| *ty == first).then_some(first)
         });
-        let element = self.types.element(iterable.ty)
+        let element = self.types.element(iterable.ty).or_else(|| self.types.var_tuple_element(iterable.ty))
             .or(set_element)
+            .or_else(|| self.types.deque_element(iterable.ty))
             .or((iterable.ty == Type::Str).then_some(Type::Str))
             .or((iterable.ty == Type::Bytes).then_some(Type::Int))
             .or(tuple_element)
@@ -876,6 +1224,11 @@ impl Checker<'_> {
                 "reversed requires a list, tuple, string, bytes, or range",
             ));
         }
+        if matches!(element, Type::Callable(_))
+            && let ExprKind::Tuple(values) = iterable.kind
+        {
+            return Ok(self.prepare_callable_tuple(values, element, reverse));
+        }
         let ty = iterable.ty;
         let source = self.hidden(ty);
         let value = self.hidden(element);
@@ -885,8 +1238,10 @@ impl Checker<'_> {
         let mut acquire = vec![Statement::Assign(done, boolean(false))];
         let mut clear = vec![source, value, ready, done];
         let mut pull = Vec::new();
-        let indexed =
-            self.types.element(ty).is_some() || fields.is_some() || (reverse && ty == Type::Bytes);
+        let indexed = self.types.element(ty).is_some()
+            || self.types.var_tuple_element(ty).is_some()
+            || fields.is_some()
+            || (reverse && ty == Type::Bytes);
         if indexed {
             let cursor = self.hidden(Type::Int);
             clear.push(cursor);
@@ -957,8 +1312,12 @@ impl Checker<'_> {
                 Expr {
                     ty: element,
                     kind: ExprKind::Builtin(
-                        if ty == Type::Bytes {
+                        if matches!(ty, Type::VarTuple(_)) {
+                            Builtin::TupleIndex
+                        } else if ty == Type::Bytes {
                             Builtin::BytesGet
+                        } else if !reverse && self.consumes_list(ty, node.range()) {
+                            Builtin::SequenceTakeInBounds
                         } else if matches!(ty, Type::List(_)) {
                             Builtin::SequenceGetInBounds
                         } else {
@@ -1002,6 +1361,8 @@ impl Checker<'_> {
                 }
             } else if ty == Type::Bytes {
                 Builtin::BytesIter
+            } else if self.types.deque_element(ty).is_some() {
+                Builtin::DequeIter { reverse }
             } else if set_element.is_some() {
                 Builtin::SetIter
             } else {
@@ -1069,9 +1430,89 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes: HashSet::new(),
             clear,
         })
+    }
+
+    /// The iterator cannot expose its tuple literal. Keep each callable (including its
+    /// bound receiver) in its own local until exhaustion, with ordinary loop exits.
+    fn prepare_callable_tuple(
+        &mut self,
+        items: Vec<Expr>,
+        element: Type,
+        reverse: bool,
+    ) -> Prepared {
+        let mut slots = Vec::new();
+        let evaluate = items
+            .into_iter()
+            .map(|item| {
+                let slot = self.hidden(element);
+                slots.push(slot);
+                Statement::Assign(slot, item)
+            })
+            .collect();
+        let cursor = self.hidden(Type::Int);
+        let value = self.hidden(element);
+        let ready = self.hidden(Type::Bool);
+        let release = slots.iter().rev().copied().map(Statement::Clear).collect();
+        let mut clear = slots.clone();
+        clear.extend([cursor, value, ready]);
+        if reverse {
+            slots.reverse();
+        }
+        let (last, prefix) = slots
+            .split_last()
+            .expect("a homogeneous callable tuple is nonempty");
+        let item = prefix
+            .iter()
+            .enumerate()
+            .rev()
+            .fold(self.local(*last), |next, (i, &slot)| Expr {
+                ty: element,
+                kind: ExprKind::Conditional(
+                    Box::new(compare(
+                        Compare::Equal,
+                        self.local(cursor),
+                        integer(i as i64),
+                    )),
+                    Box::new(self.local(slot)),
+                    Box::new(next),
+                ),
+            });
+        Prepared {
+            evaluate,
+            acquire: vec![Statement::Assign(cursor, integer(0))],
+            next: vec![
+                Statement::Clear(value),
+                Statement::Assign(
+                    ready,
+                    compare(
+                        Compare::Less,
+                        self.local(cursor),
+                        integer(slots.len() as i64),
+                    ),
+                ),
+                Statement::If(
+                    self.local(ready),
+                    vec![
+                        Statement::Assign(value, item),
+                        Statement::Assign(
+                            cursor,
+                            binary(Binary::Add, self.local(cursor), integer(1)),
+                        ),
+                    ],
+                    release,
+                ),
+            ],
+            value,
+            ready,
+            elementless: false,
+            eager_list: None,
+            writes: HashSet::new(),
+            clear,
+        }
     }
 
     /// Obtains one element from each source in order. Strict mismatch checking
@@ -1242,6 +1683,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes,
             clear,
         })
@@ -1481,7 +1923,7 @@ impl Checker<'_> {
             let mut step = inputs[index].next.clone();
             step.push(Statement::If(
                 self.local(inputs[index].ready),
-                available,
+                self.generator_body(available),
                 exhausted,
             ));
             cases = vec![Statement::If(
@@ -1512,9 +1954,32 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            eager_list: None,
             writes,
             clear,
         })
+    }
+
+    /// Convert StopIteration escaping suspended generator code, retaining its cause.
+    pub(super) fn generator_body(&self, body: Vec<Statement>) -> Vec<Statement> {
+        let error = Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("RuntimeError").unwrap(),
+                message: Some(Box::new(unpacking::string(
+                    "generator raised StopIteration",
+                ))),
+            },
+        };
+        let cause = Expr {
+            ty: self.types.optional(Type::Exception),
+            kind: ExprKind::Builtin(Builtin::ActiveException, Vec::new()),
+        };
+        let converted = Statement::Raise(Some(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Builtin(Builtin::ExceptionWithCause, vec![error, cause]),
+        }));
+        catch_stop_iteration(self.types, body, vec![converted])
     }
 
     /// Captures the callable before its source, then invokes it only after each
@@ -1549,11 +2014,7 @@ impl Checker<'_> {
         let checked = if definition.is_some() || matches!(callback, ast::Expr::Lambda(_)) {
             None
         } else if let Some(binding) = self.local_function_binding(callback) {
-            Some(binding.target(self.source, callback)?.callback(
-                self.types,
-                self.source,
-                callback,
-            )?)
+            Some(self.local_callback(binding, callback)?)
         } else {
             Some(self.expr(callback)?)
         };
@@ -1605,35 +2066,28 @@ impl Checker<'_> {
         input.evaluate.append(&mut input.acquire);
         if filter {
             let ready = self.hidden(Type::Bool);
-            let done = self.hidden(Type::Bool);
             let mut step = std::mem::take(&mut input.next);
-            step.push(Statement::If(
-                self.local(input.ready),
+            let predicate = catch_stop_iteration(
+                self.types,
                 vec![Statement::If(
-                    self.truth_value(operation),
+                    self.test_truth(operation, call)?,
                     vec![Statement::Assign(ready, boolean(true))],
                     vec![Statement::Clear(input.value)],
                 )],
-                vec![Statement::Assign(done, boolean(true))],
+                vec![Statement::Clear(input.value), Statement::Break],
+            );
+            step.push(Statement::If(
+                self.local(input.ready),
+                predicate,
+                vec![Statement::Break],
             ));
-            input.evaluate.push(Statement::Assign(done, boolean(false)));
             input.next = vec![
                 Statement::Clear(input.value),
                 Statement::Assign(ready, boolean(false)),
-                Statement::While(
-                    Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Boolean(
-                            true,
-                            vec![not(self.local(ready)), not(self.local(done))],
-                        ),
-                    },
-                    step,
-                    Vec::new(),
-                ),
+                Statement::While(not(self.local(ready)), step, Vec::new()),
             ];
             input.ready = ready;
-            input.clear.extend([ready, done]);
+            input.clear.push(ready);
             if truth_filter && let Some(payload) = self.types.payload(input_type) {
                 let value = self.hidden(payload);
                 input.next.push(Statement::If(
@@ -1656,18 +2110,26 @@ impl Checker<'_> {
             }
         } else {
             let value = self.hidden(operation.ty);
-            input.next.push(Statement::If(
-                self.local(input.ready),
-                vec![
-                    Statement::Assign(value, operation),
-                    Statement::Clear(input.value),
-                ],
-                Vec::new(),
-            ));
+            // The source can use its ready slot to latch exhaustion. A failed
+            // callback ends this map pull without changing the source cursor.
+            let ready = self.hidden(Type::Bool);
+            input
+                .next
+                .push(Statement::Assign(ready, self.local(input.ready)));
+            let mut mapped = catch_stop_iteration(
+                self.types,
+                vec![Statement::Assign(value, operation)],
+                vec![Statement::Assign(ready, boolean(false))],
+            );
+            mapped.push(Statement::Clear(input.value));
+            input
+                .next
+                .push(Statement::If(self.local(ready), mapped, Vec::new()));
             input.next.insert(0, Statement::Clear(value));
             input.value = value;
+            input.ready = ready;
             input.elementless = false;
-            input.clear.push(value);
+            input.clear.extend([value, ready]);
         }
         Ok(input)
     }
@@ -1699,11 +2161,7 @@ impl Checker<'_> {
             return self.callable_value(signature, None, None, expression);
         }
         if let Some(binding) = self.local_function_binding(expression) {
-            return binding.target(self.source, expression)?.callback(
-                self.types,
-                self.source,
-                expression,
-            );
+            return self.local_callback(binding, expression);
         }
         self.expr(expression)
     }
@@ -1745,11 +2203,15 @@ impl Checker<'_> {
                 Some(slot),
             ));
         }
-        let (kind, captured) = if let ExprKind::Callable {
-            function,
-            receiver: None,
-        } = callback.kind
-        {
+        let direct = match &callback.kind {
+            ExprKind::Callable {
+                function,
+                receiver: None,
+            }
+            | ExprKind::Builtin(Builtin::StaticFunction(function), _) => Some(*function),
+            _ => None,
+        };
+        let (kind, captured) = if let Some(function) = direct {
             self.calls.insert(function);
             (ExprKind::Call(function, args), None)
         } else {
@@ -1955,10 +2417,13 @@ impl Checker<'_> {
             clear.push(captured);
             body.push(Statement::Assign(captured, iterable.clone()));
             for (index, ty) in fields.into_iter().enumerate() {
-                let value = self.truth_value(Expr {
-                    ty,
-                    kind: ExprKind::Field(Box::new(self.local(captured)), index),
-                });
+                let value = self.test_truth(
+                    Expr {
+                        ty,
+                        kind: ExprKind::Field(Box::new(self.local(captured)), index),
+                    },
+                    call,
+                )?;
                 body.push(Statement::If(
                     if all {
                         self.local(result)
@@ -1971,7 +2436,7 @@ impl Checker<'_> {
             }
         } else {
             body.extend(self.expand_items(input, call, |checker, value| {
-                let value = checker.truth_value(value);
+                let value = checker.test_truth(value, call)?;
                 let deciding = if all { not(value) } else { value };
                 Ok(vec![Statement::If(
                     deciding,

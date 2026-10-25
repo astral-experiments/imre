@@ -1,0 +1,130 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "opt_level": 0,
+  "denominator": 97,
+  "tests": {
+    "test.test_sys.ActiveExceptionTests.test_sys_exception_no_exception": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "e9ae316ea5c7f6dcc265f3be947387d10898624e8534aaa215d750a46d69e351"
+    },
+    "test.test_sys.SysModuleTest.test_43581": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "12671c09b2ae0da29212cad51371d22c9fe2bbfb8e25d6505e8f4adb5d8964a2"
+    },
+    "test.test_sys.SysModuleTest.test_getdefaultencoding": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "b41ff7224ca4fe5cf266aa3439044a27a07e0c7a03680061baf2c50a7557e80b"
+    },
+    "test.test_sys.SysModuleTest.test_getfilesystemencoding": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "43b2b8ce0a812ea74e8efaf4b3ff2d51a127ae1970df98129709ba749f41ba7b",
+      "helper_sha256": "0236da157e45125162e664212c10446c30716b272ff48cee63a6a790ec2391a3"
+    },
+    "test.test_sys.SysModuleTest.test_ioencoding_nonascii": {
+      "status": "upstream-skip",
+      "reason": "requires FS encoding to match locale"
+    },
+    "test.test_sys.SysModuleTest.test_orig_argv": {
+      "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython; original child: Imre",
+      "assertions": "CPython",
+      "fixture_execution": "CPython module/class/instance hooks",
+      "calls": [
+        "sys.argv",
+        "sys.orig_argv"
+      ]
+    },
+    "test.test_sys.SysModuleTest.test_thread_info": {
+      "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "original CPython module/class/instance hooks",
+      "calls": [
+        "thread_info",
+        "length",
+        "name",
+        "lock",
+        "platform",
+        "name"
+      ]
+    },
+    "test.test_sys.TestSysJIT.test_jit_is_available": {
+      "status": "pass",
+      "execution": "mixed",
+      "body": "CPython; both child sources: Imre",
+      "assertions": "Imre in each child; CPython checks child status",
+      "fixture_execution": "CPython unittest hooks and original assert_python_ok",
+      "calls": [
+        "sys._jit.is_available"
+      ],
+      "children": [
+        {
+          "sha256": "b4654be9dbe8607862a7d048c249a3423760d11ba065f50bd5070c6d9455e0dd",
+          "PYTHON_JIT": "0",
+          "fixture_options": [
+            "-X",
+            "faulthandler"
+          ],
+          "launch": "compile the original -c source directly"
+        },
+        {
+          "sha256": "b4654be9dbe8607862a7d048c249a3423760d11ba065f50bd5070c6d9455e0dd",
+          "PYTHON_JIT": "1",
+          "fixture_options": [
+            "-X",
+            "faulthandler"
+          ],
+          "launch": "compile the original -c source directly"
+        }
+      ]
+    },
+    "test.test_sys.TestSysJIT.test_jit_is_enabled": {
+      "status": "pass",
+      "execution": "mixed",
+      "body": "CPython; both child sources: Imre",
+      "assertions": "Imre in each child; CPython checks child status",
+      "fixture_execution": "CPython unittest hooks and original assert_python_ok",
+      "calls": [
+        "sys._jit.is_available"
+      ],
+      "children": [
+        {
+          "sha256": "45282e21eb881778d38af07d9dbcfe98dd065230a8af7524f500a8c6a9ecaeb2",
+          "PYTHON_JIT": "0",
+          "fixture_options": [
+            "-X",
+            "faulthandler"
+          ],
+          "launch": "compile the original -c source directly"
+        },
+        {
+          "sha256": "45282e21eb881778d38af07d9dbcfe98dd065230a8af7524f500a8c6a9ecaeb2",
+          "PYTHON_JIT": "1",
+          "fixture_options": [
+            "-X",
+            "faulthandler"
+          ],
+          "launch": "compile the original -c source directly"
+        }
+      ]
+    }
+  }
+}

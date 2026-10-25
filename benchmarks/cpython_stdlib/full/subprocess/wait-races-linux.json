@@ -1,0 +1,354 @@
+{
+  "schema": "imre.subprocess.wait-races/v1",
+  "imre_revision": "1268f4f81daa8be0a5550c2542c1432c80ccf125",
+  "tested_tree": "ea25317cdff8490d3f9b9047e592e54fdaec4b5e",
+  "hosted": {
+    "run": 40179519955,
+    "job": 121127368875,
+    "artifact": 12593947003,
+    "archive_sha256": "944bbd829313e8d95b82f2affd5d77783436545fa6caaedb681c86db605f6684",
+    "product_merge": "eca8b9df47ba0be2515c94f069784f6512a2f94f"
+  },
+  "reports": [
+    {
+      "opt_level": 0,
+      "threadsafe": {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "opt_level": 0,
+        "actor_sha256": "b015fdfb99a09a8e742cb54af542dc4448661cdd2d4f50bef28a7af4c679fd06",
+        "llvm_ir_sha256": "49bd3511d8843f7ac3894b315e6d58823197b938a9384b81de5c2907962906bb",
+        "fixture_threads_sha256": "8c36ec94d1234d783fd360b1a2e7f9cf96d91b19a0351eae9282dc8a02635c25",
+        "toolchain": {
+          "imre": "02978d09210450bedcd83e907e762a5adf8aeaf38c4082f421c2ce20ee45bb94",
+          "runtime": "f65d194a1ded52e61fea1191a44f276c6f528e6c63cdd954694bc38f21bea4b1",
+          "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+        },
+        "rows": {
+          "test.test_subprocess.ProcessTestCase.test_threadsafe_wait": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"threading\""
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "mixed"
+              },
+              "observed": {
+                "owner_timed_wait_overlaps_native_timer": true,
+                "timer_operations": [
+                  [
+                    "poll",
+                    null
+                  ],
+                  [
+                    "kill",
+                    0
+                  ],
+                  [
+                    "wait",
+                    -9
+                  ],
+                  [
+                    "status",
+                    -9
+                  ],
+                  [
+                    "wait",
+                    -9
+                  ],
+                  [
+                    "status",
+                    -9
+                  ]
+                ],
+                "owner_timed_wait": -9,
+                "successful_reaps": 1,
+                "signal": "SIGKILL",
+                "child": "CPython 3.14.5 original sleep(12) data program"
+              }
+            }
+          ],
+          "test.test_subprocess.ProcessTestCaseNoPoll.test_threadsafe_wait": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"threading\""
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "mixed"
+              },
+              "observed": {
+                "owner_timed_wait_overlaps_native_timer": true,
+                "timer_operations": [
+                  [
+                    "poll",
+                    null
+                  ],
+                  [
+                    "kill",
+                    0
+                  ],
+                  [
+                    "wait",
+                    -9
+                  ],
+                  [
+                    "status",
+                    -9
+                  ],
+                  [
+                    "wait",
+                    -9
+                  ],
+                  [
+                    "status",
+                    -9
+                  ]
+                ],
+                "owner_timed_wait": -9,
+                "successful_reaps": 1,
+                "signal": "SIGKILL",
+                "child": "CPython 3.14.5 original sleep(12) data program"
+              }
+            }
+          ]
+        }
+      },
+      "external": {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "opt_level": 0,
+        "actor_sha256": "6d6b101242f165d894751c1962ab4dd975f17097cc9fd12e7ef4d7f355143310",
+        "fixture_waitpid_sha256": "eebcf1dac0243d76f1f22e176f3a56d68a7d1cc5de34523114fb60217464cd2b",
+        "positive_live_child": {
+          "kernel_kill": "SIGTERM",
+          "wait_status": -15
+        },
+        "toolchain": {
+          "imre": "02978d09210450bedcd83e907e762a5adf8aeaf38c4082f421c2ce20ee45bb94",
+          "runtime": "f65d194a1ded52e61fea1191a44f276c6f528e6c63cdd954694bc38f21bea4b1",
+          "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+        },
+        "rows": {
+          "test.test_subprocess.POSIXProcessTestCase.test_send_signal_race": [
+            {
+              "outcome": "pass",
+              "failure": null,
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "mixed"
+              },
+              "external_wait_in_native_parent": true,
+              "original_support_wait_process": true,
+              "public_wait_observed_ECHILD": true,
+              "native_signals_sent": 0,
+              "native_child_exit": 0
+            }
+          ],
+          "test.test_subprocess.POSIXProcessTestCase.test_stopped": [
+            {
+              "outcome": "failure",
+              "failure": "0 != -3",
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "POSIXProcessTestCase.test_stopped needs its upstream method decorator"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "mixed"
+              },
+              "external_wait_in_native_parent": true,
+              "original_support_wait_process": true,
+              "public_wait_observed_ECHILD": true,
+              "native_signals_sent": 0,
+              "native_child_exit": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "opt_level": 3,
+      "threadsafe": {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "opt_level": 3,
+        "actor_sha256": "cc98f7bfd255402175c880c7e66c7342dd026413bd44dac263b96882002bcec3",
+        "llvm_ir_sha256": "49bd3511d8843f7ac3894b315e6d58823197b938a9384b81de5c2907962906bb",
+        "fixture_threads_sha256": "8c36ec94d1234d783fd360b1a2e7f9cf96d91b19a0351eae9282dc8a02635c25",
+        "toolchain": {
+          "imre": "02978d09210450bedcd83e907e762a5adf8aeaf38c4082f421c2ce20ee45bb94",
+          "runtime": "f65d194a1ded52e61fea1191a44f276c6f528e6c63cdd954694bc38f21bea4b1",
+          "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+        },
+        "rows": {
+          "test.test_subprocess.ProcessTestCase.test_threadsafe_wait": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"threading\""
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "mixed"
+              },
+              "observed": {
+                "owner_timed_wait_overlaps_native_timer": true,
+                "timer_operations": [
+                  [
+                    "poll",
+                    null
+                  ],
+                  [
+                    "kill",
+                    0
+                  ],
+                  [
+                    "wait",
+                    -9
+                  ],
+                  [
+                    "status",
+                    -9
+                  ],
+                  [
+                    "wait",
+                    -9
+                  ],
+                  [
+                    "status",
+                    -9
+                  ]
+                ],
+                "owner_timed_wait": -9,
+                "successful_reaps": 1,
+                "signal": "SIGKILL",
+                "child": "CPython 3.14.5 original sleep(12) data program"
+              }
+            }
+          ],
+          "test.test_subprocess.ProcessTestCaseNoPoll.test_threadsafe_wait": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"threading\""
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "mixed"
+              },
+              "observed": {
+                "owner_timed_wait_overlaps_native_timer": true,
+                "timer_operations": [
+                  [
+                    "poll",
+                    null
+                  ],
+                  [
+                    "kill",
+                    0
+                  ],
+                  [
+                    "wait",
+                    -9
+                  ],
+                  [
+                    "status",
+                    -9
+                  ],
+                  [
+                    "wait",
+                    -9
+                  ],
+                  [
+                    "status",
+                    -9
+                  ]
+                ],
+                "owner_timed_wait": -9,
+                "successful_reaps": 1,
+                "signal": "SIGKILL",
+                "child": "CPython 3.14.5 original sleep(12) data program"
+              }
+            }
+          ]
+        }
+      },
+      "external": {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "opt_level": 3,
+        "actor_sha256": "3c1d53cd516226343cf0f0321b76df9fe93fff455a3735dec99a06961c1fda9c",
+        "fixture_waitpid_sha256": "eebcf1dac0243d76f1f22e176f3a56d68a7d1cc5de34523114fb60217464cd2b",
+        "positive_live_child": {
+          "kernel_kill": "SIGTERM",
+          "wait_status": -15
+        },
+        "toolchain": {
+          "imre": "02978d09210450bedcd83e907e762a5adf8aeaf38c4082f421c2ce20ee45bb94",
+          "runtime": "f65d194a1ded52e61fea1191a44f276c6f528e6c63cdd954694bc38f21bea4b1",
+          "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+        },
+        "rows": {
+          "test.test_subprocess.POSIXProcessTestCase.test_send_signal_race": [
+            {
+              "outcome": "pass",
+              "failure": null,
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "mixed"
+              },
+              "external_wait_in_native_parent": true,
+              "original_support_wait_process": true,
+              "public_wait_observed_ECHILD": true,
+              "native_signals_sent": 0,
+              "native_child_exit": 0
+            }
+          ],
+          "test.test_subprocess.POSIXProcessTestCase.test_stopped": [
+            {
+              "outcome": "failure",
+              "failure": "0 != -3",
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "POSIXProcessTestCase.test_stopped needs its upstream method decorator"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "imre",
+                "fixture": "mixed"
+              },
+              "external_wait_in_native_parent": true,
+              "original_support_wait_process": true,
+              "public_wait_observed_ECHILD": true,
+              "native_signals_sent": 0,
+              "native_child_exit": 0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

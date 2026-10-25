@@ -1,7 +1,7 @@
 //! Closed process signatures preserve evaluation order and exact owned results.
 
 use super::*;
-use crate::ir::{PathOperation, ProcessOperation};
+use crate::ir::{PathOperation, ProcessCapture, ProcessOperation};
 use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 
 fn operation(operation: ProcessOperation, ty: Type, args: Vec<Expr>) -> Expr {
@@ -28,6 +28,14 @@ fn absent(ty: Type) -> Expr {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LaunchApi {
+    Popen,
+    Call(bool),
+    CheckOutput,
+    Run,
+}
+
 fn integer_deadline(value: &ast::Expr) -> bool {
     let value = match value {
         ast::Expr::UnaryOp(unary)
@@ -38,6 +46,15 @@ fn integer_deadline(value: &ast::Expr) -> bool {
         other => other,
     };
     matches!(value, ast::Expr::NumberLiteral(number) if matches!(number.value, ast::Number::Int(_)))
+}
+
+fn timeout_argument(call: &ast::ExprCall) -> Option<&ast::Expr> {
+    let keyword = call
+        .arguments
+        .keywords
+        .iter()
+        .find(|kw| kw.arg.as_ref().is_some_and(|name| name == "timeout"))?;
+    (!matches!(keyword.value, ast::Expr::NoneLiteral(_))).then_some(&keyword.value)
 }
 
 /// A caught timeout can outlive the function that raised it. Its seconds
@@ -52,16 +69,27 @@ fn timeout_field_type(graph: &SourceGraph) -> Option<Type> {
     impl<'ast> Visitor<'ast> for Deadlines<'_> {
         fn visit_expr(&mut self, expr: &'ast ast::Expr) {
             if let ast::Expr::Call(call) = expr
-                && self.graph.resolve(self.module, &call.func)
-                    == Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
-                && let Some(keyword) = call
-                    .arguments
-                    .keywords
-                    .iter()
-                    .find(|kw| kw.arg.as_ref().is_some_and(|name| name == "timeout"))
-                && !matches!(keyword.value, ast::Expr::NoneLiteral(_))
+                && let Some(deadline) = match self.graph.resolve(self.module, &call.func) {
+                    Some(Binding::Intrinsic(
+                        Intrinsic::SubprocessRun
+                        | Intrinsic::SubprocessCall
+                        | Intrinsic::SubprocessCheckCall
+                        | Intrinsic::CheckOutput,
+                    )) => timeout_argument(call),
+                    _ if matches!(&*call.func, ast::Expr::Attribute(a) if a.attr.as_str() == "wait") => {
+                        timeout_argument(call)
+                            .or_else(|| call.arguments.args.first())
+                            .filter(|d| !matches!(d, ast::Expr::NoneLiteral(_)))
+                    }
+                    _ if matches!(&*call.func, ast::Expr::Attribute(a) if a.attr.as_str() == "communicate") => {
+                        timeout_argument(call)
+                            .or_else(|| call.arguments.args.get(1))
+                            .filter(|d| !matches!(d, ast::Expr::NoneLiteral(_)))
+                    }
+                    _ => None,
+                }
             {
-                if integer_deadline(&keyword.value) {
+                if integer_deadline(deadline) {
                     self.int = true;
                 } else {
                     self.float = true;
@@ -87,10 +115,35 @@ fn timeout_field_type(graph: &SourceGraph) -> Option<Type> {
     }
 }
 
-/// A direct capture and CompletedProcess.check_returncode() produce text.
-/// User calls (including property getters) and explicit raises can propagate
-/// an error created elsewhere, so their handlers use the program-wide type.
-pub(super) fn captures_errors(source: &[ast::Stmt], body: &[Statement]) -> bool {
+/// The handler slot and any argument or capture layout shared by its producers.
+pub(super) struct CapturedFields {
+    pub(super) slot: usize,
+    pub(super) tree_issue: Option<Type>,
+    argv: Option<Type>,
+    capture: Option<ProcessCapture>,
+    timeout: bool,
+}
+
+/// A timeout can carry partial raw bytes, even for a checked text capture.
+fn error_stream(types: &Types, capture: ProcessCapture, stdout: bool, timeout: bool) -> Type {
+    let completed = capture.stream(stdout);
+    if timeout && completed != Type::None {
+        types
+            .union(&[completed, types.optional(Type::Bytes)])
+            .unwrap()
+    } else {
+        completed
+    }
+}
+
+/// Explicit raises, user calls, and task or context resumption can propagate an error from elsewhere.
+pub(super) fn process_error_view(
+    slot: usize,
+    source: &[ast::Stmt],
+    body: &[Statement],
+    types: &Types,
+    kinds: &[u32],
+) -> CapturedFields {
     struct Raises(bool);
     impl<'ast> Visitor<'ast> for Raises {
         fn visit_stmt(&mut self, statement: &'ast ast::Stmt) {
@@ -103,57 +156,331 @@ pub(super) fn captures_errors(source: &[ast::Stmt], body: &[Statement]) -> bool 
     }
     let mut raises = Raises(false);
     raises.visit_body(source);
-    let mut captured = !raises.0;
-    ir::walk_expressions(body, &mut |value| {
-        if matches!(
-            value.kind,
-            ExprKind::Call(..)
-                | ExprKind::Invoke { .. }
-                | ExprKind::Construct { .. }
-                | ExprKind::Builtin(Builtin::Process(ProcessOperation::RunToStderr), _)
-        ) {
-            captured = false;
-        }
-    });
-    captured
-}
-
-pub(super) struct CapturedFields {
-    slot: usize,
-    argv: Option<Type>,
-    inherited_stderr: bool,
-}
-
-/// The argv type is shared only if every locally protected launch agrees.
-/// Synchronous run captures both streams, while check_output inherits stderr.
-pub(super) fn captured_fields(slot: usize, body: &[Statement], types: &Types) -> CapturedFields {
+    let mut captures = HashSet::new();
     let mut argv = HashSet::new();
-    let mut inherited_stderr = false;
-    ir::walk_expressions(body, &mut |expr| {
-        if let ExprKind::Builtin(Builtin::Process(op), args) = &expr.kind {
-            match op {
-                ProcessOperation::CheckOutput => {
-                    argv.insert(args[0].ty);
-                    inherited_stderr = true;
-                }
-                ProcessOperation::Run
-                | ProcessOperation::RunTimeout
-                | ProcessOperation::CheckReturnCode => {
-                    argv.insert(types.list(Type::Str));
-                }
-                _ => {}
+    let mut precise = !raises.0;
+    let mut timed = false;
+    let mut tree_issue = None;
+    let mut other_shutil = false;
+    ir::walk_expressions(body, &mut |value| {
+        let (origin, command) = match &value.kind {
+            ExprKind::Builtin(Builtin::Process(ProcessOperation::CopyTree(issue)), _) => {
+                tree_issue = Some(*issue);
+                return;
             }
-        }
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::Copy(_) | ProcessOperation::Move(_)),
+                _,
+            ) => {
+                other_shutil = true;
+                return;
+            }
+            ExprKind::Call(..)
+            | ExprKind::Invoke { .. }
+            | ExprKind::Construct { .. }
+            | ExprKind::Builtin(
+                Builtin::Process(
+                    ProcessOperation::Await
+                    | ProcessOperation::RunLoop
+                    | ProcessOperation::RunUntilComplete
+                    | ProcessOperation::TaskResult
+                    | ProcessOperation::Gather { .. }
+                    | ProcessOperation::ContextEnter
+                    | ProcessOperation::ContextExit
+                    | ProcessOperation::ContextThrow,
+                ),
+                _,
+            ) => {
+                precise = false;
+                return;
+            }
+            ExprKind::Builtin(Builtin::Process(ProcessOperation::RunToStderr), _) => (
+                ProcessCapture {
+                    stdout: false,
+                    stderr: false,
+                    text: false,
+                },
+                types.list(Type::Str),
+            ),
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::CheckOutput { capture, .. }),
+                args,
+            ) => {
+                timed = true;
+                (*capture, args[0].ty)
+            }
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::Run {
+                    timed: deadline, ..
+                }),
+                _,
+            ) => {
+                timed |= *deadline;
+                let Type::CompletedProcess(capture, cmd) = value.ty else {
+                    unreachable!()
+                };
+                (capture, types.completed_command(cmd))
+            }
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::PopenCommunicate { .. }),
+                args,
+            ) => {
+                timed = true;
+                let Type::Popen(capture, _, cmd) = args[0].ty else {
+                    unreachable!()
+                };
+                (capture, types.command_type(cmd))
+            }
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::PopenWait | ProcessOperation::Call { .. }),
+                args,
+            ) => {
+                timed = true;
+                let command = match args[0].ty {
+                    Type::Popen(_, _, id) => types.command_type(id),
+                    ty => ty,
+                };
+                (
+                    ProcessCapture {
+                        stdout: false,
+                        stderr: false,
+                        text: false,
+                    },
+                    command,
+                )
+            }
+            ExprKind::Builtin(Builtin::Process(ProcessOperation::CheckReturnCode), args) => {
+                let Type::CompletedProcess(capture, cmd) = args[0].ty else {
+                    unreachable!()
+                };
+                (capture, types.completed_command(cmd))
+            }
+            _ => return,
+        };
+        captures.insert(origin);
+        argv.insert(command);
     });
-    let argv = match argv.len() {
-        0 => Some(types.list(Type::Str)),
-        1 => argv.into_iter().next(),
-        _ => None,
-    };
     CapturedFields {
         slot,
-        argv,
-        inherited_stderr,
+        tree_issue: if precise && !other_shutil && kinds == [64] {
+            tree_issue
+        } else {
+            None
+        },
+        argv: (precise && argv.len() == 1).then(|| *argv.iter().next().unwrap()),
+        capture: (precise && captures.len() == 1).then(|| *captures.iter().next().unwrap()),
+        // These exception categories include TimeoutExpired.
+        timeout: (!precise || timed) && kinds.iter().any(|kind| matches!(kind, 0 | 1 | 25 | 27)),
+    }
+}
+
+/// Modes 6 and 7 borrow an integer descriptor or file object. The final choice
+/// between them is made after checking the argument's type.
+fn stream_mode(graph: &SourceGraph, module: ModuleId, value: &ast::Expr) -> u32 {
+    if matches!(value, ast::Expr::NoneLiteral(_)) {
+        return 0;
+    }
+    if let ast::Expr::UnaryOp(unary) = value
+        && unary.op == ast::UnaryOp::USub
+        && let ast::Expr::NumberLiteral(number) = &*unary.operand
+        && let ast::Number::Int(number) = &number.value
+    {
+        return match number.to_string().as_str() {
+            "1" => 1, // PIPE
+            "2" => 5, // STDOUT
+            "3" => 2, // DEVNULL
+            _ => 6,
+        };
+    }
+    match graph.resolve(module, value) {
+        Some(Binding::Intrinsic(Intrinsic::Pipe)) => 1,
+        Some(Binding::Intrinsic(Intrinsic::Devnull)) => 2,
+        Some(Binding::Intrinsic(Intrinsic::Stdout)) => 3,
+        Some(Binding::Intrinsic(Intrinsic::Stderr)) => 4,
+        Some(Binding::Intrinsic(Intrinsic::SubprocessStdout)) => 5,
+        Some(Binding::Intrinsic(Intrinsic::Stdin)) => 8,
+        _ => 6,
+    }
+}
+
+/// Capture determines the returned layout. Ordinary stream expressions are
+/// evaluated in source order, including ones rejected by run/check_output.
+fn stream_plan(
+    graph: &SourceGraph,
+    module: ModuleId,
+    call: &ast::ExprCall,
+) -> Result<(u32, ProcessCapture), &'static str> {
+    let checked_output =
+        graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::CheckOutput));
+    let run =
+        graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::SubprocessRun));
+    let mut streams = [u32::from(checked_output), 0];
+    let mut capture = false;
+    let mut text = false;
+    for keyword in &call.arguments.keywords {
+        let value = &keyword.value;
+        match keyword.arg.as_ref().map(|name| name.as_str()) {
+            Some(name @ ("stdout" | "stderr")) => {
+                if checked_output && name == "stdout" {
+                    // This keyword always raises, whatever value it evaluates to.
+                    continue;
+                }
+                let index = usize::from(name == "stderr");
+                streams[index] = stream_mode(graph, module, value);
+            }
+            Some(name @ ("capture_output" | "text" | "universal_newlines")) => {
+                let flag = match value {
+                    ast::Expr::BooleanLiteral(flag) => flag.value,
+                    ast::Expr::NoneLiteral(_) => false,
+                    _ => {
+                        return Err("process capture_output and text require literal bool or None");
+                    }
+                };
+                if name != "capture_output" {
+                    text |= flag;
+                } else {
+                    capture = flag;
+                }
+            }
+            Some("errors")
+                if (checked_output || run) && !matches!(value, ast::Expr::NoneLiteral(_)) =>
+            {
+                if !matches!(value, ast::Expr::StringLiteral(v) if matches!(v.value.to_str(), "strict" | "ignore" | "replace"))
+                {
+                    return Err("check_output errors requires strict, ignore, replace, or None");
+                }
+                text = true;
+            }
+            Some("encoding") if !matches!(value, ast::Expr::NoneLiteral(_)) => {
+                if !matches!(value, ast::Expr::StringLiteral(v) if matches!(v.value.to_string().to_ascii_lowercase().replace('_', "-").as_str(), "utf8" | "utf-8"))
+                {
+                    return Err("process encoding requires literal 'utf-8'");
+                }
+                text = true;
+            }
+            _ => {}
+        }
+    }
+    let conflict = capture && streams != [0, 0];
+    if capture {
+        streams = [1, 1];
+    }
+    if checked_output {
+        streams[0] = 1;
+    }
+    let stdout = streams[0] == 1;
+    let stderr = streams[1] == 1;
+    Ok((
+        streams[0] | (streams[1] << 4) | (u32::from(conflict) << 8),
+        ProcessCapture {
+            stdout,
+            stderr,
+            text: text
+                && (stdout
+                    || stderr
+                    || run
+                    || graph.resolve(module, &call.func)
+                        == Some(Binding::Intrinsic(Intrinsic::Popen))),
+        },
+    ))
+}
+
+/// A checked failure can escape its lexical run call. The closed module graph
+/// determines which optional text/bytes layouts an error field may actually use.
+fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: bool) -> Option<Type> {
+    struct Outputs<'a> {
+        graph: &'a SourceGraph,
+        module: ModuleId,
+        stdout: bool,
+        variable_command: bool,
+        check_command: bool,
+        types: &'a Types,
+        timeout: bool,
+        found: Vec<Type>,
+    }
+    impl<'ast> Visitor<'ast> for Outputs<'_> {
+        fn visit_expr(&mut self, expression: &'ast ast::Expr) {
+            if let ast::Expr::Call(call) = expression {
+                let ty = match self.graph.resolve(self.module, &call.func) {
+                    Some(Binding::Intrinsic(
+                        Intrinsic::SubprocessCall | Intrinsic::SubprocessCheckCall,
+                    )) => {
+                        self.variable_command = true; // the command may have a non-list layout
+                        Some(Type::None)
+                    }
+                    Some(Binding::Intrinsic(Intrinsic::Popen)) => {
+                        self.variable_command = true;
+                        None
+                    }
+                    Some(Binding::Intrinsic(Intrinsic::CheckOutput)) => {
+                        self.variable_command = true;
+                        stream_plan(self.graph, self.module, call)
+                            .ok()
+                            .map(|(_, capture)| {
+                                error_stream(
+                                    self.types,
+                                    capture,
+                                    self.stdout,
+                                    self.timeout && timeout_argument(call).is_some(),
+                                )
+                            })
+                    }
+                    Some(Binding::Intrinsic(Intrinsic::SubprocessRun)) => {
+                        if self.check_command && !self.variable_command {
+                            let arg = call.arguments.args.first().or_else(|| {
+                                call.arguments
+                                    .keywords
+                                    .iter()
+                                    .find(|k| k.arg.as_deref() == Some("args"))
+                                    .map(|k| &k.value)
+                            });
+                            self.variable_command = !arg.is_some_and(|arg|
+                                matches!(arg, ast::Expr::List(list) if list.elts.iter().all(|e| matches!(e, ast::Expr::StringLiteral(_))))
+                                || self.graph.session.is_string_list(self.module, arg)
+                            );
+                        }
+                        stream_plan(self.graph, self.module, call)
+                            .ok()
+                            .filter(|(mode, _)| mode & 256 == 0)
+                            .map(|(_, capture)| {
+                                error_stream(
+                                    self.types,
+                                    capture,
+                                    self.stdout,
+                                    self.timeout && timeout_argument(call).is_some(),
+                                )
+                            })
+                    }
+                    _ => None,
+                };
+                if let Some(ty) = ty
+                    && !self.found.contains(&ty)
+                {
+                    self.found.push(ty);
+                }
+            }
+            walk_expr(self, expression);
+        }
+    }
+    let mut visitor = Outputs {
+        graph,
+        module: graph.entry,
+        stdout: field != 3,
+        variable_command: false,
+        check_command: field == 0,
+        types,
+        timeout,
+        found: Vec::new(),
+    };
+    for (id, module) in graph.modules.iter().enumerate() {
+        visitor.module = id;
+        visitor.visit_body(&module.parsed.syntax().body);
+    }
+    if field == 0 {
+        // Popen and checked launches may retain a tuple, path or other command object.
+        (!visitor.variable_command).then(|| types.list(Type::Str))
+    } else {
+        Some(types.union(&visitor.found).unwrap_or(Type::Str))
     }
 }
 
@@ -315,96 +642,35 @@ impl Checker<'_> {
     /// directly without materializing a CompletedProcess or buffering its output.
     pub(super) fn process_to_stderr(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let [argv] = call.arguments.args.as_ref() else {
-            return Err(error(
-                self.source,
-                call,
-                "redirected subprocess.run requires one argv list",
-            ));
+            return self.process_run(call);
         };
-        let argv = self.expr_expected(argv, self.types.list(Type::Str))?;
-        let mut check = boolean(false);
+        let mut redirected = false;
+        let mut check = None;
         for kw in &call.arguments.keywords {
             match kw.arg.as_ref().map(|name| name.as_str()) {
-                Some("check") => check = self.expr_expected(&kw.value, Type::Bool)?,
+                Some("check") if check.is_none() => check = Some(&kw.value),
                 Some("stdout")
-                    if self.resolve(&kw.value) == Some(Binding::Intrinsic(Intrinsic::Stderr)) => {}
-                _ => {
-                    return Err(error(
-                        self.source,
-                        kw,
-                        "redirected subprocess.run supports check and stdout=sys.stderr",
-                    ));
+                    if !redirected
+                        && self.resolve(&kw.value)
+                            == Some(Binding::Intrinsic(Intrinsic::Stderr)) =>
+                {
+                    redirected = true
                 }
+                _ => return self.process_run(call),
             }
         }
+        let argv = self.command_argument(argv)?;
+        if argv.ty != self.types.list(Type::Str) {
+            return self.process_run(call);
+        }
+        let check = match check {
+            Some(value) => self.expr_expected(value, Type::Bool)?,
+            None => boolean(false),
+        };
         Ok(operation(
             ProcessOperation::RunToStderr,
             Type::None,
             vec![argv, check],
-        ))
-    }
-
-    /// An exact UTF-8 capture inherits stderr. Keep the original argv owner in
-    /// CalledProcessError so a path stays a Path and later list edits are visible.
-    pub(super) fn process_check_output(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let ([argv], [encoding]) = (
-            call.arguments.args.as_ref(),
-            call.arguments.keywords.as_ref(),
-        ) else {
-            return Err(error(
-                self.source,
-                call,
-                "check_output requires an argv list and encoding='utf-8'",
-            ));
-        };
-        if encoding.arg.as_deref() != Some("encoding")
-            || !matches!(&encoding.value, ast::Expr::StringLiteral(text) if matches!(text.value.to_str(), "utf8" | "utf-8"))
-        {
-            return Err(error(
-                self.source,
-                encoding,
-                "check_output requires a literal UTF-8 encoding",
-            ));
-        }
-        let string_or_path = self.types.union(&[Type::Str, Type::Path]).unwrap();
-        let argv = if let ast::Expr::List(display) = argv {
-            let items = display
-                .elts
-                .iter()
-                .map(|item| self.expr(item))
-                .collect::<Result<Vec<_>, _>>()?;
-            let element = if items.iter().all(|item| item.ty == Type::Str) {
-                Type::Str
-            } else if items.iter().all(|item| item.ty == Type::Path) {
-                Type::Path
-            } else {
-                string_or_path
-            };
-            let items = items
-                .into_iter()
-                .zip(&display.elts)
-                .map(|(item, at)| self.coerce(item, element, at))
-                .collect::<Result<Vec<_>, _>>()?;
-            Expr {
-                ty: self.types.list(element),
-                kind: ExprKind::List(items),
-            }
-        } else {
-            self.expr(argv)?
-        };
-        if !self.types.element(argv.ty).is_some_and(|element| {
-            element == Type::Str || element == Type::Path || element == string_or_path
-        }) {
-            return Err(error(
-                self.source,
-                call,
-                "check_output argv must be a list of str or Path",
-            ));
-        }
-        Ok(operation(
-            ProcessOperation::CheckOutput,
-            Type::Str,
-            vec![argv],
         ))
     }
 
@@ -455,122 +721,642 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Which), returns, args))
     }
 
-    /// Literal mode arguments establish a text-only result. Dynamic values are
-    /// rooted in source order before their permutation into the runtime ABI.
-    pub(super) fn process_run(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let strings = self.types.list(Type::Str);
+    /// Consume the original iterable and quote each fsdecoded path as a Windows argument.
+    pub(super) fn subprocess_list2cmdline(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let args = call.arguments.args.as_ref();
+        let keywords = call.arguments.keywords.as_ref();
+        let source = match (args, keywords) {
+            ([arg], []) => arg,
+            ([], [kw]) if kw.arg.as_deref() == Some("seq") => &kw.value,
+            _ => {
+                self.graph.checked_keywords(
+                    self.module,
+                    keywords
+                        .iter()
+                        .filter(|kw| kw.arg.as_deref() != Some("seq"))
+                        .map(Ranged::range),
+                );
+                if args.is_empty() && !keywords.iter().any(|kw| kw.arg.as_deref() == Some("seq")) {
+                    self.graph
+                        .checked_missing_argument(self.module, call.range());
+                }
+                if !args.is_empty() {
+                    for kw in keywords
+                        .iter()
+                        .filter(|kw| kw.arg.as_deref() == Some("seq"))
+                    {
+                        self.graph.checked_repeated_keyword(self.module, kw.range());
+                    }
+                }
+                for extra in args.iter().skip(1) {
+                    self.graph
+                        .checked_excess_argument(self.module, extra.range());
+                }
+                let message = if let Some(name) = keywords
+                    .iter()
+                    .filter_map(|kw| kw.arg.as_deref())
+                    .find(|name| *name != "seq" || !args.is_empty())
+                {
+                    if name == "seq" {
+                        "list2cmdline() got multiple values for argument 'seq'".to_owned()
+                    } else {
+                        format!("list2cmdline() got an unexpected keyword argument '{name}'")
+                    }
+                } else if args.is_empty() {
+                    "list2cmdline() missing 1 required positional argument: 'seq'".to_owned()
+                } else {
+                    format!(
+                        "list2cmdline() takes 1 positional argument but {} were given",
+                        args.len()
+                    )
+                };
+                return self.sys_type_error(call, Type::Str, message);
+            }
+        };
+        self.join_parts(
+            unpacking::string(" "),
+            source,
+            call,
+            stdlib::JoinStyle::WindowsCommand,
+        )
+    }
+
+    /// Evaluate a fresh command list in source order, including mixed path representations.
+    pub(super) fn process_argument_list(
+        &mut self,
+        display: &ast::ExprList,
+    ) -> Result<Expr, String> {
+        let items = display
+            .elts
+            .iter()
+            .map(|item| self.expr(item))
+            .collect::<Result<Vec<_>, _>>()?;
+        let kinds = items
+            .iter()
+            .map(|e| {
+                if matches!(e.ty, Type::StrLiteral(_)) {
+                    Type::Str
+                } else {
+                    e.ty
+                }
+            })
+            .collect::<Vec<_>>();
+        let ty = if kinds.is_empty() {
+            Some(Type::Str)
+        } else {
+            self.types.union(&kinds)
+        }
+        .ok_or_else(|| {
+            error(
+                self.source,
+                display,
+                "command list elements need a representable union",
+            )
+        })?;
+        let items = items
+            .into_iter()
+            .zip(&display.elts)
+            .map(|(value, source)| self.coerce(value, ty, source))
+            .collect::<Result<_, _>>()?;
+        Ok(Expr {
+            ty: self.types.list(ty),
+            kind: ExprKind::List(items),
+        })
+    }
+
+    /// Keep the caller's argument object; only the OS launch converts each entry to bytes.
+    fn command_argument(&mut self, arg: &ast::Expr) -> Result<Expr, String> {
+        let scalar = |ty| {
+            matches!(
+                ty,
+                Type::Str | Type::StrLiteral(_) | Type::Bytes | Type::Path | Type::PurePath(_)
+            )
+        };
+        let value = if let ast::Expr::List(display) = arg
+            && !display
+                .elts
+                .iter()
+                .any(|item| matches!(item, ast::Expr::Starred(_)))
+        {
+            self.process_argument_list(display)?
+        } else {
+            self.expr(arg)?
+        };
+        let element = |ty| {
+            scalar(ty)
+                || self
+                    .types
+                    .members(ty)
+                    .is_some_and(|members| members.into_iter().all(scalar))
+        };
+        if scalar(value.ty)
+            || self.types.element(value.ty).is_some_and(element)
+            || self
+                .types
+                .fields(value.ty)
+                .is_some_and(|fields| fields.into_iter().all(element))
+        {
+            Ok(value)
+        } else {
+            Err(error(
+                self.source,
+                arg,
+                "command requires str, bytes, Path, or a list or tuple of these",
+            ))
+        }
+    }
+
+    /// Keep the original bytes or path owner until the native launch. An absent
+    /// path has a null word; every present value has its own exact storage kind.
+    fn optional_exec_path(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        let value = self.expr(expression)?;
+        let ty = self.types.payload(value.ty).unwrap_or(value.ty);
+        let ty = match ty {
+            Type::None | Type::StrLiteral(_) => Type::Str,
+            Type::Str | Type::Bytes | Type::Path | Type::PurePath(_) => ty,
+            _ => {
+                return Err(error(
+                    self.source,
+                    expression,
+                    "an executable or cwd requires str, bytes, Path or None",
+                ));
+            }
+        };
+        self.coerce(value, self.types.optional(ty), expression)
+    }
+
+    /// call and check_call accept the same Popen arguments with an extra wait deadline.
+    pub(super) fn popen(
+        &mut self,
+        call: &ast::ExprCall,
+        check_call: Option<bool>,
+    ) -> Result<Expr, String> {
+        self.launch_process(call, check_call.map_or(LaunchApi::Popen, LaunchApi::Call))
+    }
+
+    /// Shell output accepts the same command representations as a shell-mode Popen.
+    pub(super) fn shell_output(
+        &mut self,
+        call: &ast::ExprCall,
+        status: bool,
+    ) -> Result<Expr, String> {
+        let text = self.types.optional(Type::Str);
+        let params = ["cmd", "encoding", "errors"].map(|name| Parameter {
+            name: name.into(),
+            ty: if name == "cmd" { Type::Str } else { text },
+            kind: if name == "cmd" {
+                ParameterKind::PositionalOrKeyword
+            } else {
+                ParameterKind::KeywordOnly
+            },
+            default: (name != "cmd").then(|| absent(text)),
+            sign_only: false,
+        });
+        let args = self.arguments_with(call, &params, None, |checker, index, arg| {
+            if index == 0 {
+                checker.command_argument(arg)
+            } else {
+                checker.expr_expected(arg, text)
+            }
+        })?;
+        let ty = if status {
+            self.types.tuple(vec![Type::Int, Type::Str])
+        } else {
+            Type::Str
+        };
+        Ok(self.ordered_builtin(
+            Builtin::Process(ProcessOperation::ShellOutput { status }),
+            ty,
+            args,
+        ))
+    }
+
+    pub(super) fn process_check_output(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.launch_process(call, LaunchApi::CheckOutput)
+    }
+
+    fn launch_process(&mut self, call: &ast::ExprCall, api: LaunchApi) -> Result<Expr, String> {
         let directory = self.types.optional(Type::Str);
         let environment = self.types.optional(self.types.dict(Type::Str, Type::Str));
-        let timeout = self.types.optional(Type::Float);
-        let text_mode = call
+        let (streams, capture) = stream_plan(self.graph, self.module, call)
+            .map_err(|message| error(self.source, call, message))?;
+        let stdin = call
             .arguments
             .keywords
             .iter()
-            .any(|kw| kw.arg.as_ref().is_some_and(|name| name == "text"));
-        let params = [
-            ("args", strings, None),
+            .find(|kw| kw.arg.as_deref() == Some("stdin"))
+            .map_or(0, |kw| stream_mode(self.graph, self.module, &kw.value));
+        let keyword = |name: &str| {
+            call.arguments
+                .keywords
+                .iter()
+                .find(|kw| kw.arg.as_deref() == Some(name))
+                .map(|kw| &kw.value)
+        };
+        let text_flag = |name| match keyword(name) {
+            Some(ast::Expr::BooleanLiteral(flag)) => Some(flag.value),
+            _ => None,
+        };
+        let errors = match keyword("errors") {
+            Some(ast::Expr::StringLiteral(v)) if v.value.to_str() == "ignore" => 1,
+            Some(ast::Expr::StringLiteral(v)) if v.value.to_str() == "replace" => 2,
+            _ => 0,
+        };
+        let input_given = api == LaunchApi::CheckOutput && keyword("input").is_some();
+        let validation = if api == LaunchApi::CheckOutput && keyword("stdout").is_some() {
+            1
+        } else if api == LaunchApi::CheckOutput && keyword("check").is_some() {
+            2
+        } else if input_given && stdin != 0 {
+            3
+        } else if streams & 256 != 0 {
+            4
+        } else if matches!((text_flag("text"), text_flag("universal_newlines")), (Some(a), Some(b)) if a != b)
+        {
+            5
+        } else {
+            0
+        };
+        let stdin = if input_given { 1 } else { stdin };
+        let mut streams = streams | (stdin << 12) | (u32::from(capture.text) << 16);
+        let default_bufsize = || Expr {
+            ty: Type::Int,
+            kind: ExprKind::Int("-1".into()),
+        };
+        let mut params = [
+            ("args", self.types.list(Type::Str), None),
+            ("bufsize", Type::Int, Some(default_bufsize())),
             ("cwd", directory, Some(absent(directory))),
             ("env", environment, Some(absent(environment))),
-            ("check", Type::Bool, Some(boolean(false))),
-            ("capture_output", Type::Bool, None),
-            (
-                "encoding",
-                Type::Str,
-                text_mode.then(|| Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Str("utf-8".to_owned()),
-                }),
-            ),
-            ("text", Type::Bool, Some(boolean(true))),
-            ("timeout", timeout, Some(absent(timeout))),
+            ("stdin", Type::Bool, Some(boolean(false))),
+            ("stdout", Type::Bool, Some(boolean(false))),
+            ("stderr", Type::Bool, Some(boolean(false))),
+            ("text", Type::Bool, Some(boolean(false))),
+            ("encoding", Type::Bool, Some(boolean(false))),
+            ("close_fds", Type::Bool, Some(boolean(true))),
+            ("executable", directory, Some(absent(directory))),
+            ("shell", Type::Bool, Some(boolean(false))),
         ]
         .into_iter()
         .enumerate()
         .map(|(index, (name, ty, default))| Parameter {
             name: name.to_owned(),
             ty,
-            kind: if index == 0 {
+            default,
+            sign_only: false,
+            kind: if index <= 1 {
                 ParameterKind::PositionalOrKeyword
             } else {
                 ParameterKind::KeywordOnly
             },
-            default,
-            sign_only: false,
         })
         .collect::<Vec<_>>();
-        let supplied = self.arguments_with(call, &params, None, |checker, index, argument| {
-            match index {
-                1 => checker.optional_path_argument(argument),
-                4 | 6 => {
-                    if !matches!(argument, ast::Expr::BooleanLiteral(value) if value.value) {
-                        return Err(error(checker.source, argument, "process capture_output and text require literal True"));
-                    }
-                    checker.expr(argument)
-                }
-                5 => {
-                    if !matches!(argument, ast::Expr::StringLiteral(value) if value.value.to_string() == "utf-8") {
-                        return Err(error(checker.source, argument, "process encoding requires literal 'utf-8'"));
-                    }
-                    checker.expr(argument)
-                }
-                7 => {
-                    let value = checker.expr(argument)?;
-                    if integer_deadline(argument) && value.ty == Type::Int {
+        if api != LaunchApi::Popen {
+            let deadline = self.types.optional(Type::Float);
+            params.push(Parameter {
+                name: "timeout".into(),
+                ty: deadline,
+                default: Some(absent(deadline)),
+                sign_only: false,
+                kind: ParameterKind::KeywordOnly,
+            });
+        }
+        if matches!(api, LaunchApi::CheckOutput | LaunchApi::Run) {
+            let input = self
+                .types
+                .optional(if capture.text { Type::Str } else { Type::Bytes });
+            for (name, ty, default) in [
+                ("input", input, absent(input)),
+                ("check", Type::Bool, boolean(false)),
+                ("capture_output", Type::Bool, boolean(false)),
+                ("universal_newlines", Type::Bool, boolean(false)),
+                ("errors", Type::Bool, boolean(false)),
+            ] {
+                params.push(Parameter {
+                    name: name.into(),
+                    ty,
+                    default: Some(default),
+                    sign_only: false,
+                    kind: ParameterKind::KeywordOnly,
+                });
+            }
+        }
+        let child_options = params.len();
+        if ["process_group", "umask", "start_new_session", "pass_fds"]
+            .iter()
+            .any(|name| keyword(name).is_some())
+        {
+            streams |= 1 << 18; // native LaunchConfig includes the child settings trailer
+            for (name, ty, default) in [
+                ("process_group", Type::Int, default_bufsize()),
+                ("umask", Type::Int, default_bufsize()),
+                ("start_new_session", Type::Bool, boolean(false)),
+            ] {
+                params.push(Parameter {
+                    name: name.into(),
+                    ty,
+                    default: Some(default),
+                    sign_only: false,
+                    kind: ParameterKind::KeywordOnly,
+                });
+            }
+        }
+        if keyword("pass_fds").is_some() {
+            streams |= 1 << 19;
+            params.push(Parameter {
+                name: "pass_fds".into(),
+                ty: Type::ListInt,
+                default: None,
+                sign_only: false,
+                kind: ParameterKind::KeywordOnly,
+            });
+        }
+        if keyword("restore_signals").is_some() {
+            // The emitter packs this final boolean into the existing stream word.
+            streams |= 1 << 20;
+            params.push(Parameter {
+                name: "restore_signals".into(),
+                ty: Type::Bool,
+                default: None,
+                sign_only: false,
+                kind: ParameterKind::KeywordOnly,
+            });
+        }
+        let args = self.arguments_with(call, &params, None, |checker, index, arg| {
+            if index >= child_options {
+                let name = params[index].name.as_str();
+                if name == "pass_fds" {
+                    let value = checker.expr(arg)?;
+                    let fd = |ty| matches!(ty, Type::Int | Type::Bool);
+                    if value.ty == Type::None || checker.types.element(value.ty).is_some_and(fd)
+                        || checker.types.set_element(value.ty) == Some(Type::Int)
+                        || checker.types.fields(value.ty).is_some_and(|fields| fields.into_iter().all(fd))
+                    {
                         return Ok(value);
                     }
-                    if !matches!(value.ty, Type::Float | Type::None) && value.ty != timeout {
-                        return Err(error(checker.source, argument, "process timeout requires an integer literal or float | None seconds"));
-                    }
-                    checker.coerce(value, timeout, argument)
+                    return Err(error(checker.source, arg,
+                        "pass_fds requires a native list, tuple, or set of integer descriptors"));
                 }
-                _ => checker.expr_expected(argument, params[index].ty),
+                if matches!(name, "start_new_session" | "restore_signals") {
+                    return checker.condition(arg);
+                }
+                let value = checker.expr(arg)?;
+                if value.ty == Type::Bool {
+                    return Ok(Expr { ty: Type::Int, kind: ExprKind::Builtin(Builtin::Int, vec![value]) });
+                }
+                return if name == "process_group" {
+                    checker.coerce(value, checker.types.optional(Type::Int), arg)
+                } else {
+                    checker.coerce(value, Type::Int, arg)
+                };
+            }
+            match index {
+                0 => checker.command_argument(arg),
+                1 if matches!(arg, ast::Expr::NoneLiteral(_)) => Ok(default_bufsize()),
+                2 | 10 => checker.optional_exec_path(arg),
+                4..=6 if stream_mode(checker.graph, checker.module, arg) == 6 => {
+                    if let ast::Expr::BooleanLiteral(flag) = arg {
+                        return Ok(Expr { ty: Type::Int, kind: ExprKind::Int(u8::from(flag.value).to_string()) });
+                    }
+                    let value = checker.expr(arg)?;
+                    // Keep arbitrary integers out of the fixed stream layout: a
+                    // dynamic -1 would create a pipe and change the returned type.
+                    if (index == 5 && api == LaunchApi::CheckOutput)
+                        || validation != 0
+                        || matches!(value.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
+                        || integer_deadline(arg)
+                        || matches!(&value.kind, ExprKind::Builtin(Builtin::FileFileno, _))
+                    {
+                        Ok(value)
+                    } else {
+                        Err(error(checker.source, arg,
+                            "process redirection requires a file, a literal descriptor, or file.fileno()"))
+                    }
+                }
+                4..=8 => Ok(boolean(false)), // effect-free literals checked by stream_plan
+                11 => checker.condition(arg),
+                14 if api == LaunchApi::Run => checker.expr_expected(arg, Type::Bool),
+                14 => checker.expr(arg), // evaluated before reporting a forbidden check keyword
+                15..=17 => Ok(boolean(false)), // literals validated by stream_plan
+                12 => checker.deadline_value(arg),
+                _ => checker.expr_expected(arg, params[index].ty),
             }
         })?;
-        let mut body = Vec::new();
-        let mut clear = Vec::new();
-        let timed = call.arguments.keywords.iter().any(|keyword| {
-            keyword
-                .arg
-                .as_ref()
-                .is_some_and(|name| name.as_str() == "timeout")
-        });
-        let mut order = supplied.order[..4].to_vec();
-        if timed {
-            order.push(supplied.order[7]);
-        }
-        let mut values = vec![None; supplied.values.len()];
-        for (index, value) in supplied.values.into_iter().enumerate() {
-            // The validated mode literals have no effects and need no runtime storage.
-            if order.contains(&index) {
-                let slot = self.hidden(value.ty);
-                values[index] = Some(Expr {
-                    ty: value.ty,
-                    kind: ExprKind::Local(slot),
-                });
-                body.push(Statement::Assign(slot, value));
-                clear.push(slot);
+        for (param, shift) in [(4, 12), (5, 0), (6, 4)] {
+            if (streams >> shift) & 15 == 6
+                && matches!(
+                    args.values[args.order[param]].ty,
+                    Type::BinaryIO | Type::TextIO | Type::StringIO
+                )
+            {
+                streams |= 1 << shift;
             }
         }
-        let args = order
-            .iter()
-            .map(|&index| values[index].take().unwrap())
-            .collect();
-        Ok(Expr {
-            ty: Type::CompletedProcess,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(operation(
-                    if timed {
-                        ProcessOperation::RunTimeout
+        let (op, ty) = match api {
+            LaunchApi::CheckOutput => (
+                ProcessOperation::CheckOutput {
+                    streams,
+                    validation,
+                    errors,
+                    capture,
+                },
+                capture.stream(true),
+            ),
+            LaunchApi::Run => (
+                ProcessOperation::Run {
+                    streams,
+                    validation,
+                    errors,
+                    timed: timeout_argument(call).is_some(),
+                },
+                self.types.completed(capture, args.values[args.order[0]].ty),
+            ),
+            LaunchApi::Call(check) => (ProcessOperation::Call { streams, check }, Type::Int),
+            LaunchApi::Popen => (
+                ProcessOperation::Popen { streams },
+                Type::Popen(
+                    capture,
+                    stdin == 1,
+                    self.types.process_args(args.values[args.order[0]].ty),
+                ),
+            ),
+        };
+        Ok(self.ordered_builtin(Builtin::Process(op), ty, args))
+    }
+
+    pub(super) fn popen_attribute(
+        &self,
+        receiver: Expr,
+        attr: &ast::ExprAttribute,
+    ) -> Result<Expr, String> {
+        if receiver.ty == Type::ActivePopen {
+            let (op, ty) = match attr.attr.as_str() {
+                "pid" => (ProcessOperation::PopenPid, Type::Int),
+                "returncode" => (
+                    ProcessOperation::PopenStatus { poll: false },
+                    self.types.optional(Type::Int),
+                ),
+                _ => {
+                    return Err(error(
+                        self.source,
+                        attr,
+                        "this Popen has unknown stream and argument types",
+                    ));
+                }
+            };
+            return Ok(operation(op, ty, vec![receiver]));
+        }
+        let Type::Popen(capture, stdin, cmd) = receiver.ty else {
+            unreachable!()
+        };
+        let (op, ty) = match attr.attr.as_str() {
+            name @ ("stdin" | "stdout" | "stderr") => {
+                let (index, piped) = match name {
+                    "stdin" => (0, stdin),
+                    "stdout" => (1, capture.stdout),
+                    _ => (2, capture.stderr),
+                };
+                (
+                    ProcessOperation::PopenPipe(index),
+                    if !piped {
+                        Type::None
+                    } else if capture.text {
+                        Type::TextIO
                     } else {
-                        ProcessOperation::Run
+                        Type::BinaryIO
                     },
-                    Type::CompletedProcess,
-                    args,
-                )),
-                clear,
-            },
-        })
+                )
+            }
+            "args" => (ProcessOperation::PopenArgs, self.types.command_type(cmd)),
+            "pid" => (ProcessOperation::PopenPid, Type::Int),
+            "returncode" => (
+                ProcessOperation::PopenStatus { poll: false },
+                self.types.optional(Type::Int),
+            ),
+            _ => return Err(error(self.source, attr, "unsupported Popen attribute")),
+        };
+        Ok(operation(op, ty, vec![receiver]))
+    }
+
+    pub(super) fn popen_method(
+        &mut self,
+        receiver: Expr,
+        attr: &ast::ExprAttribute,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let mut args = vec![receiver];
+        let (op, ty) = match attr.attr.as_str() {
+            "poll" if call.arguments.is_empty() => (
+                ProcessOperation::PopenStatus { poll: true },
+                self.types.optional(Type::Int),
+            ),
+            "communicate" => {
+                let Type::Popen(capture, ..) = args[0].ty else {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "cannot infer capture modes for an active child",
+                    ));
+                };
+                let input = self
+                    .types
+                    .optional(if capture.text { Type::Str } else { Type::Bytes });
+                let timeout = self.types.optional(Type::Float);
+                let params = [("input", input), ("timeout", timeout)].map(|(name, ty)| Parameter {
+                    name: name.into(),
+                    ty,
+                    kind: ParameterKind::PositionalOrKeyword,
+                    default: Some(absent(ty)),
+                    sign_only: false,
+                });
+                let values =
+                    self.arguments_with(call, &params, args.pop(), |checker, index, arg| {
+                        if index == 1 {
+                            checker.deadline_value(arg)
+                        } else {
+                            checker.expr_expected(arg, input)
+                        }
+                    })?;
+                let pair = self
+                    .types
+                    .tuple(vec![capture.stream(true), capture.stream(false)]);
+                return Ok(self.ordered_builtin(
+                    Builtin::Process(ProcessOperation::PopenCommunicate { text: capture.text }),
+                    pair,
+                    values,
+                ));
+            }
+            "wait" => {
+                let timeout = self.types.optional(Type::Float);
+                let param = Parameter {
+                    name: "timeout".into(),
+                    ty: timeout,
+                    kind: ParameterKind::PositionalOrKeyword,
+                    default: Some(absent(timeout)),
+                    sign_only: false,
+                };
+                let values =
+                    self.arguments_with(call, &[param], args.pop(), |checker, _, argument| {
+                        checker.deadline_value(argument)
+                    })?;
+                return Ok(self.ordered_builtin(
+                    Builtin::Process(ProcessOperation::PopenWait),
+                    Type::Int,
+                    values,
+                ));
+            }
+            "send_signal" => {
+                let param = Parameter {
+                    name: "sig".into(),
+                    ty: Type::Int,
+                    kind: ParameterKind::PositionalOrKeyword,
+                    default: None,
+                    sign_only: false,
+                };
+                let values = self.arguments(call, &[param], args.pop())?;
+                return Ok(self.ordered_builtin(
+                    Builtin::Process(ProcessOperation::PopenSignal),
+                    Type::None,
+                    values,
+                ));
+            }
+            name @ ("kill" | "terminate") if call.arguments.is_empty() => {
+                args.push(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Int(if name == "kill" { "9" } else { "15" }.into()),
+                });
+                (ProcessOperation::PopenSignal, Type::None)
+            }
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "unsupported Popen method or arguments",
+                ));
+            }
+        };
+        Ok(operation(op, ty, args))
+    }
+
+    fn deadline_value(&mut self, argument: &ast::Expr) -> Result<Expr, String> {
+        let value = self.expr(argument)?;
+        if integer_deadline(argument) && value.ty == Type::Int {
+            return Ok(value);
+        }
+        let timeout = self.types.optional(Type::Float);
+        if !matches!(value.ty, Type::Float | Type::None) && value.ty != timeout {
+            return Err(error(
+                self.source,
+                argument,
+                "process timeout requires an integer literal or float | None seconds",
+            ));
+        }
+        self.coerce(value, timeout, argument)
+    }
+
+    pub(super) fn process_run(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.launch_process(call, LaunchApi::Run)
     }
 
     /// Path conversion is sealed and pure; optional paths retain their absence.
@@ -696,11 +1482,14 @@ impl Checker<'_> {
         receiver: Expr,
         attribute: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
+        let Type::CompletedProcess(capture, cmd) = receiver.ty else {
+            unreachable!()
+        };
         let (field, ty) = match attribute.attr.as_str() {
-            "args" => (0, self.types.list(Type::Str)),
+            "args" => (0, self.types.completed_command(cmd)),
             "returncode" => (1, Type::Int),
-            "stdout" => (2, Type::Str),
-            "stderr" => (3, Type::Str),
+            "stdout" => (2, capture.stream(true)),
+            "stderr" => (3, capture.stream(false)),
             _ => {
                 return Err(error(
                     self.source,
@@ -743,14 +1532,6 @@ impl Checker<'_> {
         receiver: &Expr,
         attribute: &ast::ExprAttribute,
     ) -> Option<Expr> {
-        let (field, mut ty) = match attribute.attr.as_str() {
-            "cmd" => (0, self.types.list(Type::Str)),
-            "returncode" => (1, Type::Int),
-            "stdout" => (2, Type::Str),
-            "stderr" => (3, Type::Str),
-            "output" => (4, Type::Str),
-            _ => return None,
-        };
         let local = if let ExprKind::Local(slot) = receiver.kind {
             self.captured_process_errors
                 .iter()
@@ -759,61 +1540,34 @@ impl Checker<'_> {
         } else {
             None
         };
-        if let Some(capture) = local {
-            if field == 0 {
-                ty = capture.argv?;
-            }
-            if field == 3 && capture.inherited_stderr {
-                ty = self.types.optional(Type::Str);
-            }
-        } else if matches!(field, 0 | 2..=4) {
-            struct Sources<'a> {
-                graph: &'a SourceGraph,
-                module: ModuleId,
-                redirected: bool,
-                check_output: bool,
-            }
-            impl<'ast> Visitor<'ast> for Sources<'_> {
-                fn visit_expr(&mut self, expr: &'ast ast::Expr) {
-                    if let ast::Expr::Call(call) = expr {
-                        match self.graph.resolve(self.module, &call.func) {
-                            Some(Binding::Intrinsic(Intrinsic::CheckOutput)) => {
-                                self.check_output = true
-                            }
-                            Some(Binding::Intrinsic(Intrinsic::SubprocessRun)) => {
-                                self.redirected |= call
-                                    .arguments
-                                    .keywords
-                                    .iter()
-                                    .any(|kw| kw.arg.as_deref() == Some("stdout"));
-                            }
-                            _ => {}
-                        }
-                    }
-                    walk_expr(self, expr);
-                }
-            }
-            let mut calls = Sources {
-                graph: self.graph,
-                module: self.module,
-                redirected: false,
-                check_output: false,
-            };
-            for (module, source) in self.graph.modules.iter().enumerate() {
-                calls.module = module;
-                calls.visit_body(&source.parsed.syntax().body);
-            }
-            // Escaping exceptions may carry argv lists with different invariant
-            // element layouts. Only a locally proved argv is projectable then.
-            if field == 0 && calls.check_output {
-                return None;
-            }
-            if field != 0 && (calls.redirected || field == 3 && calls.check_output) {
-                ty = self.types.optional(ty);
-            }
-        }
+        let field = match attribute.attr.as_str() {
+            "cmd" => 0,
+            "returncode" => 1,
+            "stdout" => 2,
+            "stderr" => 3,
+            "output" => 4,
+            _ => return None,
+        };
+        let timeout = local.is_none_or(|facts| facts.timeout);
+        let ty = match (field, local) {
+            (
+                0,
+                Some(CapturedFields {
+                    argv: Some(argv), ..
+                }),
+            ) => *argv,
+            (1, _) => Type::Int,
+            (
+                2..=4,
+                Some(CapturedFields {
+                    capture: Some(capture),
+                    ..
+                }),
+            ) => error_stream(self.types, *capture, field != 3, timeout),
+            _ => error_field_type(self.graph, self.types, field, timeout)?,
+        };
         Some(operation(
-            ProcessOperation::ErrorField(field),
+            ProcessOperation::ErrorField(field | if timeout && field >= 2 { 16 } else { 0 }),
             ty,
             vec![receiver.clone()],
         ))
@@ -826,7 +1580,30 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
     ) -> Result<Option<Expr>, String> {
         let (field, ty) = match attribute.attr.as_str() {
-            "cmd" => (0, self.types.list(Type::Str)),
+            "cmd" => {
+                // The narrowed exception local may be wrapped in a view.
+                let local = attribute
+                    .value
+                    .as_name_expr()
+                    .and_then(|name| self.names.get(name.id.as_str()))
+                    .and_then(|slot| {
+                        self.captured_process_errors
+                            .iter()
+                            .rev()
+                            .find(|capture| capture.slot == *slot)
+                    })
+                    .and_then(|capture| capture.argv);
+                let ty = local
+                    .or_else(|| error_field_type(self.graph, self.types, 0, true))
+                    .ok_or_else(|| {
+                        error(
+                            self.source,
+                            attribute,
+                            "the original timeout command has no single known type",
+                        )
+                    })?;
+                (0, ty)
+            }
             "timeout" => (
                 1,
                 timeout_field_type(self.graph).ok_or_else(|| {

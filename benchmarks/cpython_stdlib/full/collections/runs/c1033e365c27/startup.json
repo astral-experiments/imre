@@ -1,0 +1,68 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "370f16b33d0a8658033dfa67568d2c1de01b19a0d890039c3780e057a8b6564c",
+  "operation": "check",
+  "tests_executed": 0,
+  "source": "git",
+  "support_files": [
+    "_colorize.py"
+  ],
+  "checks": [
+    {
+      "suite": "test.test_collections",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_collections.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"array\""
+    },
+    {
+      "suite": "test.test_collections",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_collections.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"array\""
+    },
+    {
+      "suite": "test.test_collections",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_collections.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"array\""
+    },
+    {
+      "suite": "test.test_collections",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_collections.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"array\""
+    },
+    {
+      "suite": "test.test_argparse",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_argparse.py:3:1: Imre: Lib/_colorize.py:5:1: Imre: unsupported sealed standard-library export dataclasses.Field"
+    },
+    {
+      "suite": "test.test_argparse",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_argparse.py:3:1: Imre: Lib/_colorize.py:5:1: Imre: unsupported sealed standard-library export dataclasses.Field"
+    },
+    {
+      "suite": "test.test_argparse",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_argparse.py:3:1: Imre: Lib/_colorize.py:5:1: Imre: unsupported sealed standard-library export dataclasses.Field"
+    },
+    {
+      "suite": "test.test_argparse",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_argparse.py:3:1: Imre: Lib/_colorize.py:5:1: Imre: unsupported sealed standard-library export dataclasses.Field"
+    }
+  ]
+}

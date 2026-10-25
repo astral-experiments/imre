@@ -1,8 +1,8 @@
-//! C-main argument capture with one lazy, shared Python-visible list.
+//! C-main argument capture and independent Python-visible argument lists.
 
+use crate::StrOwner;
 use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, c_char};
-use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Object, Str, Words, fail};
@@ -15,11 +15,13 @@ struct Arguments {
 
 thread_local! {
     static ARGUMENTS: Cell<Option<Arguments>> = const { Cell::new(None) };
-    static ARGV: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
+    static ORIGINAL: RefCell<Option<crate::ObjectOwner>> = const { RefCell::new(None) };
+    static LAUNCHER: RefCell<std::io::Result<Option<Vec<u8>>>> = const { RefCell::new(Ok(None)) };
+    static ARGV: RefCell<Option<crate::ObjectOwner>> = const { RefCell::new(None) };
 }
 
 /// Captures argv without decoding or allocating. Generated main calls this only
-/// when its closed program can access sys.argv.
+/// when its closed program can access either argument list.
 ///
 /// # Safety
 /// Call once before argv access on this execution thread. `argc` is nonnegative;
@@ -37,17 +39,27 @@ pub unsafe extern "C" fn imre_args_init(argc: i32, argv: *const *const c_char) {
 }
 
 /// Decodes all inputs before publishing a list, so a failed access can be retried.
-fn decode(arguments: Arguments) -> Result<Rc<Object>> {
+fn decode(arguments: Arguments) -> Result<crate::ObjectOwner> {
+    decode_bytes(
+        arguments.count,
+        (0..arguments.count).map(|index| {
+            // SAFETY: initialization guarantees each terminated entry outlives this call.
+            unsafe { CStr::from_ptr(*arguments.values.add(index)).to_bytes() }
+        }),
+    )
+}
+
+fn decode_bytes<'a>(
+    count: usize,
+    arguments: impl Iterator<Item = &'a [u8]>,
+) -> Result<crate::ObjectOwner> {
     let mut values = Words::new(3);
     values
         .values
-        .try_reserve_exact(arguments.count)
-        .unwrap_or_else(|_| fail("MemoryError", "argument list allocation failed"));
-    for index in 0..arguments.count {
-        // SAFETY: initialization guarantees this entry remains readable and
-        // NUL-terminated until clear; decoding invokes no callbacks.
-        let value = unsafe { CStr::from_ptr(*arguments.values.add(index)) };
-        let text = value.to_str().map_err(|error| {
+        .try_reserve_exact(count)
+        .map_err(|_| Error::new(Kind::MemoryError, "argument list allocation failed"))?;
+    for (index, bytes) in arguments.enumerate() {
+        let text = std::str::from_utf8(bytes).map_err(|error| {
             Error::new(
                 Kind::UnicodeDecodeError,
                 format!(
@@ -58,7 +70,7 @@ fn decode(arguments: Arguments) -> Result<Rc<Object>> {
         })?;
         values
             .values
-            .push(Rc::into_raw(Rc::new(Str::new(text))) as usize);
+            .push(StrOwner::into_raw(StrOwner::new(Str::new(text))) as usize);
     }
     Ok(values.into_object())
 }
@@ -111,7 +123,7 @@ pub extern "C" fn imre_sysconfig_scripts() -> *const Str {
     let text = directory
         .and_then(|path| path.into_os_string().into_string().ok())
         .unwrap_or_default();
-    Rc::into_raw(Rc::new(Str::from(text)))
+    StrOwner::into_raw(StrOwner::new(Str::from(text)))
 }
 
 /// The Python interpreter for explicitly launched Python helpers. Preserve
@@ -121,7 +133,7 @@ pub extern "C" fn imre_sys_executable() -> *const Str {
     let text = python_executable()
         .and_then(|path| path.into_os_string().into_string().ok())
         .unwrap_or_default();
-    Rc::into_raw(Rc::new(Str::from(text)))
+    StrOwner::into_raw(StrOwner::new(Str::from(text)))
 }
 
 /// Returns an owned reference to the same mutable list on every successful call.
@@ -129,26 +141,65 @@ pub extern "C" fn imre_sys_executable() -> *const Str {
 /// state must be clear; init must already have captured this main activation.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_argv() -> *const Object {
-    if let Some(value) = ARGV.with(|argv| argv.borrow().clone()) {
-        return Rc::into_raw(value);
-    }
-    let arguments = ARGUMENTS
+    argument_list(&ARGV, || decode(c_arguments()))
+}
+
+fn c_arguments() -> Arguments {
+    ARGUMENTS
         .get()
-        .unwrap_or_else(|| fail("SystemError", "arguments were not initialized"));
-    let result = decode(arguments).map(|value| {
-        let previous = ARGV.with(|argv| argv.replace(Some(value.clone())));
-        drop(previous);
-        Rc::into_raw(value)
-    });
-    finish(result, std::ptr::null())
+        .unwrap_or_else(|| fail("SystemError", "arguments were not initialized"))
+}
+
+pub(super) fn save_launcher_arguments(args: std::io::Result<Option<Vec<u8>>>) {
+    LAUNCHER.with(|raw| *raw.borrow_mut() = args);
+}
+
+/// Like argv, this list has stable identity. It starts with the original
+/// invocation and never observes mutations of the program's sys.argv.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_sys_orig_argv() -> *const Object {
+    argument_list(&ORIGINAL, || {
+        let list = LAUNCHER.with(|raw| match &*raw.borrow() {
+            Ok(Some(bytes)) => {
+                let count = bytes.iter().filter(|&&b| b == 0).count();
+                let bytes = bytes.strip_suffix(&[0]).ok_or_else(|| {
+                    Error::new(Kind::OSError, "incomplete launcher argument vector")
+                })?;
+                decode_bytes(count, bytes.split(|&b| b == 0))
+            }
+            Ok(None) => decode(c_arguments()),
+            Err(error) => Err(Error::new(Kind::OSError, error.to_string())),
+        })?;
+        save_launcher_arguments(Ok(None));
+        Ok(list)
+    })
+}
+
+fn argument_list(
+    root: &'static std::thread::LocalKey<RefCell<Option<crate::ObjectOwner>>>,
+    build: impl FnOnce() -> Result<crate::ObjectOwner>,
+) -> *const Object {
+    if let Some(value) = root.with(|root| root.borrow().clone()) {
+        return crate::ObjectOwner::into_raw(value);
+    }
+    finish(
+        build().map(|value| {
+            root.with(|root| root.replace(Some(value.clone())));
+            crate::ObjectOwner::into_raw(value)
+        }),
+        std::ptr::null(),
+    )
 }
 
 /// Releases the runtime's list root and captured pointers on either main exit.
 /// Existing aliases remain valid. Cleanup is infallible and preserves pending.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_args_clear() {
+    ORIGINAL.with(RefCell::take);
+    save_launcher_arguments(Ok(None));
     let previous = ARGV.with(RefCell::take);
     ARGUMENTS.set(None);
+    super::hashlib::clear_algorithms();
     drop(previous);
 }
 
@@ -171,18 +222,29 @@ mod tests {
         // returned handles are owned and used with their declared representations.
         unsafe {
             imre_args_init(pointers.len() as i32, pointers.as_ptr());
-            let first = Rc::from_raw(imre_sys_argv());
-            let alias = Rc::from_raw(imre_sys_argv());
-            assert!(Rc::ptr_eq(&first, &alias));
-            assert_eq!(Int(imre_seq_len(Rc::as_ptr(&first))).as_small(), Some(3));
-            let unicode = Rc::from_raw(
-                imre_seq_get(Rc::as_ptr(&first), Int::small(2).unwrap().0) as *const Str
+            let first = crate::ObjectOwner::from_raw(imre_sys_argv());
+            let alias = crate::ObjectOwner::from_raw(imre_sys_argv());
+            assert!(crate::ObjectOwner::ptr_eq(&first, &alias));
+            assert_eq!(
+                Int(imre_seq_len(crate::ObjectOwner::as_ptr(&first))).as_small(),
+                Some(3)
             );
+            let unicode = StrOwner::from_raw(imre_seq_get(
+                crate::ObjectOwner::as_ptr(&first),
+                Int::small(2).unwrap().0,
+            ) as *const Str);
             assert_eq!(unicode.as_str(), "é🦀");
-            let added = Rc::new(Str::new("new argument"));
-            imre_seq_append(Rc::as_ptr(&first), Rc::as_ptr(&added) as usize, 3);
-            assert_eq!(Int(imre_seq_len(Rc::as_ptr(&alias))).as_small(), Some(4));
-            let weak = Rc::downgrade(&first);
+            let added = StrOwner::new(Str::new("new argument"));
+            imre_seq_append(
+                crate::ObjectOwner::as_ptr(&first),
+                StrOwner::as_ptr(&added) as usize,
+                3,
+            );
+            assert_eq!(
+                Int(imre_seq_len(crate::ObjectOwner::as_ptr(&alias))).as_small(),
+                Some(4)
+            );
+            let weak = crate::ObjectOwner::downgrade(&first);
             let pending = imre_exception_new(Kind::RuntimeError as u32, std::ptr::null());
             imre_error_set(pending);
             imre_args_clear();
@@ -190,7 +252,10 @@ mod tests {
             imre_object_release(pending);
             imre_object_release(pending);
             drop(first);
-            assert_eq!(Int(imre_seq_len(Rc::as_ptr(&alias))).as_small(), Some(4));
+            assert_eq!(
+                Int(imre_seq_len(crate::ObjectOwner::as_ptr(&alias))).as_small(),
+                Some(4)
+            );
             drop(alias);
             assert!(weak.upgrade().is_none());
         }

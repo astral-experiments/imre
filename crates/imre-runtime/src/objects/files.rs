@@ -1,11 +1,11 @@
 //! Sealed UTF-8 text and byte streams. Explicit operations report language errors;
 //! final ownership cleanup only closes resources and never changes error state.
 
-use std::fs::OpenOptions;
-use std::io;
-use std::os::fd::IntoRawFd;
+use crate::StrOwner;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Read, Seek, SeekFrom};
+use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
-use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{
@@ -13,11 +13,20 @@ use super::{
 };
 mod buffered;
 mod gzip;
+mod path_text;
+mod seekable;
+mod text_memory;
+use seekable::Memory;
+pub(super) use seekable::disk_offset;
 
 use buffered::{Input, Output};
 
 pub(super) struct FileState {
+    fd: Option<RawFd>,
+    // Closing a stream releases its descriptor, not its original I/O class.
+    raw: bool,
     stream: Option<Stream>,
+    pub(super) name: Option<StrOwner>,
     // Preserve access mode after close: binary wrong-direction errors take precedence.
     kind: FileKind,
 }
@@ -27,31 +36,42 @@ enum FileKind {
     Text,
     BinaryRead,
     GzipBinaryRead,
+    Memory,
+    TextMemory,
+    Member,
     BinaryWrite,
 }
 
 enum Stream {
     Read(Input),
+    UnreadGzip { file: File, capacity: usize },
     Write(Output),
+    Memory(Memory),
+    TextMemory(text_memory::TextMemory),
+    Member(Box<super::zipfile::Member>),
 }
 
 impl Stream {
-    /// Closes exactly once even when flushing fails. `into_parts` prevents a
-    /// second implicit flush; a close error takes precedence over a flush error.
+    /// Closes exactly once even when flushing fails. A close error takes precedence.
     fn close(self) -> io::Result<()> {
         let (file, flushed) = match self {
             Self::Read(input) => (input.into_file(), Ok(())),
+            Self::UnreadGzip { file, .. } => (file, Ok(())),
             Self::Write(writer) => writer.finish(),
+            Self::Memory(_) | Self::TextMemory(_) | Self::Member(_) => return Ok(()),
         };
-        let descriptor = file.into_raw_fd();
-        // SAFETY: into_raw_fd transfers our unique descriptor owner. Do not
-        // retry close after EINTR: the descriptor may already have been reused.
-        let closed = if unsafe { libc::close(descriptor) } == 0 {
-            Ok(())
-        } else {
-            Err(io::Error::last_os_error())
-        };
-        closed.and(flushed)
+        close_file(file).and(flushed)
+    }
+}
+
+/// Close once, observing delayed I/O errors without retrying a possibly reused descriptor.
+pub(super) fn close_file(file: std::fs::File) -> io::Result<()> {
+    let descriptor = file.into_raw_fd();
+    // SAFETY: into_raw_fd transfers our unique descriptor owner to close.
+    if unsafe { libc::close(descriptor) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
     }
 }
 
@@ -65,14 +85,98 @@ impl Drop for FileState {
 }
 
 impl FileState {
+    pub(super) fn closed(&self) -> bool {
+        self.stream.is_none()
+    }
+
+    pub(super) fn fileno(&self) -> Result<RawFd> {
+        let Some(fd) = self.fd else {
+            return Err(Error::new(Kind::UnsupportedOperation, "fileno"));
+        };
+        if self.closed() {
+            Err(Error::new(Kind::ValueError, "I/O operation on closed file"))
+        } else {
+            Ok(fd)
+        }
+    }
+
+    pub(super) fn close(&mut self) -> io::Result<()> {
+        self.stream.take().map_or(Ok(()), Stream::close)
+    }
+
+    pub(super) fn communicate_stdin(&mut self, input: &[u8], close: bool) -> Result<()> {
+        if self.closed() && input.is_empty() {
+            return Ok(());
+        }
+        let Stream::Write(writer) = self.stream()? else {
+            return Err(Error::new(Kind::UnsupportedOperation, "not writable"));
+        };
+        let flushed = writer.write(input).and_then(|()| writer.flush());
+        let ignore_broken_pipe = |result: io::Result<()>| match result {
+            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+            other => other.map_err(errno_error),
+        };
+        ignore_broken_pipe(flushed)?;
+        if close {
+            ignore_broken_pipe(self.close())?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn pipe(
+        file: std::fs::File,
+        read: bool,
+        text: bool,
+        bufsize: i32,
+    ) -> crate::ObjectOwner {
+        let fd = file.as_raw_fd();
+        // Popen treats line buffering as a TextIOWrapper option and uses the
+        // default binary buffer underneath. Binary mode also falls back to default.
+        let capacity = if bufsize < 0 || bufsize == 1 {
+            128 * 1024
+        } else {
+            bufsize as usize
+        };
+        let stream = if read {
+            Stream::Read(Input::pipe(file, !text, capacity))
+        } else {
+            crate::initialize_io();
+            Stream::Write(Output::pipe(file, capacity, text && bufsize == 1))
+        };
+        let kind = if text {
+            FileKind::Text
+        } else if read {
+            FileKind::BinaryRead
+        } else {
+            FileKind::BinaryWrite
+        };
+        crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(Box::new(Self {
+            fd: Some(fd),
+            raw: !text && capacity == 0,
+            name: None,
+            stream: Some(stream),
+            kind,
+        })))))
+    }
+
     fn stream(&mut self) -> Result<&mut Stream> {
         self.stream
             .as_mut()
             .ok_or_else(|| Error::new(Kind::ValueError, "I/O operation on closed file."))
     }
 
-    fn read(&mut self) -> Result<Str> {
+    pub(super) fn read(&mut self) -> Result<Str> {
+        if self.kind == FileKind::TextMemory {
+            return self.text_memory()?.read(None, false);
+        }
         self.input()?.read_text()
+    }
+
+    pub(super) fn readline(&mut self) -> Result<Str> {
+        if self.kind == FileKind::TextMemory {
+            return self.text_memory()?.read(None, true);
+        }
+        self.input()?.text_line()
     }
 
     fn input(&mut self) -> Result<&mut Input> {
@@ -84,6 +188,17 @@ impl FileState {
         } else {
             "I/O operation on closed file."
         };
+        if let Some(Stream::UnreadGzip { file, capacity }) = self
+            .stream
+            .take_if(|stream| matches!(stream, Stream::UnreadGzip { .. }))
+        {
+            self.stream = Some(Stream::Read(Input::new(
+                file,
+                true,
+                self.kind == FileKind::GzipBinaryRead,
+                capacity,
+            )));
+        }
         let stream = self
             .stream
             .as_mut()
@@ -97,6 +212,19 @@ impl FileState {
     fn read_size(&mut self, value: &Int) -> Result<Bytes> {
         // GzipFile checks its own closed state before forwarding the argument
         // to BufferedReader. A plain BufferedWriter validates a C int first.
+        if self.kind == FileKind::Member {
+            self.check_member("read from closed file.")?;
+            // ZipExtFile is a Python implementation: it accepts any integer, even
+            // values larger than Py_ssize_t. Never reserve the requested size.
+            let limit = if let Some(value) = value.as_small() {
+                usize::try_from(value).ok()
+            } else if value.big().sign() == num_bigint::Sign::Minus {
+                None
+            } else {
+                Some(num_traits::ToPrimitive::to_usize(value.big().as_ref()).unwrap_or(usize::MAX))
+            };
+            return self.read_bytes(limit);
+        }
         if self.kind == FileKind::GzipBinaryRead {
             self.stream()?;
         }
@@ -110,16 +238,32 @@ impl FileState {
             })?;
             return Err(Error::new(Kind::UnsupportedOperation, "read"));
         }
+        if self.kind == FileKind::Memory {
+            return self.read_bytes(usize::try_from(size).ok());
+        }
         if size < -1 {
             return Err(Error::new(
                 Kind::ValueError,
                 "read length must be non-negative or -1",
             ));
         }
+        if size == 0 && matches!(self.stream, Some(Stream::UnreadGzip { .. })) {
+            return Ok(Bytes::new());
+        }
         self.input()?.read_bytes(usize::try_from(size).ok())
     }
 
     pub(super) fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        if self.kind == FileKind::Memory {
+            let Stream::Memory(memory) = self.stream()? else {
+                unreachable!()
+            };
+            return memory.write(bytes);
+        }
+        if self.kind == FileKind::Member {
+            return Err(Error::new(Kind::UnsupportedOperation, "write"));
+        }
+
         if self.kind == FileKind::BinaryRead {
             return Err(Error::new(Kind::UnsupportedOperation, "write"));
         }
@@ -146,15 +290,25 @@ impl FileState {
     }
 
     pub(super) fn write(&mut self, text: &str) -> Result<()> {
+        if self.kind == FileKind::TextMemory {
+            return self.text_memory()?.write(text);
+        }
         self.write_bytes(text.as_bytes())
     }
 
-    fn flush(&mut self) -> Result<()> {
+    pub(super) fn flush(&mut self) -> Result<()> {
+        if self.kind == FileKind::TextMemory {
+            return Ok(());
+        }
         if self.kind == FileKind::BinaryWrite && self.stream.is_none() {
             return Err(Error::new(Kind::ValueError, "flush of closed file"));
         }
         match self.stream()? {
-            Stream::Read(_) => Ok(()),
+            Stream::Read(_)
+            | Stream::UnreadGzip { .. }
+            | Stream::Member(_)
+            | Stream::Memory(_)
+            | Stream::TextMemory(_) => Ok(()),
             Stream::Write(writer) => writer.flush().map_err(os_error),
         }
     }
@@ -163,13 +317,18 @@ impl FileState {
 /// Decodes a complete text stream strictly before normalizing CRLF and lone CR.
 /// File reads and captured subprocess streams share these text-mode semantics.
 pub(super) fn decode_utf8_text(bytes: Vec<u8>) -> Result<Str> {
+    decode_text(bytes, false)
+}
+
+fn decode_text(bytes: Vec<u8>, preserve_newlines: bool) -> Result<Str> {
     let text = String::from_utf8(bytes).map_err(|error| {
-        Error::new(
-            Kind::UnicodeDecodeError,
-            format!("invalid UTF-8 at byte {}", error.utf8_error().valid_up_to()),
-        )
+        let bounds = error.utf8_error();
+        match crate::BytesOwner::try_new(error.into_bytes()) {
+            Ok(bytes) => super::bytes::decode_owned_error(bytes, bounds),
+            Err(_) => Error::memory_error(),
+        }
     })?;
-    if !text.contains('\r') {
+    if preserve_newlines || !text.contains('\r') {
         return Ok(Str::from(text));
     }
     let mut normalized = Str::with_capacity(text.len());
@@ -188,7 +347,7 @@ pub(super) fn decode_utf8_text(bytes: Vec<u8>) -> Result<Str> {
 }
 
 impl Storage {
-    fn file(&self) -> &FileState {
+    pub(super) fn file(&self) -> &FileState {
         match self {
             Self::File(file) => file,
             _ => fail("SystemError", "expected a file stream object"),
@@ -210,11 +369,22 @@ pub(super) fn os_error(error: io::Error) -> Error {
     {
         return Error::new(gzip.0, gzip.to_string());
     }
+    // Read::read_to_end reports a failed Vec reservation without an OS errno.
+    if error.kind() == io::ErrorKind::OutOfMemory && error.raw_os_error().is_none() {
+        return Error::memory_error();
+    }
     Error::new(os_error_kind(error.kind()), error.to_string())
 }
 
 fn os_error_kind(kind: io::ErrorKind) -> Kind {
     match kind {
+        io::ErrorKind::WouldBlock => Kind::BlockingIOError,
+        io::ErrorKind::BrokenPipe => Kind::BrokenPipeError,
+        io::ErrorKind::ConnectionAborted => Kind::ConnectionAbortedError,
+        io::ErrorKind::ConnectionRefused => Kind::ConnectionRefusedError,
+        io::ErrorKind::ConnectionReset => Kind::ConnectionResetError,
+        io::ErrorKind::Interrupted => Kind::InterruptedError,
+        io::ErrorKind::TimedOut => Kind::TimeoutError,
         io::ErrorKind::AlreadyExists => Kind::FileExistsError,
         io::ErrorKind::NotFound => Kind::FileNotFoundError,
         io::ErrorKind::PermissionDenied => Kind::PermissionError,
@@ -225,7 +395,35 @@ fn os_error_kind(kind: io::ErrorKind) -> Kind {
 }
 
 /// Format a POSIX errno without a filename, as in OSError(errno, strerror).
-pub(super) fn errno_error(error: io::Error) -> Error {
+pub(crate) fn errno_error(error: io::Error) -> Error {
+    if let Some(blocked) = error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<crate::BlockedWrite>())
+    {
+        return Error::blocked_write(blocked.errno, blocked.accepted);
+    }
+    errno_with_filename(error, None)
+}
+
+pub(super) fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
+    errno_with_filenames(
+        error,
+        path.map(|s| super::exceptions::Filename::Str(StrOwner::new(Str::from(s)))),
+        None,
+    )
+}
+
+pub(super) fn errno_with_filenames(
+    error: io::Error,
+    first: Option<super::exceptions::Filename>,
+    second: Option<super::exceptions::Filename>,
+) -> Error {
+    with_errno_description(error, |kind, errno, description| {
+        Error::from_errno(kind, errno, description, first, second)
+    })
+}
+
+fn with_errno_description(error: io::Error, build: impl FnOnce(Kind, i32, &str) -> Error) -> Error {
     let Some(errno) = error.raw_os_error() else {
         return os_error(error);
     };
@@ -236,68 +434,113 @@ pub(super) fn errno_error(error: io::Error) -> Error {
     }
     // SAFETY: the successful call initialized a terminated string.
     let description = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
-    Error::new(
-        os_error_kind(error.kind()),
-        format!("[Errno {errno}] {description}"),
-    )
+    let kind = match errno {
+        libc::EINPROGRESS | libc::EALREADY => Kind::BlockingIOError,
+        libc::ESHUTDOWN => Kind::BrokenPipeError,
+        _ => os_error_kind(error.kind()),
+    };
+    build(kind, errno, &description)
 }
 
 /// Opens a UTF-8 text stream in read, write, append, or exclusive-create mode.
 /// Returns an owned Object or null with a pending error.
 ///
 /// # Safety
-/// `path` must be a rooted string. `mode` must be compiler-validated as 0 through 3.
+/// `path` must point into a live StrOwner. Mode 4 reads universal newlines without translating them.
 /// Like other fallible entries, pending state must be clear on entry.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_text_open(path: *const Str, mode: u32) -> *const Object {
-    // SAFETY: the caller roots the immutable path throughout opening the stream.
-    finish(
-        open(unsafe { &*path }, mode, false, false),
-        std::ptr::null(),
-    )
+    // SAFETY: the caller keeps this string owner live throughout the call.
+    let path = unsafe { StrOwner::acquire_word(path as usize) };
+    finish(open(&path, mode, false, false), std::ptr::null())
 }
 
 /// Opens an immutable-byte stream in rb, wb, ab, or xb mode (0 through 3).
 ///
 /// # Safety
-/// Root the UTF-8 path; the compiler validates the mode and clear pending state.
+/// The path must point into a live StrOwner; the compiler validates the mode and clear pending state.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_binary_open(path: *const Str, mode: u32) -> *const Object {
-    // SAFETY: the caller roots the immutable path throughout opening the stream.
-    finish(open(unsafe { &*path }, mode, true, false), std::ptr::null())
+    // SAFETY: the caller keeps this string owner live throughout the call.
+    let path = unsafe { StrOwner::acquire_word(path as usize) };
+    finish(open(&path, mode, true, false), std::ptr::null())
 }
 
 /// Opens a gzip source without consuming a header until the first read.
 ///
 /// # Safety
-/// Root the UTF-8 path. The compiler passes 0 for text or 1 for binary.
+/// The path must point into a live StrOwner. The compiler passes 0 for text or 1 for binary.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_gzip_open(path: *const Str, binary: u32) -> *const Object {
     if binary > 1 {
         fail("SystemError", "invalid gzip mode");
     }
-    // SAFETY: the caller roots the immutable path throughout the open.
-    finish(
-        open(unsafe { &*path }, 0, binary == 1, true),
-        std::ptr::null(),
-    )
+    // SAFETY: the caller keeps this string owner live throughout the call.
+    let path = unsafe { StrOwner::acquire_word(path as usize) };
+    finish(open(&path, 0, binary == 1, true), std::ptr::null())
 }
 
 /// Shares descriptor ownership and buffering while preserving text/binary access errors.
-fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*const Object> {
+pub(super) fn open(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Result<*const Object> {
     let state = open_state(path, mode, binary, gzip)?;
-    Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
-        Storage::File(Box::new(state)),
-    )))))
+    Ok(crate::ObjectOwner::into_raw(crate::ObjectOwner::new(
+        Object(StorageCell::new(Storage::File(Box::new(state)))),
+    )))
 }
 
-fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
+fn open_state(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
+    let (file, metadata) = open_file_with(path, mode, |error| {
+        errno_with_filenames(
+            error,
+            Some(super::exceptions::Filename::Str(path.clone())),
+            None,
+        )
+    })?;
+    // CPython 3.14 bounds the device's preferred block size for buffered I/O.
+    let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
+    let fd = file.as_raw_fd();
+    let stream = match mode {
+        0 if gzip => Stream::UnreadGzip { file, capacity },
+        0 | 4 => {
+            let mut input = Input::new(file, gzip, binary, capacity);
+            if mode == 4 {
+                input.preserve_newlines();
+            }
+            Stream::Read(input)
+        }
+        _ => Stream::Write(Output::new(file, capacity, binary)),
+    };
+    Ok(FileState {
+        fd: Some(fd),
+        raw: false,
+        stream: Some(stream),
+        name: Some(path.clone()),
+        kind: match (binary, mode) {
+            (false, _) => FileKind::Text,
+            (true, 0) if gzip => FileKind::GzipBinaryRead,
+            (true, 0) => FileKind::BinaryRead,
+            (true, _) => FileKind::BinaryWrite,
+        },
+    })
+}
+
+/// Open a raw descriptor with the same pathname and directory errors as Python open().
+pub(super) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
+    open_file_with(path, mode, |error| errno_with_filename(error, Some(path)))
+}
+
+/// Use the caller's filename when opening the path or rejecting a directory.
+fn open_file_with(
+    path: &str,
+    mode: u32,
+    path_error: impl Fn(io::Error) -> Error,
+) -> Result<(std::fs::File, std::fs::Metadata)> {
     super::super::initialize_io();
     if path.contains('\0') {
         return Err(Error::new(Kind::ValueError, "embedded null byte"));
     }
-    let file = match mode {
-        0 => OpenOptions::new().read(true).open(path),
+    let mut file = match mode {
+        0 | 4 => OpenOptions::new().read(true).open(path),
         1 => OpenOptions::new()
             .write(true)
             .create(true)
@@ -307,26 +550,20 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
         3 => OpenOptions::new().write(true).create_new(true).open(path),
         _ => fail("SystemError", "invalid file mode"),
     }
-    .map_err(os_error)?;
-    let metadata = file.metadata().map_err(os_error)?;
+    .map_err(&path_error)?;
+    let metadata = file.metadata().map_err(errno_error)?;
     if metadata.is_dir() {
-        return Err(Error::new(Kind::IsADirectoryError, "is a directory"));
+        return Err(path_error(io::Error::from_raw_os_error(libc::EISDIR)));
     }
-    // CPython 3.14 bounds the device's preferred block size for buffered I/O.
-    let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
-    let stream = match mode {
-        0 => Stream::Read(Input::new(file, gzip, binary, capacity)),
-        _ => Stream::Write(Output::new(file, capacity, binary)),
-    };
-    Ok(FileState {
-        stream: Some(stream),
-        kind: match (binary, mode) {
-            (false, _) => FileKind::Text,
-            (true, 0) if gzip => FileKind::GzipBinaryRead,
-            (true, 0) => FileKind::BinaryRead,
-            (true, _) => FileKind::BinaryWrite,
-        },
-    })
+    // FileIO starts append streams at EOF before the first write. Pipes may
+    // still be opened for append even though they have no file position.
+    if mode == 2
+        && let Err(error) = file.seek(SeekFrom::End(0))
+        && error.raw_os_error() != Some(libc::ESPIPE)
+    {
+        return Err(errno_error(error));
+    }
+    Ok((file, metadata))
 }
 
 /// A close failure takes precedence over a read or write failure, matching
@@ -337,18 +574,36 @@ fn with_path_file<T>(
     binary: bool,
     operation: impl FnOnce(&mut FileState) -> Result<T>,
 ) -> Result<T> {
-    let mut state = open_state(path, mode, binary, false)?;
+    let path = StrOwner::new(Str::from(path));
+    let mut state = open_state(&path, mode, binary, false)?;
     let result = operation(&mut state);
     let closed = state.stream.take().unwrap().close().map_err(os_error);
     closed.and(result)
 }
 
 pub(super) fn read_path_text(path: &str) -> Result<Str> {
-    with_path_file(path, 0, false, FileState::read)
+    path_text::read(path, None, None, None)
 }
 
 pub(super) fn read_path_bytes(path: &str) -> Result<Bytes> {
-    with_path_file(path, 0, true, |state| state.input()?.read_bytes(None))
+    let path = super::text::try_owned_string(path)?;
+    let (mut file, metadata) = open_file(&path, 0)?;
+    let mut bytes = Vec::new();
+    // Path.read_bytes owns the descriptor until close and consumes it to EOF.
+    // A regular file can fill the result directly without allocating a second
+    // buffered-reader window (128 KiB even for an empty input).
+    let result = if metadata.is_file() {
+        file.read_to_end(&mut bytes)
+            .map(|_| bytes)
+            .map_err(os_error)
+    } else {
+        let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
+        let mut input = Input::new(file, false, true, capacity);
+        let result = input.read_bytes(None);
+        file = input.into_file();
+        result
+    };
+    close_file(file).map_err(os_error).and(result)
 }
 
 pub(super) fn write_path_bytes(path: &str, bytes: &[u8]) -> Result<usize> {
@@ -373,10 +628,10 @@ pub unsafe extern "C" fn imre_binary_read(value: *const Object) -> *const Bytes 
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.file_mut().input()?.read_bytes(None))
+            .with_mut(|storage| storage.file_mut().read_bytes(None))
     };
     finish(
-        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        result.map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes))),
         std::ptr::null(),
     )
 }
@@ -395,7 +650,7 @@ pub unsafe extern "C" fn imre_binary_read_size(value: *const Object, size: usize
             .with_mut(|storage| storage.file_mut().read_size(&size))
     };
     finish(
-        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        result.map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes))),
         std::ptr::null(),
     )
 }
@@ -410,10 +665,10 @@ pub unsafe extern "C" fn imre_binary_readline(value: *const Object) -> *const By
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.file_mut().input()?.binary_line())
+            .with_mut(|storage| storage.file_mut().read_line_bytes())
     };
     finish(
-        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        result.map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes))),
         std::ptr::null(),
     )
 }
@@ -464,7 +719,7 @@ pub unsafe extern "C" fn imre_text_read(value: *const Object) -> *const Str {
             .with_mut(|storage| storage.file_mut().read())
     };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(text))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(text))),
         std::ptr::null(),
     )
 }
@@ -479,10 +734,10 @@ pub unsafe extern "C" fn imre_text_readline(value: *const Object) -> *const Str 
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.file_mut().input()?.text_line())
+            .with_mut(|storage| storage.file_mut().readline())
     };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(text))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(text))),
         std::ptr::null(),
     )
 }
@@ -540,7 +795,10 @@ pub unsafe extern "C" fn imre_text_write_parts(
     count: usize,
 ) -> u32 {
     // SAFETY: all fragments remain rooted and immutable through assembly.
-    let text = unsafe { concat_parts(parts, count) };
+    let text = match unsafe { concat_parts(parts, count) } {
+        Ok(text) => text,
+        Err(error) => return error.returning(0),
+    };
     // SAFETY: the file remains rooted; no callback or storage reference escapes.
     // Assembly precedes even the stream-state check, preserving evaluation order.
     let result = unsafe {
@@ -565,6 +823,27 @@ pub unsafe extern "C" fn imre_text_flush(value: *const Object) -> u32 {
     finish(result.map(|()| 1), 0)
 }
 
+/// # Safety
+/// The caller roots the binary file. Only the immutable class flag is read.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_file_is_raw(value: *const Object) -> u32 {
+    // SAFETY: no language callbacks or file operations are needed for isinstance.
+    unsafe {
+        object(value)
+            .0
+            .with(|storage| u32::from(storage.file().raw))
+    }
+}
+
+/// # Safety
+/// The file stays rooted throughout this descriptor query.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_file_fileno(value: *const Object) -> usize {
+    // SAFETY: only a copied integer escapes the exact file storage.
+    let fd = unsafe { object(value).0.with(|s| s.file().fileno()) };
+    finish(fd.map(|fd| Int::from_usize(fd as usize).into_raw()), 0)
+}
+
 /// Detaches the stream before closing, so all aliases become closed even on error.
 ///
 /// # Safety
@@ -572,14 +851,15 @@ pub unsafe extern "C" fn imre_text_flush(value: *const Object) -> u32 {
 /// (including repeated close), or 0 with a pending error after releasing the fd.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_text_close(value: *const Object) -> u32 {
+    // SAFETY: the caller roots the exact file.
+    finish(close_stream(unsafe { object(value) }).map(|()| 1), 0)
+}
+
+/// Detach the descriptor before closing so all existing stream aliases observe closure.
+pub(super) fn close_stream(file: &Object) -> Result<()> {
     // SAFETY: only an independent stream owner escapes the nonreentrant access.
-    let stream = unsafe {
-        object(value)
-            .0
-            .with_mut(|storage| storage.file_mut().stream.take())
-    };
-    let result = stream.map_or(Ok(()), Stream::close).map_err(os_error);
-    finish(result.map(|()| 1), 0)
+    let stream = unsafe { file.0.with_mut(|storage| storage.file_mut().stream.take()) };
+    stream.map_or(Ok(()), Stream::close).map_err(os_error)
 }
 
 /// # Safety
@@ -605,11 +885,75 @@ mod tests {
 
     use super::super::exceptions::{
         imre_error_pending, imre_error_set, imre_error_take, imre_exception_matches,
-        imre_exception_new,
+        imre_exception_message, imre_exception_new,
     };
     use super::super::{imre_object_release, imre_seq_append, imre_seq_new};
 
+    #[test]
+    fn buffer_allocation_failure_is_distinct_from_os_enomem() {
+        Error::memory_error().raise();
+        let empty = imre_error_take();
+        os_error(io::Error::from(io::ErrorKind::OutOfMemory)).raise();
+        let error = imre_error_take();
+        // A failed reservation must use the preallocated, argument-free exception.
+        assert_eq!(error, empty);
+        // SAFETY: each take transferred one owner of the same exception.
+        unsafe {
+            imre_object_release(error);
+            imre_object_release(empty);
+        }
+        os_error(io::Error::from_raw_os_error(libc::ENOMEM)).raise();
+        take_error(Kind::OSError);
+    }
+
     struct Directory(PathBuf);
+
+    #[test]
+    fn unlink_uses_a_directory_descriptor_and_removes_only_the_named_link() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let directory = Directory::new();
+        let handle = File::open(&directory.0).unwrap();
+        let target = directory.0.join("preserved");
+        std::fs::write(&target, b"untouched").unwrap();
+        let fd = Int::small(i64::from(handle.as_raw_fd())).unwrap();
+        for name in ["é-link".as_bytes().to_vec(), b"raw-\xff-link".to_vec()] {
+            let link = directory.0.join(OsStr::from_bytes(&name));
+            let setup = std::os::unix::fs::symlink(&target, &link);
+            // APFS rejects non-UTF-8 directory entries with EILSEQ at creation.
+            // Compare unlink's error with the same filesystem rather than
+            // assuming that looking up such an entry also returns EILSEQ.
+            let expected_errno = setup.err().map(|error| {
+                assert_eq!(name, b"raw-\xff-link");
+                assert_eq!(error.raw_os_error(), Some(libc::EILSEQ));
+                std::fs::remove_file(&link)
+                    .unwrap_err()
+                    .raw_os_error()
+                    .unwrap()
+            });
+            // SAFETY: the bytes and descriptor stay rooted across unlinkat.
+            unsafe {
+                super::super::os::imre_os_unlink(std::ptr::from_ref(&name).cast(), 1, fd.0, 0)
+            };
+            if let Some(errno) = expected_errno {
+                assert_eq!(imre_error_pending(), 1);
+                // SAFETY: take transfers the exception owner; message returns its own string.
+                let message = unsafe {
+                    let error = crate::ObjectOwner::from_raw(imre_error_take());
+                    StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)))
+                };
+                assert!(message.starts_with(&format!("[Errno {errno}] ")));
+                assert!(message.ends_with(": b'raw-\\xff-link'"));
+            } else {
+                assert_eq!(imre_error_pending(), 0);
+                assert_eq!(
+                    link.symlink_metadata().unwrap_err().kind(),
+                    io::ErrorKind::NotFound
+                );
+            }
+        }
+        assert_eq!(std::fs::read(target).unwrap(), b"untouched");
+    }
 
     impl Directory {
         fn new() -> Self {
@@ -630,13 +974,17 @@ mod tests {
         }
     }
 
-    fn open(path: &str, mode: u32) -> Rc<Object> {
-        let path = Str::new(path);
-        // SAFETY: the local string is rooted; this helper requires a successful open.
-        let result = unsafe { imre_text_open(&path, mode) };
+    fn path_name(path: &std::path::Path) -> StrOwner {
+        StrOwner::new(Str::from(path.to_str().unwrap()))
+    }
+
+    fn open(path: &str, mode: u32) -> crate::ObjectOwner {
+        let path = StrOwner::new(Str::new(path));
+        // SAFETY: the path owner stays live; this helper requires a successful open.
+        let result = unsafe { imre_text_open(StrOwner::as_ptr(&path), mode) };
         assert!(!result.is_null());
         // SAFETY: open transfers this one owned reference to the Rc.
-        unsafe { Rc::from_raw(result) }
+        unsafe { crate::ObjectOwner::from_raw(result) }
     }
 
     fn take_error(kind: Kind) {
@@ -650,7 +998,7 @@ mod tests {
         assert_eq!(imre_error_pending(), 0);
     }
 
-    fn broken_pipe() -> Rc<Object> {
+    fn broken_pipe() -> crate::ObjectOwner {
         use std::net::Shutdown;
         use std::os::fd::OwnedFd;
         use std::os::unix::net::UnixStream;
@@ -660,10 +1008,13 @@ mod tests {
         // down the writer guarantees EPIPE even while the child holds the peer.
         writer.shutdown(Shutdown::Write).unwrap();
         let file = File::from(OwnedFd::from(writer));
-        Rc::new(Object(StorageCell::new(Storage::File(Box::new(
+        crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(Box::new(
             FileState {
+                fd: Some(file.as_raw_fd()),
+                raw: false,
                 stream: Some(Stream::Write(Output::new(file, 8192, false))),
                 kind: FileKind::Text,
+                name: None,
             },
         )))))
     }
@@ -693,9 +1044,7 @@ mod tests {
                 [first.as_bytes(), second.as_bytes()].concat()
             };
             std::fs::write(&path, bytes).unwrap();
-            let mut state = open_state(path.to_str().unwrap(), 0, false, gzip)
-                .ok()
-                .unwrap();
+            let mut state = open_state(&path_name(&path), 0, false, gzip).ok().unwrap();
             let input = state.input().ok().unwrap();
             assert_eq!(
                 input.text_line().ok().unwrap().as_str(),
@@ -712,15 +1061,38 @@ mod tests {
         bytes.resize(8191, b'a');
         bytes.extend(b"\xf0\x9f\xff");
         std::fs::write(&path, bytes).unwrap();
-        let mut state = open_state(path.to_str().unwrap(), 0, false, false)
-            .ok()
-            .unwrap();
+        let mut state = open_state(&path_name(&path), 0, false, false).ok().unwrap();
         let input = state.input().ok().unwrap();
         assert_eq!(input.text_line().ok().unwrap().as_str(), "first\n");
         for _ in 0..2 {
             input.text_line().unwrap_err().raise();
             take_error(Kind::UnicodeDecodeError);
         }
+    }
+
+    #[test]
+    fn unread_gzip_keeps_the_descriptor_without_allocating_read_buffers() {
+        let directory = Directory::new();
+        let path = directory.0.join("data.gz");
+        std::fs::write(&path, member(b"original")).unwrap();
+        let mut state = open_state(&path_name(&path), 0, true, true).ok().unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, member(b"replacement")).unwrap();
+
+        state.flush().ok().unwrap();
+        assert_eq!(state.read_into(&mut []).ok().unwrap(), 0);
+        assert!(
+            state
+                .read_size(&Int::from_usize(0))
+                .ok()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(matches!(state.stream, Some(Stream::UnreadGzip { .. })));
+        let mut prefix = [0; 3];
+        assert_eq!(state.read_into(&mut prefix).ok().unwrap(), 3);
+        assert_eq!(&prefix, b"ori");
+        assert_eq!(state.read_size(&Int::from_usize(8)).ok().unwrap(), b"ginal");
     }
 
     #[test]
@@ -737,9 +1109,7 @@ mod tests {
         .concat();
         gzip.splice(10..10, metadata);
         std::fs::write(&path, &gzip).unwrap();
-        let mut state = open_state(path.to_str().unwrap(), 0, true, true)
-            .ok()
-            .unwrap();
+        let mut state = open_state(&path_name(&path), 0, true, true).ok().unwrap();
         let input = state.input().ok().unwrap();
         assert_eq!(input.read_bytes(Some(2)).ok().unwrap(), b"ab");
         assert_eq!(input.binary_line().ok().unwrap(), b"c\n");
@@ -752,9 +1122,7 @@ mod tests {
         let end = gzip.len();
         gzip[end - 8] ^= 1;
         std::fs::write(&path, &gzip).unwrap();
-        let mut state = open_state(path.to_str().unwrap(), 0, true, true)
-            .ok()
-            .unwrap();
+        let mut state = open_state(&path_name(&path), 0, true, true).ok().unwrap();
         let input = state.input().ok().unwrap();
         assert_eq!(input.read_bytes(Some(7)).ok().unwrap(), b"abc\ndef");
         input.read_bytes(None).unwrap_err().raise();
@@ -776,9 +1144,7 @@ mod tests {
             ),
         ] {
             std::fs::write(&path, bytes).unwrap();
-            let mut state = open_state(path.to_str().unwrap(), 0, true, true)
-                .ok()
-                .unwrap();
+            let mut state = open_state(&path_name(&path), 0, true, true).ok().unwrap();
             let input = state.input().ok().unwrap();
             assert!(input.read_bytes(Some(0)).ok().unwrap().is_empty());
             input.read_bytes(None).unwrap_err().raise();
@@ -794,9 +1160,7 @@ mod tests {
         invalid.resize(invalid.len() + 9000, b'a');
         invalid.push(7);
         std::fs::write(&path, invalid).unwrap();
-        let mut state = open_state(path.to_str().unwrap(), 0, true, true)
-            .ok()
-            .unwrap();
+        let mut state = open_state(&path_name(&path), 0, true, true).ok().unwrap();
         state
             .input()
             .ok()
@@ -816,31 +1180,37 @@ mod tests {
         let alias = file.clone();
         // SAFETY: all file and string handles remain rooted; reads transfer ownership.
         unsafe {
-            assert_eq!(imre_text_enter(Rc::as_ptr(&file)), 1);
-            let text = Rc::from_raw(imre_text_read(Rc::as_ptr(&file)));
+            assert_eq!(imre_text_enter(crate::ObjectOwner::as_ptr(&file)), 1);
+            let text = StrOwner::from_raw(imre_text_read(crate::ObjectOwner::as_ptr(&file)));
             assert_eq!(text.as_str(), "a\nβ\nc\n\0tail");
-            assert_eq!(Rc::from_raw(imre_text_read(Rc::as_ptr(&file))).as_str(), "");
-            assert_eq!(imre_text_flush(Rc::as_ptr(&file)), 1);
-            assert_eq!(imre_text_write(Rc::as_ptr(&file), &Str::new("x")), 0);
+            assert_eq!(
+                StrOwner::from_raw(imre_text_read(crate::ObjectOwner::as_ptr(&file))).as_str(),
+                ""
+            );
+            assert_eq!(imre_text_flush(crate::ObjectOwner::as_ptr(&file)), 1);
+            assert_eq!(
+                imre_text_write(crate::ObjectOwner::as_ptr(&file), &Str::new("x")),
+                0
+            );
             let error = imre_error_take();
             for kind in [Kind::UnsupportedOperation, Kind::OSError, Kind::ValueError] {
                 assert_eq!(imre_exception_matches(error, kind as u32), 1);
             }
             imre_object_release(error);
-            assert_eq!(imre_text_close(Rc::as_ptr(&file)), 1);
+            assert_eq!(imre_text_close(crate::ObjectOwner::as_ptr(&file)), 1);
             drop(file);
-            assert_eq!(imre_text_closed(Rc::as_ptr(&alias)), 1);
-            assert_eq!(imre_text_enter(Rc::as_ptr(&alias)), 0);
+            assert_eq!(imre_text_closed(crate::ObjectOwner::as_ptr(&alias)), 1);
+            assert_eq!(imre_text_enter(crate::ObjectOwner::as_ptr(&alias)), 0);
             take_error(Kind::ValueError);
-            assert!(imre_text_read(Rc::as_ptr(&alias)).is_null());
+            assert!(imre_text_read(crate::ObjectOwner::as_ptr(&alias)).is_null());
             take_error(Kind::ValueError);
-            assert_eq!(imre_text_close(Rc::as_ptr(&alias)), 1);
+            assert_eq!(imre_text_close(crate::ObjectOwner::as_ptr(&alias)), 1);
         }
         std::fs::write(&path, [b'a', 0xf0, 0x9f]).unwrap();
         let invalid = open(path.to_str().unwrap(), 0);
         // SAFETY: the file remains rooted; the failed read transfers no string.
         unsafe {
-            assert!(imre_text_read(Rc::as_ptr(&invalid)).is_null());
+            assert!(imre_text_read(crate::ObjectOwner::as_ptr(&invalid)).is_null());
             let error = imre_error_take();
             for kind in [
                 Kind::UnicodeDecodeError,
@@ -851,7 +1221,7 @@ mod tests {
             }
             imre_object_release(error);
             assert_eq!(
-                Rc::from_raw(imre_text_read(Rc::as_ptr(&invalid))).as_str(),
+                StrOwner::from_raw(imre_text_read(crate::ObjectOwner::as_ptr(&invalid))).as_str(),
                 ""
             );
         }
@@ -862,18 +1232,25 @@ mod tests {
         let directory = Directory::new();
         let path = directory.0.join("output");
         let file = open(path.to_str().unwrap(), 1);
-        let weak = Rc::downgrade(&file);
+        let weak = crate::ObjectOwner::downgrade(&file);
         let values = imre_seq_new(5);
         // SAFETY: all values are rooted with their declared kinds and form no cycle.
         unsafe {
-            assert_eq!(imre_text_write(Rc::as_ptr(&file), &Str::new("")), 1);
             assert_eq!(
-                Int(imre_text_write(Rc::as_ptr(&file), &Str::new("é🦀\r\n"))).as_small(),
+                imre_text_write(crate::ObjectOwner::as_ptr(&file), &Str::new("")),
+                1
+            );
+            assert_eq!(
+                Int(imre_text_write(
+                    crate::ObjectOwner::as_ptr(&file),
+                    &Str::new("é🦀\r\n")
+                ))
+                .as_small(),
                 Some(4)
             );
-            assert!(imre_text_read(Rc::as_ptr(&file)).is_null());
+            assert!(imre_text_read(crate::ObjectOwner::as_ptr(&file)).is_null());
             take_error(Kind::UnsupportedOperation);
-            imre_seq_append(values, Rc::as_ptr(&file) as usize, 5);
+            imre_seq_append(values, crate::ObjectOwner::as_ptr(&file) as usize, 5);
             drop(file);
             assert!(weak.upgrade().is_some());
             imre_object_release(values);
@@ -889,11 +1266,11 @@ mod tests {
         let path = directory.0.join("output");
         let file = open(path.to_str().unwrap(), 1);
         let alias = file.clone();
-        let text = Rc::new(Str::new("partsé\0"));
+        let text = StrOwner::new(Str::new("partsé\0"));
         let ending = "🦀\n";
         let parts = [
             StringPart {
-                data: Rc::as_ptr(&text).cast(),
+                data: StrOwner::as_ptr(&text).cast(),
                 length: usize::MAX,
             },
             StringPart {
@@ -904,24 +1281,34 @@ mod tests {
         // SAFETY: file aliases and temporary immutable strings remain rooted for
         // each operation, and every pending failure is consumed before recovery.
         unsafe {
-            assert_eq!(imre_text_write_discard(Rc::as_ptr(&file), &Str::new("")), 1);
             assert_eq!(
-                imre_text_write_discard(Rc::as_ptr(&file), &Str::new("é\0🦀\n")),
+                imre_text_write_discard(crate::ObjectOwner::as_ptr(&file), &Str::new("")),
                 1
             );
             assert_eq!(
-                imre_text_write_parts(Rc::as_ptr(&file), std::ptr::null(), 0),
+                imre_text_write_discard(crate::ObjectOwner::as_ptr(&file), &Str::new("é\0🦀\n")),
                 1
             );
             assert_eq!(
-                imre_text_write_parts(Rc::as_ptr(&file), parts.as_ptr(), parts.len()),
+                imre_text_write_parts(crate::ObjectOwner::as_ptr(&file), std::ptr::null(), 0),
                 1
             );
-            assert_eq!(imre_text_close(Rc::as_ptr(&alias)), 1);
-            assert_eq!(imre_text_write_discard(Rc::as_ptr(&file), &Str::new("")), 0);
+            assert_eq!(
+                imre_text_write_parts(
+                    crate::ObjectOwner::as_ptr(&file),
+                    parts.as_ptr(),
+                    parts.len()
+                ),
+                1
+            );
+            assert_eq!(imre_text_close(crate::ObjectOwner::as_ptr(&alias)), 1);
+            assert_eq!(
+                imre_text_write_discard(crate::ObjectOwner::as_ptr(&file), &Str::new("")),
+                0
+            );
             take_error(Kind::ValueError);
             assert_eq!(
-                imre_text_write_parts(Rc::as_ptr(&file), std::ptr::null(), 0),
+                imre_text_write_parts(crate::ObjectOwner::as_ptr(&file), std::ptr::null(), 0),
                 0
             );
             take_error(Kind::ValueError);
@@ -947,30 +1334,40 @@ mod tests {
         // following recovery; a large write reaches the broken pipe immediately.
         unsafe {
             assert_eq!(
-                imre_text_write_discard(Rc::as_ptr(&readonly), &Str::new("")),
+                imre_text_write_discard(crate::ObjectOwner::as_ptr(&readonly), &Str::new("")),
                 0
             );
             take_error(Kind::UnsupportedOperation);
             assert_eq!(
-                imre_text_write_parts(Rc::as_ptr(&readonly), std::ptr::null(), 0),
+                imre_text_write_parts(crate::ObjectOwner::as_ptr(&readonly), std::ptr::null(), 0),
                 0
             );
             take_error(Kind::UnsupportedOperation);
-            assert_eq!(imre_text_write_discard(Rc::as_ptr(&full), &unbuffered), 0);
-            take_error(Kind::OSError);
             assert_eq!(
-                imre_text_write_parts(Rc::as_ptr(&full), large_parts.as_ptr(), large_parts.len()),
+                imre_text_write_discard(crate::ObjectOwner::as_ptr(&full), &unbuffered),
                 0
             );
             take_error(Kind::OSError);
-            assert_eq!(imre_text_write_discard(Rc::as_ptr(&full), &Str::new("")), 1);
             assert_eq!(
-                imre_text_write_parts(Rc::as_ptr(&full), std::ptr::null(), 0),
+                imre_text_write_parts(
+                    crate::ObjectOwner::as_ptr(&full),
+                    large_parts.as_ptr(),
+                    large_parts.len()
+                ),
+                0
+            );
+            take_error(Kind::OSError);
+            assert_eq!(
+                imre_text_write_discard(crate::ObjectOwner::as_ptr(&full), &Str::new("")),
+                1
+            );
+            assert_eq!(
+                imre_text_write_parts(crate::ObjectOwner::as_ptr(&full), std::ptr::null(), 0),
                 1
             );
             // One assembled write bypasses the buffer on this failure. Fragmented
             // writes would leave the first 4096 bytes buffered and make close fail.
-            assert_eq!(imre_text_close(Rc::as_ptr(&full)), 1);
+            assert_eq!(imre_text_close(crate::ObjectOwner::as_ptr(&full)), 1);
         }
         assert_eq!(imre_error_pending(), 0);
     }
@@ -980,14 +1377,20 @@ mod tests {
         let file = broken_pipe();
         // SAFETY: the file and strings stay rooted; each failure is consumed before reuse.
         unsafe {
-            assert_ne!(imre_text_write(Rc::as_ptr(&file), &Str::new("buffered")), 0);
-            assert_eq!(imre_text_flush(Rc::as_ptr(&file)), 0);
+            assert_ne!(
+                imre_text_write(crate::ObjectOwner::as_ptr(&file), &Str::new("buffered")),
+                0
+            );
+            assert_eq!(imre_text_flush(crate::ObjectOwner::as_ptr(&file)), 0);
             take_error(Kind::OSError);
-            assert_eq!(imre_text_close(Rc::as_ptr(&file)), 0);
-            assert_eq!(imre_text_closed(Rc::as_ptr(&file)), 1);
+            assert_eq!(imre_text_close(crate::ObjectOwner::as_ptr(&file)), 0);
+            assert_eq!(imre_text_closed(crate::ObjectOwner::as_ptr(&file)), 1);
             take_error(Kind::OSError);
-            assert_eq!(imre_text_close(Rc::as_ptr(&file)), 1);
-            assert_eq!(imre_text_write(Rc::as_ptr(&file), &Str::new("")), 0);
+            assert_eq!(imre_text_close(crate::ObjectOwner::as_ptr(&file)), 1);
+            assert_eq!(
+                imre_text_write(crate::ObjectOwner::as_ptr(&file), &Str::new("")),
+                0
+            );
             take_error(Kind::ValueError);
         }
 
@@ -996,7 +1399,7 @@ mod tests {
         // exception reference, and both references are released exactly once.
         unsafe {
             assert_ne!(
-                imre_text_write(Rc::as_ptr(&dropped), &Str::new("buffered")),
+                imre_text_write(crate::ObjectOwner::as_ptr(&dropped), &Str::new("buffered")),
                 0
             );
             let error = imre_exception_new(Kind::RuntimeError as u32, std::ptr::null());
@@ -1012,12 +1415,57 @@ mod tests {
         // SAFETY: the file and string remain rooted through the buffered write.
         unsafe {
             assert_ne!(
-                imre_text_write(Rc::as_ptr(&ignored_failure), &Str::new("buffered")),
+                imre_text_write(
+                    crate::ObjectOwner::as_ptr(&ignored_failure),
+                    &Str::new("buffered")
+                ),
                 0
             );
         }
         drop(ignored_failure);
         assert_eq!(imre_error_pending(), 0);
+    }
+
+    #[test]
+    fn append_open_positions_existing_files_and_accepts_pipes() {
+        use std::ffi::CString;
+        use std::io::Read;
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let directory = Directory::new();
+        let path = directory.0.join("existing");
+        std::fs::write(&path, b"before").unwrap();
+        let Ok((mut writer, _)) = open_file(
+            &StrOwner::try_new(Str::new(path.to_str().unwrap())).unwrap(),
+            2,
+        ) else {
+            panic!("could not open the existing file for append");
+        };
+        assert_eq!(writer.stream_position().unwrap(), 6);
+        writer.seek(SeekFrom::Start(0)).unwrap();
+        writer.write_all(b"!").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"before!");
+
+        let fifo = directory.0.join("fifo");
+        let name = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        // SAFETY: the terminated path remains live through mkfifo.
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let mut reader = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&fifo)
+            .unwrap();
+        let Ok((mut writer, _)) = open_file(
+            &StrOwner::try_new(Str::new(fifo.to_str().unwrap())).unwrap(),
+            2,
+        ) else {
+            panic!("could not open the pipe for append");
+        };
+        writer.write_all(b"x").unwrap();
+        let mut byte = [0];
+        reader.read_exact(&mut byte).unwrap();
+        assert_eq!(&byte, b"x");
     }
 
     #[test]
@@ -1040,10 +1488,15 @@ mod tests {
             ),
             ("nul\0path".to_owned(), Kind::ValueError),
         ] {
-            // SAFETY: the temporary path remains rooted for this failed call.
-            assert!(unsafe { imre_text_open(&Str::from(path), 0) }.is_null());
+            let path = StrOwner::new(Str::from(path));
+            // SAFETY: the path owner stays live throughout the failed call.
+            assert!(unsafe { imre_text_open(StrOwner::as_ptr(&path), 0) }.is_null());
             take_error(kind);
         }
+        os_error(io::ErrorKind::OutOfMemory.into()).raise();
+        take_error(Kind::MemoryError);
+        os_error(io::Error::from_raw_os_error(libc::ENOMEM)).raise();
+        take_error(Kind::OSError);
         let denied = os_error(io::Error::from(io::ErrorKind::PermissionDenied));
         denied.raise();
         take_error(Kind::PermissionError);

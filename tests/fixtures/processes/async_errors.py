@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 
 
 class ToolError(Exception):
@@ -11,6 +12,10 @@ class RuleError(ToolError):
 
 async def check() -> None:
     raise RuleError("bad output")
+
+
+async def checked_bytes() -> None:
+    subprocess.run(["/bin/sh", "-c", "printf async; exit 1"], stdout=subprocess.PIPE, check=True)
 
 
 async def compare() -> None:
@@ -31,3 +36,10 @@ except ToolError as error:
     assert parent is not None
     print(str(parent))
     print(str(parent.exceptions[0]))
+
+try:
+    subprocess.run(["/bin/sh", "-c", "exit 0"], capture_output=True, text=True, check=True)
+    asyncio.run(checked_bytes())
+except subprocess.CalledProcessError as error:
+    print(repr(error.stdout))
+    print(repr(error.stderr))
