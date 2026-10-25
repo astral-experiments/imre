@@ -58,6 +58,7 @@ mod module_values;
 mod namedtuples;
 mod namespaces;
 mod native_generators;
+mod ord;
 mod os;
 mod partials;
 mod paths;
@@ -7385,6 +7386,10 @@ impl<'a> Checker<'a> {
                 ));
             }
             _ => {}
+        }
+        if name.id == "ord" && !self.names.contains_key("ord") && self.resolve(&call.func).is_none()
+        {
+            return self.ordinal_call(call);
         }
         self.reject_builtin_keywords(call)?;
         if name.id == "bool" {

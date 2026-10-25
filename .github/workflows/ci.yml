@@ -204,6 +204,10 @@ jobs:
         env:
           PYTHONPATH: .cpython-stdlib-reference/Lib
         run: python3 tests/text_translate_upstream.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+      - name: Compare builtin ord with CPython's original character and bytes tests
+        env:
+          PYTHONPATH: .cpython-stdlib-reference/Lib
+        run: python3 tests/ord_upstream.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Run pinned unittest methods against native Imre
         run: |
           python3 benchmarks/cpython_stdlib/test_suite_evidence.py
