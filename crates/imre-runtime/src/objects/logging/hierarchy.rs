@@ -1,7 +1,5 @@
 //! Operations on the immediate children in the process-wide logger registry.
 
-use std::rc::Rc;
-
 use super::{LOGGERS, Object, name};
 use crate::objects::mappings::{imre_set_new, set_add};
 
@@ -24,14 +22,19 @@ pub unsafe extern "C" fn imre_log_children(logger: *const Object) -> *const Obje
     let child_depth = depth(&parent) + 1;
     let result = LOGGERS.with_borrow(|logs| {
         // SAFETY: the constructor returns one independently owned object.
-        let children = unsafe { Rc::from_raw(imre_set_new(5)) };
+        let children = unsafe { crate::ObjectOwner::from_raw(imre_set_new(5)) };
         for (key, entry) in &logs.entries {
             if depth(key) == child_depth && logs.parent_name(key) == Some(parent.as_str()) {
                 // SAFETY: logger handles are identity keys of representation kind 5.
-                unsafe { set_add(Rc::as_ptr(&children), Rc::as_ptr(&entry.handle) as usize) }?;
+                unsafe {
+                    set_add(
+                        crate::ObjectOwner::as_ptr(&children),
+                        crate::ObjectOwner::as_ptr(&entry.handle) as usize,
+                    )
+                }?;
             }
         }
-        Ok(Rc::into_raw(children))
+        Ok(crate::ObjectOwner::into_raw(children))
     });
     crate::finish(result, std::ptr::null())
 }

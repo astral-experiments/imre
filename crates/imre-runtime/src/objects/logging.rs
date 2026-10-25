@@ -1,8 +1,10 @@
 //! Process-local logging state for the native single-threaded runtime.
+use crate::StrOwner;
 mod config;
 mod handler;
 mod hierarchy;
 mod levels;
+pub(super) mod locks;
 pub(super) mod timed;
 
 pub(super) mod formatter;
@@ -10,26 +12,28 @@ pub(super) mod record;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::exceptions::Result;
+use super::mappings::IntKey;
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object};
 
 struct Entry {
-    handle: Rc<Object>,
+    handle: crate::ObjectOwner,
     level: Int,
     creation_order: usize,
+    enabled: HashMap<IntKey, bool>,
 }
 
 impl Entry {
     fn new(name: &str, level: i64, creation_order: usize) -> Self {
         Self {
-            handle: Rc::new(Object(StorageCell::new(Storage::Logger(Rc::new(
-                Str::from(name),
-            ))))),
+            handle: crate::ObjectOwner::new(Object(StorageCell::new(Storage::Logger(
+                StrOwner::new(Str::from(name)),
+            )))),
             level: Int::small(level).unwrap(),
             creation_order,
+            enabled: HashMap::new(),
         }
     }
 }
@@ -46,6 +50,14 @@ impl Registry {
             entries: HashMap::from([("root".into(), Entry::new("root", 30, 0))]),
             format: None,
             datefmt: None,
+        }
+    }
+
+    fn set_level(&mut self, name: &str, value: &Int) {
+        self.entries.get_mut(name).unwrap().level = value.clone();
+        // Manager._clear_cache invalidates every logger, even when the level is unchanged.
+        for entry in self.entries.values_mut() {
+            entry.enabled.clear();
         }
     }
 
@@ -165,31 +177,43 @@ fn timestamp(format: Option<&str>) -> String {
 /// Renders either an emitted timestamp or the time captured earlier by a LogRecord.
 fn format_timestamp(format: Option<&str>, local: &libc::tm, now: std::time::Duration) -> String {
     let custom = format.filter(|value| !value.is_empty());
-    // A trailing sentinel distinguishes an empty expansion from a small buffer.
-    let pattern = format!("{}!", custom.unwrap_or("%Y-%m-%d %H:%M:%S"));
-    let Ok(fmt) = CString::new(pattern) else {
-        return String::new();
-    };
-    let mut buf = vec![0u8; fmt.as_bytes().len().max(64)];
-    loop {
-        // SAFETY: the calendar time and format are valid and the buffer is writable.
-        let len =
-            unsafe { libc::strftime(buf.as_mut_ptr().cast(), buf.len(), fmt.as_ptr(), local) };
-        if len > 0 {
-            let mut text = String::from_utf8_lossy(&buf[..len - 1]).into_owned();
-            if custom.is_none() {
-                text.push_str(&format!(",{:03}", now.subsec_millis()));
+    let mut text = String::new();
+    for (index, part) in custom
+        .unwrap_or("%Y-%m-%d %H:%M:%S")
+        .split('\0')
+        .enumerate()
+    {
+        if index != 0 {
+            text.push('\0');
+        }
+        if part.is_empty() {
+            continue;
+        }
+        // strftime takes a C string. Format each NUL-free segment at the same instant.
+        // The sentinel distinguishes an empty expansion from an undersized buffer.
+        let fmt = CString::new(format!("{part}!")).expect("the segment contains no NUL");
+        let mut buf = vec![0u8; fmt.as_bytes().len().max(64)];
+        loop {
+            // SAFETY: the calendar time and format are valid and the buffer is writable.
+            let len =
+                unsafe { libc::strftime(buf.as_mut_ptr().cast(), buf.len(), fmt.as_ptr(), local) };
+            if len > 0 {
+                text.push_str(&String::from_utf8_lossy(&buf[..len - 1]));
+                break;
             }
-            return text;
+            if buf.len() > fmt.as_bytes().len().saturating_mul(256).max(4096) {
+                return String::new();
+            }
+            buf.resize(buf.len() * 2, 0);
         }
-        if buf.len() > fmt.as_bytes().len().saturating_mul(256).max(4096) {
-            return String::new();
-        }
-        buf.resize(buf.len() * 2, 0);
     }
+    if custom.is_none() {
+        text.push_str(&format!(",{:03}", now.subsec_millis()));
+    }
+    text
 }
 
-unsafe fn name(handle: *const Object) -> Rc<Str> {
+unsafe fn name(handle: *const Object) -> StrOwner {
     // SAFETY: each caller supplies a rooted native Logger; the name acquires its own owner.
     unsafe {
         object(handle).0.with(|storage| match storage {
@@ -208,10 +232,10 @@ pub unsafe extern "C" fn imre_log_get(word: usize) -> *const Object {
     let name = if name.is_empty() { "root" } else { name };
     LOGGERS.with_borrow_mut(|logs| {
         if let Some(entry) = logs.entries.get(name) {
-            return Rc::into_raw(entry.handle.clone());
+            return crate::ObjectOwner::into_raw(entry.handle.clone());
         }
         let entry = Entry::new(name, 0, logs.entries.len());
-        let result = Rc::into_raw(entry.handle.clone());
+        let result = crate::ObjectOwner::into_raw(entry.handle.clone());
         logs.entries.insert(name.into(), entry);
         result
     })
@@ -240,7 +264,8 @@ pub unsafe extern "C" fn imre_log_config(level: usize, fmt: usize, datefmt: usiz
         let datefmt = datefmt.map(ToString::to_string);
         if level != 0 {
             // SAFETY: obtain an independent owner of the supplied integer.
-            logs.entries.get_mut("root").unwrap().level = (*unsafe { Int::borrow(level) }).clone();
+            let level = unsafe { Int::borrow(level) };
+            logs.set_level("root", &level);
         }
         logs.format = Some(format);
         logs.datefmt = datefmt;
@@ -254,13 +279,13 @@ pub unsafe extern "C" fn imre_log_config(level: usize, fmt: usize, datefmt: usiz
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_name(logger: *const Object) -> *const Str {
     // SAFETY: the caller retains the logger while its name acquires an owner.
-    Rc::into_raw(unsafe { name(logger) })
+    StrOwner::into_raw(unsafe { name(logger) })
 }
 
 /// A receiver has already been evaluated and rooted by the caller.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_log_root(_logger: *const Object) -> *const Object {
-    LOGGERS.with_borrow(|logs| Rc::into_raw(logs.entries["root"].handle.clone()))
+    LOGGERS.with_borrow(|logs| crate::ObjectOwner::into_raw(logs.entries["root"].handle.clone()))
 }
 
 /// # Safety
@@ -271,7 +296,7 @@ pub unsafe extern "C" fn imre_log_parent(logger: *const Object) -> usize {
     let name = unsafe { name(logger) };
     LOGGERS.with_borrow(|logs| {
         logs.parent_name(&name).map_or(0, |parent| {
-            Rc::into_raw(logs.entries[parent].handle.clone()) as usize
+            crate::ObjectOwner::into_raw(logs.entries[parent].handle.clone()) as usize
         })
     })
 }
@@ -300,9 +325,7 @@ pub unsafe extern "C" fn imre_log_effective_level(logger: *const Object) -> usiz
 pub unsafe extern "C" fn imre_log_set_level(logger: *const Object, level: usize) {
     // SAFETY: both arguments are rooted by the caller.
     let (name, value) = unsafe { (name(logger), Int::borrow(level)) };
-    LOGGERS.with_borrow_mut(|logs| {
-        logs.entries.get_mut(name.as_str()).unwrap().level = (*value).clone()
-    });
+    LOGGERS.with_borrow_mut(|logs| logs.set_level(&name, &value));
 }
 
 /// # Safety
@@ -311,12 +334,22 @@ pub unsafe extern "C" fn imre_log_set_level(logger: *const Object, level: usize)
 pub unsafe extern "C" fn imre_log_enabled(logger: *const Object, level: usize) -> bool {
     // SAFETY: both arguments are rooted by the caller.
     let (name, value) = unsafe { (name(logger), Int::borrow(level)) };
-    LOGGERS.with_borrow(|logs| {
+    LOGGERS.with_borrow_mut(|logs| {
+        let key = IntKey((*value).clone());
+        if let Some(&enabled) = logs.entries[name.as_str()].enabled.get(&key) {
+            return enabled;
+        }
         let threshold = logs.effective(&name);
-        match (value.as_small(), threshold.as_small()) {
+        let enabled = match (value.as_small(), threshold.as_small()) {
             (Some(level), Some(threshold)) => level > 0 && level >= threshold,
             _ => value.big().sign() == num_bigint::Sign::Plus && value.big() >= threshold.big(),
-        }
+        };
+        logs.entries
+            .get_mut(name.as_str())
+            .unwrap()
+            .enabled
+            .insert(key, enabled);
+        enabled
     })
 }
 

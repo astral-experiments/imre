@@ -1,6 +1,7 @@
 //! Report the original Python filename of the syscall that actually failed.
 
 use super::*;
+use crate::StrOwner;
 use crate::objects::exceptions::Filename;
 use crate::objects::files::errno_with_filenames;
 
@@ -144,6 +145,11 @@ pub(super) unsafe fn spawn(
     if oversized_fd {
         return Err(c_int_overflow());
     }
+    let streams = if attributes.keep.is_empty() {
+        streams
+    } else {
+        streams & !(1 << 17) // pass_fds closes all other inherited descriptors
+    };
     launch
         .spawn_tagged(cwd.as_ref(), streams, fds, attributes)
         .map_err(|err| {
@@ -160,7 +166,7 @@ pub(super) unsafe fn spawn(
                         !direct,
                     ),
                     Site::Executable if config.shell => {
-                        Filename::Str(Rc::new(Str::from(if cfg!(target_os = "android") {
+                        Filename::Str(StrOwner::new(Str::from(if cfg!(target_os = "android") {
                             "/system/bin/sh"
                         } else {
                             "/bin/sh"
@@ -186,12 +192,12 @@ unsafe fn filename(word: usize, kind: WordKind, keep_path: bool) -> Filename {
     // SAFETY: argv validation admitted only rooted str, bytes, and path values.
     unsafe {
         match kind.raw() {
-            3 => Filename::Str(crate::objects::acquire_rc(word)),
-            8 => Filename::Bytes(crate::objects::acquire_rc(word)),
-            5 if keep_path => Filename::Path(crate::objects::acquire_rc(word)),
+            3 => Filename::Str(StrOwner::acquire_word(word)),
+            8 => Filename::Bytes(crate::acquire_bytes(word)),
+            5 if keep_path => Filename::Path(crate::ObjectOwner::acquire_word(word)),
             5 => object(word as *const Object)
                 .0
-                .with(|s| Filename::Str(Rc::new(Str::from(s.path())))),
+                .with(|s| Filename::Str(StrOwner::new(Str::from(s.path())))),
             _ => fail("SystemError", "unexpected subprocess error filename"),
         }
     }

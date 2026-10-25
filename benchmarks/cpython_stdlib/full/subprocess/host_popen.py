@@ -87,7 +87,7 @@ class Unsupported(Exception):
     """A transport limitation must not satisfy upstream's expected API exceptions."""
 
 
-def source(options, layout):
+def source(options, layout, *, select_backend=False):
     keywords = dict(options)
     if layout == "list[str]":
         command = "argv: list[str] = []\nfor argument in sys.argv[4:]:\n    argv.append(Path(argument).read_bytes().decode())"
@@ -139,16 +139,18 @@ for i in range(int((payload.parent / "env-count").read_text())):
     lines.extend(['elif cmd == "exit":', '    with p:', '        pass', '    send(reply, "ok None")',
                   'else:', '    raise ValueError("unknown transport command")'])
     operations = "\n".join("                    " + line for line in lines)
+    selector_import = "import selectors\n" if select_backend else ""
+    binding = "subprocess._PopenSelector = selectors.SelectSelector\n" if select_backend else ""
     return f"""from pathlib import Path
 from typing import TextIO
 import subprocess
 import sys
-
+{selector_import}
 def send(reply: TextIO, message: str) -> None:
     reply.write(message + "\\n")
     reply.flush()
 
-payload = Path(sys.argv[3])
+{binding}payload = Path(sys.argv[3])
 {command}
 with open(sys.argv[1]) as channel, open(sys.argv[2], "w") as reply:
     try:
@@ -212,7 +214,7 @@ class Stream:
 class Remote:
     def __init__(self, harness, argv, options):
         self.harness, self.argv = harness, argv
-        names = {"stdout", "stderr", "stdin", "text", "encoding", "close_fds", "cwd", "bufsize", "shell", "executable", "env"}
+        names = {"stdout", "stderr", "stdin", "text", "encoding", "close_fds", "cwd", "bufsize", "pipesize", "shell", "executable", "env"}
         elements = argv if type(argv) in (list, tuple) else (argv,)
         members = tuple("str" if type(v) is str else "bytes" if type(v) is bytes else "path" if isinstance(v, Path) else None for v in elements)
         if None in members:
@@ -379,8 +381,8 @@ class Harness:
         self.parents, self.calls, self.mixed = [], [], []
 
     @cache
-    def actor(self, keywords, layout):
-        code = source(keywords, layout)
+    def actor(self, keywords, layout, *, select_backend=False):
+        code = source(keywords, layout, select_backend=select_backend)
         # Workers share only complete artifacts within this invocation and opt level.
         directory = Path(getattr(self.args, "actors", None) or self.work)
         stem = hashlib.sha256(code.encode()).hexdigest()[:24]

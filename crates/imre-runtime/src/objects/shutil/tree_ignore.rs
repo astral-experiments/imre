@@ -1,4 +1,5 @@
 use super::*;
+use crate::StrOwner;
 use crate::objects::{mappings, values};
 use std::borrow::Cow;
 
@@ -13,7 +14,7 @@ pub(super) struct Ignore {
 }
 
 pub(super) struct Ignored {
-    names: Rc<Object>,
+    names: crate::ObjectOwner,
     set: bool,
 }
 
@@ -28,20 +29,25 @@ impl Ignore {
         for entry in entries {
             let name = src.joined(Path::new(&entry.file_name()))?;
             let value = match name {
-                Name::Text(s) | Name::Path(s) => Rc::into_raw(s) as usize,
-                Name::Bytes(b) => Rc::into_raw(b) as usize,
+                Name::Text(s) | Name::Path(s) => StrOwner::into_raw(s) as usize,
+                Name::Bytes(b) => crate::BytesOwner::into_raw(b) as usize,
             };
             names.values.push(value);
         }
         let names = names.into_object();
         // SAFETY: the compiler verifies both parameter types and whether the return is a list or set.
-        let raw =
-            unsafe { (self.function)(self.context, callback::handle(src), Rc::as_ptr(&names)) };
+        let raw = unsafe {
+            (self.function)(
+                self.context,
+                callback::handle(src),
+                crate::ObjectOwner::as_ptr(&names),
+            )
+        };
         if let Some(error) = take_pending() {
             return Err(Failure::Raised(error));
         }
         // SAFETY: a successful callback returns one independently owned container.
-        let names = unsafe { Rc::from_raw(raw) };
+        let names = unsafe { crate::ObjectOwner::from_raw(raw) };
         Ok(Ignored {
             names,
             set: self.set,
@@ -56,7 +62,7 @@ impl Ignored {
         // SAFETY: key and all entries have the exact path kind checked at the call site.
         unsafe {
             if self.set {
-                mappings::imre_set_contains(Rc::as_ptr(&self.names), key) != 0
+                mappings::imre_set_contains(crate::ObjectOwner::as_ptr(&self.names), key) != 0
             } else {
                 self.names.0.with(|s| {
                     let list = s.sequence();
@@ -113,14 +119,14 @@ pub unsafe extern "C" fn imre_shutil_ignore_patterns_call(
             }
             (*names).0.with(|s| {
                 let names = s.sequence();
-                let output = Rc::from_raw(mappings::imre_set_new(names.kind.raw()));
+                let output = crate::ObjectOwner::from_raw(mappings::imre_set_new(names.kind.raw()));
                 for &name in &names.values {
                     let text = spelling(name, names.kind.raw());
                     if patterns.iter().any(|pattern| pattern.matches(&text)) {
-                        mappings::set_add(Rc::as_ptr(&output), name)?;
+                        mappings::set_add(crate::ObjectOwner::as_ptr(&output), name)?;
                     }
                 }
-                Ok(Rc::into_raw(output))
+                Ok(crate::ObjectOwner::into_raw(output))
             })
         })
     };

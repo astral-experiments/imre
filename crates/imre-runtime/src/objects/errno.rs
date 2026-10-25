@@ -5,6 +5,7 @@ use super::mappings::{
 };
 use super::words::{OwnedWord, WordKind};
 use super::{Int, Object, Storage, StorageCell, Str, object, values};
+use crate::StrOwner;
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_int};
@@ -25,24 +26,24 @@ const SPEC: &str = "ModuleSpec(name='errno', loader=<class '_frozen_importlib.Bu
 
 pub(super) struct Registry {
     ordered: RefCell<Vec<&'static str>>,
-    annotations: OnceCell<Rc<Object>>,
+    annotations: OnceCell<crate::ObjectOwner>,
     annotate: Cell<bool>,
     codes: HashMap<&'static str, i32>,
-    keys: Rc<Object>,
-    errorcode: Rc<Object>,
+    keys: crate::ObjectOwner,
+    errorcode: crate::ObjectOwner,
 }
 
 pub(super) struct Module {
     registry: Rc<Registry>,
-    namespace: Rc<Object>,
+    namespace: crate::ObjectOwner,
 }
 
 #[derive(Clone)]
 pub(super) enum Member {
     Scalar(OwnedWord),
     Number(i32),
-    Text(Rc<Str>),
-    Dictionary(Rc<Object>),
+    Text(StrOwner),
+    Dictionary(crate::ObjectOwner),
     Loader,
     Spec,
     Class,
@@ -50,11 +51,11 @@ pub(super) enum Member {
     Bound(&'static str, usize),
 }
 
-fn into_object(storage: Storage) -> Rc<Object> {
-    Rc::new(Object(StorageCell::new(storage)))
+fn into_object(storage: Storage) -> crate::ObjectOwner {
+    crate::ObjectOwner::new(Object(StorageCell::new(storage)))
 }
 
-fn build() -> Option<Rc<Object>> {
+fn build() -> Option<crate::ObjectOwner> {
     let mut length = 0;
     // SAFETY: this C table and its NUL-terminated symbol names have static lifetime.
     let entries = unsafe {
@@ -64,8 +65,8 @@ fn build() -> Option<Rc<Object>> {
     // SAFETY: these constructors return independent owners with the specified representations.
     let (errorcode, keys) = unsafe {
         (
-            Rc::from_raw(imre_dict_new(2, 3)),
-            Rc::from_raw(imre_set_new(3)),
+            crate::ObjectOwner::from_raw(imre_dict_new(2, 3)),
+            crate::ObjectOwner::from_raw(imre_set_new(3)),
         )
     };
     let mut codes = HashMap::new();
@@ -73,9 +74,14 @@ fn build() -> Option<Rc<Object>> {
         Error::allocation().raise();
         return None;
     }
-    let add_key = |text: &Rc<Str>| {
+    let add_key = |text: &StrOwner| {
         // SAFETY: the set and exact string remain rooted throughout insertion.
-        unsafe { imre_set_add(Rc::as_ptr(&keys), Rc::as_ptr(text) as usize) };
+        unsafe {
+            imre_set_add(
+                crate::ObjectOwner::as_ptr(&keys),
+                StrOwner::as_ptr(text) as usize,
+            )
+        };
         imre_error_pending() == 0
     };
     let mut ordered = Vec::new();
@@ -88,7 +94,7 @@ fn build() -> Option<Rc<Object>> {
         "errorcode",
     ] {
         ordered.push(name);
-        if !add_key(&Rc::new(Str::from(name))) {
+        if !add_key(&StrOwner::new(Str::from(name))) {
             return None;
         }
     }
@@ -98,14 +104,18 @@ fn build() -> Option<Rc<Object>> {
             .to_str()
             .expect("ASCII errno symbol");
         ordered.push(name);
-        let text = Rc::new(Str::from(name));
+        let text = StrOwner::new(Str::from(name));
         if !add_key(&text) {
             return None;
         }
         let code = Int::small(i64::from(entry.code)).unwrap();
         // SAFETY: this is a dict[int,str], and both compiler-word representations are rooted.
         unsafe {
-            imre_dict_set(Rc::as_ptr(&errorcode), code.0, Rc::as_ptr(&text) as usize);
+            imre_dict_set(
+                crate::ObjectOwner::as_ptr(&errorcode),
+                code.0,
+                StrOwner::as_ptr(&text) as usize,
+            );
         }
         if imre_error_pending() != 0 {
             return None;
@@ -127,19 +137,19 @@ fn build() -> Option<Rc<Object>> {
     })))
 }
 
-thread_local! {static ERRNO: OnceCell<Rc<Object>>=const {OnceCell::new()};}
+thread_local! {static ERRNO: OnceCell<crate::ObjectOwner>=const {OnceCell::new()};}
 
 /// Return the per-thread builtin module; a failing dictionary build never publishes partial exports.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_errno_module() -> *const Object {
     ERRNO.with(|cell| {
         if let Some(module) = cell.get() {
-            return Rc::into_raw(module.clone());
+            return crate::ObjectOwner::into_raw(module.clone());
         }
         let Some(module) = build() else {
             return std::ptr::null();
         };
-        Rc::into_raw(cell.get_or_init(|| module).clone())
+        crate::ObjectOwner::into_raw(cell.get_or_init(|| module).clone())
     })
 }
 
@@ -151,8 +161,8 @@ pub(super) fn exported_names() -> Vec<&'static str> {
     }
     // SAFETY: module acquisition transferred one owner. Its registry is distinct
     // from the exception being formatted and cannot call user code here.
-    let owner = unsafe { Rc::from_raw(owner) };
-    with_registry(Rc::as_ptr(&owner), |registry| {
+    let owner = unsafe { crate::ObjectOwner::from_raw(owner) };
+    with_registry(crate::ObjectOwner::as_ptr(&owner), |registry| {
         registry.ordered.borrow().clone()
     })
 }
@@ -170,24 +180,29 @@ fn with_registry<T>(owner: *const Object, f: impl FnOnce(&Rc<Registry>) -> T) ->
 
 impl Registry {
     fn append_export(&self, name: &'static str) {
-        let text = Rc::new(Str::from(name));
+        let text = StrOwner::new(Str::from(name));
         // SAFETY: insertion acquires this exact key while the canonical keyset is rooted.
-        unsafe { imre_set_add(Rc::as_ptr(&self.keys), Rc::as_ptr(&text) as usize) };
+        unsafe {
+            imre_set_add(
+                crate::ObjectOwner::as_ptr(&self.keys),
+                StrOwner::as_ptr(&text) as usize,
+            )
+        };
         self.ordered.borrow_mut().push(name);
     }
 
     fn lookup(self: &Rc<Self>, name: &str, mapping: bool) -> Option<Member> {
         Some(match name {
-            "__name__" => Member::Text(Rc::new(Str::from("errno"))),
-            "__doc__" => Member::Text(Rc::new(Str::from(DOC))),
-            "__package__" => Member::Text(Rc::new(Str::new(""))),
+            "__name__" => Member::Text(StrOwner::new(Str::from("errno"))),
+            "__doc__" => Member::Text(StrOwner::new(Str::from(DOC))),
+            "__package__" => Member::Text(StrOwner::new(Str::new(""))),
             "__dict__" if !mapping => Member::Namespace(self.clone()),
             "__class__" if !mapping => Member::Class,
             "__annotations__" if !mapping || self.annotations.get().is_some() => {
                 let dict = self.annotations.get_or_init(|| {
                     self.append_export("__annotations__");
                     // SAFETY: a fresh empty annotations dictionary owns its storage.
-                    unsafe { Rc::from_raw(imre_dict_new(3, 3)) }
+                    unsafe { crate::ObjectOwner::from_raw(imre_dict_new(3, 3)) }
                 });
                 Member::Dictionary(dict.clone())
             }
@@ -226,7 +241,7 @@ pub unsafe extern "C" fn imre_errno_namespace(owner: *const Object) -> *const Ob
             let Storage::NativeModule(m) = s else {
                 unreachable!()
             };
-            Rc::into_raw(m.namespace.clone())
+            crate::ObjectOwner::into_raw(m.namespace.clone())
         })
     }
 }
@@ -235,14 +250,14 @@ pub unsafe extern "C" fn imre_errno_namespace(owner: *const Object) -> *const Ob
 /// The caller roots the namespace object; its exported keys have stable insertion order.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_errno_keys(owner: *const Object) -> *const Object {
-    with_registry(owner, |r| Rc::into_raw(r.keys.clone()))
+    with_registry(owner, |r| crate::ObjectOwner::into_raw(r.keys.clone()))
 }
 
 /// # Safety
 /// The caller roots the builtin module. All projections retain exactly the same mutable dict.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_errno_errorcode(owner: *const Object) -> *const Object {
-    with_registry(owner, |r| Rc::into_raw(r.errorcode.clone()))
+    with_registry(owner, |r| crate::ObjectOwner::into_raw(r.errorcode.clone()))
 }
 
 /// # Safety
@@ -269,7 +284,7 @@ pub unsafe extern "C" fn imre_errno_text(owner: *const Object, name: *const Str)
         let Some(Member::Text(s)) = r.lookup(name, false) else {
             unreachable!()
         };
-        Rc::into_raw(s)
+        StrOwner::into_raw(s)
     })
 }
 
@@ -321,7 +336,7 @@ pub unsafe extern "C" fn imre_errno_lookup(
     // SAFETY: the name is valid through construction of the result or error.
     let name = unsafe { &*name };
     with_registry(owner, |r| match r.lookup(name, mapping != 0) {
-        Some(member) => Rc::into_raw(into_object(Storage::ModuleMember(member))),
+        Some(member) => crate::ObjectOwner::into_raw(into_object(Storage::ModuleMember(member))),
         None if mapping != 0 => Error::string_key(name.clone()).returning(std::ptr::null()),
         None => missing(name).returning(std::ptr::null()),
     })
@@ -338,9 +353,11 @@ pub unsafe extern "C" fn imre_errno_lookup_default(
     // SAFETY: the name and the default remain rooted during lookup and acquisition.
     unsafe {
         with_registry(owner, |r| match r.lookup(&*name, false) {
-            Some(member) => Rc::into_raw(into_object(Storage::ModuleMember(member))),
+            Some(member) => {
+                crate::ObjectOwner::into_raw(into_object(Storage::ModuleMember(member)))
+            }
             None => {
-                Rc::increment_strong_count(default);
+                crate::ObjectOwner::increment_strong_count(default);
                 default
             }
         })
@@ -351,7 +368,7 @@ impl Member {
     pub(super) fn scalar(&self) -> Option<(u32, usize)> {
         Some(match self {
             Self::Number(n) => (2, Int::small(i64::from(*n)).unwrap().0),
-            Self::Text(s) => (3, Rc::as_ptr(s) as usize),
+            Self::Text(s) => (3, StrOwner::as_ptr(s) as usize),
             Self::Scalar(s) => (s.kind.raw(), s.word),
             _ => return None,
         })
@@ -370,7 +387,30 @@ pub(super) fn with_nonscalar_member<T>(owner: &Object, f: impl FnOnce(&Member) -
     }
 }
 impl Member {
-    fn type_name(&self) -> &'static str {
+    /// Compare two rooted dynamic module members at the top level or inside a tuple.
+    pub(super) fn equal_member(&self, other: &Self) -> bool {
+        if let (Some(a), Some(b)) = (self.scalar(), other.scalar()) {
+            return scalar_equal(a, b);
+        }
+        match (self, other) {
+            // SAFETY: both dictionary members remain rooted through value comparison.
+            (Member::Dictionary(a), Member::Dictionary(b)) => unsafe {
+                values::equal(
+                    crate::ObjectOwner::as_ptr(a) as usize,
+                    crate::ObjectOwner::as_ptr(b) as usize,
+                    WordKind::new(5),
+                )
+            },
+            (Member::Loader, Member::Loader)
+            | (Member::Spec, Member::Spec)
+            | (Member::Class, Member::Class) => true,
+            (Member::Bound(a, x), Member::Bound(b, y)) => a == b && x == y,
+            (Member::Namespace(a), Member::Namespace(b)) => Rc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+
+    pub(super) fn type_name(&self) -> &'static str {
         match self {
             Self::Dictionary(_) | Self::Namespace(_) => "dict",
             Self::Loader | Self::Class => "type",
@@ -388,7 +428,9 @@ impl Member {
     pub(super) fn length(&self) -> usize {
         match self {
             // SAFETY: the member owns this exact dictionary.
-            Self::Dictionary(d) => unsafe { super::mappings::imre_dict_len(Rc::as_ptr(d)) },
+            Self::Dictionary(d) => unsafe {
+                super::mappings::imre_dict_len(crate::ObjectOwner::as_ptr(d))
+            },
             Self::Namespace(r) => Int::from_usize(r.ordered.borrow().len()).into_raw(),
             _ => Error::new(
                 Kind::TypeError,
@@ -405,7 +447,7 @@ impl Member {
                     // SAFETY: the member owns this concrete dictionary through the lookup.
                     && let Some(item) = unsafe { d.0.with(|s| s.dictionary().integer_word(key)) }
                 {
-                    return Rc::into_raw(into_object(Storage::ObjectValue(item)));
+                    return crate::ObjectOwner::into_raw(into_object(Storage::ObjectValue(item)));
                 }
                 // SAFETY: the caller owns the exact integer used for subscription.
                 Error::key(unsafe { WordKind::new(2).acquire(key.0) }).returning(std::ptr::null())
@@ -460,7 +502,7 @@ impl Member {
         match self {
             // SAFETY: this opaque member owns the exact dictionary.
             Self::Dictionary(d) => u32::from(
-                unsafe { super::mappings::imre_dict_len(Rc::as_ptr(d)) }
+                unsafe { super::mappings::imre_dict_len(crate::ObjectOwner::as_ptr(d)) }
                     != Int::small(0).unwrap().0,
             ),
             _ => 1,
@@ -475,19 +517,23 @@ impl Member {
         match self {
             Member::Scalar(s) if s.kind.raw() == 3 && repr == 0 => {
                 // SAFETY: kind 3 is an owned exact string; acquire it for the result.
-                unsafe { Rc::increment_strong_count(s.word as *const Str) };
+                unsafe { StrOwner::increment_strong_count(s.word as *const Str) };
                 s.word as *const Str
             }
             // SAFETY: the owned scalar remains live throughout formatting.
             Member::Scalar(s) => unsafe { values::imre_value_repr(s.word, s.kind.raw()) },
-            Member::Text(text) if repr == 0 => Rc::into_raw(text.clone()),
-            Member::Text(text) => Rc::into_raw(Rc::new(super::exceptions::string_repr(text))),
-            Member::Number(n) => Rc::into_raw(Rc::new(Str::from(n.to_string()))),
+            Member::Text(text) if repr == 0 => StrOwner::into_raw(text.clone()),
+            Member::Text(text) => {
+                StrOwner::into_raw(StrOwner::new(super::exceptions::string_repr(text)))
+            }
+            Member::Number(n) => StrOwner::into_raw(StrOwner::new(Str::from(n.to_string()))),
             // SAFETY: the actual dictionary remains rooted by the live attribute.
-            Member::Dictionary(d) => unsafe { values::imre_value_repr(Rc::as_ptr(d) as usize, 5) },
-            Member::Loader => Rc::into_raw(Rc::new(Str::from(LOADER))),
-            Member::Spec => Rc::into_raw(Rc::new(Str::from(SPEC))),
-            Member::Class => Rc::into_raw(Rc::new(Str::from("<class 'module'>"))),
+            Member::Dictionary(d) => unsafe {
+                values::imre_value_repr(crate::ObjectOwner::as_ptr(d) as usize, 5)
+            },
+            Member::Loader => StrOwner::into_raw(StrOwner::new(Str::from(LOADER))),
+            Member::Spec => StrOwner::into_raw(StrOwner::new(Str::from(SPEC))),
+            Member::Class => StrOwner::into_raw(StrOwner::new(Str::from("<class 'module'>"))),
             Member::Bound(name, addr) => {
                 let value = match *name {
                     "__new__" | "__init_subclass__" | "__subclasshook__" => {
@@ -497,7 +543,7 @@ impl Member {
                     | "__sizeof__" => format!("<built-in function {name}>"),
                     _ => format!("<method-wrapper '{name}' of module object at 0x{addr:x}>"),
                 };
-                Rc::into_raw(Rc::new(Str::from(value)))
+                StrOwner::into_raw(StrOwner::new(Str::from(value)))
             }
             Member::Namespace(r) => {
                 let mut result = String::from("{");
@@ -508,11 +554,12 @@ impl Member {
                     result.push_str(&super::exceptions::string_repr(name));
                     result.push_str(": ");
                     // SAFETY: each member's renderer transfers a fresh owning reference.
-                    let value = unsafe { Rc::from_raw(r.lookup(name, true).unwrap().text(1)) };
+                    let value =
+                        unsafe { StrOwner::from_raw(r.lookup(name, true).unwrap().text(1)) };
                     result.push_str(&value);
                 }
                 result.push('}');
-                Rc::into_raw(Rc::new(Str::from(result)))
+                StrOwner::into_raw(StrOwner::new(Str::from(result)))
             }
         }
     }
@@ -560,30 +607,10 @@ pub unsafe extern "C" fn imre_errno_member_equal(
 ) -> u32 {
     let a = with_member(left, Clone::clone);
     let eq = if kind == 16 {
-        with_member(word as *const Object, |b| {
-            if let (Some(a), Some(b)) = (a.scalar(), b.scalar()) {
-                return scalar_equal(a, b);
-            }
-            match (&a, b) {
-                // SAFETY: both dictionary members remain rooted through value comparison.
-                (Member::Dictionary(a), Member::Dictionary(b)) => unsafe {
-                    values::equal(
-                        Rc::as_ptr(a) as usize,
-                        Rc::as_ptr(b) as usize,
-                        WordKind::new(5),
-                    )
-                },
-                (Member::Loader, Member::Loader)
-                | (Member::Spec, Member::Spec)
-                | (Member::Class, Member::Class) => true,
-                (Member::Bound(a, x), Member::Bound(b, y)) => a == b && x == y,
-                (Member::Namespace(a), Member::Namespace(b)) => Rc::ptr_eq(a, b),
-                _ => false,
-            }
-        })
+        with_member(word as *const Object, |b| a.equal_member(b))
     } else if kind == 5 {
         // SAFETY: the compiler supplies a live dict[int,str], and the member owns its dictionary.
-        matches!(&a, Member::Dictionary(d) if unsafe { values::equal(Rc::as_ptr(d) as usize,word,WordKind::new(5)) })
+        matches!(&a, Member::Dictionary(d) if unsafe { values::equal(crate::ObjectOwner::as_ptr(d) as usize,word,WordKind::new(5)) })
     } else {
         a.scalar().is_some_and(|a| scalar_equal(a, (kind, word)))
     };
