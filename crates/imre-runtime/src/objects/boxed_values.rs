@@ -5,13 +5,26 @@ use super::{Object, Storage, StorageCell, Str, acquire_rc, records, values};
 use crate::Int;
 use std::rc::Rc;
 
+// A tuple may store an optional scalar in its nullable representation. Views
+// expose the contained Python value, not the slot's storage tag.
+pub(super) fn concrete(kind: WordKind, word: usize) -> (WordKind, usize) {
+    if kind.raw() & crate::objects::words::NULLABLE == 0 {
+        (kind, word)
+    } else if word == 0 {
+        (WordKind::new(0), 0)
+    } else {
+        let base = kind.raw() & !crate::objects::words::NULLABLE;
+        (WordKind::new(base), if base == 1 { word - 1 } else { word })
+    }
+}
+
 /// Reads one statically described field; this works for both inline and shared record storage.
 pub(super) unsafe fn tuple_item(tuple: usize, index: usize) -> (WordKind, usize) {
     let ptr = tuple as *const usize;
     // SAFETY: the caller roots a tuple and proves index is in its descriptor.
     unsafe {
         let kind = WordKind::new(*records::descriptor(ptr).kinds.add(index));
-        (kind, kind.read_record_field(ptr.add(index)))
+        concrete(kind, kind.read_record_field(ptr.add(index)))
     }
 }
 
@@ -63,8 +76,9 @@ pub(super) unsafe fn checked_text(kind: WordKind, word: usize, repr: bool) -> *c
 /// The caller roots the word with the indicated concrete representation.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_box_value(kind: u32, word: usize) -> *const Object {
-    // SAFETY: the ABI supplies the exact representation and a live owner.
-    let boxed = unsafe { WordKind::new(kind).acquire(word) };
+    let (kind, word) = concrete(WordKind::new(kind), word);
+    // SAFETY: normalization preserves the rooted value supplied by the ABI.
+    let boxed = unsafe { kind.acquire(word) };
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ObjectValue(
         boxed,
     )))))
@@ -85,7 +99,10 @@ pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) ->
     let mut pending = smallvec::SmallVec::<[(usize, usize, usize, usize); 4]>::new();
     let mut next = (left, right);
     loop {
-        let ((ka, wa), (kb, wb)) = (numeric(next.0), numeric(next.1));
+        let ((ka, wa), (kb, wb)) = (
+            numeric(concrete(next.0.0, next.0.1)),
+            numeric(concrete(next.1.0, next.1.1)),
+        );
         if ka != kb {
             return false;
         }

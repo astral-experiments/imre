@@ -2,6 +2,13 @@
 use super::*;
 
 impl Checker<'_> {
+    pub(super) fn exception_tuple_slot(&self, class: usize) -> bool {
+        self.classes.declarations.definitions[class]
+            .fields
+            .last()
+            .is_some_and(|field| field.name == crate::classes::EXCEPTION_ARGS_SLOT)
+    }
+
     pub(super) fn is_import_error(&self, kind: u32) -> bool {
         let base = self
             .types
@@ -18,8 +25,12 @@ impl Checker<'_> {
             Type::None | Type::Bool | Type::Int | Type::Str | Type::StrLiteral(_) | Type::Bytes
         ) || self
             .types
-            .fields(ty)
-            .is_some_and(|items| items.into_iter().all(|item| self.boxable_value(item)))
+            .payload(ty)
+            .is_some_and(|ty| self.boxable_value(ty))
+            || self
+                .types
+                .fields(ty)
+                .is_some_and(|items| items.into_iter().all(|item| self.boxable_value(item)))
     }
 
     pub(super) fn import_error(

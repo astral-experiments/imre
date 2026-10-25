@@ -377,6 +377,19 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
                         Storage::ObjectValue(field) => Some(ReprTask::Word(field.word, field.kind)),
+                        Storage::Plain => {
+                            write!(output, "<object object at {owner:p}>").unwrap();
+                            None
+                        }
+                        Storage::StrDescriptor(index) => {
+                            write!(
+                                output,
+                                "<method '{}' of 'str' objects>",
+                                super::inspect::descriptor_name(*index)
+                            )
+                            .unwrap();
+                            None
+                        }
                         Storage::IteratorAdapter(adapter) => {
                             adapter.write_repr(output, owner);
                             None
