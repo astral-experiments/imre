@@ -71,6 +71,12 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/fu
 ```
 
 
+A manual run of the CI workflow can verify a prospective merge commit on Linux.
+Publish the commit to this repository, then supply its full SHA as the
+`sys_source` input. The job builds that commit and runs the same sys commands
+as pull request CI. Its `sys-evidence-linux` artifact records the tested Git
+commit and tree alongside both reports. Pull request checks run separately.
+
 ## Two process-boundary cases
 
 `test.test_sys.SysModuleTest.test_ioencoding_nonascii` compares the spelling of two codec names before it launches a child. The [locale audit](locale-audit-linux.json) runs the unchanged method against both subjects in each host configuration. Only the canonical row enters the 97-occurrence report.
