@@ -618,6 +618,8 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    SysIntern,
+    SysIsInterned,
     OsName,
     DocCaptureStart,
     DocCaptureTake,
