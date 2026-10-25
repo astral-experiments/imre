@@ -83,6 +83,17 @@ pub(super) unsafe fn try_acquire(mode: u32, word: usize) -> Result<Rc<Object>, E
     ))
 }
 
+/// # Safety
+/// The caller keeps the iterable word live and supplies its exact iteration mode.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_iter_acquire(mode: u32, word: usize) -> *const Object {
+    // SAFETY: builtin iter uses the same acquisition path as the itertools constructors.
+    match unsafe { try_acquire(mode, word) } {
+        Ok(cursor) => Rc::into_raw(cursor),
+        Err(error) => error.returning(std::ptr::null()),
+    }
+}
+
 /// The compiler supplies a rooted value of the exact selected source form.
 pub(super) unsafe fn acquire(mode: u32, source: usize) -> Rc<Object> {
     // SAFETY: all leaf constructors return one independent owner. A cursor

@@ -541,6 +541,7 @@ pub(crate) enum PredicateTest {
 pub(crate) enum Builtin {
     Repeat,
     CursorNextRequired,
+    AcquireCursor,
     CursorLengthHint,
     Progression {
         bounded: bool,

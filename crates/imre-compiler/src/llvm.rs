@@ -5416,6 +5416,19 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::AcquireCursor => {
+                let source = &args[0].value;
+                let mode = checked_iterable_mode(source.ty);
+                let word = self.word(source);
+                let operand = self.checked_pointer(format!(
+                    "call ptr @imre_iter_acquire(i32 {mode}, i64 {word})"
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::CursorNextRequired => {
                 let word = self.checked_instruction(format!(
                     "call i64 @imre_cursor_next_required(ptr {})",
@@ -7546,6 +7559,7 @@ declare i64 @imre_tuple_get(ptr, i64)
 declare ptr @imre_batched(i32, i64, i64, i32)
 declare ptr @imre_cycle(i32, i64)
 declare i64 @imre_cursor_next_required(ptr)
+declare ptr @imre_iter_acquire(i32, i64)
 declare ptr @imre_accumulate(i32, i64, i32, i64, i32, i64, i32, i32, i32)
 declare ptr @imre_predicate_cursor(i32, i32, i64, i32, i64, ptr, ptr, i64, i32)
 declare ptr @imre_compress(i32, i64, i32, i64)
