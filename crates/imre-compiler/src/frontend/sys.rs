@@ -1,6 +1,19 @@
 //! Sealed bindings for the process's standard streams and exit exception.
 use super::*;
 
+pub(super) fn displayable(ty: Type) -> bool {
+    matches!(
+        ty,
+        Type::None
+            | Type::Bool
+            | Type::Int
+            | Type::Str
+            | Type::StrLiteral(_)
+            | Type::Bytes
+            | Type::ListInt
+            | Type::ObjectValue
+    )
+}
 impl Checker<'_> {
     /// Read scalar fields of the immutable startup settings selected for a command.
     pub(super) fn command_flag(&self, attr: &ast::ExprAttribute) -> Result<Option<Expr>, String> {
@@ -78,7 +91,57 @@ impl Checker<'_> {
     }
 
     pub(super) fn sys_call(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "hasattr" && !self.names.contains_key("hasattr"))
+            && self.resolve(&call.func).is_none()
+            && call.arguments.keywords.is_empty()
+            && let [module, ast::Expr::StringLiteral(name)] = call.arguments.args.as_slice()
+            && self.resolve(module)
+                == Some(Binding::IntrinsicModule(
+                    crate::modules::IntrinsicModule::Builtins,
+                ))
+            && name.value.to_str() == "_"
+        {
+            return Ok(Some(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::BuiltinsHasLast, vec![]),
+            }));
+        }
         match self.resolve(&call.func) {
+            Some(Binding::Intrinsic(Intrinsic::SysDisplayHook)) => {
+                if !call.arguments.keywords.is_empty() {
+                    return self
+                        .sys_type_error(
+                            call,
+                            Type::None,
+                            "sys.displayhook() takes no keyword arguments".to_owned(),
+                        )
+                        .map(Some);
+                }
+                let [value] = call.arguments.args.as_slice() else {
+                    return self
+                        .sys_type_error(
+                            call,
+                            Type::None,
+                            format!(
+                                "sys.displayhook() takes exactly one argument ({} given)",
+                                call.arguments.args.len()
+                            ),
+                        )
+                        .map(Some);
+                };
+                let value = self.expr(value)?;
+                if !displayable(value.ty) {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "sys.displayhook requires a supported native representation",
+                    ));
+                }
+                return Ok(Some(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::SysDisplayHook, vec![value]),
+                }));
+            }
             Some(Binding::Intrinsic(Intrinsic::SysExit)) => {
                 return self.system_exit(call, true).map(Some);
             }
