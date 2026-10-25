@@ -35,7 +35,8 @@ Both levels have the same counts:
 | Imre | Imre | Imre | CPython hooks and native child | 15 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 36 |
-| Blocked before execution | | | | 214 |
+| CPython | CPython | Imre | CPython hooks and native child | 2 |
+| Blocked before execution | | | | 212 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -49,6 +50,7 @@ method checks the actual sys.stderr, the previous stream, and the unchanged-stre
 Four bodies verify native stderr with the original
 CPython output helper. The 36 host-driven methods exercise named handler registration, the registry, timed
 files, record flags, [formatters](formatters.md), [configuration](config.md), or [live level caches](cache.md).
+Two more unchanged LoggerTest bodies read and write a native manager and logger. Their original host callbacks restore both native attributes; [the recorded calls](manager-cleanups-linux.json) include the cleanup order.
 Setup and registered cleanup stay with their test. The report keeps original method locations, individual
 compiler or adapter blockers, and the three pinned skip conditions. It
 does not treat a compiled source or a passing CPython reference as a native pass.

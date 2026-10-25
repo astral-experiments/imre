@@ -22,6 +22,7 @@ sys.path[:0] = [str(HERE), str(STDLIB)]
 import native_config
 import native_encoding
 import native_standalone
+import native_manager
 import native_filters
 import native_files
 import native_formatters
@@ -158,6 +159,7 @@ def known_cases(toolchain, work, original):
     executions[native_encoding.CASE] = native_encoding.encoding_case(toolchain, directory("encoding"))
     executions[native_encoding.SETTING] = native_encoding.stream_setting_case(toolchain, directory("stream-setting"))
     executions[native_standalone.CASE] = native_standalone.handler_case(toolchain, directory("standalone-handlers"))
+    executions.update(native_manager.manager_cases(toolchain, directory("manager-enable")))
     executions.update(native_filters.filter_cases(toolchain, directory("name-filter")))
     executions.update(native_hierarchy.hierarchy_cases(toolchain, directory("children")))
     executions.update(native_files.file_cases(toolchain, directory("file-handlers")))
