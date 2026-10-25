@@ -6,6 +6,7 @@ mod credentials;
 use super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::files::{errno_error, errno_with_filenames};
 use super::{Bytes, Int, Str, c_int};
+use crate::StrOwner;
 use num_traits::ToPrimitive;
 use std::ffi::CString;
 use std::io;
@@ -65,6 +66,8 @@ descriptor_constants! {
     imre_os_o_nofollow = O_NOFOLLOW, imre_os_o_nonblock = O_NONBLOCK,
     imre_os_seek_set = SEEK_SET, imre_os_seek_cur = SEEK_CUR, imre_os_seek_end = SEEK_END,
     imre_os_seek_data = SEEK_DATA, imre_os_seek_hole = SEEK_HOLE,
+    imre_os_pollin = POLLIN, imre_os_pollpri = POLLPRI, imre_os_pollout = POLLOUT,
+    imre_os_pollerr = POLLERR, imre_os_pollhup = POLLHUP, imre_os_pollnval = POLLNVAL,
 }
 
 /// Return a kernel path and the filesystem-protocol value to keep on OSError.
@@ -93,8 +96,8 @@ unsafe fn syscall_path(
     // SAFETY: exact str is borrowed; Path.__fspath__ supplies an owned str.
     let text = unsafe {
         match tag {
-            0 => super::acquire_rc::<Str>(value as usize),
-            2 => Rc::from_raw(super::paths::imre_path_text(value.cast())),
+            0 => crate::StrOwner::acquire_word(value as usize),
+            2 => StrOwner::from_raw(super::paths::imre_path_text(value.cast())),
             _ => unreachable!(),
         }
     };
@@ -207,7 +210,7 @@ pub extern "C" fn imre_os_strerror(code: usize) -> *const Str {
             }
             // SAFETY: the non-null pointer returned above remains live during this copy.
             let text = unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy();
-            Ok(Rc::into_raw(Rc::new(Str::from(text.as_ref()))))
+            Ok(StrOwner::into_raw(StrOwner::new(Str::from(text.as_ref()))))
         }),
         std::ptr::null(),
     )

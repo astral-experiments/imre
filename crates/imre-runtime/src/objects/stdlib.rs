@@ -1,5 +1,6 @@
 //! Sealed scalar sorting and UTF-8 builders. User callbacks finish before entry.
 
+use crate::StrOwner;
 use std::cmp::Ordering;
 use std::rc::Rc;
 
@@ -448,7 +449,7 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
             values.check_kind(3);
             if let [word] = values.values.as_slice() {
                 let value = *word as *const Str;
-                Rc::increment_strong_count(value);
+                StrOwner::increment_strong_count(value);
                 return value;
             }
             let length = separator
@@ -468,7 +469,7 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
                 }
                 result.push_str(&*(word as *const Str));
             }
-            Rc::into_raw(Rc::new(result))
+            StrOwner::into_raw(StrOwner::new(result))
         })
     }
 }
@@ -504,9 +505,17 @@ pub(super) fn check_keyword_field(name: &str) -> crate::Result<()> {
     Ok(())
 }
 
+enum FormatValue<'a> {
+    Text(&'a str),
+    Integer(std::mem::ManuallyDrop<crate::Int>),
+}
+
 /// Substitutes plain named fields in encounter order. A missing field can raise
 /// before a malformed brace later in the same template.
-fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> crate::Result<Str> {
+fn format_named<'a>(
+    template: &str,
+    field: impl Fn(&str) -> Option<FormatValue<'a>>,
+) -> crate::Result<Str> {
     // A long template can consist entirely of fields with empty replacements.
     let mut result = Str::default();
     let mut rest = template;
@@ -573,7 +582,12 @@ fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> 
                 "Imre str.format supports plain named fields and !s",
             ));
         }
-        result.push_str(text);
+        match text {
+            FormatValue::Text(text) => result.push_str(text),
+            FormatValue::Integer(value) => {
+                result.push_str(&crate::integer_text::decimal_string(&value)?)
+            }
+        }
     }
     result.push_str(rest);
     Ok(result)
@@ -593,11 +607,42 @@ pub unsafe extern "C" fn imre_str_format(
     let formatted = format_named(template, |name| {
         fields.iter().find_map(|&[key, value]| {
             // SAFETY: the operands stay immutable and rooted until formatting ends.
-            unsafe { ((&*key).as_str() == name).then(|| (&*value).as_str()) }
+            unsafe { ((&*key).as_str() == name).then(|| FormatValue::Text((&*value).as_str())) }
         })
     });
     super::finish(
-        formatted.map(|text| Rc::into_raw(Rc::new(text))),
+        formatted.map(|text| StrOwner::into_raw(StrOwner::new(text))),
+        std::ptr::null(),
+    )
+}
+
+/// Format named fields without converting unused or not-yet-selected integers.
+///
+/// # Safety
+/// The caller roots the template and every (name, word, representation) triple
+/// while the formatter borrows each matching field.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_format_fields(
+    template: *const Str,
+    fields: *const [usize; 3],
+    count: usize,
+) -> *const Str {
+    // SAFETY: the compiler creates one triple per evaluated keyword argument.
+    let (template, fields) = unsafe { (&*template, std::slice::from_raw_parts(fields, count)) };
+    let result = format_named(template, |name| {
+        fields.iter().find_map(|&[key, value, kind]| {
+            // SAFETY: these immutable words use the signature-checked string and integer tags.
+            unsafe {
+                ((&*(key as *const Str)).as_str() == name).then(|| match kind {
+                    2 => FormatValue::Integer(crate::Int::borrow(value)),
+                    3 => FormatValue::Text((&*(value as *const Str)).as_str()),
+                    _ => unreachable!("invalid string-format field type"),
+                })
+            }
+        })
+    });
+    super::finish(
+        result.and_then(crate::checked_owned_str),
         std::ptr::null(),
     )
 }
@@ -620,8 +665,8 @@ pub unsafe extern "C" fn imre_str_replace(
     };
     if count == 0 {
         // SAFETY: the caller roots the input; the unchanged result takes its own owner.
-        return Rc::into_raw(unsafe {
-            super::acquire_rc::<Str>(std::ptr::from_ref(value) as usize)
+        return StrOwner::into_raw(unsafe {
+            crate::StrOwner::acquire_word(std::ptr::from_ref(value) as usize)
         });
     }
     let length = value
@@ -642,7 +687,7 @@ pub unsafe extern "C" fn imre_str_replace(
         copied = index + old.len();
     }
     result.push_str(&value[copied..]);
-    Rc::into_raw(Rc::new(result))
+    StrOwner::into_raw(StrOwner::new(result))
 }
 
 /// Formats a binary64 value with correctly rounded fixed decimal precision.
@@ -675,7 +720,7 @@ pub extern "C" fn imre_float_format(value: f64, precision: u32, flags: u32) -> *
     if percent {
         result.push('%');
     }
-    Rc::into_raw(Rc::new(result))
+    StrOwner::into_raw(StrOwner::new(result))
 }
 
 /// Suspend the current native thread, rounding a positive timeout up to nanoseconds.
@@ -755,8 +800,8 @@ mod tests {
     fn empty_named_fields_do_not_reserve_the_template_length() {
         let template = "{x}".repeat(20_000) + "{y}";
         let result = format_named(&template, |name| match name {
-            "x" => Some(""),
-            "y" => Some("雪"),
+            "x" => Some(FormatValue::Text("")),
+            "y" => Some(FormatValue::Text("雪")),
             _ => None,
         })
         .unwrap_or_else(|_| panic!("valid named fields"));
@@ -789,24 +834,24 @@ mod tests {
 
     #[test]
     fn direct_string_sorts_preserve_equal_owners_in_both_directions() {
-        let texts = ["é", "", "é", "z", ""].map(|s| Rc::new(Str::from(s)));
+        let texts = ["é", "", "é", "z", ""].map(|s| StrOwner::new(Str::from(s)));
         for (reverse, order) in [(0, [1, 4, 3, 0, 2]), (1, [0, 2, 3, 1, 4])] {
             // SAFETY: the list and its string owners stay rooted throughout the sort.
             unsafe {
                 let list = Rc::from_raw(super::super::imre_seq_new(3));
                 let pointer = Rc::as_ptr(&list);
                 for text in &texts {
-                    super::super::imre_seq_append(pointer, Rc::as_ptr(text) as usize, 3);
+                    super::super::imre_seq_append(pointer, StrOwner::as_ptr(text) as usize, 3);
                 }
                 imre_sort_by_keys(pointer.cast(), 3, pointer.cast(), 3, reverse);
                 list.0.with(|storage| {
                     assert_eq!(
                         storage.sequence().values.as_slice(),
-                        order.map(|i| Rc::as_ptr(&texts[i]) as usize),
+                        order.map(|i| StrOwner::as_ptr(&texts[i]) as usize),
                     );
                 });
             }
-            assert!(texts.iter().all(|text| Rc::strong_count(text) == 1));
+            assert!(texts.iter().all(|text| StrOwner::strong_count(text) == 1));
         }
     }
 
@@ -814,18 +859,18 @@ mod tests {
     fn sorting_shared_prefixes_uses_unicode_byte_order_and_stable_ties() {
         for (prefix, count) in [("", 96), ("a-long-directory-name/", 1025)] {
             let keys: Vec<_> = (0..count)
-                .map(|i| Rc::new(Str::from(format!("{prefix}{}", ["é", "è", "ê"][i % 3]))))
+                .map(|i| StrOwner::new(Str::from(format!("{prefix}{}", ["é", "è", "ê"][i % 3]))))
                 .collect();
             for reverse in [false, true] {
                 let mut expected: Vec<_> = keys.iter().collect();
                 expected.sort_by(|a, b| if reverse { b.cmp(a) } else { a.cmp(b) });
-                let mut words: Vec<_> = keys.iter().map(|s| Rc::as_ptr(s) as usize).collect();
+                let mut words: Vec<_> = keys.iter().map(|s| StrOwner::as_ptr(s) as usize).collect();
                 // SAFETY: keys owns each immutable string until the comparison finishes.
                 unsafe { sort_strings(&mut words, StringSort::Stable { reverse }) };
                 assert!(
                     expected
                         .into_iter()
-                        .map(|s| Rc::as_ptr(s) as usize)
+                        .map(|s| StrOwner::as_ptr(s) as usize)
                         .eq(words)
                 );
             }
@@ -834,29 +879,29 @@ mod tests {
 
     #[test]
     fn failed_key_restores_owners_and_drops_temporary_additions() {
-        let original = Rc::new(Str::from("original"));
-        let addition = Rc::new(Str::from("addition"));
+        let original = StrOwner::new(Str::from("original"));
+        let addition = StrOwner::new(Str::from("addition"));
         // SAFETY: both strings and both distinct list handles stay rooted. The
         // saved list is released exactly once after restoration.
         unsafe {
             let list = Rc::from_raw(super::super::imre_seq_new(3));
             let alias = Rc::clone(&list);
             let target = Rc::as_ptr(&list);
-            super::super::imre_seq_append(target, Rc::as_ptr(&original) as usize, 3);
+            super::super::imre_seq_append(target, StrOwner::as_ptr(&original) as usize, 3);
             let saved = Rc::from_raw(imre_sort_detach(target.cast(), 3).cast::<Object>());
             assert!(alias.0.with(|storage| storage.sequence().values.is_empty()));
-            assert_eq!(Rc::strong_count(&original), 2);
-            super::super::imre_seq_append(target, Rc::as_ptr(&addition) as usize, 3);
+            assert_eq!(StrOwner::strong_count(&original), 2);
+            super::super::imre_seq_append(target, StrOwner::as_ptr(&addition) as usize, 3);
             imre_sort_restore(target.cast(), 3, Rc::as_ptr(&saved).cast(), 0);
             assert_eq!(
                 alias.0.with(|storage| storage.sequence().values[0]),
-                Rc::as_ptr(&original) as usize,
+                StrOwner::as_ptr(&original) as usize,
             );
             drop(saved);
-            assert_eq!(Rc::strong_count(&addition), 1);
-            assert_eq!(Rc::strong_count(&original), 2);
+            assert_eq!(StrOwner::strong_count(&addition), 1);
+            assert_eq!(StrOwner::strong_count(&original), 2);
         }
-        assert_eq!(Rc::strong_count(&original), 1);
+        assert_eq!(StrOwner::strong_count(&original), 1);
     }
 
     #[test]
@@ -880,23 +925,24 @@ mod tests {
 
     #[test]
     fn sorting_keeps_generic_element_owners_and_supports_aliased_integer_keys() {
-        let texts = ["third", "first", "second"].map(|text| Rc::new(Str::from(text)));
+        let texts = ["third", "first", "second"].map(|text| StrOwner::new(Str::from(text)));
         // SAFETY: every raw argument is rooted here; returned list handles each
         // transfer one reference, released after inspecting their owned elements.
         unsafe {
             let values = super::super::imre_seq_new(3);
             let keys = crate::imre_list_new();
             for (text, key) in texts.iter().zip([3, 1, 2]) {
-                super::super::imre_seq_append(values, Rc::as_ptr(text) as usize, 3);
+                super::super::imre_seq_append(values, StrOwner::as_ptr(text) as usize, 3);
                 crate::imre_list_append(keys, crate::Int::small(key).unwrap().0);
             }
             imre_sort_by_keys(values.cast(), 3, keys.cast(), 2, 0);
             for (index, expected) in ["first", "second", "third"].iter().enumerate() {
-                let text =
-                    Rc::from_raw(super::super::imre_seq_get_index(values, index) as *const Str);
+                let text = StrOwner::from_raw(
+                    super::super::imre_seq_get_index(values, index) as *const Str
+                );
                 assert_eq!(text.as_str(), *expected);
             }
-            assert!(texts.iter().all(|text| Rc::strong_count(text) == 2));
+            assert!(texts.iter().all(|text| StrOwner::strong_count(text) == 2));
             imre_sort_by_keys(keys.cast(), 2, keys.cast(), 2, 0);
             for index in 0..3 {
                 let value = crate::Int(crate::imre_list_get_index(keys, index));
@@ -905,65 +951,65 @@ mod tests {
             super::super::imre_object_release(values);
             crate::imre_list_release(keys);
         }
-        assert!(texts.iter().all(|text| Rc::strong_count(text) == 1));
+        assert!(texts.iter().all(|text| StrOwner::strong_count(text) == 1));
     }
 
     #[test]
     fn joining_and_replacement_preserve_unicode_and_empty_matches() {
-        let separator = Rc::new(Str::from("·"));
-        let old = Rc::new(Str::from(""));
-        let new = Rc::new(Str::from("/"));
-        let texts = ["α", "", "🙂"].map(|text| Rc::new(Str::from(text)));
+        let separator = StrOwner::new(Str::from("·"));
+        let old = StrOwner::new(Str::from(""));
+        let new = StrOwner::new(Str::from("/"));
+        let texts = ["α", "", "🙂"].map(|text| StrOwner::new(Str::from(text)));
         // SAFETY: inputs stay rooted until both fresh returned owners are dropped.
         unsafe {
             let values = super::super::imre_seq_new(3);
             for text in &texts {
-                super::super::imre_seq_append(values, Rc::as_ptr(text) as usize, 3);
+                super::super::imre_seq_append(values, StrOwner::as_ptr(text) as usize, 3);
             }
-            let joined = Rc::from_raw(imre_str_join(Rc::as_ptr(&separator), values));
+            let joined = StrOwner::from_raw(imre_str_join(StrOwner::as_ptr(&separator), values));
             assert_eq!(joined.as_str(), "α··🙂");
-            let replaced = Rc::from_raw(imre_str_replace(
-                Rc::as_ptr(&joined),
-                Rc::as_ptr(&old),
-                Rc::as_ptr(&new),
+            let replaced = StrOwner::from_raw(imre_str_replace(
+                StrOwner::as_ptr(&joined),
+                StrOwner::as_ptr(&old),
+                StrOwner::as_ptr(&new),
             ));
             assert_eq!(replaced.as_str(), "/α/·/·/🙂/");
             super::super::imre_object_release(values);
         }
-        assert!(texts.iter().all(|text| Rc::strong_count(text) == 1));
+        assert!(texts.iter().all(|text| StrOwner::strong_count(text) == 1));
     }
 
     #[test]
     fn unchanged_replacements_return_an_owner_of_the_source() {
-        let value = Rc::new(Str::from("word".repeat(1024)));
+        let value = StrOwner::new(Str::from("word".repeat(1024)));
         for (old, new) in [("absent", "!"), ("word", "word"), ("", "")] {
-            let old = Rc::new(Str::from(old));
-            let new = Rc::new(Str::from(new));
+            let old = StrOwner::new(Str::from(old));
+            let new = StrOwner::new(Str::from(new));
             // SAFETY: the three inputs stay rooted, and the result transfers an owner.
             let result = unsafe {
-                Rc::from_raw(imre_str_replace(
-                    Rc::as_ptr(&value),
-                    Rc::as_ptr(&old),
-                    Rc::as_ptr(&new),
+                StrOwner::from_raw(imre_str_replace(
+                    StrOwner::as_ptr(&value),
+                    StrOwner::as_ptr(&old),
+                    StrOwner::as_ptr(&new),
                 ))
             };
-            assert!(Rc::ptr_eq(&result, &value));
+            assert!(StrOwner::ptr_eq(&result, &value));
         }
     }
 
     #[test]
     fn single_item_join_keeps_an_owner_after_the_input_list_is_released() {
-        let separator = Rc::new(Str::from("unused separator"));
-        let text = Rc::new(Str::from("an independently owned λ🙂 string"));
+        let separator = StrOwner::new(Str::from("unused separator"));
+        let text = StrOwner::new(Str::from("an independently owned λ🙂 string"));
         // SAFETY: the list retains text; joining transfers a second string owner.
         unsafe {
             let values = super::super::imre_seq_new(3);
-            super::super::imre_seq_append(values, Rc::as_ptr(&text) as usize, 3);
-            let joined = Rc::from_raw(imre_str_join(Rc::as_ptr(&separator), values));
-            assert!(Rc::ptr_eq(&text, &joined));
+            super::super::imre_seq_append(values, StrOwner::as_ptr(&text) as usize, 3);
+            let joined = StrOwner::from_raw(imre_str_join(StrOwner::as_ptr(&separator), values));
+            assert!(StrOwner::ptr_eq(&text, &joined));
             super::super::imre_object_release(values);
             drop(text);
-            assert_eq!(Rc::strong_count(&joined), 1);
+            assert_eq!(StrOwner::strong_count(&joined), 1);
             assert_eq!(joined.as_str(), "an independently owned λ🙂 string");
         }
     }
@@ -985,7 +1031,7 @@ mod tests {
             (-0.0, 2, plus | 1, "-0.00%"),
         ] {
             // SAFETY: the formatter transfers exactly one fresh string owner.
-            let actual = unsafe { Rc::from_raw(imre_float_format(value, precision, flags)) };
+            let actual = unsafe { StrOwner::from_raw(imre_float_format(value, precision, flags)) };
             assert_eq!(actual.as_str(), expected);
         }
     }

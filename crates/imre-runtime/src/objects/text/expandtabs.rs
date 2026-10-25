@@ -1,7 +1,8 @@
 //! Expand tab stops in Unicode code points. Only CR and LF reset columns.
 
 use super::super::{Str, c_int};
-use super::{Error, Kind, Rc, Result, finish, owned_string};
+use super::{Error, Kind, Result, finish, owned_string};
+use crate::StrOwner;
 
 /// A prior tab always leaves the column divisible by its width. Only the
 /// part after the last CR/LF in this unchanged span affects the next stop.
@@ -67,9 +68,9 @@ pub unsafe extern "C" fn imre_str_expandtabs(source: *const Str, tabsize: usize)
             let handle = if result.len() <= 2 {
                 owned_string(&result)
             } else {
-                Rc::new(result)
+                StrOwner::new(result)
             };
-            Ok(Rc::into_raw(handle))
+            Ok(StrOwner::into_raw(handle))
         })(),
         std::ptr::null(),
     )

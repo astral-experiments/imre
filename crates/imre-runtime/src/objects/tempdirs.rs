@@ -1,6 +1,7 @@
 //! Direct-with temporary workspaces. Creation is exclusive and private; cleanup
 //! walks held directory descriptors and never follows a descendant symlink.
 
+use crate::StrOwner;
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, OsStr, OsString};
 use std::fs::{self, OpenOptions};
@@ -456,7 +457,7 @@ pub unsafe extern "C" fn imre_tempdir_new(
         )
     };
     finish(
-        result.map(|name| Rc::into_raw(Rc::new(name))),
+        result.map(|name| StrOwner::into_raw(StrOwner::new(name))),
         std::ptr::null(),
     )
 }

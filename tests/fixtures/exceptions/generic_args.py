@@ -141,6 +141,16 @@ print(len(saved[0]))
 print(repr(saved[0][-1]))
 print(saved[0] is items)
 
+numbers = [4]
+try:
+    raise ValueError(numbers)
+except Exception as error:
+    args = error.args
+    numbers.append(2**90)
+    print(repr(args))
+    print(str(error))
+    print(args[0] is numbers)
+
 for bad in [ValueError(1.25), ValueError(True)]:
     scalar = bad.args[0]
     try:

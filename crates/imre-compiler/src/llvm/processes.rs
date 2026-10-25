@@ -4,6 +4,7 @@ use super::*;
 use crate::ir::ProcessOperation;
 
 mod descriptors;
+mod readiness;
 
 fn shutil_tag(ty: Type) -> u32 {
     match ty {
@@ -60,6 +61,23 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            ProcessOperation::SelectorClass(mode) => {
+                let which = mode.map_or(2, u32::from);
+                let operand =
+                    self.instruction(format!("call ptr @imre_popen_selector_class(i32 {which})"));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::SetSelector => {
+                self.line(format!(
+                    "call void @imre_popen_set_selector(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
             ProcessOperation::NewLoop | ProcessOperation::EnsureTask => {
                 let call = if matches!(operation, ProcessOperation::NewLoop) {
                     "call ptr @imre_async_loop_new()".to_owned()
@@ -577,6 +595,7 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::DescriptorConstant(name) => self.os_descriptor_constant(name),
+            ProcessOperation::Readiness(op) => self.readiness(op, args, returns),
             ProcessOperation::Fd(operation) => self.os_descriptor(operation, args, returns),
             ProcessOperation::CredentialId { group } => {
                 let operand = self.checked_instruction(format!(

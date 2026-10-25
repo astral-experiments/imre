@@ -58,6 +58,7 @@ Imre supports:
 - Read and write UTF-8 files, resolve native `pathlib.Path` values, and scan directories with `iterdir` and bounded `glob`.
 - Stream lines from plain or gzip files and read binary inputs in bounded chunks.
 - Create scoped temporary workspaces and atomically replace completed files.
+- Use IPv4 TCP sockets on POSIX: bind and accept local connections, connect, exchange bytes, duplicate sockets, and control descriptor blocking and inheritance.
 - Run native subprocesses with captured UTF-8 output, deadlines, explicit arguments, working directories, and environment snapshots.
 
 But not:
