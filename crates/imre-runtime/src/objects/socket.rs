@@ -435,7 +435,9 @@ pub unsafe extern "C" fn imre_socket_recv(s: &Object, size: usize, flags: usize)
                 bytes.shrink_to_fit();
             }
         }
-        Ok(Rc::into_raw(Rc::new(bytes)))
+        crate::BytesOwner::try_new(bytes)
+            .map(crate::BytesOwner::into_raw)
+            .map_err(|_| Error::memory_error())
     })();
     finish(result, ptr::null())
 }

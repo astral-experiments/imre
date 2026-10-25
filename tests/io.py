@@ -28,6 +28,7 @@ print(1000000000000000000000000000000000000000000000000000000000001)
     # Exceed the 128 KiB binary buffer CPython 3.14 uses for a pipe.
     "large": "print(" + repr("prefix\0" + "éλ🙂" * 32768 + "\0suffix") + ")\n"
     'for index in range(160):\n    print(index)\nprint("large output finished")\n',
+    "blocked_write": (Path(__file__).parent / "fixtures/sys/blocked_write.py").read_text(encoding="utf-8"),
     "print_errno": """import os
 import sys
 for fd in [1, 2]:
@@ -98,6 +99,24 @@ def same_output(actual: bytes, expected: bytes, label: str) -> None:
             f"actual={actual[offset:offset + 120]!r}, expected={expected[offset:offset + 120]!r}; "
             f"lengths={len(actual)}/{len(expected)}"
         )
+
+
+def blocked_write(command: list[str], free: int, mode: str) -> subprocess.CompletedProcess[bytes]:
+    reader, writer = os.pipe()
+    try:
+        os.set_blocking(writer, False)
+        for chunk in (b"x" * 4096, b"x"):
+            try:
+                while True:
+                    os.write(writer, chunk)
+            except BlockingIOError:
+                pass
+        if free:
+            os.read(reader, free)
+        return run([*command, str(writer), mode], pass_fds=(writer,))
+    finally:
+        os.close(reader)
+        os.close(writer)
 
 
 def visible_output(fd: int, expected: bytes, timeout: float) -> bytes:
@@ -409,6 +428,15 @@ def main() -> None:
                 reference["terminal_loop"], f"terminal output O{level}",
             )
             passed += 1
+
+            for mode, free in [("write", 0), ("write", 4096), ("flush", 0)]:
+                reference_run = blocked_write([args.python, "-I", str(sources["blocked_write"])], free, mode)
+                native_run = blocked_write([binaries["blocked_write"]], free, mode)
+                assert reference_run.returncode == native_run.returncode == 0
+                assert b"BlockingIOError(" in reference_run.stderr
+                same_output(native_run.stderr, reference_run.stderr, f"blocked {mode} with {free} free")
+                same_output(native_run.stdout, reference_run.stdout, "buffer retained after blocked write")
+                passed += 1
 
             # A caught print failure on either stream retains the pipe errno.
             reader, writer = os.pipe()
