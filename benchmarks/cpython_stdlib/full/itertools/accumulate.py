@@ -2,10 +2,41 @@ from itertools import accumulate, batched, chain, count, cycle, islice, tee
 from csv import reader, Error
 from io import StringIO
 
+
 def guarded(total: int, value: int) -> int:
     if value == 2:
         raise ValueError('refuse two')
     return total * 10 + value
+
+
+def stop_two(total: int, value: int) -> int:
+    if value == 2:
+        raise StopIteration('paused')
+    return total + value
+
+
+class Mutate:
+    def __init__(self, values: list[int]) -> None:
+        self.values = values
+
+    def add(self, left: int, right: int) -> int:
+        self.values[0] = 2**70
+        return left + right
+
+
+def choose_addition() -> None:
+    print('evaluate func')
+
+
+def initial_value() -> int:
+    print('evaluate initial')
+    return 7
+
+
+def input_values() -> list[int]:
+    print('evaluate iterable')
+    return [2, 3]
+
 
 items = [1, 2]
 cursor = accumulate(items)
@@ -51,11 +82,6 @@ except TypeError as exc:
 print(next(invalid, -1))
 print(list(islice(accumulate(count(1)), 5)))
 
-def stop_two(total: int, value: int) -> int:
-    if value == 2:
-        raise StopIteration('paused')
-    return total + value
-
 stopped = accumulate([1, 2, 3], stop_two)
 print(next(stopped))
 try:
@@ -87,36 +113,11 @@ except StopIteration as exc:
     print(str(exc))
 print(repr((next(sliced, -1), next(slice_source))))
 
-
-class Mutate:
-    def __init__(self, values: list[int]) -> None:
-        self.values = values
-
-    def add(self, left: int, right: int) -> int:
-        self.values[0] = 2**70
-        return left + right
-
-
 shared = [1]
 changing = accumulate([3, 4, 5], Mutate(shared).add)
 print(repr((sum(shared), next(changing), sum(shared))))
 print(repr((next(changing), sum(shared))))
 print(repr((list(changing), sum(shared))))
-
-
-def choose_addition() -> None:
-    print('evaluate func')
-
-
-def initial_value() -> int:
-    print('evaluate initial')
-    return 7
-
-
-def input_values() -> list[int]:
-    print('evaluate iterable')
-    return [2, 3]
-
 
 ordered = accumulate(func=choose_addition(), initial=initial_value(), iterable=input_values())
 print(list(ordered))

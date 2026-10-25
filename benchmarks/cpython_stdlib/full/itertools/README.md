@@ -89,3 +89,11 @@ The selector regression also separates data errors from selector errors: only
 the latter discard a data item. Empty iterator selectors test true without a
 pull. The runtime controls pause an outer pull while a second consumer reads
 the same cursor, and traverse 16,384 selector adapters on a 256 KiB stack.
+
+[accumulate.py](accumulate.py) exercises lazy seed and callback evaluation,
+aliasing a live input, exceptions raised by a callback or by its source,
+and resuming after a callback raises `StopIteration`. It also checks how
+chain, batched, cycle, tee and islice consume that same transient exception.
+These supplemental operations add no test ID. The unchanged
+`TestExamples.test_accumulate` is counted separately in the
+[per-occurrence reports](COVERAGE.md).

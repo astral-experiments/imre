@@ -9,8 +9,8 @@ These are separate upstream suites, for **138 occurrences** in total. The JSON
 doctests are part of JSON's denominator. Imre's LLVM optimization level does
 not change CPython's discovery or remove docstrings.
 
-At O0 and O3, thirteen complete primary methods and the batched doctest pass
-under their original host fixtures. The 103 blocked occurrences, four reference skips and sixteen
+At O0 and O3, fourteen complete primary methods and the batched doctest pass
+under their original host fixtures. The 102 blocked occurrences, four reference skips and sixteen
 reviewed exclusions remain in the primary report. The companion is blocked
 at both levels.
 
@@ -23,13 +23,16 @@ these bodies as `native-body-host-fixture`: CPython dispatches the original
 fixtures, and an Imre subprocess constructs its native instance. Filter and
 zip are builtin-only examples inside the upstream denominator.
 
-Twelve of the thirteen passing unittest bodies use the bundled `unittest.TestCase`
+Thirteen of the fourteen passing unittest bodies use the bundled `unittest.TestCase`
 assertions. The `zip` example still uses the native fixture for lists of tuples.
 The first assertion in `TestBasicOps.test_batched` compares a list of
 variable-length native tuples with a list of fixed tuples. The bundled list
 assertion cannot compare those elements yet; that complete body remains blocked.
-`TestExamples.test_compress` runs in full. The larger `TestBasicOps.test_compress`
-reaches `repeat(range(6), n)` and needs a reusable range as a first-class value.
+`TestExamples.test_accumulate` and `TestExamples.test_compress` run in full.
+The larger `TestBasicOps.test_accumulate` stops on the import of `decimal`;
+`TestBasicOps.test_chain` stops on an unannotated local function. The larger
+`TestBasicOps.test_compress` reaches `repeat(range(6), n)` and needs to retain
+the range as an iterator argument.
 
 On the reference build, four huge allocations skip under the upstream
 address-space rule. The default resource configuration also skips the long-chain
