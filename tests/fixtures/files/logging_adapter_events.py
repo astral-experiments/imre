@@ -19,7 +19,7 @@ class Hooks(logging.LoggerAdapter):
         print("checking")
         return self.logger.isEnabledFor(level)
 
-    def process(self, msg: str, kwargs: dict[str, dict[str, str] | None]) -> tuple[str, dict[str, dict[str, str] | None]]:
+    def process(self, msg, kwargs):
         print("processing")
         print("extra" in kwargs)
         if msg == "switch %s":
