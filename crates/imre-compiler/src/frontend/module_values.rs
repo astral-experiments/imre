@@ -2,18 +2,102 @@
 
 use std::cell::RefCell;
 use std::ops::Range;
+use std::rc::Rc;
 
 use super::*;
+
+type ClassLiteral = (Option<ModuleId>, Rc<[String]>);
 
 #[derive(Default)]
 pub(super) struct ModuleValues {
     definitions: RefCell<HashMap<DefinitionId, (usize, Type)>>,
+    class_tuples: RefCell<HashMap<(DefinitionId, usize), usize>>,
+    literal_tuples: RefCell<HashMap<ClassLiteral, usize>>,
     types: RefCell<Vec<Type>>,
     pub(super) regex_literals: RefCell<HashMap<String, regex::CaptureLayout>>,
     regex_globals: RefCell<HashMap<usize, regex::CaptureLayout>>,
 }
 
 impl ModuleValues {
+    /// Each declaration owns a single tuple for its entire class lifetime,
+    /// including references through aliases and subclasses.
+    fn initialize_class_tuples(
+        &self,
+        definition: DefinitionId,
+        class: &crate::classes::Class,
+        types: &Types,
+    ) -> Vec<Statement> {
+        let mut tuples: Vec<_> = class
+            .static_bindings
+            .values()
+            .filter_map(|value| match value {
+                crate::classes::ClassValue::Strings {
+                    owner,
+                    ordinal,
+                    values,
+                    literal,
+                } if *owner == definition => Some((*ordinal, values, *literal)),
+                _ => None,
+            })
+            .collect();
+        tuples.sort_unstable_by_key(|(ordinal, ..)| *ordinal);
+        tuples.dedup_by_key(|(ordinal, ..)| *ordinal);
+        let mut slots = self.types.borrow_mut();
+        tuples
+            .into_iter()
+            .filter_map(|(ordinal, values, literal)| {
+                let ty = types.tuple(vec![Type::Str; values.len()]);
+                let slot = slots.len();
+                // CPython shares literal constants within one compilation unit;
+                // the empty tuple is shared across units as well.
+                if literal {
+                    let key = (
+                        (!values.is_empty()).then_some(definition.module),
+                        Rc::clone(values),
+                    );
+                    let existing = *self.literal_tuples.borrow_mut().entry(key).or_insert(slot);
+                    if existing != slot {
+                        self.class_tuples
+                            .borrow_mut()
+                            .insert((definition, ordinal), existing);
+                        return None;
+                    }
+                }
+                slots.push(ty);
+                assert!(
+                    self.class_tuples
+                        .borrow_mut()
+                        .insert((definition, ordinal), slot)
+                        .is_none()
+                );
+                let tuple = Expr {
+                    ty,
+                    kind: ExprKind::Tuple(
+                        values
+                            .iter()
+                            .map(|value| Expr {
+                                ty: Type::Str,
+                                kind: ExprKind::Str(value.clone()),
+                            })
+                            .collect(),
+                    ),
+                };
+                Some(Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![tuple]),
+                }))
+            })
+            .collect()
+    }
+
+    pub(super) fn class_tuple(&self, owner: DefinitionId, ordinal: usize) -> Option<Expr> {
+        let slot = *self.class_tuples.borrow().get(&(owner, ordinal))?;
+        Some(Expr {
+            ty: self.types.borrow()[slot],
+            kind: ExprKind::Builtin(Builtin::GlobalGet(slot), vec![]),
+        })
+    }
+
     /// Resolves storage only after the defining initializer has been checked.
     pub fn get(&self, definition: DefinitionId) -> Option<(usize, Type)> {
         self.definitions.borrow().get(&definition).copied()
@@ -141,8 +225,39 @@ impl Initialization {
                 continue;
             }
             match statement {
-                ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {
+                ast::Stmt::ClassDef(_) => {
+                    let declarations = &checker.classes.declarations;
+                    if let Some(&class) = declarations.ids.get(&definition) {
+                        body.extend(checker.globals.initialize_class_tuples(
+                            definition,
+                            &declarations.definitions[class],
+                            checker.types,
+                        ));
+                    }
                     available.insert(definition);
+                    continue;
+                }
+                ast::Stmt::FunctionDef(_) => {
+                    available.insert(definition);
+                    continue;
+                }
+                ast::Stmt::ImportFrom(import)
+                    if crate::modules::errno_import(statement).is_some() =>
+                {
+                    let start = body.len();
+                    body.extend(import.names.iter().map(|alias| {
+                        checker
+                            .graph
+                            .checked_builtin_import(checker.module, alias.range());
+                        checker.check_errno_import(alias.name.as_str())
+                    }));
+                    checkpoints.push(Checkpoint {
+                        statement: index,
+                        body: start..body.len(),
+                        initialized: checker.globals.types.borrow().len(),
+                        definitions: available.clone(),
+                        class_reads: std::mem::take(checker.class_reads.get_mut()),
+                    });
                     continue;
                 }
                 ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_) => continue,

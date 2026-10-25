@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bindings import Boundary, PRIVATE, Probe
 from bodies import compiled
 from deep_decode import DRIVER as DEEP_DRIVER, METHOD as DEEP_METHOD, fixture as deep_fixture
+from key_identity import METHOD as KEY_METHOD, owner_fixture
 from formatting import METHODS as FORMATTING, Native as NativeFormatter, formatting_method
 from native import counts
 from reference import BENCH, COMMIT, HERE, routine, verify
@@ -46,6 +47,21 @@ def fixture_variant(case):
     return f"{variant}[{case.id()}]" if isinstance(case, doctest.DocTestCase) else variant
 
 
+@cache
+def intact_startup():
+    checks = json.loads((HERE / "doctest-startup-linux.json").read_bytes())["checks"]
+    summaries = {}
+    for reachable in (False, True):
+        rows = [row for row in checks if row["reachable_only"] == reachable]
+        reasons = {": ".join(row["diagnostic"].split(": Imre: ")[-2:]) for row in rows}
+        if len(reasons) != 1 or not all(row["exit"] for row in rows):
+            return "see the four entry checks in doctest-startup-linux.json"
+        summaries[reachable] = reasons.pop()
+    if summaries[False] == summaries[True]:
+        return summaries[False]
+    return f"ordinary: {summaries[False]}; --reachable-only: {summaries[True]}"
+
+
 def missing(source, reference, variant, level):
     """Record individually verified exceptions; ordinary API failures stay in scope."""
     if isinstance(reference, dict):
@@ -68,7 +84,8 @@ def missing(source, reference, variant, level):
             "revisit": f"Run {source} if Imre exposes the corresponding CPython backend identity or private factory.",
         }
     if source.startswith("json"):
-        why = "DocTestSuite imports CPython json; native example execution requires the shared doctest fixture (DOCTEST.md)"
+        case_blocker = "io.StringIO at example 7" if source == "json" else "json.encoder.JSONEncoder at example 1"
+        why = f"native DocTestSuite is blocked by {case_blocker}; intact package: {intact_startup()} (DOCTEST.md)"
     elif ".test_tool." in source:
         why = "original subprocess invokes CPython -m json or json.tool; a native module entry point is required"
     else:
@@ -141,6 +158,24 @@ def run(tools, directory, reference):
                              "native_calls": {"loads": len(calls)}, "native_exceptions": calls}}
 
     executions.update(dict.fromkeys(ids[DEEP_METHOD], native_depth))
+    key_dir = directory / "decoder-key-owners"
+    key_dir.mkdir()
+    keys_method = owner_fixture(tools, key_dir)
+
+    def native_keys(case, original):
+        result = keys_method(case, original)
+        obs = {"outcome": "pass" if result["outcome"] == "pass" else "failure",
+               "roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
+               "evidence": {"source": KEY_METHOD, "method_sha256": definition(KEY_METHOD)[1], "opt_level": tools.level,
+                            "fixture": "original CPython lifecycle, method, sort and identity assertions",
+                            "operation": ", ".join(result["native_operations"]),
+                            "native_key_owners": result["native_key_owners"]}}
+        if result["reason"]:
+            obs["reason"] = result["reason"]
+        return obs
+
+    executions.update(dict.fromkeys(ids[KEY_METHOD], native_keys))
+
     formatter = NativeFormatter(tools, directory)
     for short in FORMATTING:
         source = f"test.test_json.{short}"

@@ -270,7 +270,11 @@ class DocTestCase(unittest.TestCase):
         return 1
 
     def runTest(self) -> None:
-        execute(self._dt_test, False)
+        for example in self._dt_test.examples:
+            if not _optionflags(example) & SKIP:
+                execute(self._dt_test, False)
+                return
+        raise unittest.SkipTest("all examples were skipped")
 
     def debug(self) -> None:
         execute(self._dt_test, True)

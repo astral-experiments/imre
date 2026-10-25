@@ -148,6 +148,21 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
+        // A comparison with a bool singleton only observes whether the other
+        // operand is that same singleton; integer object identity is irrelevant.
+        if let Some(union) = [left.ty, right.ty]
+            .into_iter()
+            .find(|&ty| self.types.is_bool_or_int(ty))
+            && (left.ty == Type::Bool || right.ty == Type::Bool)
+        {
+            return Ok(Self::identity_result(
+                vec![
+                    self.coerce(left, union, node)?,
+                    self.coerce(right, union, node)?,
+                ],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         // Python's empty built-in tuple is a singleton. Each operand still
         // executes exactly once, even when it raises before returning the tuple.
         if [left.ty, right.ty] == [self.types.tuple(Vec::new()); 2] {
@@ -238,6 +253,15 @@ impl Checker<'_> {
                 op == ast::CmpOp::IsNot,
             ));
         }
+        if let (Type::Class(a), Type::Class(b)) = (left.ty, right.ty)
+            && self.native_mock(a)
+            && self.native_mock(b)
+        {
+            return Ok(Self::identity_result(
+                vec![self.mock_node(left, a), self.mock_node(right, b)],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         if !(types
             .iter()
             .all(|ty| matches!(ty, Type::StrEnum(_) | Type::Enum(_)))
@@ -251,6 +275,11 @@ impl Checker<'_> {
                         | Type::None
                 )
             })
+            || types == [Type::NativeModule; 2]
+            || types == [Type::ModuleNamespace; 2]
+            || types
+                .iter()
+                .all(|ty| matches!(ty, Type::ForwardRef(_) | Type::Callable(_)))
             || types
                 .iter()
                 .all(|ty| matches!(ty, Type::Str | Type::StrLiteral(_) | Type::Bytes))
@@ -275,8 +304,11 @@ impl Checker<'_> {
                     .any(|ty| self.types.struct_sequence_fields(*ty).is_some()))
             || types == [Type::SysImplementation; 2]
             || types == [Type::Logger; 2]
+            || types == [Type::StringIO; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
+            || types == [Type::PathInfo; 2]
+            || types == [Type::JsonDecoder; 2]
             || types == [Type::Sha256; 2])
         {
             return Err(error(
