@@ -116,7 +116,9 @@ jobs:
           out="$RUNNER_TEMP/receipts"
           args=(--imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18)
           python "$dir/run_cache.py" "${args[@]}" --result "$out/cache.json"
-          cmp "$dir/cache-parameters-linux.json" "$out/cache.json"
+          cache_receipt="$dir/cache-parameters-linux.json"
+          if test -f "$dir/cache-len-binding-linux.json"; then cache_receipt="$dir/cache-len-binding-linux.json"; fi
+          cmp "$cache_receipt" "$out/cache.json"
           python "$dir/run_reduce.py" "${args[@]}" --result "$out/reduce.json"
           cmp "$dir/reduce-linux.json" "$out/reduce.json"
           python "$dir/run_bodies.py" "${args[@]}" --compiler-commit "$CANDIDATE" --result "$out/bodies.json"
@@ -216,7 +218,9 @@ jobs:
               cmp "$RUNNER_TEMP/oracle-err" "$RUNNER_TEMP/err"
             done
             python "$dir/run_cache.py" "${args[@]}" --result "$out/cache.json"
-            cmp "$dir/cache-parameters-linux.json" "$out/cache.json"
+            cache_receipt="$dir/cache-parameters-linux.json"
+            if test -f "$dir/cache-len-binding-linux.json"; then cache_receipt="$dir/cache-len-binding-linux.json"; fi
+            cmp "$cache_receipt" "$out/cache.json"
             python "$dir/run_reduce.py" "${args[@]}" --result "$out/reduce.json"
             cmp "$dir/reduce-linux.json" "$out/reduce.json"
             python "$dir/run_bodies.py" "${args[@]}" --compiler-commit "$commit" --result "$out/bodies.json"
