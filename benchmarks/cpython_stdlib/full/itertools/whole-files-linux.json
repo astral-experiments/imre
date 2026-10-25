@@ -1,0 +1,102 @@
+{
+  "format_version": 1,
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "89eed3de177f7b36889db837b6886ca68ba29eec9669088902b044499fed6a22",
+  "runtime_sha256": "dbe1240ecbddda2b3352c3ebc9804b4b62934b2c4b06ec2222808b33ec415a1e",
+  "suites": {
+    "test.test_itertools": {
+      "path": "Lib/test/test_itertools.py",
+      "git_blob": "cf579d4da4e0dfb0ab31e4a1a8a5efc36e51331b",
+      "source_sha256": "ab7e8807a69486342097e69e831b4dcfa725681f26636f39e4928d72975c7a6b",
+      "modes": [
+        {
+          "opt_level": 0,
+          "reachable_only": false,
+          "build": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": " Compiling Lib/test/test_itertools.py (-O0)\nLib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"_thread\"\n"
+          },
+          "tests_executed": 0
+        },
+        {
+          "opt_level": 0,
+          "reachable_only": true,
+          "build": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": " Compiling Lib/test/test_itertools.py (-O0)\nLib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"_thread\"\n"
+          },
+          "tests_executed": 0
+        },
+        {
+          "opt_level": 3,
+          "reachable_only": false,
+          "build": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": " Compiling Lib/test/test_itertools.py (-O3)\nLib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"_thread\"\n"
+          },
+          "tests_executed": 0
+        },
+        {
+          "opt_level": 3,
+          "reachable_only": true,
+          "build": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": " Compiling Lib/test/test_itertools.py (-O3)\nLib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"_thread\"\n"
+          },
+          "tests_executed": 0
+        }
+      ]
+    },
+    "test.test_free_threading.test_itertools_batched": {
+      "path": "Lib/test/test_free_threading/test_itertools_batched.py",
+      "git_blob": "a754b4f9ea9902da610a11e4144c110e23d0cc12",
+      "source_sha256": "04d15544f4d1e4137a562786d3f3bfd6b70c49af8c6307076abb289b1047965f",
+      "modes": [
+        {
+          "opt_level": 0,
+          "reachable_only": false,
+          "build": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": " Compiling Lib/test/test_free_threading/test_itertools_batched.py (-O0)\nLib/test/test_free_threading/test_itertools_batched.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"threading\"\n"
+          },
+          "tests_executed": 0
+        },
+        {
+          "opt_level": 0,
+          "reachable_only": true,
+          "build": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": " Compiling Lib/test/test_free_threading/test_itertools_batched.py (-O0)\nLib/test/test_free_threading/test_itertools_batched.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"threading\"\n"
+          },
+          "tests_executed": 0
+        },
+        {
+          "opt_level": 3,
+          "reachable_only": false,
+          "build": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": " Compiling Lib/test/test_free_threading/test_itertools_batched.py (-O3)\nLib/test/test_free_threading/test_itertools_batched.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"threading\"\n"
+          },
+          "tests_executed": 0
+        },
+        {
+          "opt_level": 3,
+          "reachable_only": true,
+          "build": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": " Compiling Lib/test/test_free_threading/test_itertools_batched.py (-O3)\nLib/test/test_free_threading/test_itertools_batched.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"threading\"\n"
+          },
+          "tests_executed": 0
+        }
+      ]
+    }
+  }
+}

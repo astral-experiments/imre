@@ -157,9 +157,39 @@ def bridge() -> None:
     while i < len(sys.argv):
         p.register(int(sys.argv[i]), int(sys.argv[i + 1]))
         i += 2
-    for fd, mask in p.poll(int(sys.argv[2])):
+    timeout = sys.argv[2]
+    if timeout == "None":
+        ready = p.poll(None)
+    elif timeout.startswith("float:"):
+        ready = p.poll(float(timeout[6:]))
+    else:
+        ready = p.poll(int(timeout))
+    for fd, mask in ready:
         print(fd)
         print(mask)
+
+
+def bridge_select() -> None:
+    fd = int(sys.argv[2])
+    if sys.argv[3] == "None":
+        rr, ww, xx = select.select([fd], [], [], None)
+    else:
+        rr, ww, xx = select.select([fd], [], [], int(sys.argv[3]))
+    assert len(ww) == 0 and len(xx) == 0
+    for result in rr:
+        print(result)
+
+
+def bridge_limit() -> None:
+    p = select.poll()
+    p.register(1)
+    value = int(sys.argv[3])
+    if sys.argv[2] == "register":
+        p.register(0, value)
+    elif sys.argv[2] == "modify":
+        p.modify(1, value)
+    else:
+        p.poll(value)
 
 
 def wait() -> None:
@@ -194,5 +224,9 @@ elif sys.argv[1] == "bounds":
     bounds()
 elif sys.argv[1] == "poll":
     bridge()
+elif sys.argv[1] == "select":
+    bridge_select()
+elif sys.argv[1] == "limit":
+    bridge_limit()
 else:
     wait()

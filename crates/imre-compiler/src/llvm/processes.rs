@@ -61,6 +61,23 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            ProcessOperation::SelectorClass(mode) => {
+                let which = mode.map_or(2, u32::from);
+                let operand =
+                    self.instruction(format!("call ptr @imre_popen_selector_class(i32 {which})"));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::SetSelector => {
+                self.line(format!(
+                    "call void @imre_popen_set_selector(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
             ProcessOperation::NewLoop | ProcessOperation::EnsureTask => {
                 let call = if matches!(operation, ProcessOperation::NewLoop) {
                     "call ptr @imre_async_loop_new()".to_owned()
@@ -314,6 +331,27 @@ impl Emitter<'_, '_> {
                 };
                 self.checked_line(instruction);
                 none()
+            }
+            ProcessOperation::ShellOutput { status } => {
+                let tuple = status.then(|| self.record(returns));
+                let status_slot = tuple.as_ref().map_or("null", |v| v.operand.as_str());
+                let kind = representation_kind(args[0].value.ty, &self.module.types);
+                let output = self.checked_instruction(format!(
+                    "call ptr @imre_subprocess_shell_output(ptr {}, i32 {kind}, i64 {}, i64 {}, ptr {status_slot})",
+                    args[0].value.operand, args[1].value.operand, args[2].value.operand
+                ));
+                if let Some(tuple) = tuple {
+                    let slot = self
+                        .instruction(format!("getelementptr i64, ptr {}, i64 1", tuple.operand));
+                    self.line(format!("store ptr {output}, ptr {slot}"));
+                    tuple
+                } else {
+                    self.owned(Value {
+                        ty: returns,
+                        operand: output,
+                        small_integer: false,
+                    })
+                }
             }
             ProcessOperation::Popen { streams }
             | ProcessOperation::Call { streams, .. }

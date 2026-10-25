@@ -895,6 +895,43 @@ impl Checker<'_> {
         self.launch_process(call, check_call.map_or(LaunchApi::Popen, LaunchApi::Call))
     }
 
+    /// Shell output accepts the same command representations as a shell-mode Popen.
+    pub(super) fn shell_output(
+        &mut self,
+        call: &ast::ExprCall,
+        status: bool,
+    ) -> Result<Expr, String> {
+        let text = self.types.optional(Type::Str);
+        let params = ["cmd", "encoding", "errors"].map(|name| Parameter {
+            name: name.into(),
+            ty: if name == "cmd" { Type::Str } else { text },
+            kind: if name == "cmd" {
+                ParameterKind::PositionalOrKeyword
+            } else {
+                ParameterKind::KeywordOnly
+            },
+            default: (name != "cmd").then(|| absent(text)),
+            sign_only: false,
+        });
+        let args = self.arguments_with(call, &params, None, |checker, index, arg| {
+            if index == 0 {
+                checker.command_argument(arg)
+            } else {
+                checker.expr_expected(arg, text)
+            }
+        })?;
+        let ty = if status {
+            self.types.tuple(vec![Type::Int, Type::Str])
+        } else {
+            Type::Str
+        };
+        Ok(self.ordered_builtin(
+            Builtin::Process(ProcessOperation::ShellOutput { status }),
+            ty,
+            args,
+        ))
+    }
+
     pub(super) fn process_check_output(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.launch_process(call, LaunchApi::CheckOutput)
     }
