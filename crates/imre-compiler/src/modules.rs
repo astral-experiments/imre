@@ -137,6 +137,9 @@ pub(crate) enum Intrinsic {
     GetLevelName,
     AddLevelName,
     LevelNamesMapping,
+    HandlerRename,
+    HandlerLookup,
+    HandlerLevelType,
     LevelMap { names: bool },
     LogRecord,
     MakeLogRecord,
@@ -1138,10 +1141,10 @@ fn resolve_binding(
     }
 }
 
-const LOGGING_CLASSES: &str = "__imre_logging_classes__";
+pub(crate) const LOGGING_CLASSES: &str = "__imre_logging_classes__";
 
 /// Public logging classes can be compiled from Python alongside the module's
-/// native operations. Only local class definitions are exported from the bundle.
+/// native operations. Only local public definitions are exported from the bundle.
 fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) -> Option<Binding> {
     module.symbol(name).or_else(|| {
         if module != IntrinsicModule::Logging || name.starts_with('_') {
@@ -1153,7 +1156,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
             .find(|(_, m)| m.bundled && m.name == LOGGING_CLASSES)?;
         source.export(name).filter(|b| {
             matches!(b, Binding::Definition(d) if d.module == id &&
-                matches!(&source.parsed.syntax().body[d.statement], ast::Stmt::ClassDef(_)))
+                matches!(&source.parsed.syntax().body[d.statement], ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_)))
         })
     })
 }
@@ -1616,6 +1619,27 @@ impl<'a> Loader<'a> {
                     return Err("wildcard imports are unsupported".into());
                 }
                 let name = self.import_name(id, import)?;
+                if import.level == 0 && name == "imre._logging" {
+                    if !self.modules[id].is_bundled(LOGGING_CLASSES) {
+                        return Err("the private logging implementation is not importable".into());
+                    }
+                    for alias in &import.names {
+                        let method = match alias.name.as_str() {
+                            "_rename_handler" => Intrinsic::HandlerRename,
+                            "_lookup_handler" => Intrinsic::HandlerLookup,
+                            "_Level" => Intrinsic::HandlerLevelType,
+                            _ => {
+                                return Err(format!(
+                                    "unknown private logging symbol: {}",
+                                    alias.name
+                                ));
+                            }
+                        };
+                        let local = alias.asname.as_ref().unwrap_or(&alias.name);
+                        self.bind(id, local.as_str(), Binding::Intrinsic(method), alias)?;
+                    }
+                    return Ok(());
+                }
                 if import.level == 0
                     && let Some(module) = self.intrinsic_module(&name)?
                 {
