@@ -99,16 +99,9 @@ impl Drop for TupleKey {
         unsafe { super::records::imre_record_release(self.0) };
     }
 }
-impl Hash for TupleKey {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        // SAFETY: checked tuple keys contain only immutable scalar/tuple fields.
-        unsafe { hash_tuple(self.0, state) };
-    }
-}
-
 /// # Safety
 /// The rooted tuple has only exact immutable scalar, optional, or tuple fields.
-unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) {
+unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) -> Result<(), Error> {
     let mut pending = Vec::new();
     let mut current = (value, 0);
     'tuples: loop {
@@ -120,7 +113,9 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) {
             let cached = unsafe { *value.add(layout.length) };
             debug_assert_ne!(cached, 0);
             cached.hash(state);
-            let Some(next) = pending.pop() else { return };
+            let Some(next) = pending.pop() else {
+                return Ok(());
+            };
             current = next;
             continue;
         }
@@ -152,6 +147,7 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) {
                     5 => ObjectKey::borrow(word).hash(state),
                     6 => {
                         if index + 1 < layout.length {
+                            pending.try_reserve(1).map_err(|_| Error::allocation())?;
                             pending.push((value, index + 1));
                         }
                         current = (word as *const usize, 0);
@@ -162,22 +158,37 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) {
                 }
             }
         }
-        let Some(next) = pending.pop() else { return };
+        let Some(next) = pending.pop() else {
+            return Ok(());
+        };
         current = next;
     }
 }
 
-trait KeyEq {
+trait TableKey {
+    fn try_hash(&self) -> Result<u64, Error>;
+
     fn try_eq(&self, other: &Self) -> Result<bool, Error>;
 }
 
-impl<T: Eq> KeyEq for T {
+impl<T: Eq + Hash> TableKey for T {
+    fn try_hash(&self) -> Result<u64, Error> {
+        Ok(HASHER.hash_one(self))
+    }
+
     fn try_eq(&self, other: &Self) -> Result<bool, Error> {
         Ok(self == other)
     }
 }
 
-impl KeyEq for TupleKey {
+impl TableKey for TupleKey {
+    fn try_hash(&self) -> Result<u64, Error> {
+        let mut state = HASHER.build_hasher();
+        // SAFETY: the key roots an immutable checked tuple throughout hashing.
+        unsafe { hash_tuple(self.0, &mut state) }?;
+        Ok(state.finish())
+    }
+
     fn try_eq(&self, other: &Self) -> Result<bool, Error> {
         // SAFETY: both keys root immutable records of the checked key type.
         unsafe { super::values::try_equal(self.0 as usize, other.0 as usize, WordKind::new(6)) }
@@ -185,7 +196,7 @@ impl KeyEq for TupleKey {
 }
 
 /// Only the table's exact immutable key representation implements this.
-trait ScalarKey: Clone + KeyEq + Hash {
+trait ScalarKey: Clone + TableKey {
     const KIND: u32;
     fn word(&self) -> usize;
     unsafe fn borrow(word: usize) -> ManuallyDrop<Self>;
@@ -390,7 +401,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
 
     /// Preserves first-insertion position and returns owners displaced by an update.
     fn insert(&mut self, key: K, value: V) -> Result<Option<(K, V)>, Error> {
-        let hash = HASHER.hash_one(&key);
+        let hash = key.try_hash()?;
         if let Some(position) = self.key_position(hash, &key)? {
             let entry = self.entries[position].as_mut().unwrap();
             return Ok(Some((key, std::mem::replace(&mut entry.value, value))));
@@ -401,7 +412,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
 
     /// Transfers the removed key and value so they can drop outside the mutation.
     fn remove(&mut self, key: &K) -> Result<Option<Entry<K, V>>, Error> {
-        let hash = HASHER.hash_one(key);
+        let hash = key.try_hash()?;
         let mut error = None;
         let found = self.index.find_entry(
             hash,
@@ -487,7 +498,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
 
     unsafe fn lookup(&self, word: usize) -> Option<&Entry<K, V>>
     where
-        K: Eq,
+        K: Eq + Hash,
     {
         // SAFETY: the caller roots this table's exact key representation.
         let key = unsafe { K::borrow(word) };
@@ -500,7 +511,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     unsafe fn promote(&mut self, word: usize) -> Result<bool, Error> {
         // SAFETY: the caller roots a word of this table's key kind.
         let key = unsafe { K::borrow(word) };
-        let hash = HASHER.hash_one(&*key);
+        let hash = key.try_hash()?;
         let mut error = None;
         let found = self.index.find_mut(
             hash,
@@ -551,7 +562,7 @@ impl<K: ScalarKey> Table<K, usize> {
     ) -> Result<Option<OwnedWord>, Error> {
         // SAFETY: the incoming key remains rooted for this whole operation.
         let key = unsafe { K::borrow(word) };
-        let hash = HASHER.hash_one(&*key);
+        let hash = key.try_hash()?;
         if let Some(position) = self.key_position(hash, &*key)? {
             let value = self.entries[position].as_ref().unwrap().value;
             // SAFETY: the table roots the stored value of the declared kind.
@@ -667,7 +678,7 @@ impl<V: Copy> Tables<V> {
         ) -> Result<Option<V>, Error> {
             // SAFETY: the caller roots the exact key kind of the dispatched table.
             let key = unsafe { K::borrow(word) };
-            let position = table.key_position(HASHER.hash_one(&*key), &key)?;
+            let position = table.key_position(key.try_hash()?, &key)?;
             Ok(position.map(|index| table.entries[index].as_ref().unwrap().value))
         }
         // SAFETY: each table borrows its exact rooted key kind.
@@ -2652,7 +2663,7 @@ mod tests {
             for i in 0..20_000 {
                 IntKey::borrow(integer(i)).hash(&mut expected);
             }
-            hash_tuple(key, &mut observed);
+            assert!(hash_tuple(key, &mut observed).is_ok());
             imre_record_release(key);
         }
         assert_eq!(observed.finish(), expected.finish());

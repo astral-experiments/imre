@@ -84,7 +84,10 @@ impl Builtin {
             | Self::ExceptionKeywordSuggestion
             | Self::ExceptionRecordFields => Contract::new(false, PreservesOwners),
             // Formatting a projected task-group member may call its own __repr__.
-            Self::ExceptionFieldRepr | Self::ExceptionRepr | Self::ExceptionMessage => {
+            Self::ExceptionFieldRepr
+            | Self::ExceptionRepr
+            | Self::ExceptionMessage
+            | Self::Logging(crate::ir::LogOperation::PrintActiveException) => {
                 Contract::new(true, Unknown)
             }
             Self::SystemExitFromTuple
@@ -341,6 +344,7 @@ impl Builtin {
             | Self::RecordCopy
             | Self::JsonDecode(_)
             | Self::CsvReader { .. }
+            | Self::FormatCursor { .. }
             | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads
