@@ -64,4 +64,16 @@ def main() -> None:
         print(str(exc))
 
 
+def quoted_line_endings() -> None:
+    with open("input.csv", "wb") as binary:
+        binary.write(b'"a\r\nb","c\rd"\r\nlast,row\r')
+    with open("input.csv", newline="") as stream:
+        reader = csv.reader(stream)
+        print(repr(next(reader)))
+        print(reader.line_num)
+        print(repr(list(reader)))
+        print(reader.line_num)
+
+
 main()
+quoted_line_endings()
