@@ -31,7 +31,7 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 ```
 
 - `test_sys_exception_no_exception`: the complete method queries native handler state and compares the result to `None`. A separate program checks object identity across nested handlers, calls and handler exit.
-- `test_getrecursionlimit` and `test_setrecursionlimit`: the gate first tries each complete method with native unittest. If the callable form of `assertRaises` does not compile, the original CPython method and fixture drive one native process so both changes to the limit and its restoration are observable. Separate frame-depth controls compare nested calls, failed entry, unwinding, integer conversion, and restoration with stock CPython. The direct recursive recovery method still needs recursive source calls; it stays in the denominator.
+- `test_getrecursionlimit` and `test_setrecursionlimit`: the unchanged CPython methods, assertions and teardown drive one native process per method. The getter makes two native calls; the setter makes six, changing 1000 to 10005, checking errors and restoring the limit. Native-body compilation stops at `assertIsInstance` and callable `assertRaises`, respectively. Separate controls compare native frame depth, unwind and integer conversion with stock CPython. `test_recursionlimit_recovery` still needs recursive source calls. `test_setrecursionlimit_to_depth` can use `test.support.get_recursion_depth`'s `_getframe`/`f_back` fallback when `_testinternalcapi` is absent; its public behavior stays in scope.
 - `test_43581`: the complete method, both stream attributes, equality and assertion execute in the native binary.
 - `test_getdefaultencoding` and `test_getfilesystemencoding`: all `sys` operations execute in the native driver. The original unittest assertions, codec lookup and transport run on CPython.
 - `test_jit_is_available` and `test_jit_is_enabled`: Imre answers the parent capability query and executes both original child assertions under `PYTHON_JIT=0` and `=1`. CPython runs the parent, fixtures and child-status assertions. The fixture builds the original child source directly; its automatic `-X faulthandler` option is outside this check.
@@ -53,7 +53,7 @@ reference reasons even where UTF-8 mode also provides native evidence.
 
 [evidence-linux.json](evidence-linux.json) is the versioned [shared evidence
 contract](../../NATIVE_EVIDENCE.md): 97 distinct occurrences at each of O0 and O3.
-The [Linux CI run](https://github.com/astral-sh/imre/actions/runs/40173735073) executed source `35158607886bce3fec10dd8e965d891e803e1088` (tree `f80a4bcd512cdb24ff2f279f59adb6d2075bef8a`). Its `sys-evidence-linux` artifact contains both optimization reports, the legacy outcomes, and the tested commit and tree. The checked-in reports match those records. The pinned suite has no companion module; `native-O*.json` describes the same occurrences.
+The [Linux CI run](https://github.com/astral-sh/imre/actions/runs/40184296027) executed source `a470f52c206d1bad58bded9d4ad87f2f090a5d3c` (tree `d1e2268d30fabb9919072ab2680127c792183b78`). Its `sys-evidence-linux` artifact contains both optimization reports, the legacy outcomes, and the tested commit and tree. The checked-in reports match those records: 80 blocked, 5 host-driven native operations, 2 mixed, 2 native bodies with host fixtures, and 8 reference skips per level. The pinned suite has no companion module; `native-O*.json` describes the same occurrences.
 
 At each level the two JIT capability methods add two mixed results. `test_jit_is_active` made one native availability query in the parent; its first original child stopped at line 2 on `import _testcapi` before any `is_active` call or child assertion. The second child was not reached. Its individual private-API proposal remains unapproved.
 
@@ -78,8 +78,9 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/fu
 string and an optional string; the later loop needs real frame objects and their
 `f_back` links. A [separate program](frame_names.py) and its [imported functions](frame_names_owner.py)
 compare native and stock module names for nested calls, index conversion and exception
-unwinding. Its output is recorded on the blocked occurrence without crediting any
-operation in the original method.
+unwinding. On [source 92c7e5e](https://github.com/astral-sh/imre/commit/92c7e5e5d447a5e02d6ab879c8ff48849da48696),
+all 20 output lines matched pinned CPython at O0 and O3. Each blocked occurrence
+records the separate control and zero operations in the unchanged method.
 
 ## Two process-boundary cases
 
