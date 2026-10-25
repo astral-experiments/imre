@@ -124,7 +124,12 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::Logging(operation) => Contract::new(
-                matches!(operation, crate::ir::LogOperation::Configure),
+                matches!(
+                    operation,
+                    crate::ir::LogOperation::Configure
+                        | crate::ir::LogOperation::ConfigureName
+                        | crate::ir::LogOperation::CheckLevel
+                ),
                 PreservesLists,
             ),
             Self::Process(operation) => match operation {
@@ -577,6 +582,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_int"
                 | "imre_print_float"
                 | "imre_log_config"
+                | "imre_log_config_named"
+                | "imre_log_check_level"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
                 | "imre_str_unquote"

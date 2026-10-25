@@ -370,6 +370,12 @@ impl Types {
         Some(if nullable { self.optional(ty) } else { ty })
     }
 
+    /// A dynamic logging name resolves to an integer or to its fallback string.
+    /// Narrow this result before using it as either concrete type.
+    pub(crate) fn logging_level_result(&self) -> Type {
+        Type::Union(self.intern(Shape::Union(vec![Type::Str, Type::Int])))
+    }
+
     pub(crate) fn members(&self, ty: Type) -> Option<Vec<Type>> {
         let Type::Union(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
