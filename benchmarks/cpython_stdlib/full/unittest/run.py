@@ -155,6 +155,9 @@ def run(args, level, root):
             observation["reason"] = str(exc).strip().replace(str(directory) + "/", "<case>/")
             expected = (MOCK_BLOCKERS.get(method) if module == "testmock.testmock"
                         else EQUALITY_BLOCKERS.get(method) or CALLABLE_BLOCKERS.get(method))
+            if module == "testmock.testmock" and method == "test_assert_called_exception_message":
+                # The original pattern formats positional {0} before entering assertRaisesRegex.
+                expected = (533, "8:53: Imre: str.format requires named arguments")
             if expected:
                 line, diagnostic = expected
                 if observation["reason"].endswith("<case>/case.py:" + diagnostic):
