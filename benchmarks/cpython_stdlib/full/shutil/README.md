@@ -76,3 +76,24 @@ Reproduce the method attempts with the pinned interpreter and [vendored shared f
 ```
 
 Pass `--method-attempts /tmp/method-attempts-linux.json` to the evidence runner to use this result.
+
+## Shared unittest.mock and whole-suite startup
+
+[This run](https://github.com/astral-sh/imre/actions/runs/40187233993) used the published Linux compiler and runtime from [unittest.mock #758](https://github.com/astral-sh/imre/pull/758), at commit `4ffa8406bae7e321093b5a4bb6550e2d4f34e502`, tree `e0d012f12c138cd432f7a72e0dc20c42f21523d4`. It predates the move implementation. The [startup report](mock-758-startup-linux.json) records the compiler and runtime hashes and both optimization levels.
+
+* Upstream line 4 imports `unittest.mock`. A native `Mock` records a call, checks its argument, resets, and accepts `assert_not_called`.
+* The original line 53 assignment uses `patch('os.chdir', side_effect=AssertionError(...))`. The compiler stops on `unittest.mock.patch`. On CPython the [control](mock_startup.py) intercepts and records the call, then proves that the real `chdir` works after normal and exceptional context exits.
+* Both the unchanged module import and a default test loader plus `TextTestRunner` stop at upstream line 11, `import errno`, in whole-module and reachable-only builds. No native suite IDs run through these entry points.
+
+The [hosted CPython reference](mock-758-reference-linux.json) contains 174 passes and 49 original skips across all 223 IDs. Its zstd reader is available; the devbox reference skips that test. The [complete-method attempts](mock-758-method-attempts-linux.json) used the hosted reference: seven bodies and assertions ran in Imre under original host fixtures, 167 could not compile, and 49 had original skips, at both O0 and O3. All 40 methods previously blocked on the mock import reached a later diagnostic. These observations are specific to the shared mock head and do not replace the primary module evidence above.
+
+To reproduce startup, use a test-enabled CPython 3.14.5 and the pinned CPython checkout:
+
+```sh
+/path/to/python -B benchmarks/cpython_stdlib/full/shutil/mock_startup.py \
+    --cpython-source /path/to/cpython --imre /path/to/imre --runtime /path/to/libimre_runtime.a \
+    --clang /path/to/clang --compiler-tree e0d012f12c138cd432f7a72e0dc20c42f21523d4 \
+    --result /tmp/shutil-mock-startup.json
+```
+
+For complete methods, generate the reference with `suite_inventory.py` on the same host and pass it to `attempt_methods.py --reference`.
