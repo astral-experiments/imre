@@ -325,4 +325,28 @@ impl Checker<'_> {
             },
         })
     }
+
+    pub(super) fn counter_math(
+        &self,
+        operator: ast::Operator,
+        left: Expr,
+        right: Expr,
+        inplace: bool,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        if !inplace || self.types.mapping(left.ty) != self.types.mapping(right.ty) {
+            self.expect(left.ty, right.ty, node)?;
+        }
+        let op = match operator {
+            ast::Operator::Add => ir::CounterOp::Add,
+            ast::Operator::Sub => ir::CounterOp::Subtract,
+            ast::Operator::BitOr => ir::CounterOp::Union,
+            ast::Operator::BitAnd => ir::CounterOp::Intersection,
+            _ => return Err(error(self.source, node, "unsupported Counter operator")),
+        };
+        Ok(Expr {
+            ty: left.ty,
+            kind: ExprKind::Builtin(Builtin::CounterMath { op, inplace }, vec![left, right]),
+        })
+    }
 }

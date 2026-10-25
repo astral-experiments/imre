@@ -1,6 +1,8 @@
 """Write the two per-occurrence collections reports using the shared evidence contract."""
 
 import argparse
+import ast
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -25,7 +27,53 @@ UPSTREAM_SKIPS = {
 UNOBSERVED = roles(body="unobserved", assertions="unobserved", operation="unobserved", fixture="unobserved")
 
 
-def report(reference, routines, docs):
+def add_host_observations(observed, routines, reports):
+    """Retain the direct body result beside a host-driven operation on the same original method."""
+    seen = set()
+    for host in reports:
+        if any(host[field] != routines[field] for field in ("cpython_commit", "compiler_revision", "opt_level")):
+            raise ValueError("host operation evidence must use the same CPython commit, Imre revision and level")
+        def target(name):
+            key = (name, 1)
+            if key not in observed or key in seen:
+                raise ValueError(f"unknown, reference-skipped or duplicate host observation: {name}")
+            seen.add(key)
+            return observed[key]
+        for name, entries in host["tests"].items():
+            row = target(name)
+            execution, = entries
+            observation = execution["observation"]
+            positions, detail = observation["roles"], observation["evidence"]
+            if positions != roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"):
+                raise ValueError(f"host operation has unexpected execution locations: {name}")
+            path, line = routines["routines"][name]["source"].rsplit(":", 1)
+            source = (HERE / "upstream" / path).read_bytes()
+            node, = [n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.FunctionDef)
+                     and n.lineno == int(line) and n.name == name.rsplit(".", 1)[-1]]
+            original = b"".join(source.splitlines(keepends=True)[node.lineno - 1:node.end_lineno])
+            if (hashlib.sha256(original).hexdigest() != detail["method_sha256"]
+                    or not detail["native_calls"] or not all(type(n) is int and n > 0 for n in detail["native_calls"].values())):
+                raise ValueError(f"host operation has no matching method or native calls: {name}")
+            if row["outcome"] == "blocked":
+                row["evidence"]["direct_native_body"] = {
+                    "stage": row["evidence"].pop("stage", "operation-audit"), "reason": row.pop("reason")}
+                row.update(outcome="pass", roles=positions, evidence=row["evidence"] | detail)
+            else:
+                # Another successful mode, or a real failed direct execution,
+                # remains the primary result.
+                row["evidence"]["host_operation"] = observation
+        for kind, failed in (("failure", host["failures"]), ("unexpected host fixture skip", host["skips"])):
+            for name, reason in failed:
+                row = target(name)
+                row["evidence"]["host_probe"] = {"result": kind, "reason": reason}
+                if row["outcome"] == "blocked":
+                    row["evidence"]["direct_native_body"] = {
+                        "stage": row["evidence"].pop("stage", "operation-audit"), "reason": row["reason"]}
+                    row.update(outcome="failure", reason=f"{kind}: {reason}",
+                               roles=roles(body="cpython", assertions="unknown", operation="unknown", fixture="cpython"))
+
+
+def report(reference, routines, docs, host=()):
     level = routines["opt_level"]
     if level != docs["opt_level"] or any(r["cpython_commit"] != reference["cpython_commit"] for r in (routines, docs)):
         raise ValueError("the inputs come from different native levels or CPython commits")
@@ -89,6 +137,7 @@ def report(reference, routines, docs):
         else:
             raise ValueError(f"unexpected outcome for {name}: {result}")
         observed[key] = {"outcome": outcome, "reason": reason, "roles": locations, "evidence": proof}
+    add_host_observations(observed, routines, host)
     return build_report(reference, level, discovered, observed, exceptions=exceptions)
 
 
@@ -96,11 +145,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("routines", "doctests"):
         parser.add_argument("--" + name, type=Path, nargs=2, required=True, metavar=("O0", "O3"))
+    parser.add_argument("--host", type=Path, nargs=2, action="append", default=[], metavar=("O0", "O3"),
+                        help="paired host-driven native operation reports; repeat for another adapter")
     parser.add_argument("--result", type=Path, required=True)
     args = parser.parse_args()
     reference = json.loads((HERE / "reference-linux.json").read_text())
-    reports = [report(reference, json.loads(r.read_text()), json.loads(d.read_text()))
-               for r, d in zip(args.routines, args.doctests, strict=True)]
+    reports = [report(reference, json.loads(r.read_text()), json.loads(d.read_text()),
+                      [json.loads(pair[index].read_text()) for pair in args.host])
+               for index, (r, d) in enumerate(zip(args.routines, args.doctests, strict=True))]
     write_reports(args.result, reports, reference)
     for item in reports:
         print(f"-O{item['opt_level']}: {item['denominator']} occurrences, {item['counts']}")
