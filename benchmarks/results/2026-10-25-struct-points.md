@@ -1,53 +1,59 @@
 # Packed struct lists vs frozen dataclasses
 
-With one million separately constructed two-float points, packed Imre structs built **3.18× faster** and scanned **2.75× faster** than Imre frozen dataclasses. Peak resident memory fell from **56.4 to 18.0 MiB**. These are medians on one machine. [Raw samples, tool hashes and run order](2026-10-25-struct-points.json).
+With one million separately constructed two-float points, Imre structs built **3.18× faster** and scanned **2.67× faster** than Imre frozen dataclasses. With one point repeated a million times, structs used **3.25 MiB** of peak process memory versus **10.5 MiB** for dataclasses. [Raw samples, tool hashes and run order](2026-10-25-struct-points.json).
 
 ## One million separately constructed points
 
 | Implementation | Build (ms) | 12 scans (ms) | Peak RSS (MiB) |
 | --- | ---: | ---: | ---: |
-| Imre struct | 29.79 | 11.90 | 18.0 |
-| Imre dataclass | 94.80 | 32.70 | 56.4 |
-| CPython struct | 758.5 | 1241.9 | 129.8 |
-| CPython dataclass | 533.7 | 1243.0 | 128.8 |
+| Imre struct | 29.36 | 12.02 | 18.0 |
+| Imre dataclass | 93.26 | 32.15 | 56.5 |
+| CPython struct | 744.0 | 1221.8 | 129.8 |
+| CPython dataclass | 530.4 | 1217.7 | 128.8 |
 
-The loop appends `Point(x, x + 1.0)` once for each index, cycling through 1,024 coordinate pairs. Every scan calls `p.norm2()` and multiplies by that pass’s scale. Imre writes both coordinates into a 16-byte row per element. The scan reads those rows directly. In the baseline, each independently constructed dataclass has a record allocation and the list holds pointers. On CPython both lists store object references; the struct compatibility decorator additionally validates constructor argument types.
+The loop appends `Point(x, x + 1.0)` once for each index, cycling through 1,024 coordinate pairs. Each scan calls `p.norm2()` and multiplies the result by that pass’s scale. The struct build writes two floats into a 16-byte row. The dataclass baseline allocates a separate record and appends its pointer. CPython uses slotted objects and a regular list in both cases; the struct decorator additionally checks constructor argument types.
 
-Rebuilding the two programs reproduced both timed LLVM hashes. In the emitted build loop,
-the dataclass variant calls `imre_record_try_new`; the struct variant calls
-`imre_struct_append` with the scalar payload and has no record allocation.
-The struct scan obtains `imre_struct_data_readonly` once before the loop.
+The emitted struct build loop has no record allocation. The struct scan calls `imre_struct_read_view` once before the loop to obtain a data pointer and an index mask. Dense lists use the actual index; repeated lists use row zero.
+
+## Repeating one point
+
+The list is `[Point(3.0, 4.0)] * 1_000_000`. Imre stores the immutable point once, plus a logical length. An ordinary dataclass list needs one object and a million pointers. In the [previous measurement](https://github.com/astral-sh/imre/blob/5b374c1084bc8409bd9ac465d257db333889df37/benchmarks/results/2026-10-25-struct-points.md#repeating-one-existing-point), Imre eagerly allocated a million 16-byte rows and peaked at 18.0 MiB.
+
+| Implementation | Build (ms) | 12 scans (ms) | Peak RSS (MiB) |
+| --- | ---: | ---: | ---: |
+| Imre struct | <0.01 | 11.52 | 3.25 |
+| Imre dataclass | 11.05 | 11.63 | 10.5 |
+| CPython struct | 7.04 | 1371.8 | 22.3 |
+| CPython dataclass | 6.24 | 1371.4 | 21.5 |
+
+## Changing one repeated slot
+
+The program constructs the same repeated list, then replaces its middle slot with `Point(6.0, 8.0)`. Timing the write separately shows the remaining tradeoff. A dataclass list already has a pointer in every slot. Imre must first reserve and fill the dense payload; that one write took 13.08 ms and peak RSS reached 18.25 MiB. Later indexed writes to the dense list update individual rows. Replacing a repeated slot with identical field bits does not expand it.
+
+| Implementation | Build (ms) | First changed write (ms) | 12 scans (ms) | Peak RSS (MiB) |
+| --- | ---: | ---: | ---: | ---: |
+| Imre struct | <0.01 | 13.08 | 11.82 | 18.25 |
+| Imre dataclass | 11.12 | <0.01 | 11.62 | 10.5 |
+| CPython struct | 6.37 | <0.01 | 1379.3 | 22.3 |
+| CPython dataclass | 6.32 | <0.01 | 1377.1 | 21.5 |
 
 ## Smaller independently constructed lists
 
-At 10,000 elements, the two native scan times are close relative to the million-point case:
+At 10,000 elements:
 
 | Implementation | Build (ms) | 12 scans (ms) | Peak RSS (MiB) |
 | --- | ---: | ---: | ---: |
-| Imre struct | 0.397 | 0.112 | 3.3 |
-| Imre dataclass | 0.972 | 0.136 | 3.5 |
-| CPython struct | 7.92 | 12.27 | 15.8 |
-| CPython dataclass | 4.27 | 12.25 | 15.0 |
-
-## Repeating one existing point
-
-The control builds `[Point(3.0, 4.0)] * 1_000_000`, then runs the same scans:
-
-| Implementation | Build (ms) | 12 scans (ms) | Peak RSS (MiB) |
-| --- | ---: | ---: | ---: |
-| Imre struct | 12.71 | 11.68 | 18.0 |
-| Imre dataclass | 11.42 | 11.58 | 10.5 |
-| CPython struct | 6.31 | 1372.5 | 22.3 |
-| CPython dataclass | 6.23 | 1357.2 | 21.5 |
-
-Here the dataclass list shares *one* object. Its slots hold 8-byte pointers; the packed list stores a 16-byte value in each slot. The memory advantage reverses: 18.0 MiB for structs versus 10.5 MiB for dataclasses on Imre. Native packed repetition reserves the output once and doubles its initialized prefix. These results do not measure workloads where most retrieved points must be materialized as independent objects.
+| Imre struct | 0.410 | 0.112 | 3.25 |
+| Imre dataclass | 0.961 | 0.118 | 3.5 |
+| CPython struct | 8.03 | 12.03 | 15.8 |
+| CPython dataclass | 4.29 | 12.04 | 15.0 |
 
 ## Method and reproduction
 
-- Source commit `e95bcefc0180`; [fixture](../fixtures/struct_points.py), [harness](../struct_points.py). The harness produces the baseline by changing only the decorator to `@dataclass(frozen=True, slots=True)` and its import.
-- AMD EPYC-Milan Processor, x86_64, Linux, pinned to CPU 30. Python 3.14.5; Ubuntu clang version 18.1.3 (1ubuntu1). Imre: LLVM `-O3 --whole-program`, no ThinLTO, same release system-allocator runtime archive for both executables. This run used rustc 1.99.0-dev (Ohm 1.99.0-7) with Ohm’s experimental defaults disabled.
-- Eight measured processes per implementation per workload, after one unmeasured warmup each. A balanced four-way order rotates between rounds. Times are measured inside the program, excluding compilation, startup, printing and teardown. Linux GNU time reports peak RSS for the entire child process, including the runtime or interpreter.
-- Every warmup and sample must print the expected length and an exact binary64 checksum independently calculated using integer arithmetic. The raw file includes the checksums, phase timings and per-process peak RSS. Shared-host scheduling and cache state influence the results.
+- Source commit `c6a7a3ab7645`; [fixture](../fixtures/struct_points.py), [harness](../struct_points.py). The only source differences between the struct and dataclass programs are the import and decorator (`@dataclass(frozen=True, slots=True)`).
+- AMD EPYC-Milan Processor, x86_64, Linux, pinned to CPU 30. Python 3.14.5; Ubuntu clang version 18.1.3 (1ubuntu1). Imre uses LLVM `-O3 --whole-program`, no ThinLTO, and the same release system-allocator runtime for both executables. This run used rustc 1.99.0-dev (Ohm 1.99.0-7) with its experimental defaults disabled.
+- Eight measured processes per implementation per workload, after one unmeasured warmup each. A balanced four-way order rotates between rounds. Times are taken inside the program and exclude compilation, startup, printing and teardown. Sub-0.01 ms phases are shown as `<0.01`; the raw file retains the timer readings. Linux GNU time reports peak RSS for the whole child process.
+- Every warmup and sample must print the expected length and an exact binary64 checksum independently calculated with integer arithmetic. For the replacement workload, the expected sum of squared coordinates changes by `100 - 25` before scaling. Shared-host scheduling and cache state influence these results.
 
 From the repository root, choose an allowed CPU and run outside ptrace:
 

@@ -3,13 +3,13 @@
   "host": "x86_64",
   "system": "Linux",
   "kernel": "6.8.0-146-generic",
-  "fixture_sha256": "0932657ac758536a323640cda7c10b795f4b6428be0b1cc341550f9b38b5103d",
+  "fixture_sha256": "23283ea029fd021f9f36962d7f0416965ce00298c297d015736d021e35327831",
   "shim_sha256": "7e7d02fd723735a184d5177f98232aabcfc285f8496ad6a11ebf478afd6a2f68",
   "cpu_model": "AMD EPYC-Milan Processor",
   "python": "Python 3.14.5",
   "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
-  "compiler_sha256": "c8e5081313a009a6c40604e1996abb8321fb7ec99d11bd3828056c92885182ac",
-  "runtime_sha256": "d32f2975d1a9928fd9c76c37836418c1d10859f0544afa610a8d7074108c9171",
+  "compiler_sha256": "c6a57dd319b806529c6c18d889af5f1226b1f2634e2ada7043f2292cb3c29f13",
+  "runtime_sha256": "78f2047a3f039c2c99755d238d87ed482d2e09ad517edae4e91d142e752ef899",
   "flags": [
     "--clang",
     "/usr/bin/clang-18",
@@ -76,192 +76,228 @@
       "samples": {
         "Imre struct": [
           {
-            "build_ms": 0.3876686096191406,
-            "scan_ms": 0.11134147644042969,
-            "peak_kib": 3328
-          },
-          {
-            "build_ms": 0.39649009704589844,
-            "scan_ms": 0.1583099365234375,
-            "peak_kib": 3328
-          },
-          {
-            "build_ms": 0.4420280456542969,
+            "build_ms": 0.39505958557128906,
+            "first_write_ms": 0.0,
             "scan_ms": 0.11157989501953125,
             "peak_kib": 3328
           },
           {
-            "build_ms": 0.3972053527832031,
-            "scan_ms": 0.11157989501953125,
-            "peak_kib": 3584
-          },
-          {
-            "build_ms": 0.3921985626220703,
-            "scan_ms": 0.11157989501953125,
-            "peak_kib": 3584
-          },
-          {
-            "build_ms": 0.3960132598876953,
-            "scan_ms": 0.11134147644042969,
+            "build_ms": 0.4019737243652344,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.11181831359863281,
             "peak_kib": 3328
           },
           {
-            "build_ms": 0.4210472106933594,
-            "scan_ms": 0.11229515075683594,
+            "build_ms": 0.38504600524902344,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.11181831359863281,
             "peak_kib": 3328
           },
           {
-            "build_ms": 0.4444122314453125,
-            "scan_ms": 0.11157989501953125,
+            "build_ms": 0.5724430084228516,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.11920928955078125,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.38242340087890625,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.11181831359863281,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.45013427734375,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.11181831359863281,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.4506111145019531,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.11181831359863281,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.4181861877441406,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.17762184143066406,
             "peak_kib": 3328
           }
         ],
         "Imre dataclass": [
           {
-            "build_ms": 0.9799003601074219,
-            "scan_ms": 0.15163421630859375,
-            "peak_kib": 3584
-          },
-          {
-            "build_ms": 0.9512901306152344,
-            "scan_ms": 0.11491775512695312,
-            "peak_kib": 3584
-          },
-          {
-            "build_ms": 0.9136199951171875,
-            "scan_ms": 0.18024444580078125,
-            "peak_kib": 3584
-          },
-          {
-            "build_ms": 0.9748935699462891,
+            "build_ms": 0.9481906890869141,
+            "first_write_ms": 0.0,
             "scan_ms": 0.11444091796875,
             "peak_kib": 3584
           },
           {
-            "build_ms": 0.9746551513671875,
-            "scan_ms": 0.11420249938964844,
+            "build_ms": 0.9670257568359375,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.1163482666015625,
             "peak_kib": 3584
           },
           {
-            "build_ms": 0.9708404541015625,
-            "scan_ms": 0.12040138244628906,
+            "build_ms": 0.9620189666748047,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.11920928955078125,
+            "peak_kib": 3840
+          },
+          {
+            "build_ms": 0.9763240814208984,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.11396408081054688,
+            "peak_kib": 3840
+          },
+          {
+            "build_ms": 0.9410381317138672,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.11467933654785156,
+            "peak_kib": 3840
+          },
+          {
+            "build_ms": 1.0025501251220703,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.12803077697753906,
             "peak_kib": 3584
           },
           {
-            "build_ms": 0.9210109710693359,
-            "scan_ms": 0.20623207092285156,
-            "peak_kib": 3840
+            "build_ms": 0.9510517120361328,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.12564659118652344,
+            "peak_kib": 3584
           },
           {
-            "build_ms": 0.972747802734375,
-            "scan_ms": 0.16832351684570312,
-            "peak_kib": 3840
+            "build_ms": 0.9593963623046875,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.1308917999267578,
+            "peak_kib": 3584
           }
         ],
         "CPython struct": [
           {
-            "build_ms": 7.993459701538086,
-            "scan_ms": 12.321949005126953,
+            "build_ms": 8.109092712402344,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.028932571411133,
             "peak_kib": 16128
           },
           {
-            "build_ms": 7.998228073120117,
-            "scan_ms": 12.26949691772461,
+            "build_ms": 8.326292037963867,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.022018432617188,
             "peak_kib": 16128
           },
           {
-            "build_ms": 8.040428161621094,
-            "scan_ms": 12.261390686035156,
+            "build_ms": 7.910728454589844,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.071371078491211,
             "peak_kib": 16128
           },
           {
-            "build_ms": 7.82012939453125,
-            "scan_ms": 12.170076370239258,
+            "build_ms": 7.948875427246094,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.031793594360352,
             "peak_kib": 16128
           },
           {
-            "build_ms": 8.002519607543945,
-            "scan_ms": 12.310028076171875,
+            "build_ms": 8.444547653198242,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.525796890258789,
             "peak_kib": 16128
           },
           {
-            "build_ms": 7.844686508178711,
-            "scan_ms": 12.281179428100586,
+            "build_ms": 8.07642936706543,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.983156204223633,
             "peak_kib": 16128
           },
           {
-            "build_ms": 7.746458053588867,
-            "scan_ms": 12.234687805175781,
+            "build_ms": 7.982492446899414,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.96432113647461,
             "peak_kib": 16128
           },
           {
-            "build_ms": 7.843732833862305,
-            "scan_ms": 12.22538948059082,
+            "build_ms": 7.918119430541992,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.953592300415039,
             "peak_kib": 16128
           }
         ],
         "CPython dataclass": [
           {
-            "build_ms": 4.151344299316406,
-            "scan_ms": 12.357234954833984,
+            "build_ms": 4.258871078491211,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.035131454467773,
             "peak_kib": 15360
           },
           {
-            "build_ms": 4.326105117797852,
-            "scan_ms": 12.23301887512207,
+            "build_ms": 4.335641860961914,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.408971786499023,
             "peak_kib": 15360
           },
           {
-            "build_ms": 4.262685775756836,
-            "scan_ms": 12.258768081665039,
+            "build_ms": 4.254341125488281,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.02535629272461,
             "peak_kib": 15360
           },
           {
-            "build_ms": 4.26936149597168,
-            "scan_ms": 12.232780456542969,
+            "build_ms": 4.179477691650391,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.18271255493164,
             "peak_kib": 15360
           },
           {
-            "build_ms": 4.2724609375,
-            "scan_ms": 12.18867301940918,
+            "build_ms": 4.298210144042969,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.037515640258789,
             "peak_kib": 15360
           },
           {
-            "build_ms": 4.269838333129883,
-            "scan_ms": 12.274503707885742,
+            "build_ms": 4.286527633666992,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.973142623901367,
             "peak_kib": 15360
           },
           {
-            "build_ms": 4.231929779052734,
-            "scan_ms": 12.205839157104492,
+            "build_ms": 4.328250885009766,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.935949325561523,
             "peak_kib": 15360
           },
           {
-            "build_ms": 4.222869873046875,
-            "scan_ms": 12.261152267456055,
+            "build_ms": 4.447698593139648,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.038230895996094,
             "peak_kib": 15360
           }
         ]
       },
       "medians": {
         "Imre struct": {
-          "build_ms": 0.3968477249145508,
-          "scan_ms": 0.11157989501953125,
+          "build_ms": 0.4100799560546875,
+          "first_write_ms": 0.0,
+          "scan_ms": 0.11181831359863281,
           "peak_kib": 3328.0
         },
         "Imre dataclass": {
-          "build_ms": 0.9717941284179688,
-          "scan_ms": 0.1360177993774414,
+          "build_ms": 0.9607076644897461,
+          "first_write_ms": 0.0,
+          "scan_ms": 0.11777877807617188,
           "peak_kib": 3584.0
         },
         "CPython struct": {
-          "build_ms": 7.919073104858398,
-          "scan_ms": 12.265443801879883,
+          "build_ms": 8.029460906982422,
+          "first_write_ms": 0.0,
+          "scan_ms": 12.02547550201416,
           "peak_kib": 16128.0
         },
         "CPython dataclass": {
-          "build_ms": 4.266023635864258,
-          "scan_ms": 12.245893478393555,
+          "build_ms": 4.2923688888549805,
+          "first_write_ms": 0.0,
+          "scan_ms": 12.036323547363281,
           "peak_kib": 15360.0
         }
       }
@@ -321,192 +357,228 @@
       "samples": {
         "Imre struct": [
           {
-            "build_ms": 29.753923416137695,
-            "scan_ms": 11.800765991210938,
+            "build_ms": 29.260635375976562,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.841773986816406,
             "peak_kib": 18432
           },
           {
-            "build_ms": 29.819726943969727,
-            "scan_ms": 11.829853057861328,
+            "build_ms": 29.202938079833984,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.838197708129883,
             "peak_kib": 18432
           },
           {
-            "build_ms": 29.716968536376953,
-            "scan_ms": 12.385845184326172,
+            "build_ms": 29.352664947509766,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.204885482788086,
             "peak_kib": 18432
           },
           {
-            "build_ms": 29.675960540771484,
-            "scan_ms": 11.878013610839844,
+            "build_ms": 29.28018569946289,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.84391975402832,
             "peak_kib": 18432
           },
           {
-            "build_ms": 30.031919479370117,
-            "scan_ms": 12.35508918762207,
+            "build_ms": 29.35934066772461,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.396574020385742,
+            "peak_kib": 18688
+          },
+          {
+            "build_ms": 30.63511848449707,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.370586395263672,
+            "peak_kib": 18688
+          },
+          {
+            "build_ms": 29.358625411987305,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.288093566894531,
             "peak_kib": 18432
           },
           {
-            "build_ms": 29.875755310058594,
-            "scan_ms": 11.70802116394043,
-            "peak_kib": 18432
-          },
-          {
-            "build_ms": 29.427051544189453,
-            "scan_ms": 12.38560676574707,
-            "peak_kib": 18432
-          },
-          {
-            "build_ms": 30.033349990844727,
-            "scan_ms": 11.928558349609375,
+            "build_ms": 29.907703399658203,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.700153350830078,
             "peak_kib": 18432
           }
         ],
         "Imre dataclass": [
           {
-            "build_ms": 95.4132080078125,
-            "scan_ms": 33.501386642456055,
-            "peak_kib": 57856
-          },
-          {
-            "build_ms": 97.19657897949219,
-            "scan_ms": 32.711029052734375,
-            "peak_kib": 57856
-          },
-          {
-            "build_ms": 94.81024742126465,
-            "scan_ms": 32.738685607910156,
-            "peak_kib": 57856
-          },
-          {
-            "build_ms": 94.41232681274414,
-            "scan_ms": 32.525062561035156,
+            "build_ms": 93.73164176940918,
+            "first_write_ms": 0.0,
+            "scan_ms": 33.475637435913086,
             "peak_kib": 57600
           },
           {
-            "build_ms": 94.8038101196289,
-            "scan_ms": 32.38201141357422,
-            "peak_kib": 57600
-          },
-          {
-            "build_ms": 94.79236602783203,
-            "scan_ms": 32.22203254699707,
-            "peak_kib": 57600
-          },
-          {
-            "build_ms": 94.7725772857666,
-            "scan_ms": 33.402442932128906,
+            "build_ms": 93.2607650756836,
+            "first_write_ms": 0.0,
+            "scan_ms": 31.840085983276367,
             "peak_kib": 57856
           },
           {
-            "build_ms": 94.01226043701172,
-            "scan_ms": 32.6845645904541,
-            "peak_kib": 57600
+            "build_ms": 93.4443473815918,
+            "first_write_ms": 0.0,
+            "scan_ms": 32.843589782714844,
+            "peak_kib": 57856
+          },
+          {
+            "build_ms": 93.2013988494873,
+            "first_write_ms": 0.0,
+            "scan_ms": 32.08112716674805,
+            "peak_kib": 57856
+          },
+          {
+            "build_ms": 93.12200546264648,
+            "first_write_ms": 0.0,
+            "scan_ms": 31.605005264282227,
+            "peak_kib": 57856
+          },
+          {
+            "build_ms": 93.65510940551758,
+            "first_write_ms": 0.0,
+            "scan_ms": 32.488346099853516,
+            "peak_kib": 57856
+          },
+          {
+            "build_ms": 93.18733215332031,
+            "first_write_ms": 0.0,
+            "scan_ms": 32.219886779785156,
+            "peak_kib": 57856
+          },
+          {
+            "build_ms": 93.2621955871582,
+            "first_write_ms": 0.0,
+            "scan_ms": 31.963109970092773,
+            "peak_kib": 57856
           }
         ],
         "CPython struct": [
           {
-            "build_ms": 1024.7952938079834,
-            "scan_ms": 1882.6191425323486,
+            "build_ms": 742.8591251373291,
+            "first_write_ms": 0.0,
+            "scan_ms": 1217.9865837097168,
             "peak_kib": 132864
           },
           {
-            "build_ms": 803.297758102417,
-            "scan_ms": 1239.455223083496,
+            "build_ms": 745.1233863830566,
+            "first_write_ms": 0.0,
+            "scan_ms": 1225.7540225982666,
             "peak_kib": 132864
           },
           {
-            "build_ms": 747.9984760284424,
-            "scan_ms": 1240.0729656219482,
+            "build_ms": 746.4666366577148,
+            "first_write_ms": 0.0,
+            "scan_ms": 1246.635913848877,
             "peak_kib": 132864
           },
           {
-            "build_ms": 769.4096565246582,
-            "scan_ms": 1240.1533126831055,
+            "build_ms": 742.3133850097656,
+            "first_write_ms": 0.0,
+            "scan_ms": 1216.7508602142334,
             "peak_kib": 132864
           },
           {
-            "build_ms": 756.1490535736084,
-            "scan_ms": 1235.8663082122803,
+            "build_ms": 742.9566383361816,
+            "first_write_ms": 0.0,
+            "scan_ms": 1220.954418182373,
             "peak_kib": 132864
           },
           {
-            "build_ms": 756.9079399108887,
-            "scan_ms": 1250.018835067749,
+            "build_ms": 834.9936008453369,
+            "first_write_ms": 0.0,
+            "scan_ms": 1230.971336364746,
             "peak_kib": 132864
           },
           {
-            "build_ms": 760.0862979888916,
-            "scan_ms": 1243.715524673462,
+            "build_ms": 742.3841953277588,
+            "first_write_ms": 0.0,
+            "scan_ms": 1222.6929664611816,
             "peak_kib": 132864
           },
           {
-            "build_ms": 754.5645236968994,
-            "scan_ms": 1245.7079887390137,
+            "build_ms": 746.0572719573975,
+            "first_write_ms": 0.0,
+            "scan_ms": 1212.2893333435059,
             "peak_kib": 132864
           }
         ],
         "CPython dataclass": [
           {
-            "build_ms": 526.9112586975098,
-            "scan_ms": 1243.2973384857178,
+            "build_ms": 532.0136547088623,
+            "first_write_ms": 0.0,
+            "scan_ms": 1218.1193828582764,
             "peak_kib": 131840
           },
           {
-            "build_ms": 553.8949966430664,
-            "scan_ms": 1240.2276992797852,
+            "build_ms": 531.8517684936523,
+            "first_write_ms": 0.0,
+            "scan_ms": 1216.3100242614746,
             "peak_kib": 131840
           },
           {
-            "build_ms": 565.0644302368164,
-            "scan_ms": 1251.1508464813232,
+            "build_ms": 530.5173397064209,
+            "first_write_ms": 0.0,
+            "scan_ms": 1219.7368144989014,
             "peak_kib": 131840
           },
           {
-            "build_ms": 541.689395904541,
-            "scan_ms": 1241.6703701019287,
+            "build_ms": 530.2464962005615,
+            "first_write_ms": 0.0,
+            "scan_ms": 1220.0510501861572,
             "peak_kib": 131840
           },
           {
-            "build_ms": 530.6065082550049,
-            "scan_ms": 1239.7818565368652,
+            "build_ms": 538.414716720581,
+            "first_write_ms": 0.0,
+            "scan_ms": 1217.325210571289,
             "peak_kib": 131840
           },
           {
-            "build_ms": 527.747631072998,
-            "scan_ms": 1243.9284324645996,
+            "build_ms": 527.8658866882324,
+            "first_write_ms": 0.0,
+            "scan_ms": 1217.2479629516602,
             "peak_kib": 131840
           },
           {
-            "build_ms": 536.7460250854492,
-            "scan_ms": 1242.6557540893555,
+            "build_ms": 528.5370349884033,
+            "first_write_ms": 0.0,
+            "scan_ms": 1216.8586254119873,
             "peak_kib": 131840
           },
           {
-            "build_ms": 529.4404029846191,
-            "scan_ms": 1243.7281608581543,
+            "build_ms": 529.1845798492432,
+            "first_write_ms": 0.0,
+            "scan_ms": 1218.416452407837,
             "peak_kib": 131840
           }
         ]
       },
       "medians": {
         "Imre struct": {
-          "build_ms": 29.78682518005371,
-          "scan_ms": 11.90328598022461,
+          "build_ms": 29.355645179748535,
+          "first_write_ms": 0.0,
+          "scan_ms": 12.024402618408203,
           "peak_kib": 18432.0
         },
         "Imre dataclass": {
-          "build_ms": 94.79808807373047,
-          "scan_ms": 32.69779682159424,
-          "peak_kib": 57728.0
+          "build_ms": 93.2614803314209,
+          "first_write_ms": 0.0,
+          "scan_ms": 32.1505069732666,
+          "peak_kib": 57856.0
         },
         "CPython struct": {
-          "build_ms": 758.4971189498901,
-          "scan_ms": 1241.9344186782837,
+          "build_ms": 744.0400123596191,
+          "first_write_ms": 0.0,
+          "scan_ms": 1221.8236923217773,
           "peak_kib": 132864.0
         },
         "CPython dataclass": {
-          "build_ms": 533.676266670227,
-          "scan_ms": 1242.9765462875366,
+          "build_ms": 530.3819179534912,
+          "first_write_ms": 0.0,
+          "scan_ms": 1217.7222967147827,
           "peak_kib": 131840.0
         }
       }
@@ -566,192 +638,509 @@
       "samples": {
         "Imre struct": [
           {
-            "build_ms": 12.586832046508789,
-            "scan_ms": 11.64102554321289,
-            "peak_kib": 18432
+            "build_ms": 0.004291534423828125,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.529207229614258,
+            "peak_kib": 3328
           },
           {
-            "build_ms": 13.238191604614258,
-            "scan_ms": 11.68203353881836,
-            "peak_kib": 18432
+            "build_ms": 0.004291534423828125,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.479616165161133,
+            "peak_kib": 3328
           },
           {
-            "build_ms": 12.357234954833984,
-            "scan_ms": 11.66677474975586,
-            "peak_kib": 18432
+            "build_ms": 0.14328956604003906,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.514902114868164,
+            "peak_kib": 3072
           },
           {
-            "build_ms": 13.110637664794922,
-            "scan_ms": 11.81483268737793,
-            "peak_kib": 18432
+            "build_ms": 0.004291534423828125,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.534452438354492,
+            "peak_kib": 3328
           },
           {
-            "build_ms": 12.249231338500977,
-            "scan_ms": 11.672496795654297,
-            "peak_kib": 18432
+            "build_ms": 0.0035762786865234375,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.523008346557617,
+            "peak_kib": 3072
           },
           {
-            "build_ms": 12.84170150756836,
-            "scan_ms": 11.949300765991211,
-            "peak_kib": 18432
+            "build_ms": 0.004291534423828125,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.520624160766602,
+            "peak_kib": 3328
           },
           {
-            "build_ms": 13.043880462646484,
-            "scan_ms": 11.752128601074219,
-            "peak_kib": 18432
+            "build_ms": 0.003814697265625,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.523008346557617,
+            "peak_kib": 3328
           },
           {
-            "build_ms": 12.565135955810547,
-            "scan_ms": 11.654853820800781,
-            "peak_kib": 18432
+            "build_ms": 0.0035762786865234375,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.561870574951172,
+            "peak_kib": 3328
           }
         ],
         "Imre dataclass": [
           {
-            "build_ms": 11.404752731323242,
-            "scan_ms": 11.584281921386719,
-            "peak_kib": 10752
-          },
-          {
-            "build_ms": 11.939048767089844,
-            "scan_ms": 11.75999641418457,
-            "peak_kib": 10752
-          },
-          {
-            "build_ms": 11.513233184814453,
-            "scan_ms": 11.593103408813477,
-            "peak_kib": 10752
-          },
-          {
-            "build_ms": 11.39068603515625,
-            "scan_ms": 11.54327392578125,
+            "build_ms": 11.075019836425781,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.626482009887695,
             "peak_kib": 10496
           },
           {
-            "build_ms": 11.234283447265625,
-            "scan_ms": 11.566877365112305,
+            "build_ms": 11.0321044921875,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.622428894042969,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 11.216878890991211,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.674165725708008,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 11.087894439697266,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.546611785888672,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 10.945320129394531,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.597394943237305,
             "peak_kib": 10496
           },
           {
-            "build_ms": 11.437416076660156,
-            "scan_ms": 11.584281921386719,
+            "build_ms": 11.172771453857422,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.734485626220703,
+            "peak_kib": 10496
+          },
+          {
+            "build_ms": 10.089635848999023,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.651039123535156,
             "peak_kib": 10752
           },
           {
-            "build_ms": 11.38758659362793,
-            "scan_ms": 11.580228805541992,
-            "peak_kib": 10752
-          },
-          {
-            "build_ms": 11.504650115966797,
-            "scan_ms": 11.61503791809082,
+            "build_ms": 10.13326644897461,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.626958847045898,
             "peak_kib": 10752
           }
         ],
         "CPython struct": [
           {
-            "build_ms": 6.414890289306641,
-            "scan_ms": 1472.3436832427979,
+            "build_ms": 6.225824356079102,
+            "first_write_ms": 0.0,
+            "scan_ms": 1371.5152740478516,
             "peak_kib": 22784
           },
           {
-            "build_ms": 6.412029266357422,
-            "scan_ms": 1361.5949153900146,
+            "build_ms": 6.167173385620117,
+            "first_write_ms": 0.0,
+            "scan_ms": 1370.7284927368164,
             "peak_kib": 22784
           },
           {
-            "build_ms": 6.181955337524414,
-            "scan_ms": 1403.7294387817383,
+            "build_ms": 9.294748306274414,
+            "first_write_ms": 0.0,
+            "scan_ms": 1402.4019241333008,
             "peak_kib": 22784
           },
           {
-            "build_ms": 6.163358688354492,
-            "scan_ms": 1376.6822814941406,
+            "build_ms": 6.2961578369140625,
+            "first_write_ms": 0.0,
+            "scan_ms": 1370.9793090820312,
             "peak_kib": 22784
           },
           {
-            "build_ms": 6.988286972045898,
-            "scan_ms": 1368.4096336364746,
+            "build_ms": 9.74726676940918,
+            "first_write_ms": 0.0,
+            "scan_ms": 1372.3978996276855,
             "peak_kib": 22784
           },
           {
-            "build_ms": 6.256103515625,
-            "scan_ms": 1352.813720703125,
+            "build_ms": 7.546186447143555,
+            "first_write_ms": 0.0,
+            "scan_ms": 1373.5477924346924,
             "peak_kib": 22784
           },
           {
-            "build_ms": 6.26826286315918,
-            "scan_ms": 1401.4439582824707,
+            "build_ms": 6.782293319702148,
+            "first_write_ms": 0.0,
+            "scan_ms": 1372.100830078125,
             "peak_kib": 22784
           },
           {
-            "build_ms": 6.3457489013671875,
-            "scan_ms": 1358.3073616027832,
+            "build_ms": 7.292032241821289,
+            "first_write_ms": 0.0,
+            "scan_ms": 1367.539882659912,
             "peak_kib": 22784
           }
         ],
         "CPython dataclass": [
           {
-            "build_ms": 6.21795654296875,
-            "scan_ms": 1365.6909465789795,
+            "build_ms": 6.140232086181641,
+            "first_write_ms": 0.0,
+            "scan_ms": 1370.7590103149414,
             "peak_kib": 22016
           },
           {
-            "build_ms": 6.104469299316406,
-            "scan_ms": 1359.7922325134277,
+            "build_ms": 6.216764450073242,
+            "first_write_ms": 0.0,
+            "scan_ms": 1521.8141078948975,
             "peak_kib": 22016
           },
           {
-            "build_ms": 6.326436996459961,
-            "scan_ms": 1354.2537689208984,
+            "build_ms": 6.136655807495117,
+            "first_write_ms": 0.0,
+            "scan_ms": 1371.0269927978516,
             "peak_kib": 22016
           },
           {
-            "build_ms": 6.263017654418945,
-            "scan_ms": 1357.670545578003,
+            "build_ms": 6.203413009643555,
+            "first_write_ms": 0.0,
+            "scan_ms": 1291.3367748260498,
             "peak_kib": 22016
           },
           {
-            "build_ms": 6.113767623901367,
-            "scan_ms": 1356.764793395996,
+            "build_ms": 15.112161636352539,
+            "first_write_ms": 0.0,
+            "scan_ms": 1371.8647956848145,
             "peak_kib": 22016
           },
           {
-            "build_ms": 6.117582321166992,
-            "scan_ms": 1356.616497039795,
+            "build_ms": 6.256580352783203,
+            "first_write_ms": 0.0,
+            "scan_ms": 1363.3060455322266,
             "peak_kib": 22016
           },
           {
-            "build_ms": 6.329536437988281,
-            "scan_ms": 1356.77170753479,
+            "build_ms": 6.330966949462891,
+            "first_write_ms": 0.0,
+            "scan_ms": 1374.3464946746826,
             "peak_kib": 22016
           },
           {
-            "build_ms": 6.23631477355957,
-            "scan_ms": 1358.0079078674316,
+            "build_ms": 6.735563278198242,
+            "first_write_ms": 0.0,
+            "scan_ms": 1376.7919540405273,
             "peak_kib": 22016
           }
         ]
       },
       "medians": {
         "Imre struct": {
-          "build_ms": 12.714266777038574,
-          "scan_ms": 11.677265167236328,
-          "peak_kib": 18432.0
+          "build_ms": 0.004291534423828125,
+          "first_write_ms": 0.0,
+          "scan_ms": 11.523008346557617,
+          "peak_kib": 3328.0
         },
         "Imre dataclass": {
-          "build_ms": 11.4210844039917,
-          "scan_ms": 11.584281921386719,
+          "build_ms": 11.05356216430664,
+          "first_write_ms": 0.0,
+          "scan_ms": 11.626720428466797,
           "peak_kib": 10752.0
         },
         "CPython struct": {
-          "build_ms": 6.307005882263184,
-          "scan_ms": 1372.5459575653076,
+          "build_ms": 7.037162780761719,
+          "first_write_ms": 0.0,
+          "scan_ms": 1371.8080520629883,
           "peak_kib": 22784.0
         },
         "CPython dataclass": {
-          "build_ms": 6.22713565826416,
-          "scan_ms": 1357.2211265563965,
+          "build_ms": 6.236672401428223,
+          "first_write_ms": 0.0,
+          "scan_ms": 1371.445894241333,
+          "peak_kib": 22016.0
+        }
+      }
+    },
+    "replace-1000000": {
+      "checksum": 1950005850,
+      "orders": [
+        [
+          "Imre struct",
+          "Imre dataclass",
+          "CPython dataclass",
+          "CPython struct"
+        ],
+        [
+          "Imre dataclass",
+          "CPython struct",
+          "Imre struct",
+          "CPython dataclass"
+        ],
+        [
+          "CPython struct",
+          "CPython dataclass",
+          "Imre dataclass",
+          "Imre struct"
+        ],
+        [
+          "CPython dataclass",
+          "Imre struct",
+          "CPython struct",
+          "Imre dataclass"
+        ],
+        [
+          "Imre struct",
+          "Imre dataclass",
+          "CPython dataclass",
+          "CPython struct"
+        ],
+        [
+          "Imre dataclass",
+          "CPython struct",
+          "Imre struct",
+          "CPython dataclass"
+        ],
+        [
+          "CPython struct",
+          "CPython dataclass",
+          "Imre dataclass",
+          "Imre struct"
+        ],
+        [
+          "CPython dataclass",
+          "Imre struct",
+          "CPython struct",
+          "Imre dataclass"
+        ]
+      ],
+      "samples": {
+        "Imre struct": [
+          {
+            "build_ms": 0.003814697265625,
+            "first_write_ms": 13.230323791503906,
+            "scan_ms": 11.83462142944336,
+            "peak_kib": 18688
+          },
+          {
+            "build_ms": 0.003814697265625,
+            "first_write_ms": 13.724327087402344,
+            "scan_ms": 11.904239654541016,
+            "peak_kib": 18688
+          },
+          {
+            "build_ms": 0.0040531158447265625,
+            "first_write_ms": 12.782096862792969,
+            "scan_ms": 11.76905632019043,
+            "peak_kib": 18688
+          },
+          {
+            "build_ms": 0.004291534423828125,
+            "first_write_ms": 13.254165649414062,
+            "scan_ms": 11.916875839233398,
+            "peak_kib": 18688
+          },
+          {
+            "build_ms": 0.0040531158447265625,
+            "first_write_ms": 12.485742568969727,
+            "scan_ms": 11.879205703735352,
+            "peak_kib": 18688
+          },
+          {
+            "build_ms": 0.004291534423828125,
+            "first_write_ms": 12.922525405883789,
+            "scan_ms": 11.731147766113281,
+            "peak_kib": 18688
+          },
+          {
+            "build_ms": 0.003814697265625,
+            "first_write_ms": 13.552188873291016,
+            "scan_ms": 11.810541152954102,
+            "peak_kib": 18688
+          },
+          {
+            "build_ms": 0.0040531158447265625,
+            "first_write_ms": 12.706756591796875,
+            "scan_ms": 11.764049530029297,
+            "peak_kib": 18688
+          }
+        ],
+        "Imre dataclass": [
+          {
+            "build_ms": 11.337041854858398,
+            "first_write_ms": 0.0016689300537109375,
+            "scan_ms": 11.57689094543457,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 10.950565338134766,
+            "first_write_ms": 0.0011920928955078125,
+            "scan_ms": 11.75069808959961,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 11.101722717285156,
+            "first_write_ms": 0.0011920928955078125,
+            "scan_ms": 11.545896530151367,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 11.185646057128906,
+            "first_write_ms": 0.0011920928955078125,
+            "scan_ms": 11.59811019897461,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 11.080503463745117,
+            "first_write_ms": 0.00095367431640625,
+            "scan_ms": 11.709928512573242,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 11.134624481201172,
+            "first_write_ms": 0.00095367431640625,
+            "scan_ms": 11.611223220825195,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 11.321783065795898,
+            "first_write_ms": 0.0011920928955078125,
+            "scan_ms": 11.745691299438477,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 11.056184768676758,
+            "first_write_ms": 0.00095367431640625,
+            "scan_ms": 11.62862777709961,
+            "peak_kib": 10752
+          }
+        ],
+        "CPython struct": [
+          {
+            "build_ms": 6.758689880371094,
+            "first_write_ms": 0.00667572021484375,
+            "scan_ms": 1360.2089881896973,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 6.340265274047852,
+            "first_write_ms": 0.00667572021484375,
+            "scan_ms": 1389.6639347076416,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 6.389141082763672,
+            "first_write_ms": 0.0059604644775390625,
+            "scan_ms": 1380.6309700012207,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 6.262779235839844,
+            "first_write_ms": 0.0057220458984375,
+            "scan_ms": 1376.4126300811768,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 6.386756896972656,
+            "first_write_ms": 0.006198883056640625,
+            "scan_ms": 1389.5893096923828,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 6.358861923217773,
+            "first_write_ms": 0.0057220458984375,
+            "scan_ms": 1378.0620098114014,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 6.417274475097656,
+            "first_write_ms": 0.00667572021484375,
+            "scan_ms": 1380.4385662078857,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 6.341695785522461,
+            "first_write_ms": 0.006198883056640625,
+            "scan_ms": 1376.342535018921,
+            "peak_kib": 22784
+          }
+        ],
+        "CPython dataclass": [
+          {
+            "build_ms": 6.418943405151367,
+            "first_write_ms": 0.0057220458984375,
+            "scan_ms": 1372.3242282867432,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 6.455898284912109,
+            "first_write_ms": 0.005245208740234375,
+            "scan_ms": 1374.4421005249023,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 6.54911994934082,
+            "first_write_ms": 0.0045299530029296875,
+            "scan_ms": 1373.8751411437988,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 6.265163421630859,
+            "first_write_ms": 0.004291534423828125,
+            "scan_ms": 1376.086950302124,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 6.177186965942383,
+            "first_write_ms": 0.004291534423828125,
+            "scan_ms": 1378.1931400299072,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 6.104707717895508,
+            "first_write_ms": 0.003814697265625,
+            "scan_ms": 1382.6594352722168,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 6.309032440185547,
+            "first_write_ms": 0.00476837158203125,
+            "scan_ms": 1378.8354396820068,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 6.32786750793457,
+            "first_write_ms": 0.0054836273193359375,
+            "scan_ms": 1380.1946640014648,
+            "peak_kib": 22016
+          }
+        ]
+      },
+      "medians": {
+        "Imre struct": {
+          "build_ms": 0.0040531158447265625,
+          "first_write_ms": 13.076424598693848,
+          "scan_ms": 11.82258129119873,
+          "peak_kib": 18688.0
+        },
+        "Imre dataclass": {
+          "build_ms": 11.118173599243164,
+          "first_write_ms": 0.0011920928955078125,
+          "scan_ms": 11.619925498962402,
+          "peak_kib": 10752.0
+        },
+        "CPython struct": {
+          "build_ms": 6.372809410095215,
+          "first_write_ms": 0.006198883056640625,
+          "scan_ms": 1379.2502880096436,
+          "peak_kib": 22784.0
+        },
+        "CPython dataclass": {
+          "build_ms": 6.318449974060059,
+          "first_write_ms": 0.004649162292480469,
+          "scan_ms": 1377.1400451660156,
           "peak_kib": 22016.0
         }
       }
@@ -759,14 +1148,14 @@
   },
   "sources": {
     "struct": {
-      "source_sha256": "0932657ac758536a323640cda7c10b795f4b6428be0b1cc341550f9b38b5103d",
-      "llvm_sha256": "a172685127e7b6e1fd953468c0b798a3c5197c127d7acb1220302c395ad81002",
-      "binary_sha256": "6b83530b7db0e8318e7593377fac4a8bdd4ac062a2b6de3d2288e2116bf4750a"
+      "source_sha256": "23283ea029fd021f9f36962d7f0416965ce00298c297d015736d021e35327831",
+      "llvm_sha256": "5a31f7c3bdd5ff583e5925cec274845b001b376c9e2fa68b00ca4164260643ac",
+      "binary_sha256": "2c67b3ac42ae52dd8bf2942aaf5669a5c293b5e61b0956bbfa543208853b0448"
     },
     "dataclass": {
-      "source_sha256": "efe5386ee15acce9b67207f6572eb7228bc4fc8ea56ddee7d3c7a88debdf6171",
-      "llvm_sha256": "54418c344303f47fe45b770eb254132f46856f757448e3a28b380a9ac61098f6",
-      "binary_sha256": "8097b4d3c90f418f62efd4b2270fc05739e0656e811d4d86de6c9b2919138050"
+      "source_sha256": "f635206a48c74ae722b8c3383b60dbea65f104577155205922a1cfe0221a585c",
+      "llvm_sha256": "66d4deb37f5ca0efd60d4521d1f0d9fe6e3ce83935d0335498db6ec23475be02",
+      "binary_sha256": "f9d7e14bf4d7c412118ea4cacc430e1b382662d3954c668af19d66128f6117b9"
     }
   }
 }
