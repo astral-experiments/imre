@@ -90,6 +90,7 @@ mod unittest_bound;
 mod unittest_equality;
 mod unittest_main;
 mod unittest_mock;
+mod unittest_setup;
 mod unpacking;
 mod warnings;
 mod zip_sums;
@@ -117,6 +118,7 @@ struct ClassInfo {
     keyword_copies: HashSet<usize>,
     cached: HashMap<usize, function_caches::Policy>,
     cached_properties: cached_properties::Slots,
+    setup_fields: unittest_setup::Slots,
     generators: HashSet<usize>,
     producer_items: HashMap<usize, Type>,
     contexts: HashSet<usize>,
@@ -227,6 +229,7 @@ impl ClassInfo {
             }
         }
         let cached_properties = cached_properties::slots(graph, types, &declarations, &mut fields)?;
+        let setup_fields = unittest_setup::slots(graph, types, &declarations, &mut fields);
         // Reference counting is sufficient only while no accepted field graph can
         // close a cycle. This concerns storage types, not method signatures.
         if let Some(id) = Self::cyclic_field_root(&fields, types) {
@@ -308,6 +311,7 @@ impl ClassInfo {
             keyword_copies: HashSet::new(),
             cached: HashMap::new(),
             cached_properties,
+            setup_fields,
             generators: HashSet::new(),
             producer_items: HashMap::new(),
             contexts: HashSet::new(),
@@ -6112,6 +6116,9 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::TextClosed, vec![receiver]),
                     });
                 }
+                if let Some(field) = self.setup_field(receiver.ty, attribute.attr.as_str()) {
+                    return self.read_setup_field(receiver, attribute, field);
+                }
                 if let Type::Class(class) = receiver.ty
                     && (self.classes.methods[class].contains_key(attribute.attr.as_str())
                         || matches!(
@@ -6277,6 +6284,22 @@ impl<'a> Checker<'a> {
         }
         if let Some(value) = self.cache_control(call, receiver.as_ref())? {
             return Ok(value);
+        }
+        if let Some(Binding::Intrinsic(Intrinsic::MockCallList { mark })) = self.resolve(&call.func)
+        {
+            self.reject_builtin_keywords(call)?;
+            let [values] = call.arguments.args.as_ref() else {
+                return Err(error(self.source, call, "expected a mock call list"));
+            };
+            let values = self.expr(values)?;
+            if !matches!(self.types.element(values.ty), Some(Type::Class(c)) if self.bundled_mock_class(c, "_Call"))
+            {
+                return Err(error(self.source, call, "expected a mock call list"));
+            }
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::MockCallList { mark }, vec![values]),
+            });
         }
         if let Some(suite) = self.doctest_suite(call)? {
             return Ok(suite);
