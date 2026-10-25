@@ -27,8 +27,9 @@ its standard test package, and compare with a native compiler/runtime:
 python3.14 benchmarks/cpython_stdlib/suite_inventory.py \
   benchmarks/cpython_stdlib/full/errno/UPSTREAM.json --result /tmp/errno-reference.json
 python3.14 tests/errno.py --compiler target/release/imre \
-  --runtime target/release/libimre_runtime.a --clang clang --opt-levels 0 3
+  --runtime target/release/libimre_runtime.a --clang clang --opt-levels 0 3 \
+  --evidence benchmarks/cpython_stdlib/full/errno/evidence-linux.json
 ```
 
 [Linux reference](reference-linux.json) · [native O0](native-linux-O0.json) ·
-[native O3](native-linux-O3.json)
+[native O3](native-linux-O3.json) · [paired per-occurrence evidence](evidence-linux.json)

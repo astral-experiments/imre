@@ -11,6 +11,8 @@ import sys
 import tempfile
 
 HERE = Path(__file__).resolve().parents[1] / "benchmarks/cpython_stdlib/full/errno"
+sys.path.insert(0, str(HERE.parents[1]))
+from suite_evidence import build_report, roles, validate_pair
 
 
 def run(*args, cwd=None):
@@ -30,6 +32,7 @@ def main():
     parser.add_argument("--opt-levels", nargs="+", default=["0", "3"])
     parser.add_argument("--sanitize", action="store_true")
     parser.add_argument("--result-dir", type=Path)
+    parser.add_argument("--evidence", type=Path, help="write a paired v1 ledger for the reference platform")
     args = parser.parse_args()
     reference = json.loads((HERE / "reference-linux.json").read_text())
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
@@ -39,6 +42,9 @@ def main():
     assert digest == manifest["files"]["Lib/test/test_errno.py"]
     tests = sorted(reference["reference"])
     assert len(tests) == reference["denominator"]
+    reports = []
+    if args.evidence and (sys.platform != reference["platform"] or args.opt_levels != ["0", "3"]):
+        parser.error("paired evidence requires the reference platform and --opt-levels 0 3")
     with tempfile.TemporaryDirectory(prefix="imre-errno-") as tmp:
         root = Path(tmp)
         # Only its module name changes; the source, fixture, classes and method bodies do not.
@@ -75,14 +81,29 @@ def main():
                 if result.returncode:
                     sys.stderr.buffer.write(result.stderr)
                     return 1
+            observations = {}
             for c in cases:
                 actual = observe(run(root / c[0], *c[1:], cwd=root))
                 if actual != oracle[c]:
-                    expect=oracle[c]
-                    for line,(left,right) in enumerate(zip_longest(expect[1].splitlines(),actual[1].splitlines()),1):
-                        if left!=right:
-                            raise AssertionError(f"O{opt} {c}: stdout line {line}: CPython={str(left)[:500]} native={str(right)[:500]}")
-                    raise AssertionError((opt,c,"status/stderr",expect[0],actual[0],expect[2][:500],actual[2][:500]))
+                    expect = oracle[c]
+                    for line, (left, right) in enumerate(zip_longest(expect[1].splitlines(), actual[1].splitlines()), 1):
+                        if left != right:
+                            left, right = left or b"", right or b""
+                            offset = next(i for i, (a, b) in enumerate(zip_longest(left, right)) if a != b)
+                            window = slice(max(0, offset - 50), offset + 150)
+                            raise AssertionError(f"O{opt} {c}: stdout line {line}, byte {offset}: "
+                                                 f"CPython={left[window]!r}, native={right[window]!r}")
+                    raise AssertionError((opt, c, "status/stderr", expect[0], actual[0], expect[2][:500], actual[2][:500]))
+                if c[0] == "driver" and c[1].startswith("test_"):
+                    test = next(t for t in tests if t.rsplit(".", 1)[1] == c[1])
+                    observations[test, 1] = {"outcome": "pass", "roles": roles(
+                        body="imre", assertions="imre", operation="imre", fixture="imre"),
+                        "evidence": {"operation": "native errno object backed by target headers; "
+                                                 "original method completed in its own executable process",
+                                     "fixture": "Imre imported the intact module as suite, created its "
+                                               "original module-level frozenset and unittest case, and ran "
+                                               "native unittest assertions; a host driver scheduled each ID",
+                                     "source_blob": digest, "process_stdout": actual[1].decode().strip()}}
             for case in ("platform-missing", "unknown"):
                 command = [args.compiler.resolve(), "build", root / (case + ".py"), "--module-root", root,
                            "--runtime", args.runtime.resolve(), "--clang", args.clang,
@@ -99,6 +120,9 @@ def main():
                 assert actual.stderr.startswith(b"ImportError: cannot import name ")
                 assert actual.stderr.splitlines() == expected.stderr.splitlines()[-1:], (expected.stderr, actual.stderr)
             print(f"O{opt}: {len(tests)}/{len(tests)} original methods, 2 failure controls, complete platform registry and two unused failing imports matched")
+            if args.evidence:
+                reports.append(build_report(reference, int(opt), [(t, "complete module, fresh native process")
+                                            for t in tests], observations))
             if args.result_dir:
                 args.result_dir.mkdir(exist_ok=True, parents=True)
                 report = {"cpython_commit": reference["cpython_commit"], "source_blob": digest,
@@ -109,6 +133,9 @@ def main():
                                        "unknown-unused-import": "matched", "absent-target-unused-import": "matched"},
                           "registry_observations": len(oracle[("operations",)][1].splitlines())}
                 (args.result_dir / f"native-{sys.platform}-O{opt}.json").write_text(json.dumps(report, indent=2) + "\n")
+    if args.evidence:
+        validate_pair(reports, reference)
+        args.evidence.write_text(json.dumps(reports, indent=2) + "\n")
     return 0
 
 
