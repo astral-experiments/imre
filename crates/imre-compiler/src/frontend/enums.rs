@@ -179,6 +179,7 @@ impl Checker<'_> {
             })
             || types == [Type::LogRecord; 2]
             || types.iter().all(|ty| matches!(ty, Type::Cursor(_)))
+            || types == [Type::Path; 2]
             || types == [Type::Logger; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]

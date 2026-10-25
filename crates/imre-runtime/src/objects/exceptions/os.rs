@@ -7,6 +7,7 @@ use std::rc::Rc;
 pub(in crate::objects) enum Filename {
     Str(Rc<Str>),
     Bytes(Rc<Bytes>),
+    Path(Rc<Object>),
 }
 
 impl Filename {
@@ -14,6 +15,16 @@ impl Filename {
         match self {
             Self::Str(s) => push_string_repr(s, output),
             Self::Bytes(b) => crate::objects::bytes::write_repr(output, b),
+            Self::Path(p) => {
+                // SAFETY: the exception roots this immutable path while rendering it.
+                unsafe {
+                    crate::objects::values::write_repr(
+                        output,
+                        Rc::as_ptr(p) as usize,
+                        crate::objects::words::WordKind::new(5),
+                    );
+                }
+            }
         }
     }
 
@@ -21,6 +32,7 @@ impl Filename {
         match self {
             Self::Str(s) => Rc::into_raw(Rc::clone(s)) as usize,
             Self::Bytes(b) => Rc::into_raw(Rc::clone(b)) as usize | 1,
+            Self::Path(p) => Rc::into_raw(Rc::clone(p)) as usize | 6,
         }
     }
 }
