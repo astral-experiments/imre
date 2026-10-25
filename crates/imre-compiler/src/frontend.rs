@@ -4557,7 +4557,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level)
-            | Intrinsic::SignalNumber(level)
+            | Intrinsic::IntConstant(level)
             | Intrinsic::AnnotationFormat(level),
         )) = self.resolve(expression)
         {
