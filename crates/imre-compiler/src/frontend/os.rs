@@ -1,6 +1,8 @@
 use super::*;
 use crate::ir::{FdOperation, ProcessOperation};
 
+mod credentials;
+
 impl Checker<'_> {
     pub(super) fn fd_call(
         &mut self,

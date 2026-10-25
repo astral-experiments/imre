@@ -4,6 +4,10 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      unittest_source:
+        description: Exact commit to build and run through the complete Linux unittest evidence gate
+        type: string
+        required: false
       sys_source:
         description: Exact commit to build and verify against the Linux sys suite
         type: string
@@ -29,12 +33,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.sys_source || github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.unittest_source && format('unittest-{0}', inputs.unittest_source) || inputs.sys_source || github.ref }}
   cancel-in-progress: true
 
 jobs:
   scope:
-    if: ${{ !inputs.sys_source }}
+    if: ${{ !inputs.sys_source && !inputs.unittest_source }}
     runs-on: ubuntu-24.04
     outputs:
       release_artifacts: ${{ steps.scope.outputs.release_artifacts }}
@@ -51,8 +55,64 @@ jobs:
           FULL_ASAN: ${{ inputs.full_asan || false }}
         run: bash .github/scripts/ci-scope.sh
 
+  unittest-source:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.unittest_source != '' }}
+    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+    timeout-minutes: 45
+    env:
+      UNITTEST_SOURCE: ${{ inputs.unittest_source }}
+      SYS_SOURCE: ${{ inputs.sys_source }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: .unittest-launcher
+          sparse-checkout: benchmarks/cpython_stdlib/suite_modes.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Preserve the launcher from the dispatch ref
+        run: |
+          if [[ -n "$SYS_SOURCE" ]]; then echo 'Select one source gate per dispatch.' >&2; exit 1; fi
+          [[ "$UNITTEST_SOURCE" =~ ^[0-9a-f]{40}$ ]]
+          cp .unittest-launcher/benchmarks/cpython_stdlib/suite_modes.py "$RUNNER_TEMP/suite_modes.py"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: unittest-source
+          ref: ${{ inputs.unittest_source }}
+          persist-credentials: false
+      - name: Check the full compiler checkout
+        working-directory: unittest-source
+        run: |
+          test -f Cargo.toml
+          test "$(git rev-parse HEAD)" = "$UNITTEST_SOURCE"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.14.5'
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: python/cpython
+          ref: 5607950ef232dad16d75c0cf53101d9649d89115
+          path: .cpython-stdlib-reference
+          sparse-checkout: Lib/test
+          persist-credentials: false
+      - run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18
+      - run: cargo build -p imre-compiler -p imre-runtime --release --locked --features imre-compiler/verify-ir -j 2
+        working-directory: unittest-source
+      - name: Verify the selected suite at O0 and O3 in both compiler modes
+        id: evidence
+        working-directory: unittest-source
+        run: |
+          dir=benchmarks/cpython_stdlib/full/unittest
+          python3 "$RUNNER_TEMP/suite_modes.py" --source "$UNITTEST_SOURCE" --entry "$dir/run.py" --reference "$dir/reference-linux.json" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source "$GITHUB_WORKSPACE/.cpython-stdlib-reference" --output "$RUNNER_TEMP/unittest-evidence"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && (steps.evidence.outcome == 'success' || steps.evidence.outcome == 'failure') }}
+        with:
+          name: unittest-evidence-linux
+          path: ${{ runner.temp }}/unittest-evidence
+          if-no-files-found: error
+          retention-days: 7
+
   sys-source:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.sys_source != '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.sys_source != '' && !inputs.unittest_source }}
     runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     timeout-minutes: 35
     env:
@@ -116,7 +176,7 @@ jobs:
       - run: cargo test -p imre-runtime --lib --locked
 
   windows-compiler:
-    if: ${{ !inputs.sys_source }}
+    if: ${{ !inputs.sys_source && !inputs.unittest_source }}
     runs-on: ${{ github.repository == 'astral-sh/imre' && 'namespace-profile-windows-2022-x86-64-16x32' || 'windows-2022' }}
     timeout-minutes: 45
     steps:
@@ -241,11 +301,12 @@ jobs:
             python3 benchmarks/cpython_stdlib/full/pathlib/native_files.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$level" --result "$RUNNER_TEMP/cpython-path-files-O$level.json"
             python3 benchmarks/cpython_stdlib/full/pathlib/walk_matrix.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$level"
           done
-          python3 -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --cohort components --cohort walk --cohort basics --cohort metadata --cohort stat --result "$RUNNER_TEMP/cpython-path-cohorts.json"
+          python3 -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --cohort components --cohort walk --cohort basics --cohort metadata --cohort stat --cohort segments --result "$RUNNER_TEMP/cpython-path-cohorts.json"
           python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py "$RUNNER_TEMP/cpython-path-cohorts.json"
           python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --links "$RUNNER_TEMP/cpython-path-cohorts.json"
           python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --stat "$RUNNER_TEMP/cpython-path-cohorts.json"
-          python3 tests/paths.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --fixture metadata_views --fixture links --fixture link_protocols --fixture path_stat --fixture stat_options
+          python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --segments "$RUNNER_TEMP/cpython-path-cohorts.json"
+          python3 tests/paths.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --fixture metadata_views --fixture links --fixture link_protocols --fixture path_stat --fixture stat_options --fixture constructor_protocol --fixture path_protocol_descriptors
           python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/pathlib/reference-linux.json benchmarks/cpython_stdlib/full/pathlib/evidence-linux.json
       - name: Account for every CPython itertools ID under its original fixtures
         run: |
@@ -500,7 +561,7 @@ jobs:
           python3 benchmarks/memory_validate.py --python python3 --binary /tmp/memory-report --compute-binary /tmp/memory-report-compute --rust /tmp/imre-memory-reference/memory-report-reference
 
   thinlto:
-    if: ${{ !inputs.sys_source }}
+    if: ${{ !inputs.sys_source && !inputs.unittest_source }}
     runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     timeout-minutes: 120
     steps:

@@ -363,12 +363,19 @@ impl Emitter<'_, '_> {
                     }
                 }
                 if child_options {
-                    let start = args.len() - 3;
+                    let pass_fds = streams & (1 << 19) != 0;
+                    let start = args.len() - 3 - usize::from(pass_fds);
                     fields.extend([
                         ("i64", args[start].value.operand.clone()),
                         ("i64", args[start + 1].value.operand.clone()),
                         ("i1", args[start + 2].value.operand.clone()),
                     ]);
+                    if pass_fds {
+                        fields.extend([
+                            ("i64", self.word(&args[start + 3].value)),
+                            ("i32", kind(start + 3).to_string()),
+                        ]);
+                    }
                 }
                 let layout = format!(
                     "{{{}}}",
@@ -563,6 +570,40 @@ impl Emitter<'_, '_> {
             }
             ProcessOperation::DescriptorConstant(name) => self.os_descriptor_constant(name),
             ProcessOperation::Fd(operation) => self.os_descriptor(operation, args, returns),
+            ProcessOperation::CredentialId { group } => {
+                let operand = self.checked_instruction(format!(
+                    "call i64 @imre_os_credential_id(i64 {}, i32 {})",
+                    args[0].value.operand,
+                    u8::from(group)
+                ));
+                Value {
+                    ty: Type::Int,
+                    operand,
+                    small_integer: true,
+                }
+            }
+            ProcessOperation::Credential(name) => {
+                if returns == Type::None {
+                    let words = args
+                        .iter()
+                        .map(|arg| format!("i64 {}", arg.value.operand))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.checked_line(format!("call void @imre_os_{name}({words})"));
+                    none()
+                } else if returns == Type::Int {
+                    let operand = self.instruction(format!("call i64 @imre_os_{name}()"));
+                    Value {
+                        ty: returns,
+                        operand,
+                        small_integer: true,
+                    }
+                } else {
+                    let tuple = self.record(returns);
+                    self.checked_line(format!("call void @imre_os_{name}(ptr {})", tuple.operand));
+                    tuple
+                }
+            }
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
             ProcessOperation::RmTree => {
                 let [path, ignore, _, _, fd] = args else {

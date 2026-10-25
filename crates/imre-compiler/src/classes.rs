@@ -438,10 +438,10 @@ fn collect_class(
                 }
                 let unary_protocol = matches!(
                     name,
-                    "__str__" | "__bool__" | "__index__" | "__iter__" | "__copy__" | "__fspath__"
+                    "__str__" | "__bool__" | "__index__" | "__iter__" | "__copy__"
                 ) || (mapping && name == "__len__");
                 if name.starts_with("__")
-                    && name != "__init__"
+                    && !matches!(name, "__init__" | "__fspath__")
                     && !unary_protocol
                     && !(mapping && matches!(name, "__getitem__" | "__contains__"))
                     && !(name == "__post_init__" && dataclass.is_some())

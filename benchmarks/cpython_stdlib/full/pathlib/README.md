@@ -39,6 +39,26 @@ includes all seven child suites; adding their counts again would duplicate them.
 All 391 skips name their fixture, original reason and pinned source condition.
 There are no additional exclusions.
 
+The original constructor report replays all cohorts on `e6fda91`, with the
+[whole-method probe from that compiler](body-probes-segments-linux.json)
+accounting for the remaining occurrences. The current report replaces its seven
+constructor observations with measurements from `4375dae` after #995.
+Reproduce the two steps with their respective native binaries:
+
+```sh
+python -B -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py \
+    --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
+    --imre-commit e6fda919601a5ea86386d231388162e7a39be706 \
+    --body-report benchmarks/cpython_stdlib/full/pathlib/body-probes-segments-linux.json \
+    --result /tmp/pathlib-constructors.json
+python -B -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py \
+    --imre /path/to/4375dae/imre --runtime /path/to/4375dae/libimre_runtime.a --clang /path/to/clang \
+    --imre-commit 4375dae659c1d6e00f3ee8c452b7d33e1f21fca1 --cohort segments --result /tmp/pathlib-segments.json
+python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --segments /tmp/pathlib-segments.json \
+    --baseline /tmp/pathlib-constructors.json --imre-commit 4375dae659c1d6e00f3ee8c452b7d33e1f21fca1 \
+    --result /tmp/pathlib-current.json
+```
+
 Reproduce the walking-head baseline with the test-enabled 3.14.5 interpreter:
 
 ```sh
@@ -63,11 +83,11 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py \
     benchmarks/cpython_stdlib/full/pathlib/evidence-linux.json
 ```
 
-The baseline adapters and complete-method probes used the compiler and runtime
-from walking head `906b10a`. The six newer Path.info records use the measured
-revision `13b6945`. Four link observations use `ad70f73`, and ten stat/lstat
-observations use `6c448e3`. Each other row retains its original revision and roles.
-The 978 baseline probe results and diagnostics matched between optimization levels.
+The historical walking baseline used `906b10a`; six Path.info methods were
+first verified on `13b6945`, four link methods on `ad70f73`, and ten stat/lstat
+methods on `6c448e3`. The current replay verifies those roles again. The four
+recursive symlink glob methods still pass with native iterators; their recorded
+numbers of yielded loop paths can differ before the original bodies filter them.
 
 The [stat-branch sweep](body-probes-stat-linux.json) ran all 978 reference
 passes again on `2e4c78d` at both levels. Each produced 119 native candidates,
@@ -77,6 +97,11 @@ four caching checks on both concrete classes; all already had separately
 audited native receipts. A candidate does not change an execution role.
 Use the complete-method commands below with that compiler and commit to
 reproduce this second snapshot.
+
+The constructor sweep also tried all 978 methods at each level, with the same
+119 candidates, 820 compile blockers and 39 original wrappers. Compared with
+the older per-occurrence report, 24 blocked methods now reach their unchanged
+bodies before the first diagnostic. No method is credited for that change.
 
 For both Path and PosixPath, the original existence, directory and file cache
 methods check a missing name, create a file or directory and query the same view
@@ -103,6 +128,16 @@ natively under the original CPython filesystem fixtures. In `test_stat`
 CPython runs the body and its eleven assertions; Imre constructs three paths,
 joins them, calls stat three times and reads 19 integer fields. The adapter
 rejects any host pathlib, `os.stat` or `os.lstat` call in those bodies.
+
+The constructor cohort (`--cohort segments`) measures seven original methods
+on `e6fda91` and again on `4375dae`. The two concrete classes run their complete unexpected-keyword
+method and its assertion in Imre under the CPython fixture. On the five core
+pure and concrete classes, CPython drives the three `assertRaisesRegex`
+checks in `test_bytes_exc_message`; Imre constructs the paths and raises each
+`TypeError`, including for `PureWindowsPath` on Linux. After native regex
+contexts landed in #995, compiling the complete body reaches `P(b'a')`;
+the indirect call still cannot omit its optional second argument. Verify the roles and
+call counts with `metadata_receipt.py --segments /tmp/pathlib-segments.json`.
 
 The [link](../../../../tests/fixtures/paths/links.py) and
 [protocol](../../../../tests/fixtures/paths/link_protocols.py) fixtures separately
@@ -184,11 +219,11 @@ python3 benchmarks/cpython_stdlib/full/pathlib/body_report.py --work /tmp/pathli
 
 | Execution at each of O0 and O3 | Occurrences |
 | --- | ---: |
-| Native body and operation, native assertions if present, host fixture | 134 |
-| Host body and assertions, native operation | 56 |
+| Native body and operation, native assertions if present, host fixture | 136 |
+| Host body and assertions, native operation | 61 |
 | Mixed execution | 11 |
-| Blocked: diagnostic in the original body | 340 |
-| Blocked: fixture or dependency diagnostic | 398 |
+| Blocked: diagnostic in the original body | 362 |
+| Blocked: fixture or dependency diagnostic | 369 |
 | Blocked: original fixture wrapper | 39 |
 | Upstream reference skip | 391 |
 | **Total** | **1,369** |
@@ -196,7 +231,7 @@ python3 benchmarks/cpython_stdlib/full/pathlib/body_report.py --work /tmp/pathli
 There are no fully native fixture lifecycles, extra exclusions, or native execution
 failures in this run. Some methods that the general probe could not compile have
 a more specific native or host-driven adapter. Those occurrences keep the observed
-execution roles; the 777 blocked rows above have no successful adapter. The
+execution roles; the 770 blocked rows above have no successful adapter. The
 per-ID records give the original source location, diagnostic or wrapper, and any
 missing fixture behavior. A blocked row is an outstanding failure to run the method.
 
@@ -217,4 +252,9 @@ reached `TestFailedWithDetails(TestFailed)` in both normal checks
 both reachable-only checks (line 1613). A separate hosted check with the full
 CPython `Lib` on the module search path stopped at the package's first
 `import os` in all four modes because that root contains an `os.py`.
+With [the inherited exception layout change](https://github.com/astral-sh/imre/pull/971)
+(hosted trees `97a191b` and `d724fad`, then exact local heads `95595eb` and `1091f9e`), both normal entry points passed line 133 and stopped at
+`_MemoryWatchdog.__init__` assigning `self.procfile` on line 1155. Both
+reachable-only entries still stopped on line 1613. The coordinator's source root
+and the shared runner with verified vendored files gave identical diagnostics.
 None of these startup checks executed an upstream method.
