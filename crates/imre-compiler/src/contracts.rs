@@ -324,6 +324,8 @@ impl Builtin {
             | Self::Str
             | Self::NominalIdentity
             | Self::StrEnumMember { .. }
+            | Self::ForwardRefField(_)
+            | Self::NewForwardRef
             | Self::ClassNameView
             | Self::StrEnumName
             | Self::StrEnumValue

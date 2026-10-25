@@ -4,6 +4,18 @@ This inventory uses the same CPython 3.14.5 commit as [UPSTREAM.json](UPSTREAM.j
 The complete upstream functools suite has **325 IDs**. Startup checks and
 standalone annotation probes do not run any of those test bodies.
 
+[The release-wide client inventory](annotation-clients.json) records the Git
+blob, import lines, and qualified API reads in all 17 direct importers under
+`Lib/`. [The generator](annotation_clients.py) verifies each scanned source
+containing `annotationlib` against the pinned Git tree. Imported names and
+qualified reads are separate: for example, `inspect` reexports
+`get_annotations`, and `typing` dispatches through a lazy module proxy.
+The seven library clients are `_collections_abc`, `dataclasses`, `functools`,
+`inspect`, `pydoc`, `typing`, and `unittest.mock`; the remaining ten files
+are test support and tests. The sole qualified read in `test.support` is
+`annotationlib.ForwardRef` at line 3171, followed by four ordinary instance
+attribute comparisons at lines 3174–3177.
+
 | Upstream source | Git blob |
 | --- | --- |
 | Lib/annotationlib.py | 5c9a0812646f8149eb4afa4da1fdaafeb5422bf3 |
@@ -39,6 +51,15 @@ verifies the pinned source and license and runs the complete upstream
 TestFormat.test_enum at both optimization levels. [The results](annotationlib-linux.json)
 record a native method body and assertions with CPython fixture hooks; this is
 a dependency test, not one of the 325 functools IDs.
+
+Native `ForwardRef(arg, *, module, owner, is_argument, is_class)` instances
+retain their constructor fields, including the original callable owner. The
+native constructor, attribute reads, equality, nominal `isinstance`, and
+representation of supported fields are exercised by
+`tests/fixtures/callables/forward_refs.py`. These direct operations do not
+establish that deferred annotations have been evaluated on a wrapped function.
+Hashing, union operators, evaluation, and inspection of private evaluator cells
+require further support.
 
 Using the untouched import and unittest entry points from the coordinator's
 76d74f9 startup run (both default and reachable-only), the first diagnosis

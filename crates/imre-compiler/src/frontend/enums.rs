@@ -180,6 +180,9 @@ impl Checker<'_> {
                     Type::Exception | Type::TimeoutExpired | Type::NamedException(_) | Type::None
                 )
             })
+            || types
+                .iter()
+                .all(|ty| matches!(ty, Type::ForwardRef(_) | Type::Callable(_)))
             || types == [Type::Logger; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
