@@ -7342,7 +7342,7 @@ declare i64 @imre_shutil_copytree(ptr, i32, ptr, i32, i32, i32, i32, i32, ptr, p
 declare i64 @imre_shutil_move(ptr, i32, ptr, i32, i32, ptr, ptr, ptr, i32, i32)
 declare i32 @imre_shutil_destinsrc(ptr, i32, ptr, i32)
 declare i8 @imre_shutil_noncallable(ptr, ptr, ptr)
-declare void @imre_shutil_copyfileobj(ptr, ptr, i64, i32, i32)
+declare void @imre_shutil_copyfileobj(ptr, ptr, i64)
 declare ptr @imre_shutil_tree_error_args(ptr, ptr)
 declare ptr @imre_shutil_ignore_patterns_call(ptr, ptr, ptr)
 declare ptr @imre_shutil_make_archive(ptr, i32, ptr, i64, i64, i64, i32, i64, i64)

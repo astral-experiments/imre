@@ -31,7 +31,7 @@ impl Checker<'_> {
                 return checker.expr_expected(expr, Type::Int);
             }
             let v = checker.expr(expr)?;
-            if matches!(v.ty, Type::TextIO | Type::BinaryIO) {
+            if matches!(v.ty, Type::TextIO | Type::StringIO | Type::BinaryIO) {
                 Ok(v)
             } else {
                 Err(error(

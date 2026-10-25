@@ -12,6 +12,7 @@ use super::{
     Bytes, Int, Object, Storage, StorageCell, Str, StringPart, concat_parts, fail, object,
 };
 mod buffered;
+mod chunks;
 mod gzip;
 mod path_text;
 mod seekable;
@@ -163,14 +164,6 @@ impl FileState {
         self.input()?.read_text()
     }
 
-    pub(super) fn read_text_size(&mut self, value: &Int) -> Result<Str> {
-        let size = super::bytes::native_size(value)?;
-        match usize::try_from(size) {
-            Ok(size) => self.input()?.read_text_size(size),
-            Err(_) => self.read(),
-        }
-    }
-
     pub(super) fn readline(&mut self) -> Result<Str> {
         if self.kind == FileKind::TextMemory {
             return self.text_memory()?.read(None, true);
@@ -197,7 +190,7 @@ impl FileState {
         Ok(file)
     }
 
-    pub(super) fn read_size(&mut self, value: &Int) -> Result<Bytes> {
+    fn read_size(&mut self, value: &Int) -> Result<Bytes> {
         // GzipFile checks its own closed state before forwarding the argument
         // to BufferedReader. A plain BufferedWriter validates a C int first.
         if self.kind == FileKind::Member {
@@ -214,18 +207,13 @@ impl FileState {
             return self.read_bytes(limit);
         }
         if self.kind == FileKind::GzipBinaryRead {
-            self.stream()?;
+            self.check_gzip_open()?;
         }
-        let size = super::bytes::native_size(value)?;
         if self.kind == FileKind::BinaryWrite {
-            i32::try_from(size).map_err(|_| {
-                Error::new(
-                    Kind::OverflowError,
-                    "Python int too large to convert to C int",
-                )
-            })?;
+            super::c_int(value.0)?;
             return Err(Error::new(Kind::UnsupportedOperation, "read"));
         }
+        let size = super::bytes::native_size(value)?;
         if self.kind == FileKind::Memory {
             return self.read_bytes(usize::try_from(size).ok());
         }
@@ -238,26 +226,37 @@ impl FileState {
         self.input()?.read_bytes(usize::try_from(size).ok())
     }
 
+    fn check_gzip_open(&self) -> Result<()> {
+        if self.closed() {
+            return Err(Error::new(Kind::ValueError, "I/O operation on closed file"));
+        }
+        Ok(())
+    }
+
+    fn check_write_mode(&self) -> Result<()> {
+        if matches!(self.kind, FileKind::Member | FileKind::BinaryRead) {
+            return Err(Error::new(Kind::UnsupportedOperation, "write"));
+        }
+        if self.kind == FileKind::GzipBinaryRead {
+            self.check_gzip_open()?;
+            return Err(Error::from_errno(
+                Kind::OSError,
+                libc::EBADF,
+                "write() on read-only GzipFile object",
+                None,
+                None,
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        self.check_write_mode()?;
         if self.kind == FileKind::Memory {
             let Stream::Memory(memory) = self.stream()? else {
                 unreachable!()
             };
             return memory.write(bytes);
-        }
-        if self.kind == FileKind::Member {
-            return Err(Error::new(Kind::UnsupportedOperation, "write"));
-        }
-
-        if self.kind == FileKind::BinaryRead {
-            return Err(Error::new(Kind::UnsupportedOperation, "write"));
-        }
-        if self.kind == FileKind::GzipBinaryRead {
-            self.stream()?;
-            return Err(Error::new(
-                Kind::OSError,
-                "write() on read-only GzipFile object",
-            ));
         }
         let closed = if self.kind != FileKind::Text {
             "write to closed file"

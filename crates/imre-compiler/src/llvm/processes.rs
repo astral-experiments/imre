@@ -830,12 +830,8 @@ impl Emitter<'_, '_> {
                     unreachable!()
                 };
                 self.checked_line(format!(
-                    "call void @imre_shutil_copyfileobj(ptr {}, ptr {}, i64 {}, i32 {}, i32 {})",
-                    src.value.operand,
-                    dst.value.operand,
-                    size.value.operand,
-                    u32::from(src.value.ty == Type::TextIO),
-                    u32::from(dst.value.ty == Type::TextIO)
+                    "call void @imre_shutil_copyfileobj(ptr {}, ptr {}, i64 {})",
+                    src.value.operand, dst.value.operand, size.value.operand
                 ));
                 none()
             }
