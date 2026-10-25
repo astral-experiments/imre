@@ -569,7 +569,7 @@ REJECTED = {
     "write_type": 'with open("output.txt", "w", encoding="utf-8") as stream:\n    stream.write(1)',
     "closed_assignment": 'stream = open("input.txt", "r", encoding="utf-8")\nstream.closed = False',
     "splitlines_argument": 'print("a\\nb".splitlines(True))',
-    "str_container": "print(str([1]))",
+    "str_resource_list": "print(str([open('input.txt', 'r')]))",
     "text_constructor": "from typing import TextIO\nTextIO()",
     "decode_constructor": 'raise UnicodeDecodeError("not a valid constructor")',
     "generic_context": "with [1] as values:\n    print(values[0])",

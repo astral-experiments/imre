@@ -258,7 +258,13 @@ impl Verifier<'_> {
                 value,
                 ready,
             } => {
-                same(self.local(*iterator)?, Type::Iterator)?;
+                let ty = self.local(*iterator)?;
+                if let Some(element) = self.module.types.cursor_element(ty) {
+                    same(self.local(*key)?, element)?;
+                    require(value.is_none(), "a typed cursor yields one item")?;
+                } else {
+                    same(ty, Type::Iterator)?;
+                }
                 same(self.local(*ready)?, Type::Bool)?;
                 let slots = [*iterator, *key, *ready]
                     .into_iter()
