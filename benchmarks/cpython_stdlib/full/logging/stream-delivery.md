@@ -41,3 +41,5 @@ python -I -B benchmarks/cpython_stdlib/full/logging/native_encoding.py \
   --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
   --cpython-source /path/to/cpython --result /tmp/stream-delivery-linux.json
 ```
+
+The [hosted stream run](https://github.com/astral-sh/imre/actions/runs/40217698211) verified this same receipt against sys registry revision `aaf044f`. It also compared redirected standard-stream writes with CPython and exercised import snapshots with rebound and absent values. The [full logging run](https://github.com/astral-sh/imre/actions/runs/40217698324) kept all 272 occurrences at each optimization level.
