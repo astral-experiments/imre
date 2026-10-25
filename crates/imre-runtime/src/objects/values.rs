@@ -459,6 +459,14 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                             None
                         }
                         Storage::Exception(_) => Some(ReprTask::Exception(owner)),
+                        Storage::SourceModule { name, filename } => {
+                            output.push_str("<module ");
+                            super::exceptions::push_string_repr(name, output);
+                            output.push_str(" from ");
+                            super::exceptions::push_string_repr(filename, output);
+                            output.push('>');
+                            None
+                        }
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None

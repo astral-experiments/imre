@@ -13,6 +13,7 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 from suite_inventory import load_suite, verify_files, verify_interpreter_tests
+from source_modules import verify as verify_source_modules
 from suite_evidence import roles, write_reports
 from suite_native import (NativeCompileError, NativeDefaultMethod, Toolchain, compile_blocker,
                           method_bytes, native_method, run_evidence, testcase_fixture)
@@ -107,6 +108,7 @@ def run(args, level, root):
     if (reference["module"], reference["cpython_commit"]) != (manifest["module"], manifest["commit"]):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level, args.reachable_only)
+    verify_source_modules(lang, root)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
     for name in ["truth_protocol", "equality_protocol", "boolean_equality", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
                  "callable_binding", "context_regex", "loader_names", *("context_" + family for family in families)]:
