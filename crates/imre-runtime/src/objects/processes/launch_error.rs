@@ -100,12 +100,14 @@ pub(super) unsafe fn spawn(
     config: &popen::LaunchConfig,
     streams: u32,
     fds: [RawFd; 3],
+    attributes: ChildAttributes,
 ) -> Result<Child> {
     // SAFETY: validation and copying complete before the command may fork.
     let (launch, cwd) = unsafe { prepare_command(cmd, config)? };
     let has_directory = launch.search.is_none();
+    let requires_fork = attributes.requires_fork();
     launch
-        .spawn_tagged(cwd.as_ref(), streams, fds)
+        .spawn_tagged(cwd.as_ref(), streams, fds, attributes)
         .map_err(|err| {
             let (site, err) = decode(err);
             // SAFETY: failure does not release the original command or its arguments.
@@ -117,7 +119,8 @@ pub(super) unsafe fn spawn(
                     Site::Executable if !config.executable.is_null() => filename(
                         config.executable as usize,
                         WordKind::new(config.executable_kind),
-                        !converts_executable(has_directory, cwd.is_some(), streams, fds),
+                        requires_fork
+                            || !converts_executable(has_directory, cwd.is_some(), streams, fds),
                     ),
                     Site::Executable if config.shell => {
                         Filename::Str(Rc::new(Str::from(if cfg!(target_os = "android") {
@@ -142,7 +145,8 @@ pub(super) unsafe fn spawn(
                         filename(
                             word,
                             kind,
-                            !converts_executable(has_directory, cwd.is_some(), streams, fds),
+                            requires_fork
+                                || !converts_executable(has_directory, cwd.is_some(), streams, fds),
                         )
                     }
                 }

@@ -917,7 +917,42 @@ impl Checker<'_> {
                 });
             }
         }
+        let child_options = params.len();
+        if ["process_group", "umask", "start_new_session"]
+            .iter()
+            .any(|name| keyword(name).is_some())
+        {
+            streams |= 1 << 18; // native LaunchConfig includes the child settings trailer
+            for (name, ty, default) in [
+                ("process_group", Type::Int, default_bufsize()),
+                ("umask", Type::Int, default_bufsize()),
+                ("start_new_session", Type::Bool, boolean(false)),
+            ] {
+                params.push(Parameter {
+                    name: name.into(),
+                    ty,
+                    default: Some(default),
+                    sign_only: false,
+                    kind: ParameterKind::KeywordOnly,
+                });
+            }
+        }
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
+            if index >= child_options {
+                let name = params[index].name.as_str();
+                if name == "start_new_session" {
+                    return checker.condition(arg);
+                }
+                let value = checker.expr(arg)?;
+                if value.ty == Type::Bool {
+                    return Ok(Expr { ty: Type::Int, kind: ExprKind::Builtin(Builtin::Int, vec![value]) });
+                }
+                return if name == "process_group" {
+                    checker.coerce(value, checker.types.optional(Type::Int), arg)
+                } else {
+                    checker.coerce(value, Type::Int, arg)
+                };
+            }
             match index {
                 0 => checker.command_argument(arg),
                 1 if matches!(arg, ast::Expr::NoneLiteral(_)) => Ok(default_bufsize()),

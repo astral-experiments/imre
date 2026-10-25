@@ -415,6 +415,31 @@ impl PathSearch {
     }
 }
 
+#[derive(Clone, Copy)]
+struct ChildAttributes {
+    new_session: bool,
+    group: libc::pid_t,
+    mask: Option<libc::mode_t>,
+}
+
+impl Default for ChildAttributes {
+    fn default() -> Self {
+        Self {
+            new_session: false,
+            group: -1,
+            mask: None,
+        }
+    }
+}
+
+impl ChildAttributes {
+    /// A negative group other than -1 skips setpgid, but still selects CPython's
+    /// fork/exec path and preserves the caller's executable object on failure.
+    fn requires_fork(&self) -> bool {
+        self.new_session || self.group != -1 || self.mask.is_some()
+    }
+}
+
 struct Launch {
     argv: CStrings,
     executable: Option<CString>,
@@ -468,7 +493,15 @@ impl Launch {
     /// Call only from Command::pre_exec after stdio and cwd setup. Every referenced
     /// buffer was allocated in the parent; only async-signal-safe libc operations
     /// and allocation-free OS-error construction are allowed until exec or _exit.
-    unsafe fn exec_child(&mut self, close_fds: bool) -> io::Result<()> {
+    unsafe fn exec_child(
+        &mut self,
+        close_fds: bool,
+        attributes: ChildAttributes,
+    ) -> io::Result<()> {
+        if let Some(mask) = attributes.mask {
+            // SAFETY: this is the forked child; umask never fails.
+            unsafe { libc::umask(mask) };
+        }
         for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
             // SAFETY: restore_signals resets dispositions Python ignores; signal
             // is async-signal-safe and both arguments are valid signal constants.
@@ -476,7 +509,17 @@ impl Launch {
                 return Err(io::Error::last_os_error());
             }
         }
-        // SAFETY: this is the forked child after Command's stdio setup.
+        // SAFETY: setsid and setpgid are async-signal-safe. Apply them in
+        // CPython's order; a new session leader cannot also change its group.
+        if attributes.new_session && unsafe { libc::setsid() } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if attributes.group >= 0
+            // SAFETY: this is the forked child and group is a validated pid_t.
+            && unsafe { libc::setpgid(0, attributes.group) } < 0
+        {
+            return Err(io::Error::last_os_error());
+        }
         if close_fds {
             // SAFETY: the forked child owns its descriptor table.
             unsafe { self.descriptors.apply()? };
@@ -520,7 +563,7 @@ impl Launch {
     }
 
     fn spawn(self, cwd: Option<&CString>, streams: u32) -> io::Result<Child> {
-        self.spawn_tagged(cwd, streams, [-1; 3])
+        self.spawn_tagged(cwd, streams, [-1; 3], ChildAttributes::default())
             .map_err(|err| launch_error::decode(err).1)
     }
 
@@ -529,6 +572,7 @@ impl Launch {
         cwd: Option<&CString>,
         streams: u32,
         descriptors: [RawFd; 3],
+        attributes: ChildAttributes,
     ) -> io::Result<Child> {
         // Check the original descriptor table before duplicating anything. A
         // duplicate for stdout must not make a closed stderr descriptor valid.
@@ -591,7 +635,7 @@ impl Launch {
                 if stderr == 5 && libc::dup2(libc::STDOUT_FILENO, libc::STDERR_FILENO) < 0 {
                     return Err(io::Error::last_os_error());
                 }
-                self.exec_child(streams & (1 << 17) == 0)
+                self.exec_child(streams & (1 << 17) == 0, attributes)
             })
         };
         command.spawn()
@@ -1148,7 +1192,7 @@ unsafe fn spawn_list(
     let cmd = unsafe { WordKind::new(5).acquire(args as usize) };
     let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, streams, 0, true);
     // SAFETY: the original configuration remains rooted while spawn reports any error.
-    unsafe { launch_error::spawn(&cmd, &config, streams, [-1; 3]) }
+    unsafe { launch_error::spawn(&cmd, &config, streams, [-1; 3], ChildAttributes::default()) }
 }
 
 /// # Safety
