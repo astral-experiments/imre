@@ -69,7 +69,13 @@ impl Value {
             })
         }
     }
-    fn snapshot(&self, nodes: &mut Vec<Node>) -> usize {
+    fn snapshot(&self, nodes: &mut Vec<Node>, depth: usize) -> Result<usize, Error> {
+        if depth >= super::super::MAX_DEPTH && matches!(self, Self::Array(_) | Self::Table(_)) {
+            return Err(Error::new(
+                Kind::ValueError,
+                "document nesting exceeds 128 containers",
+            ));
+        }
         let node = match self {
             Self::Null => Node::Null,
             Self::Bool(x) => Node::Bool(*x),
@@ -80,27 +86,32 @@ impl Value {
             Self::Array(a) => Node::Array(
                 Self::elements(a)
                     .iter()
-                    .map(|value| Self::read(value).snapshot(nodes))
-                    .collect(),
+                    .map(|value| Self::read(value).snapshot(nodes, depth + 1))
+                    .collect::<Result<_, _>>()?,
             ),
             Self::Table(t) => Node::Object(
                 Self::items(t)
                     .iter()
-                    .map(|(key, value)| ((**key).clone(), Self::read(value).snapshot(nodes)))
-                    .collect(),
+                    .map(|(key, value)| {
+                        Ok((
+                            (**key).clone(),
+                            Self::read(value).snapshot(nodes, depth + 1)?,
+                        ))
+                    })
+                    .collect::<Result<_, Error>>()?,
             ),
         };
         let index = nodes.len();
         nodes.push(node);
-        index
+        Ok(index)
     }
-    pub(in crate::objects) fn view(&self) -> View {
+    pub(in crate::objects) fn view(&self) -> Result<View, Error> {
         let mut nodes = Vec::new();
-        let index = self.snapshot(&mut nodes);
-        View {
+        let index = self.snapshot(&mut nodes, 0)?;
+        Ok(View {
             nodes: Nodes::Document(Rc::new(nodes)),
             index,
-        }
+        })
     }
     fn from_json(view: &View, index: usize) -> Self {
         if index == view.index
@@ -292,7 +303,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
             18 => usize::from(matches!(doc(a), Value::String(_))),
             19 => {
                 let mut repr = String::new();
-                doc(a).view().write_repr(&mut repr);
+                doc(a).view()?.write_repr(&mut repr);
                 Rc::into_raw(Rc::new(Str::new(repr))) as usize
             }
             20 => usize::from(doc(a).truth()),
@@ -302,7 +313,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 Value::from_toml(&DeValue::Table(parsed.into_inner()))?.word()
             }
             22 | 27 => {
-                let view = doc(a).view();
+                let view = doc(a).view()?;
                 let mut text = String::new();
                 let result = view.table(view.index, "", false, &mut text);
                 if op == 27 {
@@ -383,9 +394,28 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                     .map(|s| (s, Value::Null.object())),
             )
             .word(),
-            29 => doc(a).view().into_handle() as usize,
+            29 => doc(a).view()?.into_handle() as usize,
             _ => unreachable!("valid document opcode"),
         })
     };
     crate::finish(run(), 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mutable_snapshot_checks_container_depth() {
+        let mut value = Value::Null;
+        for _ in 0..super::super::super::MAX_DEPTH {
+            value = Value::array(std::iter::once(value.object()));
+        }
+        assert!(value.view().is_ok());
+        let too_deep = Value::table(std::iter::once((
+            Rc::new(Str::new("child")),
+            value.object(),
+        )));
+        assert!(too_deep.view().is_err());
+    }
 }

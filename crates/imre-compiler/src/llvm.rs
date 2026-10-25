@@ -3218,6 +3218,7 @@ impl Emitter<'_, '_> {
                         "call i32 @imre_record_equal(ptr {}, ptr {})",
                         left.operand, right.operand
                     ));
+                    self.check_error();
                     let predicate = if matches!(op, Compare::Equal) {
                         "ne"
                     } else {
@@ -3231,6 +3232,7 @@ impl Emitter<'_, '_> {
                             "call i32 @imre_record_equal(ptr {}, ptr {})",
                             left.operand, right.operand
                         ));
+                        self.check_error();
                         let predicate = if matches!(op, Compare::Equal) {
                             "ne"
                         } else {
@@ -3242,6 +3244,7 @@ impl Emitter<'_, '_> {
                             "call i32 @imre_tuple_compare(ptr {}, ptr {})",
                             left.operand, right.operand
                         ));
+                        self.check_error();
                         self.instruction(format!("icmp {predicate} i32 {order}, 0"))
                     }
                 }
