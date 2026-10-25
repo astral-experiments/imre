@@ -1085,25 +1085,31 @@ pub unsafe extern "C" fn imre_str_splitlines_iter(value: *const Str) -> *const O
 /// boundary; a final boundary creates no extra item, and U+001F is not a boundary.
 ///
 /// # Safety
-/// `value` must be a rooted string. Returns an owned generic sequence of strings.
+/// `value` must be rooted. Returns an owned string sequence or null on error.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_splitlines(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { std::mem::ManuallyDrop::new(Rc::from_raw(value)) };
-    split_lines(&value, |range| owned_line(&value, range))
+    finish(
+        split_lines(&value, |range| owned_line(&value, range)),
+        std::ptr::null(),
+    )
 }
 
-fn split_lines(value: &str, own: impl Fn(std::ops::Range<usize>) -> Rc<Str>) -> *const Object {
+fn split_lines(
+    value: &str,
+    own: impl Fn(std::ops::Range<usize>) -> Rc<Str>,
+) -> Result<*const Object, Error> {
     let mut offsets = LineOffsets::new(value);
     let mut result = Words::new(3);
     while let Some(range) = offsets.next(value) {
         result
             .values
             .try_reserve(1)
-            .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
+            .map_err(|_| Error::allocation())?;
         result.values.push(Rc::into_raw(own(range)) as usize);
     }
-    Rc::into_raw(result.into_object())
+    Ok(Rc::into_raw(result.into_object()))
 }
 
 #[cfg(test)]

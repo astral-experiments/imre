@@ -528,8 +528,8 @@ pub unsafe extern "C" fn imre_bytes_decode_splitlines(value: *const Bytes) -> *c
     // SAFETY: the caller roots the immutable bytes through the split.
     let bytes = unsafe { &*value };
     let result = std::str::from_utf8(bytes)
-        .map(|text| super::split_lines(text, |range| super::text::owned_string(&text[range])))
-        .map_err(|error| decode_error(bytes, error));
+        .map_err(|error| decode_error(bytes, error))
+        .and_then(|text| super::split_lines(text, |range| super::text::owned_string(&text[range])));
     finish(result, std::ptr::null())
 }
 

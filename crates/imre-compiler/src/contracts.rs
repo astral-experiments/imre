@@ -190,6 +190,7 @@ impl Builtin {
             Self::BytesGet
             | Self::Decode
             | Self::DecodeSplitLines
+            | Self::SplitLines
             | Self::DictGet
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
@@ -257,7 +258,6 @@ impl Builtin {
             | Self::SequenceGetInBounds
             | Self::SetContains
             | Self::Split
-            | Self::SplitLines
             | Self::Ndiff
             | Self::StringListCopy
             | Self::StringListFilter(_)
@@ -574,6 +574,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_concat"
                 | "imre_bytes_repeat"
                 | "imre_bytes_decode_splitlines"
+                | "imre_str_splitlines"
                 | "imre_bytes_decode"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
