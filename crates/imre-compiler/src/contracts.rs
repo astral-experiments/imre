@@ -425,6 +425,7 @@ impl Builtin {
             Self::BytesIter
             | Self::DefaultListDict
             | Self::CounterNew
+            | Self::CounterElements
             | Self::CounterTotal
             | Self::DictAsBase
             | Self::DictIter(_)

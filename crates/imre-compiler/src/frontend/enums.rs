@@ -149,6 +149,12 @@ impl Checker<'_> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
+        if types.iter().all(|ty| matches!(ty, Type::Cursor(_))) {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         if types.contains(&Type::StringIterable) && types == [left.ty, right.ty] {
             // Both operands must reach identity with the same pointer tag.
             let left = self.coerce(left, Type::StringIterable, node)?;

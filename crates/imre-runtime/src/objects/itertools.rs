@@ -82,11 +82,13 @@ pub unsafe extern "C" fn imre_repeat(kind: u32, value: usize, times: usize) -> *
     })))))
 }
 
+mod counter_elements;
 mod sources;
 mod tee;
 use std::cell::{Cell, RefCell};
 
 pub(super) enum Adapter {
+    CounterElements(RefCell<counter_elements::Elements>),
     Sequence(sources::Sequence),
     Progression(sources::Progression),
     FloatCount { current: Cell<f64>, step: OwnedWord },
@@ -134,6 +136,7 @@ impl Adapter {
                 return;
             }
             Self::Progression(_) => "range_iterator",
+            Self::CounterElements(_) => "itertools.chain",
             Self::Sequence(_) => "iterator",
             Self::Tee(_) => "itertools._tee",
             Self::Slice(_) => "itertools.islice",
@@ -144,6 +147,7 @@ impl Adapter {
 
     pub(super) fn next(&self) -> Result<Option<OwnedWord>, Error> {
         match self {
+            Self::CounterElements(elements) => elements.borrow_mut().next(),
             Self::Sequence(seq) => Ok(seq.next()),
             Self::Progression(count) => Ok(count.next()),
             Self::FloatCount { current, step } => {

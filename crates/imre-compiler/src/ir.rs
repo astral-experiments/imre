@@ -792,6 +792,7 @@ pub(crate) enum Builtin {
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
     CounterNew,
+    CounterElements,
     CounterTotal,
     CounterUpdate,
     CounterMath {

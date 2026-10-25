@@ -5560,6 +5560,12 @@ impl<'a> Checker<'a> {
             };
             return self.counter_unbound_update(call, op, method.attr.as_str());
         }
+        if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "elements"
+            && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
+        {
+            return self.counter_elements(call, None);
+        }
         if let Some(value) = self.construct_receiver_type(call)? {
             return Ok(value);
         }
@@ -6095,6 +6101,7 @@ impl<'a> Checker<'a> {
             }
             if self.types.is_counter(receiver.ty) {
                 match attribute.attr.as_str() {
+                    "elements" => return self.counter_elements(call, Some(receiver)),
                     "update" => return self.counter(call, Some(receiver), None),
                     "subtract" => {
                         return self.counter_counts(call, Some(receiver), None, Binary::Subtract);
