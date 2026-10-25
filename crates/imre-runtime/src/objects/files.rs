@@ -1,6 +1,7 @@
 //! Sealed UTF-8 text and byte streams. Explicit operations report language errors;
 //! final ownership cleanup only closes resources and never changes error state.
 
+use crate::StrOwner;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
@@ -24,7 +25,7 @@ use buffered::{Input, Output};
 pub(super) struct FileState {
     fd: Option<RawFd>,
     stream: Option<Stream>,
-    pub(super) name: Option<Rc<Str>>,
+    pub(super) name: Option<StrOwner>,
     // Preserve access mode after close: binary wrong-direction errors take precedence.
     kind: FileKind,
 }
@@ -391,7 +392,7 @@ pub(crate) fn errno_error(error: io::Error) -> Error {
 pub(super) fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
     errno_with_filenames(
         error,
-        path.map(|s| super::exceptions::Filename::Str(Rc::new(Str::from(s)))),
+        path.map(|s| super::exceptions::Filename::Str(StrOwner::new(Str::from(s)))),
         None,
     )
 }
@@ -493,7 +494,7 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
     Ok(FileState {
         fd: Some(fd),
         stream: Some(stream),
-        name: Some(Rc::new(Str::new(path))),
+        name: Some(StrOwner::new(Str::new(path))),
         kind: match (binary, mode) {
             (false, _) => FileKind::Text,
             (true, 0) if gzip => FileKind::GzipBinaryRead,
@@ -674,7 +675,7 @@ pub unsafe extern "C" fn imre_text_read(value: *const Object) -> *const Str {
             .with_mut(|storage| storage.file_mut().read())
     };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(text))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(text))),
         std::ptr::null(),
     )
 }
@@ -692,7 +693,7 @@ pub unsafe extern "C" fn imre_text_readline(value: *const Object) -> *const Str 
             .with_mut(|storage| storage.file_mut().readline())
     };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(text))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(text))),
         std::ptr::null(),
     )
 }
@@ -883,7 +884,7 @@ mod tests {
                 // SAFETY: take transfers the exception owner; message returns its own string.
                 let message = unsafe {
                     let error = Rc::from_raw(imre_error_take());
-                    Rc::from_raw(imre_exception_message(Rc::as_ptr(&error)))
+                    StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)))
                 };
                 assert!(message.starts_with(&format!("[Errno {errno}] ")));
                 assert!(message.ends_with(": b'raw-\\xff-link'"));
@@ -1024,6 +1025,7 @@ mod tests {
         std::fs::write(&path, member(b"replacement")).unwrap();
 
         state.flush().ok().unwrap();
+        assert_eq!(state.read_into(&mut []).ok().unwrap(), 0);
         assert!(
             state
                 .read_size(&Int::from_usize(0))
@@ -1032,10 +1034,10 @@ mod tests {
                 .is_empty()
         );
         assert!(matches!(state.stream, Some(Stream::UnreadGzip { .. })));
-        assert_eq!(
-            state.read_size(&Int::from_usize(8)).ok().unwrap(),
-            b"original"
-        );
+        let mut prefix = [0; 3];
+        assert_eq!(state.read_into(&mut prefix).ok().unwrap(), 3);
+        assert_eq!(&prefix, b"ori");
+        assert_eq!(state.read_size(&Int::from_usize(8)).ok().unwrap(), b"ginal");
     }
 
     #[test]
@@ -1132,9 +1134,12 @@ mod tests {
         // SAFETY: all file and string handles remain rooted; reads transfer ownership.
         unsafe {
             assert_eq!(imre_text_enter(Rc::as_ptr(&file)), 1);
-            let text = Rc::from_raw(imre_text_read(Rc::as_ptr(&file)));
+            let text = StrOwner::from_raw(imre_text_read(Rc::as_ptr(&file)));
             assert_eq!(text.as_str(), "a\nβ\nc\n\0tail");
-            assert_eq!(Rc::from_raw(imre_text_read(Rc::as_ptr(&file))).as_str(), "");
+            assert_eq!(
+                StrOwner::from_raw(imre_text_read(Rc::as_ptr(&file))).as_str(),
+                ""
+            );
             assert_eq!(imre_text_flush(Rc::as_ptr(&file)), 1);
             assert_eq!(imre_text_write(Rc::as_ptr(&file), &Str::new("x")), 0);
             let error = imre_error_take();
@@ -1166,7 +1171,7 @@ mod tests {
             }
             imre_object_release(error);
             assert_eq!(
-                Rc::from_raw(imre_text_read(Rc::as_ptr(&invalid))).as_str(),
+                StrOwner::from_raw(imre_text_read(Rc::as_ptr(&invalid))).as_str(),
                 ""
             );
         }
@@ -1204,11 +1209,11 @@ mod tests {
         let path = directory.0.join("output");
         let file = open(path.to_str().unwrap(), 1);
         let alias = file.clone();
-        let text = Rc::new(Str::new("partsé\0"));
+        let text = StrOwner::new(Str::new("partsé\0"));
         let ending = "🦀\n";
         let parts = [
             StringPart {
-                data: Rc::as_ptr(&text).cast(),
+                data: StrOwner::as_ptr(&text).cast(),
                 length: usize::MAX,
             },
             StringPart {

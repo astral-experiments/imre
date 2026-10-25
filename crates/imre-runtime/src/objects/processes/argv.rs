@@ -49,7 +49,7 @@ pub unsafe extern "C" fn imre_subprocess_quote_argument(word: usize, kind: u32) 
         with_bytes(word, WordKind::new(kind), |bytes| {
             let text = std::str::from_utf8(bytes)
                 .map_err(|error| crate::objects::bytes::decode_error(bytes, error))?;
-            quote_argument(text).map(|value| Rc::into_raw(Rc::new(value)))
+            quote_argument(text).map(|value| crate::StrOwner::into_raw(crate::StrOwner::new(value)))
         })
     };
     finish(result, std::ptr::null())

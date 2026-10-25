@@ -1,6 +1,5 @@
 //! Native path operations used by importlib.machinery.ModuleSpec properties.
 use super::Str;
-use std::rc::Rc;
 
 /// Return the prefix before the last ASCII dot, or Python's empty string.
 ///
@@ -10,7 +9,7 @@ use std::rc::Rc;
 pub unsafe extern "C" fn imre_module_parent_prefix(name: *const Str) -> *const Str {
     // SAFETY: the compiler roots the name during the property read.
     let parent = unsafe { &*name }.rsplit_once('.').map_or("", |(p, _)| p);
-    Rc::into_raw(super::literal_string(parent))
+    crate::StrOwner::into_raw(super::literal_string(parent))
 }
 
 /// Resolve bytecode paths and derive source caches using the Python command optimization.
@@ -36,7 +35,7 @@ pub unsafe extern "C" fn imre_module_cache_from_origin(
         super::finish(
             // SAFETY: the caller roots the optimization string during the property read.
             super::cache_paths::module_cache(path, unsafe { &*optimization })
-                .map(|v| v.map_or(0, |s| Rc::into_raw(s) as usize)),
+                .map(|v| v.map_or(0, |s| crate::StrOwner::into_raw(s) as usize)),
             0,
         )
     } else {

@@ -1,5 +1,6 @@
 //! Writes typed storage directly, without constructing a dynamic JSON tree.
 
+use crate::StrOwner;
 use num_traits::ToPrimitive;
 use std::cmp::Ordering;
 
@@ -27,7 +28,7 @@ enum Indent<'a> {
 struct StandardOptions<'a> {
     allow_nan: bool,
     sort_keys: bool,
-    separators: Option<Separators<'a, Rc<Str>>>,
+    separators: Option<Separators<'a, StrOwner>>,
 }
 
 fn length(size: usize) -> Result<(), Error> {
@@ -49,7 +50,7 @@ fn length(size: usize) -> Result<(), Error> {
 unsafe fn separators(
     word: usize,
     schema: &Schema,
-) -> Result<Option<Separators<'_, Rc<Str>>>, Error> {
+) -> Result<Option<Separators<'_, StrOwner>>, Error> {
     fn typename(kind: u32) -> &'static str {
         match kind {
             NONE => "NoneType",
@@ -82,15 +83,15 @@ unsafe fn separators(
         }
         typename(schema.kind)
     }
-    fn part(word: usize, kind: u32) -> Separator<'static, Rc<Str>> {
+    fn part(word: usize, kind: u32) -> Separator<'static, crate::StrOwner> {
         if kind == STRING {
             // SAFETY: the descriptor identifies a string rooted by the container.
-            Ok(unsafe { crate::objects::acquire_rc(word) })
+            Ok(unsafe { StrOwner::acquire_word(word) })
         } else {
             Err(typename(kind))
         }
     }
-    fn field(word: usize, schema: &Schema) -> Separator<'_, Rc<Str>> {
+    fn field(word: usize, schema: &Schema) -> Separator<'_, crate::StrOwner> {
         if schema.kind == OPTIONAL {
             if word == 0 {
                 return Err("NoneType");
@@ -114,10 +115,10 @@ unsafe fn separators(
                 let mut chars = (&*(word as *const Str)).chars();
                 length(chars.clone().count())?;
                 Ok(Some((
-                    Ok(Rc::new(Str::new(
+                    Ok(StrOwner::new(Str::new(
                         chars.next().unwrap().encode_utf8(&mut [0; 4]),
                     ))),
-                    Ok(Rc::new(Str::new(
+                    Ok(StrOwner::new(Str::new(
                         chars.next().unwrap().encode_utf8(&mut [0; 4]),
                     ))),
                 )))
@@ -754,21 +755,21 @@ impl Encoder<'_> {
 ///
 /// # Safety
 /// The caller roots the value described by the schema for this lookup.
-unsafe fn root_string(word: usize, schema: &Schema) -> Option<Rc<Str>> {
+unsafe fn root_string(word: usize, schema: &Schema) -> Option<StrOwner> {
     // SAFETY: the concrete schema identifies the rooted string, optional, or document.
     unsafe {
         match schema.kind {
-            STRING => Some(crate::objects::acquire_rc(word)),
+            STRING => Some(StrOwner::acquire_word(word)),
             OPTIONAL if word != 0 => root_string(word, schema.child()),
             JSON_VIEW | DOCUMENT => object(word as *const Object)
                 .0
                 .with(|storage| match storage {
                     Storage::Json(view) => match &view.nodes[view.index] {
-                        readonly::Node::String(text) => Some(Rc::clone(text)),
+                        readonly::Node::String(text) => Some(StrOwner::clone(text)),
                         _ => None,
                     },
                     Storage::Document(readonly::document::Value::String(text)) => {
-                        Some(Rc::clone(text))
+                        Some(StrOwner::clone(text))
                     }
                     _ => None,
                 }),
@@ -827,7 +828,7 @@ unsafe fn encode(
         .as_ref()
         .and_then(|o| o.separators.as_ref())
         .map(|(item, key)| {
-            fn text<'a>(value: &'a Separator<'_, Rc<Str>>) -> Separator<'a, &'a str> {
+            fn text<'a>(value: &'a Separator<'_, StrOwner>) -> Separator<'a, &'a str> {
                 value.as_ref().map(|s| s.as_str()).map_err(|&ty| ty)
             }
             (text(item), text(key))
@@ -880,7 +881,7 @@ pub unsafe extern "C" fn imre_json_encode(
     // SAFETY: the compiler supplies the exact rooted schema and indentation.
     let result = unsafe { encode(word, schema, indent, false, ensure_ascii, None, None) };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(Str::from(text)))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(Str::from(text)))),
         std::ptr::null(),
     )
 }
@@ -918,7 +919,7 @@ pub unsafe extern "C" fn imre_json_dumps(
         })
     };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(Str::from(text)))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(Str::from(text)))),
         std::ptr::null(),
     )
 }

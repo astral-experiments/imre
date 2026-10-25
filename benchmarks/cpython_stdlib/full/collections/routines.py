@@ -36,6 +36,10 @@ COUNTER_OPERATIONS = {
 }
 EMPTY = {f"test.test_deque.TestSequence.{method}" for method in
          ("test_getitem", "test_getslice", "test_subscript")}
+DEQUE_OPERATIONS = {
+    "test_clear": "Construct a deque, clear it twice, and inspect its native length and iteration",
+    "test_maxlen_zero": "Consume native range iterators in bounded deque construction, extend, and extendleft",
+}
 
 
 @cache
@@ -169,6 +173,8 @@ def main():
                 elif case_id == f"test.test_deque.TestBasic.{method}" and method in BIG_METHODS:
                     fixture = big_fixture(sys.modules[name].BIG)
                     operation = BIG_OPERATION
+                elif case_id == f"test.test_deque.TestBasic.{method}" and method in DEQUE_OPERATIONS:
+                    operation = ("imre", DEQUE_OPERATIONS[method])
                 elif case_id in EMPTY:
                     if len(node.body) != 1 or not isinstance(node.body[0], ast.Pass):
                         raise ValueError(f"{case_id} is no longer an empty upstream test")

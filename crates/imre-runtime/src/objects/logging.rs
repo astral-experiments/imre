@@ -1,4 +1,5 @@
 //! Process-local logging state for the native single-threaded runtime.
+use crate::StrOwner;
 mod config;
 mod handler;
 mod hierarchy;
@@ -28,7 +29,7 @@ struct Entry {
 impl Entry {
     fn new(name: &str, level: i64, creation_order: usize) -> Self {
         Self {
-            handle: Rc::new(Object(StorageCell::new(Storage::Logger(Rc::new(
+            handle: Rc::new(Object(StorageCell::new(Storage::Logger(StrOwner::new(
                 Str::from(name),
             ))))),
             level: Int::small(level).unwrap(),
@@ -213,7 +214,7 @@ fn format_timestamp(format: Option<&str>, local: &libc::tm, now: std::time::Dura
     text
 }
 
-unsafe fn name(handle: *const Object) -> Rc<Str> {
+unsafe fn name(handle: *const Object) -> StrOwner {
     // SAFETY: each caller supplies a rooted native Logger; the name acquires its own owner.
     unsafe {
         object(handle).0.with(|storage| match storage {
@@ -279,7 +280,7 @@ pub unsafe extern "C" fn imre_log_config(level: usize, fmt: usize, datefmt: usiz
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_name(logger: *const Object) -> *const Str {
     // SAFETY: the caller retains the logger while its name acquires an owner.
-    Rc::into_raw(unsafe { name(logger) })
+    StrOwner::into_raw(unsafe { name(logger) })
 }
 
 /// A receiver has already been evaluated and rooted by the caller.

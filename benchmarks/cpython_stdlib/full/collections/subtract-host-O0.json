@@ -1,7 +1,7 @@
 {
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
   "opt_level": 0,
-  "compiler_revision": "43755cbf6e6be29a6c1e68e78a483b4ed5d837c6",
+  "compiler_revision": "8bed1fe034374b90860cfde5fe7f6324dfebb4de",
   "tests": {
     "test.test_collections.TestCounter.test_subtract": [
       {
