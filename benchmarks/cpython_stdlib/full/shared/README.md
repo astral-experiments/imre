@@ -24,7 +24,7 @@ results=$(mktemp -d)
 "$reference_prefix/bin/python3.14" -I -B benchmarks/cpython_stdlib/full/run_staged_reference.py --output "$results"
 ```
 
-The prefix combines the supplied reference interpreter and its standard library with the verified test fixtures. It does not copy the interpreter's test tree or third-party packages.
+The prefix combines the supplied reference interpreter and its standard library with the verified test fixtures. It does not copy the interpreter's test tree or third-party packages. The runner sets `PYTHONHOME` to this disposable prefix so children can find their own standard library even when the original subprocess tests deliberately pass an unresolvable executable name. The original unittest child that passes `-E` locates the same prefix from its executable.
 
 The runner verifies the installed fixtures again and uses the resource options from each module's ledger. It records original JUnit XML, runner output and a per-module `summary.json` in the result directory. Pass module names after `--output "$results"` for a smaller run. On Linux, run as a regular user with ordinary process and file permissions: some upstream tests exercise ptrace and permission changes.
 

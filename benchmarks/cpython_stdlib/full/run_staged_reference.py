@@ -1,4 +1,4 @@
-"""Rerun the complete wave-one CPython reference suites in the disposable test prefix."""
+"""Rerun complete CPython reference suites in the disposable test prefix."""
 import argparse
 from collections import Counter, defaultdict
 import importlib
@@ -9,12 +9,11 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
-import tomllib
 import unittest
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from discover_staged import early_skip, suite_names
+from discover_staged import early_skips, suite_names, suite_owners
 from reference_report import checked_reference
 from stage_tests import verify_prefix
 sys.path.insert(0, str(HERE.parent))
@@ -41,7 +40,7 @@ def run_group(mod, primary, pin, out):
         try:
             importlib.import_module(suite)
         except unittest.SkipTest as exc:
-            early[early_skip(suite, str(exc), mod)] = {"skipped": str(exc)}
+            early.update(early_skips(suite, str(exc), ((k, v) for k, values in expected.items() for v in values)))
         else:
             suites.append(suite.removeprefix("test."))
     xml = out / f"{mod}.xml"
@@ -50,8 +49,11 @@ def run_group(mod, primary, pin, out):
     with tempfile.TemporaryDirectory() as work, (out / f"{mod}.log").open("w") as log:
         command = [sys.executable, "-B", *options, "-m", "test", "--single-process",
                    "--tempdir", work, "--randseed", "1", *resources, "--junit-xml", str(xml), *suites]
+        # Popen's original executable tests deliberately pass a fictitious argv[0].
+        # Tell their relocated Python where its standard library is, even then.
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
         proc = subprocess.run(command, cwd=work, stdout=log, stderr=subprocess.STDOUT,
-                              env={k: v for k, v in os.environ.items() if k != "PYTHONPATH"})
+                              env={**env, "PYTHONHOME": sys.prefix})
     actual = reference_results(xml, Counter({k: len(v) for k, v in expected.items() if k not in early})) | early
     counts = Counter()
     differences = {}
@@ -74,7 +76,7 @@ def run_group(mod, primary, pin, out):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True, help="empty result directory for logs and JUnit XML")
-    parser.add_argument("modules", nargs="*", help="default: all wave-one modules")
+    parser.add_argument("modules", nargs="*", help="default: all modules with reference ledgers")
     args = parser.parse_args()
     release = json.loads((HERE.parent / "UPSTREAM.json").read_bytes())
     if sys.implementation.name != "cpython" or "v" + ".".join(map(str, sys.version_info[:3])) != release["tag"]:
@@ -84,10 +86,10 @@ def main():
     if actual_test != stdlib / "test/__init__.py":
         parser.error("the test package must belong to the disposable interpreter prefix")
     count = verify_prefix(stdlib)
-    wave = tomllib.loads((HERE / "scope.toml").read_text())["wave_one"]
+    wave = suite_owners()
     modules = args.modules or list(wave)
     if bad := set(modules) - wave.keys():
-        parser.error(f"unknown wave-one module: {sorted(bad)}")
+        parser.error(f"unknown module: {sorted(bad)}")
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=True)
     if any(out.iterdir()):

@@ -10,7 +10,7 @@ import unittest
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from reference_report import read_results
+from reference_report import checked_reference
 sys.path.insert(0, str(HERE.parent))
 from suite_inventory import cases, load_suite
 
@@ -18,41 +18,54 @@ from suite_inventory import cases, load_suite
 def suite_names(mod, default, refs):
     manifest = HERE / mod / "UPSTREAM.json"
     metadata = json.loads(manifest.read_bytes()) if manifest.exists() else {}
-    return metadata.get("modules") or [n for p in refs if (n := json.loads(p.read_bytes()).get("module"))] or ["test." + default]
+    return (metadata.get("modules") or [n for p in refs if (n := json.loads(p.read_bytes()).get("module"))]
+            or [metadata.get("module", "test." + default)])
 
 
-def early_skip(suite, reason, mod):
-    key = suite + ".TestDeque.test_copy_race"
-    if suite == "test.test_free_threading.test_collections" and reason == "GIL enabled":
-        ref = json.loads((HERE / mod / f"reference-{sys.platform}.json").read_bytes())
-        if ref["reference"].get(key) == {"skipped": reason}:
-            return key
-    raise ValueError(f"unaccounted import-time skip: {suite}: {reason}")
+def suite_owners():
+    owners = tomllib.loads((HERE / "scope.toml").read_text())["wave_one"]
+    for ref in sorted(HERE.glob(f"*/reference*-{sys.platform}.json")):
+        owners.setdefault(ref.parent.name, "test_" + ref.parent.name)
+    return owners
+
+
+def early_skips(suite, reason, entries):
+    """Account for an import-time skip only if the ledger has the same IDs and reason."""
+    result = {}
+    for name, outcome in entries:
+        if name.startswith(suite + "."):
+            if name in result or outcome != {"skipped": reason}:
+                raise ValueError(f"{suite}: import-time skip disagrees with {name}: {outcome}")
+            result[name] = outcome
+    if not result:
+        raise ValueError(f"unaccounted import-time skip: {suite}: {reason}")
+    return result
 
 
 def main():
-    primary = tomllib.loads((HERE / "scope.toml").read_text())["wave_one"]
+    primary = suite_owners()
     release = json.loads((HERE.parent / "UPSTREAM.json").read_bytes())
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("staged_root", type=Path)
-    parser.add_argument("modules", nargs="*", help="module owners; default: all wave-one suites")
+    parser.add_argument("modules", nargs="*", help="module owners; default: all recorded suites")
     args = parser.parse_args()
     if sys.implementation.name != "cpython" or "v" + ".".join(map(str, sys.version_info[:3])) != release["tag"]:
         parser.error(f"use a test-enabled CPython {release['tag']}")
     modules = args.modules or list(primary)
     if unknown := set(modules) - primary.keys():
-        parser.error(f"no wave-one assignments for {sorted(unknown)}")
+        parser.error(f"no suite assignments for {sorted(unknown)}")
     lib = args.staged_root.resolve() / "Lib"
     sys.path.insert(0, str(lib))
     if Path(importlib.import_module("test").__file__).resolve() != lib / "test/__init__.py":
         raise ValueError("the test package must come from the staged tree")
     total = skipped = 0
     for mod in modules:
-        expected = Counter()
+        entries = []
         refs = sorted((HERE / mod).glob(f"reference*-{sys.platform}.json"))
         for ref in refs:
-            results = read_results(ref, release["commit"], sys.platform)
-            expected.update(name for name, _ in results)
+            _, results = checked_reference(ref, release["commit"], sys.platform)
+            entries.extend(results)
+        expected = Counter(name for name, _ in entries)
         if not expected:
             raise ValueError(f"no {sys.platform} reference ledger for {mod}")
         seen = Counter()
@@ -64,10 +77,9 @@ def main():
                     raise ValueError(f"{suite} resolved outside the staged tree")
                 seen.update(case.id() for case in cases(load_suite(suite)))
             except unittest.SkipTest as exc:
-                # On a GIL build this package skips before discovery of its sole method.
-                key = early_skip(suite, str(exc), mod)
-                seen[key] += 1
-                early += 1
+                skips = early_skips(suite, str(exc), entries)
+                seen.update(skips.keys())
+                early += len(skips)
         if seen != expected:
             raise ValueError(f"{mod}: missing {dict(expected-seen)}, extra {dict(seen-expected)}")
         print(f"{mod}: {seen.total() - early} discovered, {early} skipped before discovery")
