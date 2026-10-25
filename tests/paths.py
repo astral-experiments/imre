@@ -24,6 +24,7 @@ REJECTED = {
     "tomllib_key_equality": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys()\nprint(keys == keys)",
     "tomllib_key_argument": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys('x')",
     "integer_segment": "Path(1)",
+    "missing_nested_walk_option": "def option(required: bool) -> bool:\n    return required\nPath('a').relative_to(walk_up=option())",
     "bytes_segment": "Path(b'file')",
     "keyword_segment": "Path(path='file')",
     "expanded_segments": "Path(*['a', 'b'])",

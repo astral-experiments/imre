@@ -97,6 +97,7 @@ impl Types {
             Type::Popen(_, _, id) => matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_))),
             Type::Int
             | Type::Float
+            | Type::BuiltinClass
             | Type::Bool
             | Type::Str
             | Type::Bytes
@@ -402,6 +403,17 @@ impl Types {
                 if !self.0.borrow().custom_truth.contains(id) =>
             {
                 Type::Union(self.intern(Shape::Union(vec![*record, Type::Exception])))
+            }
+            choices @ [_, _, ..]
+                if choices
+                    .iter()
+                    .all(|ty| matches!(ty, Type::Str | Type::Bytes | Type::Path)) =>
+            {
+                let ordered = [Type::Str, Type::Bytes, Type::Path]
+                    .into_iter()
+                    .filter(|ty| choices.contains(ty))
+                    .collect();
+                Type::Union(self.intern(Shape::Union(ordered)))
             }
             _ => return None,
         };
