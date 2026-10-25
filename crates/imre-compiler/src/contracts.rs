@@ -68,7 +68,7 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
-            Self::Linecache(..) => Contract::new(true, Unknown),
+            Self::Linecache(..) | Self::CachePath(_) => Contract::new(true, Unknown),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
@@ -466,6 +466,10 @@ impl Builtin {
             | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
             | Self::ForwardRefField(_)
+            | Self::BoxAnnotation(_)
+            | Self::AnnotationMember(_)
+            | Self::AnnotationIs
+            | Self::StaticFunction(_)
             | Self::NewForwardRef
             | Self::ClassNameView
             | Self::StrEnumName
@@ -479,7 +483,8 @@ impl Builtin {
             | Self::UnionProject => Contract::new(false, PreservesLists),
             Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
             Self::ListReserveRange => Contract::new(false, PreservesOwners),
-            Self::BinaryOpen(_)
+            Self::AnnotationRef
+            | Self::BinaryOpen(_)
             | Self::BinaryRead
             | Self::BinaryReadSize
             | Self::Ndiff
@@ -835,6 +840,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
             name,
             "int_floordiv"
                 | "imre_chr"
+                | "imre_annotation_ref"
                 | "imre_int_pow"
                 | "imre_int_modpow"
                 | "imre_int_negative_pow"
@@ -1022,6 +1028,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_upper"
                 | "imre_str_capitalize"
                 | "imre_module_cache_from_origin"
+                | "imre_cache_path_tag"
+                | "imre_cache_from_source"
+                | "imre_source_from_cache"
                 | "imre_str_slice"
                 | "imre_str_int_list"
                 | "imre_seq_get"

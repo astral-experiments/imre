@@ -254,6 +254,14 @@ impl Checker<'_> {
                         ),
                     }));
                 }
+                if let Some(prefix) = self.cache_config(target) {
+                    let value = self.coerce(value, self.types.optional(Type::Str), target)?;
+                    return Ok(Statement::Expr(cache_paths::op(
+                        ir::CachePathOperation::Set(prefix),
+                        Type::None,
+                        vec![value],
+                    )));
+                }
                 if let Some(Binding::Intrinsic(Intrinsic::LogRecordFlag(mask))) =
                     self.resolve(target)
                 {
