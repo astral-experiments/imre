@@ -203,6 +203,14 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        if attribute.attr.as_str() == "getChildren" {
+            let args = self.arguments(call, &[], Some(logger))?;
+            return Ok(self.ordered_builtin(
+                Builtin::Logging(Log::Children),
+                self.types.set(Type::Logger),
+                args,
+            ));
+        }
         if attribute.attr.as_str() == "setLevel" {
             let args = self.arguments_with(
                 call,
