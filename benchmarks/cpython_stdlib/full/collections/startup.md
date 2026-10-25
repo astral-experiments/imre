@@ -21,6 +21,17 @@ tuple, str, bytes, list, bytearray and deque, then calls the upstream helper to
 validate the abstract length, subscription, assignment, deletion and insertion
 methods. Resolving the import alone does not pass that routine.
 
+With native array class identity and sequence registration, the compiler gets
+past the array import in both the original import and runner entry points,
+with and without reachability filtering. All four checks then stop on
+[`import doctest` at line 6](upstream/Lib/test/test_collections.py#L6).
+They execute zero tests. The primary module has just one doctest call:
+[`tests.addTest(doctest.DocTestSuite(collections))`](upstream/Lib/test/test_collections.py#L2416),
+which contributes 15 occurrences. The deque companion calls
+[`doctest.DocTestSuite()`](upstream/Lib/test/test_deque.py#L1033) without an
+argument; the caller's `__test__['libreftest']` contributes one more.
+Both are included in the 659-occurrence denominator.
+
 ## Mapping as the base of a real standard-library class
 
 [CPython's `_colorize.ThemeSection`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/_colorize.py#L115) is the argparse dependency reached after the adjacent f-string depth fix in [#576](https://github.com/astral-sh/imre/pull/576). The class declaration uses `Mapping[str, str]` as a base. On the pinned interpreter its runtime base is `collections.abc.Mapping`; the parameterized alias survives in `__orig_bases__`.

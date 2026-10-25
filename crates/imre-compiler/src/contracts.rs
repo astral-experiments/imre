@@ -391,6 +391,8 @@ impl Builtin {
             | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
             | Self::ClassNameView
+            | Self::ClassNamePart { .. }
+            | Self::ClassIsSubclass
             | Self::StrEnumName
             | Self::StrEnumValue
             | Self::EnumString
