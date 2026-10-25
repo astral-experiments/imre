@@ -41,7 +41,7 @@ REJECTED = {
     "wrong_field_write": "class Item:\n    path: Path\n    def __init__(self, path: Path) -> None:\n        self.path = path\nitem = Item(Path('a'))\nitem.path = 'b'",
     "optional_access": "value: Path | None = None\nprint(value.name)",
     "mutable_attribute": "value = Path('a')\nvalue.name = 'b'",
-    "unknown_attribute": "print(Path('a').drive)",
+    "unknown_attribute": "print(Path('a').drives)",
     "path_index": "print(Path('a')[0])",
     "path_length": "print(len(Path('a')))",
     "path_order": "print(Path('a') < Path('b'))",
@@ -80,7 +80,7 @@ REJECTED = {
     "resolve_duplicate_strict": "Path('.').resolve(True, strict=False)",
     "absolute_argument": "Path('.').is_absolute(True)",
     "builtin_class_pattern": "match Path('a'):\n    case Path():\n        print(1)",
-    "unsupported_import": "from pathlib import PureWindowsPath\nPureWindowsPath('a')",
+    "unsupported_import": "from pathlib import Win32Path\nWin32Path('a')",
 }
 
 # Native paths retain Imre's Unicode-scalar string domain. Unix surrogateescape

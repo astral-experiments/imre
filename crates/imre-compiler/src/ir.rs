@@ -30,8 +30,12 @@ pub(crate) enum Type {
     Optional(usize),
     /// A closed str/bytes union with one owned tagged-pointer word.
     Union(usize),
+    /// An owned tagged reference to a string list or a fixed tuple of strings.
+    StringIterable,
     /// An internal container or string cursor, never available in user annotations.
     Iterator,
+    /// A first-class cursor whose next operation transfers one exact element type.
+    Cursor(usize),
     /// A sealed builtin exception with an immutable category and owned payload.
     Exception,
     /// An exception object known to own the given fixed payload layout.
@@ -46,6 +50,7 @@ pub(crate) enum Type {
     BinaryIO,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
     Path,
+    PurePath(PathFlavor),
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture),
     /// Async process handle, with bits for the captured stdout and stderr slots.
@@ -61,6 +66,8 @@ pub(crate) enum Type {
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
     Logger,
+    TimedFileHandler,
+    ClockTime,
     Sha256,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
@@ -106,6 +113,18 @@ impl ProcessCapture {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum PathFlavor {
+    Posix,
+    Windows,
+}
+
+impl Type {
+    pub(crate) fn is_path(self) -> bool {
+        matches!(self, Self::Path | Self::PurePath(_))
+    }
+}
+
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Self::Class(id) = self {
@@ -115,6 +134,7 @@ impl std::fmt::Display for Type {
             Self::StrLiteral(id) => return write!(f, "string-literal#{id}"),
             Self::StrEnum(id) => return write!(f, "string-enum#{id}"),
             Self::Enum(id) => return write!(f, "enum#{id}"),
+            Self::Cursor(id) => return write!(f, "iterator#{id}"),
             Self::List(id) => return write!(f, "list#{id}"),
             Self::Dict(id) => return write!(f, "dict#{id}"),
             Self::Set(id) => return write!(f, "set#{id}"),
@@ -138,9 +158,12 @@ impl std::fmt::Display for Type {
             Self::Exception | Self::NamedException(_) => "Exception",
             Self::ExitCode => "SystemExit.code",
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
+            Self::StringIterable => "Iterable[str]",
             Self::TextIO => "typing.TextIO",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
+            Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
+            Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
             Self::CompletedProcess(capture) if capture.text => "subprocess.CompletedProcess[str]",
             Self::CompletedProcess(_) => "subprocess.CompletedProcess[bytes]",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
@@ -153,6 +176,8 @@ impl std::fmt::Display for Type {
             Self::Semaphore => "asyncio.Semaphore",
             Self::RegexPattern => "re.Pattern[str]",
             Self::Logger => "logging.Logger",
+            Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
+            Self::ClockTime => "datetime.time",
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
@@ -168,6 +193,7 @@ impl std::fmt::Display for Type {
             | Self::StrEnum(_)
             | Self::Enum(_)
             | Self::Class(_)
+            | Self::Cursor(_)
             | Self::List(_)
             | Self::Dict(_)
             | Self::Set(_)
@@ -427,6 +453,8 @@ pub(crate) enum ZipField {
 
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    Repeat,
+    CursorLengthHint,
     DirectoryContextView,
     Document(DocumentOp),
     /// Runs the static archive's module initializer in ordinary import order.
@@ -463,6 +491,7 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    OsName,
     SystemExitNew {
         omit_none: bool,
     },
@@ -474,6 +503,7 @@ pub(crate) enum Builtin {
     RaiseException,
     WallTime,
     Logging(LogOperation),
+    Timed(TimedOperation),
     Input,
     Int,
     Float,
@@ -604,6 +634,8 @@ pub(crate) enum Builtin {
     IsNone,
     /// Promotes an exact str/bytes owner without allocating or changing identity.
     UnionInject,
+    /// An owned list for a readonly iteration: borrows existing list storage or copies tuple words.
+    StringIterationList,
     /// Projects a member proved by local control flow, acquiring its own owner.
     UnionProject,
     IsInstance(Vec<InstanceType>),
@@ -831,6 +863,12 @@ pub(crate) enum PathOperation {
     Scripts,
     OsExists,
     New,
+    PureNew(PathFlavor),
+    JoinObject,
+    Drive,
+    Root,
+    Anchor,
+    AsPosix,
     Join,
     Match {
         full: bool,
@@ -880,6 +918,31 @@ pub(crate) enum PosixPathOperation {
     Splitext,
     Normpath,
     Abspath,
+}
+
+/// Operations on a timed file handler and its immutable wall-clock time.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TimedOperation {
+    New,
+    Clock,
+    ClockPart,
+    Close,
+    Flush,
+    Stream,
+    Filename,
+    Interval,
+    RolloverAt,
+    When,
+    Suffix,
+    BackupCount,
+    Utc,
+    Delay,
+    AtTime,
+    ComputeInt,
+    ComputeFloat,
+    FilesToDelete,
+    ShouldRollover,
+    DoRollover,
 }
 
 /// Operations on the native logging registry and its named loggers.

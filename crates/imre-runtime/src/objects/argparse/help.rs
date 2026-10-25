@@ -103,14 +103,12 @@ impl OptionSpec {
             format!("{{{}}}", self.choices.join(","))
         };
         if self.positional() {
-            if self.many && summary {
-                metavar = format!("{metavar} [{metavar} ...]");
+            if summary {
+                metavar = self.nargs.label(&metavar);
             }
             return paint(color, if summary { "32" } else { "1;32" }, &metavar);
         }
-        if self.many {
-            metavar = format!("{metavar} [{metavar} ...]");
-        }
+        metavar = self.nargs.label(&metavar);
         let option_color = |flag: &str, bold: bool| match (flag.starts_with("--"), bold) {
             (true, true) => "1;36",
             (true, false) => "36",
@@ -349,6 +347,58 @@ fn help_row(
 }
 
 impl Parser {
+    /// Subparser names use the parent's uncolored usage without its options.
+    pub(super) fn set_child_programs(&mut self) {
+        let Some(commands) = &mut self.subcommands else {
+            return;
+        };
+        let mut parts = vec![(len(&self.prog), self.prog.clone())];
+        parts.extend(self.options.iter().filter(|o| o.positional()).map(|o| {
+            let label = o.label(true, false);
+            (len(&label), label)
+        }));
+        let width = width();
+        let prog = if parts.len() == 1 {
+            self.prog.clone()
+        } else if parts.iter().map(|(length, _)| length + 1).sum::<usize>() - 1 > width
+            && len(&self.prog) * 4 > width.saturating_mul(3)
+        {
+            format!("{}\n{}", self.prog, usage_lines(&parts[1..], 0, 0, width))
+        } else {
+            usage_lines(&parts, len(&self.prog) + 1, 0, width)
+        };
+        for child in &mut commands.choices {
+            child.parser.prog = format!("{} {}", prog.trim_matches(python_whitespace), child.name);
+        }
+    }
+
+    fn description(&self, text: &str, width: usize, indent: usize) -> String {
+        let text = if text.contains("%(prog)") {
+            expand(text, &self.prog, None)
+        } else {
+            text.to_owned()
+        };
+        let prefix = " ".repeat(indent);
+        if self.raw {
+            let mut offsets = super::super::LineOffsets::new(&text);
+            let mut result = String::new();
+            while let Some(line) = offsets.next(&text) {
+                result.push_str(&prefix);
+                result.push_str(&text[line.start..offsets.start]);
+            }
+            result
+        } else {
+            // _format_text subtracts the current indent before textwrap.fill;
+            // textwrap then counts its initial/subsequent indent in that width.
+            let width = width.saturating_sub(indent).max(11);
+            wrap(&text, width.saturating_sub(indent).max(1))
+                .into_iter()
+                .map(|line| format!("{prefix}{line}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }
+
     pub(super) fn usage(&self, width: usize) -> String {
         let color = color_enabled();
         let short = format!("[{}]", paint(color, "32", "-h"));
@@ -419,16 +469,7 @@ impl Parser {
         let width = width();
         let mut output = self.usage(width);
         if !description.is_empty() {
-            let description = if description.contains("%(prog)") {
-                expand(description, &self.prog, None)
-            } else {
-                description.to_owned()
-            };
-            let description = if self.raw {
-                description
-            } else {
-                wrap(&description, width.max(11)).join("\n")
-            };
+            let description = self.description(description, width, 0);
             if !description.is_empty() {
                 write!(output, "\n{description}\n").unwrap();
             }
@@ -444,13 +485,16 @@ impl Parser {
             "show this help message and exit".to_owned(),
         )];
         let mut positionals = Vec::new();
+        let mut grouped = vec![Vec::new(); self.groups.len()];
         for option in &self.options {
             let row = (
                 option.label(false, false),
                 option.label(false, color),
                 expand(&option.help, &self.prog, Some(option)),
             );
-            if option.positional() {
+            if let Some(group) = option.group {
+                grouped[group].push(row);
+            } else if option.positional() {
                 positionals.push(row);
             } else {
                 rows.push(row);
@@ -459,6 +503,7 @@ impl Parser {
         let mut max_header = rows
             .iter()
             .chain(&positionals)
+            .chain(grouped.iter().flatten())
             .map(|(label, _, _)| len(label))
             .max()
             .unwrap();
@@ -513,6 +558,21 @@ impl Parser {
         for (label, styled, help) in rows {
             help_row(&mut output, width, position, 2, &label, &styled, &help);
         }
+        for (group, rows) in self.groups.iter().zip(grouped) {
+            if rows.is_empty() && group.description.is_none() {
+                continue;
+            }
+            output.push('\n');
+            if let Some(title) = &group.title {
+                writeln!(output, "{}", paint(color, "1;34", &format!("{title}:"))).unwrap();
+            }
+            if let Some(text) = &group.description {
+                writeln!(output, "{}\n", self.description(text, width, 2)).unwrap();
+            }
+            for (label, styled, help) in rows {
+                help_row(&mut output, width, position, 2, &label, &styled, &help);
+            }
+        }
         // HelpFormatter collapses three or more newlines throughout the report,
         // including blank lines at the edges of a raw module docstring.
         while output.contains("\n\n\n") {
@@ -546,6 +606,7 @@ fn expand(template: &str, prog: &str, option: Option<&OptionSpec>) -> String {
                     super::super::paths::normalize(option.default.as_deref().unwrap()).to_string()
                 }
                 ("default", Some(option)) => option.default.as_deref().unwrap_or("None").to_owned(),
+                ("const", Some(option)) => option.constant.as_deref().unwrap_or("None").to_owned(),
                 ("choices", Some(option)) => {
                     if option.choices.is_empty() {
                         "None".into()
@@ -561,12 +622,10 @@ fn expand(template: &str, prog: &str, option: Option<&OptionSpec>) -> String {
                     }
                 }
                 ("nargs", Some(option)) => {
-                    if option.many {
-                        "+".into()
-                    } else if option.kind == Kind::Bool {
+                    if option.kind == Kind::Bool {
                         "0".into()
                     } else {
-                        "None".into()
+                        option.nargs.spelling()
                     }
                 }
                 _ => unreachable!("compile-time argparse template check"),

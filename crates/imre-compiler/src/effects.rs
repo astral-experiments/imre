@@ -8,7 +8,7 @@
 //! infallible here; every handler, else and finally body is included.
 
 use crate::callables::Targets;
-use crate::ir::{Expr, ExprKind, Module, Statement, Type};
+use crate::ir::{Expr, ExprKind, Module, Statement};
 
 pub(crate) struct ExceptionEffects {
     functions: Vec<bool>,
@@ -56,12 +56,7 @@ fn block(body: &[Statement], functions: &[bool], targets: &Targets) -> bool {
         | Statement::Continue
         | Statement::Exhaust => false,
         Statement::Scope { body, .. } => block(body, functions, targets),
-        Statement::SetItem(receiver, index, value) => {
-            !matches!(receiver.ty, Type::Dict(_))
-                || expression(receiver, functions, targets)
-                || expression(index, functions, targets)
-                || expression(value, functions, targets)
-        }
+        Statement::SetItem(..) => true,
         // The initial indexed read may fail even for a dictionary assignment.
         Statement::AugmentItem(..) => true,
         Statement::SetField(receiver, _, value) => {
@@ -120,15 +115,13 @@ fn expression(value: &Expr, functions: &[bool], targets: &Targets) -> bool {
         | ExprKind::Bytes(_)
         | ExprKind::None
         | ExprKind::Local(_) => false,
-        ExprKind::List(values)
-        | ExprKind::Set { values, .. }
-        | ExprKind::Compare(values, _)
-        | ExprKind::Boolean(_, values) => values
-            .iter()
-            .any(|value| expression(value, functions, targets)),
-        ExprKind::Dict { entries, .. } => entries.iter().any(|(key, value)| {
-            expression(key, functions, targets) || expression(value, functions, targets)
-        }),
+        ExprKind::List(values) | ExprKind::Compare(values, _) | ExprKind::Boolean(_, values) => {
+            values
+                .iter()
+                .any(|value| expression(value, functions, targets))
+        }
+        ExprKind::Dict { entries, .. } => !entries.is_empty(),
+        ExprKind::Set { values, .. } => !values.is_empty(),
         ExprKind::Scope { body, value, .. } => {
             block(body, functions, targets) || expression(value, functions, targets)
         }
@@ -188,7 +181,7 @@ fn expression(value: &Expr, functions: &[bool], targets: &Targets) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{Builtin, CallArgs, ExceptHandler, Function};
+    use crate::ir::{Builtin, CallArgs, ExceptHandler, Function, Type};
 
     fn analyze(module: &Module) -> ExceptionEffects {
         super::analyze(module, &Targets::analyze(module))

@@ -9,6 +9,16 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "argparse"
 CASES = {
+    "counts": [
+        [], ["a"], ["a", "b"], ["a", "b", "c", "d", "e"],
+        ["--", "a", "b"], ["a", "--", "--", "b"], ["a", "b", "-v", "c"],
+        ["a", "-v", "b", "c"], ["a", "b", "--", "-v"],
+        ["--pair", "-v", "--flag", "a", "b"], ["--pair", "a", "--", "b"],
+        ["--pair=x", "y"], ["--maybe", "--flag", "a", "b"], ["--maybe=", "a", "b"],
+        ["--items", "--flag", "a", "b"], ["--items=x", "a", "b"], ["--help"],
+    ],
+    "groups": [[], ["--help"], ["foo", "check", "--help"], ["foo", "check"],
+               ["--first", "a", "-v", "--alt=b", "foo", "check", "--long-setting", "c"]],
     "explicit_args": [[], ["first"], ["--", "-x"], ["first", "extra"], ["--help"]],
     "reader": [
         [],
@@ -88,8 +98,8 @@ CASES = {
 REJECTED = {
     "computed_flag": 'parser.add_argument("--" + "item")',
     "repeated_flag": 'parser.add_argument("-v", "--verbose")\n    parser.add_argument("-v")',
-    "positional_arity": 'parser.add_argument("input", nargs="*")',
-    "positional_after_many": 'parser.add_argument("input", nargs="+")\n    parser.add_argument("output")',
+    "invalid_arity": 'parser.add_argument("input", nargs="bad")',
+    "zero_arity": 'parser.add_argument("input", nargs=0)',
     "mixed_positionals": 'parser.add_argument("input", "--other")',
     "foreign_converter": 'parser.add_argument("--number", type=int)',
     "choice_expression": 'parser.add_argument("--key", choices=list("ab"))',
@@ -139,6 +149,8 @@ def main():
             for width in (16, 34, 55, 111):
                 for arguments in (["--help"], ["--not-an-option"]):
                     samples.extend((arguments, width, color) for color in (False, True))
+                if name == "groups":
+                    samples.extend((["foo", "check", "--help"], width, color) for color in (False, True))
             for width in (" 34\t", "+3_4", "٣٤", "3__4", "9" * 20, "0" * 4300 + "34"):
                 samples.append((["--help"], width, False))
             for level in args.opt_levels:
