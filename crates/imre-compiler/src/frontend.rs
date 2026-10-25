@@ -5758,6 +5758,37 @@ impl<'a> Checker<'a> {
             };
             return self.counter_unbound_update(call, op, method.attr.as_str());
         }
+        if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "clear"
+            && (self.unshadowed_builtin(&method.value, "dict")
+                || matches!(
+                    self.resolve(&method.value),
+                    Some(Binding::Intrinsic(
+                        Intrinsic::Counter | Intrinsic::DefaultDict
+                    ))
+                ))
+        {
+            self.reject_builtin_keywords(call)?;
+            let [owner] = call.arguments.args.as_ref() else {
+                return Err(error(
+                    self.source,
+                    call,
+                    "unbound dict.clear requires one dictionary",
+                ));
+            };
+            let receiver = self.expr(owner)?;
+            if self.types.mapping(receiver.ty).is_none() {
+                return Err(error(
+                    self.source,
+                    owner,
+                    "dict.clear requires a dictionary",
+                ));
+            }
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(Builtin::DictClear, vec![receiver]),
+            });
+        }
         if let Some(value) = self.construct_receiver_type(call)? {
             return Ok(value);
         }
@@ -6503,6 +6534,15 @@ impl<'a> Checker<'a> {
                 });
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
+                if attribute.attr.as_str() == "clear"
+                    && call.arguments.args.is_empty()
+                    && call.arguments.keywords.is_empty()
+                {
+                    return Ok(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::DictClear, vec![receiver]),
+                    });
+                }
                 if attribute.attr.as_str() == "keys"
                     && call.arguments.args.is_empty()
                     && let Some(view) = key_view
@@ -6517,7 +6557,7 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         call,
-                        "supported dictionary methods are get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
+                        "supported dictionary methods are clear(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
                     ));
                 }
                 let key = self.expr_expected(&call.arguments.args[0], key_type)?;
