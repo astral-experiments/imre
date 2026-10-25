@@ -13,6 +13,7 @@ mod asyncio;
 mod boxed_values;
 mod builtins;
 mod bytes;
+mod cache_paths;
 mod chainmap;
 mod contexts;
 mod copying;

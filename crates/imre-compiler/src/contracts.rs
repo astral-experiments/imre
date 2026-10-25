@@ -68,7 +68,7 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
-            Self::Linecache(..) => Contract::new(true, Unknown),
+            Self::Linecache(..) | Self::CachePath(_) => Contract::new(true, Unknown),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
@@ -1026,6 +1026,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_upper"
                 | "imre_str_capitalize"
                 | "imre_module_cache_from_origin"
+                | "imre_cache_path_tag"
+                | "imre_cache_from_source"
+                | "imre_source_from_cache"
                 | "imre_str_slice"
                 | "imre_str_int_list"
                 | "imre_seq_get"

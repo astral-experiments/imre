@@ -16,6 +16,7 @@ mod argparse;
 mod assignments;
 mod asyncio;
 mod bytes;
+mod cache_paths;
 mod cached_properties;
 mod call_binding_errors;
 mod callables;
@@ -456,6 +457,7 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "RecursionError" => return Some(43),
         "Warning" => return Some(80),
         "RuntimeWarning" => return Some(81),
+        "DeprecationWarning" => return Some(82),
         _ => {}
     }
     if name == "ImportError" {
@@ -1139,6 +1141,10 @@ pub(crate) fn lower_with_owners(
         .extend_layouts(&mut classes.fields);
     Ok((
         ir::Module {
+            ignore_python_environment: graph
+                .command_startup
+                .as_ref()
+                .is_some_and(|(flags, _)| flags.isolated),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             class_fields: classes.fields,
@@ -1403,6 +1409,7 @@ fn signature(
         .or_else(|| match (receiver, function.name.as_str()) {
             (Some(_), "__init__" | "__post_init__") => Some(Type::None),
             (Some(_), "__str__" | "__repr__") => Some(Type::Str),
+            (Some(_), "__bool__") => Some(Type::Bool),
             _ => None,
         });
     let id = inference.register(parameter_types, returns);
@@ -5165,6 +5172,13 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Int(level.to_string()),
             });
         }
+        if let Some(prefix) = self.cache_config(expression) {
+            return Ok(cache_paths::op(
+                ir::CachePathOperation::Get(prefix),
+                self.types.optional(Type::Str),
+                vec![],
+            ));
+        }
         self.reject_class_receiver_value(expression)?;
         if let Some(binding) = self.local_function_binding(expression) {
             if let Some(slot) = binding.value_slot {
@@ -6072,7 +6086,7 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
-                if attribute.attr.as_str() == "machinery"
+                if matches!(attribute.attr.as_str(), "machinery" | "util")
                     && self.resolve(&attribute.value)
                         == Some(Binding::IntrinsicModule(
                             crate::modules::IntrinsicModule::Importlib,
@@ -6082,7 +6096,10 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         attribute,
-                        "import importlib.machinery before reading the machinery attribute",
+                        &format!(
+                            "import importlib.{} before reading the {} attribute",
+                            attribute.attr, attribute.attr
+                        ),
                     ));
                 }
                 if let Some(flag) = self.command_flag(attribute)? {
@@ -6815,6 +6832,10 @@ impl<'a> Checker<'a> {
                 call,
                 "argument unpacking requires a source-defined function or method",
             ));
+        }
+        if let Some(Binding::Intrinsic(Intrinsic::CachePath { reverse })) = self.resolve(&call.func)
+        {
+            return self.cache_path_call(call, reverse);
         }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ModuleSpec)) {
             return self.module_spec(call);
