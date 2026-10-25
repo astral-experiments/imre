@@ -20,6 +20,15 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: python/cpython
+          ref: 5607950ef232dad16d75c0cf53101d9649d89115
+          path: .cpython-argparse
+          sparse-checkout: |
+            Lib
+            Tools/i18n
+          persist-credentials: false
       - name: Install LLVM 18
         run: sudo apt-get update && sudo apt-get install -y clang-18
       - name: Test the actual prospective tree and record its provenance
@@ -65,10 +74,11 @@ jobs:
           required += ("benchmarks/cpython_stdlib/full/unittest/context_regex.py",)
           required += ("tests/fixtures/exceptions/warning_hierarchy.py", "tests/fixtures/files/nonblocking_write.py")
           required += ("tests/fixtures/containers/defaultdict_factory_arguments.py",)
+          required += ('tests/fixtures/classes/mapping_abc.py', 'tests/fixtures/classes/mapping_alias.py')
           optional = ("tests/fixtures/classes/initializer_hook.py",)
           for name in (*required, *(path for path in optional if (root / path).is_file())):
               source = root / name
-              local_imports = name.endswith(("/wrapper_attributes/main.py", "/classes/constant_strings.py", "/sys/version_info.py"))
+              local_imports = name.endswith(("/wrapper_attributes/main.py", "/classes/constant_strings.py", "/sys/version_info.py", "/classes/mapping_abc.py", "/classes/mapping_alias.py"))
               samples = (("1","1","LF","1"), ("2","1","LF","1"),
                          ("1","8191","1","LF"), ("2","4096","CR","2")) if name.endswith("/sys/stream_buffer.py") else ((),)
               with TemporaryDirectory() as tmp:
@@ -95,21 +105,126 @@ jobs:
                           assert actual == reference, (name, args, level, reference, actual)
               print(name, "O0/O3 exit, stdout, stderr matched", flush=True)
           PY
+          cat > "$RUNNER_TEMP/argparse-stock.py" <<'PY'
+          """Compile both original suite entry points with intact, pinned color and test sources."""
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import shutil
+          import subprocess
+          import sys
+          import tempfile
+
+          PIN = '5607950ef232dad16d75c0cf53101d9649d89115'
+          revision, label = sys.argv[1:]
+          root = Path(os.environ['GITHUB_WORKSPACE'])
+          cpython = root / '.cpython-argparse'
+          manifest = json.loads((root/'benchmarks/cpython_stdlib/full/argparse/UPSTREAM.json').read_bytes())
+          assert manifest['commit'] == PIN
+          FILES = manifest['files'] | manifest['reference_files']
+          receipts = Path(os.environ['RUNNER_TEMP'], 'argparse-stock-receipts')
+          receipts.mkdir(exist_ok=True)
+          imre = root / 'target/debug/imre'
+          runtime = root / 'target/debug/libimre_runtime.a'
+          clang = '/usr/bin/clang-18'
+          def git(*args, cwd=root):
+              return subprocess.check_output(['git', *args], cwd=cwd, text=True).strip()
+
+          assert sys.version_info[:3] == (3, 14, 5)
+          assert git('rev-parse', 'HEAD') == revision
+          assert git('rev-parse', 'HEAD', cwd=cpython) == PIN
+          for file, blob in FILES.items():
+              assert git('hash-object', file, cwd=cpython) == blob
+              assert git('rev-parse', PIN+':'+file, cwd=cpython) == blob
+
+          def digest(path):
+              with path.open('rb') as f:
+                  return hashlib.file_digest(f, 'sha256').hexdigest()
+
+          def streams(p, work):
+              return {'exit':p.returncode, **{k:getattr(p,k).decode('utf-8', errors='backslashreplace').replace(str(work)+'/', '') for k in ('stdout','stderr')}}
+
+          def triple(p):
+              return p.returncode, p.stdout, p.stderr
+
+          report = {'cpython_commit':PIN, 'source_blobs':FILES, 'imre_revision':revision,
+                    'imre_tree':git('rev-parse','HEAD^{tree}'), 'compiler_sha256':digest(imre),
+                    'runtime_sha256':digest(runtime), 'denominator':1893, 'entries':{}}
+          with tempfile.TemporaryDirectory(prefix='argparse-stock-') as temp:
+              work = Path(temp)
+              lib = work / 'Lib'
+              lib.mkdir()
+              shutil.copytree(cpython/'Lib/test', lib/'test', symlinks=True)
+              shutil.copy2(cpython/'Lib/_colorize.py', lib/'_colorize.py')
+              shutil.copytree(cpython/'Tools/i18n', work/'Tools/i18n', symlinks=True)
+              entry = lib/'imre_suite.py'
+              source = 'import test.test_argparse as target\n'
+              driver = ('import unittest\nsuite = unittest.defaultTestLoader.loadTestsFromModule(target)\n'
+                        'unittest.TextTestRunner(verbosity=2).run(suite)\n')
+              for mode, body in [('import',source),('runner',source+driver)]:
+                  entry.write_text(body)
+                  ref = subprocess.run([sys.executable,'-B',entry], cwd=work, capture_output=True, timeout=180,
+                                       env={**os.environ,'PYTHONPATH':str(cpython/'Lib')})
+                  assert ref.returncode == 0, streams(ref,work)
+                  if mode == 'runner':
+                      assert re.search(rb'^Ran 1893 tests in ',ref.stderr,re.M) and re.search(rb'^OK$',ref.stderr,re.M),ref.stderr[-1200:]
+                  rows = {}
+                  report['entries'][mode] = {'entry_source':body, 'reference':streams(ref,work), 'native':rows}
+                  for level in (0,3):
+                      for reachable in (False,True):
+                          output = work / f'{mode}-O{level}-{int(reachable)}'
+                          args = [imre,'build',entry,'--module-root',lib,'--no-cache','--runtime',runtime,
+                                  '--clang',clang,'--opt-level',str(level),'-o',output]
+                          if reachable:
+                              args.append('--reachable-only')
+                          p = subprocess.run(args,cwd=work,capture_output=True,timeout=120)
+                          row = {'build':streams(p,work)}
+                          if p.returncode:
+                              row.update(outcome='compile-blocked', tests_executed=0, module_operations='not-run')
+                          else:
+                              native=subprocess.run([output],cwd=work,capture_output=True,timeout=240)
+                              row['run']=streams(native,work)
+                              row['outcome']='matched' if triple(native)==triple(ref) else 'failed'
+                              ran=re.search(rb'^Ran (\d+) tests in ',native.stderr,re.M)
+                              row['tests_executed']=int(ran[1]) if ran else 0
+                          rows[f'O{level}-reachable-{int(reachable)}'] = row
+              report_path=receipts/(label+'-'+revision+'-startup.json')
+              report_path.write_text(json.dumps(report,indent=2)+'\n')
+              theme_path=receipts/(label+'-'+revision+'-theme.json')
+              subprocess.run([sys.executable,'-B',root/'benchmarks/cpython_stdlib/full/collections/theme_section.py',
+                              '--cpython-source',cpython,'--imre',imre,'--runtime',runtime,'--clang',clang,
+                              '--compiler-revision',revision,'--result',theme_path],check=True)
+              theme=json.loads(theme_path.read_bytes())
+              assert theme['upstream_test_occurrences']==0 and len(theme['modes'])==4
+              for e in report['entries'].values():
+                  for row in e['native'].values():
+                      assert row['outcome']=='compile-blocked' and row['tests_executed']==0 and row['build']['exit']==1 and 'Lib/_colorize.py:5:1:' in row['build']['stderr'] and 'unsupported sealed standard-library export dataclasses.Field' in row['build']['stderr'], row
+              for row in theme['modes'].values():
+                  assert row['outcome']=='compile-blocked' and row['module_operations']=='not-run' and 'unsupported sealed standard-library export dataclasses.Field' in row['diagnostic'], row
+              print(f'Stock argparse {label}: {revision} tree={report["imre_tree"]}; original reference 1893/1893, eight O0/O3 builds stop at _colorize.py:5 dataclasses.Field; zero native test bodies. Four theme controls stop at Field.',flush=True)
+          PY
           for attempt in 1 2 3 4 5; do
             git fetch --no-tags origin refs/heads/main
             base=$(git rev-parse FETCH_HEAD)
             tree=$(git merge-tree --write-tree "$base" "$pr")
             candidate=$(git -c user.name='Argparse preflight' -c user.email='noreply@github.com' commit-tree "$tree" -p "$base" -p "$pr" -m 'Hosted validation of PR #968')
+            git checkout --detach "$base"
+            cargo build --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
+            python3 -B "$RUNNER_TEMP/argparse-stock.py" "$base" canonical
             git checkout --detach "$candidate"
             test "$(git rev-parse HEAD^{tree})" = "$tree"
             echo "Attempt $attempt: base=$base pr=$pr tree=$tree"
             cargo build --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
+            python3 -B "$RUNNER_TEMP/argparse-stock.py" "$candidate" prospective
             cargo test --locked -j 2 -p imre-runtime --lib
             python3 tests/argparse_cli.py --compiler "$RUNNER_TEMP/argparse-driver" --runtime "$base_checkout/target/debug/libimre_runtime.a" --python "$(command -v python3)" --clang /usr/bin/clang-18 --opt-levels 0 3
             python3 tests/io.py --compiler "$base_checkout/target/debug/imre" --runtime "$base_checkout/target/debug/libimre_runtime.a" --python "$(command -v python3)" --clang /usr/bin/clang-18 --opt-levels 0 3
             python3 tests/unittest_main.py --compiler "$RUNNER_TEMP/argparse-driver" --runtime "$base_checkout/target/debug/libimre_runtime.a" --python "$(command -v python3)" --clang /usr/bin/clang-18 --opt-levels 0 3
             python3 tests/paths.py --fixture resolution --compiler "$RUNNER_TEMP/argparse-driver" --runtime "$base_checkout/target/debug/libimre_runtime.a" --python "$(command -v python3)" --clang /usr/bin/clang-18 --opt-levels 0 3
             for level in 0 3; do
+              python3 -B benchmarks/cpython_stdlib/full/functools/optimization_mode.py --imre "$base_checkout/target/debug/imre" --runtime "$base_checkout/target/debug/libimre_runtime.a" --clang /usr/bin/clang-18 --opt-level "$level"
               python3 benchmarks/cpython_stdlib/native_sys.py --imre "$RUNNER_TEMP/argparse-driver" --runtime "$base_checkout/target/debug/libimre_runtime.a" --python "$(command -v python3)" --clang /usr/bin/clang-18 --opt-level "$level"
             done
             python3 benchmarks/cpython_stdlib/full/logging/null_handler.py --imre "$RUNNER_TEMP/argparse-driver" --runtime "$base_checkout/target/debug/libimre_runtime.a" --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/argparse-null-handler.json"
@@ -117,7 +232,7 @@ jobs:
             echo "Passed: base=$base pr=$pr tree=$tree (-O0 and -O3 stdout, stderr and exit; runtime ownership)." >> "$GITHUB_STEP_SUMMARY"
             git fetch --no-tags origin refs/heads/main
             latest=$(git rev-parse FETCH_HEAD)
-            inputs=(tests/fixtures/containers/defaultdict_factory_arguments.py tests/exceptions.py tests/fixtures/exceptions/warning_hierarchy.py tests/fixtures/files/nonblocking_write.py benchmarks/cpython_stdlib/full/unittest/context_regex.py benchmarks/cpython_stdlib/full/logging/null_handler.py benchmarks/cpython_stdlib/full/logging/UPSTREAM.json tests/paths.py tests/files.py tests/fixtures/paths tests/fixtures/sys/streams_exit.py benchmarks/cpython_stdlib/native_sys.py benchmarks/cpython_stdlib/upstream.py benchmarks/cpython_stdlib/UPSTREAM.json benchmarks/cpython_stdlib/upstream benchmarks/cpython_stdlib/full/sys/stream_errno.py benchmarks/cpython_stdlib/full/sys/exit_payloads.py benchmarks/cpython_stdlib/full/unittest/mock_reset.py tests/fixtures/containers/dict_method_copy.py tests/io.py tests/unittest_main.py tests/fixtures/unittest_main crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse
+            inputs=(tests/fixtures/classes/mapping_abc.py tests/fixtures/classes/mapping_alias.py benchmarks/cpython_stdlib/full/collections/theme_section.py benchmarks/cpython_stdlib/full/argparse/UPSTREAM.json benchmarks/cpython_stdlib/full/functools/optimization_mode.py tests/classes.py tests/fixtures/containers/defaultdict_factory_arguments.py tests/exceptions.py tests/fixtures/exceptions/warning_hierarchy.py tests/fixtures/files/nonblocking_write.py benchmarks/cpython_stdlib/full/unittest/context_regex.py benchmarks/cpython_stdlib/full/logging/null_handler.py benchmarks/cpython_stdlib/full/logging/UPSTREAM.json tests/paths.py tests/files.py tests/fixtures/paths tests/fixtures/sys/streams_exit.py benchmarks/cpython_stdlib/native_sys.py benchmarks/cpython_stdlib/upstream.py benchmarks/cpython_stdlib/UPSTREAM.json benchmarks/cpython_stdlib/upstream benchmarks/cpython_stdlib/full/sys/stream_errno.py benchmarks/cpython_stdlib/full/sys/exit_payloads.py benchmarks/cpython_stdlib/full/unittest/mock_reset.py tests/fixtures/containers/dict_method_copy.py tests/io.py tests/unittest_main.py tests/fixtures/unittest_main crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse
                     tests/fixtures/paths/walking.py tests/fixtures/processes/file_redirects.py tests/fixtures/text/line_methods.py
                     benchmarks/cpython_stdlib/full/types/namespaces.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py
                     tests/fixtures/module_values/wrapper_attributes benchmarks/cpython_stdlib/full/logging/hierarchy_values.py
@@ -134,3 +249,11 @@ jobs:
           done
           echo "Main kept changing through all five attempts; inspect the tested trees before merging." >&2
           exit 1
+      - name: Preserve original startup streams and dataclass theme controls
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: argparse-968-stock-mapping
+          path: ${{ runner.temp }}/argparse-stock-receipts/
+          if-no-files-found: error
+          retention-days: 14
