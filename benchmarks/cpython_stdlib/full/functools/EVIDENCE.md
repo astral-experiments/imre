@@ -158,3 +158,16 @@ The two Linux builds reproduced the pinned CPython 3.14.5 references byte for by
 On the [fixture attribution branch](https://github.com/astral-sh/imre/pull/939), both `test_lru_reentrancy_with_len` occurrences replaced the real CPython builtin, made 13 lookups in the native cache, and invoked CPython’s original `len` on 10 misses. The supplemental cache snapshot was `(3, 10, 4, 4)` and the original binding was restored by identity. The host ran the method and its assertions.
 
 On the [native binding branch](https://github.com/astral-sh/imre/pull/949), the same two unchanged methods saved, replaced, called and restored Imre’s live `builtins.len`. The method bodies, assertions, cache and length operations all ran in Imre; the original unittest hooks ran on CPython. Neither source ran either suite with native fixtures, and both companion runs stopped at `random` before any native worker started. These source-specific observations do not replace the canonical reports.
+
+## Dispatch arguments and the #726 annotation integration
+
+Each build reproduced both pinned CPython references byte for byte. Counts apply independently at `-O0` and `-O3`.
+
+| Compiler and report | Native bodies with host fixtures | Host-driven native operations | Mixed | Blocked |
+| --- | ---: | ---: | ---: | ---: |
+| [270129b](https://github.com/astral-sh/imre/actions/runs/40193095109/job/121168103466) [primary, 325](observations/270129b/evidence-linux.json) | 5 | 15 | 13 | 292 |
+| [270129b](https://github.com/astral-sh/imre/actions/runs/40193095109/job/121168103466) [free-threading, 4](observations/270129b/evidence-free-threading-linux.json) | 0 | 0 | 0 | 4 |
+| [581e518](https://github.com/astral-sh/imre/actions/runs/40193838962/job/121170327420) [primary, 325](observations/581e518/evidence-linux.json) | 4 | 13 | 15 | 293 |
+| [581e518](https://github.com/astral-sh/imre/actions/runs/40193838962/job/121170327420) [free-threading, 4](observations/581e518/evidence-free-threading-linux.json) | 0 | 0 | 0 | 4 |
+
+On `270129b`, the unchanged registration method compiles its formatting and stops at `self.assertIs` on upstream line 2297. `test_simple_overloads` runs its native body and assertions under host fixtures. On `581e518`, the four native bodies are the C and Python variants of `test_argument_checking` and `test_with_bound_and_unbound_methods`. Both LRU reentrancy methods remain mixed on that source. Neither build starts a free-threaded native worker.
