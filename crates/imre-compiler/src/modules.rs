@@ -418,7 +418,10 @@ impl IntrinsicModule {
     /// Ty resolves these builtin names solely against its bundled stdlib. Only
     /// the exact import proved by the closed checker needs an import diagnostic.
     pub(crate) fn lacks_builtin_stub(self) -> bool {
-        matches!(self, Self::Opcode | Self::StringFormatting | Self::CollectionsNative)
+        matches!(
+            self,
+            Self::Opcode | Self::StringFormatting | Self::CollectionsNative
+        )
     }
 
     fn named(name: &str) -> Option<Self> {
