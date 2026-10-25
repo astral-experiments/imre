@@ -2,6 +2,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Exercise a closed child pipe before any other output initializes SIGPIPE.
+stopped = subprocess.Popen(["directory/exit-zero"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+stopped.wait()
+out, err = stopped.communicate(b"x" * 65536)
+print(repr((stopped.returncode, out, err)))
+
 child = (sys.argv[1], "-c", "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())")
 print(repr(subprocess.run(child, input=b"\x00\xff", stdout=subprocess.PIPE).stdout))
 print(subprocess.run(child, input=None, stdin=subprocess.DEVNULL, capture_output=True).stdout)
