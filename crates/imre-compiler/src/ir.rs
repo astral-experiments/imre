@@ -637,6 +637,9 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    SysVersionInfo {
+        implementation: bool,
+    },
     OsName,
     DocCaptureStart,
     DocCaptureTake,
@@ -664,6 +667,7 @@ pub(crate) enum Builtin {
     Formatter(FormatterOperation),
     Input,
     Chr,
+    Ord,
     IntegerPower,
     ModularPower,
     NegativeIntegerPower,
@@ -1326,6 +1330,8 @@ pub(crate) enum LogRecordOperation {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LogOperation {
     Get,
+    HandlerRename,
+    HandlerLookup,
     AddLevel,
     LevelName,
     LevelForName,
@@ -1499,6 +1505,8 @@ pub(crate) enum ProcessOperation {
     RmTree,
     Copy(CopyOperation),
     CopyTree(Type),
+    Move(Type),
+    DestInSrc,
     IgnorePatterns,
     TreeErrorArgs,
     CheckReturnCode,

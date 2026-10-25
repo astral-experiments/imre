@@ -329,12 +329,48 @@ fn option(
         };
         required = value.value;
     }
-    let action = kw
-        .get("action")
-        .map(|expr| literal(expr, module))
-        .transpose()?
-        .unwrap_or("store");
-    if action != "store"
+    let is_boolean_action = |expr: &ast::Expr| {
+        let mut root = expr;
+        while let ast::Expr::Attribute(attr) = root {
+            root = &attr.value;
+        }
+        root.as_name_expr()
+            .is_some_and(|name| !locals.contains(name.id.as_str()))
+            && graph.resolve(id, expr) == Some(Binding::Intrinsic(Intrinsic::BooleanOptionalAction))
+    };
+    let action = match kw.get("action").copied() {
+        None => "store",
+        Some(expr) if is_boolean_action(expr) => "boolean_optional",
+        Some(expr) => {
+            let action = literal(expr, module)?;
+            if action == "boolean_optional" {
+                return Err(module.error(expr, "argparse BooleanOptionalAction must be the class"));
+            }
+            action
+        }
+    };
+    // BooleanOptionalAction inserts the negative spelling immediately after
+    // each long option; short aliases keep their original position.
+    let aliases = if action == "boolean_optional" {
+        let mut expanded = Vec::new();
+        for spelling in std::iter::once(flag_name).chain(aliases) {
+            if spelling.starts_with("--no-") {
+                return Err(module.error(
+                    flag,
+                    &format!("invalid argparse option {spelling:?} for BooleanOptionalAction"),
+                ));
+            }
+            expanded.push(spelling.to_owned());
+            if let Some(name) = spelling.strip_prefix("--") {
+                expanded.push(format!("--no-{name}"));
+            }
+        }
+        expanded.into_iter().skip(1).collect()
+    } else {
+        aliases.into_iter().map(str::to_owned).collect::<Vec<_>>()
+    };
+    let zero = action != "store";
+    if zero
         && (positional
             || kw.contains_key("type")
             || kw.contains_key("nargs")
@@ -345,7 +381,7 @@ fn option(
     }
     match action {
         "store" => {}
-        "store_true" | "store_false" => element = Type::Bool,
+        "store_true" | "store_false" | "boolean_optional" => element = Type::Bool,
         "count" => {
             if let Some(value) = kw.get("default")
                 && !matches!(value, ast::Expr::NoneLiteral(_))
@@ -755,6 +791,7 @@ fn namespace_class(
     let class = classes.definitions.len();
     layouts.push(fields.iter().map(|field| field.ty).collect());
     classes.definitions.push(Class {
+        init_hooks: Default::default(),
         exception_aliases: Default::default(),
         static_bindings: Default::default(),
         name: "Namespace".into(),
@@ -1048,11 +1085,13 @@ impl Parsers {
                                 if let Some(group) = group {
                                     field.option["group"] = json!(group);
                                 }
-                                for value in &add.arguments.args {
-                                    let name = literal(value, module)?;
-                                    if !spellings.insert(name) {
+                                for value in std::iter::once(&field.option["flag"])
+                                    .chain(field.option["aliases"].as_array().unwrap())
+                                {
+                                    let name = value.as_str().unwrap();
+                                    if !spellings.insert(name.to_owned()) {
                                         return Err(module.error(
-                                            value,
+                                            add,
                                             "argparse option spellings must be unique",
                                         ));
                                     }
