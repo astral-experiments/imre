@@ -343,7 +343,7 @@ impl Record {
         }
     }
 
-    fn repr(&self) -> String {
+    pub(in crate::objects) fn repr(&self) -> String {
         let get = |k: &str| display(&self.fields[k], false);
         format!(
             "<LogRecord: {}, {}, {}, {}, \"{}\">",
