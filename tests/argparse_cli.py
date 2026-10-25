@@ -111,6 +111,11 @@ CASES = {
                          ["range", "--big", "4999", "100000000000000000001"],
                          ["radix", str(2**80)], ["radix", str(2**80 + 3)], ["radix", "--help"]],
     "two": [[], ["--help"], ["--mo=lar"], ["--flag"], ["--paths", "one", "two"]],
+    "spellings": [[], ["+h"], ["++help"], ["++hel"], ["--help"], ["++value=x"], ["/v", "v"],
+                  ["+xz"], ["+x+z"], ["+xZ"], ["+"], ["++v", "x"], ["--", "++value"],
+                  ["abbrev"], ["abbrev", "-h"], ["abbrev", "-foo"], ["abbrev", "-foob=x"],
+                  ["abbrev", "-fabc"], ["abbrev", "-foor", "y"], ["abbrev", "-foobar=a"],
+                  ["abbrev", "-3-2"], ["abbrev", "-f", "-2"], ["abbrev", "--help"]],
 }
 REJECTED = {
     "computed_flag": 'parser.add_argument("--" + "item")',
@@ -166,6 +171,8 @@ def main():
             for width in (16, 34, 55, 111):
                 for arguments in (["--help"], ["--not-an-option"]):
                     samples.extend((arguments, width, color) for color in (False, True))
+                if name == "spellings":
+                    samples.extend(([mode, "--unknown"], width, color) for mode in ("bare", "pos") for color in (False, True))
                 if name == "groups":
                     samples.extend((["foo", "check", "--help"], width, color) for color in (False, True))
             for width in (" 34\t", "+3_4", "٣٤", "3__4", "9" * 20, "0" * 4300 + "34"):

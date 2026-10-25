@@ -268,6 +268,7 @@ impl Types {
                 | Type::StrEnum(_)
                 | Type::Enum(_)
                 | Type::Bytes
+                | Type::Logger
                 | Type::Path
                 | Type::PurePath(_)
         ) || matches!(ty, Type::Tuple(_) | Type::Class(_)) && self.immutable_key_field(ty)
@@ -287,6 +288,7 @@ impl Types {
             | Type::Bytes
             | Type::Path
             | Type::PurePath(_)
+            | Type::Logger
             | Type::None => true,
             Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
             Type::Tuple(_) => self

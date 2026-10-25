@@ -2335,18 +2335,23 @@ impl<'a> Checker<'a> {
     /// reach literals before the branches join. Only optional promotion can
     /// widen a result; unrelated concrete storage types never share a value.
     fn conditional(&mut self, value: &ast::ExprIf, expected: Option<Type>) -> Result<Expr, String> {
-        fn empty_display(arm: &ast::Expr) -> bool {
+        fn empty_display(checker: &Checker<'_>, arm: &ast::Expr) -> bool {
             matches!(arm, ast::Expr::Dict(d) if d.items.is_empty())
                 || matches!(arm, ast::Expr::List(l) if l.elts.is_empty())
+                || matches!(arm, ast::Expr::Call(c) if c.arguments.args.is_empty()
+                    && c.arguments.keywords.is_empty()
+                    && matches!(&*c.func, ast::Expr::Name(n) if n.id == "set"
+                        && !checker.names.contains_key(n.id.as_str()) && checker.resolve(&c.func).is_none()))
         }
         // An empty display obtains its invariant element type from its sibling
         // when no surrounding annotation supplied one.
         let mut sibling = None;
         self.conditional_with(
             value,
-            expected.is_none() && empty_display(&value.body),
+            expected.is_none() && empty_display(self, &value.body),
             |checker, arm| {
-                let context = expected.or_else(|| empty_display(arm).then_some(sibling).flatten());
+                let context =
+                    expected.or_else(|| empty_display(checker, arm).then_some(sibling).flatten());
                 let checked = if let Some(ty) = context {
                     checker.expr_expected(arm, ty)?
                 } else {
@@ -3480,6 +3485,10 @@ impl<'a> Checker<'a> {
                     let right = self.expr(&assign.value)?;
                     let value = if self.types.is_counter(left.ty) {
                         self.counter_math(assign.op, left, right, true, statement)?
+                    } else if assign.op == ast::Operator::Div
+                        && (left.ty.is_path() || right.ty.is_path())
+                    {
+                        self.path_join(left, right, statement)?
                     } else {
                         self.binary_expr(assign.op, left, right, statement)?
                     };
@@ -3869,7 +3878,7 @@ impl<'a> Checker<'a> {
     /// Class-form raises construct a new instance, just like an explicit call.
     fn simple_exception(&mut self, call: &ast::ExprCall, kind: u32) -> Result<Expr, String> {
         if self.is_import_error(kind) {
-            return self.import_error(call, kind);
+            return self.import_error(call, kind, None);
         }
         if kind == 32 {
             return self.system_exit(call, false);
@@ -5652,6 +5661,9 @@ impl<'a> Checker<'a> {
             && call.arguments.keywords.is_empty()
         {
             let (source, key) = self.union_operand(input)?;
+            if let Some(element) = self.types.cursor_element(source.ty) {
+                return self.collect_cursor_set(source, element, input);
+            }
             let key = key.ok_or_else(|| {
                 error(
                     self.source,
@@ -6021,6 +6033,27 @@ impl<'a> Checker<'a> {
             return self.invoke(call, callable);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func {
+            if attribute.attr.as_str() == "count"
+                && let ast::Expr::Attribute(parts) = &*attribute.value
+                && parts.attr.as_str() == "parts"
+                && let Ok(path) = self.expr(&parts.value)
+                && path.ty.is_path()
+            {
+                self.reject_builtin_keywords(call)?;
+                let [component] = call.arguments.args.as_ref() else {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "parts.count expects one component",
+                    ));
+                };
+                let component = self.expr_expected(component, Type::Str)?;
+                return Ok(paths::operation(
+                    ir::PathOperation::CountPart,
+                    Type::Int,
+                    vec![path, component],
+                ));
+            }
             if let Some(class) = self.class_reference(&attribute.value) {
                 if let Some(e) = self.exception_alias_call(call, attribute, class, None)? {
                     return Ok(e);
@@ -6032,11 +6065,7 @@ impl<'a> Checker<'a> {
                 None => self.expr(&attribute.value)?,
             };
             if receiver.ty == Type::ImportException && attribute.attr.as_str() == "__init__" {
-                let replacement = self.import_error(call, 41)?;
-                return Ok(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(Builtin::ImportErrorReset, vec![receiver, replacement]),
-                });
+                return self.import_error(call, 41, Some(receiver));
             }
             if matches!(receiver.ty, Type::NamedException(_))
                 && matches!(attribute.attr.as_str(), "__init__" | "__post_init__")

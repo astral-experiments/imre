@@ -570,6 +570,7 @@ pub(crate) enum Builtin {
     },
     ImportErrorField(u32),
     ImportErrorReset,
+    ImportErrorRejectReset,
     ExceptionFieldRepr,
     ExceptionFieldLen,
     ExceptionFieldIndex,
@@ -746,6 +747,8 @@ pub(crate) enum Builtin {
         empty_list: bool,
     },
     JsonAdd,
+    /// Compare two parsed values, observing mutations to an original root list.
+    JsonEqual,
     /// Both lookups borrow the same local JSON document and use literal integer defaults.
     JsonAddFields(String, String),
     JsonIsInt,
@@ -943,6 +946,7 @@ pub(crate) enum PathOperation {
     Drive,
     Root,
     Anchor,
+    CountPart,
     AsPosix,
     Join,
     Match {
@@ -982,8 +986,9 @@ pub(crate) enum PathOperation {
     ContextExit,
     UnionText,
     Iterdir,
-    Glob,
-    Next,
+    Glob {
+        recursive: bool,
+    },
 }
 
 /// POSIX lexical operations preserve raw str or bytes spellings.
@@ -1073,6 +1078,7 @@ pub(crate) enum LogOperation {
     Level,
     Root,
     Parent,
+    Children,
     EffectiveLevel,
     SetLevel,
     Enabled,
